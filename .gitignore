@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.metabot/
+.DS_Store
+coverage/
+*.log
