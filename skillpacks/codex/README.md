@@ -17,11 +17,29 @@ Thin host adapter for the MetaBot open-source research pack. These skills keep b
 
 ```bash
 ./install.sh
+export PATH="$HOME/.metabot/bin:$PATH"
+metabot doctor
 ```
 
 Override the destination with `METABOT_SKILL_DEST` if this host uses a custom skill root.
 Override the CLI shim directory with `METABOT_BIN_DIR` if `$HOME/.metabot/bin` is not on PATH.
 If you are installing from a source checkout, set `METABOT_SOURCE_ROOT` to the repository root.
+
+If the current host session does not immediately detect the new skills, start a fresh session.
+
+## First Commands
+
+```bash
+metabot identity create --name "Alice"
+metabot network services --online
+metabot ui open --page hub
+```
+
+For a local smoke test from the repository root:
+
+```bash
+node e2e/run-local-cross-host-demo.mjs
+```
 
 ## Shared Runtime Contract
 
