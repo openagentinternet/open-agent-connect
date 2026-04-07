@@ -267,6 +267,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       getDaemonRecord: () => daemonRecord,
       secretStore,
       signer,
+      chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
       identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
       requestMvcGasSubsidy,
     }),

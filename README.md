@@ -16,7 +16,8 @@ What works in this repo today:
 - post simplebuzz messages, with optional uploaded file attachments
 - write arbitrary MetaID tuples through the public chain-write interface
 - publish and list services
-- seed remote demo providers into a local yellow-pages directory
+- read the chain-backed yellow-pages feed using the existing `/protocols/skill-service` and `/protocols/metabot-heartbeat` protocols
+- keep local `network sources` as a seeded fallback/demo transport
 - execute remote demo calls when a provider exposes `providerDaemonBaseUrl`
 - inspect traces after the task finishes
 - install thin host packs for Codex, Claude Code, and OpenClaw
@@ -109,7 +110,9 @@ Open the local yellow-pages page for a human:
 metabot ui open --page hub
 ```
 
-If you want one remote demo provider to appear in the local directory first:
+By default this reads the public chain directory first and applies heartbeat-based online filtering.
+
+If you want to inject one remote demo provider as a local fallback source:
 
 ```bash
 metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
@@ -146,8 +149,8 @@ metabot identity create --name "Alice"
 metabot file upload --request-file file-request.json
 metabot buzz post --request-file buzz-request.json
 metabot chain write --request-file chain-request.json
-metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
 metabot network services --online
+metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
 metabot services call --request-file request.json
 metabot trace get --trace-id trace-123
 metabot ui open --page hub

@@ -24,6 +24,7 @@ import type { Signer } from '../core/signing/signer';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
+import { readChainDirectoryWithFallback } from '../core/discovery/chainDirectoryReader';
 import {
   createLocalIdentitySyncStep,
   createLocalMetabotStep,
@@ -53,14 +54,21 @@ function summarizeService(record: ReturnType<typeof buildPublishedService>['reco
   return {
     servicePinId: record.currentPinId,
     sourceServicePinId: record.sourceServicePinId,
+    chainPinIds: [record.sourceServicePinId, record.currentPinId].filter(Boolean),
     providerGlobalMetaId: record.providerGlobalMetaId,
+    providerAddress: record.paymentAddress,
     providerSkill: record.providerSkill,
     serviceName: record.serviceName,
     displayName: record.displayName,
     description: record.description,
     price: record.price,
     currency: record.currency,
+    serviceIcon: record.serviceIcon,
+    skillDocument: record.skillDocument,
+    inputType: record.inputType,
     outputType: record.outputType,
+    endpoint: record.endpoint,
+    paymentAddress: record.paymentAddress,
     available: Boolean(record.available),
     online: true,
     updatedAt: record.updatedAt,
@@ -409,6 +417,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   secretStore?: SecretStore;
   signer?: Signer;
   identitySyncStepDelayMs?: number;
+  chainApiBaseUrl?: string;
   requestMvcGasSubsidy?: (
     options: RequestMvcGasSubsidyOptions
   ) => Promise<RequestMvcGasSubsidyResult>;
@@ -543,14 +552,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const localServices = state.services
           .filter((service) => service.available === 1)
           .map((service) => summarizeService(service));
-        const seededServices = await fetchSeededDirectoryServices(runtimeStateStore.paths.hotRoot);
+        const directory = await readChainDirectoryWithFallback({
+          chainApiBaseUrl: input.chainApiBaseUrl,
+          onlineOnly: online === true,
+          fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(runtimeStateStore.paths.hotRoot),
+        });
         const services = dedupeServices([
-          ...seededServices,
+          ...directory.services,
           ...localServices,
         ]);
 
         return commandSuccess({
-          services: online === false ? [] : services,
+          services,
+          discoverySource: directory.source,
+          fallbackUsed: directory.fallbackUsed,
         });
       },
       listSources: async () => {

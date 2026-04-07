@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,7 +13,7 @@ function parseLastJson(chunks) {
   return JSON.parse(chunks.join('').trim());
 }
 
-async function runCommand(homeDir, args) {
+async function runCommand(homeDir, args, envOverrides = {}) {
   const stdout = [];
   const stderr = [];
   const env = {
@@ -21,6 +22,8 @@ async function runCommand(homeDir, args) {
     METABOT_HOME: homeDir,
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+    ...envOverrides,
   };
 
   const exitCode = await runCli(args, {
@@ -35,6 +38,96 @@ async function runCommand(homeDir, args) {
     stdout,
     stderr,
     payload: parseLastJson(stdout),
+  };
+}
+
+async function startFakeChainApiServer() {
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    const nowSec = Math.floor(Date.now() / 1000);
+    let payload = null;
+
+    if (url.pathname === '/pin/path/list') {
+      payload = {
+        data: {
+          list: [
+              {
+                id: 'chain-service-pin-1',
+                metaid: 'metaid-provider',
+                address: 'mvc-provider-address',
+                timestamp: nowSec,
+                status: 0,
+                operation: 'create',
+                path: '/protocols/skill-service',
+                contentSummary: JSON.stringify({
+                serviceName: 'weather-oracle',
+                displayName: 'Weather Oracle',
+                description: 'Returns tomorrow weather.',
+                providerMetaBot: 'idq1provider',
+                providerSkill: 'metabot-weather-oracle',
+                price: '0.00001',
+                currency: 'SPACE',
+                skillDocument: '# Weather Oracle',
+                inputType: 'text',
+                outputType: 'text',
+                endpoint: 'simplemsg',
+                paymentAddress: 'mvc-payment-address',
+              }),
+            },
+          ],
+          nextCursor: null,
+        },
+      };
+    } else if (url.pathname === '/address/pin/list/mvc-provider-address') {
+      payload = {
+        data: {
+          list: [
+            {
+              seenTime: nowSec - 30,
+            },
+          ],
+        },
+      };
+    }
+
+    if (payload == null) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not_found' }));
+      return;
+    }
+
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(payload));
+  });
+
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Expected TCP fake chain server');
+  }
+
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    async close() {
+      await new Promise((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    },
   };
 }
 
@@ -172,6 +265,30 @@ test('services publish persists a local directory entry that network services --
   assert.equal(listed.payload.data.services[0].displayName, 'Weather Oracle');
   assert.equal(listed.payload.data.services[0].online, true);
   assert.equal(listed.payload.data.services[0].providerGlobalMetaId, created.payload.data.globalMetaId);
+});
+
+test('network services reads chain-backed online services without local directory seeds', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const chainApi = await startFakeChainApiServer();
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const listed = await runCommand(
+    homeDir,
+    ['network', 'services', '--online'],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+
+  assert.equal(listed.exitCode, 0);
+  assert.equal(listed.payload.ok, true);
+  assert.equal(listed.payload.data.discoverySource, 'chain');
+  assert.equal(listed.payload.data.fallbackUsed, false);
+  assert.equal(Array.isArray(listed.payload.data.services), true);
+  assert.equal(listed.payload.data.services.length, 1);
+  assert.equal(listed.payload.data.services[0].servicePinId, 'chain-service-pin-1');
+  assert.equal(listed.payload.data.services[0].displayName, 'Weather Oracle');
+  assert.equal(listed.payload.data.services[0].providerGlobalMetaId, 'idq1provider');
+  assert.equal(listed.payload.data.services[0].online, true);
 });
 
 test('network services merges remote demo directory seeds and returns provider daemon base urls for agent-side invocation', async (t) => {

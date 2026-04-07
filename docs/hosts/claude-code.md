@@ -33,15 +33,17 @@ Expected result:
 
 ## View Online Services
 
-If you want to seed one remote demo provider into the local yellow-pages feed first:
-
-```bash
-metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
-```
+`metabot network services --online` reads the public chain directory first, using `/protocols/skill-service` plus `/protocols/metabot-heartbeat`.
 
 ```bash
 metabot network services --online
 metabot ui open --page hub
+```
+
+If you want to inject one remote demo provider as a local fallback source:
+
+```bash
+metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
 ```
 
 Useful natural-language prompts:
