@@ -13,6 +13,7 @@ const {
 async function startServer() {
   const calls = {
     identity: [],
+    chain: [],
     services: [],
     serviceExecutions: [],
     trace: [],
@@ -40,6 +41,16 @@ async function startServer() {
           name: input.name,
           globalMetaId: 'gm-local-alice',
           subsidyState: 'claimed',
+        });
+      },
+    },
+    chain: {
+      write: async (input) => {
+        calls.chain.push(input);
+        return commandSuccess({
+          pinId: 'pin-chain-write-1',
+          path: input.path,
+          txids: ['tx-chain-write-1'],
         });
       },
     },
@@ -201,6 +212,38 @@ test('POST /api/identity/create parses the JSON body and forwards it to identity
       name: 'Alice',
       globalMetaId: 'gm-local-alice',
       subsidyState: 'claimed',
+    },
+  });
+});
+
+test('POST /api/chain/write parses the JSON body and forwards it to chain.write', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const request = {
+    path: '/protocols/simplebuzz',
+    payload: '{"content":"hello metabot"}',
+    contentType: 'application/json',
+  };
+
+  const response = await fetch(`${server.baseUrl}/api/chain/write`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.chain, [request]);
+  assert.deepEqual(payload, {
+    ok: true,
+    state: 'success',
+    data: {
+      pinId: 'pin-chain-write-1',
+      path: '/protocols/simplebuzz',
+      txids: ['tx-chain-write-1'],
     },
   });
 });

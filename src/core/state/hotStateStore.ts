@@ -1,5 +1,6 @@
-import { promises as fs } from 'node:fs';
-import { resolveMetabotPaths, type MetabotPaths } from './paths';
+import type { MetabotPaths } from './paths';
+import { createFileSecretStore } from '../secrets/fileSecretStore';
+import type { LocalIdentitySecrets } from '../secrets/secretStore';
 
 export interface HotStateStore {
   paths: MetabotPaths;
@@ -9,50 +10,22 @@ export interface HotStateStore {
   deleteSecrets(): Promise<void>;
 }
 
-async function ensureHotLayout(paths: MetabotPaths): Promise<void> {
-  await fs.mkdir(paths.hotRoot, { recursive: true });
-}
-
-async function readJsonFile<T>(filePath: string): Promise<T | null> {
-  try {
-    const raw = await fs.readFile(filePath, 'utf8');
-    return JSON.parse(raw) as T;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
-}
-
 export function createHotStateStore(homeDirOrPaths: string | MetabotPaths): HotStateStore {
-  const paths = typeof homeDirOrPaths === 'string' ? resolveMetabotPaths(homeDirOrPaths) : homeDirOrPaths;
+  const store = createFileSecretStore(homeDirOrPaths);
 
   return {
-    paths,
+    paths: store.paths,
     async ensureLayout() {
-      await ensureHotLayout(paths);
-      return paths;
+      return store.ensureLayout();
     },
-    async readSecrets() {
-      await ensureHotLayout(paths);
-      return readJsonFile(paths.secretsPath);
+    async readSecrets<T extends Record<string, unknown>>() {
+      return store.readIdentitySecrets<T & LocalIdentitySecrets>();
     },
-    async writeSecrets(value) {
-      await ensureHotLayout(paths);
-      await fs.writeFile(paths.secretsPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-      return paths.secretsPath;
+    async writeSecrets<T extends Record<string, unknown>>(value: T) {
+      return store.writeIdentitySecrets(value as T & LocalIdentitySecrets);
     },
     async deleteSecrets() {
-      try {
-        await fs.rm(paths.secretsPath);
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== 'ENOENT') {
-          throw error;
-        }
-      }
+      await store.deleteIdentitySecrets();
     }
   };
 }

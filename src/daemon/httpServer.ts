@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { Buffer } from 'node:buffer';
 import { commandFailed } from '../core/contracts/commandResult';
+import { handleChainRoutes } from './routes/chain';
 import { handleDaemonRoutes } from './routes/daemon';
 import { handleChatRoutes } from './routes/chat';
 import { handleIdentityRoutes } from './routes/identity';
@@ -13,6 +14,7 @@ import type { MetabotDaemonHttpHandlers, RouteContext, RouteHandler } from './ro
 const JSON_BODY_LIMIT_BYTES = 1024 * 1024;
 
 const ROUTES: RouteHandler[] = [
+  handleChainRoutes,
   handleDaemonRoutes,
   handleChatRoutes,
   handleIdentityRoutes,

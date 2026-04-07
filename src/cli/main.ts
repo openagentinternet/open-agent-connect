@@ -6,6 +6,7 @@ import { runDoctorCommand } from './commands/doctor';
 import { runIdentityCommand } from './commands/identity';
 import { runNetworkCommand } from './commands/network';
 import { runServicesCommand } from './commands/services';
+import { runChainCommand } from './commands/chain';
 import { runChatCommand } from './commands/chat';
 import { runTraceCommand } from './commands/trace';
 import { runUiCommand } from './commands/ui';
@@ -32,6 +33,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
 
   try {
     switch (command) {
+      case 'chain':
+        result = await runChainCommand(rest, context);
+        break;
       case 'daemon':
         result = await runDaemonCommand(rest, context);
         break;

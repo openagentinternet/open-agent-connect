@@ -13,7 +13,7 @@ import {
   commandSuccess,
   type MetabotCommandResult,
 } from '../core/contracts/commandResult';
-import { createHotStateStore } from '../core/state/hotStateStore';
+import { createFileSecretStore } from '../core/secrets/fileSecretStore';
 import {
   createRuntimeStateStore,
   type RuntimeDaemonRecord,
@@ -25,6 +25,9 @@ import { planRemoteCall } from '../core/delegation/remoteCall';
 import { buildSessionTrace } from '../core/chat/sessionTrace';
 import { exportSessionArtifacts } from '../core/chat/transcriptExport';
 import { sendPrivateChat } from '../core/chat/privateChat';
+import { createLocalMnemonicSigner } from '../core/signing/localMnemonicSigner';
+import type { SecretStore } from '../core/secrets/secretStore';
+import type { Signer } from '../core/signing/signer';
 
 const DIRECTORY_SEEDS_FILE = 'directory-seeds.json';
 
@@ -411,11 +414,36 @@ async function fetchPeerChatPublicKey(globalMetaId: string): Promise<string | nu
 export function createDefaultMetabotDaemonHandlers(input: {
   homeDir: string;
   getDaemonRecord: () => RuntimeDaemonRecord | null;
+  secretStore?: SecretStore;
+  signer?: Signer;
 }): MetabotDaemonHttpHandlers {
-  const hotStateStore = createHotStateStore(input.homeDir);
+  const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
+  const signer = input.signer ?? createLocalMnemonicSigner({ secretStore });
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
 
   return {
+    chain: {
+      write: async (rawInput) => {
+        try {
+          const result = await signer.writePin({
+            operation: typeof rawInput.operation === 'string' ? rawInput.operation : undefined,
+            path: typeof rawInput.path === 'string' ? rawInput.path : undefined,
+            encryption: typeof rawInput.encryption === 'string' ? rawInput.encryption : undefined,
+            version: typeof rawInput.version === 'string' ? rawInput.version : undefined,
+            contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
+            payload: typeof rawInput.payload === 'string' ? rawInput.payload : undefined,
+            encoding: typeof rawInput.encoding === 'string' ? rawInput.encoding : undefined,
+            network: typeof rawInput.network === 'string' ? rawInput.network : undefined,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          return commandFailed(
+            'chain_write_failed',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      },
+    },
     daemon: {
       getStatus: async () => {
         const daemon = input.getDaemonRecord();
@@ -470,7 +498,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           identity,
         });
 
-        await hotStateStore.writeSecrets({
+        await secretStore.writeIdentitySecrets({
           mnemonic,
           path: identity.path,
           privateKeyHex: await derivePrivateKeyHex({
@@ -925,13 +953,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('invalid_chat_request', 'Private chat request must include to and content.');
         }
 
-        const secrets = await hotStateStore.readSecrets<{
-          privateKeyHex?: string;
-          chatPublicKey?: string;
-        }>();
-        const localPrivateKeyHex = normalizeText(secrets?.privateKeyHex);
-        if (!localPrivateKeyHex) {
-          return commandFailed('identity_secret_missing', 'Local private chat key is missing from hot state.');
+        let privateChatIdentity;
+        try {
+          privateChatIdentity = await signer.getPrivateChatIdentity();
+        } catch (error) {
+          return commandFailed(
+            'identity_secret_missing',
+            error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.'
+          );
         }
 
         let peerChatPublicKey = request.peerChatPublicKey;
@@ -950,8 +979,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         const sent = sendPrivateChat({
           fromIdentity: {
-            globalMetaId: state.identity.globalMetaId,
-            privateKeyHex: localPrivateKeyHex,
+            globalMetaId: privateChatIdentity.globalMetaId,
+            privateKeyHex: privateChatIdentity.privateKeyHex,
           },
           toGlobalMetaId: request.to,
           peerChatPublicKey,

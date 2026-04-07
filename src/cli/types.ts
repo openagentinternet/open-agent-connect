@@ -4,6 +4,9 @@ import type { MetabotCommandResult } from '../core/contracts/commandResult';
 export type Awaitable<T> = T | Promise<T>;
 
 export interface CliDependencies {
+  chain?: {
+    write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   daemon?: {
     start?: () => Awaitable<MetabotCommandResult<unknown>>;
   };

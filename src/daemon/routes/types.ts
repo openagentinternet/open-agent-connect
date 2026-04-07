@@ -6,6 +6,9 @@ export type Awaitable<T> = T | Promise<T>;
 export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund';
 
 export interface MetabotDaemonHttpHandlers {
+  chain?: {
+    write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   daemon?: {
     getStatus?: () => Awaitable<MetabotCommandResult<unknown>>;
     doctor?: () => Awaitable<MetabotCommandResult<unknown>>;

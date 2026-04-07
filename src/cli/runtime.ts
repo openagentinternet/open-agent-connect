@@ -120,6 +120,9 @@ async function requestJson<T>(
 
 export function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies {
   return {
+    chain: {
+      write: async (input) => requestJson(context, 'POST', '/api/chain/write', input),
+    },
     daemon: {
       start: async () => {
         const baseUrl = await ensureDaemonBaseUrl(context);
@@ -174,6 +177,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
   const defaults = createDefaultCliDependencies(context);
   const provided = context.dependencies;
   return {
+    chain: { ...defaults.chain, ...provided.chain },
     daemon: { ...defaults.daemon, ...provided.daemon },
     doctor: { ...defaults.doctor, ...provided.doctor },
     identity: { ...defaults.identity, ...provided.identity },
