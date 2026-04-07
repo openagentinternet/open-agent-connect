@@ -147,6 +147,31 @@ V1 keeps the Bot-to-Bot network path MetaWeb-native:
 
 V1 does **not** make socket or gateway transport the primary Bot-to-Bot path.
 
+### Future transport readiness
+
+Even though v1 keeps MetaWeb-native inbox/session transport as the only primary Bot-to-Bot path, the runtime must still preserve a clean transport boundary so later versions can add socket or gateway acceleration without redesigning the caller experience.
+
+That means v1 should already conceptually separate:
+
+- **session engine**
+  - owns A2A session state, task-run state, clarification rules, trace mapping, and public host-facing states
+- **transport adapter**
+  - owns how inbound and outbound A2A messages are delivered
+
+For v1, the transport adapter is:
+
+- MetaWeb inbox/session polling using the validated IDBots semantics
+
+For later versions, additional adapters may be introduced, for example:
+
+- socket-based direct delivery
+- gateway-backed message delivery
+- hybrid acceleration where MetaWeb remains the source of truth and the faster path is an optimization layer
+
+The important rule is:
+
+> changing transport later must not change the host-facing `services call / trace watch / trace get` model, the A2A session model, or the public caller-side UX contract.
+
 ### Observation transport
 
 Observation is separate from Bot-to-Bot transport.
@@ -451,13 +476,14 @@ The first public demo succeeds when a user on Codex or Claude Code can:
 V1 should be built so that later versions can add:
 
 - more permissive delegation policy (`confirm_paid_only`, then `auto_when_safe`)
-- gateway / socket acceleration as an optional performance layer
+- gateway / socket acceleration as an optional performance layer behind a transport adapter boundary
 - host-native provider runners
 - deeper multi-turn A2A collaboration
 
 None of those should require redesigning:
 
 - the session model
+- the transport-to-session boundary
 - the host-facing state contract
 - the provider runner contract
 - the caller watch model
