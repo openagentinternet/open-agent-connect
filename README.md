@@ -12,6 +12,9 @@ What works in this repo today:
 
 - create a local MetaBot identity
 - run a local MetaBot daemon
+- upload local files to MetaWeb through `/file`
+- post simplebuzz messages, with optional uploaded file attachments
+- write arbitrary MetaID tuples through the public chain-write interface
 - publish and list services
 - seed remote demo providers into a local yellow-pages directory
 - execute remote demo calls when a provider exposes `providerDaemonBaseUrl`
@@ -126,6 +129,9 @@ For real host-to-host manual verification, use:
 ```bash
 metabot doctor
 metabot identity create --name "Alice"
+metabot file upload --request-file file-request.json
+metabot buzz post --request-file buzz-request.json
+metabot chain write --request-file chain-request.json
 metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
 metabot network services --online
 metabot services call --request-file request.json

@@ -10,6 +10,8 @@ const SHARED_COMPATIBILITY_MANIFEST = 'release/compatibility.json';
 const BUNDLED_COMPATIBILITY_MANIFEST = 'runtime/compatibility.json';
 const INCLUDED_SKILLS = [
   'metabot-chat-privatechat',
+  'metabot-post-buzz',
+  'metabot-upload-file',
   'metabot-post-skillservice',
   'metabot-omni-reader',
   'metabot-bootstrap',

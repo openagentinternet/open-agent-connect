@@ -6,8 +6,10 @@ import { runDoctorCommand } from './commands/doctor';
 import { runIdentityCommand } from './commands/identity';
 import { runNetworkCommand } from './commands/network';
 import { runServicesCommand } from './commands/services';
+import { runBuzzCommand } from './commands/buzz';
 import { runChainCommand } from './commands/chain';
 import { runChatCommand } from './commands/chat';
+import { runFileCommand } from './commands/file';
 import { runTraceCommand } from './commands/trace';
 import { runUiCommand } from './commands/ui';
 import { commandUnknownSubcommand } from './commands/helpers';
@@ -33,6 +35,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
 
   try {
     switch (command) {
+      case 'buzz':
+        result = await runBuzzCommand(rest, context);
+        break;
       case 'chain':
         result = await runChainCommand(rest, context);
         break;
@@ -53,6 +58,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
         break;
       case 'chat':
         result = await runChatCommand(rest, context);
+        break;
+      case 'file':
+        result = await runFileCommand(rest, context);
         break;
       case 'trace':
         result = await runTraceCommand(rest, context);

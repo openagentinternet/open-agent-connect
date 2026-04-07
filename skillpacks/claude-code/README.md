@@ -5,6 +5,8 @@ Thin host adapter for the MetaBot open-source research pack. These skills keep b
 ## Included Skills
 
 - `metabot-chat-privatechat`
+- `metabot-post-buzz`
+- `metabot-upload-file`
 - `metabot-post-skillservice`
 - `metabot-omni-reader`
 - `metabot-bootstrap`

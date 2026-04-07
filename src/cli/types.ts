@@ -4,6 +4,9 @@ import type { MetabotCommandResult } from '../core/contracts/commandResult';
 export type Awaitable<T> = T | Promise<T>;
 
 export interface CliDependencies {
+  buzz?: {
+    post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   chain?: {
     write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
@@ -28,6 +31,9 @@ export interface CliDependencies {
   };
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
+  file?: {
+    upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   trace?: {
     get?: (input: { traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;

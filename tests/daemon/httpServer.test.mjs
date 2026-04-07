@@ -14,6 +14,8 @@ async function startServer() {
   const calls = {
     identity: [],
     chain: [],
+    file: [],
+    buzz: [],
     services: [],
     serviceExecutions: [],
     trace: [],
@@ -51,6 +53,24 @@ async function startServer() {
           pinId: 'pin-chain-write-1',
           path: input.path,
           txids: ['tx-chain-write-1'],
+        });
+      },
+    },
+    file: {
+      upload: async (input) => {
+        calls.file.push(input);
+        return commandSuccess({
+          pinId: 'file-pin-1',
+          metafileUri: 'metafile://file-pin-1.png',
+        });
+      },
+    },
+    buzz: {
+      post: async (input) => {
+        calls.buzz.push(input);
+        return commandSuccess({
+          pinId: 'buzz-pin-1',
+          attachments: ['metafile://file-pin-1.png'],
         });
       },
     },
@@ -244,6 +264,66 @@ test('POST /api/chain/write parses the JSON body and forwards it to chain.write'
       pinId: 'pin-chain-write-1',
       path: '/protocols/simplebuzz',
       txids: ['tx-chain-write-1'],
+    },
+  });
+});
+
+test('POST /api/file/upload parses the JSON body and forwards it to file.upload', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const request = {
+    filePath: '/tmp/photo.png',
+    contentType: 'image/png',
+  };
+
+  const response = await fetch(`${server.baseUrl}/api/file/upload`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.file, [request]);
+  assert.deepEqual(payload, {
+    ok: true,
+    state: 'success',
+    data: {
+      pinId: 'file-pin-1',
+      metafileUri: 'metafile://file-pin-1.png',
+    },
+  });
+});
+
+test('POST /api/buzz/post parses the JSON body and forwards it to buzz.post', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const request = {
+    content: 'hello metabot buzz',
+    attachments: ['/tmp/photo.png'],
+  };
+
+  const response = await fetch(`${server.baseUrl}/api/buzz/post`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.buzz, [request]);
+  assert.deepEqual(payload, {
+    ok: true,
+    state: 'success',
+    data: {
+      pinId: 'buzz-pin-1',
+      attachments: ['metafile://file-pin-1.png'],
     },
   });
 });

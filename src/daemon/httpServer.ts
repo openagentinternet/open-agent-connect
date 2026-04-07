@@ -1,9 +1,11 @@
 import http from 'node:http';
 import { Buffer } from 'node:buffer';
 import { commandFailed } from '../core/contracts/commandResult';
+import { handleBuzzRoutes } from './routes/buzz';
 import { handleChainRoutes } from './routes/chain';
 import { handleDaemonRoutes } from './routes/daemon';
 import { handleChatRoutes } from './routes/chat';
+import { handleFileRoutes } from './routes/file';
 import { handleIdentityRoutes } from './routes/identity';
 import { handleNetworkRoutes } from './routes/network';
 import { handleServicesRoutes } from './routes/services';
@@ -14,9 +16,11 @@ import type { MetabotDaemonHttpHandlers, RouteContext, RouteHandler } from './ro
 const JSON_BODY_LIMIT_BYTES = 1024 * 1024;
 
 const ROUTES: RouteHandler[] = [
+  handleBuzzRoutes,
   handleChainRoutes,
   handleDaemonRoutes,
   handleChatRoutes,
+  handleFileRoutes,
   handleIdentityRoutes,
   handleNetworkRoutes,
   handleServicesRoutes,

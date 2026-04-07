@@ -28,6 +28,8 @@ import { sendPrivateChat } from '../core/chat/privateChat';
 import { createLocalMnemonicSigner } from '../core/signing/localMnemonicSigner';
 import type { SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
+import { uploadLocalFileToChain } from '../core/files/uploadFile';
+import { postBuzzToChain } from '../core/buzz/postBuzz';
 
 const DIRECTORY_SEEDS_FILE = 'directory-seeds.json';
 
@@ -90,6 +92,16 @@ function readObject(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => normalizeText(entry))
+    .filter(Boolean);
 }
 
 function readCallRequest(rawInput: Record<string, unknown>) {
@@ -439,6 +451,31 @@ export function createDefaultMetabotDaemonHandlers(input: {
         } catch (error) {
           return commandFailed(
             'chain_write_failed',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      },
+    },
+    buzz: {
+      post: async (rawInput) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before posting buzz.');
+        }
+
+        try {
+          const result = await postBuzzToChain({
+            content: normalizeText(rawInput.content),
+            contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
+            attachments: readStringArray(rawInput.attachments),
+            quotePin: typeof rawInput.quotePin === 'string' ? rawInput.quotePin : undefined,
+            network: typeof rawInput.network === 'string' ? rawInput.network : undefined,
+            signer,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          return commandFailed(
+            'buzz_post_failed',
             error instanceof Error ? error.message : String(error)
           );
         }
@@ -1051,6 +1088,29 @@ export function createDefaultMetabotDaemonHandlers(input: {
           traceMarkdownPath: artifacts.traceMarkdownPath,
           traceJsonPath: artifacts.traceJsonPath,
         });
+      },
+    },
+    file: {
+      upload: async (rawInput) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before uploading files.');
+        }
+
+        try {
+          const result = await uploadLocalFileToChain({
+            filePath: normalizeText(rawInput.filePath),
+            contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
+            network: typeof rawInput.network === 'string' ? rawInput.network : undefined,
+            signer,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          return commandFailed(
+            'file_upload_failed',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
       },
     },
     trace: {

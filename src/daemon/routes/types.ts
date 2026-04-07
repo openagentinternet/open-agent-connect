@@ -6,6 +6,9 @@ export type Awaitable<T> = T | Promise<T>;
 export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund';
 
 export interface MetabotDaemonHttpHandlers {
+  buzz?: {
+    post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   chain?: {
     write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
@@ -29,6 +32,9 @@ export interface MetabotDaemonHttpHandlers {
   };
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
+  file?: {
+    upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   trace?: {
     getTrace?: (input: { traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;

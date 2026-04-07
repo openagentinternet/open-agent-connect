@@ -120,6 +120,9 @@ async function requestJson<T>(
 
 export function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies {
   return {
+    buzz: {
+      post: async (input) => requestJson(context, 'POST', '/api/buzz/post', input),
+    },
     chain: {
       write: async (input) => requestJson(context, 'POST', '/api/chain/write', input),
     },
@@ -158,6 +161,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     chat: {
       private: async (input) => requestJson(context, 'POST', '/api/chat/private', input),
     },
+    file: {
+      upload: async (input) => requestJson(context, 'POST', '/api/file/upload', input),
+    },
     trace: {
       get: async (input) => requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}`),
     },
@@ -177,6 +183,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
   const defaults = createDefaultCliDependencies(context);
   const provided = context.dependencies;
   return {
+    buzz: { ...defaults.buzz, ...provided.buzz },
     chain: { ...defaults.chain, ...provided.chain },
     daemon: { ...defaults.daemon, ...provided.daemon },
     doctor: { ...defaults.doctor, ...provided.doctor },
@@ -184,6 +191,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     network: { ...defaults.network, ...provided.network },
     services: { ...defaults.services, ...provided.services },
     chat: { ...defaults.chat, ...provided.chat },
+    file: { ...defaults.file, ...provided.file },
     trace: { ...defaults.trace, ...provided.trace },
     ui: { ...defaults.ui, ...provided.ui },
   };

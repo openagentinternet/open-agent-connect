@@ -14,6 +14,8 @@ const execFile = promisify(execFileCallback);
 const HOSTS = ['codex', 'claude-code', 'openclaw'];
 const EXPECTED_SKILLS = [
   'metabot-chat-privatechat',
+  'metabot-post-buzz',
+  'metabot-upload-file',
   'metabot-post-skillservice',
   'metabot-omni-reader',
   'metabot-bootstrap',
@@ -170,6 +172,32 @@ test('buildMetabotSkillpacks publishes the shared network-source registry skill 
     assert.match(content, /network sources add/);
     assert.match(content, /network sources list/);
     assert.match(content, /network sources remove/);
+  }
+});
+
+test('buildMetabotSkillpacks publishes the shared buzz and file writer skills across all host packs', async () => {
+  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
+  const { buildMetabotSkillpacks } = await import(BUILD_SCRIPT_URL);
+
+  await buildMetabotSkillpacks({
+    repoRoot: REPO_ROOT,
+    outputRoot,
+  });
+
+  for (const host of HOSTS) {
+    const buzzContent = await readFile(
+      path.join(outputRoot, host, 'skills', 'metabot-post-buzz', 'SKILL.md'),
+      'utf8'
+    );
+    assert.match(buzzContent, /buzz post/);
+    assert.match(buzzContent, /file upload/);
+
+    const fileContent = await readFile(
+      path.join(outputRoot, host, 'skills', 'metabot-upload-file', 'SKILL.md'),
+      'utf8'
+    );
+    assert.match(fileContent, /file upload/);
+    assert.match(fileContent, /\/file/);
   }
 });
 
