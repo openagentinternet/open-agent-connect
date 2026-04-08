@@ -32,6 +32,12 @@ export type TraceEventInput = {
   event?: TraceDerivedEventName | string;
 };
 
+export type PublicStatusResolution = {
+  status: PublicStatus;
+  /** The raw event label seen by the resolver (if any) for future tracing/debugging. */
+  rawEvent?: string;
+};
+
 const eventMap: Record<TraceDerivedEventName, PublicStatus> = {
   request_sent: 'requesting_remote',
   provider_received: 'remote_received',
@@ -43,14 +49,23 @@ const eventMap: Record<TraceDerivedEventName, PublicStatus> = {
 };
 
 /**
- * Maps low-level trace events into the host-facing public status model.
- * Any unknown or missing event should surface a clear exception state rather than silently resembling progress.
+ * Returns both the resolved public status and the raw event label (if any) for tracing.
  */
-export function mapPublicStatus(trace: TraceEventInput): PublicStatus {
-  const key = trace?.event;
-  if (!key || !(key in eventMap)) {
-    return 'local_runtime_error';
+export function resolvePublicStatus(trace?: TraceEventInput): PublicStatusResolution {
+  const event = trace?.event;
+  if (typeof event === 'string' && Object.prototype.hasOwnProperty.call(eventMap, event)) {
+    return {
+      status: eventMap[event as TraceDerivedEventName],
+      rawEvent: event,
+    };
   }
 
-  return eventMap[key as TraceDerivedEventName];
+  return { status: 'local_runtime_error', rawEvent: event };
+}
+
+/**
+ * Convenience helper for consumers that only need the status value.
+ */
+export function mapPublicStatus(trace?: TraceEventInput): PublicStatus {
+  return resolvePublicStatus(trace).status;
 }

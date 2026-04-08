@@ -3,7 +3,10 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
-const { mapPublicStatus } = require('../../dist/core/a2a/publicStatus.js');
+const {
+  mapPublicStatus,
+  resolvePublicStatus,
+} = require('../../dist/core/a2a/publicStatus.js');
 
 test('public status mapper covers the required progress and exception labels', () => {
   assert.equal(mapPublicStatus({ event: 'request_sent' }), 'requesting_remote');
@@ -18,7 +21,19 @@ test('provider completion maps to completed', () => {
   assert.equal(mapPublicStatus({ event: 'provider_completed' }), 'completed');
 });
 
-test('unknown or missing events map to explicit exception state', () => {
-  assert.equal(mapPublicStatus({ event: 'provider_cancelled' }), 'local_runtime_error');
+test('resolvePublicStatus surfaces raw unknown events via resolution metadata', () => {
+  const resolution = resolvePublicStatus({ event: 'provider_cancelled' });
+  assert.equal(resolution.status, 'local_runtime_error');
+  assert.equal(resolution.rawEvent, 'provider_cancelled');
   assert.equal(mapPublicStatus({}), 'local_runtime_error');
+});
+
+test('prototype-edge event names do not slip through the resolver', () => {
+  const resolution = resolvePublicStatus({ event: 'toString' });
+  assert.equal(resolution.status, 'local_runtime_error');
+  assert.equal(resolution.rawEvent, 'toString');
+});
+
+test('mapPublicStatus handles missing input by surfacing the exception state', () => {
+  assert.equal(mapPublicStatus(undefined), 'local_runtime_error');
 });
