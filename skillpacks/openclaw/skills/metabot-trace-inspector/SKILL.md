@@ -1,11 +1,11 @@
 ---
 name: metabot-trace-inspector
-description: Use when a human or agent needs to inspect the trace of a MetaWeb remote call after execution or refund follow-up
+description: Use when a human or agent needs deeper evidence about a remote MetaBot session, especially after timeout, clarification, manual action, or when the user asks for details
 ---
 
 # MetaBot Trace Inspector
 
-Inspect the machine trace for a remote MetaBot call, then open the local human page only when richer visual context is needed.
+Inspect the machine trace for a remote MetaBot session, then open the local human inspector only when richer visual context is needed.
 
 ## Host Adapter
 
@@ -28,13 +28,18 @@ Route natural-language intent through `metabot`, then reason over the returned J
 
 ```bash
 metabot trace get --trace-id trace-123
+metabot trace watch --trace-id trace-123
 metabot ui open --page trace
 ```
 
 ## Expectations
 
 - Prefer `trace get` for agent workflows and automation.
-- Use the local trace page for human review or debugging.
+- Prefer `trace watch` while the host session is still following a live remote MetaBot run.
+- Recommend the local trace inspector when timeout occurs, clarification appears, manual action is required, or the user asks for details.
+- If the runtime already returned a local trace UI URL, open that exact URL for the human.
+- Use the local trace page for human review or debugging, not as the primary execution surface.
+- Keep the framing as one local MetaBot observing one remote MetaBot session, not a cold transport log viewer.
 - Keep the trace id as the primary handle across hosts and UI surfaces.
 
 ## Compatibility

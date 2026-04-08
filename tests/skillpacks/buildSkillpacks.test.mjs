@@ -29,6 +29,7 @@ const EXPECTED_COMPATIBILITY_MANIFEST = 'release/compatibility.json';
 const EXPECTED_BUNDLED_COMPATIBILITY_COPY = 'runtime/compatibility.json';
 const EXPECTED_CONFIRMATION_CONTRACT_LINE =
   'Before any paid remote call, show the provider, service, price, currency, and wait for explicit confirmation.';
+const EXPECTED_TRACE_WATCH_LINE = 'metabot trace watch --trace-id trace-123';
 
 async function assertFileExists(filePath) {
   const info = await stat(filePath);
@@ -130,9 +131,11 @@ test('buildMetabotSkillpacks publishes the shared remote-call demo transport con
       path.join(outputRoot, host, 'skills', 'metabot-call-remote-service', 'SKILL.md'),
       'utf8'
     );
-    assert.match(content, /providerDaemonBaseUrl/);
-    assert.match(content, /responseText/);
-    assert.match(content, /Demo Transport/);
+    assert.match(content, /services call --request-file/);
+    assert.match(content, new RegExp(EXPECTED_TRACE_WATCH_LINE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.match(content, /remote MetaBot/i);
+    assert.match(content, /delegate/i);
+    assert.doesNotMatch(content, /caller-to-provider daemon round-trip/i);
   }
 });
 
@@ -150,8 +153,35 @@ test('buildMetabotSkillpacks publishes the shared network-directory handoff fiel
       path.join(outputRoot, host, 'skills', 'metabot-network-directory', 'SKILL.md'),
       'utf8'
     );
-    assert.match(content, /providerDaemonBaseUrl/);
+    assert.match(content, /online MetaBot services/i);
+    assert.match(content, /remote MetaBot/i);
+    assert.match(content, /delegate/i);
     assert.match(content, /metabot-call-remote-service/);
+  }
+});
+
+test('buildMetabotSkillpacks teaches when to recommend the local trace inspector across all host packs', async () => {
+  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
+  const { buildMetabotSkillpacks } = await import(BUILD_SCRIPT_URL);
+
+  await buildMetabotSkillpacks({
+    repoRoot: REPO_ROOT,
+    outputRoot,
+  });
+
+  for (const host of HOSTS) {
+    const content = await readFile(
+      path.join(outputRoot, host, 'skills', 'metabot-trace-inspector', 'SKILL.md'),
+      'utf8'
+    );
+    assert.match(content, /trace get --trace-id/);
+    assert.match(content, new RegExp(EXPECTED_TRACE_WATCH_LINE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.match(content, /timeout/i);
+    assert.match(content, /clarification/i);
+    assert.match(content, /manual action/i);
+    assert.match(content, /asks for details|user asks for details/i);
+    assert.match(content, /remote MetaBot/i);
+    assert.doesNotMatch(content, /endpoint/i);
   }
 });
 
