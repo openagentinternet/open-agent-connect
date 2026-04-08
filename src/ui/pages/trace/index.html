@@ -207,6 +207,7 @@
         margin: 0;
         color: var(--muted);
         line-height: 1.6;
+        white-space: pre-wrap;
       }
       .tone-active { border-color: rgba(15, 118, 110, 0.25); }
       .tone-timeout { border-color: rgba(180, 83, 9, 0.25); background: rgba(180, 83, 9, 0.05); }
@@ -346,6 +347,25 @@
 
       <section class="detail-grid">
         <article class="detail-card">
+          <h2>Remote Result</h2>
+          <p class="detail-copy" data-trace-result-summary>
+            When the remote MetaBot completes, show the verbatim returned result here instead of forcing humans to inspect raw exports first.
+          </p>
+          <pre data-trace-result>Waiting for the remote MetaBot to return a result.</pre>
+          <dl class="definition-list" data-trace-result-meta></dl>
+        </article>
+
+        <article class="detail-card">
+          <h2>Rating Follow-Up</h2>
+          <p class="detail-copy" data-trace-rating-summary>
+            Keep the DACT T-stage visible here so humans can see whether the buyer published a rating and whether it was delivered back to the provider MetaBot.
+          </p>
+          <pre data-trace-rating-request>No provider-side rating request is stored for this trace.</pre>
+          <pre data-trace-rating-comment>No buyer-side rating follow-up is stored for this trace yet.</pre>
+          <dl class="definition-list" data-trace-rating-meta></dl>
+        </article>
+
+        <article class="detail-card">
           <h2>Transcript Timeline</h2>
           <p class="detail-copy">If session-level transcript records exist, show them in order. Otherwise fall back to exported markdown.</p>
           <div data-trace-transcript></div>
@@ -356,6 +376,13 @@
           <h2>Public Status Events</h2>
           <p class="detail-copy">These events come from the local daemon watch layer, not a browser-only animation.</p>
           <ul class="timeline-list" data-trace-events></ul>
+        </article>
+      </section>
+
+      <section class="detail-grid">
+        <article class="detail-card">
+          <h2>Observation Notes</h2>
+          <p class="detail-copy">This inspector is for humans. The actual task execution, payment, and MetaWeb exchange remain in the daemon and on-chain records.</p>
         </article>
       </section>
 

@@ -1,10 +1,12 @@
+import { buildTraceInspectorViewModel } from './viewModel';
+
 export function buildTraceInspectorScript(): string {
+  const buildTraceInspectorViewModelSource = buildTraceInspectorViewModel.toString();
   return `(() => {
+  const buildTraceInspectorViewModel = ${buildTraceInspectorViewModelSource};
   const traceId = new URL(window.location.href).searchParams.get('traceId') || 'unknown-trace';
   const traceApiUrl = '/api/trace/' + encodeURIComponent(traceId);
   const traceEventsUrl = traceApiUrl + '/events';
-  const transcriptEventKeys = new Set();
-  const statusEventKeys = new Set();
   let currentTrace = null;
   let currentInspector = null;
 
@@ -19,6 +21,13 @@ export function buildTraceInspectorScript(): string {
     snapshot: document.querySelector('[data-trace-snapshot]'),
     participants: document.querySelector('[data-trace-participants]'),
     artifacts: document.querySelector('[data-trace-artifacts]'),
+    resultSummary: document.querySelector('[data-trace-result-summary]'),
+    result: document.querySelector('[data-trace-result]'),
+    resultMeta: document.querySelector('[data-trace-result-meta]'),
+    ratingSummary: document.querySelector('[data-trace-rating-summary]'),
+    ratingRequest: document.querySelector('[data-trace-rating-request]'),
+    ratingComment: document.querySelector('[data-trace-rating-comment]'),
+    ratingMeta: document.querySelector('[data-trace-rating-meta]'),
     transcript: document.querySelector('[data-trace-transcript]'),
     events: document.querySelector('[data-trace-events]'),
     transcriptHint: document.querySelector('[data-transcript-hint]'),
@@ -34,6 +43,11 @@ export function buildTraceInspectorScript(): string {
     while (element.firstChild) {
       element.removeChild(element.firstChild);
     }
+  };
+
+  const setPreText = (element, value) => {
+    if (!element) return;
+    element.textContent = value;
   };
 
   const appendDefinitionRow = (target, label, value) => {
@@ -75,6 +89,12 @@ export function buildTraceInspectorScript(): string {
 
   const coerceArray = (value) => Array.isArray(value) ? value.slice() : [];
   const coerceObject = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  const formatDefinitionValue = (label, value) => {
+    if (/(^| )At$/.test(label) && /^\\d+$/.test(String(value || ''))) {
+      return formatTime(Number(value));
+    }
+    return String(value || '');
+  };
 
   const getCurrentPublicStatus = (trace, inspector) => {
     const traceStatus = trace && trace.a2a && typeof trace.a2a.publicStatus === 'string'
@@ -199,10 +219,36 @@ export function buildTraceInspectorScript(): string {
     }
   };
 
+  const renderResultPanels = (trace, inspector) => {
+    const viewModel = buildTraceInspectorViewModel({ trace, inspector });
+
+    setText(elements.resultSummary, viewModel.resultPanel.summary);
+    setPreText(elements.result, viewModel.resultPanel.text);
+    clearChildren(elements.resultMeta);
+    viewModel.resultPanel.metaRows.forEach((row) => {
+      appendDefinitionRow(elements.resultMeta, row.label, formatDefinitionValue(row.label, row.value));
+    });
+
+    setText(elements.ratingSummary, viewModel.ratingPanel.summary);
+    setPreText(
+      elements.ratingRequest,
+      viewModel.ratingPanel.requestText || 'No provider-side rating request is stored for this trace.'
+    );
+    setPreText(
+      elements.ratingComment,
+      viewModel.ratingPanel.commentText || 'No buyer-side rating follow-up is stored for this trace yet.'
+    );
+    clearChildren(elements.ratingMeta);
+    viewModel.ratingPanel.metaRows.forEach((row) => {
+      appendDefinitionRow(elements.ratingMeta, row.label, formatDefinitionValue(row.label, row.value));
+    });
+  };
+
   const renderTranscript = (trace, inspector) => {
     clearChildren(elements.transcript);
     if (!elements.transcript) return;
-    const items = coerceArray(inspector && inspector.transcriptItems).sort((left, right) => (left.timestamp || 0) - (right.timestamp || 0));
+    const viewModel = buildTraceInspectorViewModel({ trace, inspector });
+    const items = coerceArray(viewModel.transcriptItems);
     if (!items.length) {
       const fallback = inspector && typeof inspector.transcriptMarkdown === 'string' && inspector.transcriptMarkdown.trim()
         ? inspector.transcriptMarkdown.trim().split('\\n').slice(0, 8).join('\\n')
@@ -219,21 +265,10 @@ export function buildTraceInspectorScript(): string {
     const list = document.createElement('ol');
     list.className = 'timeline-list';
     items.forEach((item) => {
-      const key = [item.id || '', item.timestamp || '', item.content || ''].join('|');
-      if (transcriptEventKeys.has(key)) {
-        return;
-      }
-      transcriptEventKeys.add(key);
       const entry = document.createElement('li');
-      entry.className = 'timeline-item tone-' + (item.type === 'clarification_request'
-        ? 'clarification'
-        : item.type === 'failure'
-          ? 'failure'
-          : item.sender === 'system'
-            ? 'manual'
-            : 'active');
+      entry.className = 'timeline-item tone-' + (item.tone || 'neutral');
       const strong = document.createElement('strong');
-      strong.textContent = '[' + (item.sender || 'system') + '] ' + (item.type || 'message') + ' · ' + formatTime(item.timestamp);
+      strong.textContent = (item.title || 'Transcript Event') + ' · ' + formatTime(item.timestamp);
       const paragraph = document.createElement('p');
       paragraph.textContent = item.content || '';
       entry.appendChild(strong);
@@ -249,8 +284,8 @@ export function buildTraceInspectorScript(): string {
   const renderStatusEvents = (trace, inspector) => {
     clearChildren(elements.events);
     if (!elements.events) return;
-    const snapshots = coerceArray(inspector && inspector.publicStatusSnapshots)
-      .sort((left, right) => (left.resolvedAt || 0) - (right.resolvedAt || 0));
+    const viewModel = buildTraceInspectorViewModel({ trace, inspector });
+    const snapshots = coerceArray(viewModel.statusItems);
     if (!snapshots.length) {
       appendListItem(
         elements.events,
@@ -261,26 +296,11 @@ export function buildTraceInspectorScript(): string {
       return;
     }
     snapshots.forEach((snapshot) => {
-      const key = [snapshot.sessionId || '', snapshot.taskRunId || '', snapshot.status || '', snapshot.resolvedAt || ''].join('|');
-      if (statusEventKeys.has(key)) {
-        return;
-      }
-      statusEventKeys.add(key);
       appendListItem(
         elements.events,
-        (snapshot.status || 'pending') + ' · ' + formatTime(snapshot.resolvedAt),
-        snapshot.rawEvent ? 'Mapped from ' + snapshot.rawEvent : 'Derived from daemon session state.',
-        snapshot.status === 'timeout'
-          ? 'timeout'
-          : snapshot.status === 'manual_action_required'
-            ? 'manual'
-            : snapshot.status === 'remote_failed'
-              ? 'failure'
-              : snapshot.status === 'completed'
-                ? 'completed'
-                : snapshot.status === 'remote_received' || snapshot.status === 'remote_executing' || snapshot.status === 'requesting_remote'
-                  ? 'active'
-                  : 'neutral'
+        (snapshot.title || 'pending') + ' · ' + formatTime(snapshot.timestamp),
+        snapshot.content || 'Derived from daemon session state.',
+        snapshot.tone || 'neutral'
       );
     });
   };
@@ -297,6 +317,7 @@ export function buildTraceInspectorScript(): string {
     renderSnapshot(currentTrace, currentInspector);
     renderParticipants(currentTrace, currentInspector);
     renderArtifacts(currentTrace, currentInspector);
+    renderResultPanels(currentTrace, currentInspector);
     renderTranscript(currentTrace, currentInspector);
     renderStatusEvents(currentTrace, currentInspector);
   };

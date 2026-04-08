@@ -655,4 +655,6 @@ test('GET /ui/trace serves a built-in trace inspector wired to the trace API, SS
   assert.match(html, /Timeout/);
   assert.match(html, /Clarification/);
   assert.match(html, /Manual Action/);
+  assert.match(html, /Remote Result/);
+  assert.match(html, /Rating Follow-Up/);
 });
