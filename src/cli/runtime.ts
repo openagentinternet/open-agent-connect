@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -26,6 +27,7 @@ const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
+let cachedDaemonRuntimeFingerprint: string | null = null;
 
 function normalizeBaseUrl(value: string | undefined): string {
   const trimmed = typeof value === 'string' ? value.trim() : '';
@@ -36,9 +38,57 @@ function normalizeEnvText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function buildDaemonConfigHash(env: NodeJS.ProcessEnv): string {
+function collectRuntimeFingerprintEntries(rootDir: string, directory: string, entries: string[]): void {
+  for (const dirent of fs.readdirSync(directory, { withFileTypes: true })) {
+    const absolutePath = path.join(directory, dirent.name);
+    if (dirent.isDirectory()) {
+      collectRuntimeFingerprintEntries(rootDir, absolutePath, entries);
+      continue;
+    }
+    if (!dirent.isFile() || !absolutePath.endsWith('.js')) {
+      continue;
+    }
+    const stat = fs.statSync(absolutePath);
+    entries.push(`${path.relative(rootDir, absolutePath)}:${stat.size}:${Math.floor(stat.mtimeMs)}`);
+  }
+}
+
+export function getDaemonRuntimeFingerprint(rootDir?: string): string {
+  const normalizedRoot = rootDir
+    ? path.resolve(rootDir)
+    : path.resolve(__dirname, '..');
+  if (!rootDir && cachedDaemonRuntimeFingerprint) {
+    return cachedDaemonRuntimeFingerprint;
+  }
+
+  const entries: string[] = [];
+  try {
+    collectRuntimeFingerprintEntries(normalizedRoot, normalizedRoot, entries);
+  } catch {
+    const fallbackEntry = resolveCliEntrypoint();
+    try {
+      const stat = fs.statSync(fallbackEntry);
+      entries.push(`${path.basename(fallbackEntry)}:${stat.size}:${Math.floor(stat.mtimeMs)}`);
+    } catch {
+      entries.push(`fallback:${fallbackEntry}`);
+    }
+  }
+
+  entries.sort();
+  const fingerprint = createHash('sha256').update(entries.join('\n')).digest('hex');
+  if (!rootDir) {
+    cachedDaemonRuntimeFingerprint = fingerprint;
+  }
+  return fingerprint;
+}
+
+export function buildDaemonConfigHash(
+  env: NodeJS.ProcessEnv,
+  options: { runtimeFingerprint?: string } = {},
+): string {
   return createHash('sha256')
     .update(JSON.stringify({
+      runtimeFingerprint: options.runtimeFingerprint ?? getDaemonRuntimeFingerprint(),
       chainApiBaseUrl: normalizeEnvText(env.METABOT_CHAIN_API_BASE_URL),
       fakeChainWrite: normalizeEnvText(env[TEST_FAKE_CHAIN_WRITE_ENV]),
       fakeSubsidy: normalizeEnvText(env[TEST_FAKE_SUBSIDY_ENV]),
