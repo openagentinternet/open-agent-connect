@@ -3,7 +3,11 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
+import { createConfigStore, type ConfigStore } from '../core/config/configStore';
 import { createNetworkDirectoryEvolutionService } from '../core/evolution/service';
+import { createLocalEvolutionStore } from '../core/evolution/localEvolutionStore';
+import { renderResolvedSkillContract } from '../core/skills/skillResolver';
+import type { SkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
 import { resolveMetabotPaths } from '../core/state/paths';
 import {
   createRuntimeStateStore,
@@ -37,6 +41,87 @@ function normalizeBaseUrl(value: string | undefined): string {
 
 function normalizeEnvText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+type SupportedConfigKey =
+  | 'evolution_network.enabled'
+  | 'evolution_network.autoAdoptSameSkillSameScope'
+  | 'evolution_network.autoRecordExecutions';
+
+const SUPPORTED_CONFIG_KEYS = new Set<SupportedConfigKey>([
+  'evolution_network.enabled',
+  'evolution_network.autoAdoptSameSkillSameScope',
+  'evolution_network.autoRecordExecutions',
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isSupportedConfigKey(key: string): key is SupportedConfigKey {
+  return SUPPORTED_CONFIG_KEYS.has(key as SupportedConfigKey);
+}
+
+function readConfigValue(
+  config: Awaited<ReturnType<ConfigStore['read']>>,
+  key: SupportedConfigKey,
+): boolean {
+  if (key === 'evolution_network.enabled') {
+    return config.evolution_network.enabled;
+  }
+  if (key === 'evolution_network.autoAdoptSameSkillSameScope') {
+    return config.evolution_network.autoAdoptSameSkillSameScope;
+  }
+  return config.evolution_network.autoRecordExecutions;
+}
+
+function writeConfigValue(
+  config: Awaited<ReturnType<ConfigStore['read']>>,
+  key: SupportedConfigKey,
+  value: boolean,
+): Awaited<ReturnType<ConfigStore['read']>> {
+  if (key === 'evolution_network.enabled') {
+    return {
+      ...config,
+      evolution_network: {
+        ...config.evolution_network,
+        enabled: value,
+      },
+    };
+  }
+  if (key === 'evolution_network.autoAdoptSameSkillSameScope') {
+    return {
+      ...config,
+      evolution_network: {
+        ...config.evolution_network,
+        autoAdoptSameSkillSameScope: value,
+      },
+    };
+  }
+  return {
+    ...config,
+    evolution_network: {
+      ...config.evolution_network,
+      autoRecordExecutions: value,
+    },
+  };
+}
+
+async function readArtifactFile(filePath: string): Promise<Record<string, unknown> | null> {
+  try {
+    const raw = await fs.promises.readFile(filePath, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) {
+      return null;
+    }
+    return parsed;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || error instanceof SyntaxError) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 function collectRuntimeFingerprintEntries(rootDir: string, directory: string, entries: string[]): void {
@@ -325,6 +410,59 @@ function wrapNetworkListServicesDependency(
   };
 }
 
+async function resolveActiveVariantForSkill(
+  context: CliRuntimeContext,
+  skillName: string,
+): Promise<SkillVariantArtifact | null> {
+  const homeDir = normalizeHomeDir(context.env, context.cwd);
+  const evolutionStore = createLocalEvolutionStore(homeDir);
+  const index = await evolutionStore.readIndex();
+  const activeVariantId = index.activeVariants[skillName];
+  if (!activeVariantId) {
+    return null;
+  }
+
+  const artifactPath = path.join(evolutionStore.paths.evolutionArtifactsRoot, `${activeVariantId}.json`);
+  const artifact = await readArtifactFile(artifactPath);
+  if (!artifact || artifact.skillName !== skillName) {
+    return null;
+  }
+
+  return artifact as unknown as SkillVariantArtifact;
+}
+
+async function clearActiveVariantMapping(
+  context: CliRuntimeContext,
+  skillName: string,
+): Promise<{ removed: boolean; previousVariantId: string | null }> {
+  const homeDir = normalizeHomeDir(context.env, context.cwd);
+  const paths = resolveMetabotPaths(homeDir);
+  const evolutionStore = createLocalEvolutionStore(paths);
+  const index = await evolutionStore.readIndex();
+  const previousVariantId = index.activeVariants[skillName] ?? null;
+  if (!previousVariantId) {
+    return {
+      removed: false,
+      previousVariantId: null,
+    };
+  }
+
+  const activeVariants = { ...index.activeVariants };
+  delete activeVariants[skillName];
+  const nextIndex = {
+    ...index,
+    activeVariants,
+  };
+
+  await fs.promises.mkdir(path.dirname(paths.evolutionIndexPath), { recursive: true });
+  await fs.promises.writeFile(paths.evolutionIndexPath, `${JSON.stringify(nextIndex, null, 2)}\n`, 'utf8');
+
+  return {
+    removed: true,
+    previousVariantId,
+  };
+}
+
 function createTestChainWriteSigner(baseSigner: Signer): Signer {
   let writeCount = 0;
 
@@ -453,6 +591,40 @@ function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceRep
 
 export function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies {
   return {
+    config: {
+      get: async (input) => {
+        if (!isSupportedConfigKey(input.key)) {
+          return commandFailed(
+            'unsupported_config_key',
+            `Unsupported config key: ${input.key}`,
+          );
+        }
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const configStore = createConfigStore(homeDir);
+        const config = await configStore.read();
+        return commandSuccess({
+          key: input.key,
+          value: readConfigValue(config, input.key),
+        });
+      },
+      set: async (input) => {
+        if (!isSupportedConfigKey(input.key)) {
+          return commandFailed(
+            'unsupported_config_key',
+            `Unsupported config key: ${input.key}`,
+          );
+        }
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const configStore = createConfigStore(homeDir);
+        const config = await configStore.read();
+        const nextConfig = writeConfigValue(config, input.key, input.value);
+        await configStore.set(nextConfig);
+        return commandSuccess({
+          key: input.key,
+          value: readConfigValue(nextConfig, input.key),
+        });
+      },
+    },
     buzz: {
       post: async (input) => requestJson(context, 'POST', '/api/buzz/post', input),
     },
@@ -510,6 +682,80 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         });
       },
     },
+    skills: {
+      resolve: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const configStore = createConfigStore(homeDir);
+        const config = await configStore.read();
+        const activeVariant = config.evolution_network.enabled
+          ? await resolveActiveVariantForSkill(context, input.skill)
+          : null;
+        const rendered = renderResolvedSkillContract({
+          skillName: input.skill,
+          host: input.host as SkillHost,
+          format: input.format as SkillRenderFormat,
+          evolutionNetworkEnabled: config.evolution_network.enabled,
+          activeVariant,
+        });
+        if (rendered.format === 'markdown') {
+          return commandSuccess(rendered.markdown);
+        }
+        return commandSuccess(rendered);
+      },
+    },
+    evolution: {
+      status: async () => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const configStore = createConfigStore(homeDir);
+        const config = await configStore.read();
+        const evolutionStore = createLocalEvolutionStore(homeDir);
+        const index = await evolutionStore.readIndex();
+        return commandSuccess({
+          enabled: config.evolution_network.enabled,
+          executions: index.executions.length,
+          analyses: index.analyses.length,
+          artifacts: index.artifacts.length,
+          activeVariants: index.activeVariants,
+        });
+      },
+      adopt: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const evolutionStore = createLocalEvolutionStore(homeDir);
+        const artifactPath = path.join(evolutionStore.paths.evolutionArtifactsRoot, `${input.variantId}.json`);
+        const artifact = await readArtifactFile(artifactPath);
+        if (!artifact) {
+          return commandFailed('evolution_variant_not_found', `Variant not found: ${input.variantId}`);
+        }
+        if (artifact.skillName !== input.skill) {
+          return commandFailed(
+            'evolution_variant_skill_mismatch',
+            `Variant ${input.variantId} belongs to ${String(artifact.skillName)} and cannot be adopted for ${input.skill}.`,
+          );
+        }
+
+        const updatedArtifact = {
+          ...artifact,
+          status: 'active',
+          adoption: 'active',
+          updatedAt: Date.now(),
+        };
+        await evolutionStore.writeArtifact(updatedArtifact as never);
+        await evolutionStore.setActiveVariant(input.skill, input.variantId);
+        return commandSuccess({
+          skillName: input.skill,
+          variantId: input.variantId,
+          active: true,
+        });
+      },
+      rollback: async (input) => {
+        const rollback = await clearActiveVariantMapping(context, input.skill);
+        return commandSuccess({
+          skillName: input.skill,
+          rolledBack: rollback.removed,
+          previousVariantId: rollback.previousVariantId,
+        });
+      },
+    },
   };
 }
 
@@ -522,6 +768,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     provided.network?.listServices ?? defaultNetwork.listServices,
   );
   return {
+    config: { ...defaults.config, ...provided.config },
     buzz: { ...defaults.buzz, ...provided.buzz },
     chain: { ...defaults.chain, ...provided.chain },
     daemon: { ...defaults.daemon, ...provided.daemon },
@@ -537,6 +784,8 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     file: { ...defaults.file, ...provided.file },
     trace: { ...defaults.trace, ...provided.trace },
     ui: { ...defaults.ui, ...provided.ui },
+    skills: { ...defaults.skills, ...provided.skills },
+    evolution: { ...defaults.evolution, ...provided.evolution },
   };
 }
 
