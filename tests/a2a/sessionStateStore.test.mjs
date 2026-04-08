@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -52,6 +52,7 @@ test('session state store persists sessions and task runs in a dedicated hot fil
   await store.writeTaskRun(createTaskRunRecord());
 
   const state = await store.readState();
+  assert.equal(state.version, 1);
   assert.equal(state.sessions.length, 1);
   assert.equal(state.sessions[0].sessionId, 'session-1');
   assert.equal(state.taskRuns.length, 1);
@@ -117,6 +118,19 @@ test('session state store appends transcript items and public status snapshots',
   assert.equal(state.publicStatusSnapshots.length, 1);
   assert.equal(state.publicStatusSnapshots[0].status, 'remote_executing');
   assert.equal(state.publicStatusSnapshots[0].mapped, true);
+
+  await store.appendTranscriptItems([
+    {
+      id: 'tx-1',
+      sessionId: 'session-1',
+      timestamp: 1_744_444_444_500,
+      type: 'message',
+      sender: 'caller',
+      content: 'duplicate should be ignored',
+      metadata: null,
+    },
+  ]);
+  assert.equal((await store.readState()).transcriptItems.length, 2);
 });
 
 test('session state store does not mutate runtime-state identity/services/traces storage', async () => {
@@ -171,4 +185,60 @@ test('session state store does not mutate runtime-state identity/services/traces
   assert.match(readFileSync(runtimeStore.paths.runtimeStatePath, 'utf8'), /Trace Session/);
   assert.doesNotMatch(readFileSync(runtimeStore.paths.runtimeStatePath, 'utf8'), /session-1/);
   assert.match(readFileSync(sessionStore.sessionStatePath, 'utf8'), /session-1/);
+});
+
+test('session state store serializes concurrent updates without dropping data', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-concurrency-'));
+  const store = createSessionStateStore(homeDir);
+
+  await Promise.all([
+    store.appendTranscriptItems([
+      {
+        id: 'tx-a',
+        sessionId: 'session-1',
+        timestamp: 1_744_444_444_100,
+        type: 'message',
+        sender: 'caller',
+        content: 'a',
+        metadata: null,
+      },
+    ]),
+    store.appendTranscriptItems([
+      {
+        id: 'tx-b',
+        sessionId: 'session-1',
+        timestamp: 1_744_444_444_101,
+        type: 'message',
+        sender: 'provider',
+        content: 'b',
+        metadata: null,
+      },
+    ]),
+    store.setLoopCursor('caller', 'cursor-a'),
+    store.setLoopCursor('provider', 'cursor-b'),
+  ]);
+
+  const state = await store.readState();
+  assert.deepEqual(
+    state.transcriptItems.map(item => item.id).sort(),
+    ['tx-a', 'tx-b'],
+  );
+  assert.deepEqual(state.cursors, {
+    caller: 'cursor-a',
+    provider: 'cursor-b',
+  });
+});
+
+test('session state store treats invalid json as empty state instead of bricking reads', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-corrupt-state-'));
+  const store = createSessionStateStore(homeDir);
+
+  await store.ensureLayout();
+  writeFileSync(store.sessionStatePath, '{"broken":', 'utf8');
+
+  const state = await store.readState();
+  assert.equal(state.version, 1);
+  assert.deepEqual(state.sessions, []);
+  assert.deepEqual(state.taskRuns, []);
+  assert.deepEqual(state.transcriptItems, []);
 });

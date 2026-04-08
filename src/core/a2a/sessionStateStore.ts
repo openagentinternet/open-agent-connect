@@ -7,6 +7,11 @@ import type { PublicStatus } from './publicStatus';
 import { ensureHotLayout } from '../state/runtimeStateStore';
 
 const SESSION_STATE_FILENAME = 'a2a-session-state.json';
+const SESSION_STATE_SCHEMA_VERSION = 1;
+const MAX_TRANSCRIPT_ITEMS = 2_000;
+const MAX_PUBLIC_STATUS_SNAPSHOTS = 1_000;
+const LOCKFILE_RETRY_DELAY_MS = 20;
+const LOCKFILE_MAX_ATTEMPTS = 50;
 
 export type A2ATranscriptSender = 'caller' | 'provider' | 'system';
 export type A2ALoopCursor = string | number | null;
@@ -37,6 +42,7 @@ export interface A2APublicStatusSnapshot {
 }
 
 export interface A2ASessionStoreState {
+  version: number;
   sessions: A2ASessionRecord[];
   taskRuns: A2ATaskRunRecord[];
   transcriptItems: A2ATranscriptItemRecord[];
@@ -65,6 +71,7 @@ export interface A2ASessionStateStore {
 
 function cloneEmptyState(): A2ASessionStoreState {
   return {
+    version: SESSION_STATE_SCHEMA_VERSION,
     sessions: [],
     taskRuns: [],
     transcriptItems: [],
@@ -82,11 +89,45 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
     return JSON.parse(raw) as T;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
+    if (code === 'ENOENT' || error instanceof SyntaxError) {
       return null;
     }
     throw error;
   }
+}
+
+async function writeJsonFileAtomically(filePath: string, value: unknown): Promise<void> {
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  await fs.rename(tempPath, filePath);
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function withLock<T>(lockPath: string, operation: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; attempt < LOCKFILE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const handle = await fs.open(lockPath, 'wx');
+      try {
+        return await operation();
+      } finally {
+        await handle.close();
+        await fs.rm(lockPath, { force: true });
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST') {
+        throw error;
+      }
+      await sleep(LOCKFILE_RETRY_DELAY_MS);
+    }
+  }
+
+  throw new Error(`Timed out acquiring session-state lock: ${lockPath}`);
 }
 
 function normalizeLoopCursors(raw: Partial<A2ALoopCursors> | null | undefined): A2ALoopCursors {
@@ -109,12 +150,15 @@ function normalizeState(value: A2ASessionStoreState | null): A2ASessionStoreStat
   }
 
   return {
+    version: SESSION_STATE_SCHEMA_VERSION,
     sessions: Array.isArray(value.sessions) ? value.sessions : [],
     taskRuns: Array.isArray(value.taskRuns) ? value.taskRuns : [],
-    transcriptItems: Array.isArray(value.transcriptItems) ? value.transcriptItems : [],
+    transcriptItems: Array.isArray(value.transcriptItems)
+      ? value.transcriptItems.slice(-MAX_TRANSCRIPT_ITEMS)
+      : [],
     cursors: normalizeLoopCursors(value.cursors),
     publicStatusSnapshots: Array.isArray(value.publicStatusSnapshots)
-      ? value.publicStatusSnapshots
+      ? value.publicStatusSnapshots.slice(-MAX_PUBLIC_STATUS_SNAPSHOTS)
       : [],
   };
 }
@@ -123,6 +167,26 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
   const paths =
     typeof homeDirOrPaths === 'string' ? resolveMetabotPaths(homeDirOrPaths) : homeDirOrPaths;
   const sessionStatePath = path.join(paths.hotRoot, SESSION_STATE_FILENAME);
+  const lockPath = `${sessionStatePath}.lock`;
+  let pendingWrite = Promise.resolve();
+
+  const runExclusive = async <T>(operation: () => Promise<T>): Promise<T> => {
+    const next = pendingWrite.then(
+      async () => {
+        await ensureHotLayout(paths);
+        return withLock(lockPath, operation);
+      },
+      async () => {
+        await ensureHotLayout(paths);
+        return withLock(lockPath, operation);
+      },
+    );
+    pendingWrite = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
 
   return {
     paths,
@@ -136,15 +200,22 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
       return normalizeState(await readJsonFile<A2ASessionStoreState>(sessionStatePath));
     },
     async writeState(nextState) {
-      await ensureHotLayout(paths);
-      const normalized = normalizeState(nextState);
-      await fs.writeFile(sessionStatePath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
-      return normalized;
+      return runExclusive(async () => {
+        await ensureHotLayout(paths);
+        const normalized = normalizeState(nextState);
+        await writeJsonFileAtomically(sessionStatePath, normalized);
+        return normalized;
+      });
     },
     async updateState(updater) {
-      const current = await this.readState();
-      const nextState = await updater(current);
-      return this.writeState(nextState);
+      return runExclusive(async () => {
+        await ensureHotLayout(paths);
+        const current = normalizeState(await readJsonFile<A2ASessionStoreState>(sessionStatePath));
+        const nextState = await updater(current);
+        const normalized = normalizeState(nextState);
+        await writeJsonFileAtomically(sessionStatePath, normalized);
+        return normalized;
+      });
     },
     async writeSession(record) {
       await this.updateState(state => ({
@@ -166,7 +237,10 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
       }
       await this.updateState(state => ({
         ...state,
-        transcriptItems: [...state.transcriptItems, ...items],
+        transcriptItems: [
+          ...state.transcriptItems,
+          ...items.filter(item => !state.transcriptItems.some(existing => existing.id === item.id)),
+        ].slice(-MAX_TRANSCRIPT_ITEMS),
       }));
       return items;
     },
@@ -174,9 +248,26 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
       if (!items.length) {
         return items;
       }
+      const snapshotKey = (snapshot: A2APublicStatusSnapshot): string =>
+        [
+          snapshot.sessionId,
+          snapshot.taskRunId || '',
+          snapshot.status || '',
+          snapshot.rawEvent || '',
+          String(snapshot.mapped),
+          String(snapshot.resolvedAt),
+        ].join(':');
       await this.updateState(state => ({
         ...state,
-        publicStatusSnapshots: [...state.publicStatusSnapshots, ...items],
+        publicStatusSnapshots: [
+          ...state.publicStatusSnapshots,
+          ...items.filter(snapshot => {
+            const incomingKey = snapshotKey(snapshot);
+            return !state.publicStatusSnapshots.some(
+              existing => snapshotKey(existing) === incomingKey,
+            );
+          }),
+        ].slice(-MAX_PUBLIC_STATUS_SNAPSHOTS),
       }));
       return items;
     },
