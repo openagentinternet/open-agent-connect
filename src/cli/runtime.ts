@@ -125,6 +125,21 @@ async function requestJson<T>(
   return response.json() as Promise<MetabotCommandResult<T>>;
 }
 
+async function requestText(
+  context: CliRuntimeContext,
+  method: 'GET',
+  routePath: string,
+): Promise<string> {
+  const baseUrl = await ensureDaemonBaseUrl(context);
+  const response = await fetch(`${baseUrl}${routePath}`, {
+    method,
+  });
+  if (!response.ok) {
+    throw new Error(`Request failed with HTTP ${response.status}`);
+  }
+  return response.text();
+}
+
 function createTestChainWriteSigner(baseSigner: Signer): Signer {
   let writeCount = 0;
 
@@ -216,6 +231,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     },
     trace: {
       get: async (input) => requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}`),
+      watch: async (input) => requestText(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}/watch`),
     },
     ui: {
       open: async (input) => {

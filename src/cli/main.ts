@@ -82,7 +82,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
     );
   }
 
-  writeJsonLine(context, result);
+  if (!(result as { __rawStdoutHandled?: boolean }).__rawStdoutHandled) {
+    writeJsonLine(context, result);
+  }
   return resolveExitCode(result);
 }
 

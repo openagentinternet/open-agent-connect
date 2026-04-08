@@ -30,6 +30,7 @@ import { createA2ASessionEngine } from '../core/a2a/sessionEngine';
 import { resolvePublicStatus } from '../core/a2a/publicStatus';
 import { createServiceRunnerRegistry } from '../core/a2a/provider/serviceRunnerRegistry';
 import type { A2ASessionRecord, A2ATaskRunRecord } from '../core/a2a/sessionTypes';
+import { buildTraceWatchEvents, serializeTraceWatchEvents } from '../core/a2a/watch/traceWatch';
 import {
   createLocalIdentitySyncStep,
   createLocalMetabotStep,
@@ -1215,6 +1216,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('trace_not_found', `Trace not found: ${traceId}`);
         }
         return commandSuccess(trace);
+      },
+      watchTrace: async ({ traceId }) => {
+        const sessionState = await sessionStateStore.readState();
+        const events = buildTraceWatchEvents({
+          traceId,
+          sessions: sessionState.sessions,
+          snapshots: sessionState.publicStatusSnapshots,
+        });
+        return serializeTraceWatchEvents(events);
       },
     },
   };

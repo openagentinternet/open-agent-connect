@@ -158,6 +158,19 @@ async function startServer() {
           transcriptPath: '/tmp/trace-weather-123.md',
         });
       },
+      watchTrace: async (input) => [
+        JSON.stringify({
+          traceId: input.traceId,
+          status: 'requesting_remote',
+          terminal: false,
+        }),
+        JSON.stringify({
+          traceId: input.traceId,
+          status: 'completed',
+          terminal: true,
+        }),
+        '',
+      ].join('\n'),
     },
     ui: {
       renderPage: async (page) => {
@@ -569,6 +582,31 @@ test('GET /api/trace/:traceId forwards the route parameter to trace.getTrace', a
       transcriptPath: '/tmp/trace-weather-123.md',
     },
   });
+});
+
+test('GET /api/trace/:traceId/watch returns newline-delimited public status events', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/trace/trace-weather-123/watch`);
+  const body = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'application/x-ndjson; charset=utf-8');
+
+  const events = body.trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(events, [
+    {
+      traceId: 'trace-weather-123',
+      status: 'requesting_remote',
+      terminal: false,
+    },
+    {
+      traceId: 'trace-weather-123',
+      status: 'completed',
+      terminal: true,
+    },
+  ]);
 });
 
 test('GET /ui/hub serves the local HTML hub page', async (t) => {

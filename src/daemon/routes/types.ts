@@ -38,6 +38,7 @@ export interface MetabotDaemonHttpHandlers {
   };
   trace?: {
     getTrace?: (input: { traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    watchTrace?: (input: { traceId: string }) => Awaitable<string>;
   };
   ui?: {
     renderPage?: (page: MetabotUiPageName) => Awaitable<string>;
@@ -52,6 +53,7 @@ export interface RouteContext {
   readJsonBody: () => Promise<Record<string, unknown>>;
   sendJson: (status: number, payload: unknown) => void;
   sendHtml: (status: number, html: string) => void;
+  sendText: (status: number, body: string, contentType?: string) => void;
   sendMethodNotAllowed: (allowed: string[]) => void;
 }
 

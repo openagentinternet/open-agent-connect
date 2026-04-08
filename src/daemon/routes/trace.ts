@@ -15,7 +15,21 @@ export const handleTraceRoutes: RouteHandler = async (context) => {
     return true;
   }
 
-  const traceId = decodeURIComponent(url.pathname.slice(TRACE_ROUTE_PREFIX.length)).trim();
+  const routeSuffix = decodeURIComponent(url.pathname.slice(TRACE_ROUTE_PREFIX.length)).trim();
+  if (routeSuffix.endsWith('/watch')) {
+    const traceId = routeSuffix.slice(0, -'/watch'.length).trim();
+    const result = handlers.trace?.watchTrace
+      ? await handlers.trace.watchTrace({ traceId })
+      : '';
+    if (!result) {
+      context.sendJson(404, commandFailed('trace_not_found', `Trace watch not found: ${traceId}`));
+      return true;
+    }
+    context.sendText(200, result, 'application/x-ndjson; charset=utf-8');
+    return true;
+  }
+
+  const traceId = routeSuffix;
   const result = handlers.trace?.getTrace
     ? await handlers.trace.getTrace({ traceId })
     : commandFailed('not_implemented', 'Trace handler is not configured.');
