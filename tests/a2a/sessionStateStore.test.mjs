@@ -299,6 +299,23 @@ test('session state store recovers from a stale lock owned by a dead process', a
   assert.equal(state.sessions[0].sessionId, 'session-1');
 });
 
+test('session state store recovers from a stale lock without pid metadata', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-stale-lock-no-pid-'));
+  const store = createSessionStateStore(homeDir);
+
+  await store.ensureLayout();
+  const lockPath = `${store.sessionStatePath}.lock`;
+  writeFileSync(lockPath, '{}', 'utf8');
+  const staleTimestamp = (Date.now() - (2 * 60 * 1000)) / 1000;
+  utimesSync(lockPath, staleTimestamp, staleTimestamp);
+
+  await store.writeTaskRun(createTaskRunRecord());
+
+  const state = await store.readState();
+  assert.equal(state.taskRuns.length, 1);
+  assert.equal(state.taskRuns[0].runId, 'run-1');
+});
+
 test('session state store caps transcript and public status history in hot storage', async () => {
   const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-caps-'));
   const store = createSessionStateStore(homeDir);

@@ -12,7 +12,8 @@ const MAX_TRANSCRIPT_ITEMS = 2_000;
 const MAX_PUBLIC_STATUS_SNAPSHOTS = 1_000;
 const LOCKFILE_BASE_DELAY_MS = 25;
 const LOCKFILE_MAX_ATTEMPTS = 200;
-const LOCKFILE_STALE_MS = 5 * 60 * 1000;
+const LOCKFILE_STALE_WITH_PID_MS = 5 * 60 * 1000;
+const LOCKFILE_STALE_WITHOUT_PID_MS = 30_000;
 
 export type A2ATranscriptSender = 'caller' | 'provider' | 'system';
 export type A2ALoopCursor = string | number | null;
@@ -202,8 +203,9 @@ async function withLock<T>(lockPath: string, operation: () => Promise<T>): Promi
           await fs.rm(lockPath, { force: true });
           continue;
         }
-        const stale = Date.now() - acquiredAt > LOCKFILE_STALE_MS;
-        if (stale && !lockPid) {
+        const staleThreshold = lockPid ? LOCKFILE_STALE_WITH_PID_MS : LOCKFILE_STALE_WITHOUT_PID_MS;
+        const stale = Date.now() - acquiredAt > staleThreshold;
+        if (stale) {
           await fs.rm(lockPath, { force: true });
           continue;
         }
