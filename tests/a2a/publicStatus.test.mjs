@@ -13,3 +13,12 @@ test('public status mapper covers the required progress and exception labels', (
   assert.equal(mapPublicStatus({ event: 'provider_failed' }), 'remote_failed');
   assert.equal(mapPublicStatus({ event: 'clarification_needed' }), 'manual_action_required');
 });
+
+test('provider completion maps to completed', () => {
+  assert.equal(mapPublicStatus({ event: 'provider_completed' }), 'completed');
+});
+
+test('unknown or missing events map to explicit exception state', () => {
+  assert.equal(mapPublicStatus({ event: 'provider_cancelled' }), 'local_runtime_error');
+  assert.equal(mapPublicStatus({}), 'local_runtime_error');
+});
