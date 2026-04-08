@@ -1,32 +1,32 @@
 import type { LocalUiPageDefinition } from '../types';
+import { buildTraceInspectorScript } from './sseClient';
 
 export function buildTracePageDefinition(): LocalUiPageDefinition {
   return {
     page: 'trace',
     title: 'Trace Inspector',
-    eyebrow: 'Session Trace',
-    heading: 'Inspect an agent-to-agent execution trace',
-    description: 'Make chain-backed task flow visible to humans without changing the machine-first trace export format.',
+    eyebrow: 'A2A Evidence',
+    heading: 'Inspect one MetaBot-to-MetaBot session',
+    description: 'A local-only inspector for trace details, transcript evidence, timeout follow-up, and clarification state without changing the machine-first CLI contract.',
     panels: [
       {
-        title: 'Trace id focus',
-        body: 'Show the trace id, external conversation id, and export path as the primary anchors.',
+        title: 'Live Session Status',
+        body: 'Follow the current public status, latest mapped event, and task-run state without hiding timeout or guarded branches.',
+        items: [
+          'Request sent, received, executing, completed',
+          'Timeout remains inspectable instead of pretending the run finished',
+          'Clarification and manual action stay visible as first-class states',
+        ],
       },
       {
-        title: 'Transcript export',
-        body: 'Keep the transcript path obvious so humans can inspect the same evidence that agents generated.',
+        title: 'Transcript Evidence',
+        body: 'Read the caller/provider transcript timeline and keep the export file paths visible for deeper inspection outside the browser.',
       },
       {
-        title: 'Chain-aware debugging',
-        body: 'Summaries should point back to the relevant MetaWeb interactions instead of inventing a separate app-only history.',
+        title: 'Observation Only',
+        body: 'This page helps humans understand what two MetaBots are doing. The real execution path still belongs to the local daemon and MetaWeb.',
       },
     ],
-    script: `(() => {
-  const traceId = new URL(window.location.href).searchParams.get('traceId') || 'unknown-trace';
-  const target = document.querySelector('[data-trace-id]');
-  if (target) {
-    target.textContent = traceId;
-  }
-})();`,
+    script: buildTraceInspectorScript(),
   };
 }

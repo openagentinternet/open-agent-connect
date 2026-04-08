@@ -10,7 +10,8 @@ const {
   commandFailed,
 } = require('../../dist/core/contracts/commandResult.js');
 
-async function startServer() {
+async function startServer(options = {}) {
+  const useBuiltInUiPages = options.useBuiltInUiPages === true;
   const calls = {
     identity: [],
     chain: [],
@@ -172,14 +173,16 @@ async function startServer() {
         '',
       ].join('\n'),
     },
-    ui: {
-      renderPage: async (page) => {
-        if (page !== 'hub') {
-          throw new Error(`Unexpected page ${page}`);
-        }
-        return `<!doctype html><html><head><title>MetaBot Hub</title></head><body><h1>MetaBot Hub</h1></body></html>`;
-      },
-    },
+    ui: useBuiltInUiPages
+      ? undefined
+      : {
+          renderPage: async (page) => {
+            if (page !== 'hub') {
+              throw new Error(`Unexpected page ${page}`);
+            }
+            return `<!doctype html><html><head><title>MetaBot Hub</title></head><body><h1>MetaBot Hub</h1></body></html>`;
+          },
+        },
   });
 
   await new Promise((resolve, reject) => {
@@ -609,6 +612,21 @@ test('GET /api/trace/:traceId/watch returns newline-delimited public status even
   ]);
 });
 
+test('GET /api/trace/:traceId/events returns server-sent trace status events for the local inspector', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/trace/trace-weather-123/events`);
+  const body = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'text/event-stream; charset=utf-8');
+  assert.match(body, /event: trace-status/);
+  assert.match(body, /"traceId":"trace-weather-123"/);
+  assert.match(body, /"status":"requesting_remote"/);
+  assert.match(body, /"status":"completed"/);
+});
+
 test('GET /ui/hub serves the local HTML hub page', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
@@ -619,4 +637,22 @@ test('GET /ui/hub serves the local HTML hub page', async (t) => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /MetaBot Hub/);
+});
+
+test('GET /ui/trace serves a built-in trace inspector wired to the trace API, SSE, and first-class timeout/clarification/manual-action states', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/trace?traceId=trace-weather-123`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /Trace Inspector/);
+  assert.match(html, /new EventSource\(/);
+  assert.match(html, /\/api\/trace\//);
+  assert.match(html, /\/events/);
+  assert.match(html, /Timeout/);
+  assert.match(html, /Clarification/);
+  assert.match(html, /Manual Action/);
 });

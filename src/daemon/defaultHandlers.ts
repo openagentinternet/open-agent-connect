@@ -415,6 +415,87 @@ async function persistSessionMutation(
   return publicStatus;
 }
 
+async function appendA2ATranscriptItems(
+  sessionStateStore: ReturnType<typeof createSessionStateStore>,
+  items: Array<{
+    id: string;
+    sessionId: string;
+    taskRunId?: string | null;
+    timestamp: number;
+    type: string;
+    sender: 'caller' | 'provider' | 'system';
+    content: string;
+    metadata?: Record<string, unknown> | null;
+  }>,
+): Promise<void> {
+  const normalizedItems = items
+    .map((item) => ({
+      ...item,
+      id: normalizeText(item.id),
+      sessionId: normalizeText(item.sessionId),
+      taskRunId: normalizeText(item.taskRunId) || null,
+      type: normalizeText(item.type) || 'message',
+      content: normalizeText(item.content),
+    }))
+    .filter((item) => item.id && item.sessionId && item.content);
+
+  if (!normalizedItems.length) {
+    return;
+  }
+
+  await sessionStateStore.appendTranscriptItems(normalizedItems);
+}
+
+async function readOptionalUtf8(filePath: string | null | undefined): Promise<string | null> {
+  const normalizedPath = normalizeText(filePath);
+  if (!normalizedPath) {
+    return null;
+  }
+  try {
+    return await fs.readFile(normalizedPath, 'utf8');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function buildTraceInspectorPayload(input: {
+  traceId: string;
+  trace: ReturnType<typeof buildSessionTrace>;
+  sessionStateStore: ReturnType<typeof createSessionStateStore>;
+}) {
+  const sessionState = await input.sessionStateStore.readState();
+  const sessions = sessionState.sessions
+    .filter((entry) => entry.traceId === input.traceId)
+    .sort((left, right) => left.createdAt - right.createdAt);
+  const sessionIds = new Set(sessions.map((entry) => entry.sessionId));
+  const taskRuns = sessionState.taskRuns
+    .filter((entry) => sessionIds.has(entry.sessionId))
+    .sort((left, right) => left.createdAt - right.createdAt);
+  const transcriptItems = sessionState.transcriptItems
+    .filter((entry) => sessionIds.has(entry.sessionId))
+    .sort((left, right) => left.timestamp - right.timestamp);
+  const publicStatusSnapshots = sessionState.publicStatusSnapshots
+    .filter((entry) => sessionIds.has(entry.sessionId))
+    .sort((left, right) => left.resolvedAt - right.resolvedAt);
+
+  return {
+    ...input.trace,
+    inspector: {
+      session: sessions.at(-1) ?? null,
+      sessions,
+      taskRuns,
+      transcriptItems,
+      publicStatusSnapshots,
+      transcriptMarkdown: await readOptionalUtf8(input.trace.artifacts.transcriptMarkdownPath),
+      traceMarkdown: await readOptionalUtf8(input.trace.artifacts.traceMarkdownPath),
+    },
+  };
+}
+
 async function fetchPeerChatPublicKey(globalMetaId: string): Promise<string | null> {
   const normalized = normalizeText(globalMetaId);
   if (!normalized) return null;
@@ -810,6 +891,36 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const publicStatus = await persistSessionMutation(sessionStateStore, started);
+        await appendA2ATranscriptItems(sessionStateStore, [
+          {
+            id: `${plan.traceId}-caller-user-task`,
+            sessionId: started.session.sessionId,
+            taskRunId: started.taskRun.runId,
+            timestamp: started.session.createdAt,
+            type: 'user_task',
+            sender: 'caller',
+            content: request.userTask,
+            metadata: {
+              taskContext: request.taskContext || null,
+              servicePinId: plan.service.servicePinId,
+              providerGlobalMetaId: plan.service.providerGlobalMetaId,
+            },
+          },
+          {
+            id: `${plan.traceId}-caller-request-sent`,
+            sessionId: started.session.sessionId,
+            taskRunId: started.taskRun.runId,
+            timestamp: started.session.updatedAt,
+            type: 'status_note',
+            sender: 'system',
+            content: `Local MetaBot delegated this task to remote MetaBot ${normalizeText(service.displayName) || normalizeText(service.serviceName) || plan.service.providerGlobalMetaId}.`,
+            metadata: {
+              publicStatus: publicStatus.status,
+              event: started.event,
+              externalConversationId: started.linkage.externalConversationId,
+            },
+          },
+        ]);
 
         const serviceDisplayName = normalizeText(service.displayName) || normalizeText(service.serviceName);
         const trace = buildSessionTrace({
@@ -833,6 +944,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
             paymentTxid: `payment-${plan.traceId}`,
             paymentCurrency: plan.payment.currency,
             paymentAmount: plan.payment.amount,
+          },
+          a2a: {
+            sessionId: started.session.sessionId,
+            taskRunId: started.taskRun.runId,
+            role: started.session.role,
+            publicStatus: publicStatus.status,
+            latestEvent: started.event,
+            taskRunState: started.taskRun.state,
+            callerGlobalMetaId: started.session.callerGlobalMetaId,
+            providerGlobalMetaId: started.session.providerGlobalMetaId,
+            providerName: serviceDisplayName,
+            servicePinId: started.session.servicePinId,
           },
         });
 
@@ -938,7 +1061,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
           userTask: execution.request.userTask,
           taskContext: execution.request.taskContext,
         });
-        await persistSessionMutation(sessionStateStore, received);
+        const receivedStatus = await persistSessionMutation(sessionStateStore, received);
+        await appendA2ATranscriptItems(sessionStateStore, [
+          {
+            id: `${traceId}-provider-received-task`,
+            sessionId: received.session.sessionId,
+            taskRunId: received.taskRun.runId,
+            timestamp: received.session.createdAt,
+            type: 'user_task',
+            sender: 'caller',
+            content: execution.request.userTask,
+            metadata: {
+              taskContext: execution.request.taskContext || null,
+              callerGlobalMetaId: execution.buyer.globalMetaId || null,
+              callerName: execution.buyer.name || execution.buyer.host || null,
+              publicStatus: receivedStatus.status,
+            },
+          },
+        ]);
 
         const runnerRegistry = createServiceRunnerRegistry([
           {
@@ -972,8 +1112,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           taskRun: received.taskRun,
           result: runnerResult,
         });
-        await persistSessionMutation(sessionStateStore, applied);
-
+        const appliedStatus = await persistSessionMutation(sessionStateStore, applied);
         const responseText = runnerResult.state === 'completed'
           ? normalizeText(runnerResult.responseText)
           : '';
@@ -982,6 +1121,26 @@ export function createDefaultMetabotDaemonHandlers(input: {
           : runnerResult.state === 'needs_clarification'
             ? normalizeText(runnerResult.question)
             : normalizeText(runnerResult.message);
+        await appendA2ATranscriptItems(sessionStateStore, [
+          {
+            id: `${traceId}-provider-runner-result`,
+            sessionId: received.session.sessionId,
+            taskRunId: applied.taskRun.runId,
+            timestamp: applied.session.updatedAt,
+            type: runnerResult.state === 'needs_clarification'
+              ? 'clarification_request'
+              : runnerResult.state === 'failed'
+                ? 'failure'
+                : 'assistant',
+            sender: runnerResult.state === 'failed' ? 'system' : 'provider',
+            content: providerMessage,
+            metadata: {
+              publicStatus: appliedStatus.status,
+              event: applied.event,
+              runnerState: runnerResult.state,
+            },
+          },
+        ]);
 
         const trace = buildSessionTrace({
           traceId,
@@ -1004,6 +1163,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
             paymentTxid: null,
             paymentCurrency: service.currency,
             paymentAmount: service.price,
+          },
+          a2a: {
+            sessionId: received.session.sessionId,
+            taskRunId: applied.taskRun.runId,
+            role: received.session.role,
+            publicStatus: appliedStatus.status,
+            latestEvent: applied.event,
+            taskRunState: applied.taskRun.state,
+            callerGlobalMetaId: received.session.callerGlobalMetaId,
+            callerName: execution.buyer.name || execution.buyer.host || null,
+            providerGlobalMetaId: received.session.providerGlobalMetaId,
+            servicePinId: received.session.servicePinId,
           },
         });
 
@@ -1215,7 +1386,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if (!trace) {
           return commandFailed('trace_not_found', `Trace not found: ${traceId}`);
         }
-        return commandSuccess(trace);
+        return commandSuccess(
+          await buildTraceInspectorPayload({
+            traceId,
+            trace,
+            sessionStateStore,
+          })
+        );
       },
       watchTrace: async ({ traceId }) => {
         const sessionState = await sessionStateStore.readState();
