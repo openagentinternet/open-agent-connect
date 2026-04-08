@@ -33,6 +33,7 @@ export interface RuntimeDaemonRecord {
   port: number;
   baseUrl: string;
   startedAt: number;
+  configHash?: string | null;
 }
 
 export interface RuntimeState {

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
@@ -13,6 +14,7 @@ import type { Signer } from '../core/signing/signer';
 import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers } from '../daemon/defaultHandlers';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
+import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import type { CliDependencies, CliRuntimeContext } from './types';
 
 const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
@@ -21,10 +23,29 @@ const DEFAULT_DAEMON_START_TIMEOUT_MS = 5_000;
 const DAEMON_START_POLL_INTERVAL_MS = 100;
 const TEST_FAKE_CHAIN_WRITE_ENV = 'METABOT_TEST_FAKE_CHAIN_WRITE';
 const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
+const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
+const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
+const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 
 function normalizeBaseUrl(value: string | undefined): string {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   return trimmed || DEFAULT_DAEMON_BASE_URL;
+}
+
+function normalizeEnvText(value: string | null | undefined): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function buildDaemonConfigHash(env: NodeJS.ProcessEnv): string {
+  return createHash('sha256')
+    .update(JSON.stringify({
+      chainApiBaseUrl: normalizeEnvText(env.METABOT_CHAIN_API_BASE_URL),
+      fakeChainWrite: normalizeEnvText(env[TEST_FAKE_CHAIN_WRITE_ENV]),
+      fakeSubsidy: normalizeEnvText(env[TEST_FAKE_SUBSIDY_ENV]),
+      fakeProviderChatPublicKey: normalizeEnvText(env[TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV]),
+      fakeMetaWebReply: normalizeEnvText(env[TEST_FAKE_METAWEB_REPLY_ENV]),
+    }))
+    .digest('hex');
 }
 
 function normalizeHomeDir(env: NodeJS.ProcessEnv, cwd: string): string {
@@ -57,6 +78,42 @@ async function resolveDaemonRecord(context: CliRuntimeContext): Promise<RuntimeD
   return store.readDaemon();
 }
 
+function daemonConfigMatchesContext(
+  daemonRecord: RuntimeDaemonRecord | null,
+  context: CliRuntimeContext,
+): boolean {
+  if (!daemonRecord) {
+    return false;
+  }
+  return normalizeEnvText(daemonRecord.configHash) === buildDaemonConfigHash(context.env);
+}
+
+async function stopRunningDaemon(daemonRecord: RuntimeDaemonRecord): Promise<void> {
+  if (!Number.isFinite(daemonRecord.pid) || daemonRecord.pid <= 0) {
+    return;
+  }
+
+  try {
+    process.kill(daemonRecord.pid, 'SIGTERM');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH') {
+      return;
+    }
+    throw error;
+  }
+
+  const startedAt = Date.now();
+  while ((Date.now() - startedAt) < DAEMON_CONFIG_RESTART_TIMEOUT_MS) {
+    if (!await isDaemonReachable(daemonRecord.baseUrl)) {
+      return;
+    }
+    await sleep(DAEMON_START_POLL_INTERVAL_MS);
+  }
+
+  throw new Error('Timed out while restarting the local MetaBot daemon with updated configuration.');
+}
+
 async function ensureDaemonBaseUrl(context: CliRuntimeContext): Promise<string> {
   const explicitBaseUrl = typeof context.env.METABOT_DAEMON_BASE_URL === 'string'
     ? context.env.METABOT_DAEMON_BASE_URL.trim()
@@ -67,7 +124,10 @@ async function ensureDaemonBaseUrl(context: CliRuntimeContext): Promise<string> 
 
   const daemonRecord = await resolveDaemonRecord(context);
   if (daemonRecord?.baseUrl && await isDaemonReachable(daemonRecord.baseUrl)) {
-    return daemonRecord.baseUrl;
+    if (daemonConfigMatchesContext(daemonRecord, context)) {
+      return daemonRecord.baseUrl;
+    }
+    await stopRunningDaemon(daemonRecord);
   }
 
   return startDetachedDaemon(context);
@@ -76,9 +136,13 @@ async function ensureDaemonBaseUrl(context: CliRuntimeContext): Promise<string> 
 async function startDetachedDaemon(context: CliRuntimeContext): Promise<string> {
   const homeDir = normalizeHomeDir(context.env, context.cwd);
   const store = createRuntimeStateStore(homeDir);
+  const expectedConfigHash = buildDaemonConfigHash(context.env);
   const staleRecord = await store.readDaemon();
   if (staleRecord?.baseUrl && await isDaemonReachable(staleRecord.baseUrl)) {
-    return staleRecord.baseUrl;
+    if (daemonConfigMatchesContext(staleRecord, context)) {
+      return staleRecord.baseUrl;
+    }
+    await stopRunningDaemon(staleRecord);
   }
   await store.clearDaemon();
 
@@ -101,7 +165,11 @@ async function startDetachedDaemon(context: CliRuntimeContext): Promise<string> 
   const startedAt = Date.now();
   while ((Date.now() - startedAt) < DEFAULT_DAEMON_START_TIMEOUT_MS) {
     const daemonRecord = await store.readDaemon();
-    if (daemonRecord?.baseUrl && await isDaemonReachable(daemonRecord.baseUrl)) {
+    if (
+      daemonRecord?.baseUrl
+      && normalizeEnvText(daemonRecord.configHash) === expectedConfigHash
+      && await isDaemonReachable(daemonRecord.baseUrl)
+    ) {
       return daemonRecord.baseUrl;
     }
     await sleep(DAEMON_START_POLL_INTERVAL_MS);
@@ -181,6 +249,67 @@ function createTestSubsidyRequester(): (
       rewarded: true,
     },
   });
+}
+
+function createTestProviderChatPublicKeyFetcher(
+  env: NodeJS.ProcessEnv,
+): ((globalMetaId: string) => Promise<string | null>) | undefined {
+  const publicKey = typeof env[TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV] === 'string'
+    ? env[TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV]!.trim()
+    : '';
+  if (!publicKey) {
+    return undefined;
+  }
+
+  return async () => publicKey;
+}
+
+function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceReplyWaiter | undefined {
+  const raw = typeof env[TEST_FAKE_METAWEB_REPLY_ENV] === 'string'
+    ? env[TEST_FAKE_METAWEB_REPLY_ENV]!.trim()
+    : '';
+  if (!raw) {
+    return undefined;
+  }
+
+  let parsed: {
+    responseText?: unknown;
+    deliveryPinId?: unknown;
+    observedAt?: unknown;
+    delayMs?: unknown;
+  };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch (error) {
+    throw new Error(
+      `Invalid ${TEST_FAKE_METAWEB_REPLY_ENV}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  return {
+    awaitServiceReply: async (input) => {
+      const delayMs = Number.isFinite(parsed.delayMs)
+        ? Math.max(0, Math.floor(Number(parsed.delayMs)))
+        : 0;
+      if (delayMs > 0) {
+        await sleep(Math.min(delayMs, input.timeoutMs));
+      }
+
+      return {
+        state: 'completed',
+        responseText: typeof parsed.responseText === 'string'
+          ? parsed.responseText
+          : 'Test fake remote reply.',
+        deliveryPinId: typeof parsed.deliveryPinId === 'string' ? parsed.deliveryPinId : null,
+        observedAt: Number.isFinite(parsed.observedAt)
+          ? Number(parsed.observedAt)
+          : Date.now(),
+        rawMessage: {
+          source: 'test-fake-metaweb-reply',
+        },
+      };
+    },
+  };
 }
 
 export function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies {
@@ -275,6 +404,8 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const requestMvcGasSubsidy = context.env[TEST_FAKE_SUBSIDY_ENV] === '1'
     ? createTestSubsidyRequester()
     : undefined;
+  const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
+  const callerReplyWaiter = createTestMetaWebReplyWaiter(context.env);
 
   const daemon = createMetabotDaemon({
     homeDirOrPaths: paths,
@@ -285,6 +416,8 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       signer,
       chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
       identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
+      fetchPeerChatPublicKey,
+      callerReplyWaiter,
       requestMvcGasSubsidy,
     }),
   });
@@ -301,6 +434,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     port: started.port,
     baseUrl: started.baseUrl,
     startedAt: Date.now(),
+    configHash: buildDaemonConfigHash(context.env),
   });
 
   let shuttingDown = false;

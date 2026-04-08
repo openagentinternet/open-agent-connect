@@ -23,7 +23,8 @@
     "@metalet/utxo-wallet-service": "^0.3.33-beta.5",
     "@scure/bip39": "^1.6.0",
     "crypto-js": "^4.2.0",
-    "meta-contract": "^0.4.16"
+    "meta-contract": "^0.4.16",
+    "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
     "@types/crypto-js": "^4.2.2",

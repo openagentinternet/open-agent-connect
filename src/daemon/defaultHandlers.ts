@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
   commandFailed,
@@ -11,11 +12,13 @@ import {
   createRuntimeStateStore,
   type RuntimeDaemonRecord,
   type RuntimeIdentityRecord,
+  type RuntimeState,
 } from '../core/state/runtimeStateStore';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 import { buildPublishedService } from '../core/services/publishService';
 import { planRemoteCall } from '../core/delegation/remoteCall';
 import { buildSessionTrace } from '../core/chat/sessionTrace';
+import type { SessionTraceRecord } from '../core/chat/sessionTrace';
 import { exportSessionArtifacts } from '../core/chat/transcriptExport';
 import { sendPrivateChat } from '../core/chat/privateChat';
 import { createLocalMnemonicSigner } from '../core/signing/localMnemonicSigner';
@@ -26,11 +29,13 @@ import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
 import { readChainDirectoryWithFallback } from '../core/discovery/chainDirectoryReader';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
-import { createA2ASessionEngine } from '../core/a2a/sessionEngine';
+import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/sessionEngine';
 import { resolvePublicStatus } from '../core/a2a/publicStatus';
 import { createServiceRunnerRegistry } from '../core/a2a/provider/serviceRunnerRegistry';
+import type { ProviderServiceRunnerResult } from '../core/a2a/provider/serviceRunnerContracts';
 import type { A2ASessionRecord, A2ATaskRunRecord } from '../core/a2a/sessionTypes';
 import { buildTraceWatchEvents, serializeTraceWatchEvents } from '../core/a2a/watch/traceWatch';
+import { isTerminalTraceWatchStatus } from '../core/a2a/watch/watchEvents';
 import {
   createLocalIdentitySyncStep,
   createLocalMetabotStep,
@@ -38,8 +43,16 @@ import {
   isIdentityBootstrapReady,
 } from '../core/bootstrap/localIdentityBootstrap';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
+import { buildDelegationOrderPayload } from '../core/orders/delegationOrderMessage';
+import {
+  createSocketIoMetaWebReplyWaiter,
+  type AwaitMetaWebServiceReplyResult,
+  type MetaWebServiceReplyWaiter,
+} from '../core/a2a/metawebReplyWaiter';
 
 const DIRECTORY_SEEDS_FILE = 'directory-seeds.json';
+const DEFAULT_CALLER_FOREGROUND_WAIT_MS = 15_000;
+const DEFAULT_TRACE_WATCH_WAIT_MS = 20_000;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -525,6 +538,248 @@ async function fetchPeerChatPublicKey(globalMetaId: string): Promise<string | nu
   return null;
 }
 
+function buildSyntheticPaymentTxid(input: {
+  traceId: string;
+  servicePinId: string;
+  providerGlobalMetaId: string;
+  userTask: string;
+}): string {
+  return createHash('sha256')
+    .update([
+      normalizeText(input.traceId),
+      normalizeText(input.servicePinId),
+      normalizeText(input.providerGlobalMetaId),
+      normalizeText(input.userTask),
+    ].join('\n'))
+    .digest('hex');
+}
+
+async function listRuntimeDirectoryServices(input: {
+  state: RuntimeState;
+  hotRoot: string;
+  chainApiBaseUrl?: string;
+  onlineOnly: boolean;
+}): Promise<{
+  services: Array<Record<string, unknown>>;
+  discoverySource: 'chain' | 'seeded';
+  fallbackUsed: boolean;
+}> {
+  const localServices = input.state.services
+    .filter((service) => service.available === 1)
+    .map((service) => summarizeService(service));
+  const directory = await readChainDirectoryWithFallback({
+    chainApiBaseUrl: input.chainApiBaseUrl,
+    onlineOnly: input.onlineOnly,
+    fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(input.hotRoot),
+  });
+
+  return {
+    services: dedupeServices([
+      ...directory.services,
+      ...localServices,
+    ]),
+    discoverySource: directory.source,
+    fallbackUsed: directory.fallbackUsed,
+  };
+}
+
+async function persistTraceRecord(
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>,
+  trace: SessionTraceRecord,
+): Promise<void> {
+  await runtimeStateStore.updateState((state) => ({
+    ...state,
+    traces: [
+      trace,
+      ...state.traces.filter((entry) => entry.traceId !== trace.traceId),
+    ],
+  }));
+}
+
+async function rebuildCallerTraceArtifacts(input: {
+  baseTrace: SessionTraceRecord;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  sessionStateStore: ReturnType<typeof createSessionStateStore>;
+}): Promise<{ trace: SessionTraceRecord; artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>> }> {
+  const sessionState = await input.sessionStateStore.readState();
+  const sessions = sessionState.sessions
+    .filter((entry) => entry.traceId === input.baseTrace.traceId)
+    .sort((left, right) => left.createdAt - right.createdAt);
+  const latestSession = sessions.at(-1) ?? null;
+  const taskRuns = sessionState.taskRuns
+    .filter((entry) => latestSession && entry.sessionId === latestSession.sessionId)
+    .sort((left, right) => left.createdAt - right.createdAt);
+  const latestTaskRun = taskRuns.at(-1) ?? null;
+  const sessionIds = new Set(sessions.map((entry) => entry.sessionId));
+  const transcriptMessages = sessionState.transcriptItems
+    .filter((entry) => sessionIds.has(entry.sessionId))
+    .sort((left, right) => left.timestamp - right.timestamp)
+    .map((entry) => ({
+      id: entry.id,
+      type: entry.sender === 'caller'
+        ? 'user'
+        : entry.sender === 'provider'
+          ? 'assistant'
+          : entry.type,
+      timestamp: entry.timestamp,
+      content: entry.content,
+      metadata: entry.metadata ?? undefined,
+    }));
+  const latestSnapshot = sessionState.publicStatusSnapshots
+    .filter((entry) => latestSession && entry.sessionId === latestSession.sessionId)
+    .sort((left, right) => left.resolvedAt - right.resolvedAt)
+    .at(-1);
+
+  const nextTrace = buildSessionTrace({
+    traceId: input.baseTrace.traceId,
+    channel: input.baseTrace.channel,
+    exportRoot: input.runtimeStateStore.paths.exportRoot,
+    createdAt: input.baseTrace.createdAt,
+    session: {
+      ...input.baseTrace.session,
+      externalConversationId: input.baseTrace.session.externalConversationId,
+    },
+    order: input.baseTrace.order,
+    a2a: latestSession
+      ? {
+          sessionId: latestSession.sessionId,
+          taskRunId: latestTaskRun?.runId ?? input.baseTrace.a2a?.taskRunId ?? null,
+          role: latestSession.role,
+          publicStatus: latestSnapshot?.status ?? input.baseTrace.a2a?.publicStatus ?? null,
+          latestEvent: latestSnapshot?.rawEvent ?? input.baseTrace.a2a?.latestEvent ?? null,
+          taskRunState: latestTaskRun?.state ?? input.baseTrace.a2a?.taskRunState ?? null,
+          callerGlobalMetaId: latestSession.callerGlobalMetaId,
+          callerName: input.baseTrace.a2a?.callerName ?? null,
+          providerGlobalMetaId: latestSession.providerGlobalMetaId,
+          providerName: input.baseTrace.a2a?.providerName ?? input.baseTrace.session.peerName ?? null,
+          servicePinId: latestSession.servicePinId,
+        }
+      : input.baseTrace.a2a,
+  });
+
+  const artifacts = await exportSessionArtifacts({
+    trace: nextTrace,
+    transcript: {
+      sessionId: nextTrace.session.id,
+      title: nextTrace.session.title,
+      messages: transcriptMessages,
+    },
+  });
+  await persistTraceRecord(input.runtimeStateStore, nextTrace);
+
+  return {
+    trace: nextTrace,
+    artifacts,
+  };
+}
+
+async function applyCallerReplyResult(input: {
+  reply: AwaitMetaWebServiceReplyResult;
+  session: A2ASessionRecord;
+  taskRun: A2ATaskRunRecord;
+  sessionEngine: ReturnType<typeof createA2ASessionEngine>;
+  sessionStateStore: ReturnType<typeof createSessionStateStore>;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  trace: SessionTraceRecord;
+}): Promise<{
+  trace: SessionTraceRecord;
+  artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>>;
+  mutation: {
+    session: A2ASessionRecord;
+    taskRun: A2ATaskRunRecord;
+    event: A2ASessionEngineEvent;
+    runnerResult: ProviderServiceRunnerResult | null;
+  };
+}> {
+  await input.sessionStateStore.appendPublicStatusSnapshots([
+    {
+      sessionId: input.session.sessionId,
+      taskRunId: input.taskRun.runId,
+      status: 'remote_received',
+      mapped: true,
+      rawEvent: 'provider_received',
+      resolvedAt: input.reply.state === 'completed' && input.reply.observedAt
+        ? input.reply.observedAt
+        : Date.now(),
+    },
+  ]);
+
+  const runnerResult: ProviderServiceRunnerResult = {
+    state: 'completed',
+    responseText: input.reply.state === 'completed' ? input.reply.responseText : '',
+  };
+  const mutation = input.sessionEngine.applyProviderRunnerResult({
+    session: input.session,
+    taskRun: input.taskRun,
+    result: runnerResult,
+  });
+  const publicStatus = await persistSessionMutation(input.sessionStateStore, mutation);
+  await appendA2ATranscriptItems(input.sessionStateStore, [
+    {
+      id: `${input.trace.traceId}-provider-delivery`,
+      sessionId: input.session.sessionId,
+      taskRunId: mutation.taskRun.runId,
+      timestamp: mutation.session.updatedAt,
+      type: 'assistant',
+      sender: 'provider',
+      content: input.reply.state === 'completed' ? input.reply.responseText : '',
+      metadata: {
+        publicStatus: publicStatus.status,
+        event: mutation.event,
+        deliveryPinId: input.reply.state === 'completed' ? input.reply.deliveryPinId : null,
+      },
+    },
+  ]);
+
+  const rebuilt = await rebuildCallerTraceArtifacts({
+    baseTrace: input.trace,
+    runtimeStateStore: input.runtimeStateStore,
+    sessionStateStore: input.sessionStateStore,
+  });
+
+  return {
+    trace: rebuilt.trace,
+    artifacts: rebuilt.artifacts,
+    mutation,
+  };
+}
+
+async function applyCallerForegroundTimeout(input: {
+  session: A2ASessionRecord;
+  taskRun: A2ATaskRunRecord;
+  sessionEngine: ReturnType<typeof createA2ASessionEngine>;
+  sessionStateStore: ReturnType<typeof createSessionStateStore>;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  trace: SessionTraceRecord;
+}): Promise<{ trace: SessionTraceRecord; artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>> }> {
+  const mutation = input.sessionEngine.markForegroundTimeout({
+    session: input.session,
+    taskRun: input.taskRun,
+  });
+  const publicStatus = await persistSessionMutation(input.sessionStateStore, mutation);
+  await appendA2ATranscriptItems(input.sessionStateStore, [
+    {
+      id: `${input.trace.traceId}-caller-timeout`,
+      sessionId: input.session.sessionId,
+      taskRunId: mutation.taskRun.runId,
+      timestamp: mutation.session.updatedAt,
+      type: 'status_note',
+      sender: 'system',
+      content: 'Foreground wait ended before the remote MetaBot returned. The task may still continue remotely.',
+      metadata: {
+        publicStatus: publicStatus.status,
+        event: mutation.event,
+      },
+    },
+  ]);
+
+  return rebuildCallerTraceArtifacts({
+    baseTrace: input.trace,
+    runtimeStateStore: input.runtimeStateStore,
+    sessionStateStore: input.sessionStateStore,
+  });
+}
+
 export function createDefaultMetabotDaemonHandlers(input: {
   homeDir: string;
   getDaemonRecord: () => RuntimeDaemonRecord | null;
@@ -532,6 +787,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   signer?: Signer;
   identitySyncStepDelayMs?: number;
   chainApiBaseUrl?: string;
+  fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
+  callerReplyWaiter?: MetaWebServiceReplyWaiter;
   requestMvcGasSubsidy?: (
     options: RequestMvcGasSubsidyOptions
   ) => Promise<RequestMvcGasSubsidyResult>;
@@ -541,6 +798,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
   const sessionStateStore = createSessionStateStore(input.homeDir);
   const sessionEngine = createA2ASessionEngine();
+  const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey ?? fetchPeerChatPublicKey;
+  const callerReplyWaiter = input.callerReplyWaiter ?? createSocketIoMetaWebReplyWaiter();
 
   return {
     chain: {
@@ -819,17 +1078,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }
           availableServices = remoteDirectory.services;
         } else {
-          availableServices = state.services
-            .filter((service) => service.available === 1)
-            .map((service) => ({
-              servicePinId: service.currentPinId,
-              providerGlobalMetaId: service.providerGlobalMetaId,
-              serviceName: service.serviceName,
-              displayName: service.displayName,
-              description: service.description,
-              price: service.price,
-              currency: service.currency,
-            }));
+          const directory = await listRuntimeDirectoryServices({
+            state,
+            hotRoot: runtimeStateStore.paths.hotRoot,
+            chainApiBaseUrl: input.chainApiBaseUrl,
+            onlineOnly: true,
+          });
+          availableServices = directory.services;
         }
 
         const plan = planRemoteCall({
@@ -868,6 +1123,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
           userTask: request.userTask,
           taskContext: request.taskContext,
         });
+        const serviceDisplayName = normalizeText(service.displayName) || normalizeText(service.serviceName);
+        const paymentTxid = buildSyntheticPaymentTxid({
+          traceId: plan.traceId,
+          servicePinId: plan.service.servicePinId,
+          providerGlobalMetaId: plan.service.providerGlobalMetaId,
+          userTask: request.userTask,
+        });
+        let orderPinId: string | null = null;
+        let providerReplyText: string | null = null;
+        let deliveryPinId: string | null = null;
 
         if (request.providerDaemonBaseUrl) {
           const execution = await executeRemoteServiceCall({
@@ -888,6 +1153,75 @@ export function createDefaultMetabotDaemonHandlers(input: {
             }
             return execution;
           }
+        } else {
+          let privateChatIdentity;
+          try {
+            privateChatIdentity = await signer.getPrivateChatIdentity();
+          } catch (error) {
+            return commandFailed(
+              'identity_secret_missing',
+              error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.'
+            );
+          }
+
+          const peerChatPublicKey = plan.service.providerGlobalMetaId === state.identity.globalMetaId
+            ? state.identity.chatPublicKey
+            : await resolvePeerChatPublicKey(plan.service.providerGlobalMetaId) ?? '';
+          if (!peerChatPublicKey) {
+            return commandFailed(
+              'peer_chat_public_key_missing',
+              'Remote MetaBot has no published chat public key on chain.'
+            );
+          }
+
+          const orderPayload = buildDelegationOrderPayload({
+            rawRequest: request.rawRequest || request.userTask,
+            taskContext: request.taskContext,
+            userTask: request.userTask,
+            serviceName: serviceDisplayName,
+            providerSkill: normalizeText(service.providerSkill) || normalizeText(service.serviceName),
+            servicePinId: plan.service.servicePinId,
+            paymentTxid,
+            price: plan.payment.amount,
+            currency: plan.payment.currency,
+          });
+
+          let outboundOrder;
+          try {
+            outboundOrder = sendPrivateChat({
+              fromIdentity: {
+                globalMetaId: privateChatIdentity.globalMetaId,
+                privateKeyHex: privateChatIdentity.privateKeyHex,
+              },
+              toGlobalMetaId: plan.service.providerGlobalMetaId,
+              peerChatPublicKey,
+              content: orderPayload,
+            });
+          } catch (error) {
+            return commandFailed(
+              'remote_order_build_failed',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
+
+          try {
+            const orderWrite = await signer.writePin({
+              operation: 'create',
+              path: outboundOrder.path,
+              encryption: outboundOrder.encryption,
+              version: outboundOrder.version,
+              contentType: outboundOrder.contentType,
+              payload: outboundOrder.payload,
+              encoding: 'utf-8',
+              network: 'mvc',
+            });
+            orderPinId = orderWrite.pinId;
+          } catch (error) {
+            return commandFailed(
+              'remote_order_broadcast_failed',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
         }
 
         const publicStatus = await persistSessionMutation(sessionStateStore, started);
@@ -904,6 +1238,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               taskContext: request.taskContext || null,
               servicePinId: plan.service.servicePinId,
               providerGlobalMetaId: plan.service.providerGlobalMetaId,
+              paymentTxid,
             },
           },
           {
@@ -918,11 +1253,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
               publicStatus: publicStatus.status,
               event: started.event,
               externalConversationId: started.linkage.externalConversationId,
+              orderPinId,
+              paymentTxid,
             },
           },
         ]);
 
-        const serviceDisplayName = normalizeText(service.displayName) || normalizeText(service.serviceName);
         const trace = buildSessionTrace({
           traceId: plan.traceId,
           channel: 'a2a',
@@ -941,7 +1277,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             role: 'buyer',
             serviceId: plan.service.servicePinId,
             serviceName: serviceDisplayName,
-            paymentTxid: `payment-${plan.traceId}`,
+            paymentTxid,
             paymentCurrency: plan.payment.currency,
             paymentAmount: plan.payment.amount,
           },
@@ -985,40 +1321,81 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   confirmationPolicyMode: plan.confirmation.policyMode,
                   confirmationRequired: plan.confirmation.requiresConfirmation,
                   providerDaemonBaseUrl: request.providerDaemonBaseUrl || null,
+                  orderPinId,
+                  paymentTxid,
                 },
               },
             ],
           },
         });
 
-        await runtimeStateStore.writeState({
-          ...state,
-          traces: [
-            trace,
-            ...state.traces.filter((entry) => entry.traceId !== trace.traceId),
-          ],
-        });
+        await persistTraceRecord(runtimeStateStore, trace);
+
+        let responseTrace = trace;
+        let responseArtifacts = artifacts;
+        let responseSession = started.session;
+        let responseTaskRun = started.taskRun;
+        let responseEvent = started.event;
+        let responsePublicStatus = publicStatus.status;
+        if (!request.providerDaemonBaseUrl) {
+          const privateChatIdentity = await signer.getPrivateChatIdentity();
+          const peerChatPublicKey = plan.service.providerGlobalMetaId === state.identity.globalMetaId
+            ? state.identity.chatPublicKey
+            : await resolvePeerChatPublicKey(plan.service.providerGlobalMetaId) ?? '';
+          const reply = await callerReplyWaiter.awaitServiceReply({
+            callerGlobalMetaId: privateChatIdentity.globalMetaId,
+            callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+            providerGlobalMetaId: plan.service.providerGlobalMetaId,
+            providerChatPublicKey: peerChatPublicKey,
+            servicePinId: plan.service.servicePinId,
+            paymentTxid,
+            timeoutMs: DEFAULT_CALLER_FOREGROUND_WAIT_MS,
+          });
+          if (reply.state === 'completed') {
+            const applied = await applyCallerReplyResult({
+              reply,
+              session: started.session,
+              taskRun: started.taskRun,
+              sessionEngine,
+              sessionStateStore,
+              runtimeStateStore,
+              trace,
+            });
+            responseTrace = applied.trace;
+            responseArtifacts = applied.artifacts;
+            responseSession = applied.mutation.session;
+            responseTaskRun = applied.mutation.taskRun;
+            responseEvent = applied.mutation.event;
+            responsePublicStatus = 'completed';
+            providerReplyText = reply.responseText;
+            deliveryPinId = reply.deliveryPinId;
+          }
+        }
 
         return commandSuccess({
-          traceId: trace.traceId,
+          traceId: responseTrace.traceId,
           providerGlobalMetaId: plan.service.providerGlobalMetaId,
           serviceName: serviceDisplayName,
           service: plan.service,
           payment: plan.payment,
           confirmation: plan.confirmation,
+          paymentTxid,
+          orderPinId,
+          ...(deliveryPinId ? { deliveryPinId } : {}),
+          ...(providerReplyText ? { responseText: providerReplyText } : {}),
           session: {
-            sessionId: started.session.sessionId,
-            taskRunId: started.taskRun.runId,
-            role: started.session.role,
-            state: started.session.state,
-            publicStatus: publicStatus.status,
-            event: started.event,
+            sessionId: responseSession.sessionId,
+            taskRunId: responseTaskRun.runId,
+            role: responseSession.role,
+            state: responseSession.state,
+            publicStatus: responsePublicStatus,
+            event: responseEvent,
             coworkSessionId: started.linkage.coworkSessionId,
             externalConversationId: started.linkage.externalConversationId,
           },
-          traceJsonPath: artifacts.traceJsonPath,
-          traceMarkdownPath: artifacts.traceMarkdownPath,
-          transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
+          traceJsonPath: responseArtifacts.traceJsonPath,
+          traceMarkdownPath: responseArtifacts.traceMarkdownPath,
+          transcriptMarkdownPath: responseArtifacts.transcriptMarkdownPath,
         });
       },
       execute: async (rawInput) => {
@@ -1271,7 +1648,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           peerChatPublicKey = state.identity.chatPublicKey;
         }
         if (!peerChatPublicKey) {
-          peerChatPublicKey = await fetchPeerChatPublicKey(request.to) ?? '';
+          peerChatPublicKey = await resolvePeerChatPublicKey(request.to) ?? '';
         }
         if (!peerChatPublicKey) {
           return commandFailed(

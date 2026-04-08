@@ -536,6 +536,74 @@ test('services call returns an A2A start contract while provider execution flows
   assert.equal(providerTaskRun.state, 'completed');
 });
 
+test('services call resolves a chain-discovered online service into a real MetaWeb reply path without providerDaemonBaseUrl', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const chainApi = await startFakeChainApiServer();
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'chain-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  }), 'utf8');
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+      METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
+        responseText: 'Tomorrow will be bright with a light wind.',
+        deliveryPinId: 'delivery-pin-1',
+      }),
+    }
+  );
+
+  assert.equal(called.exitCode, 0);
+  assert.equal(called.payload.ok, true);
+  assert.equal(called.payload.data.providerGlobalMetaId, 'idq1provider');
+  assert.equal(called.payload.data.serviceName, 'Weather Oracle');
+  assert.equal(called.payload.data.responseText, 'Tomorrow will be bright with a light wind.');
+  assert.equal(called.payload.data.deliveryPinId, 'delivery-pin-1');
+  assert.equal(called.payload.data.session.role, 'caller');
+  assert.equal(called.payload.data.session.publicStatus, 'completed');
+  assert.equal(called.payload.data.session.event, 'provider_completed');
+  assert.match(called.payload.data.orderPinId, /^\/protocols\/simplemsg-pin-/);
+
+  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+    METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+    METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+    METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
+      responseText: 'Tomorrow will be bright with a light wind.',
+      deliveryPinId: 'delivery-pin-1',
+    }),
+  });
+
+  assert.equal(trace.exitCode, 0);
+  assert.equal(trace.payload.ok, true);
+  assert.equal(trace.payload.data.order.serviceId, 'chain-service-pin-1');
+  assert.equal(trace.payload.data.session.peerGlobalMetaId, 'idq1provider');
+  assert.equal(trace.payload.data.a2a.publicStatus, 'completed');
+  assert.equal(trace.payload.data.a2a.latestEvent, 'provider_completed');
+  assert.match(trace.payload.data.order.paymentTxid, /^[0-9a-f]{64}$/i);
+
+  const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
+  assert.match(transcriptMarkdown, /Tomorrow will be bright with a light wind/);
+});
+
 test('chat private encrypts a loopback message and stores a chat trace in the local runtime', async (t) => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
   t.after(async () => stopDaemon(homeDir));
