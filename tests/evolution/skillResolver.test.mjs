@@ -85,6 +85,44 @@ test('resolver preserves same-scope metadata when merging an active variant', ()
   assert.deepEqual(resolved.scope, base.scope);
 });
 
+test('resolver degrades safely to base when active variant shape is malformed', () => {
+  const malformedVariant = {
+    variantId: 'variant-malformed',
+    skillName: 'metabot-network-directory',
+    status: 'active',
+    // Intentionally omit patch/metadata/scope to simulate bad persisted data.
+  };
+
+  assert.doesNotThrow(() => {
+    const resolved = resolveSkillContract({
+      skillName: 'metabot-network-directory',
+      evolutionNetworkEnabled: true,
+      activeVariant: malformedVariant,
+    });
+    assert.equal(resolved.source, 'base');
+    assert.equal(resolved.activeVariantId, null);
+  });
+});
+
+test('resolver computes same-scope metadata from actual scopes when metadata is contradictory', () => {
+  const base = getBaseSkillContract('metabot-network-directory');
+  const broadenedScopeVariant = createActiveVariantPatch({
+    ...base.scope,
+    chainWrite: true,
+  });
+  broadenedScopeVariant.metadata.sameScope = true;
+
+  const resolved = resolveSkillContract({
+    skillName: 'metabot-network-directory',
+    evolutionNetworkEnabled: true,
+    activeVariant: broadenedScopeVariant,
+  });
+
+  assert.equal(resolved.source, 'merged');
+  assert.equal(resolved.scope.chainWrite, true);
+  assert.equal(resolved.scopeMetadata.sameScope, false);
+});
+
 test('resolver renders both json and markdown outputs for codex, claude-code, and openclaw shims', () => {
   const hosts = ['codex', 'claude-code', 'openclaw'];
 
@@ -117,4 +155,22 @@ test('resolver renders both json and markdown outputs for codex, claude-code, an
     assert.match(markdownOutput.markdown, /## Command Template/);
     assert.match(markdownOutput.markdown, /## Scope/);
   }
+});
+
+test('resolver markdown rendering preserves command templates with backticks and newlines', () => {
+  const base = getBaseSkillContract('metabot-network-directory');
+  const variant = createActiveVariantPatch(base.scope);
+  variant.patch.commandTemplatePatch = 'metabot network services --online\nprintf "```"';
+
+  const markdownOutput = renderResolvedSkillContract({
+    skillName: 'metabot-network-directory',
+    host: 'codex',
+    format: 'markdown',
+    evolutionNetworkEnabled: true,
+    activeVariant: variant,
+  });
+
+  assert.equal(markdownOutput.format, 'markdown');
+  assert.equal(markdownOutput.markdown.includes(variant.patch.commandTemplatePatch), true);
+  assert.match(markdownOutput.markdown, /````bash/);
 });
