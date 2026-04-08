@@ -150,6 +150,84 @@ test('unknown service returns a provider-side not-found failure without invoking
 
   assert.equal(result.state, 'failed');
   assert.equal(result.code, 'service_runner_not_found');
-  assert.match(result.message, /pin-missing|missing.skill/);
+  assert.equal('ok' in result, false);
+  assert.equal('matchBy' in result, false);
+  assert.equal(
+    result.message.includes('pin-missing') || result.message.includes('missing.skill'),
+    true,
+  );
   assert.equal(runnerCalls, 0);
+});
+
+test('runner exceptions and invalid results are normalized into failed runner results', async () => {
+  const registry = createServiceRunnerRegistry([
+    {
+      servicePinId: 'pin-exception',
+      runner: async () => {
+        throw new Error('runner exploded');
+      },
+    },
+    {
+      servicePinId: 'pin-invalid',
+      runner: async () => ({ state: 'unknown' }),
+    },
+  ]);
+
+  const exceptionResult = await registry.execute({
+    servicePinId: 'pin-exception',
+    providerSkill: '',
+    providerGlobalMetaId: 'idq-provider',
+    userTask: 'explode',
+    taskContext: '',
+  });
+  const invalidResult = await registry.execute({
+    servicePinId: 'pin-invalid',
+    providerSkill: '',
+    providerGlobalMetaId: 'idq-provider',
+    userTask: 'invalid',
+    taskContext: '',
+  });
+
+  assert.deepEqual(
+    [exceptionResult.state, exceptionResult.code],
+    ['failed', 'service_runner_exception'],
+  );
+  assert.deepEqual(
+    [invalidResult.state, invalidResult.code],
+    ['failed', 'invalid_service_runner_result'],
+  );
+});
+
+test('duplicate service pin or provider skill registration is rejected', () => {
+  assert.throws(
+    () => createServiceRunnerRegistry([
+      {
+        servicePinId: 'pin-duplicate',
+        providerSkill: 'duplicate.skill',
+        runner: async () => ({ state: 'completed', responseText: 'first' }),
+      },
+      {
+        servicePinId: 'pin-duplicate',
+        providerSkill: 'other.skill',
+        runner: async () => ({ state: 'completed', responseText: 'second' }),
+      },
+    ]),
+    /service pin/i,
+  );
+
+  assert.throws(
+    () => createServiceRunnerRegistry([
+      {
+        servicePinId: 'pin-one',
+        providerSkill: 'duplicate.skill',
+        runner: async () => ({ state: 'completed', responseText: 'first' }),
+      },
+      {
+        servicePinId: 'pin-two',
+        providerSkill: 'duplicate.skill',
+        runner: async () => ({ state: 'completed', responseText: 'second' }),
+      },
+    ]),
+    /provider skill/i,
+  );
 });

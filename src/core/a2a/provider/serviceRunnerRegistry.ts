@@ -117,7 +117,7 @@ export function createServiceRunnerRegistry(
       providerSkill: input.providerSkill,
     });
     if (!resolution.ok) {
-      return resolution;
+      return createNotFoundResult(input);
     }
 
     try {
