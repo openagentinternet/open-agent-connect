@@ -41,6 +41,20 @@ Then call:
 {{METABOT_CLI}} services call --request-file request.json
 ```
 
+If the remote MetaBot explicitly requests a rating after delivery, publish one buyer-side rating with:
+
+```json
+{
+  "traceId": "trace-123",
+  "rate": 5,
+  "comment": "Useful result and smooth remote collaboration."
+}
+```
+
+```bash
+{{METABOT_CLI}} services rate --request-file rating.json
+```
+
 If the call returns a trace id and the local MetaBot is still waiting on the remote MetaBot, keep the same host session updated with:
 
 ```bash
@@ -63,8 +77,14 @@ If the call returns a trace id and the local MetaBot is still waiting on the rem
 
 - `success`: continue with the returned trace id, session identity, and external conversation linkage.
 - If `responseText` is present, treat it as the remote MetaBot's returned result and surface it directly to the human.
-- If `traceId` is present without `responseText`, follow with `trace watch` so the human can see the remote MetaBot receive, execute, and complete the task.
-- If `trace watch` reaches `timeout`, explain that the current host wait ended but the remote MetaBot may still continue processing.
+- If `traceId` is present without `responseText`, follow with `trace watch` and let that watch run to completion or until the watch command itself stops returning new progress.
+- `trace watch` can legally show `timeout` and later `remote_received` / `completed` in the same follow-up. Do not stop at the first `timeout` line if the command is still running.
+- When `trace watch` ends with `completed`, immediately call `{{METABOT_CLI}} trace get --trace-id ...`.
+- If `trace get` returns `resultText`, surface that remote result verbatim. Do not paraphrase, summarize, or rewrite it unless the human explicitly asks you to.
+- If `trace get` returns `ratingRequestText`, treat it as the remote MetaBot explicitly asking for the DACT T-stage to finish.
+- Unless the human asked to skip follow-up, publish one concise buyer-side rating with `{{METABOT_CLI}} services rate --request-file ...`.
+- The rating should be written in the local MetaBot's voice as the buyer. Prefer a factual 1-2 sentence comment tied to the actual result. If the human has not complained and the remote result appears usable, a positive 4-5 score is the default.
+- Only explain timeout to the human when the full follow-up still ends without a later completion.
 - If provider-side trace paths are present, keep them as evidence for later inspection.
 - `failed`: stop and surface the failure code without pretending the remote MetaBot completed the task.
 - `manual_action_required`: pause automation, surface the returned local UI URL, and recommend the trace inspector when deeper evidence is useful.

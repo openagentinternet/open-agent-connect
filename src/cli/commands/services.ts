@@ -35,5 +35,20 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
     return handler(request);
   }
 
+  if (subcommand === 'rate') {
+    const requestFile = readFlagValue(args, '--request-file');
+    if (!requestFile) {
+      return commandMissingFlag('--request-file');
+    }
+
+    const handler = context.dependencies.services?.rate;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Services rate handler is not configured.');
+    }
+
+    const request = await readJsonFile(context, requestFile);
+    return handler(request);
+  }
+
   return commandUnknownSubcommand(`services ${args.join(' ')}`.trim());
 }

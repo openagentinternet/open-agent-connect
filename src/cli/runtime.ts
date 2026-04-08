@@ -326,12 +326,14 @@ function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceRep
     state?: unknown;
     responseText?: unknown;
     deliveryPinId?: unknown;
+    ratingRequestText?: unknown;
     observedAt?: unknown;
     delayMs?: unknown;
     sequence?: Array<{
       state?: unknown;
       responseText?: unknown;
       deliveryPinId?: unknown;
+      ratingRequestText?: unknown;
       observedAt?: unknown;
       delayMs?: unknown;
     }> | unknown;
@@ -373,6 +375,7 @@ function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceRep
           ? step.responseText
           : 'Test fake remote reply.',
         deliveryPinId: typeof step.deliveryPinId === 'string' ? step.deliveryPinId : null,
+        ratingRequestText: typeof step.ratingRequestText === 'string' ? step.ratingRequestText : null,
         observedAt: Number.isFinite(step.observedAt)
           ? Number(step.observedAt)
           : Date.now(),
@@ -423,6 +426,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     services: {
       publish: async (input) => requestJson(context, 'POST', '/api/services/publish', input),
       call: async (input) => requestJson(context, 'POST', '/api/services/call', input),
+      rate: async (input) => requestJson(context, 'POST', '/api/services/rate', input),
     },
     chat: {
       private: async (input) => requestJson(context, 'POST', '/api/chat/private', input),

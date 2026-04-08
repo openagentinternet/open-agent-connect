@@ -27,6 +27,9 @@ Inspect the machine trace for a remote MetaBot session, then open the local huma
 
 - Prefer `trace get` for agent workflows and automation.
 - Prefer `trace watch` while the host session is still following a live remote MetaBot run.
+- If `trace get` returns `resultText`, treat it as the remote MetaBot's original completed output and surface it directly unless the human asks for interpretation.
+- If `trace get` returns `ratingRequestText`, treat that as a post-delivery DACT T-stage request from the remote MetaBot.
+- If `trace watch` shows `timeout` but keeps running, continue following it until the watch command exits; timeout is a handoff signal, not always the final outcome.
 - Recommend the local trace inspector when timeout occurs, clarification appears, manual action is required, or the user asks for details.
 - If the runtime already returned a local trace UI URL, open that exact URL for the human.
 - Use the local trace page for human review or debugging, not as the primary execution surface.

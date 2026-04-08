@@ -41,6 +41,33 @@ async function runCommand(homeDir, args, envOverrides = {}) {
   };
 }
 
+async function runCommandText(homeDir, args, envOverrides = {}) {
+  const stdout = [];
+  const stderr = [];
+  const env = {
+    ...process.env,
+    HOME: homeDir,
+    METABOT_HOME: homeDir,
+    METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+    METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+    ...envOverrides,
+  };
+
+  const exitCode = await runCli(args, {
+    env,
+    cwd: homeDir,
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: (chunk) => { stderr.push(String(chunk)); return true; } },
+  });
+
+  return {
+    exitCode,
+    stdout: stdout.join(''),
+    stderr: stderr.join(''),
+  };
+}
+
 async function startFakeChainApiServer() {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -599,6 +626,9 @@ test('services call resolves a chain-discovered online service into a real MetaW
   assert.equal(trace.payload.data.session.peerGlobalMetaId, 'idq1provider');
   assert.equal(trace.payload.data.a2a.publicStatus, 'completed');
   assert.equal(trace.payload.data.a2a.latestEvent, 'provider_completed');
+  assert.equal(trace.payload.data.resultText, 'Tomorrow will be bright with a light wind.');
+  assert.equal(trace.payload.data.resultDeliveryPinId, 'delivery-pin-1');
+  assert.equal(trace.payload.data.ratingRequestText, null);
   assert.match(trace.payload.data.order.paymentTxid, /^[0-9a-f]{64}$/i);
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
@@ -733,10 +763,219 @@ test('services call upgrades a timed-out chain-discovered caller trace when the 
   assert.equal(trace.payload.data.a2a.publicStatus, 'completed');
   assert.equal(trace.payload.data.a2a.latestEvent, 'provider_completed');
   assert.equal(trace.payload.data.a2a.taskRunState, 'completed');
+  assert.equal(trace.payload.data.resultText, 'A late weather reply finally arrived.');
+  assert.equal(trace.payload.data.resultDeliveryPinId, 'delivery-pin-late-1');
+  assert.equal(trace.payload.data.ratingRequestText, null);
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /Foreground timeout reached|Foreground wait ended before the remote MetaBot returned/i);
   assert.match(transcriptMarkdown, /A late weather reply finally arrived\./i);
+});
+
+test('trace watch waits through the timeout handoff so one follow-up can observe the eventual late completion', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const chainApi = await startFakeChainApiServer();
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'chain-trace-watch-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  }), 'utf8');
+
+  const replyConfig = JSON.stringify({
+    state: 'timeout',
+    sequence: [
+      {
+        state: 'timeout',
+      },
+      {
+        state: 'completed',
+        delayMs: 300,
+        responseText: 'A late weather reply finally arrived.',
+        deliveryPinId: 'delivery-pin-late-2',
+      },
+    ],
+  });
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+      METABOT_TEST_FAKE_METAWEB_REPLY: replyConfig,
+    }
+  );
+
+  assert.equal(called.exitCode, 0);
+  assert.equal(called.payload.ok, true);
+  assert.equal(called.payload.data.session.publicStatus, 'timeout');
+
+  const startedAt = Date.now();
+  const watched = await runCommandText(
+    homeDir,
+    ['trace', 'watch', '--trace-id', called.payload.data.traceId],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+      METABOT_TEST_FAKE_METAWEB_REPLY: replyConfig,
+    }
+  );
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(watched.exitCode, 0);
+  assert.equal(watched.stderr, '');
+  assert.ok(elapsedMs >= 250, `expected trace watch to wait for late completion, got ${elapsedMs}ms`);
+
+  const events = watched.stdout.trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(events.map((event) => event.status), [
+    'requesting_remote',
+    'timeout',
+    'remote_received',
+    'completed',
+  ]);
+  assert.equal(events.at(-1)?.terminal, true);
+});
+
+test('trace get exposes a remote rating request when the provider later asks for T-stage feedback', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const chainApi = await startFakeChainApiServer();
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'chain-rating-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  }), 'utf8');
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+      METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
+        responseText: 'Tomorrow will be bright with a light wind.',
+        deliveryPinId: 'delivery-pin-rating-1',
+        ratingRequestText: '服务已完成，如果方便请给我一个评价吧。',
+      }),
+    }
+  );
+
+  assert.equal(called.exitCode, 0);
+  assert.equal(called.payload.ok, true);
+
+  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+    METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+    METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+    METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
+      responseText: 'Tomorrow will be bright with a light wind.',
+      deliveryPinId: 'delivery-pin-rating-1',
+      ratingRequestText: '服务已完成，如果方便请给我一个评价吧。',
+    }),
+  });
+
+  assert.equal(trace.exitCode, 0);
+  assert.equal(trace.payload.ok, true);
+  assert.equal(trace.payload.data.ratingRequestText, '服务已完成，如果方便请给我一个评价吧。');
+});
+
+test('services rate publishes one buyer-side skill-service-rate record from a completed remote trace', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const chainApi = await startFakeChainApiServer();
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'chain-rating-publish-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  }), 'utf8');
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+      METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
+        responseText: 'Tomorrow will be bright with a light wind.',
+        deliveryPinId: 'delivery-pin-rating-2',
+        ratingRequestText: '服务已完成，如果方便请给我一个评价吧。',
+      }),
+    }
+  );
+
+  assert.equal(called.exitCode, 0);
+  assert.equal(called.payload.ok, true);
+
+  const rateRequestFile = path.join(homeDir, 'service-rate.json');
+  await writeFile(rateRequestFile, JSON.stringify({
+    traceId: called.payload.data.traceId,
+    rate: 5,
+    comment: '结果清晰，响应也可靠。',
+  }), 'utf8');
+
+  const rated = await runCommand(
+    homeDir,
+    ['services', 'rate', '--request-file', rateRequestFile],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+      METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
+        responseText: 'Tomorrow will be bright with a light wind.',
+        deliveryPinId: 'delivery-pin-rating-2',
+        ratingRequestText: '服务已完成，如果方便请给我一个评价吧。',
+      }),
+    }
+  );
+
+  assert.equal(rated.exitCode, 0);
+  assert.equal(rated.payload.ok, true);
+  assert.equal(rated.payload.data.traceId, called.payload.data.traceId);
+  assert.equal(rated.payload.data.rate, '5');
+  assert.equal(rated.payload.data.comment, '结果清晰，响应也可靠。');
+  assert.equal(rated.payload.data.path, '/protocols/skill-service-rate');
+  assert.match(rated.payload.data.pinId, /^\/protocols\/skill-service-rate-pin-/);
+  assert.equal(rated.payload.data.serviceId, 'chain-service-pin-1');
+  assert.equal(rated.payload.data.servicePaidTx, called.payload.data.paymentTxid);
+  assert.equal(rated.payload.data.serverBot, 'idq1provider');
 });
 
 test('chat private encrypts a loopback message and stores a chat trace in the local runtime', async (t) => {

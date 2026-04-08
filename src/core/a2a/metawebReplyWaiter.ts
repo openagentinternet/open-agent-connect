@@ -1,11 +1,16 @@
 import { io, type Socket } from 'socket.io-client';
 import { receivePrivateChat } from '../chat/privateChat';
-import { cleanServiceResultText, parseDeliveryMessage } from '../orders/serviceOrderProtocols';
+import {
+  cleanServiceResultText,
+  parseDeliveryMessage,
+  parseNeedsRatingMessage,
+} from '../orders/serviceOrderProtocols';
 
 const DEFAULT_SOCKET_ENDPOINTS = [
   { url: 'wss://api.idchat.io', path: '/socket/socket.io' },
   { url: 'wss://www.show.now', path: '/socket/socket.io' },
 ];
+const DEFAULT_NEEDS_RATING_GRACE_MS = 3_000;
 
 export interface AwaitMetaWebServiceReplyInput {
   callerGlobalMetaId: string;
@@ -24,6 +29,7 @@ export type AwaitMetaWebServiceReplyResult =
       deliveryPinId: string | null;
       observedAt: number | null;
       rawMessage: Record<string, unknown> | null;
+      ratingRequestText?: string | null;
     }
   | {
       state: 'timeout';
@@ -156,7 +162,9 @@ export function createSocketIoMetaWebReplyWaiter(): MetaWebServiceReplyWaiter {
       return new Promise((resolve) => {
         let settled = false;
         let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+        let ratingGraceHandle: ReturnType<typeof setTimeout> | null = null;
         const sockets: Socket[] = [];
+        let pendingDelivery: Omit<Extract<AwaitMetaWebServiceReplyResult, { state: 'completed' }>, 'state'> | null = null;
 
         const finish = (result: AwaitMetaWebServiceReplyResult) => {
           if (settled) return;
@@ -164,6 +172,10 @@ export function createSocketIoMetaWebReplyWaiter(): MetaWebServiceReplyWaiter {
           if (timeoutHandle) {
             clearTimeout(timeoutHandle);
             timeoutHandle = null;
+          }
+          if (ratingGraceHandle) {
+            clearTimeout(ratingGraceHandle);
+            ratingGraceHandle = null;
           }
           for (const socket of sockets) {
             try {
@@ -204,6 +216,16 @@ export function createSocketIoMetaWebReplyWaiter(): MetaWebServiceReplyWaiter {
               return;
             }
 
+            const ratingRequestText = parseNeedsRatingMessage(plaintext);
+            if (ratingRequestText != null && pendingDelivery) {
+              finish({
+                state: 'completed',
+                ...pendingDelivery,
+                ratingRequestText,
+              });
+              return;
+            }
+
             const delivery = parseDeliveryMessage(plaintext);
             if (!delivery) {
               return;
@@ -215,15 +237,32 @@ export function createSocketIoMetaWebReplyWaiter(): MetaWebServiceReplyWaiter {
               return;
             }
 
-            finish({
-              state: 'completed',
+            pendingDelivery = {
               responseText: cleanServiceResultText(normalizeText(delivery.result)) || normalizeText(delivery.result),
               deliveryPinId: pinIdFromMessage(message),
               observedAt: typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)
                 ? message.timestamp
                 : null,
               rawMessage: normalizeObject(message),
-            });
+              ratingRequestText: null,
+            };
+            if (timeoutHandle) {
+              clearTimeout(timeoutHandle);
+              timeoutHandle = null;
+            }
+            if (ratingGraceHandle) {
+              clearTimeout(ratingGraceHandle);
+            }
+            ratingGraceHandle = setTimeout(() => {
+              if (!pendingDelivery) {
+                finish({ state: 'timeout' });
+                return;
+              }
+              finish({
+                state: 'completed',
+                ...pendingDelivery,
+              });
+            }, DEFAULT_NEEDS_RATING_GRACE_MS);
           });
         }
       });

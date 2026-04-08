@@ -54,10 +54,17 @@ import {
 const DIRECTORY_SEEDS_FILE = 'directory-seeds.json';
 const DEFAULT_CALLER_FOREGROUND_WAIT_MS = 15_000;
 const DEFAULT_CALLER_BACKGROUND_WAIT_MS = 30 * 60 * 1000;
-const DEFAULT_TRACE_WATCH_WAIT_MS = 20_000;
+const DEFAULT_TRACE_WATCH_WAIT_MS = 75_000;
+const TRACE_WATCH_POLL_INTERVAL_MS = 500;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function sanitizeServiceSegment(value: string): string {
@@ -153,6 +160,19 @@ function readExecuteServiceRequest(rawInput: Record<string, unknown>) {
       userTask: normalizeText(request.userTask),
       taskContext: normalizeText(request.taskContext),
     },
+  };
+}
+
+function readServiceRateRequest(rawInput: Record<string, unknown>) {
+  const request = readObject(rawInput.request) ?? rawInput;
+  const rawRate = request.rate;
+  const parsedRate = typeof rawRate === 'number'
+    ? rawRate
+    : Number.parseInt(normalizeText(rawRate), 10);
+  return {
+    traceId: normalizeText(request.traceId),
+    rate: Number.isFinite(parsedRate) ? Math.trunc(parsedRate) : NaN,
+    comment: normalizeText(request.comment),
   };
 }
 
@@ -477,6 +497,89 @@ async function readOptionalUtf8(filePath: string | null | undefined): Promise<st
   }
 }
 
+function extractTraceResult(input: {
+  transcriptItems: Array<{
+    timestamp: number;
+    sender: 'caller' | 'provider' | 'system';
+    content: string;
+    metadata?: Record<string, unknown> | null;
+  }>;
+}): {
+  resultText: string | null;
+  resultObservedAt: number | null;
+  resultDeliveryPinId: string | null;
+} {
+  for (let index = input.transcriptItems.length - 1; index >= 0; index -= 1) {
+    const item = input.transcriptItems[index];
+    if (item.sender !== 'provider') {
+      continue;
+    }
+    const content = normalizeText(item.content);
+    if (!content) {
+      continue;
+    }
+    const metadata = item.metadata ?? null;
+    const deliveryPinId = normalizeText(metadata?.deliveryPinId);
+    const publicStatus = normalizeText(metadata?.publicStatus);
+    const event = normalizeText(metadata?.event);
+    const looksLikeCompletedResult = Boolean(
+      deliveryPinId
+      || publicStatus === 'completed'
+      || event === 'provider_completed'
+    );
+    if (!looksLikeCompletedResult) {
+      continue;
+    }
+    return {
+      resultText: content,
+      resultObservedAt: Number.isFinite(item.timestamp) ? item.timestamp : null,
+      resultDeliveryPinId: deliveryPinId || null,
+    };
+  }
+
+  return {
+    resultText: null,
+    resultObservedAt: null,
+    resultDeliveryPinId: null,
+  };
+}
+
+function extractTraceRatingRequest(input: {
+  transcriptItems: Array<{
+    timestamp: number;
+    sender: 'caller' | 'provider' | 'system';
+    content: string;
+    metadata?: Record<string, unknown> | null;
+  }>;
+}): {
+  ratingRequestText: string | null;
+  ratingRequestedAt: number | null;
+} {
+  for (let index = input.transcriptItems.length - 1; index >= 0; index -= 1) {
+    const item = input.transcriptItems[index];
+    if (item.sender !== 'provider') {
+      continue;
+    }
+    const content = normalizeText(item.content);
+    if (!content) {
+      continue;
+    }
+    const metadata = item.metadata ?? null;
+    if (metadata?.needsRating !== true) {
+      continue;
+    }
+    return {
+      ratingRequestText: content,
+      ratingRequestedAt: Number.isFinite(item.timestamp) ? item.timestamp : null,
+    };
+  }
+
+  return {
+    ratingRequestText: null,
+    ratingRequestedAt: null,
+  };
+}
+
 async function buildTraceInspectorPayload(input: {
   traceId: string;
   trace: ReturnType<typeof buildSessionTrace>;
@@ -496,9 +599,13 @@ async function buildTraceInspectorPayload(input: {
   const publicStatusSnapshots = sessionState.publicStatusSnapshots
     .filter((entry) => sessionIds.has(entry.sessionId))
     .sort((left, right) => left.resolvedAt - right.resolvedAt);
+  const result = extractTraceResult({ transcriptItems });
+  const ratingRequest = extractTraceRatingRequest({ transcriptItems });
 
   return {
     ...input.trace,
+    ...result,
+    ...ratingRequest,
     inspector: {
       session: sessions.at(-1) ?? null,
       sessions,
@@ -763,7 +870,7 @@ async function applyCallerReplyResult(input: {
     result: runnerResult,
   });
   const publicStatus = await persistSessionMutation(input.sessionStateStore, mutation);
-  await appendA2ATranscriptItems(input.sessionStateStore, [
+  const transcriptItems: Parameters<typeof appendA2ATranscriptItems>[1] = [
     {
       id: `${input.trace.traceId}-provider-delivery`,
       sessionId: input.session.sessionId,
@@ -778,7 +885,23 @@ async function applyCallerReplyResult(input: {
         deliveryPinId: input.reply.state === 'completed' ? input.reply.deliveryPinId : null,
       },
     },
-  ]);
+  ];
+  if (input.reply.state === 'completed' && normalizeText(input.reply.ratingRequestText)) {
+    transcriptItems.push({
+      id: `${input.trace.traceId}-provider-needs-rating`,
+      sessionId: input.session.sessionId,
+      taskRunId: mutation.taskRun.runId,
+      timestamp: (input.reply.observedAt ?? mutation.session.updatedAt) + 1,
+      type: 'rating_request',
+      sender: 'provider',
+      content: normalizeText(input.reply.ratingRequestText),
+      metadata: {
+        needsRating: true,
+        event: 'needs_rating',
+      },
+    });
+  }
+  await appendA2ATranscriptItems(input.sessionStateStore, transcriptItems);
 
   const rebuilt = await rebuildCallerTraceArtifacts({
     baseTrace: input.trace,
@@ -1541,6 +1664,135 @@ export function createDefaultMetabotDaemonHandlers(input: {
           transcriptMarkdownPath: responseArtifacts.transcriptMarkdownPath,
         });
       },
+      rate: async (rawInput) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing service ratings.');
+        }
+
+        const request = readServiceRateRequest(rawInput);
+        if (!request.traceId) {
+          return commandFailed('invalid_service_rating_request', 'Service rating request must include traceId.');
+        }
+        if (!Number.isFinite(request.rate) || request.rate < 1 || request.rate > 5) {
+          return commandFailed('invalid_service_rating_score', 'Service rating score must be an integer from 1 to 5.');
+        }
+        if (!request.comment) {
+          return commandFailed('invalid_service_rating_comment', 'Service rating request must include a non-empty comment.');
+        }
+
+        const trace = state.traces.find((entry) => entry.traceId === request.traceId);
+        if (!trace) {
+          return commandFailed('trace_not_found', `Trace not found: ${request.traceId}`);
+        }
+        if (normalizeText(trace.order?.role) !== 'buyer') {
+          return commandFailed('service_rating_not_buyer_trace', 'Only buyer-side remote traces can publish service ratings.');
+        }
+
+        const serviceId = normalizeText(trace.order?.serviceId);
+        const servicePrice = normalizeText(trace.order?.paymentAmount);
+        const serviceCurrency = normalizeText(trace.order?.paymentCurrency);
+        const servicePaidTx = normalizeText(trace.order?.paymentTxid);
+        const serverBot = normalizeText(trace.session.peerGlobalMetaId ?? trace.a2a?.providerGlobalMetaId);
+        if (!serviceId || !servicePrice || !serviceCurrency || !servicePaidTx || !serverBot) {
+          return commandFailed(
+            'service_rating_trace_incomplete',
+            'Trace is missing service or payment metadata required for skill-service-rate.'
+          );
+        }
+
+        const directory = await listRuntimeDirectoryServices({
+          state,
+          hotRoot: runtimeStateStore.paths.hotRoot,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+          onlineOnly: false,
+        });
+        const matchedService = directory.services.find((entry) => (
+          normalizeText(entry.servicePinId) === serviceId
+          || normalizeText(entry.sourceServicePinId) === serviceId
+        ));
+        const serviceSkill = normalizeText(
+          matchedService?.providerSkill
+          ?? matchedService?.serviceName
+          ?? trace.order?.serviceName
+        );
+        const payload = {
+          serviceID: serviceId,
+          servicePrice,
+          serviceCurrency,
+          servicePaidTx,
+          serviceSkill: serviceSkill || normalizeText(trace.order?.serviceName),
+          serverBot,
+          rate: String(request.rate),
+          comment: request.comment,
+        };
+
+        let ratingWrite;
+        try {
+          ratingWrite = await signer.writePin({
+            operation: 'create',
+            path: '/protocols/skill-service-rate',
+            encryption: '0',
+            version: '1.0.0',
+            contentType: 'application/json',
+            payload: JSON.stringify(payload),
+          });
+        } catch (error) {
+          return commandFailed(
+            'service_rating_publish_failed',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+
+        const sessionState = await sessionStateStore.readState();
+        const latestSession = sessionState.sessions
+          .filter((entry) => entry.traceId === request.traceId)
+          .sort((left, right) => left.updatedAt - right.updatedAt)
+          .at(-1);
+        let nextTrace = trace;
+        let nextArtifacts = trace.artifacts;
+        if (latestSession) {
+          await appendA2ATranscriptItems(sessionStateStore, [
+            {
+              id: `${trace.traceId}-caller-rating-${Date.now().toString(36)}`,
+              sessionId: latestSession.sessionId,
+              taskRunId: latestSession.currentTaskRunId,
+              timestamp: Date.now(),
+              type: 'rating',
+              sender: 'caller',
+              content: request.comment,
+              metadata: {
+                event: 'service_rating_published',
+                rate: String(request.rate),
+                ratingPinId: ratingWrite.pinId ?? null,
+              },
+            },
+          ]);
+          const rebuilt = await rebuildCallerTraceArtifacts({
+            baseTrace: trace,
+            runtimeStateStore,
+            sessionStateStore,
+          });
+          nextTrace = rebuilt.trace;
+          nextArtifacts = rebuilt.artifacts;
+        }
+
+        return commandSuccess({
+          traceId: request.traceId,
+          path: '/protocols/skill-service-rate',
+          pinId: ratingWrite.pinId ?? null,
+          txids: ratingWrite.txids,
+          rate: String(request.rate),
+          comment: request.comment,
+          serviceId,
+          servicePaidTx,
+          serverBot,
+          serviceSkill: payload.serviceSkill,
+          traceJsonPath: nextArtifacts.traceJsonPath ?? nextTrace.artifacts.traceJsonPath,
+          traceMarkdownPath: nextArtifacts.traceMarkdownPath ?? nextTrace.artifacts.traceMarkdownPath,
+          transcriptMarkdownPath: nextArtifacts.transcriptMarkdownPath ?? nextTrace.artifacts.transcriptMarkdownPath,
+        });
+      },
       execute: async (rawInput) => {
         const state = await runtimeStateStore.readState();
         if (!state.identity) {
@@ -1915,13 +2167,45 @@ export function createDefaultMetabotDaemonHandlers(input: {
         );
       },
       watchTrace: async ({ traceId }) => {
-        const sessionState = await sessionStateStore.readState();
-        const events = buildTraceWatchEvents({
-          traceId,
-          sessions: sessionState.sessions,
-          snapshots: sessionState.publicStatusSnapshots,
-        });
-        return serializeTraceWatchEvents(events);
+        const normalizedTraceId = normalizeText(traceId);
+        if (!normalizedTraceId) {
+          return '';
+        }
+
+        const deadline = Date.now() + DEFAULT_TRACE_WATCH_WAIT_MS;
+        while (true) {
+          const sessionState = await sessionStateStore.readState();
+          const events = buildTraceWatchEvents({
+            traceId: normalizedTraceId,
+            sessions: sessionState.sessions,
+            snapshots: sessionState.publicStatusSnapshots,
+          });
+          if (events.length > 0) {
+            const serialized = serializeTraceWatchEvents(events);
+            if (events.at(-1)?.terminal || Date.now() >= deadline) {
+              return serialized;
+            }
+          } else {
+            const runtimeState = await runtimeStateStore.readState();
+            const traceExists = runtimeState.traces.some((entry) => entry.traceId === normalizedTraceId)
+              || sessionState.sessions.some((entry) => normalizeText(entry.traceId) === normalizedTraceId);
+            if (!traceExists || Date.now() >= deadline) {
+              return '';
+            }
+          }
+
+          const remainingMs = deadline - Date.now();
+          if (remainingMs <= 0) {
+            const finalState = await sessionStateStore.readState();
+            const finalEvents = buildTraceWatchEvents({
+              traceId: normalizedTraceId,
+              sessions: finalState.sessions,
+              snapshots: finalState.publicStatusSnapshots,
+            });
+            return serializeTraceWatchEvents(finalEvents);
+          }
+          await sleep(Math.min(TRACE_WATCH_POLL_INTERVAL_MS, remainingMs));
+        }
       },
     },
   };

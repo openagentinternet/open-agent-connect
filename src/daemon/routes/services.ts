@@ -46,5 +46,19 @@ export const handleServicesRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  if (url.pathname === '/api/services/rate') {
+    if (req.method !== 'POST') {
+      context.sendMethodNotAllowed(['POST']);
+      return true;
+    }
+
+    const input = await context.readJsonBody();
+    const result = handlers.services?.rate
+      ? await handlers.services.rate(input)
+      : commandFailed('not_implemented', 'Services rate handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
   return false;
 };
