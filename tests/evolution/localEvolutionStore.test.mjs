@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -140,4 +140,119 @@ test('local evolution store keeps deterministic, append-safe index updates and a
   assert.deepEqual(index.analyses, [analysis.analysisId]);
   assert.deepEqual(index.artifacts, [artifact.variantId, newerArtifact.variantId]);
   assert.equal(index.activeVariants['metabot-network-directory'], newerArtifact.variantId);
+});
+
+test('local evolution store rejects unsafe identifiers used for filesystem paths', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const store = createLocalEvolutionStore(homeDir);
+  const execution = createExecutionRecord();
+  const analysis = createAnalysisRecord();
+  const artifact = createArtifactRecord();
+
+  await assert.rejects(
+    store.writeExecution({
+      ...execution,
+      executionId: '../escape',
+    }),
+    /Invalid executionId/
+  );
+  await assert.rejects(
+    store.writeAnalysis({
+      ...analysis,
+      analysisId: 'nested/path',
+    }),
+    /Invalid analysisId/
+  );
+  await assert.rejects(
+    store.writeArtifact({
+      ...artifact,
+      variantId: '/tmp/evil',
+    }),
+    /Invalid variantId/
+  );
+});
+
+test('local evolution store serializes concurrent index updates to avoid lost writes', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const store = createLocalEvolutionStore(homeDir);
+
+  const executionWrites = Array.from({ length: 24 }, (_, index) => {
+    const execution = createExecutionRecord();
+    execution.executionId = `exec-${index + 1}`;
+    return store.writeExecution(execution);
+  });
+  const analysisWrites = Array.from({ length: 24 }, (_, index) => {
+    const analysis = createAnalysisRecord();
+    analysis.analysisId = `analysis-${index + 1}`;
+    analysis.executionId = `exec-${index + 1}`;
+    return store.writeAnalysis(analysis);
+  });
+  const artifactWrites = Array.from({ length: 24 }, (_, index) => {
+    const artifact = createArtifactRecord();
+    artifact.variantId = `variant-${index + 1}`;
+    artifact.lineage.lineageId = `lineage-${index + 1}`;
+    artifact.lineage.rootVariantId = `variant-${index + 1}`;
+    artifact.lineage.parentVariantId = index === 0 ? null : `variant-${index}`;
+    artifact.lineage.executionId = `exec-${index + 1}`;
+    artifact.lineage.analysisId = `analysis-${index + 1}`;
+    return store.writeArtifact(artifact);
+  });
+
+  await Promise.all([
+    ...executionWrites,
+    ...analysisWrites,
+    ...artifactWrites,
+    store.setActiveVariant('metabot-network-directory', 'variant-24'),
+    store.setActiveVariant('metabot-trace-inspector', 'variant-trace-1'),
+  ]);
+
+  const index = await store.readIndex();
+  const expectedExecutions = Array.from({ length: 24 }, (_, i) => `exec-${i + 1}`).sort();
+  const expectedAnalyses = Array.from({ length: 24 }, (_, i) => `analysis-${i + 1}`).sort();
+  const expectedArtifacts = Array.from({ length: 24 }, (_, i) => `variant-${i + 1}`).sort();
+
+  assert.deepEqual(index.executions, expectedExecutions);
+  assert.deepEqual(index.analyses, expectedAnalyses);
+  assert.deepEqual(index.artifacts, expectedArtifacts);
+  assert.equal(index.activeVariants['metabot-network-directory'], 'variant-24');
+  assert.equal(index.activeVariants['metabot-trace-inspector'], 'variant-trace-1');
+});
+
+test('local evolution store preserves unknown index fields during updates', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const store = createLocalEvolutionStore(homeDir);
+  await store.ensureLayout();
+  writeFileSync(
+    store.paths.evolutionIndexPath,
+    `${JSON.stringify({
+      schemaVersion: 1,
+      executions: ['existing-exec'],
+      analyses: [],
+      artifacts: [],
+      activeVariants: {},
+      futureState: {
+        compactedAt: 1_744_444_500_000,
+      },
+    })}\n`,
+    'utf8'
+  );
+
+  await store.writeExecution(createExecutionRecord());
+
+  const rawIndex = JSON.parse(readFileSync(store.paths.evolutionIndexPath, 'utf8'));
+  assert.deepEqual(rawIndex.futureState, {
+    compactedAt: 1_744_444_500_000,
+  });
+  assert.deepEqual(rawIndex.executions, ['exec-1', 'existing-exec']);
+});
+
+test('local evolution store recovers from malformed index.json without bricking writes', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const store = createLocalEvolutionStore(homeDir);
+  await store.ensureLayout();
+  writeFileSync(store.paths.evolutionIndexPath, '{"broken": ', 'utf8');
+
+  await assert.doesNotReject(store.writeExecution(createExecutionRecord()));
+  const index = await store.readIndex();
+  assert.deepEqual(index.executions, ['exec-1']);
 });

@@ -10,8 +10,20 @@ import type {
 } from './types';
 
 const EVOLUTION_SCHEMA_VERSION = 1 as const;
+const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z0-9._-]+$/;
+const KNOWN_INDEX_KEYS = new Set([
+  'schemaVersion',
+  'executions',
+  'analyses',
+  'artifacts',
+  'activeVariants',
+]);
 
-function createEmptyIndex(): SkillEvolutionIndex {
+let atomicWriteSequence = 0;
+
+type StoredSkillEvolutionIndex = SkillEvolutionIndex & Record<string, unknown>;
+
+function createEmptyIndex(): StoredSkillEvolutionIndex {
   return {
     schemaVersion: EVOLUTION_SCHEMA_VERSION,
     executions: [],
@@ -48,12 +60,20 @@ function normalizeActiveVariants(value: unknown): Record<string, string> {
   return Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right)));
 }
 
-function normalizeIndex(value: unknown): SkillEvolutionIndex {
+function normalizeIndex(value: unknown): StoredSkillEvolutionIndex {
   if (!isRecord(value)) {
     return createEmptyIndex();
   }
 
+  const preservedUnknownFields: Record<string, unknown> = {};
+  for (const [key, fieldValue] of Object.entries(value)) {
+    if (!KNOWN_INDEX_KEYS.has(key)) {
+      preservedUnknownFields[key] = fieldValue;
+    }
+  }
+
   return {
+    ...preservedUnknownFields,
     schemaVersion: EVOLUTION_SCHEMA_VERSION,
     executions: normalizeStringList(value.executions),
     analyses: normalizeStringList(value.analyses),
@@ -75,9 +95,27 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
   }
 }
 
+async function readIndexFile(filePath: string): Promise<unknown | null> {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    return JSON.parse(raw);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || error instanceof SyntaxError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function nextAtomicWriteSuffix(): string {
+  atomicWriteSequence += 1;
+  return `${process.pid}.${Date.now()}.${atomicWriteSequence}`;
+}
+
 async function writeJsonAtomic(filePath: string, value: unknown): Promise<string> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  const tempPath = `${filePath}.${nextAtomicWriteSuffix()}.tmp`;
   await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
   await fs.rename(tempPath, filePath);
   return filePath;
@@ -93,6 +131,19 @@ async function ensureEvolutionLayout(paths: MetabotPaths): Promise<void> {
   await fs.mkdir(paths.evolutionArtifactsRoot, { recursive: true });
 }
 
+function validateIdentifier(identifier: string, fieldName: string): string {
+  if (
+    !identifier
+    || identifier === '.'
+    || identifier === '..'
+    || path.isAbsolute(identifier)
+    || !SAFE_IDENTIFIER_PATTERN.test(identifier)
+  ) {
+    throw new Error(`Invalid ${fieldName}: ${identifier}`);
+  }
+  return identifier;
+}
+
 export interface LocalEvolutionStore {
   paths: MetabotPaths;
   ensureLayout(): Promise<MetabotPaths>;
@@ -105,15 +156,27 @@ export interface LocalEvolutionStore {
 
 export function createLocalEvolutionStore(homeDirOrPaths: string | MetabotPaths): LocalEvolutionStore {
   const paths = typeof homeDirOrPaths === 'string' ? resolveMetabotPaths(homeDirOrPaths) : homeDirOrPaths;
+  let updateQueue: Promise<void> = Promise.resolve();
+
+  function queueIndexUpdate<T>(task: () => Promise<T>): Promise<T> {
+    const run = updateQueue.then(task, task);
+    updateQueue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
 
   async function updateIndex(
-    updater: (current: SkillEvolutionIndex) => SkillEvolutionIndex
+    updater: (current: StoredSkillEvolutionIndex) => StoredSkillEvolutionIndex
   ): Promise<SkillEvolutionIndex> {
-    await ensureEvolutionLayout(paths);
-    const current = normalizeIndex(await readJsonFile<SkillEvolutionIndex>(paths.evolutionIndexPath));
-    const next = normalizeIndex(updater(current));
-    await writeJsonAtomic(paths.evolutionIndexPath, next);
-    return next;
+    return queueIndexUpdate(async () => {
+      await ensureEvolutionLayout(paths);
+      const current = normalizeIndex(await readIndexFile(paths.evolutionIndexPath));
+      const next = normalizeIndex(updater(current));
+      await writeJsonAtomic(paths.evolutionIndexPath, next);
+      return next;
+    });
   }
 
   return {
@@ -123,45 +186,51 @@ export function createLocalEvolutionStore(homeDirOrPaths: string | MetabotPaths)
       return paths;
     },
     async readIndex() {
+      await updateQueue;
       await ensureEvolutionLayout(paths);
-      return normalizeIndex(await readJsonFile<SkillEvolutionIndex>(paths.evolutionIndexPath));
+      return normalizeIndex(await readIndexFile(paths.evolutionIndexPath));
     },
     async writeExecution(record) {
       await ensureEvolutionLayout(paths);
-      const filePath = path.join(paths.evolutionExecutionsRoot, `${record.executionId}.json`);
+      const executionId = validateIdentifier(record.executionId, 'executionId');
+      const filePath = path.join(paths.evolutionExecutionsRoot, `${executionId}.json`);
       await writeJsonAtomic(filePath, record);
       await updateIndex((current) => ({
         ...current,
-        executions: addIdentifier(current.executions, record.executionId),
+        executions: addIdentifier(current.executions, executionId),
       }));
       return filePath;
     },
     async writeAnalysis(record) {
       await ensureEvolutionLayout(paths);
-      const filePath = path.join(paths.evolutionAnalysesRoot, `${record.analysisId}.json`);
+      const analysisId = validateIdentifier(record.analysisId, 'analysisId');
+      const filePath = path.join(paths.evolutionAnalysesRoot, `${analysisId}.json`);
       await writeJsonAtomic(filePath, record);
       await updateIndex((current) => ({
         ...current,
-        analyses: addIdentifier(current.analyses, record.analysisId),
+        analyses: addIdentifier(current.analyses, analysisId),
       }));
       return filePath;
     },
     async writeArtifact(record) {
       await ensureEvolutionLayout(paths);
-      const filePath = path.join(paths.evolutionArtifactsRoot, `${record.variantId}.json`);
+      const variantId = validateIdentifier(record.variantId, 'variantId');
+      const filePath = path.join(paths.evolutionArtifactsRoot, `${variantId}.json`);
       await writeJsonAtomic(filePath, record);
       await updateIndex((current) => ({
         ...current,
-        artifacts: addIdentifier(current.artifacts, record.variantId),
+        artifacts: addIdentifier(current.artifacts, variantId),
       }));
       return filePath;
     },
     async setActiveVariant(skillName, variantId) {
+      const safeSkillName = validateIdentifier(skillName, 'skillName');
+      const safeVariantId = validateIdentifier(variantId, 'variantId');
       return updateIndex((current) => ({
         ...current,
         activeVariants: normalizeActiveVariants({
           ...current.activeVariants,
-          [skillName]: variantId,
+          [safeSkillName]: safeVariantId,
         }),
       }));
     },
