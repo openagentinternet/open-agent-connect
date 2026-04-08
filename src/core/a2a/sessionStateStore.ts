@@ -106,6 +106,19 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
   }
 }
 
+async function readLockInfo(filePath: string): Promise<{ pid?: number; acquiredAt?: number } | null> {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    const parsed = JSON.parse(raw) as { pid?: unknown; acquiredAt?: unknown };
+    return {
+      pid: typeof parsed.pid === 'number' ? parsed.pid : undefined,
+      acquiredAt: typeof parsed.acquiredAt === 'number' ? parsed.acquiredAt : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function writeJsonFileAtomically(filePath: string, value: unknown): Promise<void> {
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   let handle: fs.FileHandle | null = null;
@@ -179,7 +192,7 @@ async function withLock<T>(lockPath: string, operation: () => Promise<T>): Promi
         throw error;
       }
       try {
-        const lockInfo = await readJsonFile<{ pid?: unknown; acquiredAt?: unknown }>(lockPath);
+        const lockInfo = await readLockInfo(lockPath);
         const stat = await fs.stat(lockPath);
         const lockPid = typeof lockInfo?.pid === 'number' ? lockInfo.pid : null;
         const acquiredAt =

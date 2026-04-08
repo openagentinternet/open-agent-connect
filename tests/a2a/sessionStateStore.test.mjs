@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -280,4 +280,54 @@ test('session state store treats invalid json as empty state instead of bricking
   assert.ok(
     readdirSync(path.dirname(store.sessionStatePath)).some(entry => entry.startsWith('a2a-session-state.json.corrupt-'))
   );
+});
+
+test('session state store recovers from a stale lock owned by a dead process', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-stale-lock-'));
+  const store = createSessionStateStore(homeDir);
+
+  await store.ensureLayout();
+  const lockPath = `${store.sessionStatePath}.lock`;
+  writeFileSync(lockPath, JSON.stringify({ pid: 999999, acquiredAt: Date.now() - (10 * 60 * 1000) }), 'utf8');
+  const staleTimestamp = (Date.now() - (10 * 60 * 1000)) / 1000;
+  utimesSync(lockPath, staleTimestamp, staleTimestamp);
+
+  await store.writeSession(createSessionRecord());
+
+  const state = await store.readState();
+  assert.equal(state.sessions.length, 1);
+  assert.equal(state.sessions[0].sessionId, 'session-1');
+});
+
+test('session state store caps transcript and public status history in hot storage', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-caps-'));
+  const store = createSessionStateStore(homeDir);
+
+  await store.appendTranscriptItems(
+    Array.from({ length: 2_005 }, (_, index) => ({
+      id: `tx-${index}`,
+      sessionId: 'session-1',
+      timestamp: 1_744_444_444_000 + index,
+      type: 'message',
+      sender: 'caller',
+      content: `message-${index}`,
+      metadata: null,
+    }))
+  );
+  await store.appendPublicStatusSnapshots(
+    Array.from({ length: 1_005 }, (_, index) => ({
+      sessionId: 'session-1',
+      taskRunId: 'run-1',
+      status: 'remote_executing',
+      mapped: true,
+      rawEvent: `provider_executing_${index}`,
+      resolvedAt: 1_744_444_445_000 + index,
+    }))
+  );
+
+  const state = await store.readState();
+  assert.equal(state.transcriptItems.length, 2_000);
+  assert.equal(state.transcriptItems[0].id, 'tx-5');
+  assert.equal(state.publicStatusSnapshots.length, 1_000);
+  assert.equal(state.publicStatusSnapshots[0].rawEvent, 'provider_executing_5');
 });
