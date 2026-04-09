@@ -9,6 +9,8 @@ import {
   createRuntimeStateStore,
   type RuntimeDaemonRecord,
 } from '../core/state/runtimeStateStore';
+import { createProviderHeartbeatLoop } from '../core/provider/providerHeartbeatLoop';
+import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
 import { createLocalMnemonicSigner } from '../core/signing/localMnemonicSigner';
 import { normalizeChainWriteRequest } from '../core/chain/writePin';
@@ -608,6 +610,22 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   }
 
   const runtimeStore = createRuntimeStateStore(paths);
+  const providerPresenceStore = createProviderPresenceStateStore(paths);
+  const providerHeartbeatLoop = createProviderHeartbeatLoop({
+    signer,
+    presenceStore: providerPresenceStore,
+    getIdentity: async () => {
+      const state = await runtimeStore.readState();
+      if (!state.identity) {
+        return null;
+      }
+
+      return {
+        globalMetaId: state.identity.globalMetaId,
+        mvcAddress: state.identity.mvcAddress,
+      };
+    },
+  });
   daemonRecord = await runtimeStore.writeDaemon({
     ownerId: daemon.ownerId,
     pid: process.pid,
@@ -617,11 +635,16 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     startedAt: Date.now(),
     configHash: buildDaemonConfigHash(context.env),
   });
+  const providerPresence = await providerPresenceStore.read();
+  if (providerPresence.enabled) {
+    await providerHeartbeatLoop.start();
+  }
 
   let shuttingDown = false;
   const shutdown = async (exitCode: number) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    providerHeartbeatLoop.stop();
     await runtimeStore.clearDaemon(process.pid);
     await daemon.close();
     process.exit(exitCode);

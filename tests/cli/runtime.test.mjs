@@ -9,6 +9,7 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { getDefaultDaemonPort } = require('../../dist/cli/runtime.js');
+const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 
 function parseLastJson(chunks) {
   return JSON.parse(chunks.join('').trim());
@@ -295,6 +296,38 @@ test('fresh daemon starts for the same home reuse the home-derived port', async 
 
   assert.equal(firstPort, secondPort);
   assert.equal(firstPort, String(getDefaultDaemonPort(homeDir)));
+});
+
+test('daemon start writes a provider heartbeat when provider presence is enabled', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  await stopDaemon(homeDir);
+  const presenceStore = createProviderPresenceStateStore(homeDir);
+  await presenceStore.write({
+    enabled: true,
+    lastHeartbeatAt: null,
+    lastHeartbeatPinId: null,
+    lastHeartbeatTxid: null,
+  });
+
+  const started = await runCommand(homeDir, ['daemon', 'start']);
+  assert.equal(started.exitCode, 0);
+  assert.equal(started.payload.ok, true);
+
+  let presenceState = await presenceStore.read();
+  for (let attempt = 0; attempt < 30 && !presenceState.lastHeartbeatPinId; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    presenceState = await presenceStore.read();
+  }
+
+  assert.equal(presenceState.enabled, true);
+  assert.match(presenceState.lastHeartbeatPinId, /^\/protocols\/metabot-heartbeat-pin-/);
+  assert.match(presenceState.lastHeartbeatTxid, /^\/protocols\/metabot-heartbeat-tx-/);
+  assert.equal(Number.isFinite(presenceState.lastHeartbeatAt), true);
 });
 
 test('ui open trace returns a local trace inspector url with the requested trace id', async (t) => {
