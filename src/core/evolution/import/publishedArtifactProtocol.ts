@@ -192,7 +192,10 @@ export function parseMetafilePinId(uri: string): string | null {
   if (typeof uri !== 'string' || !uri.startsWith(METAFILE_SCHEME)) {
     return null;
   }
-  const raw = uri.slice(METAFILE_SCHEME.length).trim();
+  const raw = uri.slice(METAFILE_SCHEME.length).trim().replace(/^\/+/, '');
+  if (raw.includes('/')) {
+    return null;
+  }
   return isSafeEvolutionIdentifier(raw) ? raw : null;
 }
 

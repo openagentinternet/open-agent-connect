@@ -49,6 +49,12 @@ function createRow(pinId, contentSummary) {
   };
 }
 
+function createMetadataWithout(fieldName) {
+  const metadata = createMetadata();
+  delete metadata[fieldName];
+  return metadata;
+}
+
 test('deriveResolvedScopeHash prefers scope metadata hash and falls back to stringified scope', () => {
   const resolvedWithHash = {
     scopeMetadata: {
@@ -122,7 +128,7 @@ test('search parses bounded metadata rows, filters valid matches, de-dupes, sort
       JSON.stringify(
         createMetadata({
           variantId: 'variant-b',
-          artifactUri: 'metafile://artifact-b.json',
+          artifactUri: 'metafile:///artifact-b.json',
           publishedAt: 200,
           triggerSource: 'soft_failure',
         })
@@ -161,11 +167,24 @@ test('search parses bounded metadata rows, filters valid matches, de-dupes, sort
       })
     ),
     createRow(
-      'pin-missing-required',
-      createMetadata({
-        variantId: 'variant-missing-required',
-        artifactUri: undefined,
-      })
+      'pin-missing-protocol-version',
+      createMetadataWithout('protocolVersion')
+    ),
+    createRow(
+      'pin-missing-variant-id',
+      createMetadataWithout('variantId')
+    ),
+    createRow(
+      'pin-missing-artifact-uri',
+      createMetadataWithout('artifactUri')
+    ),
+    createRow(
+      'pin-missing-lineage',
+      createMetadataWithout('lineage')
+    ),
+    createRow(
+      'pin-missing-published-at',
+      createMetadataWithout('publishedAt')
     ),
     createRow('pin-invalid-json', '{not-json'),
     {
@@ -297,5 +316,27 @@ test('search surfaces transport/page envelope failures as search-level errors', 
       },
     }),
     /chain_path_list_failed/
+  );
+});
+
+test('search surfaces invalid non-array page payload as wrapped search-level error', async () => {
+  const remoteStore = {
+    async readIndex() {
+      return {
+        schemaVersion: 1,
+        imports: [],
+        byVariantId: {},
+      };
+    },
+  };
+
+  await assert.rejects(
+    searchPublishedEvolutionArtifacts({
+      skillName: 'metabot-network-directory',
+      resolvedScopeHash: 'scope-hash-1',
+      remoteStore,
+      fetchMetadataRows: async () => ({ data: { list: [] } }),
+    }),
+    /evolution_search_fetch_failed:invalid_page_payload/
   );
 });
