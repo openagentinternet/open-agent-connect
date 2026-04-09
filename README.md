@@ -16,6 +16,7 @@ What works in this repo today:
 - post simplebuzz messages, with optional uploaded file attachments
 - write arbitrary MetaID tuples through the public chain-write interface
 - publish and list services
+- open a real local provider console for publish, service inventory, online state, and manual refund follow-up
 - read the chain-backed yellow-pages feed using `/protocols/skill-service` and `/protocols/metabot-heartbeat`
 - keep local `network sources` as a seeded fallback and demo transport hint
 - start remote delegation with `metabot services call`
@@ -118,6 +119,43 @@ EOF
 metabot buzz post --request-file buzz-request.json
 ```
 
+## Operate As A Provider
+
+Publish one local capability:
+
+```bash
+cat > service-payload.json <<'EOF'
+{
+  "serviceName": "tarot-rws-service",
+  "displayName": "Tarot Reading",
+  "description": "Reads one tarot card.",
+  "providerSkill": "tarot-rws",
+  "price": "0.00001",
+  "currency": "SPACE",
+  "outputType": "text",
+  "skillDocument": "# Tarot Reading"
+}
+EOF
+
+metabot services publish --payload-file service-payload.json
+metabot ui open --page publish
+```
+
+Use the local provider console for human-only actions:
+
+```bash
+metabot ui open --page my-services
+```
+
+From `My Services`, the human can:
+
+- review the current provider identity and online state
+- toggle provider presence on or off
+- inspect published services and seller-side order traces
+- open the refund page when a manual refund action is pending
+
+The refund page stays thin by design. It only confirms the exact pending refund and then hands state back to the same daemon, trace, and provider-summary contracts.
+
 ## See The Network
 
 Read the online directory as JSON:
@@ -216,6 +254,8 @@ metabot services call --request-file request.json
 metabot trace watch --trace-id trace-123
 metabot trace get --trace-id trace-123
 metabot ui open --page hub
+metabot ui open --page publish
+metabot ui open --page my-services
 ```
 
 ## Repository Layout

@@ -25,6 +25,9 @@ async function runCommand(homeDir, args) {
     ...process.env,
     HOME: homeDir,
     METABOT_HOME: homeDir,
+    METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+    METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
   };
 
   const exitCode = await runCli(args, {

@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { getDefaultDaemonPort } = require('../../dist/cli/runtime.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
+const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 
 function parseLastJson(chunks) {
   return JSON.parse(chunks.join('').trim());
@@ -206,6 +207,18 @@ async function writeDirectorySeeds(homeDir, providers) {
   await mkdir(path.dirname(seedsPath), { recursive: true });
   await writeFile(seedsPath, JSON.stringify({ providers }, null, 2), 'utf8');
   return seedsPath;
+}
+
+async function fetchJson(baseUrl, routePath, options = {}) {
+  const response = await fetch(`${baseUrl}${routePath}`, {
+    method: options.method ?? 'GET',
+    headers: options.body ? { 'content-type': 'application/json' } : undefined,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  return {
+    status: response.status,
+    payload: await response.json(),
+  };
 }
 
 test('identity create autostarts the local daemon and doctor reports the identity as loaded', async (t) => {
@@ -405,6 +418,113 @@ test('services publish persists a local directory entry that network services --
   assert.equal(listed.payload.data.services[0].displayName, 'Weather Oracle');
   assert.equal(listed.payload.data.services[0].online, true);
   assert.equal(listed.payload.data.services[0].providerGlobalMetaId, created.payload.data.globalMetaId);
+});
+
+test('provider closure runtime can publish, go online, receive a seller trace, and surface a manual refund queue item', async (t) => {
+  const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-closure-caller-'));
+  const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-closure-provider-'));
+  t.after(async () => stopDaemon(callerHome));
+  t.after(async () => stopDaemon(providerHome));
+
+  const providerIdentity = await runCommand(providerHome, ['identity', 'create', '--name', 'Tarot Provider']);
+  assert.equal(providerIdentity.exitCode, 0);
+
+  const publishFile = path.join(providerHome, 'provider-payload.json');
+  await writeFile(publishFile, JSON.stringify({
+    serviceName: 'tarot-rws-service',
+    displayName: 'Tarot Reading',
+    description: 'Reads one tarot card.',
+    providerSkill: 'tarot-rws',
+    price: '0.00001',
+    currency: 'SPACE',
+    outputType: 'text',
+    skillDocument: '# Tarot Reading',
+  }), 'utf8');
+
+  const published = await runCommand(providerHome, ['services', 'publish', '--payload-file', publishFile]);
+  assert.equal(published.exitCode, 0);
+  assert.equal(published.payload.ok, true);
+
+  const providerDaemon = await runCommand(providerHome, ['daemon', 'start']);
+  assert.equal(providerDaemon.exitCode, 0);
+  assert.equal(providerDaemon.payload.ok, true);
+
+  const presenceEnabled = await fetchJson(providerDaemon.payload.data.baseUrl, '/api/provider/presence', {
+    method: 'POST',
+    body: { enabled: true },
+  });
+  assert.equal(presenceEnabled.status, 200);
+  assert.equal(presenceEnabled.payload.ok, true);
+  assert.equal(presenceEnabled.payload.data.presence.enabled, true);
+
+  const listed = await runCommand(providerHome, ['network', 'services', '--online']);
+  assert.equal(listed.exitCode, 0);
+  assert.equal(listed.payload.ok, true);
+  assert.equal(listed.payload.data.services.length, 1);
+  assert.equal(listed.payload.data.services[0].servicePinId, published.payload.data.servicePinId);
+  assert.equal(listed.payload.data.services[0].online, true);
+
+  const callerIdentity = await runCommand(callerHome, ['identity', 'create', '--name', 'Caller Bot']);
+  assert.equal(callerIdentity.exitCode, 0);
+
+  const requestFile = path.join(callerHome, 'provider-closure-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: published.payload.data.servicePinId,
+      providerGlobalMetaId: providerIdentity.payload.data.globalMetaId,
+      providerDaemonBaseUrl: providerDaemon.payload.data.baseUrl,
+      userTask: 'Do one tarot reading',
+      taskContext: 'Acceptance coverage for provider console closure',
+    },
+  }), 'utf8');
+
+  const called = await runCommand(callerHome, ['services', 'call', '--request-file', requestFile]);
+  assert.equal(called.exitCode, 0);
+  assert.equal(called.payload.ok, true);
+
+  const providerTrace = await runCommand(providerHome, ['trace', 'get', '--trace-id', called.payload.data.traceId]);
+  assert.equal(providerTrace.exitCode, 0);
+  assert.equal(providerTrace.payload.ok, true);
+  assert.equal(providerTrace.payload.data.order.role, 'seller');
+  assert.equal(providerTrace.payload.data.order.serviceId, published.payload.data.servicePinId);
+
+  const runtimeStateStore = createRuntimeStateStore(providerHome);
+  const state = await runtimeStateStore.readState();
+  const traceId = called.payload.data.traceId;
+  const nextTraces = state.traces.map((entry) => {
+    if (entry.traceId !== traceId || !entry.order) {
+      return entry;
+    }
+    return {
+      ...entry,
+      order: {
+        ...entry.order,
+        status: 'refund_pending',
+        refundRequestPinId: 'refund-pin-acceptance-1',
+        coworkSessionId: 'seller-session-acceptance-1',
+      },
+      a2a: {
+        ...(entry.a2a ?? {}),
+        publicStatus: 'manual_action_required',
+        taskRunState: 'manual_action_required',
+      },
+    };
+  });
+  await runtimeStateStore.writeState({
+    ...state,
+    traces: nextTraces,
+  });
+
+  const summary = await fetchJson(providerDaemon.payload.data.baseUrl, '/api/provider/summary');
+  assert.equal(summary.status, 200);
+  assert.equal(summary.payload.ok, true);
+  assert.equal(summary.payload.data.presence.enabled, true);
+  assert.equal(summary.payload.data.services.length, 1);
+  assert.equal(summary.payload.data.recentOrders.length, 1);
+  assert.equal(summary.payload.data.recentOrders[0].traceId, traceId);
+  assert.equal(summary.payload.data.manualActions.length, 1);
+  assert.equal(summary.payload.data.manualActions[0].orderId, providerTrace.payload.data.order.id);
+  assert.equal(summary.payload.data.manualActions[0].refundRequestPinId, 'refund-pin-acceptance-1');
 });
 
 test('network services reads chain-backed online services without local directory seeds', async (t) => {
