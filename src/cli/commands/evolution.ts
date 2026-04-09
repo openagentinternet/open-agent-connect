@@ -57,5 +57,29 @@ export async function runEvolutionCommand(args: string[], context: CliRuntimeCon
     return handler({ skill });
   }
 
+  if (subcommand === 'search') {
+    const handler = context.dependencies.evolution?.search;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Evolution search handler is not configured.');
+    }
+    const skill = readFlagValue(args, '--skill');
+    if (!skill) {
+      return commandMissingFlag('--skill');
+    }
+    return handler({ skill });
+  }
+
+  if (subcommand === 'import') {
+    const handler = context.dependencies.evolution?.import;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Evolution import handler is not configured.');
+    }
+    const pinId = readFlagValue(args, '--pin-id');
+    if (!pinId) {
+      return commandMissingFlag('--pin-id');
+    }
+    return handler({ pinId });
+  }
+
   return commandUnknownSubcommand(`evolution ${args.join(' ')}`.trim());
 }

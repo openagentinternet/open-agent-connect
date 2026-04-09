@@ -7,6 +7,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
+const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
 const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretStore.js');
@@ -23,17 +24,19 @@ function createRuntimeEnv(homeDir, overrides = {}) {
   };
 }
 
-async function runEvolutionCli(homeDir, args, envOverrides = {}) {
+async function runEvolutionCli(homeDir, args, envOverrides = {}, dependencies = undefined) {
   const stdout = [];
   const exitCode = await runCli(args, {
     env: createRuntimeEnv(homeDir, envOverrides),
     cwd: homeDir,
     stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
     stderr: { write: () => true },
+    dependencies,
   });
 
   return {
     exitCode,
+    stdout: stdout.join(''),
     payload: JSON.parse(stdout.join('').trim()),
   };
 }
@@ -277,4 +280,129 @@ test('runCli publish returns evolution_network_disabled when the evolution netwo
   assert.equal(result.exitCode, 1);
   assert.equal(result.payload.ok, false);
   assert.equal(result.payload.code, 'evolution_network_disabled');
+});
+
+test('runCli supports `metabot evolution search --skill` and returns JSON-only command result output', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-search-'));
+  const result = await runEvolutionCli(
+    homeDir,
+    ['evolution', 'search', '--skill', 'metabot-network-directory'],
+    {},
+    {
+      evolution: {
+        search: async (input) => commandSuccess({
+          skillName: input.skill,
+          scopeHash: 'scope-hash-v1',
+          count: 0,
+          results: [],
+        }),
+      },
+    },
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.skillName, 'metabot-network-directory');
+  assert.equal(result.payload.data.count, 0);
+  assert.equal(result.stdout.trim().startsWith('{'), true);
+  assert.equal(result.stdout.includes('Unknown command:'), false);
+});
+
+test('runCli search requires --skill', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-search-'));
+  const result = await runEvolutionCli(
+    homeDir,
+    ['evolution', 'search'],
+    {},
+    {
+      evolution: {
+        search: async () => commandSuccess({}),
+      },
+    },
+  );
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.code, 'missing_flag');
+});
+
+test('runCli supports `metabot evolution import --pin-id`', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-import-'));
+  const expectedArtifactPath = path.join(homeDir, '.metabot', 'evolution', 'remote', 'artifacts', 'variant-1.json');
+  const expectedMetadataPath = path.join(homeDir, '.metabot', 'evolution', 'remote', 'artifacts', 'variant-1.meta.json');
+
+  const result = await runEvolutionCli(
+    homeDir,
+    ['evolution', 'import', '--pin-id', 'pin-1'],
+    {},
+    {
+      evolution: {
+        import: async (input) => commandSuccess({
+          pinId: input.pinId,
+          variantId: 'variant-1',
+          artifactPath: expectedArtifactPath,
+          metadataPath: expectedMetadataPath,
+        }),
+      },
+    },
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.pinId, 'pin-1');
+  assert.equal(result.payload.data.artifactPath, expectedArtifactPath);
+  assert.equal(result.payload.data.metadataPath, expectedMetadataPath);
+});
+
+test('runCli import requires --pin-id', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-import-'));
+  const result = await runEvolutionCli(
+    homeDir,
+    ['evolution', 'import'],
+    {},
+    {
+      evolution: {
+        import: async () => commandSuccess({}),
+      },
+    },
+  );
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.code, 'missing_flag');
+});
+
+test('runCli search/import return evolution_network_disabled when the evolution network is disabled', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-disabled-'));
+  const configStore = createConfigStore(homeDir);
+  const config = await configStore.read();
+  await configStore.set({
+    ...config,
+    evolution_network: {
+      ...config.evolution_network,
+      enabled: false,
+    },
+  });
+
+  const searchResult = await runEvolutionCli(homeDir, [
+    'evolution',
+    'search',
+    '--skill',
+    'metabot-network-directory',
+  ]);
+
+  assert.equal(searchResult.exitCode, 1);
+  assert.equal(searchResult.payload.ok, false);
+  assert.equal(searchResult.payload.code, 'evolution_network_disabled');
+
+  const importResult = await runEvolutionCli(homeDir, [
+    'evolution',
+    'import',
+    '--pin-id',
+    'pin-1',
+  ]);
+
+  assert.equal(importResult.exitCode, 1);
+  assert.equal(importResult.payload.ok, false);
+  assert.equal(importResult.payload.code, 'evolution_network_disabled');
 });

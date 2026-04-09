@@ -42,12 +42,111 @@ async function runCommand(homeDir, args, envOverrides = {}) {
 }
 
 async function startFakeChainApiServer() {
+  const evolutionMetadataPinId = 'evolution-metadata-pin-1';
+  const evolutionArtifactPinId = 'evolution-artifact-pin-1';
+  const evolutionScopeHash = JSON.stringify({
+    allowedCommands: [
+      'metabot network services --online',
+      'metabot ui open --page hub',
+    ],
+    chainRead: true,
+    chainWrite: false,
+    localUiOpen: true,
+    remoteDelegation: false,
+  });
+  const evolutionMetadata = {
+    protocolVersion: '1',
+    skillName: 'metabot-network-directory',
+    variantId: 'variant-remote-1',
+    artifactUri: `metafile://${evolutionArtifactPinId}`,
+    evolutionType: 'FIX',
+    triggerSource: 'hard_failure',
+    scopeHash: evolutionScopeHash,
+    sameSkill: true,
+    sameScope: true,
+    verificationPassed: true,
+    replayValid: true,
+    notWorseThanBase: true,
+    lineage: {
+      lineageId: 'lineage-remote-1',
+      parentVariantId: null,
+      rootVariantId: 'variant-remote-1',
+      executionId: 'execution-remote-1',
+      analysisId: 'analysis-remote-1',
+      createdAt: 1_760_000_000_000,
+    },
+    publisherGlobalMetaId: 'idqprovider',
+    artifactCreatedAt: 1_760_000_001_000,
+    artifactUpdatedAt: 1_760_000_002_000,
+    publishedAt: 1_760_000_003_000,
+  };
+  const evolutionArtifactBody = {
+    variantId: 'variant-remote-1',
+    skillName: 'metabot-network-directory',
+    scope: {
+      allowedCommands: [
+        'metabot network services --online',
+        'metabot ui open --page hub',
+      ],
+      chainRead: true,
+      chainWrite: false,
+      localUiOpen: true,
+      remoteDelegation: false,
+    },
+    metadata: {
+      sameSkill: true,
+      sameScope: true,
+      scopeHash: evolutionScopeHash,
+    },
+    patch: {
+      instructionsPatch: 'Prefer deterministic provider ordering when listing online services.',
+    },
+    lineage: {
+      lineageId: 'lineage-remote-1',
+      parentVariantId: null,
+      rootVariantId: 'variant-remote-1',
+      executionId: 'execution-remote-1',
+      analysisId: 'analysis-remote-1',
+      createdAt: 1_760_000_000_000,
+    },
+    verification: {
+      passed: true,
+      checkedAt: 1_760_000_004_000,
+      protocolCompatible: true,
+      replayValid: true,
+      notWorseThanBase: true,
+      notes: 'remote fixture verification',
+    },
+    createdAt: 1_760_000_001_000,
+    updatedAt: 1_760_000_002_000,
+  };
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const nowSec = Math.floor(Date.now() / 1000);
     let payload = null;
 
     if (url.pathname === '/pin/path/list') {
+      const pathFilter = url.searchParams.get('path');
+      if (pathFilter === '/protocols/metabot-evolution-artifact-v1') {
+        payload = {
+          data: {
+            list: [
+              {
+                id: evolutionMetadataPinId,
+                metaid: 'metaid-evolution-provider',
+                address: 'mvc-evolution-provider-address',
+                timestamp: nowSec,
+                status: 0,
+                operation: 'create',
+                path: '/protocols/metabot-evolution-artifact-v1',
+                contentSummary: evolutionMetadata,
+              },
+            ],
+            nextCursor: null,
+          },
+        };
+      } else {
       payload = {
         data: {
           list: [
@@ -78,6 +177,7 @@ async function startFakeChainApiServer() {
           nextCursor: null,
         },
       };
+      }
     } else if (url.pathname === '/address/pin/list/mvc-provider-address') {
       payload = {
         data: {
@@ -86,6 +186,19 @@ async function startFakeChainApiServer() {
               seenTime: nowSec - 30,
             },
           ],
+        },
+      };
+    } else if (url.pathname === `/pin/${evolutionMetadataPinId}`) {
+      payload = {
+        data: {
+          id: evolutionMetadataPinId,
+          contentSummary: evolutionMetadata,
+        },
+      };
+    } else if (url.pathname === `/content/${evolutionArtifactPinId}`) {
+      payload = {
+        data: {
+          content: JSON.stringify(evolutionArtifactBody),
         },
       };
     }
@@ -289,6 +402,55 @@ test('network services reads chain-backed online services without local director
   assert.equal(listed.payload.data.services[0].displayName, 'Weather Oracle');
   assert.equal(listed.payload.data.services[0].providerGlobalMetaId, 'idq1provider');
   assert.equal(listed.payload.data.services[0].online, true);
+});
+
+test('evolution search/import read published artifact metadata + body via chain API and write remote artifact files', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const chainApi = await startFakeChainApiServer();
+  t.after(async () => chainApi.close());
+
+  const searched = await runCommand(
+    homeDir,
+    ['evolution', 'search', '--skill', 'metabot-network-directory'],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '',
+      METABOT_TEST_FAKE_SUBSIDY: '',
+    }
+  );
+
+  assert.equal(searched.exitCode, 0);
+  assert.equal(searched.payload.ok, true);
+  assert.equal(searched.payload.data.skillName, 'metabot-network-directory');
+  assert.equal(searched.payload.data.count, 1);
+  assert.equal(searched.payload.data.results[0].pinId, 'evolution-metadata-pin-1');
+  assert.equal(searched.stdout.join('').trim().startsWith('{'), true);
+
+  const imported = await runCommand(
+    homeDir,
+    ['evolution', 'import', '--pin-id', 'evolution-metadata-pin-1'],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '',
+      METABOT_TEST_FAKE_SUBSIDY: '',
+    }
+  );
+
+  assert.equal(imported.exitCode, 0);
+  assert.equal(imported.payload.ok, true);
+  assert.equal(imported.payload.data.pinId, 'evolution-metadata-pin-1');
+  assert.equal(imported.payload.data.variantId, 'variant-remote-1');
+  assert.equal(imported.payload.data.artifactPath.includes(`${path.sep}.metabot${path.sep}evolution${path.sep}remote${path.sep}artifacts${path.sep}`), true);
+  assert.equal(imported.payload.data.metadataPath.includes(`${path.sep}.metabot${path.sep}evolution${path.sep}remote${path.sep}artifacts${path.sep}`), true);
+  assert.equal(imported.payload.data.artifactPath.endsWith(`${path.sep}variant-remote-1.json`), true);
+  assert.equal(imported.payload.data.metadataPath.endsWith(`${path.sep}variant-remote-1.meta.json`), true);
+
+  const artifactSaved = JSON.parse(await readFile(imported.payload.data.artifactPath, 'utf8'));
+  const metadataSaved = JSON.parse(await readFile(imported.payload.data.metadataPath, 'utf8'));
+  assert.equal(artifactSaved.variantId, 'variant-remote-1');
+  assert.equal(artifactSaved.skillName, 'metabot-network-directory');
+  assert.equal(metadataSaved.pinId, 'evolution-metadata-pin-1');
+  assert.equal(metadataSaved.variantId, 'variant-remote-1');
 });
 
 test('network services merges remote demo directory seeds and returns provider daemon base urls for agent-side invocation', async (t) => {

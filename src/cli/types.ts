@@ -55,6 +55,8 @@ export interface CliDependencies {
     adopt?: (input: { skill: string; variantId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     publish?: (input: { skill: string; variantId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     rollback?: (input: { skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    search?: (input: { skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    import?: (input: { pinId: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
 }
 

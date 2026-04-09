@@ -6,7 +6,11 @@ import { commandFailed, commandSuccess, type MetabotCommandResult } from '../cor
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
 import { createNetworkDirectoryEvolutionService } from '../core/evolution/service';
 import { createLocalEvolutionStore } from '../core/evolution/localEvolutionStore';
+import { createRemoteEvolutionStore } from '../core/evolution/remoteEvolutionStore';
 import { publishEvolutionArtifact } from '../core/evolution/publish/publishArtifact';
+import { createChainEvolutionReader } from '../core/evolution/import/chainEvolutionReader';
+import { importPublishedEvolutionArtifact } from '../core/evolution/import/importArtifact';
+import { deriveResolvedScopeHash, searchPublishedEvolutionArtifacts } from '../core/evolution/import/searchArtifacts';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { renderResolvedSkillContract } from '../core/skills/skillResolver';
 import type { SkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
@@ -43,6 +47,17 @@ type EvolutionPublishFailureCode =
   | 'evolution_variant_scope_hash_missing'
   | 'evolution_variant_not_verified'
   | 'evolution_publish_not_supported';
+
+type EvolutionImportFailureCode =
+  | 'evolution_import_metadata_invalid'
+  | 'evolution_import_pin_not_found'
+  | 'evolution_import_not_supported'
+  | 'evolution_import_scope_mismatch'
+  | 'evolution_import_variant_conflict'
+  | 'evolution_import_artifact_fetch_failed'
+  | 'evolution_import_artifact_invalid';
+
+const EVOLUTION_IMPORT_SKILL_NAME = 'metabot-network-directory';
 
 function normalizeBaseUrl(value: string | undefined): string {
   const trimmed = typeof value === 'string' ? value.trim() : '';
@@ -464,6 +479,24 @@ async function clearActiveVariantMapping(
   };
 }
 
+async function resolveEvolutionScopeHashForSkill(input: {
+  context: CliRuntimeContext;
+  skillName: string;
+  evolutionNetworkEnabled: boolean;
+}): Promise<string> {
+  const activeVariant = input.evolutionNetworkEnabled
+    ? await resolveActiveVariantForSkill(input.context, input.skillName)
+    : null;
+  const rendered = renderResolvedSkillContract({
+    skillName: input.skillName,
+    host: 'codex',
+    format: 'json',
+    evolutionNetworkEnabled: input.evolutionNetworkEnabled,
+    activeVariant,
+  });
+  return deriveResolvedScopeHash(rendered.contract);
+}
+
 function createTestChainWriteSigner(baseSigner: Signer): Signer {
   let writeCount = 0;
 
@@ -497,6 +530,16 @@ function isEvolutionPublishFailureCode(value: unknown): value is EvolutionPublis
     || value === 'evolution_variant_scope_hash_missing'
     || value === 'evolution_variant_not_verified'
     || value === 'evolution_publish_not_supported';
+}
+
+function isEvolutionImportFailureCode(value: unknown): value is EvolutionImportFailureCode {
+  return value === 'evolution_import_metadata_invalid'
+    || value === 'evolution_import_pin_not_found'
+    || value === 'evolution_import_not_supported'
+    || value === 'evolution_import_scope_mismatch'
+    || value === 'evolution_import_variant_conflict'
+    || value === 'evolution_import_artifact_fetch_failed'
+    || value === 'evolution_import_artifact_invalid';
 }
 
 function createCliSigner(context: CliRuntimeContext, homeDir: string): Signer {
@@ -737,6 +780,34 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           activeVariants: index.activeVariants,
         });
       },
+      search: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const configStore = createConfigStore(homeDir);
+        const config = await configStore.read();
+        if (!config.evolution_network.enabled) {
+          return commandFailed(
+            'evolution_network_disabled',
+            'Evolution network search is disabled.'
+          );
+        }
+
+        const resolvedScopeHash = await resolveEvolutionScopeHashForSkill({
+          context,
+          skillName: input.skill,
+          evolutionNetworkEnabled: config.evolution_network.enabled,
+        });
+        const remoteStore = createRemoteEvolutionStore(homeDir);
+        const chainReader = createChainEvolutionReader({
+          chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+        });
+        const results = await searchPublishedEvolutionArtifacts({
+          skillName: input.skill,
+          resolvedScopeHash,
+          remoteStore,
+          fetchMetadataRows: chainReader.fetchMetadataRows,
+        });
+        return commandSuccess(results);
+      },
       publish: async (input) => {
         const homeDir = normalizeHomeDir(context.env, context.cwd);
         const configStore = createConfigStore(homeDir);
@@ -781,6 +852,46 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
           const message = error instanceof Error ? error.message : String(error);
           if (isEvolutionPublishFailureCode(code)) {
+            return commandFailed(code, message);
+          }
+          throw error;
+        }
+      },
+      import: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const configStore = createConfigStore(homeDir);
+        const config = await configStore.read();
+        if (!config.evolution_network.enabled) {
+          return commandFailed(
+            'evolution_network_disabled',
+            'Evolution network import is disabled.'
+          );
+        }
+
+        const resolvedScopeHash = await resolveEvolutionScopeHashForSkill({
+          context,
+          skillName: EVOLUTION_IMPORT_SKILL_NAME,
+          evolutionNetworkEnabled: config.evolution_network.enabled,
+        });
+        const remoteStore = createRemoteEvolutionStore(homeDir);
+        const chainReader = createChainEvolutionReader({
+          chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+        });
+
+        try {
+          const imported = await importPublishedEvolutionArtifact({
+            pinId: input.pinId,
+            skillName: EVOLUTION_IMPORT_SKILL_NAME,
+            resolvedScopeHash,
+            remoteStore,
+            readMetadataPinById: chainReader.readMetadataPinById,
+            readArtifactBodyByUri: chainReader.readArtifactBodyByUri,
+          });
+          return commandSuccess(imported);
+        } catch (error) {
+          const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+          const message = error instanceof Error ? error.message : String(error);
+          if (isEvolutionImportFailureCode(code)) {
             return commandFailed(code, message);
           }
           throw error;
