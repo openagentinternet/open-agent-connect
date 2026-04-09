@@ -18,6 +18,29 @@ If you are installing from a source checkout outside the default layout, set `ME
 
 After installation, start a fresh OpenClaw session if the current session does not immediately pick up the new `metabot-*` skills.
 
+## Evolution Network M1 (Local Only)
+
+M1 enables local self-repair for `metabot-network-directory` only.
+
+- Total feature flag: `evolution_network.enabled`
+- Installed `metabot-network-directory` remains a stable host skill identity, but the installed copy is a runtime-resolve shim
+- The shim should resolve the live contract before execution:
+
+```bash
+metabot skills resolve --skill metabot-network-directory --host openclaw --format markdown
+```
+
+Useful M1 controls:
+
+```bash
+metabot config get evolution_network.enabled
+metabot config set evolution_network.enabled false
+metabot evolution status --skill metabot-network-directory
+metabot evolution rollback --skill metabot-network-directory
+```
+
+M1 does not include chain publication/search/import for evolution variants.
+
 ## Create The First MetaBot
 
 ```bash

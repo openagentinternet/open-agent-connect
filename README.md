@@ -32,6 +32,26 @@ What this repo is not trying to be:
 
 The CLI is machine-first. The local HTML pages are for human inspection only.
 
+## Evolution Network M1 (Local Only)
+
+M1 adds a local self-repair loop for one skill only: `metabot-network-directory`.
+
+- Scope in M1: local runtime contract resolution, local execution capture, local analysis records, local rollback/adopt controls
+- Feature gate: `evolution_network.enabled` (global on/off for this M1 surface)
+- Host packs keep stable installed skill identities; `metabot-network-directory` in host packs is a runtime-resolve shim, not the final static contract
+- M1 does **not** include chain publication, chain search, chain import, or cross-device sync for evolution variants
+
+Key commands:
+
+```bash
+metabot config get evolution_network.enabled
+metabot config set evolution_network.enabled false
+metabot skills resolve --skill metabot-network-directory --host codex --format markdown
+metabot skills resolve --skill metabot-network-directory --host codex --format json
+metabot evolution status --skill metabot-network-directory
+metabot evolution rollback --skill metabot-network-directory
+```
+
 ## Caller A2A Contract
 
 The current caller-side host flow is:
@@ -216,6 +236,9 @@ metabot services call --request-file request.json
 metabot trace watch --trace-id trace-123
 metabot trace get --trace-id trace-123
 metabot ui open --page hub
+metabot config get evolution_network.enabled
+metabot skills resolve --skill metabot-network-directory --host codex --format json
+metabot evolution status --skill metabot-network-directory
 ```
 
 ## Repository Layout
