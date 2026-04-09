@@ -133,6 +133,7 @@ Cover:
 - missing artifact fails with `evolution_variant_not_found`
 - `artifact.skillName !== --skill` fails with `evolution_variant_skill_mismatch`
 - missing linked analysis fails with `evolution_variant_analysis_mismatch`
+- malformed linked analysis required fields fail with `evolution_variant_analysis_mismatch`
 - linked analysis mismatch on `analysisId`, `skillName`, or `executionId` fails with `evolution_variant_analysis_mismatch`
 - missing or empty `scopeHash` fails with `evolution_variant_scope_hash_missing`
 - unverified artifact fails with `evolution_variant_not_verified`
@@ -352,7 +353,7 @@ node dist/cli/main.js evolution publish --skill metabot-network-directory --vari
 
 Expected:
 - `doctor` reports `daemon_reachable: true` and `identity_loaded: true`
-- publish returns a real hex-like `pinId` and `txid`
+- publish returns a real hex-like `pinId` and `txids`
 - result includes a `metafile://...` `artifactUri`
 - the returned `pinId` must not look like `/protocols/simplebuzz-pin-*` or any other fake-write fixture shape
 
