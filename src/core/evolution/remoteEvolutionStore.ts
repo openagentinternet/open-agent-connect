@@ -144,6 +144,19 @@ async function writeJsonAtomic(filePath: string, value: unknown): Promise<string
   return filePath;
 }
 
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+}
+
 async function ensureRemoteEvolutionLayout(paths: MetabotPaths): Promise<void> {
   await fs.mkdir(paths.evolutionRemoteArtifactsRoot, { recursive: true });
 }
@@ -222,16 +235,31 @@ export function createRemoteEvolutionStore(homeDirOrPaths: string | MetabotPaths
         await ensureRemoteEvolutionLayout(paths);
         const safeVariantId = validateSafeEvolutionIdentifier(artifact.variantId, 'variantId');
         if (sidecar.variantId !== safeVariantId) {
-          throw new Error(`Invalid variantId: ${sidecar.variantId}`);
+          throw new Error(
+            `Artifact variantId (${safeVariantId}) does not match sidecar variantId (${sidecar.variantId})`
+          );
+        }
+        if (sidecar.skillName !== artifact.skillName) {
+          throw new Error(
+            `Artifact skillName (${artifact.skillName}) does not match sidecar skillName (${sidecar.skillName})`
+          );
+        }
+        if (sidecar.scopeHash !== artifact.metadata.scopeHash) {
+          throw new Error(
+            `Artifact scopeHash (${artifact.metadata.scopeHash}) does not match sidecar scopeHash (${sidecar.scopeHash})`
+          );
+        }
+
+        const artifactPath = path.join(paths.evolutionRemoteArtifactsRoot, `${safeVariantId}.json`);
+        const metadataPath = path.join(paths.evolutionRemoteArtifactsRoot, `${safeVariantId}.meta.json`);
+        if (await pathExists(artifactPath) || await pathExists(metadataPath)) {
+          throw new Error(`Remote evolution artifact already imported for variantId: ${safeVariantId}`);
         }
 
         const currentIndex = await readIndexWithRepair();
         if (Object.prototype.hasOwnProperty.call(currentIndex.byVariantId, safeVariantId)) {
           throw new Error(`Remote evolution artifact already imported for variantId: ${safeVariantId}`);
         }
-
-        const artifactPath = path.join(paths.evolutionRemoteArtifactsRoot, `${safeVariantId}.json`);
-        const metadataPath = path.join(paths.evolutionRemoteArtifactsRoot, `${safeVariantId}.meta.json`);
 
         await writeJsonAtomic(artifactPath, artifact);
         await writeJsonAtomic(metadataPath, sidecar);

@@ -210,3 +210,97 @@ test('remote evolution store rejects filename-unsafe variant identifiers', async
   await assert.rejects(store.readArtifact('/tmp/escape'), /Invalid variantId/);
   await assert.rejects(store.readSidecar('nested/path'), /Invalid variantId/);
 });
+
+test('remote evolution store rejects duplicate imports when files exist but index is missing', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-remote-evolution-store-'));
+  const store = createRemoteEvolutionStore(homeDir);
+  const artifact = createArtifactRecord();
+  const sidecar = createSidecarRecord();
+  await store.ensureLayout();
+
+  const artifactPath = path.join(store.paths.evolutionRemoteArtifactsRoot, `${artifact.variantId}.json`);
+  const metadataPath = path.join(store.paths.evolutionRemoteArtifactsRoot, `${artifact.variantId}.meta.json`);
+  writeFileSync(artifactPath, `${JSON.stringify(artifact)}\n`, 'utf8');
+  writeFileSync(metadataPath, `${JSON.stringify(sidecar)}\n`, 'utf8');
+
+  await assert.rejects(
+    store.writeImport({
+      artifact: {
+        ...artifact,
+        patch: {
+          instructionsPatch: 'new overwrite attempt',
+        },
+      },
+      sidecar: {
+        ...sidecar,
+        pinId: 'pin-overwrite',
+      },
+    }),
+    /already imported/i
+  );
+
+  assert.deepEqual(JSON.parse(readFileSync(artifactPath, 'utf8')), artifact);
+  assert.deepEqual(JSON.parse(readFileSync(metadataPath, 'utf8')), sidecar);
+});
+
+test('remote evolution store rejects duplicate imports when files exist and index is corrupt', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-remote-evolution-store-'));
+  const store = createRemoteEvolutionStore(homeDir);
+  const artifact = createArtifactRecord();
+  const sidecar = createSidecarRecord();
+  await store.ensureLayout();
+
+  const artifactPath = path.join(store.paths.evolutionRemoteArtifactsRoot, `${artifact.variantId}.json`);
+  const metadataPath = path.join(store.paths.evolutionRemoteArtifactsRoot, `${artifact.variantId}.meta.json`);
+  writeFileSync(artifactPath, `${JSON.stringify(artifact)}\n`, 'utf8');
+  writeFileSync(metadataPath, `${JSON.stringify(sidecar)}\n`, 'utf8');
+  writeFileSync(store.paths.evolutionRemoteIndexPath, '{"broken": ', 'utf8');
+
+  await assert.rejects(
+    store.writeImport({
+      artifact,
+      sidecar,
+    }),
+    /already imported/i
+  );
+});
+
+test('remote evolution store explains artifact and sidecar mismatches before write', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-remote-evolution-store-'));
+  const store = createRemoteEvolutionStore(homeDir);
+  const artifact = createArtifactRecord();
+  const sidecar = createSidecarRecord();
+
+  await assert.rejects(
+    store.writeImport({
+      artifact,
+      sidecar: {
+        ...sidecar,
+        variantId: 'variant-other',
+      },
+    }),
+    /does not match sidecar variantId/
+  );
+
+  await assert.rejects(
+    store.writeImport({
+      artifact,
+      sidecar: {
+        ...sidecar,
+        skillName: 'metabot-trace-inspector',
+      },
+    }),
+    /does not match sidecar skillName/
+  );
+
+  await assert.rejects(
+    store.writeImport({
+      artifact,
+      sidecar: {
+        ...sidecar,
+        scopeHash: 'scope-hash-other',
+      },
+    }),
+    /does not match sidecar scopeHash/
+  );
+});
