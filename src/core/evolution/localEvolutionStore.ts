@@ -166,6 +166,8 @@ export interface LocalEvolutionStore {
   paths: MetabotPaths;
   ensureLayout(): Promise<MetabotPaths>;
   readIndex(): Promise<SkillEvolutionIndex>;
+  readArtifact(variantId: string): Promise<SkillVariantArtifact | null>;
+  readAnalysis(analysisId: string): Promise<SkillExecutionAnalysis | null>;
   writeExecution(record: SkillExecutionRecord): Promise<string>;
   writeAnalysis(record: SkillExecutionAnalysis): Promise<string>;
   writeArtifact(record: SkillVariantArtifact): Promise<string>;
@@ -199,6 +201,18 @@ export function createLocalEvolutionStore(homeDirOrPaths: string | MetabotPaths)
       await getIndexQueue(indexQueueKey);
       await ensureEvolutionLayout(paths);
       return normalizeIndex(await readIndexFile(paths.evolutionIndexPath));
+    },
+    async readArtifact(variantId) {
+      await ensureEvolutionLayout(paths);
+      const safeVariantId = validateIdentifier(variantId, 'variantId');
+      const filePath = path.join(paths.evolutionArtifactsRoot, `${safeVariantId}.json`);
+      return readJsonFile<SkillVariantArtifact>(filePath);
+    },
+    async readAnalysis(analysisId) {
+      await ensureEvolutionLayout(paths);
+      const safeAnalysisId = validateIdentifier(analysisId, 'analysisId');
+      const filePath = path.join(paths.evolutionAnalysesRoot, `${safeAnalysisId}.json`);
+      return readJsonFile<SkillExecutionAnalysis>(filePath);
     },
     async writeExecution(record) {
       await ensureEvolutionLayout(paths);

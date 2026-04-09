@@ -112,6 +112,21 @@ test('local evolution store persists execution, analysis, artifact, and index un
   assert.equal(indexFromFile.activeVariants['metabot-network-directory'], artifact.variantId);
 });
 
+test('local evolution store reads stored artifact and analysis records and returns null for missing records', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const store = createLocalEvolutionStore(homeDir);
+  const analysis = createAnalysisRecord();
+  const artifact = createArtifactRecord();
+
+  await store.writeAnalysis(analysis);
+  await store.writeArtifact(artifact);
+
+  assert.deepEqual(await store.readAnalysis(analysis.analysisId), analysis);
+  assert.deepEqual(await store.readArtifact(artifact.variantId), artifact);
+  assert.equal(await store.readAnalysis('analysis-missing'), null);
+  assert.equal(await store.readArtifact('variant-missing'), null);
+});
+
 test('local evolution store keeps deterministic, append-safe index updates and active mapping', async () => {
   const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
   const store = createLocalEvolutionStore(homeDir);
