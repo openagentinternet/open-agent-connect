@@ -2,6 +2,7 @@ import type {
   SkillExecutionAnalysis,
   SkillVariantArtifact,
 } from '../types';
+import { EVOLUTION_ARTIFACT_PROTOCOL_VERSION } from '../import/publishedArtifactProtocol';
 
 export const EVOLUTION_ARTIFACT_PROTOCOL_PATH = '/protocols/metabot-evolution-artifact-v1';
 
@@ -31,7 +32,7 @@ export function buildEvolutionArtifactMetadataPayload(input: EvolutionArtifactMe
   const { artifact, analysis, artifactUri, publisherGlobalMetaId, publishedAt } = input;
 
   return {
-    protocolVersion: '1',
+    protocolVersion: EVOLUTION_ARTIFACT_PROTOCOL_VERSION,
     skillName: artifact.skillName,
     variantId: artifact.variantId,
     artifactUri,
