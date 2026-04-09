@@ -14,6 +14,9 @@ export interface MetabotPaths {
   evolutionAnalysesRoot: string;
   evolutionArtifactsRoot: string;
   evolutionIndexPath: string;
+  evolutionRemoteRoot: string;
+  evolutionRemoteArtifactsRoot: string;
+  evolutionRemoteIndexPath: string;
 }
 
 export function resolveMetabotPaths(homeDir: string): MetabotPaths {
@@ -30,6 +33,9 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
   const evolutionAnalysesRoot = path.join(evolutionRoot, 'analyses');
   const evolutionArtifactsRoot = path.join(evolutionRoot, 'artifacts');
   const evolutionIndexPath = path.join(evolutionRoot, 'index.json');
+  const evolutionRemoteRoot = path.join(evolutionRoot, 'remote');
+  const evolutionRemoteArtifactsRoot = path.join(evolutionRemoteRoot, 'artifacts');
+  const evolutionRemoteIndexPath = path.join(evolutionRemoteRoot, 'index.json');
 
   return {
     baseRoot,
@@ -44,6 +50,9 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     evolutionExecutionsRoot,
     evolutionAnalysesRoot,
     evolutionArtifactsRoot,
-    evolutionIndexPath
+    evolutionIndexPath,
+    evolutionRemoteRoot,
+    evolutionRemoteArtifactsRoot,
+    evolutionRemoteIndexPath
   };
 }

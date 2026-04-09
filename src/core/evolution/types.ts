@@ -72,3 +72,41 @@ export interface SkillEvolutionIndex {
   artifacts: string[];
   activeVariants: Record<string, string>;
 }
+
+export interface ImportedRemoteArtifactSidecar {
+  pinId: string;
+  variantId: string;
+  publisherGlobalMetaId: string;
+  artifactUri: string;
+  skillName: string;
+  scopeHash: string;
+  publishedAt: number;
+  importedAt: number;
+}
+
+export interface RemoteEvolutionIndexRow {
+  variantId: string;
+  pinId: string;
+}
+
+export interface RemoteEvolutionIndex {
+  schemaVersion: 1;
+  imports: string[];
+  byVariantId: Record<string, RemoteEvolutionIndexRow>;
+}
+
+export interface PublishedEvolutionSearchResultSummaryRow {
+  pinId: string;
+  variantId: string;
+  skillName: string;
+  artifactUri: string;
+  publisherGlobalMetaId: string;
+  publishedAt: number;
+  scopeHash: string;
+  triggerSource: SkillExecutionTriggerSource;
+  verificationPassed: boolean;
+  replayValid: boolean;
+  notWorseThanBase: boolean;
+  alreadyImported: boolean;
+  importedPinId: string | null;
+}
