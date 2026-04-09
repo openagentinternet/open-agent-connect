@@ -17,6 +17,8 @@ import {
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 import { buildPublishedService } from '../core/services/publishService';
 import { publishServiceToChain } from '../core/services/servicePublishChain';
+import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
+import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { planRemoteCall } from '../core/delegation/remoteCall';
 import { buildSessionTrace } from '../core/chat/sessionTrace';
 import type { SessionTraceRecord } from '../core/chat/sessionTrace';
@@ -123,6 +125,32 @@ function readStringArray(value: unknown): string[] {
     .filter((entry): entry is string => typeof entry === 'string')
     .map((entry) => normalizeText(entry))
     .filter(Boolean);
+}
+
+function buildProviderSummaryPayload(input: {
+  state: RuntimeState;
+  presence: Awaited<ReturnType<ReturnType<typeof createProviderPresenceStateStore>['read']>>;
+}) {
+  const snapshot = buildProviderConsoleSnapshot({
+    services: input.state.services,
+    traces: input.state.traces as unknown as ProviderConsoleTraceRecord[],
+  });
+
+  return {
+    identity: input.state.identity
+      ? {
+          metabotId: input.state.identity.metabotId,
+          name: input.state.identity.name,
+          globalMetaId: input.state.identity.globalMetaId,
+          mvcAddress: input.state.identity.mvcAddress,
+        }
+      : null,
+    presence: input.presence,
+    services: snapshot.services,
+    recentOrders: snapshot.recentOrders,
+    manualActions: snapshot.manualActions,
+    totals: snapshot.totals,
+  };
 }
 
 function readCallRequest(rawInput: Record<string, unknown>) {
@@ -993,6 +1021,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   chainApiBaseUrl?: string;
   fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
   callerReplyWaiter?: MetaWebServiceReplyWaiter;
+  onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   requestMvcGasSubsidy?: (
     options: RequestMvcGasSubsidyOptions
   ) => Promise<RequestMvcGasSubsidyResult>;
@@ -1000,6 +1029,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   const signer = input.signer ?? createLocalMnemonicSigner({ secretStore });
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
+  const providerPresenceStore = createProviderPresenceStateStore(input.homeDir);
   const sessionStateStore = createSessionStateStore(input.homeDir);
   const sessionEngine = createA2ASessionEngine();
   const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey ?? fetchPeerChatPublicKey;
@@ -1252,6 +1282,89 @@ export function createDefaultMetabotDaemonHandlers(input: {
           removed,
           baseUrl: normalizedBaseUrl,
           totalSources: nextSources.length,
+        });
+      },
+    },
+    provider: {
+      getSummary: async () => {
+        const state = await runtimeStateStore.readState();
+        const presence = await providerPresenceStore.read();
+        return commandSuccess(buildProviderSummaryPayload({
+          state,
+          presence,
+        }));
+      },
+      setPresence: async ({ enabled }) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before changing provider presence.');
+        }
+
+        const presence = await providerPresenceStore.update((current) => ({
+          ...current,
+          enabled,
+        }));
+        await input.onProviderPresenceChanged?.(enabled);
+
+        return commandSuccess({
+          identity: {
+            metabotId: state.identity.metabotId,
+            name: state.identity.name,
+            globalMetaId: state.identity.globalMetaId,
+          },
+          presence,
+        });
+      },
+      confirmRefund: async ({ orderId }) => {
+        const normalizedOrderId = normalizeText(orderId);
+        if (!normalizedOrderId) {
+          return commandFailed('invalid_refund_confirmation', 'Refund confirmation requires an orderId.');
+        }
+
+        const state = await runtimeStateStore.readState();
+        const traceIndex = state.traces.findIndex((entry) => {
+          const traceRecord = entry as unknown as Record<string, unknown>;
+          const order = readObject(traceRecord.order);
+          return normalizeText(order?.id) === normalizedOrderId
+            && normalizeText(order?.role) === 'seller';
+        });
+        if (traceIndex < 0) {
+          return commandFailed('order_not_found', `Provider order was not found: ${normalizedOrderId}`);
+        }
+
+        const currentTrace = state.traces[traceIndex] as unknown as Record<string, unknown>;
+        const currentOrder = readObject(currentTrace.order);
+        if (
+          !currentOrder
+          || normalizeText(currentOrder.status) !== 'refund_pending'
+          || !normalizeText(currentOrder.refundRequestPinId)
+        ) {
+          return commandFailed('refund_not_required', 'Manual refund is not required.');
+        }
+
+        const now = Date.now();
+        const nextTrace = {
+          ...currentTrace,
+          order: {
+            ...currentOrder,
+            status: 'refunded',
+            refundConfirmedAt: now,
+            refundedAt: now,
+          },
+        } as unknown as SessionTraceRecord;
+
+        await runtimeStateStore.writeState({
+          ...state,
+          traces: [
+            nextTrace,
+            ...state.traces.filter((entry, index) => index !== traceIndex),
+          ],
+        });
+
+        return commandSuccess({
+          orderId: normalizedOrderId,
+          traceId: normalizeText(currentTrace.traceId),
+          state: 'refunded',
         });
       },
     },

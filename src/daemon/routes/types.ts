@@ -25,6 +25,11 @@ export interface MetabotDaemonHttpHandlers {
     addSource?: (input: { baseUrl: string; label?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     removeSource?: (input: { baseUrl: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  provider?: {
+    getSummary?: () => Awaitable<MetabotCommandResult<unknown>>;
+    setPresence?: (input: { enabled: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    confirmRefund?: (input: { orderId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   services?: {
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     call?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
