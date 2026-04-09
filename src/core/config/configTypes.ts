@@ -13,7 +13,7 @@ export function createDefaultConfig(): MetabotConfig {
     evolution_network: {
       enabled: true,
       autoAdoptSameSkillSameScope: false,
-      autoRecordExecutions: false
+      autoRecordExecutions: true
     }
   };
 }

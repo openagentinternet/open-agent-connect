@@ -29,6 +29,7 @@ test('createConfigStore defaults to evolution_network enabled true and persists 
     const store = createConfigStore();
     const defaults = await store.read();
     assert.strictEqual(defaults.evolution_network.enabled, true);
+    assert.strictEqual(defaults.evolution_network.autoRecordExecutions, true);
 
     const updated = {
       evolution_network: {
@@ -60,7 +61,7 @@ test('read merges defaults when config fields are missing', async () => {
       evolution_network: {
         enabled: false,
         autoAdoptSameSkillSameScope: false,
-        autoRecordExecutions: false
+        autoRecordExecutions: true
       }
     });
   });
@@ -84,7 +85,7 @@ test('read ignores non-boolean config values and falls back to defaults', async 
       evolution_network: {
         enabled: true,
         autoAdoptSameSkillSameScope: false,
-        autoRecordExecutions: false
+        autoRecordExecutions: true
       }
     });
   });

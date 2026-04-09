@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -213,6 +213,52 @@ test('runCli records execution and analysis when network-services evolution is e
   assert.equal(analysis.skillName, 'metabot-network-directory');
   assert.equal(analysis.triggerSource, 'hard_failure');
   assert.equal(analysis.shouldGenerateCandidate, true);
+});
+
+test('runCli records execution bookkeeping for default evolution config on success', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-network-evolution-default-'));
+  const stdout = [];
+
+  const exitCode = await runCli(['network', 'services', '--online'], {
+    env: createRuntimeEnv(homeDir),
+    cwd: homeDir,
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      network: {
+        listServices: async () => commandSuccess({
+          services: [
+            {
+              servicePinId: 'service-weather',
+              providerGlobalMetaId: 'provider-123',
+              online: true,
+            },
+          ],
+        }),
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const evolutionRoot = path.join(homeDir, '.metabot', 'evolution');
+  const indexPath = path.join(evolutionRoot, 'index.json');
+  assert.equal(existsSync(indexPath), true);
+
+  const index = readJson(indexPath);
+  assert.equal(index.executions.length, 1);
+  assert.equal(index.analyses.length, 0);
+  assert.equal(index.artifacts.length, 0);
+
+  const executionDir = path.join(evolutionRoot, 'executions');
+  const executionFiles = readdirSync(executionDir);
+  assert.equal(executionFiles.length, 1);
+  const execution = readJson(path.join(executionDir, executionFiles[0]));
+  assert.equal(execution.commandTemplate, 'metabot network services --online');
+  assert.equal(execution.envelope.data.services[0].servicePinId, 'service-weather');
+
+  assert.deepEqual(readdirSync(path.join(evolutionRoot, 'analyses')), []);
+  assert.deepEqual(readdirSync(path.join(evolutionRoot, 'artifacts')), []);
 });
 
 test('runCli writes no evolution side effects when network-services evolution is disabled', async () => {
