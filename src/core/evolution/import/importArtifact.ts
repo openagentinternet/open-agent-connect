@@ -43,6 +43,35 @@ function normalizeArtifactBody(rawBody: unknown): unknown {
   return JSON.parse(rawBody) as unknown;
 }
 
+function hasImportableVerificationTuple(metadata: NonNullable<ReturnType<typeof parsePublishedArtifactMetadata>>): boolean {
+  return (
+    metadata.verificationPassed === true
+    && metadata.replayValid === true
+    && metadata.notWorseThanBase === true
+  );
+}
+
+function doesArtifactMatchMetadata(input: {
+  artifact: NonNullable<ReturnType<typeof validateShareableArtifactBody>>;
+  metadata: NonNullable<ReturnType<typeof parsePublishedArtifactMetadata>>;
+}): boolean {
+  const { artifact, metadata } = input;
+  return (
+    artifact.variantId === metadata.variantId
+    && artifact.skillName === metadata.skillName
+    && artifact.metadata.scopeHash === metadata.scopeHash
+    && artifact.lineage.lineageId === metadata.lineage.lineageId
+    && artifact.lineage.parentVariantId === metadata.lineage.parentVariantId
+    && artifact.lineage.rootVariantId === metadata.lineage.rootVariantId
+    && artifact.lineage.executionId === metadata.lineage.executionId
+    && artifact.lineage.analysisId === metadata.lineage.analysisId
+    && artifact.lineage.createdAt === metadata.lineage.createdAt
+    && artifact.verification.passed === metadata.verificationPassed
+    && artifact.verification.replayValid === metadata.replayValid
+    && artifact.verification.notWorseThanBase === metadata.notWorseThanBase
+  );
+}
+
 export async function importPublishedEvolutionArtifact(input: {
   pinId: string;
   skillName: string;
@@ -88,6 +117,13 @@ export async function importPublishedEvolutionArtifact(input: {
     );
   }
 
+  if (!hasImportableVerificationTuple(metadata)) {
+    throw createImportError(
+      'evolution_import_metadata_invalid',
+      `Metadata pin "${input.pinId}" is missing required verification guarantees`
+    );
+  }
+
   if (metadata.scopeHash !== input.resolvedScopeHash) {
     throw createImportError(
       'evolution_import_scope_mismatch',
@@ -123,11 +159,7 @@ export async function importPublishedEvolutionArtifact(input: {
     );
   }
 
-  if (
-    artifact.variantId !== metadata.variantId
-    || artifact.skillName !== metadata.skillName
-    || artifact.metadata.scopeHash !== metadata.scopeHash
-  ) {
+  if (!doesArtifactMatchMetadata({ artifact, metadata })) {
     throw createImportError(
       'evolution_import_artifact_invalid',
       'Artifact body does not match metadata fields'

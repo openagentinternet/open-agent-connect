@@ -165,27 +165,37 @@ test('successful import by pinId writes artifact + sidecar + index entry', async
 });
 
 test('unsupported skillName returns evolution_import_not_supported', async () => {
-  await assert.rejects(
-    importPublishedEvolutionArtifact({
-      pinId: 'pin-import-unsupported',
+  const unsupportedMetadataCases = [
+    createMetadata({
       skillName: 'metabot-trace-inspector',
-      resolvedScopeHash: 'scope-hash-import-1',
-      remoteStore: {
-        async readIndex() {
-          return { schemaVersion: 1, imports: [], byVariantId: {} };
-        },
-      },
-      async readMetadataPinById() {
-        return createMetadata({
-          skillName: 'metabot-trace-inspector',
-        });
-      },
-      async readArtifactBodyByUri() {
-        throw new Error('should not fetch artifact for unsupported skill');
-      },
     }),
-    (error) => assertImportError(error, 'evolution_import_not_supported')
-  );
+    createMetadata({
+      skillName: 'metabot-trace-inspector',
+      verificationPassed: false,
+    }),
+  ];
+
+  for (const metadata of unsupportedMetadataCases) {
+    await assert.rejects(
+      importPublishedEvolutionArtifact({
+        pinId: 'pin-import-unsupported',
+        skillName: 'metabot-trace-inspector',
+        resolvedScopeHash: 'scope-hash-import-1',
+        remoteStore: {
+          async readIndex() {
+            return { schemaVersion: 1, imports: [], byVariantId: {} };
+          },
+        },
+        async readMetadataPinById() {
+          return metadata;
+        },
+        async readArtifactBodyByUri() {
+          throw new Error('should not fetch artifact for unsupported skill');
+        },
+      }),
+      (error) => assertImportError(error, 'evolution_import_not_supported')
+    );
+  }
 });
 
 test('scope mismatch returns evolution_import_scope_mismatch', async () => {
@@ -212,28 +222,44 @@ test('scope mismatch returns evolution_import_scope_mismatch', async () => {
   );
 });
 
-test('malformed metadata returns evolution_import_metadata_invalid', async () => {
-  await assert.rejects(
-    importPublishedEvolutionArtifact({
-      pinId: 'pin-import-bad-metadata',
-      skillName: 'metabot-network-directory',
-      resolvedScopeHash: 'scope-hash-import-1',
-      remoteStore: {
-        async readIndex() {
-          return { schemaVersion: 1, imports: [], byVariantId: {} };
-        },
-      },
-      async readMetadataPinById() {
-        const malformed = createMetadata();
-        delete malformed.protocolVersion;
-        return malformed;
-      },
-      async readArtifactBodyByUri() {
-        throw new Error('should not fetch artifact when metadata is invalid');
-      },
+test('malformed or protocol-invalid metadata returns evolution_import_metadata_invalid', async () => {
+  const invalidMetadataCases = [
+    (() => {
+      const malformed = createMetadata();
+      delete malformed.protocolVersion;
+      return malformed;
+    })(),
+    createMetadata({
+      verificationPassed: false,
     }),
-    (error) => assertImportError(error, 'evolution_import_metadata_invalid')
-  );
+    createMetadata({
+      verificationPassed: true,
+      replayValid: false,
+      notWorseThanBase: false,
+    }),
+  ];
+
+  for (const metadata of invalidMetadataCases) {
+    await assert.rejects(
+      importPublishedEvolutionArtifact({
+        pinId: 'pin-import-bad-metadata',
+        skillName: 'metabot-network-directory',
+        resolvedScopeHash: 'scope-hash-import-1',
+        remoteStore: {
+          async readIndex() {
+            return { schemaVersion: 1, imports: [], byVariantId: {} };
+          },
+        },
+        async readMetadataPinById() {
+          return metadata;
+        },
+        async readArtifactBodyByUri() {
+          throw new Error('should not fetch artifact when metadata is invalid');
+        },
+      }),
+      (error) => assertImportError(error, 'evolution_import_metadata_invalid')
+    );
+  }
 });
 
 test('missing pin returns evolution_import_pin_not_found', async () => {
@@ -321,6 +347,88 @@ test('metadata/body mismatch returns evolution_import_artifact_invalid', async (
     }),
     (error) => assertImportError(error, 'evolution_import_artifact_invalid')
   );
+});
+
+test('metadata/body lineage or verification mismatch returns evolution_import_artifact_invalid', async () => {
+  const metadata = createMetadata();
+  const mismatchedBodies = [
+    createArtifactBody({
+      lineage: {
+        ...createArtifactBody().lineage,
+        lineageId: 'lineage-import-other',
+      },
+    }),
+    createArtifactBody({
+      lineage: {
+        ...createArtifactBody().lineage,
+        parentVariantId: 'variant-parent-other',
+      },
+    }),
+    createArtifactBody({
+      lineage: {
+        ...createArtifactBody().lineage,
+        rootVariantId: 'variant-root-other',
+      },
+    }),
+    createArtifactBody({
+      lineage: {
+        ...createArtifactBody().lineage,
+        executionId: 'exec-import-other',
+      },
+    }),
+    createArtifactBody({
+      lineage: {
+        ...createArtifactBody().lineage,
+        analysisId: 'analysis-import-other',
+      },
+    }),
+    createArtifactBody({
+      lineage: {
+        ...createArtifactBody().lineage,
+        createdAt: 1_760_001_999_999,
+      },
+    }),
+    createArtifactBody({
+      verification: {
+        ...createArtifactBody().verification,
+        passed: false,
+      },
+    }),
+    createArtifactBody({
+      verification: {
+        ...createArtifactBody().verification,
+        replayValid: false,
+      },
+    }),
+    createArtifactBody({
+      verification: {
+        ...createArtifactBody().verification,
+        notWorseThanBase: false,
+      },
+    }),
+  ];
+
+  for (const body of mismatchedBodies) {
+    await assert.rejects(
+      importPublishedEvolutionArtifact({
+        pinId: 'pin-import-body-verification-mismatch',
+        skillName: 'metabot-network-directory',
+        resolvedScopeHash: metadata.scopeHash,
+        remoteStore: {
+          async readIndex() {
+            return { schemaVersion: 1, imports: [], byVariantId: {} };
+          },
+        },
+        async readMetadataPinById() {
+          return metadata;
+        },
+        async readArtifactBodyByUri() {
+          return body;
+        },
+      }),
+      (error) => assertImportError(error, 'evolution_import_artifact_invalid')
+    );
+  }
 });
 
 test('duplicate local variantId returns evolution_import_variant_conflict', async () => {
