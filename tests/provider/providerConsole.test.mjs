@@ -108,3 +108,28 @@ test('buildProviderConsoleSnapshot surfaces refund_pending seller traces as manu
     sessionId: 'seller-session-1',
   });
 });
+
+test('buildProviderConsoleSnapshot drops manual refund work once the seller trace is already refunded', () => {
+  const snapshot = buildProviderConsoleSnapshot({
+    services: [],
+    traces: [
+      createSellerTrace({
+        traceId: 'trace-provider-refund-complete',
+        order: {
+          id: 'order-refund-2',
+          role: 'seller',
+          status: 'refunded',
+          serviceId: 'service-pin-1',
+          serviceName: 'Tarot Reading',
+          paymentTxid: 'c'.repeat(64),
+          paymentCurrency: 'SPACE',
+          paymentAmount: '0.00001',
+          refundRequestPinId: 'refund-pin-2',
+          coworkSessionId: 'seller-session-2',
+        },
+      }),
+    ],
+  });
+
+  assert.deepEqual(snapshot.manualActions, []);
+});

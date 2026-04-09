@@ -715,3 +715,21 @@ test('GET /ui/my-services serves the built-in provider console wired to provider
   assert.match(html, /\/api\/provider\/presence/);
   assert.match(html, /Manual actions/i);
 });
+
+test('GET /ui/refund renders the provider refund interruption with exact identifiers and one confirm action', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/refund?orderId=order-refund-1`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /Manual Refund Confirmation/);
+  assert.match(html, /data-refund-order-id/);
+  assert.match(html, /data-refund-request-pin/);
+  assert.match(html, /data-refund-trace-link/);
+  assert.match(html, /data-refund-confirm/);
+  assert.match(html, /\/api\/provider\/summary/);
+  assert.match(html, /\/api\/provider\/refund\/confirm/);
+});

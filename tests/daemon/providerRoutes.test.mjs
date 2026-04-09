@@ -242,4 +242,6 @@ test('POST /api/provider/refund/confirm clears the manual refund queue for the m
 
   const state = await app.runtimeStateStore.readState();
   assert.equal(state.traces[0].order.status, 'refunded');
+  assert.equal(typeof state.traces[0].order.refundConfirmedAt, 'number');
+  assert.equal(typeof state.traces[0].order.refundedAt, 'number');
 });

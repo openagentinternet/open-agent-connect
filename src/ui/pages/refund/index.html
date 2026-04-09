@@ -4,6 +4,161 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>__PAGE_TITLE__</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f3ec;
+        --panel: #fffdf7;
+        --ink: #1f2933;
+        --muted: #5b6773;
+        --line: #d8d1c2;
+        --accent: #0f766e;
+        --warm: #b45309;
+        --error: #b42318;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Helvetica Neue", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(180, 83, 9, 0.08), transparent 30%),
+          linear-gradient(180deg, #faf7f0 0%, var(--bg) 100%);
+        color: var(--ink);
+      }
+
+      .page {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 32px 24px 64px;
+      }
+
+      .hero, .panels, .page-rich-content {
+        margin-bottom: 24px;
+      }
+
+      .nav {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .nav a {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      .panels {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .panel,
+      .refund-card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 12px 40px rgba(31, 41, 51, 0.06);
+      }
+
+      .panel,
+      .refund-card {
+        padding: 20px;
+      }
+
+      .refund-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .refund-eyebrow {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .refund-header h2 {
+        margin: 4px 0 0;
+        font-size: 1.15rem;
+      }
+
+      .refund-status {
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .refund-status[data-tone="success"] { color: var(--accent); }
+      .refund-status[data-tone="busy"] { color: var(--warm); }
+      .refund-status[data-tone="error"] { color: var(--error); }
+
+      .refund-rows {
+        display: grid;
+        gap: 12px;
+        margin: 0;
+      }
+
+      .refund-row {
+        display: grid;
+        grid-template-columns: 160px minmax(0, 1fr);
+        gap: 12px;
+        padding-top: 12px;
+        border-top: 1px solid rgba(216, 209, 194, 0.7);
+      }
+
+      .refund-row dt {
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .refund-row dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .refund-actions {
+        margin-top: 20px;
+      }
+
+      .refund-actions button {
+        border: none;
+        border-radius: 999px;
+        padding: 12px 18px;
+        background: var(--accent);
+        color: #fff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .refund-actions button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .mono-text {
+        font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+      }
+
+      @media (max-width: 860px) {
+        .panels {
+          grid-template-columns: 1fr;
+        }
+
+        .refund-header,
+        .refund-row {
+          grid-template-columns: 1fr;
+          display: grid;
+        }
+      }
+    </style>
   </head>
   <body>
     __PAGE_CONTENT__
