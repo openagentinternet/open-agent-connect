@@ -410,7 +410,10 @@ test('orchestration service auto-adopts valid same-skill same-scope candidates i
   assert.equal(index.executions.length, 1);
   assert.equal(index.analyses.length, 1);
   assert.equal(index.artifacts.length, 1);
-  assert.equal(index.activeVariants['metabot-network-directory'], index.artifacts[0]);
+  assert.deepEqual(index.activeVariants['metabot-network-directory'], {
+    source: 'local',
+    variantId: index.artifacts[0],
+  });
 
   const artifactPath = path.join(store.paths.evolutionArtifactsRoot, `${index.artifacts[0]}.json`);
   const artifact = JSON.parse(readFileSync(artifactPath, 'utf8'));

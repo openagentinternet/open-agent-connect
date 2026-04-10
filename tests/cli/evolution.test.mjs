@@ -118,6 +118,25 @@ test('runCli supports `metabot evolution status`', async () => {
   assert.deepEqual(result.payload.data.activeVariants, {});
 });
 
+test('runCli `metabot evolution status` projects active variant refs as skill->variantId strings', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-status-'));
+  const store = createLocalEvolutionStore(homeDir);
+  await store.setActiveVariantRef('metabot-network-directory', {
+    source: 'remote',
+    variantId: 'variant-remote-1',
+  });
+  await store.setActiveVariant('metabot-trace-inspector', 'variant-local-1');
+
+  const result = await runEvolutionCli(homeDir, ['evolution', 'status']);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.deepEqual(result.payload.data.activeVariants, {
+    'metabot-network-directory': 'variant-remote-1',
+    'metabot-trace-inspector': 'variant-local-1',
+  });
+});
+
 test('runCli supports `metabot evolution adopt --skill --variant-id` and `metabot evolution rollback --skill`', async () => {
   const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-adopt-'));
   const store = createLocalEvolutionStore(homeDir);
@@ -139,7 +158,10 @@ test('runCli supports `metabot evolution adopt --skill --variant-id` and `metabo
   assert.equal(adoptResult.payload.data.variantId, artifact.variantId);
 
   const indexAfterAdopt = await store.readIndex();
-  assert.equal(indexAfterAdopt.activeVariants['metabot-network-directory'], artifact.variantId);
+  assert.deepEqual(indexAfterAdopt.activeVariants['metabot-network-directory'], {
+    source: 'local',
+    variantId: artifact.variantId,
+  });
 
   const rollbackResult = await runEvolutionCli(homeDir, [
     'evolution',

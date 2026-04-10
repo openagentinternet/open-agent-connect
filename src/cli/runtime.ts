@@ -88,6 +88,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function compareCodePointStrings(left: string, right: string): number {
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
+}
+
+function projectActiveVariantIds(activeVariants: Record<string, unknown>): Record<string, string> {
+  const entries: Array<[string, string]> = [];
+  for (const [skillName, rawRef] of Object.entries(activeVariants)) {
+    const activeRef = parseSkillActiveVariantRef(rawRef);
+    if (!activeRef) {
+      continue;
+    }
+    entries.push([skillName, activeRef.variantId]);
+  }
+  entries.sort(([left], [right]) => compareCodePointStrings(left, right));
+  return Object.fromEntries(entries);
+}
+
 function isSupportedConfigKey(key: string): key is SupportedConfigKey {
   return SUPPORTED_CONFIG_KEYS.has(key as SupportedConfigKey);
 }
@@ -811,7 +834,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           executions: index.executions.length,
           analyses: index.analyses.length,
           artifacts: index.artifacts.length,
-          activeVariants: index.activeVariants,
+          activeVariants: projectActiveVariantIds(index.activeVariants),
         });
       },
       search: async (input) => {
