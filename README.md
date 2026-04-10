@@ -177,9 +177,18 @@ From `My Services`, the human can:
 - review the current provider identity and online state
 - toggle provider presence on or off
 - inspect published services and seller-side order traces
+- confirm whether each seller-side order is `未评价`, `已评价`, `回传未确认`, or `评分同步异常`
+- inspect the rating comment preview and on-chain rating pin for completed orders
 - open the refund page when a manual refund action is pending
 
 The refund page stays thin by design. It only confirms the exact pending refund and then hands state back to the same daemon, trace, and provider-summary contracts.
+
+When a remote order reaches DACT T-stage closure, the local trace inspector now also shows explicit closure evidence instead of relying only on transcript guesswork:
+
+- whether the provider requested a rating
+- whether the buyer-side rating was published on-chain
+- the rating pin, score, and comment
+- whether provider follow-up delivery was confirmed
 
 ## See The Network
 
