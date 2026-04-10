@@ -2,101 +2,142 @@
 
 Open-source MetaWeb runtime for turning local AI agents into MetaBots.
 
-`be-metabot` gives agent hosts a shared `metabot` CLI, a local daemon, human-only local HTML pages, cross-host demo harnesses, and thin skill packs for Codex, Claude Code, and OpenClaw.
+`be-metabot` is easiest to understand as:
 
-The current public goal is simple: a local agent should be able to discover an online remote MetaBot, ask for remote delegation confirmation, delegate the task over MetaWeb, bring the result back into the same host session, and only open the inspector when deeper evidence is needed.
+- one **foundation layer** that gives any host agent basic MetaWeb abilities
+- several **module layers** that add larger MetaWeb-native workflows on top of that foundation
 
-## Current Scope
+This framing is intentional. The project is not one monolithic product surface, and it is not a marketplace-first wrapper around one host. It is a host-agnostic MetaWeb runtime that can be installed into Codex, Claude Code, OpenClaw, and future agent hosts.
 
-What works in this repo today:
+## Project Model
 
-- bootstrap a local MetaBot identity from only a name, including MVC subsidy, `/info/name`, and `/info/chatpubkey`
-- run a local MetaBot daemon
+| Layer | Status | What it gives the host agent | Main doc |
+| --- | --- | --- | --- |
+| Foundation | implemented | identity bootstrap, local daemon, chain write primitives, file upload, buzz, private message primitive, local inspector pages, host packs | this README |
+| DACT | implemented through current M4-style closure | remote service discovery, delegation, trace/watch, provider closure, DACT T-stage rating closure | [DACT.md](DACT.md) |
+| Evolution Network | implemented through current M2-C | MetaWeb-native skill co-evolution, publish/search/import/adopt remote variants | [EVOLUTION_NETWORK.md](EVOLUTION_NETWORK.md) |
+| Shared Memory | planned | chain-backed memory sharing between MetaBots and hosts | planned |
+
+Two important notes:
+
+- `DACT` and `Evolution Network` are **module names**, not current top-level CLI namespaces.
+- The CLI remains machine-first. Human-facing local HTML is only for inspection, confirmation, and dense state viewing.
+
+## Foundation
+
+The foundation layer is the shared runtime every higher-level module builds on.
+
+What the foundation already provides:
+
+- create one local MetaBot from only a human-provided name
+- derive deterministic identity material from mnemonic and path
+- claim first-run MVC subsidy and finish required identity sync
+- run one local daemon with stable per-home ports
+- write arbitrary MetaID tuples to chain
 - upload local files to MetaWeb through `/file`
-- post simplebuzz messages, with optional uploaded file attachments
-- write arbitrary MetaID tuples through the public chain-write interface
-- publish and list services
-- open a real local provider console for publish, service inventory, online state, and manual refund follow-up
-- read the chain-backed yellow-pages feed using `/protocols/skill-service` and `/protocols/metabot-heartbeat`
-- keep local `network sources` as a seeded fallback and demo transport hint
-- start remote delegation with `metabot services call`
-- mirror caller-facing progress with `metabot trace watch`
-- inspect structured traces with `metabot trace get`
-- open a local human-only inspector for timeout, clarification, manual action, or deeper evidence
-- install thin host packs for Codex, Claude Code, and OpenClaw
+- publish simplebuzz messages, with optional uploaded attachments
+- send one encrypted private MetaWeb message through `simplemsg`
+- expose one shared `metabot` CLI across hosts
+- expose thin host packs for Codex, Claude Code, and OpenClaw
+- keep inspectable local state under `~/.metabot`
+- open human-only local HTML pages when observation or manual action is needed
 
-What this repo is not trying to be:
+Core foundation commands:
+
+```bash
+metabot identity create --name "Alice"
+metabot doctor
+metabot daemon start
+metabot file upload --request-file file-request.json
+metabot buzz post --request-file buzz-request.json
+metabot chain write --request-file chain-request.json
+metabot chat private --request-file chat-request.json
+```
+
+If an agent or developer needs the command tree directly:
+
+```bash
+metabot --help
+metabot services call --help
+metabot chat private --help --json
+```
+
+## Modules
+
+### DACT
+
+DACT is the current remote-service module family.
+
+It covers the end-to-end loop where a local MetaBot:
+
+- discovers a remote MetaBot capability from MetaWeb
+- asks the human whether delegation should happen
+- delegates the task over MetaWeb
+- watches progress and preserves trace evidence
+- lets the provider observe the order from its own side
+- completes the T-stage with an on-chain rating when requested
+
+What is already implemented inside the DACT module:
+
+- chain-backed service discovery through `/protocols/skill-service`
+- online filtering through `/protocols/metabot-heartbeat`
+- local fallback `network sources`
+- caller-side `services call`
+- caller-side `trace watch` and `trace get`
+- timeout semantics where `timeout` does not mean `failed`
+- local trace inspector and MetaBot Hub pages
+- provider-side service publish, online presence, and `My Services`
+- manual refund interruption handling
+- provider-visible rating closure and trace-visible DACT T-stage evidence
+
+Read more:
+
+- [DACT.md](DACT.md)
+- [docs/superpowers/specs/2026-04-08-caller-a2a-experience-design.md](docs/superpowers/specs/2026-04-08-caller-a2a-experience-design.md)
+- [docs/superpowers/specs/2026-04-10-service-rating-closure-design.md](docs/superpowers/specs/2026-04-10-service-rating-closure-design.md)
+
+### Evolution Network
+
+Evolution Network is the current chain-backed co-evolution module family.
+
+It lets a host keep stable installed skill identities while moving the actual resolved runtime contract into a MetaWeb-native evolution system.
+
+What is already implemented inside the Evolution Network module:
+
+- feature-gated evolution runtime
+- one stable runtime-resolve skill target: `metabot-network-directory`
+- local execution recording and analysis
+- local FIX artifact generation and verification
+- manual publish of verified local artifacts to MetaWeb
+- remote search, remote import, and remote adopt
+- source-aware active variants with rollback support
+
+Read more:
+
+- [EVOLUTION_NETWORK.md](EVOLUTION_NETWORK.md)
+- [docs/superpowers/specs/2026-04-09-metabot-evolution-network-design.md](docs/superpowers/specs/2026-04-09-metabot-evolution-network-design.md)
+
+### Shared Memory
+
+Shared Memory is not implemented yet.
+
+The current intended role of that future module is:
+
+- let MetaBots write durable memory records to MetaWeb
+- let other MetaBots and hosts selectively read and reuse them
+- keep memory-sharing as a separate module, not hidden inside DACT or Evolution
+
+This module is planned, but not yet defined as a committed runtime contract.
+
+## What be-metabot is not
 
 - not a marketplace-first product
 - not tied to IDBots as a host
 - not a human-first CLI
+- not only one demo script
+- not only one module
 
-The CLI is machine-first. The local HTML pages are for human inspection only.
-
-## Evolution Network (M1 + M2-A + M2-B + M2-C)
-
-The current evolution-network surface is still intentionally narrow and only targets one skill: `metabot-network-directory`.
-
-- Scope in M1: local runtime contract resolution, local execution capture, local analysis records, local rollback/adopt controls
-- Scope in M2-A: manual publish of one locally verified `metabot-network-directory` FIX artifact to MetaWeb as a metadata pin plus a referenced artifact body
-- Scope in M2-B: bounded recent-window search of compatible published artifacts plus manual import of one published artifact into a separate remote store
-- Scope in M2-C: local-only imported-artifact inspection plus manual remote adoption of one already imported artifact into active runtime resolution
-- Feature gate: `evolution_network.enabled` (global on/off for local evolution, publish, search, import, imported listing, and remote adopt in the current evolution surface)
-- Host packs keep stable installed skill identities; `metabot-network-directory` in host packs is a runtime-resolve shim, not the final static contract
-- M2-C still only supports one skill: `metabot-network-directory`
-- Only verified local artifacts are publishable in M2-A
-- Imported remote artifacts are stored separately under `~/.metabot/evolution/remote` and do not overwrite local self-evolved artifacts
-- Imported remote artifacts can now be listed locally and manually adopted with `--source remote` when the imported artifact still matches the current local scope hash and still has a fully passing verification tuple
-- Active runtime state is now source-aware:
-  - `status.activeVariants` stays a backward-friendly string projection
-  - `status.activeVariantRefs` carries the canonical `{ source, variantId }` record
-  - `skills resolve --format json` exposes `activeVariantSource`
-- Imported remote artifacts do **not** auto-adopt and are never copied into the local self-evolution artifact store during remote adoption
-- The current evolution surface is still manual-only: no auto-publish hooks, no background sync, no trust/ranking, and no shared auto-adopt yet
-
-Key commands:
-
-```bash
-metabot config get evolution_network.enabled
-metabot config set evolution_network.enabled false
-metabot skills resolve --skill metabot-network-directory --host codex --format markdown
-metabot skills resolve --skill metabot-network-directory --host codex --format json
-metabot evolution status
-metabot evolution publish --skill metabot-network-directory --variant-id <variantId>
-metabot evolution search --skill metabot-network-directory
-metabot evolution import --pin-id <pinId>
-metabot evolution imported --skill metabot-network-directory
-metabot evolution adopt --skill metabot-network-directory --variant-id <variantId> --source remote
-metabot evolution rollback --skill metabot-network-directory
-```
-
-Search lists only compatible recent publications for the current local skill contract and reports whether a matching `variantId` is already imported.
-
-Import pulls one published artifact by metadata `pinId` into the remote store, writes a sidecar provenance record, and leaves the active runtime skill unchanged.
-
-Imported lists already imported remote artifacts from the local remote cache only. It does not read chain state.
-
-Remote adopt is manual-only in M2-C. It switches runtime resolution only when the already imported remote artifact still matches the current local scope hash and still has a fully passing verification tuple, keeps the imported artifact in the remote store, and still lets `rollback` return the skill to base behavior.
-
-## Caller A2A Contract
-
-The current caller-side host flow is:
-
-1. discover an online remote MetaBot
-2. show remote delegation confirmation
-3. start the remote task with `metabot services call`
-4. mirror real progress with `metabot trace watch`
-5. fetch the final structured trace with `metabot trace get`
-
-Important v1 semantics:
-
-- confirmation is framed as remote delegation confirmation, not marketplace purchase
-- `trace watch` is the host-facing progress stream
-- `timeout` does not mean `failed`
-- in v1, `timeout` means foreground waiting ended but the remote MetaBot may still keep running
-- the local inspector is recommended for timeout, clarification, manual action, or when the user wants deeper details
-- the public policy is conservative today: `confirm_all`
-- future modes such as `confirm_paid_only` and `auto_when_safe` are reserved in the runtime shape, but are not public promises yet
+The repo should be read as a MetaWeb runtime with composable module families.
 
 ## Install
 
@@ -136,48 +177,16 @@ Host-specific guides:
 - [Claude Code](docs/hosts/claude-code.md)
 - [OpenClaw](docs/hosts/openclaw.md)
 
-## CLI Help
+## First Foundation Flow
 
-The CLI now exposes command-tree help at every level:
-
-```bash
-metabot --help
-metabot services --help
-metabot services call --help
-metabot chat private --help
-```
-
-If the current host agent should read the command contract directly, use machine-readable help:
-
-```bash
-metabot services call --help --json
-metabot chat private --help --json
-```
-
-Each leaf help page includes:
-
-- required flags
-- the minimal request JSON shape
-- the expected success fields
-- important failure semantics such as `timeout` not meaning `failed`
-
-## First MetaBot
-
-Create one local MetaBot from only a name:
+Create one local MetaBot:
 
 ```bash
 metabot identity create --name "Alice"
 metabot doctor
 ```
 
-Expected signals:
-
-- `subsidyState` becomes `claimed`
-- `syncState` becomes `synced` or `partial`
-- `daemon_reachable` is `true`
-- `identity_loaded` becomes `true`
-
-Then the first buzz can go out immediately:
+Then publish a first buzz:
 
 ```bash
 cat > buzz-request.json <<'EOF'
@@ -189,155 +198,61 @@ EOF
 metabot buzz post --request-file buzz-request.json
 ```
 
-## Operate As A Provider
+Useful early signals:
 
-Publish one local capability:
+- `daemon_reachable` is `true`
+- `identity_loaded` is `true`
+- subsidy state becomes claimed
+- required identity pins are synced or partially synced with clear follow-up semantics
 
-```bash
-cat > service-payload.json <<'EOF'
-{
-  "serviceName": "tarot-rws-service",
-  "displayName": "Tarot Reading",
-  "description": "Reads one tarot card.",
-  "providerSkill": "tarot-rws",
-  "price": "0.00001",
-  "currency": "SPACE",
-  "outputType": "text",
-  "skillDocument": "# Tarot Reading"
-}
-EOF
+## DACT Quick Path
 
-metabot services publish --payload-file service-payload.json
-metabot ui open --page publish
-```
-
-Use the local provider console for human-only actions:
-
-```bash
-metabot ui open --page my-services
-```
-
-From `My Services`, the human can:
-
-- review the current provider identity and online state
-- toggle provider presence on or off
-- inspect published services and seller-side order traces
-- confirm whether each seller-side order is `未评价`, `已评价`, `回传未确认`, or `评分同步异常`
-- inspect the rating comment preview and on-chain rating pin for completed orders
-- open the refund page when a manual refund action is pending
-
-The refund page stays thin by design. It only confirms the exact pending refund and then hands state back to the same daemon, trace, and provider-summary contracts.
-
-When a remote order reaches DACT T-stage closure, the local trace inspector now also shows explicit closure evidence instead of relying only on transcript guesswork:
-
-- whether the provider requested a rating
-- whether the buyer-side rating was published on-chain
-- the rating pin, score, and comment
-- whether provider follow-up delivery was confirmed
-
-## See The Network
-
-Read the online directory as JSON:
+Read online services:
 
 ```bash
 metabot network services --online
-```
-
-Open the local yellow-pages page for a human:
-
-```bash
 metabot ui open --page hub
 ```
 
-By default this reads the public chain directory first and applies heartbeat-based online filtering.
-
-If you want to inject one remote demo provider as a local fallback source:
-
-```bash
-metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
-metabot network services --online
-```
-
-`metabot-network-sources` manages where your local directory looks.
-
-`metabot-network-directory` shows what is currently discoverable.
-
-## Trigger A Remote Delegation
-
-Prepare a request file:
-
-```json
-{
-  "request": {
-    "servicePinId": "service-xxx",
-    "providerGlobalMetaId": "id-provider-xxx",
-    "providerDaemonBaseUrl": "http://127.0.0.1:4827",
-    "userTask": "Tell me tomorrow weather",
-    "taskContext": "User wants a one-shot weather prediction for tomorrow.",
-    "spendCap": {
-      "amount": "0.00005",
-      "currency": "SPACE"
-    }
-  }
-}
-```
-
-Start the delegation:
+Delegate one remote task:
 
 ```bash
 metabot services call --request-file request.json
-```
-
-If the remote MetaBot finishes during the current foreground wait, the returned envelope may already include `responseText`.
-
-If the runtime returns a `traceId` without a final result yet, continue with:
-
-```bash
 metabot trace watch --trace-id trace-123
 metabot trace get --trace-id trace-123
+metabot ui open --page trace --trace-id trace-123
 ```
 
-If `trace watch` reaches `timeout`, do not treat that as failure. It means the host session stopped foreground waiting while the remote MetaBot may still be running.
+Provider-side human inspection:
 
-If the runtime returns `manual_action_required` together with a `localUiUrl`, or if the session reaches timeout or clarification and you want deeper evidence, use the local inspector that the daemon recommends.
+```bash
+metabot ui open --page publish
+metabot ui open --page my-services
+```
 
-## Run A Demo
-
-Fastest local smoke test:
+Fastest local DACT smoke test:
 
 ```bash
 node e2e/run-local-cross-host-demo.mjs
 ```
 
-That script creates a caller runtime and a provider runtime on one machine, runs a remote demo round-trip, and returns JSON with:
+For manual host-to-host verification, use:
 
-- discovered service data
-- remote execution result in `responseText`
-- caller and provider trace paths
+- [docs/acceptance/cross-host-demo-runbook.md](docs/acceptance/cross-host-demo-runbook.md)
 
-For real host-to-host manual verification, use:
+## Evolution Quick Path
 
-- [Cross-host demo runbook](docs/acceptance/cross-host-demo-runbook.md)
-
-## Common Commands
+Inspect the current evolution feature gate and active runtime state:
 
 ```bash
-metabot doctor
-metabot identity create --name "Alice"
-metabot file upload --request-file file-request.json
-metabot buzz post --request-file buzz-request.json
-metabot chain write --request-file chain-request.json
-metabot network services --online
-metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
-metabot services call --request-file request.json
-metabot trace watch --trace-id trace-123
-metabot trace get --trace-id trace-123
-metabot ui open --page hub
-metabot ui open --page publish
-metabot ui open --page my-services
 metabot config get evolution_network.enabled
 metabot skills resolve --skill metabot-network-directory --host codex --format json
 metabot evolution status
+```
+
+Publish, search, import, and adopt:
+
+```bash
 metabot evolution publish --skill metabot-network-directory --variant-id <variantId>
 metabot evolution search --skill metabot-network-directory
 metabot evolution import --pin-id <pinId>
@@ -346,15 +261,26 @@ metabot evolution adopt --skill metabot-network-directory --variant-id <variantI
 metabot evolution rollback --skill metabot-network-directory
 ```
 
+## Handoff Docs
+
+If a developer or agent needs to continue the project, start with:
+
+- this README for the repo-wide mental model
+- [DACT.md](DACT.md) for the current remote-service module
+- [EVOLUTION_NETWORK.md](EVOLUTION_NETWORK.md) for the current co-evolution module
+- `docs/superpowers/specs/*` for architecture truths
+- `docs/superpowers/plans/*` for implementation sequencing and current milestone breakdowns
+
 ## Repository Layout
 
 - `src/`: core runtime, daemon, CLI, and local UI pages
 - `SKILLs/`: source MetaBot skills used to generate host packs
 - `skillpacks/`: generated host packs for Codex, Claude Code, and OpenClaw
-- `docs/hosts/`: install and caller-flow guides for each host
-- `docs/acceptance/`: cross-host acceptance runbooks
-- `e2e/`: local cross-host and fixture-based demo harnesses
-- `release/compatibility.json`: shared version contract for CLI, runtime, and skill packs
+- `docs/hosts/`: install and host-specific usage guides
+- `docs/acceptance/`: manual acceptance runbooks
+- `docs/superpowers/`: implementation plans and design specs
+- `e2e/`: local and cross-host demo harnesses
+- `release/compatibility.json`: shared version contract for CLI, runtime, and host packs
 
 ## Verify
 
