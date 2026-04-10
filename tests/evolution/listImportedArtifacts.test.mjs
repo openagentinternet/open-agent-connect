@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -207,7 +207,36 @@ test('listing imported artifacts is currently supported only for metabot-network
         },
       },
     }),
-    (error) => assertFailureCode(error, 'evolution_import_not_supported')
+    (error) => assertFailureCode(error, 'evolution_imported_not_supported')
+  );
+});
+
+test('index pinId mismatch with sidecar pinId returns evolution_imported_artifact_invalid', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-list-imported-'));
+  const remoteStore = createRemoteEvolutionStore(homeDir);
+  await remoteStore.writeImport({
+    artifact: createArtifactRecord({
+      variantId: 'variant-pin-mismatch',
+      scopeHash: 'scope-pin-mismatch',
+    }),
+    sidecar: createSidecarRecord({
+      variantId: 'variant-pin-mismatch',
+      scopeHash: 'scope-pin-mismatch',
+      pinId: 'pin-sidecar-canonical',
+    }),
+  });
+
+  const rawIndex = JSON.parse(readFileSync(remoteStore.paths.evolutionRemoteIndexPath, 'utf8'));
+  rawIndex.byVariantId['variant-pin-mismatch'].pinId = 'pin-index-corrupted';
+  writeFileSync(remoteStore.paths.evolutionRemoteIndexPath, `${JSON.stringify(rawIndex, null, 2)}\n`, 'utf8');
+
+  await assert.rejects(
+    listImportedEvolutionArtifacts({
+      skillName: 'metabot-network-directory',
+      activeRef: null,
+      remoteStore,
+    }),
+    (error) => assertFailureCode(error, 'evolution_imported_artifact_invalid')
   );
 });
 

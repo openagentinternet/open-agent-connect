@@ -6,7 +6,7 @@ import type {
 } from '../types';
 import { validateShareableArtifactBody } from './publishedArtifactProtocol';
 
-type ImportedListFailureCode = 'evolution_import_not_supported' | 'evolution_imported_artifact_invalid';
+type ImportedListFailureCode = 'evolution_imported_not_supported' | 'evolution_imported_artifact_invalid';
 
 const SUPPORTED_SKILL = 'metabot-network-directory';
 
@@ -84,7 +84,7 @@ export async function listImportedEvolutionArtifacts(input: {
 }> {
   if (input.skillName !== SUPPORTED_SKILL) {
     throw createListError(
-      'evolution_import_not_supported',
+      'evolution_imported_not_supported',
       `Import is currently supported only for "${SUPPORTED_SKILL}"`
     );
   }
@@ -127,6 +127,7 @@ export async function listImportedEvolutionArtifacts(input: {
       || artifact.variantId !== variantId
       || sidecar.skillName !== input.skillName
       || artifact.skillName !== input.skillName
+      || remoteIndex.byVariantId[variantId]?.pinId !== sidecar.pinId
       || sidecar.scopeHash !== artifact.metadata.scopeHash
     ) {
       throw createListError(
