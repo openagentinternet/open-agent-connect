@@ -116,3 +116,18 @@ export interface PublishedEvolutionSearchResultSummaryRow {
   alreadyImported: boolean;
   importedPinId: string | null;
 }
+
+export interface ImportedEvolutionArtifactSummaryRow {
+  variantId: string;
+  pinId: string;
+  skillName: string;
+  publisherGlobalMetaId: string;
+  artifactUri: string;
+  publishedAt: number;
+  importedAt: number;
+  scopeHash: string;
+  verificationPassed: boolean;
+  replayValid: boolean;
+  notWorseThanBase: boolean;
+  active: boolean;
+}
