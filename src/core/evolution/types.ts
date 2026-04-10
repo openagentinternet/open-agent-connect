@@ -9,6 +9,12 @@ import type {
 export type SkillExecutionTriggerSource = 'hard_failure' | 'soft_failure' | 'manual_recovery';
 export type SkillEvolutionType = 'FIX';
 export type SkillAdoptionState = 'active' | 'manual';
+export type SkillVariantSource = 'local' | 'remote';
+
+export interface SkillActiveVariantRef {
+  source: SkillVariantSource;
+  variantId: string;
+}
 
 export interface SkillExecutionRecord {
   executionId: string;
@@ -70,7 +76,7 @@ export interface SkillEvolutionIndex {
   executions: string[];
   analyses: string[];
   artifacts: string[];
-  activeVariants: Record<string, string>;
+  activeVariants: Record<string, SkillActiveVariantRef>;
 }
 
 export interface ImportedRemoteArtifactSidecar {

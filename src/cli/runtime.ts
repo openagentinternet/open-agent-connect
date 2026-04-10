@@ -88,6 +88,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function readActiveVariantRef(value: unknown): { source: 'local' | 'remote'; variantId: string } | null {
+  if (typeof value === 'string') {
+    return {
+      source: 'local',
+      variantId: value,
+    };
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  if ((value.source === 'local' || value.source === 'remote') && typeof value.variantId === 'string') {
+    return {
+      source: value.source,
+      variantId: value.variantId,
+    };
+  }
+  return null;
+}
+
 function isSupportedConfigKey(key: string): key is SupportedConfigKey {
   return SUPPORTED_CONFIG_KEYS.has(key as SupportedConfigKey);
 }
@@ -447,12 +466,12 @@ async function resolveActiveVariantForSkill(
   const homeDir = normalizeHomeDir(context.env, context.cwd);
   const evolutionStore = createLocalEvolutionStore(homeDir);
   const index = await evolutionStore.readIndex();
-  const activeVariantId = index.activeVariants[skillName];
-  if (!activeVariantId) {
+  const activeVariantRef = readActiveVariantRef(index.activeVariants[skillName]);
+  if (!activeVariantRef || activeVariantRef.source !== 'local') {
     return null;
   }
 
-  const artifactPath = path.join(evolutionStore.paths.evolutionArtifactsRoot, `${activeVariantId}.json`);
+  const artifactPath = path.join(evolutionStore.paths.evolutionArtifactsRoot, `${activeVariantRef.variantId}.json`);
   const artifact = await readArtifactFile(artifactPath);
   if (!artifact || artifact.skillName !== skillName) {
     return null;
@@ -468,8 +487,8 @@ async function clearActiveVariantMapping(
   const homeDir = normalizeHomeDir(context.env, context.cwd);
   const evolutionStore = createLocalEvolutionStore(homeDir);
   const index = await evolutionStore.readIndex();
-  const previousVariantId = index.activeVariants[skillName] ?? null;
-  if (!previousVariantId) {
+  const previousVariantRef = readActiveVariantRef(index.activeVariants[skillName]);
+  if (!previousVariantRef) {
     return {
       removed: false,
       previousVariantId: null,
@@ -480,7 +499,7 @@ async function clearActiveVariantMapping(
 
   return {
     removed: true,
-    previousVariantId,
+    previousVariantId: previousVariantRef.variantId,
   };
 }
 

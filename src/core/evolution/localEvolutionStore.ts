@@ -3,10 +3,12 @@ import path from 'node:path';
 
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 import type {
+  SkillActiveVariantRef,
   SkillEvolutionIndex,
   SkillExecutionAnalysis,
   SkillExecutionRecord,
   SkillVariantArtifact,
+  SkillVariantSource,
 } from './types';
 
 const EVOLUTION_SCHEMA_VERSION = 1 as const;
@@ -46,15 +48,43 @@ function normalizeStringList(value: unknown): string[] {
   return [...new Set(value.filter((item): item is string => typeof item === 'string'))].sort();
 }
 
-function normalizeActiveVariants(value: unknown): Record<string, string> {
+function normalizeActiveVariantSource(value: unknown): SkillVariantSource | null {
+  if (value === 'local' || value === 'remote') {
+    return value;
+  }
+  return null;
+}
+
+function normalizeActiveVariantRef(value: unknown): SkillActiveVariantRef | null {
+  if (typeof value === 'string') {
+    return {
+      source: 'local',
+      variantId: value,
+    };
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  const source = normalizeActiveVariantSource(value.source);
+  if (!source || typeof value.variantId !== 'string') {
+    return null;
+  }
+  return {
+    source,
+    variantId: value.variantId,
+  };
+}
+
+function normalizeActiveVariants(value: unknown): Record<string, SkillActiveVariantRef> {
   if (!isRecord(value)) {
     return {};
   }
 
-  const entries: Array<[string, string]> = [];
-  for (const [skillName, variantId] of Object.entries(value)) {
-    if (typeof skillName === 'string' && typeof variantId === 'string') {
-      entries.push([skillName, variantId]);
+  const entries: Array<[string, SkillActiveVariantRef]> = [];
+  for (const [skillName, refValue] of Object.entries(value)) {
+    const normalizedRef = normalizeActiveVariantRef(refValue);
+    if (typeof skillName === 'string' && normalizedRef) {
+      entries.push([skillName, normalizedRef]);
     }
   }
 
@@ -171,6 +201,7 @@ export interface LocalEvolutionStore {
   writeExecution(record: SkillExecutionRecord): Promise<string>;
   writeAnalysis(record: SkillExecutionAnalysis): Promise<string>;
   writeArtifact(record: SkillVariantArtifact): Promise<string>;
+  setActiveVariantRef(skillName: string, ref: SkillActiveVariantRef): Promise<SkillEvolutionIndex>;
   setActiveVariant(skillName: string, variantId: string): Promise<SkillEvolutionIndex>;
   clearActiveVariant(skillName: string): Promise<SkillEvolutionIndex>;
 }
@@ -247,16 +278,29 @@ export function createLocalEvolutionStore(homeDirOrPaths: string | MetabotPaths)
       }));
       return filePath;
     },
-    async setActiveVariant(skillName, variantId) {
+    async setActiveVariantRef(skillName, ref) {
       const safeSkillName = validateSafeEvolutionIdentifier(skillName, 'skillName');
-      const safeVariantId = validateSafeEvolutionIdentifier(variantId, 'variantId');
+      const safeVariantId = validateSafeEvolutionIdentifier(ref.variantId, 'variantId');
+      const safeSource = normalizeActiveVariantSource(ref.source);
+      if (!safeSource) {
+        throw new Error(`Invalid source: ${String(ref.source)}`);
+      }
       return updateIndex((current) => ({
         ...current,
         activeVariants: normalizeActiveVariants({
           ...current.activeVariants,
-          [safeSkillName]: safeVariantId,
+          [safeSkillName]: {
+            source: safeSource,
+            variantId: safeVariantId,
+          },
         }),
       }));
+    },
+    async setActiveVariant(skillName, variantId) {
+      return this.setActiveVariantRef(skillName, {
+        source: 'local',
+        variantId,
+      });
     },
     async clearActiveVariant(skillName) {
       const safeSkillName = validateSafeEvolutionIdentifier(skillName, 'skillName');

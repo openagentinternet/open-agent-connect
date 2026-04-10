@@ -109,7 +109,10 @@ test('local evolution store persists execution, analysis, artifact, and index un
   assert.deepEqual(indexFromFile.executions, [execution.executionId]);
   assert.deepEqual(indexFromFile.analyses, [analysis.analysisId]);
   assert.deepEqual(indexFromFile.artifacts, [artifact.variantId]);
-  assert.equal(indexFromFile.activeVariants['metabot-network-directory'], artifact.variantId);
+  assert.deepEqual(indexFromFile.activeVariants['metabot-network-directory'], {
+    source: 'local',
+    variantId: artifact.variantId,
+  });
 });
 
 test('local evolution store reads stored artifact and analysis records and returns null for missing records', async () => {
@@ -154,7 +157,10 @@ test('local evolution store keeps deterministic, append-safe index updates and a
   assert.deepEqual(index.executions, [execution.executionId]);
   assert.deepEqual(index.analyses, [analysis.analysisId]);
   assert.deepEqual(index.artifacts, [artifact.variantId, newerArtifact.variantId]);
-  assert.equal(index.activeVariants['metabot-network-directory'], newerArtifact.variantId);
+  assert.deepEqual(index.activeVariants['metabot-network-directory'], {
+    source: 'local',
+    variantId: newerArtifact.variantId,
+  });
 });
 
 test('local evolution store clears one active variant through the shared index update queue', async () => {
@@ -171,8 +177,67 @@ test('local evolution store clears one active variant through the shared index u
 
   const index = await store.readIndex();
   assert.deepEqual(index.executions, ['exec-1']);
-  assert.equal(index.activeVariants['metabot-network-directory'], 'variant-keep');
+  assert.deepEqual(index.activeVariants['metabot-network-directory'], {
+    source: 'local',
+    variantId: 'variant-keep',
+  });
   assert.equal(index.activeVariants['metabot-trace-inspector'], undefined);
+});
+
+test('local evolution store normalizes legacy active variant strings into local refs', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const store = createLocalEvolutionStore(homeDir);
+  await store.ensureLayout();
+  writeFileSync(
+    store.paths.evolutionIndexPath,
+    `${JSON.stringify({
+      schemaVersion: 1,
+      executions: [],
+      analyses: [],
+      artifacts: [],
+      activeVariants: {
+        'metabot-network-directory': 'variant-local-1',
+      },
+    })}\n`,
+    'utf8'
+  );
+
+  const index = await store.readIndex();
+  assert.deepEqual(index.activeVariants, {
+    'metabot-network-directory': {
+      source: 'local',
+      variantId: 'variant-local-1',
+    },
+  });
+});
+
+test('local evolution store drops malformed active variant refs during read', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const store = createLocalEvolutionStore(homeDir);
+  await store.ensureLayout();
+  writeFileSync(
+    store.paths.evolutionIndexPath,
+    `${JSON.stringify({
+      schemaVersion: 1,
+      executions: [],
+      analyses: [],
+      artifacts: [],
+      activeVariants: {
+        'metabot-network-directory': {
+          source: 'local',
+        },
+        'metabot-trace-inspector': {
+          source: 'unknown',
+          variantId: 'variant-bad-source',
+        },
+        'metabot-import': 42,
+      },
+    })}\n`,
+    'utf8'
+  );
+
+  const index = await store.readIndex();
+  assert.deepEqual(index.activeVariants, {});
 });
 
 test('local evolution store rejects unsafe identifiers used for filesystem paths', async () => {
@@ -247,8 +312,14 @@ test('local evolution store serializes concurrent index updates to avoid lost wr
   assert.deepEqual(index.executions, expectedExecutions);
   assert.deepEqual(index.analyses, expectedAnalyses);
   assert.deepEqual(index.artifacts, expectedArtifacts);
-  assert.equal(index.activeVariants['metabot-network-directory'], 'variant-24');
-  assert.equal(index.activeVariants['metabot-trace-inspector'], 'variant-trace-1');
+  assert.deepEqual(index.activeVariants['metabot-network-directory'], {
+    source: 'local',
+    variantId: 'variant-24',
+  });
+  assert.deepEqual(index.activeVariants['metabot-trace-inspector'], {
+    source: 'local',
+    variantId: 'variant-trace-1',
+  });
 });
 
 test('local evolution store serializes concurrent index updates across store instances sharing one index path', async () => {
@@ -281,8 +352,14 @@ test('local evolution store serializes concurrent index updates across store ins
   ].sort();
 
   assert.deepEqual(index.executions, expectedExecutions);
-  assert.equal(index.activeVariants['metabot-network-directory'], 'variant-a');
-  assert.equal(index.activeVariants['metabot-trace-inspector'], 'variant-b');
+  assert.deepEqual(index.activeVariants['metabot-network-directory'], {
+    source: 'local',
+    variantId: 'variant-a',
+  });
+  assert.deepEqual(index.activeVariants['metabot-trace-inspector'], {
+    source: 'local',
+    variantId: 'variant-b',
+  });
 });
 
 test('local evolution store preserves unknown index fields during updates', async () => {
@@ -322,4 +399,25 @@ test('local evolution store recovers from malformed index.json without bricking 
   await assert.doesNotReject(store.writeExecution(createExecutionRecord()));
   const index = await store.readIndex();
   assert.deepEqual(index.executions, ['exec-1']);
+});
+
+test('local evolution store can persist a remote active variant ref and keeps local helper behavior', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const store = createLocalEvolutionStore(homeDir);
+
+  await store.setActiveVariantRef('metabot-network-directory', {
+    source: 'remote',
+    variantId: 'variant-remote-1',
+  });
+  await store.setActiveVariant('metabot-trace-inspector', 'variant-local-1');
+
+  const index = await store.readIndex();
+  assert.deepEqual(index.activeVariants['metabot-network-directory'], {
+    source: 'remote',
+    variantId: 'variant-remote-1',
+  });
+  assert.deepEqual(index.activeVariants['metabot-trace-inspector'], {
+    source: 'local',
+    variantId: 'variant-local-1',
+  });
 });
