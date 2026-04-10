@@ -46,29 +46,48 @@ test('resolver returns the base contract when the evolution network is disabled'
     skillName: 'metabot-network-directory',
     evolutionNetworkEnabled: false,
     activeVariant: createActiveVariantPatch(base.scope),
+    activeVariantSource: 'local',
   });
 
   assert.equal(resolved.source, 'base');
   assert.equal(resolved.activeVariantId, null);
+  assert.equal(resolved.activeVariantSource, null);
   assert.equal(resolved.instructions, base.instructions);
   assert.equal(resolved.commandTemplate, base.commandTemplate);
 });
 
-test('resolver returns a merged contract when an active variant exists', () => {
+test('resolver returns a merged contract with local origin when a local active variant exists', () => {
   const base = getBaseSkillContract('metabot-network-directory');
   const variant = createActiveVariantPatch(base.scope);
   const resolved = resolveSkillContract({
     skillName: 'metabot-network-directory',
     evolutionNetworkEnabled: true,
     activeVariant: variant,
+    activeVariantSource: 'local',
   });
 
   assert.equal(resolved.source, 'merged');
   assert.equal(resolved.activeVariantId, variant.variantId);
+  assert.equal(resolved.activeVariantSource, 'local');
   assert.equal(resolved.instructions, variant.patch.instructionsPatch);
   assert.equal(resolved.commandTemplate, variant.patch.commandTemplatePatch);
   assert.equal(resolved.outputExpectation, variant.patch.outputExpectationPatch);
   assert.equal(resolved.fallbackPolicy, variant.patch.fallbackPolicyPatch);
+});
+
+test('resolver returns a merged contract with remote origin when a remote active variant exists', () => {
+  const base = getBaseSkillContract('metabot-network-directory');
+  const variant = createActiveVariantPatch(base.scope);
+  const resolved = resolveSkillContract({
+    skillName: 'metabot-network-directory',
+    evolutionNetworkEnabled: true,
+    activeVariant: variant,
+    activeVariantSource: 'remote',
+  });
+
+  assert.equal(resolved.source, 'merged');
+  assert.equal(resolved.activeVariantId, variant.variantId);
+  assert.equal(resolved.activeVariantSource, 'remote');
 });
 
 test('resolver preserves same-scope metadata when merging an active variant', () => {
@@ -98,9 +117,11 @@ test('resolver degrades safely to base when active variant shape is malformed', 
       skillName: 'metabot-network-directory',
       evolutionNetworkEnabled: true,
       activeVariant: malformedVariant,
+      activeVariantSource: 'remote',
     });
     assert.equal(resolved.source, 'base');
     assert.equal(resolved.activeVariantId, null);
+    assert.equal(resolved.activeVariantSource, null);
   });
 });
 
@@ -121,6 +142,7 @@ test('resolver computes same-scope metadata from actual scopes when metadata is 
   assert.equal(resolved.source, 'merged');
   assert.equal(resolved.scope.chainWrite, true);
   assert.equal(resolved.scopeMetadata.sameScope, false);
+  assert.equal(resolved.activeVariantSource, null);
 });
 
 test('resolver renders both json and markdown outputs for codex, claude-code, and openclaw shims', () => {
@@ -173,4 +195,21 @@ test('resolver markdown rendering preserves command templates with backticks and
   assert.equal(markdownOutput.format, 'markdown');
   assert.equal(markdownOutput.markdown.includes(variant.patch.commandTemplatePatch), true);
   assert.match(markdownOutput.markdown, /````bash/);
+});
+
+test('resolver markdown rendering includes active variant source', () => {
+  const base = getBaseSkillContract('metabot-network-directory');
+  const variant = createActiveVariantPatch(base.scope);
+
+  const markdownOutput = renderResolvedSkillContract({
+    skillName: 'metabot-network-directory',
+    host: 'codex',
+    format: 'markdown',
+    evolutionNetworkEnabled: true,
+    activeVariant: variant,
+    activeVariantSource: 'remote',
+  });
+
+  assert.equal(markdownOutput.format, 'markdown');
+  assert.match(markdownOutput.markdown, /Active variant source: `remote`/);
 });

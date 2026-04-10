@@ -1,6 +1,7 @@
 export type SkillHost = 'codex' | 'claude-code' | 'openclaw';
 export type SkillRenderFormat = 'json' | 'markdown';
 export type SkillResolutionSource = 'base' | 'merged';
+export type ActiveVariantSource = 'local' | 'remote' | null;
 export type SkillVariantStatus = 'active' | 'inactive';
 
 export interface SkillPermissionScope {
@@ -48,11 +49,13 @@ export interface ResolveSkillContractInput {
   skillName: string;
   evolutionNetworkEnabled: boolean;
   activeVariant?: SkillVariantArtifact | null;
+  activeVariantSource?: ActiveVariantSource;
 }
 
 export interface ResolvedSkillContract extends BaseSkillContract {
   source: SkillResolutionSource;
   activeVariantId: string | null;
+  activeVariantSource: ActiveVariantSource;
   scopeMetadata: SkillVariantScopeMetadata;
 }
 

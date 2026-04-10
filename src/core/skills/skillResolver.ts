@@ -1,5 +1,6 @@
 import { getBaseSkillContract } from './baseSkillRegistry';
 import type {
+  ActiveVariantSource,
   RenderResolvedSkillContractInput,
   RenderedSkillContract,
   ResolvedSkillContract,
@@ -152,13 +153,22 @@ function buildBaseResolvedContract(skillName: string): ResolvedSkillContract {
     scope: cloneScope(base.scope),
     source: 'base',
     activeVariantId: null,
+    activeVariantSource: null,
     scopeMetadata: cloneScopeMetadata(DEFAULT_SCOPE_METADATA),
   };
 }
 
+function normalizeActiveVariantSource(source: unknown): ActiveVariantSource {
+  if (source === 'local' || source === 'remote') {
+    return source;
+  }
+  return null;
+}
+
 function mergeWithActiveVariant(
   base: ResolvedSkillContract,
-  activeVariant: SkillVariantArtifact
+  activeVariant: SkillVariantArtifact,
+  activeVariantSource: ActiveVariantSource
 ): ResolvedSkillContract {
   const mergedScope = cloneScope(activeVariant.scope);
   const sameScope = areScopesEquivalent(base.scope, mergedScope);
@@ -173,6 +183,7 @@ function mergeWithActiveVariant(
     scope: mergedScope,
     source: 'merged',
     activeVariantId: activeVariant.variantId,
+    activeVariantSource,
     scopeMetadata: {
       sameSkill: activeVariant.skillName === base.skillName,
       sameScope,
@@ -214,6 +225,7 @@ function renderMarkdownContract(host: SkillHost, contract: ResolvedSkillContract
     `Host: \`${host}\``,
     `Source: \`${contract.source}\``,
     `Active variant: \`${contract.activeVariantId ?? 'none'}\``,
+    `Active variant source: \`${contract.activeVariantSource ?? 'none'}\``,
     '',
     '## Summary',
     contract.summary,
@@ -249,7 +261,7 @@ export function resolveSkillContract(input: ResolveSkillContractInput): Resolved
   if (!activeVariant) {
     return base;
   }
-  return mergeWithActiveVariant(base, activeVariant);
+  return mergeWithActiveVariant(base, activeVariant, normalizeActiveVariantSource(input.activeVariantSource));
 }
 
 export function renderResolvedSkillContract(
