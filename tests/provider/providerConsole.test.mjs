@@ -66,6 +66,7 @@ test('buildProviderConsoleSnapshot summarizes published services and seller-side
   const snapshot = buildProviderConsoleSnapshot({
     services: [createServiceRecord()],
     traces: [createSellerTrace()],
+    ratingDetails: [],
   });
 
   assert.equal(snapshot.services.length, 1);
@@ -74,7 +75,81 @@ test('buildProviderConsoleSnapshot summarizes published services and seller-side
   assert.equal(snapshot.recentOrders.length, 1);
   assert.equal(snapshot.recentOrders[0].traceId, 'trace-provider-1');
   assert.equal(snapshot.recentOrders[0].servicePinId, 'service-pin-1');
+  assert.equal(snapshot.recentOrders[0].ratingStatus, 'requested_unrated');
+  assert.equal(snapshot.recentOrders[0].ratingValue, null);
+  assert.equal(snapshot.recentOrders[0].ratingComment, null);
+  assert.equal(snapshot.recentOrders[0].ratingPinId, null);
+  assert.equal(snapshot.recentOrders[0].ratingCreatedAt, null);
   assert.equal(snapshot.totals.sellerOrderCount, 1);
+});
+
+test('buildProviderConsoleSnapshot joins a matching on-chain rating onto the seller order', () => {
+  const snapshot = buildProviderConsoleSnapshot({
+    services: [createServiceRecord()],
+    traces: [createSellerTrace()],
+    ratingDetails: [
+      {
+        pinId: 'rating-pin-1',
+        serviceId: 'service-pin-1',
+        servicePaidTx: 'a'.repeat(64),
+        rate: 4,
+        comment: '解释得很清楚。',
+        raterGlobalMetaId: 'idq1buyer',
+        raterMetaId: 'buyer-meta-id',
+        createdAt: 1_775_000_020_000,
+      },
+    ],
+  });
+
+  assert.deepEqual(snapshot.recentOrders[0], {
+    traceId: 'trace-provider-1',
+    orderId: 'order-trace-provider-1',
+    servicePinId: 'service-pin-1',
+    serviceName: 'Tarot Reading',
+    paymentTxid: 'a'.repeat(64),
+    paymentAmount: '0.00001',
+    paymentCurrency: 'SPACE',
+    buyerGlobalMetaId: 'idq1buyer',
+    buyerName: 'Buyer Bot',
+    publicStatus: 'completed',
+    createdAt: 1_775_000_010_000,
+    ratingStatus: 'rated_on_chain',
+    ratingValue: 4,
+    ratingComment: '解释得很清楚。',
+    ratingPinId: 'rating-pin-1',
+    ratingCreatedAt: 1_775_000_020_000,
+  });
+});
+
+test('buildProviderConsoleSnapshot marks a rated seller order as follow-up unconfirmed when provider delivery was not confirmed', () => {
+  const snapshot = buildProviderConsoleSnapshot({
+    services: [createServiceRecord()],
+    traces: [
+      createSellerTrace({
+        traceId: 'trace-provider-rating-unconfirmed',
+        ratingMessageSent: false,
+        ratingMessageError: 'Remote provider follow-up delivery not confirmed.',
+      }),
+    ],
+    ratingDetails: [
+      {
+        pinId: 'rating-pin-2',
+        serviceId: 'service-pin-1',
+        servicePaidTx: 'a'.repeat(64),
+        rate: 5,
+        comment: '闭环完整，回复及时。',
+        raterGlobalMetaId: 'idq1buyer',
+        raterMetaId: 'buyer-meta-id',
+        createdAt: 1_775_000_030_000,
+      },
+    ],
+  });
+
+  assert.equal(snapshot.recentOrders[0].ratingStatus, 'rated_on_chain_followup_unconfirmed');
+  assert.equal(snapshot.recentOrders[0].ratingValue, 5);
+  assert.equal(snapshot.recentOrders[0].ratingComment, '闭环完整，回复及时。');
+  assert.equal(snapshot.recentOrders[0].ratingPinId, 'rating-pin-2');
+  assert.equal(snapshot.recentOrders[0].ratingCreatedAt, 1_775_000_030_000);
 });
 
 test('buildProviderConsoleSnapshot surfaces refund_pending seller traces as manual refund actions', () => {
@@ -97,6 +172,7 @@ test('buildProviderConsoleSnapshot surfaces refund_pending seller traces as manu
         },
       }),
     ],
+    ratingDetails: [],
   });
 
   assert.equal(snapshot.manualActions.length, 1);
@@ -129,6 +205,7 @@ test('buildProviderConsoleSnapshot drops manual refund work once the seller trac
         },
       }),
     ],
+    ratingDetails: [],
   });
 
   assert.deepEqual(snapshot.manualActions, []);
