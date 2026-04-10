@@ -32,17 +32,20 @@ What this repo is not trying to be:
 
 The CLI is machine-first. The local HTML pages are for human inspection only.
 
-## Evolution Network (M1 + M2-A)
+## Evolution Network (M1 + M2-A + M2-B)
 
 The current evolution-network surface is still intentionally narrow and only targets one skill: `metabot-network-directory`.
 
 - Scope in M1: local runtime contract resolution, local execution capture, local analysis records, local rollback/adopt controls
 - Scope in M2-A: manual publish of one locally verified `metabot-network-directory` FIX artifact to MetaWeb as a metadata pin plus a referenced artifact body
-- Feature gate: `evolution_network.enabled` (global on/off for the current evolution surface)
+- Scope in M2-B: bounded recent-window search of compatible published artifacts plus manual import of one published artifact into a separate remote store
+- Feature gate: `evolution_network.enabled` (global on/off for publish, search, and import in the current evolution surface)
 - Host packs keep stable installed skill identities; `metabot-network-directory` in host packs is a runtime-resolve shim, not the final static contract
-- M2-A is manual publish only: no auto-publish hooks, no search/import, no trust/ranking, and no shared auto-adopt yet
+- M2-B still only supports one skill: `metabot-network-directory`
 - Only verified local artifacts are publishable in M2-A
-- M2-A still does **not** include chain search, chain import, trust ranking, or cross-device sync for evolution variants
+- Imported remote artifacts are stored separately under `~/.metabot/evolution/remote` and do not overwrite local self-evolved artifacts
+- Imported remote artifacts do **not** auto-adopt and do not mutate `activeVariants`
+- The current evolution surface is still manual-only: no auto-publish hooks, no background sync, no trust/ranking, and no shared auto-adopt yet
 
 Key commands:
 
@@ -53,8 +56,14 @@ metabot skills resolve --skill metabot-network-directory --host codex --format m
 metabot skills resolve --skill metabot-network-directory --host codex --format json
 metabot evolution status
 metabot evolution publish --skill metabot-network-directory --variant-id <variantId>
+metabot evolution search --skill metabot-network-directory
+metabot evolution import --pin-id <pinId>
 metabot evolution rollback --skill metabot-network-directory
 ```
+
+Search lists only compatible recent publications for the current local skill contract and reports whether a matching `variantId` is already imported.
+
+Import pulls one published artifact by metadata `pinId` into the remote store, writes a sidecar provenance record, and leaves the active runtime skill unchanged.
 
 ## Caller A2A Contract
 
@@ -243,6 +252,9 @@ metabot ui open --page hub
 metabot config get evolution_network.enabled
 metabot skills resolve --skill metabot-network-directory --host codex --format json
 metabot evolution status
+metabot evolution publish --skill metabot-network-directory --variant-id <variantId>
+metabot evolution search --skill metabot-network-directory
+metabot evolution import --pin-id <pinId>
 ```
 
 ## Repository Layout
