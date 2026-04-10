@@ -178,6 +178,136 @@ test('runCli supports `metabot evolution adopt --skill --variant-id` and `metabo
   assert.equal(indexAfterRollback.activeVariants['metabot-network-directory'], undefined);
 });
 
+test('runCli adopt passes `--source remote` through CLI parsing', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-adopt-source-'));
+  let capturedInput = null;
+  const result = await runEvolutionCli(
+    homeDir,
+    [
+      'evolution',
+      'adopt',
+      '--skill',
+      'metabot-network-directory',
+      '--variant-id',
+      'variant-remote-1',
+      '--source',
+      'remote',
+    ],
+    {},
+    {
+      evolution: {
+        adopt: async (input) => {
+          capturedInput = input;
+          return commandSuccess({ accepted: true });
+        },
+      },
+    },
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.deepEqual(capturedInput, {
+    skill: 'metabot-network-directory',
+    variantId: 'variant-remote-1',
+    source: 'remote',
+  });
+});
+
+test('runCli adopt keeps local path when `--source local` is provided', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-adopt-source-'));
+  let capturedInput = null;
+  const result = await runEvolutionCli(
+    homeDir,
+    [
+      'evolution',
+      'adopt',
+      '--skill',
+      'metabot-network-directory',
+      '--variant-id',
+      'variant-local-1',
+      '--source',
+      'local',
+    ],
+    {},
+    {
+      evolution: {
+        adopt: async (input) => {
+          capturedInput = input;
+          return commandSuccess({ accepted: true });
+        },
+      },
+    },
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.deepEqual(capturedInput, {
+    skill: 'metabot-network-directory',
+    variantId: 'variant-local-1',
+    source: 'local',
+  });
+});
+
+test('runCli adopt defaults source to local when `--source` is omitted', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-adopt-source-'));
+  let capturedInput = null;
+  const result = await runEvolutionCli(
+    homeDir,
+    [
+      'evolution',
+      'adopt',
+      '--skill',
+      'metabot-network-directory',
+      '--variant-id',
+      'variant-local-1',
+    ],
+    {},
+    {
+      evolution: {
+        adopt: async (input) => {
+          capturedInput = input;
+          return commandSuccess({ accepted: true });
+        },
+      },
+    },
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.deepEqual(capturedInput, {
+    skill: 'metabot-network-directory',
+    variantId: 'variant-local-1',
+    source: 'local',
+  });
+});
+
+test('runCli adopt rejects unsupported `--source` values', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-adopt-source-'));
+  const result = await runEvolutionCli(
+    homeDir,
+    [
+      'evolution',
+      'adopt',
+      '--skill',
+      'metabot-network-directory',
+      '--variant-id',
+      'variant-unsupported-1',
+      '--source',
+      'cloud',
+    ],
+    {},
+    {
+      evolution: {
+        adopt: async () => commandSuccess({ accepted: true }),
+      },
+    },
+  );
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.code, 'evolution_remote_adopt_not_supported');
+});
+
 test('runCli supports `metabot evolution publish --skill --variant-id` for a verified local artifact without mutating adoption state', async () => {
   const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-publish-'));
   const store = createLocalEvolutionStore(homeDir);
@@ -385,6 +515,52 @@ test('runCli import requires --pin-id', async () => {
     {
       evolution: {
         import: async () => commandSuccess({}),
+      },
+    },
+  );
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.code, 'missing_flag');
+});
+
+test('runCli supports `metabot evolution imported --skill`', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-imported-'));
+  let capturedInput = null;
+  const result = await runEvolutionCli(
+    homeDir,
+    ['evolution', 'imported', '--skill', 'metabot-network-directory'],
+    {},
+    {
+      evolution: {
+        imported: async (input) => {
+          capturedInput = input;
+          return commandSuccess({
+            skillName: input.skill,
+            count: 0,
+            results: [],
+          });
+        },
+      },
+    },
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.deepEqual(capturedInput, {
+    skill: 'metabot-network-directory',
+  });
+});
+
+test('runCli imported requires --skill', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-imported-'));
+  const result = await runEvolutionCli(
+    homeDir,
+    ['evolution', 'imported'],
+    {},
+    {
+      evolution: {
+        imported: async () => commandSuccess({}),
       },
     },
   );

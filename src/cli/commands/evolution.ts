@@ -26,7 +26,18 @@ export async function runEvolutionCommand(args: string[], context: CliRuntimeCon
     if (!variantId) {
       return commandMissingFlag('--variant-id');
     }
-    return handler({ skill, variantId });
+    const source = readFlagValue(args, '--source') ?? 'local';
+    if (source !== 'local' && source !== 'remote') {
+      return commandFailed(
+        'evolution_remote_adopt_not_supported',
+        `Unsupported evolution adoption source: ${source}.`
+      );
+    }
+    return handler({
+      skill,
+      variantId,
+      source,
+    });
   }
 
   if (subcommand === 'publish') {
@@ -79,6 +90,18 @@ export async function runEvolutionCommand(args: string[], context: CliRuntimeCon
       return commandMissingFlag('--pin-id');
     }
     return handler({ pinId });
+  }
+
+  if (subcommand === 'imported') {
+    const handler = context.dependencies.evolution?.imported;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Evolution imported handler is not configured.');
+    }
+    const skill = readFlagValue(args, '--skill');
+    if (!skill) {
+      return commandMissingFlag('--skill');
+    }
+    return handler({ skill });
   }
 
   return commandUnknownSubcommand(`evolution ${args.join(' ')}`.trim());

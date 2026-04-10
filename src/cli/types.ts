@@ -52,11 +52,16 @@ export interface CliDependencies {
   };
   evolution?: {
     status?: () => Awaitable<MetabotCommandResult<unknown>>;
-    adopt?: (input: { skill: string; variantId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    adopt?: (input: {
+      skill: string;
+      variantId: string;
+      source?: 'local' | 'remote';
+    }) => Awaitable<MetabotCommandResult<unknown>>;
     publish?: (input: { skill: string; variantId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     rollback?: (input: { skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
     search?: (input: { skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
     import?: (input: { pinId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    imported?: (input: { skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
 }
 

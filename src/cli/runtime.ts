@@ -10,10 +10,13 @@ import { createRemoteEvolutionStore } from '../core/evolution/remoteEvolutionSto
 import { publishEvolutionArtifact } from '../core/evolution/publish/publishArtifact';
 import { createChainEvolutionReader } from '../core/evolution/import/chainEvolutionReader';
 import { importPublishedEvolutionArtifact } from '../core/evolution/import/importArtifact';
+import { listImportedEvolutionArtifacts } from '../core/evolution/import/listImportedArtifacts';
 import { deriveResolvedScopeHash, searchPublishedEvolutionArtifacts } from '../core/evolution/import/searchArtifacts';
+import { adoptRemoteEvolutionArtifact } from '../core/evolution/remoteAdoption';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { renderResolvedSkillContract } from '../core/skills/skillResolver';
 import type { SkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
+import type { SkillActiveVariantRef } from '../core/evolution/types';
 import { resolveMetabotPaths } from '../core/state/paths';
 import {
   createRuntimeStateStore,
@@ -60,7 +63,14 @@ type EvolutionRuntimeFailureCode =
   | 'evolution_import_scope_mismatch'
   | 'evolution_import_variant_conflict'
   | 'evolution_import_artifact_fetch_failed'
-  | 'evolution_import_artifact_invalid';
+  | 'evolution_import_artifact_invalid'
+  | 'evolution_imported_not_supported'
+  | 'evolution_imported_artifact_invalid'
+  | 'evolution_remote_adopt_not_supported'
+  | 'evolution_remote_variant_not_found'
+  | 'evolution_remote_variant_skill_mismatch'
+  | 'evolution_remote_variant_scope_mismatch'
+  | 'evolution_remote_variant_invalid';
 
 const EVOLUTION_IMPORT_SKILL_NAME = 'metabot-network-directory';
 
@@ -106,6 +116,21 @@ function projectActiveVariantIds(activeVariants: Record<string, unknown>): Recor
       continue;
     }
     entries.push([skillName, activeRef.variantId]);
+  }
+  entries.sort(([left], [right]) => compareCodePointStrings(left, right));
+  return Object.fromEntries(entries);
+}
+
+function projectActiveVariantRefs(
+  activeVariants: Record<string, unknown>,
+): Record<string, SkillActiveVariantRef> {
+  const entries: Array<[string, SkillActiveVariantRef]> = [];
+  for (const [skillName, rawRef] of Object.entries(activeVariants)) {
+    const activeRef = parseSkillActiveVariantRef(rawRef);
+    if (!activeRef) {
+      continue;
+    }
+    entries.push([skillName, activeRef]);
   }
   entries.sort(([left], [right]) => compareCodePointStrings(left, right));
   return Object.fromEntries(entries);
@@ -466,22 +491,49 @@ function wrapNetworkListServicesDependency(
 async function resolveActiveVariantForSkill(
   context: CliRuntimeContext,
   skillName: string,
-): Promise<SkillVariantArtifact | null> {
+): Promise<{
+  activeVariant: SkillVariantArtifact | null;
+  activeVariantSource: 'local' | 'remote' | null;
+}> {
   const homeDir = normalizeHomeDir(context.env, context.cwd);
   const evolutionStore = createLocalEvolutionStore(homeDir);
   const index = await evolutionStore.readIndex();
   const activeVariantRef = parseSkillActiveVariantRef(index.activeVariants[skillName]);
-  if (!activeVariantRef || activeVariantRef.source !== 'local') {
-    return null;
+  if (!activeVariantRef) {
+    return {
+      activeVariant: null,
+      activeVariantSource: null,
+    };
   }
 
-  const artifactPath = path.join(evolutionStore.paths.evolutionArtifactsRoot, `${activeVariantRef.variantId}.json`);
-  const artifact = await readArtifactFile(artifactPath);
+  let artifact: SkillVariantArtifact | Record<string, unknown> | null;
+  if (activeVariantRef.source === 'local') {
+    const artifactPath = path.join(evolutionStore.paths.evolutionArtifactsRoot, `${activeVariantRef.variantId}.json`);
+    artifact = await readArtifactFile(artifactPath);
+  } else {
+    try {
+      const remoteStore = createRemoteEvolutionStore(homeDir);
+      artifact = await remoteStore.readArtifact(activeVariantRef.variantId);
+    } catch {
+      artifact = null;
+    }
+  }
   if (!artifact || artifact.skillName !== skillName) {
-    return null;
+    return {
+      activeVariant: null,
+      activeVariantSource: null,
+    };
   }
 
-  return artifact as unknown as SkillVariantArtifact;
+  return {
+    activeVariant: {
+      ...(artifact as SkillVariantArtifact),
+      // Active refs are the source of truth even for imported remote artifacts,
+      // which remain stored as inactive bodies in the remote cache.
+      status: 'active',
+    },
+    activeVariantSource: activeVariantRef.source,
+  };
 }
 
 async function clearActiveVariantMapping(
@@ -512,15 +564,16 @@ async function resolveEvolutionScopeHashForSkill(input: {
   skillName: string;
   evolutionNetworkEnabled: boolean;
 }): Promise<string> {
-  const activeVariant = input.evolutionNetworkEnabled
+  const resolvedActiveVariant = input.evolutionNetworkEnabled
     ? await resolveActiveVariantForSkill(input.context, input.skillName)
-    : null;
+    : { activeVariant: null, activeVariantSource: null };
   const rendered = renderResolvedSkillContract({
     skillName: input.skillName,
     host: 'codex',
     format: 'json',
     evolutionNetworkEnabled: input.evolutionNetworkEnabled,
-    activeVariant,
+    activeVariant: resolvedActiveVariant.activeVariant,
+    activeVariantSource: resolvedActiveVariant.activeVariantSource,
   });
   return deriveResolvedScopeHash(rendered.contract);
 }
@@ -572,7 +625,14 @@ function isEvolutionRuntimeFailureCode(value: unknown): value is EvolutionRuntim
     || value === 'evolution_import_scope_mismatch'
     || value === 'evolution_import_variant_conflict'
     || value === 'evolution_import_artifact_fetch_failed'
-    || value === 'evolution_import_artifact_invalid';
+    || value === 'evolution_import_artifact_invalid'
+    || value === 'evolution_imported_not_supported'
+    || value === 'evolution_imported_artifact_invalid'
+    || value === 'evolution_remote_adopt_not_supported'
+    || value === 'evolution_remote_variant_not_found'
+    || value === 'evolution_remote_variant_skill_mismatch'
+    || value === 'evolution_remote_variant_scope_mismatch'
+    || value === 'evolution_remote_variant_invalid';
 }
 
 function mapEvolutionRuntimeError(error: unknown): { code: EvolutionRuntimeFailureCode; message: string } | null {
@@ -806,15 +866,16 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const homeDir = normalizeHomeDir(context.env, context.cwd);
         const configStore = createConfigStore(homeDir);
         const config = await configStore.read();
-        const activeVariant = config.evolution_network.enabled
+        const resolvedActiveVariant = config.evolution_network.enabled
           ? await resolveActiveVariantForSkill(context, input.skill)
-          : null;
+          : { activeVariant: null, activeVariantSource: null };
         const rendered = renderResolvedSkillContract({
           skillName: input.skill,
           host: input.host as SkillHost,
           format: input.format as SkillRenderFormat,
           evolutionNetworkEnabled: config.evolution_network.enabled,
-          activeVariant,
+          activeVariant: resolvedActiveVariant.activeVariant,
+          activeVariantSource: resolvedActiveVariant.activeVariantSource,
         });
         if (rendered.format === 'markdown') {
           return commandSuccess(rendered.markdown);
@@ -835,6 +896,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           analyses: index.analyses.length,
           artifacts: index.artifacts.length,
           activeVariants: projectActiveVariantIds(index.activeVariants),
+          activeVariantRefs: projectActiveVariantRefs(index.activeVariants),
         });
       },
       search: async (input) => {
@@ -966,8 +1028,79 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           throw error;
         }
       },
+      imported: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const configStore = createConfigStore(homeDir);
+        const config = await configStore.read();
+        if (!config.evolution_network.enabled) {
+          return commandFailed(
+            'evolution_network_disabled',
+            'Evolution network imported listing is disabled.'
+          );
+        }
+
+        try {
+          const evolutionStore = createLocalEvolutionStore(homeDir);
+          const index = await evolutionStore.readIndex();
+          const activeRef = parseSkillActiveVariantRef(index.activeVariants[input.skill]);
+          const remoteStore = createRemoteEvolutionStore(homeDir);
+          const imported = await listImportedEvolutionArtifacts({
+            skillName: input.skill,
+            activeRef,
+            remoteStore,
+          });
+          return commandSuccess(imported);
+        } catch (error) {
+          const mapped = mapEvolutionRuntimeError(error);
+          if (mapped) {
+            return commandFailed(mapped.code, mapped.message);
+          }
+          throw error;
+        }
+      },
       adopt: async (input) => {
         const homeDir = normalizeHomeDir(context.env, context.cwd);
+        if (input.source === 'remote') {
+          const configStore = createConfigStore(homeDir);
+          const config = await configStore.read();
+          if (!config.evolution_network.enabled) {
+            return commandFailed(
+              'evolution_network_disabled',
+              'Evolution network remote adoption is disabled.'
+            );
+          }
+          if (input.skill !== EVOLUTION_IMPORT_SKILL_NAME) {
+            return commandFailed(
+              'evolution_remote_adopt_not_supported',
+              `Remote adoption is currently supported only for "${EVOLUTION_IMPORT_SKILL_NAME}".`
+            );
+          }
+
+          try {
+            const resolvedScopeHash = await resolveEvolutionScopeHashForSkill({
+              context,
+              skillName: input.skill,
+              evolutionNetworkEnabled: config.evolution_network.enabled,
+            });
+            const evolutionStore = createLocalEvolutionStore(homeDir);
+            const remoteStore = createRemoteEvolutionStore(homeDir);
+            const adopted = await adoptRemoteEvolutionArtifact({
+              skillName: input.skill,
+              variantId: input.variantId,
+              resolvedScopeHash,
+              remoteStore,
+              evolutionStore,
+            });
+            return commandSuccess(adopted);
+          } catch (error) {
+            const mapped = mapEvolutionRuntimeError(error);
+            if (mapped) {
+              return commandFailed(mapped.code, mapped.message);
+            }
+            throw error;
+          }
+        }
+
         const evolutionStore = createLocalEvolutionStore(homeDir);
         const artifactPath = path.join(evolutionStore.paths.evolutionArtifactsRoot, `${input.variantId}.json`);
         const artifact = await readArtifactFile(artifactPath);
