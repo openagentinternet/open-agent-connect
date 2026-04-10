@@ -23,6 +23,8 @@ export type ProviderConsoleOrderRatingStatus =
   | 'rated_on_chain_followup_unconfirmed'
   | 'sync_error';
 
+export type ProviderConsoleRatingSyncState = 'ready' | 'sync_error';
+
 export interface ProviderConsoleServiceRow {
   servicePinId: string;
   sourceServicePinId: string;
@@ -98,14 +100,15 @@ function buildServiceRow(record: PublishedServiceRecord): ProviderConsoleService
 
 function resolveOrderRating(
   trace: ProviderConsoleTraceRecord,
-  ratingDetail: RatingDetailItem | null
+  ratingDetail: RatingDetailItem | null,
+  ratingSyncState: ProviderConsoleRatingSyncState
 ): Pick<
   ProviderConsoleOrderRow,
   'ratingStatus' | 'ratingValue' | 'ratingComment' | 'ratingPinId' | 'ratingCreatedAt'
 > {
   if (!ratingDetail) {
     return {
-      ratingStatus: 'requested_unrated',
+      ratingStatus: ratingSyncState === 'sync_error' ? 'sync_error' : 'requested_unrated',
       ratingValue: null,
       ratingComment: null,
       ratingPinId: null,
@@ -127,7 +130,8 @@ function resolveOrderRating(
 
 function buildOrderRowWithRating(
   trace: ProviderConsoleTraceRecord,
-  ratingDetails: RatingDetailItem[]
+  ratingDetails: RatingDetailItem[],
+  ratingSyncState: ProviderConsoleRatingSyncState
 ): ProviderConsoleOrderRow | null {
   const order = trace.order;
   if (!order || normalizeText(order.role) !== 'seller') {
@@ -147,7 +151,7 @@ function buildOrderRowWithRating(
         servicePaidTx: paymentTxid,
       })
     : null;
-  const rating = resolveOrderRating(trace, ratingDetail);
+  const rating = resolveOrderRating(trace, ratingDetail, ratingSyncState);
 
   return {
     traceId: normalizeText(trace.traceId),
@@ -197,13 +201,15 @@ export function buildProviderConsoleSnapshot(input: {
   services: PublishedServiceRecord[];
   traces: ProviderConsoleTraceRecord[];
   ratingDetails?: RatingDetailItem[];
+  ratingSyncState?: ProviderConsoleRatingSyncState;
 }): ProviderConsoleSnapshot {
   const ratingDetails = Array.isArray(input.ratingDetails) ? input.ratingDetails : [];
+  const ratingSyncState = input.ratingSyncState === 'sync_error' ? 'sync_error' : 'ready';
   const services = [...input.services]
     .sort(sortByUpdatedAtDesc)
     .map(buildServiceRow);
   const recentOrders = input.traces
-    .map((trace) => buildOrderRowWithRating(trace, ratingDetails))
+    .map((trace) => buildOrderRowWithRating(trace, ratingDetails, ratingSyncState))
     .filter((entry): entry is ProviderConsoleOrderRow => Boolean(entry))
     .sort(sortByUpdatedAtDesc);
   const manualActions = input.traces

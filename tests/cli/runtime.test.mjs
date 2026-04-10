@@ -71,43 +71,53 @@ async function runCommandText(homeDir, args, envOverrides = {}) {
   };
 }
 
-async function startFakeChainApiServer() {
+async function startFakeChainApiServer(options = {}) {
+  const ratingPins = Array.isArray(options.ratingPins) ? options.ratingPins : [];
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const nowSec = Math.floor(Date.now() / 1000);
     let payload = null;
 
     if (url.pathname === '/pin/path/list') {
-      payload = {
-        data: {
-          list: [
-              {
-                id: 'chain-service-pin-1',
-                metaid: 'metaid-provider',
-                address: 'mvc-provider-address',
-                timestamp: nowSec,
-                status: 0,
-                operation: 'create',
-                path: '/protocols/skill-service',
-                contentSummary: JSON.stringify({
-                serviceName: 'weather-oracle',
-                displayName: 'Weather Oracle',
-                description: 'Returns tomorrow weather.',
-                providerMetaBot: 'idq1provider',
-                providerSkill: 'metabot-weather-oracle',
-                price: '0.00001',
-                currency: 'SPACE',
-                skillDocument: '# Weather Oracle',
-                inputType: 'text',
-                outputType: 'text',
-                endpoint: 'simplemsg',
-                paymentAddress: 'mvc-payment-address',
-              }),
-            },
-          ],
-          nextCursor: null,
-        },
-      };
+      if (url.searchParams.get('path') === '/protocols/skill-service-rate') {
+        payload = {
+          data: {
+            list: ratingPins,
+            nextCursor: null,
+          },
+        };
+      } else {
+        payload = {
+          data: {
+            list: [
+                {
+                  id: 'chain-service-pin-1',
+                  metaid: 'metaid-provider',
+                  address: 'mvc-provider-address',
+                  timestamp: nowSec,
+                  status: 0,
+                  operation: 'create',
+                  path: '/protocols/skill-service',
+                  contentSummary: JSON.stringify({
+                  serviceName: 'weather-oracle',
+                  displayName: 'Weather Oracle',
+                  description: 'Returns tomorrow weather.',
+                  providerMetaBot: 'idq1provider',
+                  providerSkill: 'metabot-weather-oracle',
+                  price: '0.00001',
+                  currency: 'SPACE',
+                  skillDocument: '# Weather Oracle',
+                  inputType: 'text',
+                  outputType: 'text',
+                  endpoint: 'simplemsg',
+                  paymentAddress: 'mvc-payment-address',
+                }),
+              },
+            ],
+            nextCursor: null,
+          },
+        };
+      }
     } else if (url.pathname === '/address/pin/list/mvc-provider-address') {
       payload = {
         data: {
@@ -525,6 +535,125 @@ test('provider closure runtime can publish, go online, receive a seller trace, a
   assert.equal(summary.payload.data.manualActions.length, 1);
   assert.equal(summary.payload.data.manualActions[0].orderId, providerTrace.payload.data.order.id);
   assert.equal(summary.payload.data.manualActions[0].refundRequestPinId, 'refund-pin-acceptance-1');
+});
+
+test('provider summary refreshes rating detail from chain and exposes rated seller-order closure', async (t) => {
+  const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-provider-closure-'));
+  const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-caller-closure-'));
+  const ratingPins = [];
+  const chainApi = await startFakeChainApiServer({ ratingPins });
+  t.after(async () => stopDaemon(providerHome));
+  t.after(async () => stopDaemon(callerHome));
+  t.after(async () => chainApi.close());
+  t.after(async () => rm(providerHome, { recursive: true, force: true }));
+  t.after(async () => rm(callerHome, { recursive: true, force: true }));
+
+  const providerIdentity = await runCommand(providerHome, ['identity', 'create', '--name', 'Provider Bot']);
+  assert.equal(providerIdentity.exitCode, 0);
+  const callerIdentity = await runCommand(callerHome, ['identity', 'create', '--name', 'Caller Bot']);
+  assert.equal(callerIdentity.exitCode, 0);
+
+  const publishFile = path.join(providerHome, 'provider-rating-payload.json');
+  await writeFile(publishFile, JSON.stringify({
+    serviceName: 'tarot-rws-service',
+    displayName: 'Tarot Reading',
+    description: 'Reads one tarot card.',
+    providerSkill: 'tarot-rws',
+    price: '0.00001',
+    currency: 'SPACE',
+    outputType: 'text',
+    skillDocument: '# Tarot Reading',
+  }), 'utf8');
+
+  const published = await runCommand(providerHome, ['services', 'publish', '--payload-file', publishFile]);
+  assert.equal(published.exitCode, 0);
+  assert.equal(published.payload.ok, true);
+
+  const providerDaemon = await runCommand(
+    providerHome,
+    ['daemon', 'start'],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+  assert.equal(providerDaemon.exitCode, 0);
+  assert.equal(providerDaemon.payload.ok, true);
+
+  const requestFile = path.join(callerHome, 'provider-rating-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: published.payload.data.servicePinId,
+      providerGlobalMetaId: providerIdentity.payload.data.globalMetaId,
+      providerDaemonBaseUrl: providerDaemon.payload.data.baseUrl,
+      userTask: 'Do one tarot reading',
+      taskContext: 'Acceptance coverage for provider rating closure',
+    },
+  }), 'utf8');
+
+  const called = await runCommand(
+    callerHome,
+    ['services', 'call', '--request-file', requestFile],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+  assert.equal(called.exitCode, 0);
+  assert.equal(called.payload.ok, true);
+
+  const providerRuntimeStateStore = createRuntimeStateStore(providerHome);
+  const providerState = await providerRuntimeStateStore.readState();
+  await providerRuntimeStateStore.writeState({
+    ...providerState,
+    traces: providerState.traces.map((entry) => {
+      if (entry.traceId !== called.payload.data.traceId || !entry.order) {
+        return entry;
+      }
+      return {
+        ...entry,
+        order: {
+          ...entry.order,
+          paymentTxid: called.payload.data.paymentTxid,
+        },
+      };
+    }),
+  });
+
+  const rateRequestFile = path.join(callerHome, 'provider-rating-request.json');
+  await writeFile(rateRequestFile, JSON.stringify({
+    traceId: called.payload.data.traceId,
+    rate: 4,
+    comment: '解释很具体。',
+  }), 'utf8');
+
+  const rated = await runCommand(
+    callerHome,
+    ['services', 'rate', '--request-file', rateRequestFile],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+  assert.equal(rated.exitCode, 0);
+  assert.equal(rated.payload.ok, true);
+
+  ratingPins.push({
+    id: rated.payload.data.pinId,
+    globalMetaId: callerIdentity.payload.data.globalMetaId,
+    metaid: callerIdentity.payload.data.metaId,
+    timestamp: Math.floor(Date.now() / 1000),
+    contentSummary: JSON.stringify({
+      serviceID: rated.payload.data.serviceId,
+      servicePaidTx: rated.payload.data.servicePaidTx,
+      rate: rated.payload.data.rate,
+      comment: rated.payload.data.comment,
+    }),
+  });
+
+  const summary = await fetchJson(providerDaemon.payload.data.baseUrl, '/api/provider/summary');
+  assert.equal(summary.status, 200);
+  assert.equal(summary.payload.ok, true);
+  assert.equal(summary.payload.data.ratingSyncState, 'ready');
+  assert.equal(summary.payload.data.ratingSyncError, null);
+  assert.equal(summary.payload.data.recentOrders.length, 1);
+  assert.equal(summary.payload.data.recentOrders[0].traceId, called.payload.data.traceId);
+  assert.equal(summary.payload.data.recentOrders[0].ratingStatus, 'rated_on_chain');
+  assert.equal(summary.payload.data.recentOrders[0].ratingValue, 4);
+  assert.equal(summary.payload.data.recentOrders[0].ratingComment, '解释很具体。');
+  assert.equal(summary.payload.data.recentOrders[0].ratingPinId, rated.payload.data.pinId);
+  assert.ok(Number.isFinite(summary.payload.data.recentOrders[0].ratingCreatedAt));
 });
 
 test('network services reads chain-backed online services without local directory seeds', async (t) => {

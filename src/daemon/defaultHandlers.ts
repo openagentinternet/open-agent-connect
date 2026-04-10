@@ -19,6 +19,8 @@ import { buildPublishedService } from '../core/services/publishService';
 import { publishServiceToChain } from '../core/services/servicePublishChain';
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
+import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
+import { refreshRatingDetailCacheFromChain } from '../core/ratings/ratingDetailSync';
 import { planRemoteCall } from '../core/delegation/remoteCall';
 import { buildSessionTrace } from '../core/chat/sessionTrace';
 import type { SessionTraceRecord } from '../core/chat/sessionTrace';
@@ -59,6 +61,7 @@ const DEFAULT_CALLER_FOREGROUND_WAIT_MS = 15_000;
 const DEFAULT_CALLER_BACKGROUND_WAIT_MS = 30 * 60 * 1000;
 const DEFAULT_TRACE_WATCH_WAIT_MS = 75_000;
 const TRACE_WATCH_POLL_INTERVAL_MS = 500;
+const PROVIDER_RATING_SYNC_STALE_MS = 30_000;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -130,10 +133,15 @@ function readStringArray(value: unknown): string[] {
 function buildProviderSummaryPayload(input: {
   state: RuntimeState;
   presence: Awaited<ReturnType<ReturnType<typeof createProviderPresenceStateStore>['read']>>;
+  ratingDetails?: Awaited<ReturnType<ReturnType<typeof createRatingDetailStateStore>['read']>>['items'];
+  ratingSyncState?: 'ready' | 'sync_error';
+  ratingSyncError?: string | null;
 }) {
   const snapshot = buildProviderConsoleSnapshot({
     services: input.state.services,
     traces: input.state.traces as unknown as ProviderConsoleTraceRecord[],
+    ratingDetails: input.ratingDetails,
+    ratingSyncState: input.ratingSyncState,
   });
 
   return {
@@ -150,7 +158,51 @@ function buildProviderSummaryPayload(input: {
     recentOrders: snapshot.recentOrders,
     manualActions: snapshot.manualActions,
     totals: snapshot.totals,
+    ratingSyncState: input.ratingSyncState === 'sync_error' ? 'sync_error' : 'ready',
+    ratingSyncError: normalizeText(input.ratingSyncError) || null,
   };
+}
+
+async function readProviderRatingSnapshot(input: {
+  ratingDetailStateStore: ReturnType<typeof createRatingDetailStateStore>;
+  chainApiBaseUrl?: string;
+  now?: () => number;
+}): Promise<{
+  ratingDetails: Awaited<ReturnType<ReturnType<typeof createRatingDetailStateStore>['read']>>['items'];
+  ratingSyncState: 'ready' | 'sync_error';
+  ratingSyncError: string | null;
+}> {
+  const now = input.now ?? Date.now;
+  const current = await input.ratingDetailStateStore.read();
+  const lastSyncedAt = Number.isFinite(current.lastSyncedAt) ? Number(current.lastSyncedAt) : 0;
+  const shouldRefresh = current.items.length === 0 || !lastSyncedAt || now() - lastSyncedAt >= PROVIDER_RATING_SYNC_STALE_MS;
+
+  if (!shouldRefresh) {
+    return {
+      ratingDetails: current.items,
+      ratingSyncState: 'ready',
+      ratingSyncError: null,
+    };
+  }
+
+  try {
+    const refreshed = await refreshRatingDetailCacheFromChain({
+      store: input.ratingDetailStateStore,
+      chainApiBaseUrl: input.chainApiBaseUrl,
+      now,
+    });
+    return {
+      ratingDetails: refreshed.state.items,
+      ratingSyncState: 'ready',
+      ratingSyncError: null,
+    };
+  } catch (error) {
+    return {
+      ratingDetails: current.items,
+      ratingSyncState: 'sync_error',
+      ratingSyncError: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function readCallRequest(rawInput: Record<string, unknown>) {
@@ -1030,6 +1082,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const signer = input.signer ?? createLocalMnemonicSigner({ secretStore });
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(input.homeDir);
+  const ratingDetailStateStore = createRatingDetailStateStore(input.homeDir);
   const sessionStateStore = createSessionStateStore(input.homeDir);
   const sessionEngine = createA2ASessionEngine();
   const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey ?? fetchPeerChatPublicKey;
@@ -1289,9 +1342,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
       getSummary: async () => {
         const state = await runtimeStateStore.readState();
         const presence = await providerPresenceStore.read();
+        const ratingSnapshot = await readProviderRatingSnapshot({
+          ratingDetailStateStore,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+        });
         return commandSuccess(buildProviderSummaryPayload({
           state,
           presence,
+          ratingDetails: ratingSnapshot.ratingDetails,
+          ratingSyncState: ratingSnapshot.ratingSyncState,
+          ratingSyncError: ratingSnapshot.ratingSyncError,
         }));
       },
       setPresence: async ({ enabled }) => {
