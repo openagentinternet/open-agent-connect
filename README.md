@@ -33,6 +33,51 @@ What this repo is not trying to be:
 
 The CLI is machine-first. The local HTML pages are for human inspection only.
 
+## Evolution Network (M1 + M2-A + M2-B + M2-C)
+
+The current evolution-network surface is still intentionally narrow and only targets one skill: `metabot-network-directory`.
+
+- Scope in M1: local runtime contract resolution, local execution capture, local analysis records, local rollback/adopt controls
+- Scope in M2-A: manual publish of one locally verified `metabot-network-directory` FIX artifact to MetaWeb as a metadata pin plus a referenced artifact body
+- Scope in M2-B: bounded recent-window search of compatible published artifacts plus manual import of one published artifact into a separate remote store
+- Scope in M2-C: local-only imported-artifact inspection plus manual remote adoption of one already imported artifact into active runtime resolution
+- Feature gate: `evolution_network.enabled` (global on/off for local evolution, publish, search, import, imported listing, and remote adopt in the current evolution surface)
+- Host packs keep stable installed skill identities; `metabot-network-directory` in host packs is a runtime-resolve shim, not the final static contract
+- M2-C still only supports one skill: `metabot-network-directory`
+- Only verified local artifacts are publishable in M2-A
+- Imported remote artifacts are stored separately under `~/.metabot/evolution/remote` and do not overwrite local self-evolved artifacts
+- Imported remote artifacts can now be listed locally and manually adopted with `--source remote` when the imported artifact still matches the current local scope hash and still has a fully passing verification tuple
+- Active runtime state is now source-aware:
+  - `status.activeVariants` stays a backward-friendly string projection
+  - `status.activeVariantRefs` carries the canonical `{ source, variantId }` record
+  - `skills resolve --format json` exposes `activeVariantSource`
+- Imported remote artifacts do **not** auto-adopt and are never copied into the local self-evolution artifact store during remote adoption
+- The current evolution surface is still manual-only: no auto-publish hooks, no background sync, no trust/ranking, and no shared auto-adopt yet
+
+Key commands:
+
+```bash
+metabot config get evolution_network.enabled
+metabot config set evolution_network.enabled false
+metabot skills resolve --skill metabot-network-directory --host codex --format markdown
+metabot skills resolve --skill metabot-network-directory --host codex --format json
+metabot evolution status
+metabot evolution publish --skill metabot-network-directory --variant-id <variantId>
+metabot evolution search --skill metabot-network-directory
+metabot evolution import --pin-id <pinId>
+metabot evolution imported --skill metabot-network-directory
+metabot evolution adopt --skill metabot-network-directory --variant-id <variantId> --source remote
+metabot evolution rollback --skill metabot-network-directory
+```
+
+Search lists only compatible recent publications for the current local skill contract and reports whether a matching `variantId` is already imported.
+
+Import pulls one published artifact by metadata `pinId` into the remote store, writes a sidecar provenance record, and leaves the active runtime skill unchanged.
+
+Imported lists already imported remote artifacts from the local remote cache only. It does not read chain state.
+
+Remote adopt is manual-only in M2-C. It switches runtime resolution only when the already imported remote artifact still matches the current local scope hash and still has a fully passing verification tuple, keeps the imported artifact in the remote store, and still lets `rollback` return the skill to base behavior.
+
 ## Caller A2A Contract
 
 The current caller-side host flow is:
@@ -290,6 +335,15 @@ metabot trace get --trace-id trace-123
 metabot ui open --page hub
 metabot ui open --page publish
 metabot ui open --page my-services
+metabot config get evolution_network.enabled
+metabot skills resolve --skill metabot-network-directory --host codex --format json
+metabot evolution status
+metabot evolution publish --skill metabot-network-directory --variant-id <variantId>
+metabot evolution search --skill metabot-network-directory
+metabot evolution import --pin-id <pinId>
+metabot evolution imported --skill metabot-network-directory
+metabot evolution adopt --skill metabot-network-directory --variant-id <variantId> --source remote
+metabot evolution rollback --skill metabot-network-directory
 ```
 
 ## Repository Layout

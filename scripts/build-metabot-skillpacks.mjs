@@ -42,6 +42,14 @@ function replaceAll(source, replacements) {
   ), source);
 }
 
+function extractFrontmatter(source, skillName) {
+  const match = source.match(/^---\n[\s\S]*?\n---/);
+  if (!match) {
+    throw new Error(`Expected frontmatter in SKILL source for ${skillName}`);
+  }
+  return match[0];
+}
+
 function renderHostMetadata(hostKey, host) {
   return [
     `Generated for ${host.displayName}.`,
@@ -211,6 +219,18 @@ async function writeFile(filePath, content, executable = false) {
 async function renderSkill({ repoRoot, skillName, hostKey, host, templates }) {
   const sourcePath = path.join(repoRoot, 'SKILLs', skillName, 'SKILL.md');
   const source = await fs.readFile(sourcePath, 'utf8');
+
+  if (skillName === 'metabot-network-directory') {
+    return replaceAll(templates.runtimeResolveShim, {
+      '{{FRONTMATTER}}': extractFrontmatter(source, skillName),
+      '{{SKILL_NAME}}': skillName,
+      '{{HOST_KEY}}': hostKey,
+      '{{METABOT_CLI}}': SHARED_CLI_PATH,
+      '{{HOST_SKILLPACK_METADATA}}': renderHostMetadata(hostKey, host),
+      '{{COMPATIBILITY_MANIFEST}}': SHARED_COMPATIBILITY_MANIFEST,
+    });
+  }
+
   const renderedTemplates = {
     confirmationContract: replaceAll(templates.confirmationContract, {
       '{{METABOT_CLI}}': SHARED_CLI_PATH,
@@ -236,6 +256,7 @@ export async function buildMetabotSkillpacks(options = {}) {
   const templates = {
     confirmationContract: await readTemplate(repoRoot, 'skillpacks/common/templates/confirmation-contract.md'),
     systemRouting: await readTemplate(repoRoot, 'skillpacks/common/templates/system-routing.md'),
+    runtimeResolveShim: await readTemplate(repoRoot, 'skillpacks/common/templates/runtime-resolve-shim.md'),
   };
 
   const hostKeys = Object.keys(HOSTS);

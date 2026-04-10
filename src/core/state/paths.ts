@@ -10,6 +10,15 @@ export interface MetabotPaths {
   providerPresenceStatePath: string;
   ratingDetailStatePath: string;
   secretsPath: string;
+  configPath: string;
+  evolutionRoot: string;
+  evolutionExecutionsRoot: string;
+  evolutionAnalysesRoot: string;
+  evolutionArtifactsRoot: string;
+  evolutionIndexPath: string;
+  evolutionRemoteRoot: string;
+  evolutionRemoteArtifactsRoot: string;
+  evolutionRemoteIndexPath: string;
 }
 
 export function resolveMetabotPaths(homeDir: string): MetabotPaths {
@@ -20,6 +29,15 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
   const baseRoot = path.join(homeDir, '.metabot');
   const hotRoot = path.join(baseRoot, 'hot');
   const exportRoot = path.join(baseRoot, 'exports');
+  const configPath = path.join(hotRoot, 'config.json');
+  const evolutionRoot = path.join(baseRoot, 'evolution');
+  const evolutionExecutionsRoot = path.join(evolutionRoot, 'executions');
+  const evolutionAnalysesRoot = path.join(evolutionRoot, 'analyses');
+  const evolutionArtifactsRoot = path.join(evolutionRoot, 'artifacts');
+  const evolutionIndexPath = path.join(evolutionRoot, 'index.json');
+  const evolutionRemoteRoot = path.join(evolutionRoot, 'remote');
+  const evolutionRemoteArtifactsRoot = path.join(evolutionRemoteRoot, 'artifacts');
+  const evolutionRemoteIndexPath = path.join(evolutionRemoteRoot, 'index.json');
 
   return {
     baseRoot,
@@ -30,6 +48,15 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     daemonStatePath: path.join(hotRoot, 'daemon.json'),
     providerPresenceStatePath: path.join(hotRoot, 'provider-presence.json'),
     ratingDetailStatePath: path.join(hotRoot, 'rating-detail.json'),
-    secretsPath: path.join(hotRoot, 'secrets.json')
+    secretsPath: path.join(hotRoot, 'secrets.json'),
+    configPath,
+    evolutionRoot,
+    evolutionExecutionsRoot,
+    evolutionAnalysesRoot,
+    evolutionArtifactsRoot,
+    evolutionIndexPath,
+    evolutionRemoteRoot,
+    evolutionRemoteArtifactsRoot,
+    evolutionRemoteIndexPath
   };
 }

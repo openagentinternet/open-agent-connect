@@ -141,7 +141,7 @@ test('buildMetabotSkillpacks publishes the shared remote-call demo transport con
   }
 });
 
-test('buildMetabotSkillpacks publishes the shared network-directory handoff field across all host packs', async () => {
+test('buildMetabotSkillpacks renders metabot-network-directory as a stable runtime-resolve shim in every host pack', async () => {
   const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
   const { buildMetabotSkillpacks } = await import(BUILD_SCRIPT_URL);
 
@@ -155,12 +155,19 @@ test('buildMetabotSkillpacks publishes the shared network-directory handoff fiel
       path.join(outputRoot, host, 'skills', 'metabot-network-directory', 'SKILL.md'),
       'utf8'
     );
-    assert.match(content, /online MetaBot services/i);
-    assert.match(content, /remote MetaBot/i);
-    assert.match(content, /delegate/i);
-    assert.match(content, /metabot-call-remote-service/);
-    assert.match(content, new RegExp(EXPECTED_HUB_UI_LINE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-    assert.match(content, /append the local MetaBot Hub link/i);
+    assert.match(content, /^name:\s*metabot-network-directory$/m);
+    assert.match(content, /^description:\s*Use when an agent or human needs the local yellow-pages view of online MetaBots before deciding which remote MetaBot should receive a delegated task$/m);
+    assert.match(
+      content,
+      new RegExp(`metabot skills resolve --skill metabot-network-directory --host ${host} --format markdown`)
+    );
+    assert.match(content, /runtime-resolve shim/i);
+    assert.match(content, /follow the resolved contract/i);
+
+    assert.doesNotMatch(content, /metabot network services --online/i);
+    assert.doesNotMatch(content, /metabot ui open --page hub/i);
+    assert.doesNotMatch(content, /providerDaemonBaseUrl/i);
+    assert.doesNotMatch(content, /## Expectations/i);
   }
 });
 

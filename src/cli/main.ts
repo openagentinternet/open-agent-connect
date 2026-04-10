@@ -12,6 +12,9 @@ import { runChatCommand } from './commands/chat';
 import { runFileCommand } from './commands/file';
 import { runTraceCommand } from './commands/trace';
 import { runUiCommand } from './commands/ui';
+import { runConfigCommand } from './commands/config';
+import { runSkillsCommand } from './commands/skills';
+import { runEvolutionCommand } from './commands/evolution';
 import { commandUnknownSubcommand } from './commands/helpers';
 import { helpRequested, writeResolvedHelp } from './commandHelp';
 import { createCliRuntimeContext, type CliContext } from './types';
@@ -71,6 +74,15 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'ui':
           result = await runUiCommand(rest, context);
+          break;
+        case 'config':
+          result = await runConfigCommand(rest, context);
+          break;
+        case 'skills':
+          result = await runSkillsCommand(rest, context);
+          break;
+        case 'evolution':
+          result = await runEvolutionCommand(rest, context);
           break;
         case undefined:
           result = commandFailed('missing_command', 'No command provided.');

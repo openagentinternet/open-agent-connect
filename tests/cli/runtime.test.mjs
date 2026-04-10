@@ -11,6 +11,20 @@ const { runCli } = require('../../dist/cli/main.js');
 const { getDefaultDaemonPort } = require('../../dist/cli/runtime.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
+const { createConfigStore } = require('../../dist/core/config/configStore.js');
+const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
+const { createRemoteEvolutionStore } = require('../../dist/core/evolution/remoteEvolutionStore.js');
+
+const NETWORK_DIRECTORY_SCOPE_HASH = JSON.stringify({
+  allowedCommands: [
+    'metabot network services --online',
+    'metabot ui open --page hub',
+  ],
+  chainRead: true,
+  chainWrite: false,
+  localUiOpen: true,
+  remoteDelegation: false,
+});
 
 function parseLastJson(chunks) {
   return JSON.parse(chunks.join('').trim());
@@ -71,18 +85,176 @@ async function runCommandText(homeDir, args, envOverrides = {}) {
   };
 }
 
+function createImportedArtifactFixture(overrides = {}) {
+  const variantId = overrides.variantId ?? 'variant-remote-1';
+  const skillName = overrides.skillName ?? 'metabot-network-directory';
+  const instructionsPatch = overrides.instructionsPatch
+    ?? 'Prefer deterministic provider ordering when listing online services.';
+  return {
+    artifact: {
+      variantId,
+      skillName,
+      status: 'inactive',
+      scope: {
+        allowedCommands: [
+          'metabot network services --online',
+          'metabot ui open --page hub',
+        ],
+        chainRead: true,
+        chainWrite: false,
+        localUiOpen: true,
+        remoteDelegation: false,
+      },
+      metadata: {
+        sameSkill: true,
+        sameScope: true,
+        scopeHash: NETWORK_DIRECTORY_SCOPE_HASH,
+      },
+      patch: {
+        instructionsPatch,
+      },
+      lineage: {
+        lineageId: `lineage-${variantId}`,
+        parentVariantId: null,
+        rootVariantId: variantId,
+        executionId: `execution-${variantId}`,
+        analysisId: `analysis-${variantId}`,
+        createdAt: 1_760_000_000_000,
+      },
+      verification: {
+        passed: true,
+        checkedAt: 1_760_000_004_000,
+        protocolCompatible: true,
+        replayValid: true,
+        notWorseThanBase: true,
+        notes: 'remote fixture verification',
+      },
+      adoption: 'manual',
+      createdAt: 1_760_000_001_000,
+      updatedAt: 1_760_000_002_000,
+    },
+    sidecar: {
+      pinId: overrides.pinId ?? `pin-${variantId}`,
+      variantId,
+      publisherGlobalMetaId: overrides.publisherGlobalMetaId ?? 'idqprovider',
+      artifactUri: overrides.artifactUri ?? `metafile:///${variantId}.json`,
+      skillName,
+      scopeHash: NETWORK_DIRECTORY_SCOPE_HASH,
+      publishedAt: 1_760_000_003_000,
+      importedAt: 1_760_000_004_500,
+    },
+  };
+}
+
 async function startFakeChainApiServer(options = {}) {
   const ratingPins = Array.isArray(options.ratingPins) ? options.ratingPins : [];
+  const evolutionMetadataPinId = 'evolution-metadata-pin-1';
+  const evolutionArtifactPinId = 'evolution-artifact-pin-1';
+  const evolutionScopeHash = JSON.stringify({
+    allowedCommands: [
+      'metabot network services --online',
+      'metabot ui open --page hub',
+    ],
+    chainRead: true,
+    chainWrite: false,
+    localUiOpen: true,
+    remoteDelegation: false,
+  });
+  const evolutionMetadata = {
+    protocolVersion: '1',
+    skillName: 'metabot-network-directory',
+    variantId: 'variant-remote-1',
+    artifactUri: `metafile://${evolutionArtifactPinId}`,
+    evolutionType: 'FIX',
+    triggerSource: 'hard_failure',
+    scopeHash: evolutionScopeHash,
+    sameSkill: true,
+    sameScope: true,
+    verificationPassed: true,
+    replayValid: true,
+    notWorseThanBase: true,
+    lineage: {
+      lineageId: 'lineage-remote-1',
+      parentVariantId: null,
+      rootVariantId: 'variant-remote-1',
+      executionId: 'execution-remote-1',
+      analysisId: 'analysis-remote-1',
+      createdAt: 1_760_000_000_000,
+    },
+    publisherGlobalMetaId: 'idqprovider',
+    artifactCreatedAt: 1_760_000_001_000,
+    artifactUpdatedAt: 1_760_000_002_000,
+    publishedAt: 1_760_000_003_000,
+  };
+  const evolutionArtifactBody = {
+    variantId: 'variant-remote-1',
+    skillName: 'metabot-network-directory',
+    scope: {
+      allowedCommands: [
+        'metabot network services --online',
+        'metabot ui open --page hub',
+      ],
+      chainRead: true,
+      chainWrite: false,
+      localUiOpen: true,
+      remoteDelegation: false,
+    },
+    metadata: {
+      sameSkill: true,
+      sameScope: true,
+      scopeHash: evolutionScopeHash,
+    },
+    patch: {
+      instructionsPatch: 'Prefer deterministic provider ordering when listing online services.',
+    },
+    lineage: {
+      lineageId: 'lineage-remote-1',
+      parentVariantId: null,
+      rootVariantId: 'variant-remote-1',
+      executionId: 'execution-remote-1',
+      analysisId: 'analysis-remote-1',
+      createdAt: 1_760_000_000_000,
+    },
+    verification: {
+      passed: true,
+      checkedAt: 1_760_000_004_000,
+      protocolCompatible: true,
+      replayValid: true,
+      notWorseThanBase: true,
+      notes: 'remote fixture verification',
+    },
+    createdAt: 1_760_000_001_000,
+    updatedAt: 1_760_000_002_000,
+  };
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const nowSec = Math.floor(Date.now() / 1000);
     let payload = null;
 
     if (url.pathname === '/pin/path/list') {
-      if (url.searchParams.get('path') === '/protocols/skill-service-rate') {
+      const pathFilter = url.searchParams.get('path');
+      if (pathFilter === '/protocols/skill-service-rate') {
         payload = {
           data: {
             list: ratingPins,
+            nextCursor: null,
+          },
+        };
+      } else if (pathFilter === '/protocols/metabot-evolution-artifact-v1') {
+        payload = {
+          data: {
+            list: [
+              {
+                id: evolutionMetadataPinId,
+                metaid: 'metaid-evolution-provider',
+                address: 'mvc-evolution-provider-address',
+                timestamp: nowSec,
+                status: 0,
+                operation: 'create',
+                path: '/protocols/metabot-evolution-artifact-v1',
+                contentSummary: evolutionMetadata,
+              },
+            ],
             nextCursor: null,
           },
         };
@@ -126,6 +298,19 @@ async function startFakeChainApiServer(options = {}) {
               seenTime: nowSec - 30,
             },
           ],
+        },
+      };
+    } else if (url.pathname === `/pin/${evolutionMetadataPinId}`) {
+      payload = {
+        data: {
+          id: evolutionMetadataPinId,
+          contentSummary: evolutionMetadata,
+        },
+      };
+    } else if (url.pathname === `/content/${evolutionArtifactPinId}`) {
+      payload = {
+        data: {
+          content: JSON.stringify(evolutionArtifactBody),
         },
       };
     }
@@ -678,6 +863,492 @@ test('network services reads chain-backed online services without local director
   assert.equal(listed.payload.data.services[0].displayName, 'Weather Oracle');
   assert.equal(listed.payload.data.services[0].providerGlobalMetaId, 'idq1provider');
   assert.equal(listed.payload.data.services[0].online, true);
+});
+
+test('evolution search/import read published artifact metadata + body via chain API and write remote artifact files', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const chainApi = await startFakeChainApiServer();
+  t.after(async () => chainApi.close());
+
+  const searched = await runCommand(
+    homeDir,
+    ['evolution', 'search', '--skill', 'metabot-network-directory'],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '',
+      METABOT_TEST_FAKE_SUBSIDY: '',
+    }
+  );
+
+  assert.equal(searched.exitCode, 0);
+  assert.equal(searched.payload.ok, true);
+  assert.equal(searched.payload.data.skillName, 'metabot-network-directory');
+  assert.equal(searched.payload.data.count, 1);
+  assert.equal(searched.payload.data.results[0].pinId, 'evolution-metadata-pin-1');
+  assert.equal(searched.stdout.join('').trim().startsWith('{'), true);
+
+  const imported = await runCommand(
+    homeDir,
+    ['evolution', 'import', '--pin-id', 'evolution-metadata-pin-1'],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '',
+      METABOT_TEST_FAKE_SUBSIDY: '',
+    }
+  );
+
+  assert.equal(imported.exitCode, 0);
+  assert.equal(imported.payload.ok, true);
+  assert.equal(imported.payload.data.pinId, 'evolution-metadata-pin-1');
+  assert.equal(imported.payload.data.variantId, 'variant-remote-1');
+  assert.equal(imported.payload.data.artifactPath.includes(`${path.sep}.metabot${path.sep}evolution${path.sep}remote${path.sep}artifacts${path.sep}`), true);
+  assert.equal(imported.payload.data.metadataPath.includes(`${path.sep}.metabot${path.sep}evolution${path.sep}remote${path.sep}artifacts${path.sep}`), true);
+  assert.equal(imported.payload.data.artifactPath.endsWith(`${path.sep}variant-remote-1.json`), true);
+  assert.equal(imported.payload.data.metadataPath.endsWith(`${path.sep}variant-remote-1.meta.json`), true);
+
+  const artifactSaved = JSON.parse(await readFile(imported.payload.data.artifactPath, 'utf8'));
+  const metadataSaved = JSON.parse(await readFile(imported.payload.data.metadataPath, 'utf8'));
+  assert.equal(artifactSaved.variantId, 'variant-remote-1');
+  assert.equal(artifactSaved.skillName, 'metabot-network-directory');
+  assert.equal(metadataSaved.pinId, 'evolution-metadata-pin-1');
+  assert.equal(metadataSaved.variantId, 'variant-remote-1');
+});
+
+test('evolution search returns a search-level command failure when chain metadata fetch fails', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (url.pathname === '/pin/path/list') {
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'boom' }));
+      return;
+    }
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'not_found' }));
+  });
+
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Expected TCP fake chain server');
+  }
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  });
+
+  const searched = await runCommand(
+    homeDir,
+    ['evolution', 'search', '--skill', 'metabot-network-directory'],
+    {
+      METABOT_CHAIN_API_BASE_URL: baseUrl,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '',
+      METABOT_TEST_FAKE_SUBSIDY: '',
+    }
+  );
+
+  assert.equal(searched.exitCode, 1);
+  assert.equal(searched.payload.ok, false);
+  assert.equal(searched.payload.code, 'evolution_chain_query_failed');
+  assert.match(searched.payload.message, /evolution_chain_query_failed:chain_evolution_http_500/);
+});
+
+test('evolution search rejects unsupported skills in this round', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+
+  const searched = await runCommand(
+    homeDir,
+    ['evolution', 'search', '--skill', 'metabot-trace-inspector'],
+    {
+      METABOT_TEST_FAKE_CHAIN_WRITE: '',
+      METABOT_TEST_FAKE_SUBSIDY: '',
+    }
+  );
+
+  assert.equal(searched.exitCode, 1);
+  assert.equal(searched.payload.ok, false);
+  assert.equal(searched.payload.code, 'evolution_search_not_supported');
+  assert.match(
+    searched.payload.message,
+    /Evolution search is currently supported only for "metabot-network-directory"\./
+  );
+});
+
+test('evolution search returns a stable invalid-result error when chain search payload is malformed', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (url.pathname === '/pin/path/list') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: { rows: [] } }));
+      return;
+    }
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'not_found' }));
+  });
+
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Expected TCP fake chain server');
+  }
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  });
+
+  const searched = await runCommand(
+    homeDir,
+    ['evolution', 'search', '--skill', 'metabot-network-directory'],
+    {
+      METABOT_CHAIN_API_BASE_URL: baseUrl,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '',
+      METABOT_TEST_FAKE_SUBSIDY: '',
+    }
+  );
+
+  assert.equal(searched.exitCode, 1);
+  assert.equal(searched.payload.ok, false);
+  assert.equal(searched.payload.code, 'evolution_search_result_invalid');
+  assert.match(searched.payload.message, /evolution_search_result_invalid:invalid_page_payload/);
+});
+
+test('evolution import returns a stable import error when metadata pin lookup fails in transport', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (url.pathname === '/pin/evolution-metadata-pin-transport-error') {
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'boom' }));
+      return;
+    }
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'not_found' }));
+  });
+
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Expected TCP fake chain server');
+  }
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  });
+
+  const imported = await runCommand(
+    homeDir,
+    ['evolution', 'import', '--pin-id', 'evolution-metadata-pin-transport-error'],
+    {
+      METABOT_CHAIN_API_BASE_URL: baseUrl,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '',
+      METABOT_TEST_FAKE_SUBSIDY: '',
+    }
+  );
+
+  assert.equal(imported.exitCode, 1);
+  assert.equal(imported.payload.ok, false);
+  assert.equal(imported.payload.code, 'evolution_import_metadata_invalid');
+  assert.match(
+    imported.payload.message,
+    /Failed to read metadata pin "evolution-metadata-pin-transport-error": chain_evolution_http_500/
+  );
+});
+
+test('evolution status exposes activeVariantRefs and skills resolve reports remote activeVariantSource', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const localStore = createLocalEvolutionStore(homeDir);
+  const remoteStore = createRemoteEvolutionStore(homeDir);
+  const fixture = createImportedArtifactFixture();
+  await remoteStore.writeImport(fixture);
+  await localStore.setActiveVariantRef('metabot-network-directory', {
+    source: 'remote',
+    variantId: fixture.artifact.variantId,
+  });
+
+  const status = await runCommand(homeDir, ['evolution', 'status']);
+  assert.equal(status.exitCode, 0);
+  assert.equal(status.payload.ok, true);
+  assert.deepEqual(status.payload.data.activeVariants, {
+    'metabot-network-directory': fixture.artifact.variantId,
+  });
+  assert.deepEqual(status.payload.data.activeVariantRefs, {
+    'metabot-network-directory': {
+      source: 'remote',
+      variantId: fixture.artifact.variantId,
+    },
+  });
+
+  const resolved = await runCommand(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-directory',
+    '--host',
+    'codex',
+    '--format',
+    'json',
+  ]);
+  assert.equal(resolved.exitCode, 0);
+  assert.equal(resolved.payload.ok, true);
+  assert.equal(resolved.payload.data.contract.activeVariantId, fixture.artifact.variantId);
+  assert.equal(resolved.payload.data.contract.activeVariantSource, 'remote');
+  assert.equal(resolved.payload.data.contract.source, 'merged');
+  assert.match(
+    resolved.payload.data.contract.instructions,
+    /Prefer deterministic provider ordering when listing online services\./
+  );
+});
+
+test('evolution imported lists local imported artifacts without chain lookups', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const remoteStore = createRemoteEvolutionStore(homeDir);
+  const fixture = createImportedArtifactFixture();
+  await remoteStore.writeImport(fixture);
+
+  const imported = await runCommand(homeDir, [
+    'evolution',
+    'imported',
+    '--skill',
+    'metabot-network-directory',
+  ]);
+
+  assert.equal(imported.exitCode, 0);
+  assert.equal(imported.payload.ok, true);
+  assert.equal(imported.payload.data.skillName, 'metabot-network-directory');
+  assert.equal(imported.payload.data.count, 1);
+  assert.equal(imported.payload.data.results[0].variantId, fixture.artifact.variantId);
+  assert.equal(imported.payload.data.results[0].pinId, fixture.sidecar.pinId);
+  assert.equal(imported.payload.data.results[0].active, false);
+});
+
+test('skills resolve falls back to the base contract when the remote active artifact cache is malformed', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const localStore = createLocalEvolutionStore(homeDir);
+  const remoteStore = createRemoteEvolutionStore(homeDir);
+  const fixture = createImportedArtifactFixture();
+  await remoteStore.writeImport(fixture);
+  await writeFile(
+    path.join(remoteStore.paths.evolutionRemoteArtifactsRoot, `${fixture.artifact.variantId}.json`),
+    '{',
+    'utf8',
+  );
+  await localStore.setActiveVariantRef('metabot-network-directory', {
+    source: 'remote',
+    variantId: fixture.artifact.variantId,
+  });
+
+  const resolved = await runCommand(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-directory',
+    '--host',
+    'codex',
+    '--format',
+    'json',
+  ]);
+
+  assert.equal(resolved.exitCode, 0);
+  assert.equal(resolved.payload.ok, true);
+  assert.equal(resolved.payload.data.contract.source, 'base');
+  assert.equal(resolved.payload.data.contract.activeVariantId, null);
+  assert.equal(resolved.payload.data.contract.activeVariantSource, null);
+});
+
+test('evolution adopt --source remote writes remote active refs and skills resolve uses imported artifact body', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const localStore = createLocalEvolutionStore(homeDir);
+  const remoteStore = createRemoteEvolutionStore(homeDir);
+  const fixture = createImportedArtifactFixture({
+    instructionsPatch: 'Remote-only instructions patch for adopted imported variant.',
+  });
+  await remoteStore.writeImport(fixture);
+
+  const adopted = await runCommand(homeDir, [
+    'evolution',
+    'adopt',
+    '--skill',
+    'metabot-network-directory',
+    '--variant-id',
+    fixture.artifact.variantId,
+    '--source',
+    'remote',
+  ]);
+
+  assert.equal(adopted.exitCode, 0);
+  assert.equal(adopted.payload.ok, true);
+  assert.equal(adopted.payload.data.skillName, 'metabot-network-directory');
+  assert.equal(adopted.payload.data.variantId, fixture.artifact.variantId);
+  assert.equal(adopted.payload.data.source, 'remote');
+  assert.equal(adopted.payload.data.active, true);
+
+  const index = await localStore.readIndex();
+  assert.deepEqual(index.activeVariants['metabot-network-directory'], {
+    source: 'remote',
+    variantId: fixture.artifact.variantId,
+  });
+
+  const resolved = await runCommand(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-directory',
+    '--host',
+    'codex',
+    '--format',
+    'json',
+  ]);
+  assert.equal(resolved.exitCode, 0);
+  assert.equal(resolved.payload.ok, true);
+  assert.equal(resolved.payload.data.contract.activeVariantId, fixture.artifact.variantId);
+  assert.equal(resolved.payload.data.contract.activeVariantSource, 'remote');
+  assert.equal(resolved.payload.data.contract.source, 'merged');
+  assert.match(
+    resolved.payload.data.contract.instructions,
+    /Remote-only instructions patch for adopted imported variant\./
+  );
+});
+
+test('evolution imported rejects unsupported skills', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+
+  const imported = await runCommand(homeDir, [
+    'evolution',
+    'imported',
+    '--skill',
+    'metabot-trace-inspector',
+  ]);
+
+  assert.equal(imported.exitCode, 1);
+  assert.equal(imported.payload.ok, false);
+  assert.equal(imported.payload.code, 'evolution_imported_not_supported');
+});
+
+test('evolution adopt --source remote rejects unsupported skills in this round', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+
+  const adopted = await runCommand(homeDir, [
+    'evolution',
+    'adopt',
+    '--skill',
+    'metabot-trace-inspector',
+    '--variant-id',
+    'variant-remote-1',
+    '--source',
+    'remote',
+  ]);
+
+  assert.equal(adopted.exitCode, 1);
+  assert.equal(adopted.payload.ok, false);
+  assert.equal(adopted.payload.code, 'evolution_remote_adopt_not_supported');
+});
+
+test('evolution adopt rejects unsupported source values in this round', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+
+  const adopted = await runCommand(homeDir, [
+    'evolution',
+    'adopt',
+    '--skill',
+    'metabot-network-directory',
+    '--variant-id',
+    'variant-remote-1',
+    '--source',
+    'cloud',
+  ]);
+
+  assert.equal(adopted.exitCode, 1);
+  assert.equal(adopted.payload.ok, false);
+  assert.equal(adopted.payload.code, 'evolution_remote_adopt_not_supported');
+});
+
+test('evolution imported and remote adopt return evolution_network_disabled when disabled', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const configStore = createConfigStore(homeDir);
+  const config = await configStore.read();
+  await configStore.set({
+    ...config,
+    evolution_network: {
+      ...config.evolution_network,
+      enabled: false,
+    },
+  });
+
+  const imported = await runCommand(homeDir, [
+    'evolution',
+    'imported',
+    '--skill',
+    'metabot-network-directory',
+  ]);
+  assert.equal(imported.exitCode, 1);
+  assert.equal(imported.payload.ok, false);
+  assert.equal(imported.payload.code, 'evolution_network_disabled');
+
+  const adopted = await runCommand(homeDir, [
+    'evolution',
+    'adopt',
+    '--skill',
+    'metabot-network-directory',
+    '--variant-id',
+    'variant-remote-1',
+    '--source',
+    'remote',
+  ]);
+  assert.equal(adopted.exitCode, 1);
+  assert.equal(adopted.payload.ok, false);
+  assert.equal(adopted.payload.code, 'evolution_network_disabled');
 });
 
 test('network services merges remote demo directory seeds and returns provider daemon base urls for agent-side invocation', async (t) => {

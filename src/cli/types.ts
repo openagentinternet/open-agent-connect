@@ -1,9 +1,14 @@
 import { promises as fs } from 'node:fs';
 import type { MetabotCommandResult } from '../core/contracts/commandResult';
+import type { SkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
 
 export type Awaitable<T> = T | Promise<T>;
 
 export interface CliDependencies {
+  config?: {
+    get?: (input: { key: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    set?: (input: { key: string; value: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   buzz?: {
     post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
@@ -42,6 +47,22 @@ export interface CliDependencies {
   };
   ui?: {
     open?: (input: { page: string; traceId?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
+  skills?: {
+    resolve?: (input: { skill: string; host: SkillHost; format: SkillRenderFormat }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
+  evolution?: {
+    status?: () => Awaitable<MetabotCommandResult<unknown>>;
+    adopt?: (input: {
+      skill: string;
+      variantId: string;
+      source?: 'local' | 'remote';
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    publish?: (input: { skill: string; variantId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    rollback?: (input: { skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    search?: (input: { skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    import?: (input: { pinId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    imported?: (input: { skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
 }
 
