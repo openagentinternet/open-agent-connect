@@ -19,6 +19,7 @@ const EXPECTED_SKILLS = [
   'metabot-post-skillservice',
   'metabot-omni-reader',
   'metabot-bootstrap',
+  'metabot-identity-manage',
   'metabot-network-directory',
   'metabot-network-sources',
   'metabot-call-remote-service',
@@ -233,6 +234,30 @@ test('buildMetabotSkillpacks publishes the shared network-source registry skill 
     assert.match(content, /network sources add/);
     assert.match(content, /network sources list/);
     assert.match(content, /network sources remove/);
+  }
+});
+
+test('buildMetabotSkillpacks publishes the shared identity-manage workflow across all host packs', async () => {
+  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
+  const { buildMetabotSkillpacks } = await import(BUILD_SCRIPT_URL);
+
+  await buildMetabotSkillpacks({
+    repoRoot: REPO_ROOT,
+    outputRoot,
+  });
+
+  for (const host of HOSTS) {
+    const content = await readFile(
+      path.join(outputRoot, host, 'skills', 'metabot-identity-manage', 'SKILL.md'),
+      'utf8'
+    );
+    assert.match(content, /^name:\s*metabot-identity-manage$/m);
+    assert.match(content, /identity list/);
+    assert.match(content, /identity assign --name/);
+    assert.match(content, /METABOT_HOME="\$HOME\/\.metabot\/profiles\/\$PROFILE_SLUG"/);
+    assert.match(content, /identity_name_taken/);
+    assert.match(content, /identity_name_conflict/);
+    assert.match(content, /identity who/);
   }
 });
 

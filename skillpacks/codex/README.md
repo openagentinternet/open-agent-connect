@@ -10,6 +10,7 @@ Thin host adapter for the MetaBot open-source research pack. These skills keep b
 - `metabot-post-skillservice`
 - `metabot-omni-reader`
 - `metabot-bootstrap`
+- `metabot-identity-manage`
 - `metabot-network-directory`
 - `metabot-network-sources`
 - `metabot-call-remote-service`

@@ -197,6 +197,11 @@ Agent-driven Codex development and testing loop:
 - copy `docs/hosts/codex-dev-test-runbook.md` into a Codex session
 - tell Codex: `按这个流程跑开发测试` (or `run this dev-test workflow`)
 
+Agent-driven Codex identity create/switch loop:
+
+- copy `docs/hosts/codex-agent-identity-runbook.md` into a Codex session
+- tell Codex: `创建或切换到 David` (or `create or switch to David`)
+
 ## First Foundation Flow
 
 Create one local MetaBot:
@@ -240,6 +245,7 @@ Important behavior:
 - `metabot identity create --name ...` is bound to the current active local home
 - metabot names are unique on one machine; creating a name that already exists in another local profile fails with `identity_name_taken`
 - if an identity already exists in the active home with a different name, create now fails with `identity_name_conflict` instead of silently reusing the old identity
+- for deterministic agent execution, use `docs/hosts/codex-agent-identity-runbook.md` or the `metabot-identity-manage` skill
 
 ## DACT Quick Path
 
