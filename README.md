@@ -174,8 +174,15 @@ If the host does not immediately pick up the new skills, start a fresh host sess
 Host-specific guides:
 
 - [Codex](docs/hosts/codex.md)
+- [Codex Agent Install Runbook](docs/hosts/codex-agent-install.md)
 - [Claude Code](docs/hosts/claude-code.md)
 - [OpenClaw](docs/hosts/openclaw.md)
+
+Agent-driven Codex install (no manual step-by-step typing):
+
+- copy `docs/hosts/codex-agent-install.md` into a Codex session
+- tell Codex: `安装它` (or `install it`)
+- Codex should execute the runbook steps and report verification results
 
 ## First Foundation Flow
 
