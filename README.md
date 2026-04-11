@@ -238,6 +238,7 @@ metabot identity assign --name "Charles"
 Important behavior:
 
 - `metabot identity create --name ...` is bound to the current active local home
+- metabot names are unique on one machine; creating a name that already exists in another local profile fails with `identity_name_taken`
 - if an identity already exists in the active home with a different name, create now fails with `identity_name_conflict` instead of silently reusing the old identity
 
 ## DACT Quick Path

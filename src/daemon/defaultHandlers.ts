@@ -9,6 +9,7 @@ import {
 } from '../core/contracts/commandResult';
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
 import {
+  listIdentityProfiles,
   setActiveMetabotHome,
   upsertIdentityProfile,
 } from '../core/identity/identityProfiles';
@@ -1373,6 +1374,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const normalizedName = normalizeText(name);
         if (!normalizedName) {
           return commandFailed('missing_name', 'MetaBot name is required.');
+        }
+
+        const profiles = await listIdentityProfiles(normalizedSystemHomeDir);
+        const normalizedTargetName = normalizedName.toLowerCase();
+        const duplicateByName = profiles.find((profile) => (
+          profile.name.toLowerCase() === normalizedTargetName
+          && path.resolve(profile.homeDir) !== path.resolve(input.homeDir)
+        ));
+        if (duplicateByName) {
+          return commandFailed(
+            'identity_name_taken',
+            `Local MetaBot name "${normalizedName}" already exists. Use metabot identity assign --name "${duplicateByName.name}".`
+          );
         }
 
         const state = await runtimeStateStore.readState();

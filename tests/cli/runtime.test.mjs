@@ -541,6 +541,44 @@ test('identity list/assign/who supports switching active local bot home across r
   assert.equal(who.payload.data.activeHomeDir, bobHome);
 });
 
+test('identity create rejects duplicate names across different local homes on the same machine', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const firstHome = path.join(systemHome, 'profiles', 'david-home-a');
+  const secondHome = path.join(systemHome, 'profiles', 'david-home-b');
+  await mkdir(firstHome, { recursive: true });
+  await mkdir(secondHome, { recursive: true });
+
+  t.after(async () => stopDaemon(firstHome));
+  t.after(async () => stopDaemon(secondHome));
+
+  const commonEnv = {
+    HOME: systemHome,
+  };
+
+  const createdFirst = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'David'], {
+    ...commonEnv,
+    METABOT_HOME: firstHome,
+  });
+  assert.equal(createdFirst.exitCode, 0);
+  assert.equal(createdFirst.payload.ok, true);
+  assert.equal(createdFirst.payload.data.name, 'David');
+
+  const duplicateAttempt = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'David'], {
+    ...commonEnv,
+    METABOT_HOME: secondHome,
+  });
+  assert.equal(duplicateAttempt.exitCode, 1);
+  assert.equal(duplicateAttempt.payload.ok, false);
+  assert.equal(duplicateAttempt.payload.code, 'identity_name_taken');
+
+  const whoSecondHome = await runCommandWithEnv(systemHome, ['identity', 'who'], {
+    ...commonEnv,
+    METABOT_HOME: secondHome,
+  });
+  assert.equal(whoSecondHome.exitCode, 1);
+  assert.equal(whoSecondHome.payload.code, 'identity_missing');
+});
+
 test('daemon config restarts keep the previous port so local inspector URLs stay stable', async (t) => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
   t.after(async () => stopDaemon(homeDir));

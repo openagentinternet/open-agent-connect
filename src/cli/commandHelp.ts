@@ -214,6 +214,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'globalMetaId',
     ],
     failureSemantics: [
+      'Fails with identity_name_taken when another local profile on this machine already uses the same name.',
       'Fails with identity_name_conflict when another active local identity already exists under the current home.',
       'Fails when the bootstrap flow cannot derive keys, claim subsidy, or persist identity state.',
     ],
