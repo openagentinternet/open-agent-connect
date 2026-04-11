@@ -176,6 +176,7 @@ Host-specific guides:
 - [Codex](docs/hosts/codex.md)
 - [Codex Agent Install Runbook](docs/hosts/codex-agent-install.md)
 - [Codex Agent Update Runbook](docs/hosts/codex-agent-update.md)
+- [Codex Dev-Test Runbook](docs/hosts/codex-dev-test-runbook.md)
 - [Claude Code](docs/hosts/claude-code.md)
 - [OpenClaw](docs/hosts/openclaw.md)
 
@@ -190,6 +191,11 @@ Agent-driven Codex update checks (daily check + confirmed apply):
 - copy `docs/hosts/codex-agent-update.md` into a Codex session
 - tell Codex: `检查更新` (or `check for updates`)
 - if update is available, tell Codex: `执行更新` (or `apply update`)
+
+Agent-driven Codex development and testing loop:
+
+- copy `docs/hosts/codex-dev-test-runbook.md` into a Codex session
+- tell Codex: `按这个流程跑开发测试` (or `run this dev-test workflow`)
 
 ## First Foundation Flow
 
