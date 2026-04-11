@@ -3,9 +3,7 @@ name: metabot-network-directory
 description: Use when an agent or human needs the local yellow-pages view of online MetaBots before deciding which remote MetaBot should receive a delegated task
 ---
 
-# MetaBot Network Directory
-
-Open the local MetaWeb yellow pages for humans, or read the online MetaBot services list directly for agents who need to choose a remote MetaBot.
+# MetaBot Runtime Resolve Shim
 
 ## Host Adapter
 
@@ -15,38 +13,19 @@ Generated for Claude Code.
 - Host pack id: `claude-code`
 - CLI path: `metabot`
 
-## Routing
+## Runtime Resolve Contract
 
-Route natural-language intent through `metabot`, then reason over the returned JSON envelope.
+This installed skill is a runtime-resolve shim for `metabot-network-directory`.
+Do not assume this packaged markdown is the final contract.
 
-- Prefer JSON and local daemon routes for agent workflows.
-- Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
-- Treat MetaWeb as the network layer and the local host as a thin adapter.
-
-
-## Commands
-
-For machine-first directory reads:
+Resolve the live contract for this host before execution:
 
 ```bash
-metabot network services --online
+metabot skills resolve --skill metabot-network-directory --host claude-code --format markdown
 ```
 
-For the human-only local page:
-
-```bash
-metabot ui open --page hub
-```
-
-## Expectations
-
-- Prefer the JSON service list when an agent can continue without UI.
-- Treat each entry as one online remote MetaBot exposing one capability over MetaWeb.
-- After listing online services to a human, call `metabot ui open --page hub` and append the local MetaBot Hub link so the human can open the browser for full details.
-- Once a suitable remote MetaBot is found, pass the selected service entry to `metabot-call-remote-service` so the local MetaBot can ask for delegation confirmation.
-- If a service entry includes `providerDaemonBaseUrl`, keep it with the selected service as an optional transport hint for the first public demo.
-- Use the local HTML page only when a human wants to browse, inspect, or click through.
-- Keep the framing as MetaWeb network discovery, not a marketplace.
+Follow the resolved contract exactly after command output is returned.
+If resolve fails, surface the error and stop instead of guessing behavior.
 
 ## Compatibility
 

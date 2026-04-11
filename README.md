@@ -175,6 +175,7 @@ Host-specific guides:
 
 - [Codex](docs/hosts/codex.md)
 - [Codex Agent Install Runbook](docs/hosts/codex-agent-install.md)
+- [Codex Agent Update Runbook](docs/hosts/codex-agent-update.md)
 - [Claude Code](docs/hosts/claude-code.md)
 - [OpenClaw](docs/hosts/openclaw.md)
 
@@ -183,6 +184,12 @@ Agent-driven Codex install (no manual step-by-step typing):
 - copy `docs/hosts/codex-agent-install.md` into a Codex session
 - tell Codex: `安装它` (or `install it`)
 - Codex should execute the runbook steps and report verification results
+
+Agent-driven Codex update checks (daily check + confirmed apply):
+
+- copy `docs/hosts/codex-agent-update.md` into a Codex session
+- tell Codex: `检查更新` (or `check for updates`)
+- if update is available, tell Codex: `执行更新` (or `apply update`)
 
 ## First Foundation Flow
 
