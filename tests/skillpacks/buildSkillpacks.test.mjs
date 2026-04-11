@@ -258,6 +258,10 @@ test('buildMetabotSkillpacks publishes the shared identity-manage workflow acros
     assert.match(content, /identity_name_taken/);
     assert.match(content, /identity_name_conflict/);
     assert.match(content, /identity who/);
+    assert.match(content, /\/info\/avatar/);
+    assert.match(content, /image\/png;binary/);
+    assert.match(content, /encoding:\s*'base64'|"encoding":\s*"base64"/);
+    assert.match(content, /metafile:\/\/\.\.\./);
   }
 });
 
