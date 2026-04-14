@@ -81,3 +81,65 @@ test('runCli dispatches `metabot file upload --request-file --chain btc` and set
     network: 'btc',
   }]);
 });
+
+test('runCli fails `metabot file upload` when --chain value is missing', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-missing-chain-'));
+  const requestFile = path.join(tempDir, 'request.json');
+  await writeFile(requestFile, JSON.stringify({
+    filePath: '/tmp/photo.png',
+  }), 'utf8');
+
+  const stdout = [];
+  const calls = [];
+  const exitCode = await runCli(['file', 'upload', '--request-file', requestFile, '--chain'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        upload: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'should-not-happen' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(calls, []);
+  const envelope = JSON.parse(stdout.join('').trim());
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.state, 'failed');
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /Missing value for --chain/);
+});
+
+test('runCli fails `metabot file upload` when --chain value is unsupported', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-invalid-chain-'));
+  const requestFile = path.join(tempDir, 'request.json');
+  await writeFile(requestFile, JSON.stringify({
+    filePath: '/tmp/photo.png',
+  }), 'utf8');
+
+  const stdout = [];
+  const calls = [];
+  const exitCode = await runCli(['file', 'upload', '--request-file', requestFile, '--chain', 'doge'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        upload: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'should-not-happen' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(calls, []);
+  const envelope = JSON.parse(stdout.join('').trim());
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.state, 'failed');
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /Unsupported --chain value/);
+});

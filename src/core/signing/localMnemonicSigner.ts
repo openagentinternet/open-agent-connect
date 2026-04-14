@@ -382,7 +382,7 @@ async function runDefaultBtcCreatePin(input: {
       satoshis: utxo.satoshis,
       address: utxo.address,
       rawTx: utxo.rawTx,
-      confirmed: Boolean(utxo.confirmed),
+      confirmed: utxo.confirmed,
     })),
     feeRate: input.feeRate,
     metaidDataList: [{

@@ -81,3 +81,33 @@ test('runCli dispatches `metabot buzz post --request-file --chain btc` and sets 
     network: 'btc',
   }]);
 });
+
+test('runCli fails `metabot buzz post` when --chain value is unsupported', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-buzz-invalid-chain-'));
+  const requestFile = path.join(tempDir, 'request.json');
+  await writeFile(requestFile, JSON.stringify({
+    content: 'hello metabot buzz',
+  }), 'utf8');
+
+  const stdout = [];
+  const calls = [];
+  const exitCode = await runCli(['buzz', 'post', '--request-file', requestFile, '--chain', 'doge'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      buzz: {
+        post: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'should-not-happen' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(calls, []);
+  const envelope = JSON.parse(stdout.join('').trim());
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /Unsupported --chain value/);
+});
