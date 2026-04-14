@@ -9,7 +9,7 @@ const PRIMARY_CLI_PATH = 'metabot';
 const LEGACY_CLI_ALIAS = 'agent-connect';
 const SHARED_COMPATIBILITY_MANIFEST = 'release/compatibility.json';
 const BUNDLED_COMPATIBILITY_MANIFEST = 'runtime/compatibility.json';
-const LEGACY_SKILLS = [
+const METABOT_SKILLS = [
   'metabot-chat-privatechat',
   'metabot-post-buzz',
   'metabot-upload-file',
@@ -37,10 +37,6 @@ const HOSTS = {
     defaultSkillRoot: '${OPENCLAW_HOME:-$HOME/.openclaw}/skills',
   },
 };
-
-const PUBLIC_SKILL_MAP = Object.fromEntries(
-  LEGACY_SKILLS.map((legacySkill) => [legacySkill, legacySkill.replace(/^metabot-/, 'open-agent-')])
-);
 
 function replaceAll(source, replacements) {
   return Object.entries(replacements).reduce(
@@ -80,15 +76,10 @@ Thin host adapter for Open Agent Connect, the host-facing runtime for Open Agent
 This host pack installs:
 
 - primary MetaBot skill names under the \`metabot-*\` prefix
-- \`open-agent-*\` aliases for migration and compatibility with newer naming surfaces
 
-## Included Open-Agent Alias Skills
+## Included MetaBot Skills
 
-${listSkills(Object.values(PUBLIC_SKILL_MAP))}
-
-## Included Primary MetaBot Skills
-
-${listSkills(LEGACY_SKILLS)}
+${listSkills(METABOT_SKILLS)}
 
 ## Install
 
@@ -249,13 +240,6 @@ async function writeFile(filePath, content, executable = false) {
   }
 }
 
-function replaceLegacySkillIds(source, mapping = PUBLIC_SKILL_MAP) {
-  return Object.entries(mapping).reduce(
-    (text, [legacySkill, publicSkill]) => text.split(legacySkill).join(publicSkill),
-    source
-  );
-}
-
 function replaceNarrativeTerms(source) {
   return source;
 }
@@ -297,18 +281,10 @@ async function renderSkill({
   hostKey,
   host,
   templates,
-  publicName = false,
 }) {
   const sourcePath = path.join(repoRoot, 'SKILLs', legacySkillName, 'SKILL.md');
   const source = await fs.readFile(sourcePath, 'utf8');
-
-  let renderedSource = source;
-  if (publicName) {
-    renderedSource = replaceLegacySkillIds(renderedSource);
-    renderedSource = renderedSource.replace(`name: ${legacySkillName}`, `name: ${outputSkillName}`);
-  }
-
-  renderedSource = replaceNarrativeTerms(renderedSource);
+  const renderedSource = replaceNarrativeTerms(source);
   const rendered = renderSourceSkill(
     renderedSource,
     legacySkillName,
@@ -350,19 +326,7 @@ export async function buildAgentConnectSkillpacks(options = {}) {
     await writeFile(path.join(hostRoot, 'install.sh'), buildInstallScript(host), true);
     await writeFile(path.join(hostRoot, BUNDLED_COMPATIBILITY_MANIFEST), compatibilityManifest);
 
-    for (const legacySkillName of LEGACY_SKILLS) {
-      const publicSkillName = PUBLIC_SKILL_MAP[legacySkillName];
-      const publicRendered = await renderSkill({
-        repoRoot,
-        legacySkillName,
-        outputSkillName: publicSkillName,
-        hostKey,
-        host,
-        templates,
-        publicName: true,
-      });
-      await writeFile(path.join(hostRoot, 'skills', publicSkillName, 'SKILL.md'), publicRendered);
-
+    for (const legacySkillName of METABOT_SKILLS) {
       const legacyRendered = await renderSkill({
         repoRoot,
         legacySkillName,

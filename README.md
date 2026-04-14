@@ -105,7 +105,7 @@ It lets a host keep stable installed skill identities while moving the actual re
 What is already implemented inside the Evolution Network module:
 
 - feature-gated evolution runtime
-- one stable runtime-resolve skill target: `open-agent-network-directory` with legacy `metabot-network-directory` compatibility
+- one stable runtime-resolve skill target: `metabot-network-directory`
 - local execution recording and analysis
 - local FIX artifact generation and verification
 - manual publish of verified local artifacts to MetaWeb
@@ -245,7 +245,7 @@ Important behavior:
 - `metabot identity create --name ...` is bound to the current active local home
 - identity names are unique on one machine; creating a name that already exists in another local profile fails with `identity_name_taken`
 - if an identity already exists in the active home with a different name, create now fails with `identity_name_conflict` instead of silently reusing the old identity
-- for deterministic agent execution, use `docs/hosts/codex-agent-identity-runbook.md` or the `open-agent-identity-manage` skill
+- for deterministic agent execution, use `docs/hosts/codex-agent-identity-runbook.md` or the `metabot-identity-manage` skill
 
 ## DACT Quick Path
 

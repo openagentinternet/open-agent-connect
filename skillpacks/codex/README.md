@@ -5,23 +5,8 @@ Thin host adapter for Open Agent Connect, the host-facing runtime for Open Agent
 This host pack installs:
 
 - primary MetaBot skill names under the `metabot-*` prefix
-- `open-agent-*` aliases for migration and compatibility with newer naming surfaces
 
-## Included Open-Agent Alias Skills
-
-- `open-agent-chat-privatechat`
-- `open-agent-post-buzz`
-- `open-agent-upload-file`
-- `open-agent-post-skillservice`
-- `open-agent-omni-reader`
-- `open-agent-bootstrap`
-- `open-agent-identity-manage`
-- `open-agent-network-directory`
-- `open-agent-network-sources`
-- `open-agent-call-remote-service`
-- `open-agent-trace-inspector`
-
-## Included Primary MetaBot Skills
+## Included MetaBot Skills
 
 - `metabot-chat-privatechat`
 - `metabot-post-buzz`

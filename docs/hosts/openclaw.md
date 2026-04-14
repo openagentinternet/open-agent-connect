@@ -17,7 +17,7 @@ The installer also drops a local `metabot` shim under `~/.agent-connect/bin` by 
 If that directory is not on PATH, either export it as shown above or set `AGENT_CONNECT_BIN_DIR` before running `./install.sh`.
 If you are installing from a source checkout outside the default layout, set `AGENT_CONNECT_SOURCE_ROOT` to the repository root.
 
-After installation, start a fresh OpenClaw session if the current session does not immediately pick up the new `metabot-*` skills. `open-agent-*` aliases are also installed for compatibility.
+After installation, start a fresh OpenClaw session if the current session does not immediately pick up the new `metabot-*` skills.
 
 ## Evolution Network M1 (Local Only)
 

@@ -16,18 +16,18 @@ It also installs `agent-connect` as a compatibility CLI alias.
 If that directory is not on PATH, either export it as shown above or set `AGENT_CONNECT_BIN_DIR` before running `./install.sh`.
 If you are installing from a source checkout outside the default layout, set `AGENT_CONNECT_SOURCE_ROOT` to the repository root.
 
-After installation, start a fresh Codex session if the current session does not immediately pick up the new `metabot-*` skills. `open-agent-*` aliases are also installed for compatibility.
+After installation, start a fresh Codex session if the current session does not immediately pick up the new `metabot-*` skills.
 
 ## Evolution Network M1 (Local Only)
 
-M1 enables local self-repair for `open-agent-network-directory` only.
+M1 enables local self-repair for `metabot-network-directory` only.
 
 - Total feature flag: `evolution_network.enabled`
-- Installed `open-agent-network-directory` remains a stable host skill identity, but the installed copy is a runtime-resolve shim
+- Installed `metabot-network-directory` remains a stable host skill identity, but the installed copy is a runtime-resolve shim
 - The shim should resolve the live contract before execution:
 
 ```bash
-metabot skills resolve --skill open-agent-network-directory --host codex --format markdown
+metabot skills resolve --skill metabot-network-directory --host codex --format markdown
 ```
 
 Useful M1 controls:
@@ -36,7 +36,7 @@ Useful M1 controls:
 metabot config get evolution_network.enabled
 metabot config set evolution_network.enabled false
 metabot evolution status
-metabot evolution rollback --skill open-agent-network-directory
+metabot evolution rollback --skill metabot-network-directory
 ```
 
 M1 does not include chain publication/search/import for evolution variants.
