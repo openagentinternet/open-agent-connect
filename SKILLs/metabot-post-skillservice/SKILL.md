@@ -38,12 +38,19 @@ Then call:
 {{METABOT_CLI}} services publish --payload-file payload.json
 ```
 
+When the human explicitly asks to publish on BTC (for example: `btc`, `比特币`, `bitcoin`), call:
+
+```bash
+{{METABOT_CLI}} services publish --payload-file payload.json --chain btc
+```
+
 ## Required Semantics
 
 - Preserve the provider `globalMetaId` as the on-chain service identity.
 - Preserve price and currency as explicit payload fields.
 - Preserve the current available vs revoked lifecycle instead of inventing marketplace-only states.
 - If an icon or skill document must be stored on-chain first, publish that asset before calling this skill.
+- If the human names BTC (`btc`, `比特币`, `bitcoin`), pass `--chain btc`; otherwise keep default `mvc`.
 
 ## Result Handling
 

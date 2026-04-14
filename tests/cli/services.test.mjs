@@ -53,6 +53,41 @@ test('runCli dispatches `metabot services publish --payload-file` with parsed JS
   });
 });
 
+test('runCli dispatches `metabot services publish --payload-file --chain btc` and sets network=btc', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-publish-btc-'));
+  const payloadFile = path.join(tempDir, 'payload.json');
+  await writeFile(payloadFile, JSON.stringify({
+    serviceName: 'Tarot Reading',
+    displayName: 'Tarot Reading',
+    description: 'Performs tarot readings.',
+  }), 'utf8');
+
+  const calls = [];
+  const exitCode = await runCli(['services', 'publish', '--payload-file', payloadFile, '--chain', 'btc'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        publish: async (input) => {
+          calls.push(input);
+          return commandSuccess({
+            servicePinId: 'service-tarot-btc',
+            network: input.network,
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    serviceName: 'Tarot Reading',
+    displayName: 'Tarot Reading',
+    description: 'Performs tarot readings.',
+    network: 'btc',
+  }]);
+});
+
 test('runCli dispatches `metabot services call --request-file` with parsed JSON request', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-call-'));
   const requestFile = path.join(tempDir, 'request.json');
@@ -101,4 +136,39 @@ test('runCli dispatches `metabot services call --request-file` with parsed JSON 
       state: 'ready',
     },
   });
+});
+
+test('runCli dispatches `metabot services rate --request-file --chain btc` and sets network=btc', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-rate-btc-'));
+  const requestFile = path.join(tempDir, 'rating.json');
+  await writeFile(requestFile, JSON.stringify({
+    traceId: 'trace-123',
+    rate: 5,
+    comment: 'Great result.',
+  }), 'utf8');
+
+  const calls = [];
+  const exitCode = await runCli(['services', 'rate', '--request-file', requestFile, '--chain', 'btc'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        rate: async (input) => {
+          calls.push(input);
+          return commandSuccess({
+            pinId: 'rating-pin-btc-1',
+            network: input.network,
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    traceId: 'trace-123',
+    rate: 5,
+    comment: 'Great result.',
+    network: 'btc',
+  }]);
 });

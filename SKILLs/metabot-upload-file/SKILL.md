@@ -32,11 +32,18 @@ Then call:
 {{METABOT_CLI}} file upload --request-file request.json
 ```
 
+When the human explicitly asks to upload on BTC (for example: `btc`, `比特币`, `bitcoin`), call:
+
+```bash
+{{METABOT_CLI}} file upload --request-file request.json --chain btc
+```
+
 ## Required Semantics
 
 - Use `/file` as the MetaWeb path.
 - Read the local file from `filePath`, encode it as base64, and upload it through the shared runtime.
 - Return the resulting `metafile://...` URI so later skills can reference the uploaded file.
+- If the human names BTC (`btc`, `比特币`, `bitcoin`), pass `--chain btc`; otherwise keep default `mvc`.
 
 ## Compatibility
 

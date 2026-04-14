@@ -81,3 +81,34 @@ test('createLocalMnemonicSigner writes an MVC pin through the injected transport
   assert.equal(result.globalMetaId, EXPECTED_IDENTITY.globalMetaId);
   assert.equal(result.totalCost > 0, true);
 });
+
+test('createLocalMnemonicSigner writes a BTC pin through the injected btcCreatePin adapter', async () => {
+  const calls = [];
+  const signer = createLocalMnemonicSigner({
+    secretStore: createSecretStore(),
+    btcCreatePin: async (input) => {
+      calls.push(input);
+      return {
+        txids: ['c'.repeat(64)],
+        pinId: `${'c'.repeat(64)}i0`,
+        totalCost: 456,
+      };
+    },
+  });
+
+  const result = await signer.writePin({
+    path: '/protocols/simplebuzz',
+    payload: '{"content":"hello from btc"}',
+    contentType: 'application/json',
+    network: 'btc',
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].request.network, 'btc');
+  assert.equal(calls[0].request.path, '/protocols/simplebuzz');
+  assert.equal(calls[0].identity.globalMetaId, EXPECTED_IDENTITY.globalMetaId);
+  assert.equal(result.pinId, `${'c'.repeat(64)}i0`);
+  assert.deepEqual(result.txids, ['c'.repeat(64)]);
+  assert.equal(result.totalCost, 456);
+  assert.equal(result.network, 'btc');
+});

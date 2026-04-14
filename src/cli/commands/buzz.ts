@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, readFlagValue, readJsonFile } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, readChainFlag, readFlagValue, readJsonFile } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function resolveMaybeRelativePath(baseDir: string, filePath: unknown): string | undefined {
@@ -25,6 +25,11 @@ export async function runBuzzCommand(args: string[], context: CliRuntimeContext)
     return commandMissingFlag('--request-file');
   }
 
+  const chainFlag = readChainFlag(args);
+  if (chainFlag.error) {
+    return chainFlag.error;
+  }
+
   const handler = context.dependencies.buzz?.post;
   if (!handler) {
     return commandFailed('not_implemented', 'Buzz post handler is not configured.');
@@ -32,9 +37,11 @@ export async function runBuzzCommand(args: string[], context: CliRuntimeContext)
 
   const request = await readJsonFile(context, requestFile);
   const requestDir = path.dirname(path.isAbsolute(requestFile) ? requestFile : path.resolve(context.cwd, requestFile));
+  const resolvedAttachments = resolveAttachmentPaths(requestDir, request.attachments);
   const resolvedRequest = {
     ...request,
-    attachments: resolveAttachmentPaths(requestDir, request.attachments),
+    ...(resolvedAttachments === undefined ? {} : { attachments: resolvedAttachments }),
+    ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
   };
   return handler(resolvedRequest);
 }

@@ -89,6 +89,12 @@ Write avatar pin:
 {{METABOT_CLI}} chain write --request-file avatar-request.json
 ```
 
+If the human explicitly asks to write avatar on BTC (for example: `btc`, `比特币`, `bitcoin`), use:
+
+```bash
+{{METABOT_CLI}} chain write --request-file avatar-request.json --chain btc
+```
+
 ## Guardrails
 
 - Local MetaBot names are unique per machine.

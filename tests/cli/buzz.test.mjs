@@ -50,3 +50,34 @@ test('runCli dispatches `metabot buzz post --request-file` with parsed JSON requ
     },
   });
 });
+
+test('runCli dispatches `metabot buzz post --request-file --chain btc` and sets network=btc', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-buzz-btc-'));
+  const requestFile = path.join(tempDir, 'request.json');
+  await writeFile(requestFile, JSON.stringify({
+    content: 'hello metabot buzz on btc',
+  }), 'utf8');
+
+  const calls = [];
+  const exitCode = await runCli(['buzz', 'post', '--request-file', requestFile, '--chain', 'btc'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      buzz: {
+        post: async (input) => {
+          calls.push(input);
+          return commandSuccess({
+            pinId: 'buzz-pin-btc-1',
+            network: input.network,
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    content: 'hello metabot buzz on btc',
+    network: 'btc',
+  }]);
+});

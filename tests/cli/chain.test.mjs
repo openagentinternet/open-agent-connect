@@ -52,3 +52,39 @@ test('runCli dispatches `metabot chain write --request-file` with parsed JSON re
     },
   });
 });
+
+test('runCli dispatches `metabot chain write --request-file --chain btc` and overrides request network', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-chain-btc-'));
+  const requestFile = path.join(tempDir, 'request.json');
+  await writeFile(requestFile, JSON.stringify({
+    path: '/protocols/simplebuzz',
+    payload: '{"content":"hello btc"}',
+    contentType: 'application/json',
+    network: 'mvc',
+  }), 'utf8');
+
+  const calls = [];
+  const exitCode = await runCli(['chain', 'write', '--request-file', requestFile, '--chain', 'btc'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      chain: {
+        write: async (input) => {
+          calls.push(input);
+          return commandSuccess({
+            pinId: 'pin-chain-write-btc-1',
+            network: input.network,
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    path: '/protocols/simplebuzz',
+    payload: '{"content":"hello btc"}',
+    contentType: 'application/json',
+    network: 'btc',
+  }]);
+});

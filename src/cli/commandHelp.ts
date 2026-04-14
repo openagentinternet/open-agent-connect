@@ -160,6 +160,12 @@ const HELP_JSON_FLAG: CommandHelpFlag = {
   description: 'Emit machine-readable help JSON instead of text.',
 };
 
+const CHAIN_BTC_MVC_FLAG: CommandHelpFlag = {
+  flag: '--chain',
+  value: '<mvc|btc>',
+  description: 'Override the target chain network for this command. Defaults to mvc.',
+};
+
 export const ROOT_COMMAND_HELP: CommandHelpSpec = {
   commandPath: [],
   summary: 'Machine-first MetaBot CLI for local runtime, chain write, remote delegation, and local inspection.',
@@ -320,7 +326,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['file', 'upload'],
     summary: 'Upload one local file to MetaWeb and return the resulting metafile URI.',
-    usage: 'metabot file upload --request-file <path>',
+    usage: 'metabot file upload --request-file <path> [--chain <mvc|btc>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -341,7 +347,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot file upload --request-file file-request.json',
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['buzz'],
@@ -355,7 +361,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['buzz', 'post'],
     summary: 'Publish one simplebuzz post through the validated MetaWeb buzz contract.',
-    usage: 'metabot buzz post --request-file <path>',
+    usage: 'metabot buzz post --request-file <path> [--chain <mvc|btc>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -374,7 +380,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot buzz post --request-file buzz-request.json',
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['chain'],
@@ -388,7 +394,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['chain', 'write'],
     summary: 'Write one arbitrary MetaID tuple using the public chain-write interface.',
-    usage: 'metabot chain write --request-file <path>',
+    usage: 'metabot chain write --request-file <path> [--chain <mvc|btc>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -399,6 +405,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       version: '1.0.0',
       contentType: 'application/json',
       payload: '{"example":true}',
+      network: 'optional chain network override',
     },
     successFields: [
       'pinId',
@@ -411,7 +418,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot chain write --request-file chain-request.json',
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['network'],
@@ -518,7 +525,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['services', 'publish'],
     summary: 'Publish one service to the chain-backed skill-service directory.',
-    usage: 'metabot services publish --payload-file <path>',
+    usage: 'metabot services publish --payload-file <path> [--chain <mvc|btc>]',
     requiredFlags: [
       { flag: '--payload-file', value: '<path>', description: 'JSON service payload file.' },
     ],
@@ -544,7 +551,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot services publish --payload-file service-payload.json',
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['services', 'call'],
@@ -588,7 +595,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['services', 'rate'],
     summary: 'Publish one buyer-side service rating and optionally deliver a follow-up private message back to the provider.',
-    usage: 'metabot services rate --request-file <path>',
+    usage: 'metabot services rate --request-file <path> [--chain <mvc|btc>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -612,7 +619,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot services rate --request-file rating.json',
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['chat'],

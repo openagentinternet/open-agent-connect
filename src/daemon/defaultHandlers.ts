@@ -1627,6 +1627,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         try {
           const now = Date.now();
+          const network = typeof rawInput.network === 'string' ? rawInput.network : undefined;
           const published = await publishServiceToChain({
             signer,
             creatorMetabotId: state.identity.metabotId,
@@ -1644,6 +1645,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             },
             skillDocument,
             now,
+            network,
           });
 
           await runtimeStateStore.writeState({
@@ -2105,6 +2107,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           rate: String(request.rate),
           comment: request.comment,
         };
+        const network = typeof rawInput.network === 'string' ? rawInput.network : undefined;
 
         let ratingWrite;
         try {
@@ -2115,6 +2118,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             version: '1.0.0',
             contentType: 'application/json',
             payload: JSON.stringify(payload),
+            network,
           });
         } catch (error) {
           return commandFailed(
@@ -2158,7 +2162,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               contentType: outgoingRatingMessage.contentType,
               payload: outgoingRatingMessage.payload,
               encoding: 'utf-8',
-              network: 'mvc',
+              network,
             });
             ratingMessageSent = true;
             ratingMessagePinId = ratingMessageWrite.pinId ?? null;

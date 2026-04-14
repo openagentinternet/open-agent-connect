@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, readFlagValue, readJsonFile } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, readChainFlag, readFlagValue, readJsonFile } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function resolveMaybeRelativePath(baseDir: string, filePath: unknown): string | undefined {
@@ -18,6 +18,11 @@ export async function runFileCommand(args: string[], context: CliRuntimeContext)
     return commandMissingFlag('--request-file');
   }
 
+  const chainFlag = readChainFlag(args);
+  if (chainFlag.error) {
+    return chainFlag.error;
+  }
+
   const handler = context.dependencies.file?.upload;
   if (!handler) {
     return commandFailed('not_implemented', 'File upload handler is not configured.');
@@ -28,6 +33,7 @@ export async function runFileCommand(args: string[], context: CliRuntimeContext)
   const resolvedRequest = {
     ...request,
     filePath: resolveMaybeRelativePath(requestDir, request.filePath) ?? request.filePath,
+    ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
   };
   return handler(resolvedRequest);
 }

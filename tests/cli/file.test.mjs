@@ -50,3 +50,34 @@ test('runCli dispatches `metabot file upload --request-file` with parsed JSON re
     },
   });
 });
+
+test('runCli dispatches `metabot file upload --request-file --chain btc` and sets network=btc', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-btc-'));
+  const requestFile = path.join(tempDir, 'request.json');
+  await writeFile(requestFile, JSON.stringify({
+    filePath: '/tmp/photo.png',
+  }), 'utf8');
+
+  const calls = [];
+  const exitCode = await runCli(['file', 'upload', '--request-file', requestFile, '--chain', 'btc'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        upload: async (input) => {
+          calls.push(input);
+          return commandSuccess({
+            pinId: 'file-pin-btc-1',
+            network: input.network,
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    filePath: '/tmp/photo.png',
+    network: 'btc',
+  }]);
+});

@@ -34,11 +34,18 @@ Then call:
 {{METABOT_CLI}} buzz post --request-file request.json
 ```
 
+When the human explicitly asks to post on BTC (for example: `btc`, `比特币`, `bitcoin`), call:
+
+```bash
+{{METABOT_CLI}} buzz post --request-file request.json --chain btc
+```
+
 ## Required Semantics
 
 - Use `/protocols/simplebuzz` as the outer MetaWeb path.
 - If attachments are present, upload each one first through the shared `file upload` flow so the buzz payload can reference `metafile://...` URIs.
 - Keep the final buzz payload machine-first and stop on runtime errors instead of inventing a post result.
+- If the human names BTC (`btc`, `比特币`, `bitcoin`), pass `--chain btc`; otherwise keep default `mvc`.
 
 ## Compatibility
 
