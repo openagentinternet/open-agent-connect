@@ -1,6 +1,6 @@
 # Codex Agent Update Runbook
 
-Use this document when you want Codex to check for `be-metabot` updates and apply them safely.
+Use this document when you want Codex to check for `Open Agent Connect` updates and apply them safely.
 
 ## Agent Goal
 
@@ -18,7 +18,7 @@ Use this document when you want Codex to check for `be-metabot` updates and appl
 
 ## Upstream Source Of Truth
 
-- GitHub repository: `metaid-developers/be-metabot`
+- GitHub repository: `metaid-developers/Open Agent Connect`
 - local version contract: `release/compatibility.json`
 - package version: `package.json`
 
@@ -37,7 +37,7 @@ If a precondition fails, stop and return a concise failure report with the exact
 Run from repository root:
 
 ```bash
-REMOTE_COMPAT_URL="https://raw.githubusercontent.com/metaid-developers/be-metabot/main/release/compatibility.json"
+REMOTE_COMPAT_URL="https://raw.githubusercontent.com/metaid-developers/Open Agent Connect/main/release/compatibility.json"
 LOCAL_COMPAT_FILE="release/compatibility.json"
 LOCAL_PKG_FILE="package.json"
 
@@ -114,7 +114,7 @@ npm run build:skillpacks
 cd skillpacks/codex
 ./install.sh
 cd ../..
-export PATH="$HOME/.metabot/bin:$PATH"
+export PATH="$HOME/.agent-connect/bin:$PATH"
 metabot doctor
 ```
 

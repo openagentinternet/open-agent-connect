@@ -1,10 +1,10 @@
 # Codex Agent Install Runbook
 
-Use this document when you want Codex to install and configure `be-metabot` with minimal human intervention.
+Use this document when you want Codex to install and configure `Open Agent Connect` with minimal human intervention.
 
 ## Agent Goal
 
-Install the Codex host pack and make `metabot` runnable in the current environment, then verify the runtime is healthy.
+Install the Codex host pack, make `metabot` runnable in the current environment, keep `agent-connect` available as a compatibility alias, then verify the runtime is healthy.
 
 ## Execution Mode
 
@@ -41,16 +41,18 @@ cd skillpacks/codex
 Run:
 
 ```bash
-export PATH="$HOME/.metabot/bin:$PATH"
+export PATH="$HOME/.agent-connect/bin:$PATH"
 ```
 
 Then verify:
 
 ```bash
 command -v metabot
+command -v agent-connect
 ```
 
 If `metabot` is still missing, stop and report that PATH injection failed for the current shell session.
+If `agent-connect` is missing but `metabot` exists, report that the primary CLI works and the compatibility alias needs inspection.
 
 ## Post-Install Verification
 

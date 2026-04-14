@@ -13,7 +13,8 @@ Generated for OpenClaw.
 
 - Default skill root: `${OPENCLAW_HOME:-$HOME/.openclaw}/skills`
 - Host pack id: `openclaw`
-- CLI path: `metabot`
+- Primary CLI path: `metabot`
+- Compatibility CLI alias: `agent-connect`
 
 ## Routing
 
@@ -82,7 +83,7 @@ metabot ui open --page trace --trace-id trace-123
 
 Before any paid remote call, show the provider, service, price, currency, and wait for explicit confirmation.
 
-- If the human declines, do not call the remote MetaBot.
+- If the human declines, do not call the remote agent.
 - If a spend cap is missing or ambiguous, ask for one before proceeding.
 - If the runtime returns `manual_action_required`, surface the local UI URL and pause.
 

@@ -3,7 +3,7 @@ name: metabot-network-directory
 description: Use when an agent or human needs the local yellow-pages view of online MetaBots before deciding which remote MetaBot should receive a delegated task
 ---
 
-# MetaBot Runtime Resolve Shim
+# Open Agent Connect Runtime Resolve Shim
 
 ## Host Adapter
 
@@ -11,7 +11,8 @@ Generated for OpenClaw.
 
 - Default skill root: `${OPENCLAW_HOME:-$HOME/.openclaw}/skills`
 - Host pack id: `openclaw`
-- CLI path: `metabot`
+- Primary CLI path: `metabot`
+- Compatibility CLI alias: `agent-connect`
 
 ## Runtime Resolve Contract
 
@@ -29,5 +30,5 @@ If resolve fails, surface the error and stop instead of guessing behavior.
 
 ## Compatibility
 
-- CLI path: `metabot`
+- Primary CLI path: `metabot`
 - Compatibility manifest: `release/compatibility.json`

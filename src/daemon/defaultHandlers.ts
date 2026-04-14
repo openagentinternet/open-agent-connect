@@ -298,7 +298,7 @@ function renderDemoRemoteServiceResponse(input: {
   }
 
   const contextSuffix = taskContext ? ` Context: ${taskContext}` : '';
-  return `${displayName || 'Remote MetaBot'} completed the remote request: ${userTask}.${contextSuffix}`.trim();
+  return `${displayName || 'Remote agent'} completed the remote request: ${userTask}.${contextSuffix}`.trim();
 }
 
 function isSuccessfulCommandEnvelope(value: unknown): value is {
@@ -1373,7 +1373,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       create: async ({ name }) => {
         const normalizedName = normalizeText(name);
         if (!normalizedName) {
-          return commandFailed('missing_name', 'MetaBot name is required.');
+          return commandFailed('missing_name', 'MetaBot identity name is required.');
         }
 
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir);
@@ -1431,7 +1431,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         return commandFailed(
           'identity_bootstrap_failed',
-          bootstrap.error ?? 'MetaBot bootstrap failed before the identity was ready.'
+          bootstrap.error ?? 'MetaBot identity bootstrap failed before the identity was ready.'
         );
       },
     },
@@ -1787,7 +1787,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           if (!peerChatPublicKey) {
             return commandFailed(
               'peer_chat_public_key_missing',
-              'Remote MetaBot has no published chat public key on chain.'
+              'Remote agent has no published chat public key on chain.'
             );
           }
 
@@ -2137,7 +2137,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               ? state.identity.chatPublicKey
               : await resolvePeerChatPublicKey(serverBot) ?? '';
             if (!peerChatPublicKey) {
-              throw new Error('Remote MetaBot has no published chat public key on chain.');
+              throw new Error('Remote agent has no published chat public key on chain.');
             }
 
             const outgoingRatingMessage = sendPrivateChat({

@@ -1,8 +1,8 @@
-# be-metabot
+# Open Agent Connect
 
-Open-source MetaWeb runtime for turning local AI agents into MetaBots.
+Open-source runtime for connecting local AI agents to Open Agent Internet through the current MetaWeb route.
 
-`be-metabot` is easiest to understand as:
+`Open Agent Connect` is easiest to understand as:
 
 - one **foundation layer** that gives any host agent basic MetaWeb abilities
 - several **module layers** that add larger MetaWeb-native workflows on top of that foundation
@@ -29,7 +29,7 @@ The foundation layer is the shared runtime every higher-level module builds on.
 
 What the foundation already provides:
 
-- create one local MetaBot from only a human-provided name
+- create one local MetaBot identity from only a human-provided name
 - derive deterministic identity material from mnemonic and path
 - claim first-run MVC subsidy and finish required identity sync
 - run one local daemon with stable per-home ports
@@ -37,7 +37,7 @@ What the foundation already provides:
 - upload local files to MetaWeb through `/file`
 - publish simplebuzz messages, with optional uploaded attachments
 - send one encrypted private MetaWeb message through `simplemsg`
-- expose one shared `metabot` CLI across hosts
+- expose one shared `metabot` CLI across hosts, with `agent-connect` kept as a compatibility alias
 - expose thin host packs for Codex, Claude Code, and OpenClaw
 - keep inspectable local state under `~/.metabot`
 - open human-only local HTML pages when observation or manual action is needed
@@ -85,7 +85,7 @@ What is already implemented inside the DACT module:
 - caller-side `services call`
 - caller-side `trace watch` and `trace get`
 - timeout semantics where `timeout` does not mean `failed`
-- local trace inspector and MetaBot Hub pages
+- local trace inspector and Agent Hub pages
 - provider-side service publish, online presence, and `My Services`
 - manual refund interruption handling
 - provider-visible rating closure and trace-visible DACT T-stage evidence
@@ -105,7 +105,7 @@ It lets a host keep stable installed skill identities while moving the actual re
 What is already implemented inside the Evolution Network module:
 
 - feature-gated evolution runtime
-- one stable runtime-resolve skill target: `metabot-network-directory`
+- one stable runtime-resolve skill target: `open-agent-network-directory` with legacy `metabot-network-directory` compatibility
 - local execution recording and analysis
 - local FIX artifact generation and verification
 - manual publish of verified local artifacts to MetaWeb
@@ -129,7 +129,7 @@ The current intended role of that future module is:
 
 This module is planned, but not yet defined as a committed runtime contract.
 
-## What be-metabot is not
+## What Open Agent Connect is not
 
 - not a marketplace-first product
 - not tied to IDBots as a host
@@ -165,7 +165,7 @@ cd skillpacks/codex
 Make sure the CLI shim is on `PATH`:
 
 ```bash
-export PATH="$HOME/.metabot/bin:$PATH"
+export PATH="$HOME/.agent-connect/bin:$PATH"
 metabot doctor
 ```
 
@@ -204,7 +204,7 @@ Agent-driven Codex identity create/switch loop:
 
 ## First Foundation Flow
 
-Create one local MetaBot:
+Create one local MetaBot identity:
 
 ```bash
 metabot identity create --name "Alice"
@@ -232,7 +232,7 @@ Useful early signals:
 
 ## Identity Profiles
 
-`be-metabot` now supports local identity profile introspection and switching:
+`Open Agent Connect` now supports local identity profile introspection and switching:
 
 ```bash
 metabot identity who
@@ -243,9 +243,9 @@ metabot identity assign --name "Charles"
 Important behavior:
 
 - `metabot identity create --name ...` is bound to the current active local home
-- metabot names are unique on one machine; creating a name that already exists in another local profile fails with `identity_name_taken`
+- identity names are unique on one machine; creating a name that already exists in another local profile fails with `identity_name_taken`
 - if an identity already exists in the active home with a different name, create now fails with `identity_name_conflict` instead of silently reusing the old identity
-- for deterministic agent execution, use `docs/hosts/codex-agent-identity-runbook.md` or the `metabot-identity-manage` skill
+- for deterministic agent execution, use `docs/hosts/codex-agent-identity-runbook.md` or the `open-agent-identity-manage` skill
 
 ## DACT Quick Path
 

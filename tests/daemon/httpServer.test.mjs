@@ -180,7 +180,7 @@ async function startServer(options = {}) {
             if (page !== 'hub') {
               throw new Error(`Unexpected page ${page}`);
             }
-            return `<!doctype html><html><head><title>MetaBot Hub</title></head><body><h1>MetaBot Hub</h1></body></html>`;
+            return `<!doctype html><html><head><title>Agent Hub</title></head><body><h1>Agent Hub</h1></body></html>`;
           },
         },
   });
@@ -636,7 +636,7 @@ test('GET /ui/hub serves the built-in yellow-pages view with a real service dire
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
-  assert.match(html, /MetaBot Hub/);
+  assert.match(html, /Agent Hub/);
   assert.match(html, /Yellow Pages Directory/);
   assert.match(html, /data-service-directory/);
   assert.match(html, /data-service-list/);

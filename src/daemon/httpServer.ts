@@ -123,7 +123,7 @@ export function createHttpServer(handlers: MetabotDaemonHttpHandlers = {}): http
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (requestUrl.pathname.startsWith('/ui/')) {
-        context.sendHtml(500, `<!doctype html><html><body><h1>MetaBot UI Error</h1><pre>${message}</pre></body></html>`);
+        context.sendHtml(500, `<!doctype html><html><body><h1>Open Agent Connect UI Error</h1><pre>${message}</pre></body></html>`);
         return;
       }
       context.sendJson(500, commandFailed('internal_error', message));

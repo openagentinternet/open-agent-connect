@@ -175,7 +175,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'services', summary: 'Publish, call, and rate remote MetaBot services.' },
     { name: 'chat', summary: 'Send encrypted private MetaWeb messages to another MetaBot.' },
     { name: 'trace', summary: 'Watch or inspect structured remote delegation traces.' },
-    { name: 'ui', summary: 'Open local human-only MetaBot HTML pages.' },
+    { name: 'ui', summary: 'Open local human-only HTML pages backed by the MetaBot runtime.' },
   ],
   optionalFlags: [HELP_JSON_FLAG],
   examples: [
@@ -188,22 +188,22 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   ROOT_COMMAND_HELP,
   {
     commandPath: ['identity'],
-    summary: 'Identity commands for creating, listing, and switching local MetaBot profiles.',
+    summary: 'Identity commands for creating, listing, and switching local MetaBot identity profiles.',
     usage: 'metabot identity <subcommand>',
     subcommands: [
-      { name: 'create', summary: 'Create a local MetaBot from a human-provided name.' },
-      { name: 'who', summary: 'Show which local MetaBot is currently active.' },
-      { name: 'list', summary: 'List local MetaBot profiles discovered on this machine.' },
-      { name: 'assign', summary: 'Switch the active local MetaBot profile by name.' },
+      { name: 'create', summary: 'Create one local MetaBot identity from a human-provided name.' },
+      { name: 'who', summary: 'Show which local MetaBot identity is currently active.' },
+      { name: 'list', summary: 'List local MetaBot identity profiles discovered on this machine.' },
+      { name: 'assign', summary: 'Switch the active local MetaBot identity profile by name.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
   {
     commandPath: ['identity', 'create'],
-    summary: 'Create one local MetaBot and complete the validated bootstrap flow for the current active home.',
+    summary: 'Create one local MetaBot identity and complete the validated bootstrap flow for the current active home.',
     usage: 'metabot identity create --name <display-name>',
     requiredFlags: [
-      { flag: '--name', value: '<display-name>', description: 'Human-facing name for the new local MetaBot.' },
+      { flag: '--name', value: '<display-name>', description: 'Human-facing name for the new local MetaBot identity.' },
     ],
     successFields: [
       'metabotId',
@@ -241,7 +241,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['identity', 'list'],
-    summary: 'List local MetaBot profiles on this machine and report the current active home.',
+    summary: 'List local MetaBot identity profiles on this machine and report the current active home.',
     usage: 'metabot identity list',
     successFields: [
       'systemHomeDir',
@@ -252,10 +252,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['identity', 'assign'],
-    summary: 'Switch the active local MetaBot profile by display name.',
+    summary: 'Switch the active local MetaBot identity profile by display name.',
     usage: 'metabot identity assign --name <display-name>',
     requiredFlags: [
-      { flag: '--name', value: '<display-name>', description: 'Existing local MetaBot profile name to activate.' },
+      { flag: '--name', value: '<display-name>', description: 'Existing local MetaBot identity profile name to activate.' },
     ],
     successFields: [
       'activeHomeDir',
@@ -707,13 +707,13 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'Open local human-only HTML pages backed by the same daemon state as the CLI.',
     usage: 'metabot ui <subcommand>',
     subcommands: [
-      { name: 'open', summary: 'Open one local MetaBot page in the browser.' },
+      { name: 'open', summary: 'Open one local MetaBot runtime page in the browser.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
   {
     commandPath: ['ui', 'open'],
-    summary: 'Open one local MetaBot HTML page such as hub, publish, my-services, trace, or refund.',
+    summary: 'Open one local MetaBot runtime HTML page such as hub, publish, my-services, trace, or refund.',
     usage: 'metabot ui open --page <page> [--trace-id <trace-id>]',
     requiredFlags: [
       { flag: '--page', value: '<page>', description: 'Built-in page name: hub, publish, my-services, trace, or refund.' },

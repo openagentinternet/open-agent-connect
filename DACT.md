@@ -1,8 +1,8 @@
-# MetaBot DACT Module
+# Open Agent Connect DACT Module
 
 ## 一句话定义
 
-DACT 是 `be-metabot` 当前这条“远端能力接入闭环”模块的暂定名称。
+DACT 是 `Open Agent Connect` 当前这条“远端能力接入闭环”模块的暂定名称。
 
 它负责让本地 MetaBot 能通过 MetaWeb：
 
@@ -40,7 +40,7 @@ DACT 要解决的是另一类问题：
 
 - 链上发现在线服务
 - 调用方宿主内确认委派
-- MetaBot-to-MetaBot 发起远端调用
+- agent-to-agent 发起远端调用
 - 在当前宿主 session 中拿到结果或 trace
 - provider 侧看到订单与闭环状态
 - T-stage 评价写链并可被双方观察
@@ -65,7 +65,7 @@ DACT 要解决的是另一类问题：
 - 根据 heartbeat 做在线过滤
 - `metabot network services --online`
 - 本地 `network sources` 作为 seeded fallback 与 demo transport hint
-- 本地人类观察页 `MetaBot Hub`
+- 本地人类观察页 `Agent Hub`
 
 这一阶段的关键价值是：
 
@@ -169,7 +169,7 @@ DACT 要解决的是另一类问题：
 
 - `metabot` CLI
 - 本地 daemon
-- `~/.metabot` 状态目录
+- `~/.metabot` 状态目录（当前保留为兼容路径）
 
 这样 DACT 不需要为每个宿主分别重做一套底层逻辑。
 

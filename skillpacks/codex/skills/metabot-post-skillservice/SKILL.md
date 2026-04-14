@@ -13,7 +13,8 @@ Generated for Codex.
 
 - Default skill root: `${CODEX_HOME:-$HOME/.codex}/skills`
 - Host pack id: `codex`
-- CLI path: `metabot`
+- Primary CLI path: `metabot`
+- Compatibility CLI alias: `agent-connect`
 
 ## Routing
 

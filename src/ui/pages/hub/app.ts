@@ -5,7 +5,7 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
   const buildHubServiceDirectoryViewModelSource = buildHubServiceDirectoryViewModel.toString();
   return {
     page: 'hub',
-    title: 'MetaBot Hub',
+    title: 'Agent Hub',
     eyebrow: 'Yellow Pages',
     heading: 'Browse online MetaBot services',
     description: 'A local-only view of discoverable MetaBot services, sorted for humans while the daemon stays machine-first.',

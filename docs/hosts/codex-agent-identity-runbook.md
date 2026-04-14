@@ -4,7 +4,7 @@ Use this runbook when you want Codex to reliably create or switch to a local Met
 
 ## Agent Goal
 
-- treat MetaBot name as the canonical local reference
+- treat the MetaBot identity name as the canonical local reference
 - if the name already exists locally, switch to it
 - if the name does not exist, create it in its own dedicated local profile home
 - finish with an explicit `identity who` verification report
@@ -22,7 +22,7 @@ Before running commands, verify:
 
 - repository root contains `package.json`
 - `metabot` is available in current shell (`command -v metabot`)
-- target MetaBot name is provided and not empty
+- target MetaBot identity name is provided and not empty
 
 If any precondition fails, stop and return a concise blocked report.
 

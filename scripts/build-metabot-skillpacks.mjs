@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url';
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(SCRIPT_PATH), '..');
 const DEFAULT_OUTPUT_ROOT = path.join(DEFAULT_REPO_ROOT, 'skillpacks');
-const SHARED_CLI_PATH = 'metabot';
+const PRIMARY_CLI_PATH = 'metabot';
+const LEGACY_CLI_ALIAS = 'agent-connect';
 const SHARED_COMPATIBILITY_MANIFEST = 'release/compatibility.json';
 const BUNDLED_COMPATIBILITY_MANIFEST = 'runtime/compatibility.json';
-const INCLUDED_SKILLS = [
+const LEGACY_SKILLS = [
   'metabot-chat-privatechat',
   'metabot-post-buzz',
   'metabot-upload-file',
@@ -37,10 +38,15 @@ const HOSTS = {
   },
 };
 
+const PUBLIC_SKILL_MAP = Object.fromEntries(
+  LEGACY_SKILLS.map((legacySkill) => [legacySkill, legacySkill.replace(/^metabot-/, 'open-agent-')])
+);
+
 function replaceAll(source, replacements) {
-  return Object.entries(replacements).reduce((text, [token, value]) => (
-    text.split(token).join(value)
-  ), source);
+  return Object.entries(replacements).reduce(
+    (text, [token, value]) => text.split(token).join(value),
+    source
+  );
 }
 
 function extractFrontmatter(source, skillName) {
@@ -57,31 +63,49 @@ function renderHostMetadata(hostKey, host) {
     '',
     `- Default skill root: \`${host.defaultSkillRoot}\``,
     `- Host pack id: \`${hostKey}\``,
-    `- CLI path: \`${SHARED_CLI_PATH}\``,
+    `- Primary CLI path: \`${PRIMARY_CLI_PATH}\``,
+    `- Compatibility CLI alias: \`${LEGACY_CLI_ALIAS}\``,
   ].join('\n');
 }
 
+function listSkills(skills) {
+  return skills.map((skill) => `- \`${skill}\``).join('\n');
+}
+
 function buildReadme({ hostKey, host, packageVersion }) {
-  const skillList = INCLUDED_SKILLS.map((skill) => `- \`${skill}\``).join('\n');
-  return `# MetaBot Skill Pack for ${host.displayName}
+  return `# Open Agent Connect Skill Pack for ${host.displayName}
 
-Thin host adapter for the MetaBot open-source research pack. These skills keep business logic in the shared \`${SHARED_CLI_PATH}\` CLI and MetaWeb runtime instead of the host adapter.
+Thin host adapter for Open Agent Connect, the host-facing runtime for Open Agent Internet. These skills keep business logic in the shared \`${PRIMARY_CLI_PATH}\` CLI and MetaWeb runtime instead of the host adapter.
 
-## Included Skills
+This host pack installs:
 
-${skillList}
+- primary MetaBot skill names under the \`metabot-*\` prefix
+- \`open-agent-*\` aliases for migration and compatibility with newer naming surfaces
+
+## Included Open-Agent Alias Skills
+
+${listSkills(Object.values(PUBLIC_SKILL_MAP))}
+
+## Included Primary MetaBot Skills
+
+${listSkills(LEGACY_SKILLS)}
 
 ## Install
 
 \`\`\`bash
 ./install.sh
-export PATH="$HOME/.metabot/bin:$PATH"
+export PATH="$HOME/.agent-connect/bin:$PATH"
 metabot doctor
 \`\`\`
 
-Override the destination with \`METABOT_SKILL_DEST\` if this host uses a custom skill root.
-Override the CLI shim directory with \`METABOT_BIN_DIR\` if \`$HOME/.metabot/bin\` is not on PATH.
-If you are installing from a source checkout, set \`METABOT_SOURCE_ROOT\` to the repository root.
+Compatibility note:
+
+- \`agent-connect\` is installed as a working compatibility CLI alias
+- both \`METABOT_*\` and \`AGENT_CONNECT_*\` environment variables are supported
+
+Override the destination with \`AGENT_CONNECT_SKILL_DEST\` if this host uses a custom skill root.
+Override the CLI shim directory with \`AGENT_CONNECT_BIN_DIR\` if \`$HOME/.agent-connect/bin\` is not on PATH.
+If you are installing from a source checkout, set \`AGENT_CONNECT_SOURCE_ROOT\` to the repository root.
 
 If the current host session does not immediately detect the new skills, start a fresh session.
 
@@ -101,7 +125,8 @@ node e2e/run-local-cross-host-demo.mjs
 
 ## Shared Runtime Contract
 
-- CLI path: \`${SHARED_CLI_PATH}\`
+- Primary CLI path: \`${PRIMARY_CLI_PATH}\`
+- Compatibility CLI alias: \`${LEGACY_CLI_ALIAS}\`
 - Compatibility manifest: \`${SHARED_COMPATIBILITY_MANIFEST}\`
 - Bundled compatibility copy: \`${BUNDLED_COMPATIBILITY_MANIFEST}\`
 - Package version: \`${packageVersion}\`
@@ -114,10 +139,10 @@ function buildInstallScript(host) {
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-DEST_ROOT="\${METABOT_SKILL_DEST:-${host.defaultSkillRoot}}"
-BIN_DIR="\${METABOT_BIN_DIR:-$HOME/.metabot/bin}"
-SOURCE_ROOT="\${METABOT_SOURCE_ROOT:-}"
-CLI_ENTRY="\${METABOT_CLI_ENTRY:-}"
+DEST_ROOT="\${AGENT_CONNECT_SKILL_DEST:-\${METABOT_SKILL_DEST:-${host.defaultSkillRoot}}}"
+BIN_DIR="\${AGENT_CONNECT_BIN_DIR:-\${METABOT_BIN_DIR:-$HOME/.agent-connect/bin}}"
+SOURCE_ROOT="\${AGENT_CONNECT_SOURCE_ROOT:-\${METABOT_SOURCE_ROOT:-}}"
+CLI_ENTRY="\${AGENT_CONNECT_CLI_ENTRY:-\${METABOT_CLI_ENTRY:-}}"
 
 mkdir -p "$DEST_ROOT"
 mkdir -p "$BIN_DIR"
@@ -175,7 +200,7 @@ command -v node >/dev/null 2>&1 || {
 if ! resolve_cli_entry; then
   build_cli_from_source || true
   resolve_cli_entry || {
-    echo "MetaBot CLI entry not found. Set METABOT_SOURCE_ROOT or METABOT_CLI_ENTRY before running install.sh." >&2
+    echo "MetaBot CLI entry not found. Set AGENT_CONNECT_SOURCE_ROOT or AGENT_CONNECT_CLI_ENTRY before running install.sh." >&2
     exit 1
   }
 fi
@@ -189,17 +214,24 @@ for skill_dir in "$SCRIPT_DIR"/skills/*; do
   cp -R "$skill_dir"/. "$target_dir"/
 done
 
-printf '%s\n' \
-  '#!/usr/bin/env bash' \
-  'set -euo pipefail' \
-  "exec node \"$CLI_ENTRY\" \"\\\$@\"" \
-  > "$BIN_DIR/metabot"
+write_cli_shim() {
+  local target_name="$1"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    "exec node \"$CLI_ENTRY\" \"\\\$@\"" \
+    > "$BIN_DIR/$target_name"
+  chmod +x "$BIN_DIR/$target_name"
+}
 
-chmod +x "$BIN_DIR/metabot"
+write_cli_shim "${PRIMARY_CLI_PATH}"
+write_cli_shim "${LEGACY_CLI_ALIAS}"
 
-echo "Installed MetaBot skills to $DEST_ROOT"
-echo "Installed MetaBot CLI shim to $BIN_DIR/metabot"
-echo "CLI path: ${SHARED_CLI_PATH}"
+echo "Installed Open Agent Connect skills to $DEST_ROOT"
+echo "Installed primary CLI shim to $BIN_DIR/${PRIMARY_CLI_PATH}"
+echo "Installed compatibility CLI alias to $BIN_DIR/${LEGACY_CLI_ALIAS}"
+echo "Primary CLI path: ${PRIMARY_CLI_PATH}"
+echo "Compatibility CLI alias: ${LEGACY_CLI_ALIAS}"
 echo "Compatibility manifest: ${SHARED_COMPATIBILITY_MANIFEST}"
 echo "Bundled compatibility copy: $SCRIPT_DIR/${BUNDLED_COMPATIBILITY_MANIFEST}"
 `;
@@ -217,16 +249,24 @@ async function writeFile(filePath, content, executable = false) {
   }
 }
 
-async function renderSkill({ repoRoot, skillName, hostKey, host, templates }) {
-  const sourcePath = path.join(repoRoot, 'SKILLs', skillName, 'SKILL.md');
-  const source = await fs.readFile(sourcePath, 'utf8');
+function replaceLegacySkillIds(source, mapping = PUBLIC_SKILL_MAP) {
+  return Object.entries(mapping).reduce(
+    (text, [legacySkill, publicSkill]) => text.split(legacySkill).join(publicSkill),
+    source
+  );
+}
 
-  if (skillName === 'metabot-network-directory') {
+function replaceNarrativeTerms(source) {
+  return source;
+}
+
+function renderSourceSkill(source, sourceSkillName, outputSkillName, hostKey, host, templates) {
+  if (sourceSkillName === 'metabot-network-directory') {
     return replaceAll(templates.runtimeResolveShim, {
-      '{{FRONTMATTER}}': extractFrontmatter(source, skillName),
-      '{{SKILL_NAME}}': skillName,
+      '{{FRONTMATTER}}': extractFrontmatter(source, sourceSkillName),
+      '{{SKILL_NAME}}': outputSkillName,
       '{{HOST_KEY}}': hostKey,
-      '{{METABOT_CLI}}': SHARED_CLI_PATH,
+      '{{METABOT_CLI}}': PRIMARY_CLI_PATH,
       '{{HOST_SKILLPACK_METADATA}}': renderHostMetadata(hostKey, host),
       '{{COMPATIBILITY_MANIFEST}}': SHARED_COMPATIBILITY_MANIFEST,
     });
@@ -234,14 +274,15 @@ async function renderSkill({ repoRoot, skillName, hostKey, host, templates }) {
 
   const renderedTemplates = {
     confirmationContract: replaceAll(templates.confirmationContract, {
-      '{{METABOT_CLI}}': SHARED_CLI_PATH,
+      '{{METABOT_CLI}}': PRIMARY_CLI_PATH,
     }),
     systemRouting: replaceAll(templates.systemRouting, {
-      '{{METABOT_CLI}}': SHARED_CLI_PATH,
+      '{{METABOT_CLI}}': PRIMARY_CLI_PATH,
     }),
   };
+
   return replaceAll(source, {
-    '{{METABOT_CLI}}': SHARED_CLI_PATH,
+    '{{METABOT_CLI}}': PRIMARY_CLI_PATH,
     '{{COMPATIBILITY_MANIFEST}}': SHARED_COMPATIBILITY_MANIFEST,
     '{{HOST_SKILLPACK_METADATA}}': renderHostMetadata(hostKey, host),
     '{{SYSTEM_ROUTING}}': renderedTemplates.systemRouting,
@@ -249,7 +290,37 @@ async function renderSkill({ repoRoot, skillName, hostKey, host, templates }) {
   });
 }
 
-export async function buildMetabotSkillpacks(options = {}) {
+async function renderSkill({
+  repoRoot,
+  legacySkillName,
+  outputSkillName,
+  hostKey,
+  host,
+  templates,
+  publicName = false,
+}) {
+  const sourcePath = path.join(repoRoot, 'SKILLs', legacySkillName, 'SKILL.md');
+  const source = await fs.readFile(sourcePath, 'utf8');
+
+  let renderedSource = source;
+  if (publicName) {
+    renderedSource = replaceLegacySkillIds(renderedSource);
+    renderedSource = renderedSource.replace(`name: ${legacySkillName}`, `name: ${outputSkillName}`);
+  }
+
+  renderedSource = replaceNarrativeTerms(renderedSource);
+  const rendered = renderSourceSkill(
+    renderedSource,
+    legacySkillName,
+    outputSkillName,
+    hostKey,
+    host,
+    templates
+  );
+  return replaceNarrativeTerms(rendered);
+}
+
+export async function buildAgentConnectSkillpacks(options = {}) {
   const repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : DEFAULT_REPO_ROOT;
   const outputRoot = options.outputRoot ? path.resolve(options.outputRoot) : DEFAULT_OUTPUT_ROOT;
   const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, 'package.json'), 'utf8'));
@@ -268,30 +339,57 @@ export async function buildMetabotSkillpacks(options = {}) {
     await fs.rm(hostRoot, { recursive: true, force: true });
     await fs.mkdir(path.join(hostRoot, 'skills'), { recursive: true });
 
-    await writeFile(path.join(hostRoot, 'README.md'), buildReadme({
-      hostKey,
-      host,
-      packageVersion: packageJson.version,
-    }));
+    await writeFile(
+      path.join(hostRoot, 'README.md'),
+      buildReadme({
+        hostKey,
+        host,
+        packageVersion: packageJson.version,
+      })
+    );
     await writeFile(path.join(hostRoot, 'install.sh'), buildInstallScript(host), true);
     await writeFile(path.join(hostRoot, BUNDLED_COMPATIBILITY_MANIFEST), compatibilityManifest);
 
-    for (const skillName of INCLUDED_SKILLS) {
-      const rendered = await renderSkill({ repoRoot, skillName, hostKey, host, templates });
-      await writeFile(path.join(hostRoot, 'skills', skillName, 'SKILL.md'), rendered);
+    for (const legacySkillName of LEGACY_SKILLS) {
+      const publicSkillName = PUBLIC_SKILL_MAP[legacySkillName];
+      const publicRendered = await renderSkill({
+        repoRoot,
+        legacySkillName,
+        outputSkillName: publicSkillName,
+        hostKey,
+        host,
+        templates,
+        publicName: true,
+      });
+      await writeFile(path.join(hostRoot, 'skills', publicSkillName, 'SKILL.md'), publicRendered);
+
+      const legacyRendered = await renderSkill({
+        repoRoot,
+        legacySkillName,
+        outputSkillName: legacySkillName,
+        hostKey,
+        host,
+        templates,
+      });
+      await writeFile(path.join(hostRoot, 'skills', legacySkillName, 'SKILL.md'), legacyRendered);
     }
   }
 
   return {
     outputRoot,
     hosts: hostKeys,
-    cliPath: SHARED_CLI_PATH,
+    cliPath: PRIMARY_CLI_PATH,
+    cliAliases: [LEGACY_CLI_ALIAS],
     compatibilityManifest: SHARED_COMPATIBILITY_MANIFEST,
   };
 }
 
+export async function buildMetabotSkillpacks(options = {}) {
+  return buildAgentConnectSkillpacks(options);
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  const result = await buildMetabotSkillpacks();
+  const result = await buildAgentConnectSkillpacks();
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 

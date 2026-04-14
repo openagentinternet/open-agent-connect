@@ -131,8 +131,8 @@ export function buildTraceInspectorScript(): string {
   const renderStatusBanner = (trace, inspector) => {
     const status = getCurrentPublicStatus(trace, inspector);
     const clarificationNeeded = getCurrentClarificationState(trace, inspector);
-    let title = 'Watching Remote MetaBot';
-    let copy = 'This local inspector is following one MetaBot-to-MetaBot session through the local daemon.';
+    let title = 'Watching Remote agent';
+    let copy = 'This local inspector is following one agent-to-agent session through the local daemon.';
     let tone = 'active';
 
     if (clarificationNeeded) {
@@ -199,9 +199,9 @@ export function buildTraceInspectorScript(): string {
     if (!elements.participants || !trace) return;
 
     const callerName = trace.a2a && (trace.a2a.callerName || trace.a2a.callerGlobalMetaId)
-      ? buildParticipantBody([trace.a2a.callerName, trace.a2a.callerGlobalMetaId], 'Unknown caller MetaBot')
+      ? buildParticipantBody([trace.a2a.callerName, trace.a2a.callerGlobalMetaId], 'Unknown caller agent')
       : (trace.order && trace.order.role === 'seller'
-        ? buildParticipantBody([trace.session && trace.session.peerName, trace.session && trace.session.peerGlobalMetaId], 'Unknown caller MetaBot')
+        ? buildParticipantBody([trace.session && trace.session.peerName, trace.session && trace.session.peerGlobalMetaId], 'Unknown caller agent')
         : (trace.session && trace.session.metabotId != null ? 'Local MetaBot #' + trace.session.metabotId : 'Local MetaBot'));
     const remoteName = trace.a2a && trace.a2a.role === 'provider'
       ? buildParticipantBody([trace.a2a.callerName, trace.a2a.callerGlobalMetaId], 'Unknown remote MetaBot')
@@ -214,8 +214,8 @@ export function buildTraceInspectorScript(): string {
         ],
         'Unknown remote MetaBot'
       );
-    appendListItem(elements.participants, 'Caller MetaBot', callerName || 'Unknown caller MetaBot', 'active', 'participant-item');
-    appendListItem(elements.participants, 'Remote MetaBot', remoteName || 'Unknown remote MetaBot', 'active', 'participant-item');
+    appendListItem(elements.participants, 'Caller agent', callerName || 'Unknown caller agent', 'active', 'participant-item');
+    appendListItem(elements.participants, 'Remote agent', remoteName || 'Unknown remote MetaBot', 'active', 'participant-item');
     if (trace.order && (trace.order.serviceName || trace.order.serviceId)) {
       appendListItem(
         elements.participants,

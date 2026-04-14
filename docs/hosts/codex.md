@@ -1,4 +1,4 @@
-# MetaBot on Codex
+# Open Agent Connect on Codex
 
 ## Install
 
@@ -7,26 +7,27 @@ From the repository root:
 ```bash
 cd skillpacks/codex
 ./install.sh
-export PATH="$HOME/.metabot/bin:$PATH"
+export PATH="$HOME/.agent-connect/bin:$PATH"
 metabot doctor
 ```
 
-This installs the Codex skills and a local `metabot` shim under `~/.metabot/bin` by default.
-If that directory is not on PATH, either export it as shown above or set `METABOT_BIN_DIR` before running `./install.sh`.
-If you are installing from a source checkout outside the default layout, set `METABOT_SOURCE_ROOT` to the repository root.
+This installs the Codex skills plus a primary `metabot` shim under `~/.agent-connect/bin` by default.
+It also installs `agent-connect` as a compatibility CLI alias.
+If that directory is not on PATH, either export it as shown above or set `AGENT_CONNECT_BIN_DIR` before running `./install.sh`.
+If you are installing from a source checkout outside the default layout, set `AGENT_CONNECT_SOURCE_ROOT` to the repository root.
 
-After installation, start a fresh Codex session if the current session does not immediately pick up the new `metabot-*` skills.
+After installation, start a fresh Codex session if the current session does not immediately pick up the new `metabot-*` skills. `open-agent-*` aliases are also installed for compatibility.
 
 ## Evolution Network M1 (Local Only)
 
-M1 enables local self-repair for `metabot-network-directory` only.
+M1 enables local self-repair for `open-agent-network-directory` only.
 
 - Total feature flag: `evolution_network.enabled`
-- Installed `metabot-network-directory` remains a stable host skill identity, but the installed copy is a runtime-resolve shim
+- Installed `open-agent-network-directory` remains a stable host skill identity, but the installed copy is a runtime-resolve shim
 - The shim should resolve the live contract before execution:
 
 ```bash
-metabot skills resolve --skill metabot-network-directory --host codex --format markdown
+metabot skills resolve --skill open-agent-network-directory --host codex --format markdown
 ```
 
 Useful M1 controls:
@@ -35,12 +36,12 @@ Useful M1 controls:
 metabot config get evolution_network.enabled
 metabot config set evolution_network.enabled false
 metabot evolution status
-metabot evolution rollback --skill metabot-network-directory
+metabot evolution rollback --skill open-agent-network-directory
 ```
 
 M1 does not include chain publication/search/import for evolution variants.
 
-## Create The First MetaBot
+## Create The First MetaBot Identity
 
 Ask the local agent to run, or run directly in the terminal:
 

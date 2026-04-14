@@ -716,7 +716,7 @@ test('services publish persists a local directory entry that network services --
   await writeFile(payloadFile, JSON.stringify({
     serviceName: 'weather-oracle',
     displayName: 'Weather Oracle',
-    description: 'Returns tomorrow weather from the local MetaBot runtime.',
+    description: 'Returns tomorrow weather from the local connected-agent runtime.',
     providerSkill: 'metabot-weather-oracle',
     price: '0.00001',
     currency: 'SPACE',
@@ -1498,7 +1498,7 @@ test('network services merges remote demo directory seeds and returns provider d
   await writeFile(publishFile, JSON.stringify({
     serviceName: 'weather-oracle',
     displayName: 'Weather Oracle',
-    description: 'Returns tomorrow weather from the local MetaBot runtime.',
+    description: 'Returns tomorrow weather from the local connected-agent runtime.',
     providerSkill: 'metabot-weather-oracle',
     price: '0.00001',
     currency: 'SPACE',
@@ -1584,7 +1584,7 @@ test('services call stores a trace that trace get can read back from the local r
   await writeFile(publishFile, JSON.stringify({
     serviceName: 'weather-oracle',
     displayName: 'Weather Oracle',
-    description: 'Returns tomorrow weather from the local MetaBot runtime.',
+    description: 'Returns tomorrow weather from the local connected-agent runtime.',
     providerSkill: 'metabot-weather-oracle',
     price: '0.00001',
     currency: 'SPACE',
@@ -1661,7 +1661,7 @@ test('services call returns an A2A start contract while provider execution flows
   await writeFile(publishFile, JSON.stringify({
     serviceName: 'weather-oracle',
     displayName: 'Weather Oracle',
-    description: 'Returns tomorrow weather from the local MetaBot runtime.',
+    description: 'Returns tomorrow weather from the local connected-agent runtime.',
     providerSkill: 'metabot-weather-oracle',
     price: '0.00001',
     currency: 'SPACE',

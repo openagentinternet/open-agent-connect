@@ -1,6 +1,6 @@
 {{FRONTMATTER}}
 
-# MetaBot Runtime Resolve Shim
+# Open Agent Connect Runtime Resolve Shim
 
 ## Host Adapter
 
@@ -22,5 +22,5 @@ If resolve fails, surface the error and stop instead of guessing behavior.
 
 ## Compatibility
 
-- CLI path: `{{METABOT_CLI}}`
+- Primary CLI path: `{{METABOT_CLI}}`
 - Compatibility manifest: `{{COMPATIBILITY_MANIFEST}}`

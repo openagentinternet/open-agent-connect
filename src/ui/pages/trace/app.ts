@@ -6,7 +6,7 @@ export function buildTracePageDefinition(): LocalUiPageDefinition {
     page: 'trace',
     title: 'Trace Inspector',
     eyebrow: 'A2A Evidence',
-    heading: 'Inspect one MetaBot-to-MetaBot session',
+    heading: 'Inspect one agent-to-agent session',
     description: 'A local-only inspector for trace details, transcript evidence, timeout follow-up, and clarification state without changing the machine-first CLI contract.',
     panels: [
       {

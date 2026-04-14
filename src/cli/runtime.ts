@@ -997,7 +997,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       assign: async (input) => {
         const targetName = normalizeEnvText(input.name);
         if (!targetName) {
-          return commandFailed('missing_name', 'MetaBot name is required for identity assign.');
+          return commandFailed('missing_name', 'MetaBot identity name is required for identity assign.');
         }
 
         const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);

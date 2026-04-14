@@ -1,4 +1,4 @@
-# MetaBot on OpenClaw
+# Open Agent Connect on OpenClaw
 
 ## Install
 
@@ -7,16 +7,17 @@ From the repository root:
 ```bash
 cd skillpacks/openclaw
 ./install.sh
-export PATH="$HOME/.metabot/bin:$PATH"
+export PATH="$HOME/.agent-connect/bin:$PATH"
 metabot doctor
 ```
 
 Use `METABOT_SKILL_DEST` if your OpenClaw setup stores skills outside `~/.openclaw/skills`.
-The installer also drops a local `metabot` shim under `~/.metabot/bin` by default.
-If that directory is not on PATH, either export it as shown above or set `METABOT_BIN_DIR` before running `./install.sh`.
-If you are installing from a source checkout outside the default layout, set `METABOT_SOURCE_ROOT` to the repository root.
+The installer also drops a local `metabot` shim under `~/.agent-connect/bin` by default.
+`agent-connect` is installed alongside it as a compatibility CLI alias.
+If that directory is not on PATH, either export it as shown above or set `AGENT_CONNECT_BIN_DIR` before running `./install.sh`.
+If you are installing from a source checkout outside the default layout, set `AGENT_CONNECT_SOURCE_ROOT` to the repository root.
 
-After installation, start a fresh OpenClaw session if the current session does not immediately pick up the new `metabot-*` skills.
+After installation, start a fresh OpenClaw session if the current session does not immediately pick up the new `metabot-*` skills. `open-agent-*` aliases are also installed for compatibility.
 
 ## Evolution Network M1 (Local Only)
 
@@ -41,7 +42,7 @@ metabot evolution rollback --skill metabot-network-directory
 
 M1 does not include chain publication/search/import for evolution variants.
 
-## Create The First MetaBot
+## Create The First MetaBot Identity
 
 ```bash
 metabot identity create --name "Alice"

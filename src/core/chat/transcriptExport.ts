@@ -29,7 +29,7 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function formatMetaBotLabel(options: {
+function formatConnectedAgentLabel(options: {
   name?: string | null;
   globalMetaId?: string | null;
   fallback: string;
@@ -57,7 +57,7 @@ function renderTimeoutNote(prefix: 'transcript' | 'trace'): string {
 
 function buildCallerLabel(trace: SessionTraceRecord): string {
   if (trace.a2a) {
-    return formatMetaBotLabel({
+    return formatConnectedAgentLabel({
       name: trace.a2a.callerName,
       globalMetaId: trace.a2a.callerGlobalMetaId,
       fallback: trace.session.metabotId != null
@@ -67,7 +67,7 @@ function buildCallerLabel(trace: SessionTraceRecord): string {
   }
 
   if (trace.order?.role === 'seller') {
-    return formatMetaBotLabel({
+    return formatConnectedAgentLabel({
       name: trace.session.peerName,
       globalMetaId: trace.session.peerGlobalMetaId,
       fallback: 'Unknown Caller MetaBot',
@@ -82,7 +82,7 @@ function buildCallerLabel(trace: SessionTraceRecord): string {
 function buildRemoteLabel(trace: SessionTraceRecord): string {
   if (trace.a2a) {
     const remoteIsCaller = trace.a2a.role === 'provider';
-    return formatMetaBotLabel({
+    return formatConnectedAgentLabel({
       name: remoteIsCaller ? trace.a2a.callerName : trace.a2a.providerName,
       globalMetaId: remoteIsCaller
         ? trace.a2a.callerGlobalMetaId
@@ -93,7 +93,7 @@ function buildRemoteLabel(trace: SessionTraceRecord): string {
     });
   }
 
-  return formatMetaBotLabel({
+  return formatConnectedAgentLabel({
     name: trace.session.peerName,
     globalMetaId: trace.session.peerGlobalMetaId,
     fallback: 'Unknown Remote MetaBot',
@@ -179,8 +179,8 @@ function renderTraceMarkdown(trace: SessionTraceRecord): string {
   if (trace.order?.paymentTxid) {
     lines.push(`Payment TXID: ${trace.order.paymentTxid}`);
   }
-  lines.push(`Caller MetaBot: ${buildCallerLabel(trace)}`);
-  lines.push(`Remote MetaBot: ${buildRemoteLabel(trace)}`);
+  lines.push(`Caller agent: ${buildCallerLabel(trace)}`);
+  lines.push(`Remote agent: ${buildRemoteLabel(trace)}`);
   if (trace.a2a?.sessionId) {
     lines.push(`A2A Session ID: ${trace.a2a.sessionId}`);
   }

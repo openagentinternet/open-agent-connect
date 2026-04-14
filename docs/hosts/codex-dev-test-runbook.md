@@ -1,6 +1,6 @@
 # Codex Dev-Test Runbook
 
-Use this runbook when you want Codex to execute a repeatable local development + testing cycle for `be-metabot`.
+Use this runbook when you want Codex to execute a repeatable local development + testing cycle for `Open Agent Connect`.
 
 ## Agent Goal
 
@@ -58,7 +58,7 @@ npm run build:skillpacks
 cd skillpacks/codex
 ./install.sh
 cd ../..
-export PATH="$HOME/.metabot/bin:$PATH"
+export PATH="$HOME/.agent-connect/bin:$PATH"
 metabot doctor
 ```
 

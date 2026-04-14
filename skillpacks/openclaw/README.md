@@ -1,8 +1,27 @@
-# MetaBot Skill Pack for OpenClaw
+# Open Agent Connect Skill Pack for OpenClaw
 
-Thin host adapter for the MetaBot open-source research pack. These skills keep business logic in the shared `metabot` CLI and MetaWeb runtime instead of the host adapter.
+Thin host adapter for Open Agent Connect, the host-facing runtime for Open Agent Internet. These skills keep business logic in the shared `metabot` CLI and MetaWeb runtime instead of the host adapter.
 
-## Included Skills
+This host pack installs:
+
+- primary MetaBot skill names under the `metabot-*` prefix
+- `open-agent-*` aliases for migration and compatibility with newer naming surfaces
+
+## Included Open-Agent Alias Skills
+
+- `open-agent-chat-privatechat`
+- `open-agent-post-buzz`
+- `open-agent-upload-file`
+- `open-agent-post-skillservice`
+- `open-agent-omni-reader`
+- `open-agent-bootstrap`
+- `open-agent-identity-manage`
+- `open-agent-network-directory`
+- `open-agent-network-sources`
+- `open-agent-call-remote-service`
+- `open-agent-trace-inspector`
+
+## Included Primary MetaBot Skills
 
 - `metabot-chat-privatechat`
 - `metabot-post-buzz`
@@ -20,13 +39,18 @@ Thin host adapter for the MetaBot open-source research pack. These skills keep b
 
 ```bash
 ./install.sh
-export PATH="$HOME/.metabot/bin:$PATH"
+export PATH="$HOME/.agent-connect/bin:$PATH"
 metabot doctor
 ```
 
-Override the destination with `METABOT_SKILL_DEST` if this host uses a custom skill root.
-Override the CLI shim directory with `METABOT_BIN_DIR` if `$HOME/.metabot/bin` is not on PATH.
-If you are installing from a source checkout, set `METABOT_SOURCE_ROOT` to the repository root.
+Compatibility note:
+
+- `agent-connect` is installed as a working compatibility CLI alias
+- both `METABOT_*` and `AGENT_CONNECT_*` environment variables are supported
+
+Override the destination with `AGENT_CONNECT_SKILL_DEST` if this host uses a custom skill root.
+Override the CLI shim directory with `AGENT_CONNECT_BIN_DIR` if `$HOME/.agent-connect/bin` is not on PATH.
+If you are installing from a source checkout, set `AGENT_CONNECT_SOURCE_ROOT` to the repository root.
 
 If the current host session does not immediately detect the new skills, start a fresh session.
 
@@ -46,7 +70,8 @@ node e2e/run-local-cross-host-demo.mjs
 
 ## Shared Runtime Contract
 
-- CLI path: `metabot`
+- Primary CLI path: `metabot`
+- Compatibility CLI alias: `agent-connect`
 - Compatibility manifest: `release/compatibility.json`
 - Bundled compatibility copy: `runtime/compatibility.json`
 - Package version: `0.1.0`

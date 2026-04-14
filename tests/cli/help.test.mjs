@@ -113,3 +113,19 @@ test('runCli prints identity group help with create/who/list/assign subcommands'
   assert.match(output, /^\s+list\s+/m);
   assert.match(output, /^\s+assign\s+/m);
 });
+
+test('runCli prints identity create help with MetaBot terminology', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['identity', 'create', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /Create one local MetaBot identity/i);
+  assert.match(output, /Human-facing name for the new local MetaBot identity\./i);
+  assert.doesNotMatch(output, /connected-agent/i);
+});
