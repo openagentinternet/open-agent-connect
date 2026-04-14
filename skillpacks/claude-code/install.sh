@@ -2,10 +2,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEST_ROOT="${AGENT_CONNECT_SKILL_DEST:-${METABOT_SKILL_DEST:-${CLAUDE_HOME:-$HOME/.claude}/skills}}"
-BIN_DIR="${AGENT_CONNECT_BIN_DIR:-${METABOT_BIN_DIR:-$HOME/.agent-connect/bin}}"
-SOURCE_ROOT="${AGENT_CONNECT_SOURCE_ROOT:-${METABOT_SOURCE_ROOT:-}}"
-CLI_ENTRY="${AGENT_CONNECT_CLI_ENTRY:-${METABOT_CLI_ENTRY:-}}"
+DEST_ROOT="${METABOT_SKILL_DEST:-${CLAUDE_HOME:-$HOME/.claude}/skills}"
+BIN_DIR="${METABOT_BIN_DIR:-$HOME/.metabot/bin}"
+SOURCE_ROOT="${METABOT_SOURCE_ROOT:-}"
+CLI_ENTRY="${METABOT_CLI_ENTRY:-}"
 
 mkdir -p "$DEST_ROOT"
 mkdir -p "$BIN_DIR"
@@ -63,7 +63,7 @@ command -v node >/dev/null 2>&1 || {
 if ! resolve_cli_entry; then
   build_cli_from_source || true
   resolve_cli_entry || {
-    echo "MetaBot CLI entry not found. Set AGENT_CONNECT_SOURCE_ROOT or AGENT_CONNECT_CLI_ENTRY before running install.sh." >&2
+    echo "MetaBot CLI entry not found. Set METABOT_SOURCE_ROOT or METABOT_CLI_ENTRY before running install.sh." >&2
     exit 1
   }
 fi
@@ -85,12 +85,9 @@ write_cli_shim() {
 }
 
 write_cli_shim "metabot"
-write_cli_shim "agent-connect"
 
 echo "Installed Open Agent Connect skills to $DEST_ROOT"
 echo "Installed primary CLI shim to $BIN_DIR/metabot"
-echo "Installed compatibility CLI alias to $BIN_DIR/agent-connect"
 echo "Primary CLI path: metabot"
-echo "Compatibility CLI alias: agent-connect"
 echo "Compatibility manifest: release/compatibility.json"
 echo "Bundled compatibility copy: $SCRIPT_DIR/runtime/compatibility.json"

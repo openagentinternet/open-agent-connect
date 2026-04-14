@@ -14,7 +14,6 @@ Generated for Claude Code.
 - Default skill root: `${CLAUDE_HOME:-$HOME/.claude}/skills`
 - Host pack id: `claude-code`
 - Primary CLI path: `metabot`
-- Compatibility CLI alias: `agent-connect`
 
 ## Routing
 

@@ -26,7 +26,6 @@ const EXPECTED_LEGACY_SKILLS = [
   'metabot-trace-inspector',
 ];
 const EXPECTED_CLI_PATH = 'metabot';
-const EXPECTED_CLI_ALIAS = 'agent-connect';
 const EXPECTED_COMPATIBILITY_MANIFEST = 'release/compatibility.json';
 const EXPECTED_BUNDLED_COMPATIBILITY_COPY = 'runtime/compatibility.json';
 const EXPECTED_CONFIRMATION_CONTRACT_LINE =
@@ -38,6 +37,14 @@ const EXPECTED_HUB_UI_LINE = 'metabot ui open --page hub';
 async function assertFileExists(filePath) {
   const info = await stat(filePath);
   assert.equal(info.isFile(), true, `${filePath} should exist as a file`);
+}
+
+async function assertFileMissing(filePath) {
+  await assert.rejects(
+    async () => stat(filePath),
+    /ENOENT/,
+    `${filePath} should not exist`
+  );
 }
 
 test('buildAgentConnectSkillpacks renders the shared Open Agent Connect skills into every host output', async () => {
@@ -74,7 +81,7 @@ test('buildAgentConnectSkillpacks embeds one shared CLI path and one shared comp
   for (const host of HOSTS) {
     const readme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
     assert.match(readme, new RegExp(`\\b${EXPECTED_CLI_PATH}\\b`));
-    assert.match(readme, new RegExp(`\\b${EXPECTED_CLI_ALIAS}\\b`));
+    assert.doesNotMatch(readme, /\bagent-connect\b/);
     assert.match(readme, new RegExp(EXPECTED_COMPATIBILITY_MANIFEST.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
 });
@@ -293,7 +300,7 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
   }
 });
 
-test('install.sh copies skills and installs runnable metabot and agent-connect shims from the source tree', async () => {
+test('install.sh copies skills and installs only a runnable metabot shim from the source tree', async () => {
   const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
   const skillDest = await mkdtemp(path.join(os.tmpdir(), 'metabot-skill-dest-'));
   const binDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-bin-'));
@@ -309,15 +316,15 @@ test('install.sh copies skills and installs runnable metabot and agent-connect s
     cwd: hostRoot,
     env: {
       ...process.env,
-      AGENT_CONNECT_SOURCE_ROOT: REPO_ROOT,
-      AGENT_CONNECT_SKILL_DEST: skillDest,
-      AGENT_CONNECT_BIN_DIR: binDir,
+      METABOT_SOURCE_ROOT: REPO_ROOT,
+      METABOT_SKILL_DEST: skillDest,
+      METABOT_BIN_DIR: binDir,
     },
   });
 
   await assertFileExists(path.join(skillDest, 'metabot-bootstrap', 'SKILL.md'));
-  await assertFileExists(path.join(binDir, 'agent-connect'));
   await assertFileExists(path.join(binDir, 'metabot'));
+  await assertFileMissing(path.join(binDir, 'agent-connect'));
 
   let commandFailure = null;
   try {

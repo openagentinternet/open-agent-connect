@@ -37,7 +37,7 @@ What the foundation already provides:
 - upload local files to MetaWeb through `/file`
 - publish simplebuzz messages, with optional uploaded attachments
 - send one encrypted private MetaWeb message through `simplemsg`
-- expose one shared `metabot` CLI across hosts, with `agent-connect` kept as a compatibility alias
+- expose one shared `metabot` CLI across hosts
 - expose thin host packs for Codex, Claude Code, and OpenClaw
 - keep inspectable local state under `~/.metabot`
 - open human-only local HTML pages when observation or manual action is needed
@@ -165,7 +165,7 @@ cd skillpacks/codex
 Make sure the CLI shim is on `PATH`:
 
 ```bash
-export PATH="$HOME/.agent-connect/bin:$PATH"
+export PATH="$HOME/.metabot/bin:$PATH"
 metabot doctor
 ```
 

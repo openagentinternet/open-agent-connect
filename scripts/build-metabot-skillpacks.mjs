@@ -6,7 +6,6 @@ const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(SCRIPT_PATH), '..');
 const DEFAULT_OUTPUT_ROOT = path.join(DEFAULT_REPO_ROOT, 'skillpacks');
 const PRIMARY_CLI_PATH = 'metabot';
-const LEGACY_CLI_ALIAS = 'agent-connect';
 const SHARED_COMPATIBILITY_MANIFEST = 'release/compatibility.json';
 const BUNDLED_COMPATIBILITY_MANIFEST = 'runtime/compatibility.json';
 const METABOT_SKILLS = [
@@ -60,7 +59,6 @@ function renderHostMetadata(hostKey, host) {
     `- Default skill root: \`${host.defaultSkillRoot}\``,
     `- Host pack id: \`${hostKey}\``,
     `- Primary CLI path: \`${PRIMARY_CLI_PATH}\``,
-    `- Compatibility CLI alias: \`${LEGACY_CLI_ALIAS}\``,
   ].join('\n');
 }
 
@@ -85,18 +83,17 @@ ${listSkills(METABOT_SKILLS)}
 
 \`\`\`bash
 ./install.sh
-export PATH="$HOME/.agent-connect/bin:$PATH"
+export PATH="$HOME/.metabot/bin:$PATH"
 metabot doctor
 \`\`\`
 
 Compatibility note:
 
-- \`agent-connect\` is installed as a working compatibility CLI alias
-- both \`METABOT_*\` and \`AGENT_CONNECT_*\` environment variables are supported
+- only the \`metabot\` CLI name is installed
 
-Override the destination with \`AGENT_CONNECT_SKILL_DEST\` if this host uses a custom skill root.
-Override the CLI shim directory with \`AGENT_CONNECT_BIN_DIR\` if \`$HOME/.agent-connect/bin\` is not on PATH.
-If you are installing from a source checkout, set \`AGENT_CONNECT_SOURCE_ROOT\` to the repository root.
+Override the destination with \`METABOT_SKILL_DEST\` if this host uses a custom skill root.
+Override the CLI shim directory with \`METABOT_BIN_DIR\` if \`$HOME/.metabot/bin\` is not on PATH.
+If you are installing from a source checkout, set \`METABOT_SOURCE_ROOT\` to the repository root.
 
 If the current host session does not immediately detect the new skills, start a fresh session.
 
@@ -117,7 +114,6 @@ node e2e/run-local-cross-host-demo.mjs
 ## Shared Runtime Contract
 
 - Primary CLI path: \`${PRIMARY_CLI_PATH}\`
-- Compatibility CLI alias: \`${LEGACY_CLI_ALIAS}\`
 - Compatibility manifest: \`${SHARED_COMPATIBILITY_MANIFEST}\`
 - Bundled compatibility copy: \`${BUNDLED_COMPATIBILITY_MANIFEST}\`
 - Package version: \`${packageVersion}\`
@@ -130,10 +126,10 @@ function buildInstallScript(host) {
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-DEST_ROOT="\${AGENT_CONNECT_SKILL_DEST:-\${METABOT_SKILL_DEST:-${host.defaultSkillRoot}}}"
-BIN_DIR="\${AGENT_CONNECT_BIN_DIR:-\${METABOT_BIN_DIR:-$HOME/.agent-connect/bin}}"
-SOURCE_ROOT="\${AGENT_CONNECT_SOURCE_ROOT:-\${METABOT_SOURCE_ROOT:-}}"
-CLI_ENTRY="\${AGENT_CONNECT_CLI_ENTRY:-\${METABOT_CLI_ENTRY:-}}"
+DEST_ROOT="\${METABOT_SKILL_DEST:-${host.defaultSkillRoot}}"
+BIN_DIR="\${METABOT_BIN_DIR:-$HOME/.metabot/bin}"
+SOURCE_ROOT="\${METABOT_SOURCE_ROOT:-}"
+CLI_ENTRY="\${METABOT_CLI_ENTRY:-}"
 
 mkdir -p "$DEST_ROOT"
 mkdir -p "$BIN_DIR"
@@ -191,7 +187,7 @@ command -v node >/dev/null 2>&1 || {
 if ! resolve_cli_entry; then
   build_cli_from_source || true
   resolve_cli_entry || {
-    echo "MetaBot CLI entry not found. Set AGENT_CONNECT_SOURCE_ROOT or AGENT_CONNECT_CLI_ENTRY before running install.sh." >&2
+    echo "MetaBot CLI entry not found. Set METABOT_SOURCE_ROOT or METABOT_CLI_ENTRY before running install.sh." >&2
     exit 1
   }
 fi
@@ -216,13 +212,10 @@ write_cli_shim() {
 }
 
 write_cli_shim "${PRIMARY_CLI_PATH}"
-write_cli_shim "${LEGACY_CLI_ALIAS}"
 
 echo "Installed Open Agent Connect skills to $DEST_ROOT"
 echo "Installed primary CLI shim to $BIN_DIR/${PRIMARY_CLI_PATH}"
-echo "Installed compatibility CLI alias to $BIN_DIR/${LEGACY_CLI_ALIAS}"
 echo "Primary CLI path: ${PRIMARY_CLI_PATH}"
-echo "Compatibility CLI alias: ${LEGACY_CLI_ALIAS}"
 echo "Compatibility manifest: ${SHARED_COMPATIBILITY_MANIFEST}"
 echo "Bundled compatibility copy: $SCRIPT_DIR/${BUNDLED_COMPATIBILITY_MANIFEST}"
 `;
@@ -343,7 +336,7 @@ export async function buildAgentConnectSkillpacks(options = {}) {
     outputRoot,
     hosts: hostKeys,
     cliPath: PRIMARY_CLI_PATH,
-    cliAliases: [LEGACY_CLI_ALIAS],
+    cliAliases: [],
     compatibilityManifest: SHARED_COMPATIBILITY_MANIFEST,
   };
 }

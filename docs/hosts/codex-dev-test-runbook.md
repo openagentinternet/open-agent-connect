@@ -58,7 +58,7 @@ npm run build:skillpacks
 cd skillpacks/codex
 ./install.sh
 cd ../..
-export PATH="$HOME/.agent-connect/bin:$PATH"
+export PATH="$HOME/.metabot/bin:$PATH"
 metabot doctor
 ```
 

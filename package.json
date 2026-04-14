@@ -10,8 +10,7 @@
     "node": ">=20 <25"
   },
   "bin": {
-    "metabot": "dist/cli/main.js",
-    "agent-connect": "dist/cli/main.js"
+    "metabot": "dist/cli/main.js"
   },
   "scripts": {
     "build": "npx rimraf dist && tsc -p tsconfig.json",

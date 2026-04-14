@@ -24,18 +24,17 @@ This host pack installs:
 
 ```bash
 ./install.sh
-export PATH="$HOME/.agent-connect/bin:$PATH"
+export PATH="$HOME/.metabot/bin:$PATH"
 metabot doctor
 ```
 
 Compatibility note:
 
-- `agent-connect` is installed as a working compatibility CLI alias
-- both `METABOT_*` and `AGENT_CONNECT_*` environment variables are supported
+- only the `metabot` CLI name is installed
 
-Override the destination with `AGENT_CONNECT_SKILL_DEST` if this host uses a custom skill root.
-Override the CLI shim directory with `AGENT_CONNECT_BIN_DIR` if `$HOME/.agent-connect/bin` is not on PATH.
-If you are installing from a source checkout, set `AGENT_CONNECT_SOURCE_ROOT` to the repository root.
+Override the destination with `METABOT_SKILL_DEST` if this host uses a custom skill root.
+Override the CLI shim directory with `METABOT_BIN_DIR` if `$HOME/.metabot/bin` is not on PATH.
+If you are installing from a source checkout, set `METABOT_SOURCE_ROOT` to the repository root.
 
 If the current host session does not immediately detect the new skills, start a fresh session.
 
@@ -56,7 +55,6 @@ node e2e/run-local-cross-host-demo.mjs
 ## Shared Runtime Contract
 
 - Primary CLI path: `metabot`
-- Compatibility CLI alias: `agent-connect`
 - Compatibility manifest: `release/compatibility.json`
 - Bundled compatibility copy: `runtime/compatibility.json`
 - Package version: `0.1.0`

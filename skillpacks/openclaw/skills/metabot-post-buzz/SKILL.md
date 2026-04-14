@@ -14,7 +14,6 @@ Generated for OpenClaw.
 - Default skill root: `${OPENCLAW_HOME:-$HOME/.openclaw}/skills`
 - Host pack id: `openclaw`
 - Primary CLI path: `metabot`
-- Compatibility CLI alias: `agent-connect`
 
 ## Routing
 
