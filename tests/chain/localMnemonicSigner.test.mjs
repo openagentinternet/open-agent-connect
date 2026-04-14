@@ -42,6 +42,16 @@ async function withMockedBtcWallet(overrides, run) {
   }
 }
 
+async function withMockedFetch(mockFetch, run) {
+  const originalFetch = global.fetch;
+  global.fetch = mockFetch;
+  try {
+    await run();
+  } finally {
+    global.fetch = originalFetch;
+  }
+}
+
 test('createLocalMnemonicSigner derives identity and private chat key material from the stored mnemonic', async () => {
   const signer = createLocalMnemonicSigner({
     secretStore: createSecretStore(),
@@ -263,4 +273,275 @@ test('createLocalMnemonicSigner default BTC flow fails when signTx produces no r
     );
     assert.deepEqual(broadcasts, ['raw-commit-hex']);
   });
+});
+
+test('createLocalMnemonicSigner default BTC flow falls back to mempool utxos when metalet btc-utxo query is retryable', async () => {
+  const signCalls = [];
+  const fetchCalls = [];
+  const hexTxId = 'a'.repeat(64);
+
+  await withMockedBtcWallet({
+    getAddress: () => 'btc-test-address',
+    getScriptType: () => 'P2TR',
+    signTx: (signType, options) => {
+      signCalls.push({ signType, options });
+      return {
+        commitTx: { rawTx: 'raw-commit-hex', fee: 10 },
+        revealTxs: [{ rawTx: 'raw-reveal-hex', fee: 20 }],
+      };
+    },
+  }, async () => {
+    await withMockedFetch(async (url, init = {}) => {
+      const value = String(url);
+      fetchCalls.push({ value, init });
+
+      if (value.includes('/wallet-api/v3/address/btc-utxo')) {
+        throw new Error('rpc error');
+      }
+
+      if (value.includes('https://mempool.space/api/address/btc-test-address/utxo')) {
+        return {
+          ok: true,
+          json: async () => [{
+            txid: hexTxId,
+            vout: 0,
+            value: 25_000,
+            status: { confirmed: true },
+          }],
+        };
+      }
+
+      if (value.includes('/wallet-api/v3/tx/broadcast')) {
+        const body = JSON.parse(String(init.body));
+        const txId = body.rawTx === 'raw-commit-hex' ? 'b'.repeat(64) : 'c'.repeat(64);
+        return {
+          ok: true,
+          json: async () => ({ code: 0, data: txId }),
+        };
+      }
+
+      throw new Error(`Unexpected fetch URL: ${value}`);
+    }, async () => {
+      const signer = createLocalMnemonicSigner({
+        secretStore: createSecretStore(),
+      });
+      const result = await signer.writePin({
+        path: '/protocols/simplebuzz',
+        payload: '{"content":"btc fallback utxo"}',
+        contentType: 'application/json',
+        network: 'btc',
+      });
+
+      assert.equal(result.network, 'btc');
+      assert.equal(result.pinId, `${'c'.repeat(64)}i0`);
+      assert.equal(signCalls.length, 1);
+      assert.equal(signCalls[0].signType, SignType.INSCRIBE_METAIDPIN);
+      assert.equal(signCalls[0].options.utxos[0].txId, hexTxId);
+      assert.equal(signCalls[0].options.utxos[0].satoshis, 25_000);
+      assert.equal(signCalls[0].options.utxos[0].confirmed, true);
+      assert.equal(
+        fetchCalls.some((call) => call.value.includes('https://mempool.space/api/address/btc-test-address/utxo')),
+        true
+      );
+    });
+  });
+});
+
+test('createLocalMnemonicSigner default BTC flow falls back to mempool tx hex when metalet tx/raw query is retryable', async () => {
+  const signCalls = [];
+  const fetchCalls = [];
+  const hexTxId = 'd'.repeat(64);
+
+  await withMockedBtcWallet({
+    getAddress: () => 'btc-test-address',
+    getScriptType: () => 'P2PKH',
+    signTx: (signType, options) => {
+      signCalls.push({ signType, options });
+      return {
+        commitTx: { rawTx: 'raw-commit-hex', fee: 8 },
+        revealTxs: [{ rawTx: 'raw-reveal-hex', fee: 12 }],
+      };
+    },
+  }, async () => {
+    await withMockedFetch(async (url, init = {}) => {
+      const value = String(url);
+      fetchCalls.push({ value, init });
+
+      if (value.includes('/wallet-api/v3/address/btc-utxo')) {
+        return {
+          ok: true,
+          json: async () => ({
+            code: 0,
+            data: [{
+              txId: hexTxId,
+              outputIndex: 1,
+              satoshis: 40_000,
+              address: 'btc-test-address',
+            }],
+          }),
+        };
+      }
+
+      if (value.includes('/wallet-api/v3/tx/raw')) {
+        throw new Error('request timeout after 1500ms');
+      }
+
+      if (value.includes(`https://mempool.space/api/tx/${hexTxId}/hex`)) {
+        return {
+          ok: true,
+          text: async () => 'feedbeef',
+        };
+      }
+
+      if (value.includes('/wallet-api/v3/tx/broadcast')) {
+        const body = JSON.parse(String(init.body));
+        const txId = body.rawTx === 'raw-commit-hex' ? 'e'.repeat(64) : 'f'.repeat(64);
+        return {
+          ok: true,
+          json: async () => ({ code: 0, data: txId }),
+        };
+      }
+
+      throw new Error(`Unexpected fetch URL: ${value}`);
+    }, async () => {
+      const signer = createLocalMnemonicSigner({
+        secretStore: createSecretStore(),
+      });
+      const result = await signer.writePin({
+        path: '/protocols/simplebuzz',
+        payload: '{"content":"btc fallback rawtx"}',
+        contentType: 'application/json',
+        network: 'btc',
+      });
+
+      assert.equal(result.network, 'btc');
+      assert.equal(result.pinId, `${'f'.repeat(64)}i0`);
+      assert.equal(signCalls.length, 1);
+      assert.equal(signCalls[0].options.utxos[0].rawTx, 'feedbeef');
+      assert.equal(
+        fetchCalls.some((call) => call.value.includes(`https://mempool.space/api/tx/${hexTxId}/hex`)),
+        true
+      );
+    });
+  });
+});
+
+test('createLocalMnemonicSigner default BTC flow does not fall back to mempool utxos for non-retryable metalet errors', async () => {
+  const fetchCalls = [];
+  let signCalled = false;
+
+  await withMockedBtcWallet({
+    getAddress: () => 'btc-test-address',
+    getScriptType: () => 'P2TR',
+    signTx: () => {
+      signCalled = true;
+      throw new Error('signTx should not be called for non-retryable utxo errors');
+    },
+  }, async () => {
+    await withMockedFetch(async (url) => {
+      const value = String(url);
+      fetchCalls.push(value);
+
+      if (value.includes('/wallet-api/v3/address/btc-utxo')) {
+        return {
+          ok: true,
+          json: async () => ({
+            code: 5001,
+            message: 'address format invalid',
+          }),
+        };
+      }
+
+      if (value.includes('https://mempool.space/api/address/')) {
+        throw new Error('mempool should not be called for non-retryable errors');
+      }
+
+      if (value.includes('/wallet-api/v3/tx/broadcast')) {
+        throw new Error('broadcast should not be called for non-retryable utxo errors');
+      }
+
+      throw new Error(`Unexpected fetch URL: ${value}`);
+    }, async () => {
+      const signer = createLocalMnemonicSigner({
+        secretStore: createSecretStore(),
+      });
+
+      await assert.rejects(
+        async () => signer.writePin({
+          path: '/protocols/simplebuzz',
+          payload: '{"content":"btc non-retryable utxo"}',
+          contentType: 'application/json',
+          network: 'btc',
+        }),
+        /address format invalid/
+      );
+    });
+  });
+
+  assert.equal(signCalled, false);
+  assert.equal(fetchCalls.some((url) => url.includes('https://mempool.space/api/address/')), false);
+});
+
+test('createLocalMnemonicSigner default BTC flow exposes mempool tx hex error when retryable metalet tx/raw fallback also fails', async () => {
+  const fetchCalls = [];
+  const hexTxId = '9'.repeat(64);
+
+  await withMockedBtcWallet({
+    getAddress: () => 'btc-test-address',
+    getScriptType: () => 'P2PKH',
+    signTx: () => {
+      throw new Error('signTx should not be called when tx/raw lookup fails');
+    },
+  }, async () => {
+    await withMockedFetch(async (url) => {
+      const value = String(url);
+      fetchCalls.push(value);
+
+      if (value.includes('/wallet-api/v3/address/btc-utxo')) {
+        return {
+          ok: true,
+          json: async () => ({
+            code: 0,
+            data: [{
+              txId: hexTxId,
+              outputIndex: 0,
+              satoshis: 30_000,
+              address: 'btc-test-address',
+            }],
+          }),
+        };
+      }
+
+      if (value.includes('/wallet-api/v3/tx/raw')) {
+        throw new Error('rpc error');
+      }
+
+      if (value.includes(`https://mempool.space/api/tx/${hexTxId}/hex`)) {
+        return {
+          ok: false,
+          status: 503,
+          text: async () => 'upstream unavailable',
+        };
+      }
+
+      throw new Error(`Unexpected fetch URL: ${value}`);
+    }, async () => {
+      const signer = createLocalMnemonicSigner({
+        secretStore: createSecretStore(),
+      });
+
+      await assert.rejects(
+        async () => signer.writePin({
+          path: '/protocols/simplebuzz',
+          payload: '{"content":"btc fallback tx raw failure"}',
+          contentType: 'application/json',
+          network: 'btc',
+        }),
+        /mempool request failed \(503\)/
+      );
+    });
+  });
+
+  assert.equal(fetchCalls.some((url) => url.includes('/wallet-api/v3/tx/raw')), true);
+  assert.equal(fetchCalls.some((url) => url.includes(`https://mempool.space/api/tx/${hexTxId}/hex`)), true);
 });
