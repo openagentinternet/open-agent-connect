@@ -21,9 +21,11 @@ import type { SecretStore } from '../secrets/secretStore';
 import type { PrivateChatSignerIdentity, Signer } from './signer';
 
 const METALET_HOST = 'https://www.metalet.space';
+const MEMPOOL_HOST = 'https://mempool.space';
 const NET = 'livenet';
 const P2PKH_INPUT_SIZE = 148;
 const DEFAULT_BTC_WRITE_FEE_RATE = 2;
+const DEFAULT_METALET_TIMEOUT_MS = 1_500;
 
 interface MvcTransportUtxo {
   txid: string;
@@ -72,6 +74,68 @@ export interface LocalMnemonicSignerBtcCreatePinResult {
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error != null && typeof error === 'object' && 'message' in error && typeof (error as Error).message === 'string') {
+    return (error as Error).message;
+  }
+  return String(error ?? '');
+}
+
+function isRetryableBtcProviderError(error: unknown): boolean {
+  const normalized = getErrorMessage(error).toLowerCase();
+  return (
+    normalized.includes('higun request error')
+    || normalized.includes('rpc error')
+    || normalized.includes('timeout')
+    || normalized.includes('timed out')
+    || normalized.includes('fetch failed')
+    || normalized.includes('failed to fetch')
+    || normalized.includes('network error')
+    || normalized.includes('networkerror')
+  );
+}
+
+function resolveTimeoutMs(timeoutMs?: number): number {
+  return Number.isFinite(timeoutMs) && Number(timeoutMs) > 0
+    ? Math.floor(Number(timeoutMs))
+    : DEFAULT_METALET_TIMEOUT_MS;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs?: number): Promise<Response> {
+  const controller = new AbortController();
+  const resolvedTimeoutMs = resolveTimeoutMs(timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), resolvedTimeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`request timeout after ${resolvedTimeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function mempoolGetJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${MEMPOOL_HOST}/api${path}`);
+  if ('ok' in response && response.ok === false) {
+    throw new Error(`mempool request failed (${response.status})`);
+  }
+  return await response.json() as T;
+}
+
+async function mempoolGetText(path: string): Promise<string> {
+  const response = await fetch(`${MEMPOOL_HOST}/api${path}`);
+  if ('ok' in response && response.ok === false) {
+    throw new Error(`mempool request failed (${response.status})`);
+  }
+  return await response.text();
 }
 
 async function fetchMvcUtxos(address: string): Promise<MvcTransportUtxo[]> {
@@ -155,39 +219,89 @@ function normalizeBtcUtxos(input: {
   return confirmed.length > 0 ? confirmed : normalized;
 }
 
-async function fetchBtcRawTxHex(txId: string): Promise<string> {
-  const params = new URLSearchParams({
-    txId,
-    chain: 'btc',
-    net: NET,
-  });
-  const response = await fetch(`${METALET_HOST}/wallet-api/v3/tx/raw?${params}`);
-  const json = await response.json() as {
-    code?: number;
-    message?: string;
-    data?: { rawTx?: string; hex?: string };
-  };
-  if (json?.code !== 0) {
-    throw new Error(json?.message || 'Metalet BTC raw tx query failed.');
+async function fetchBtcRawTxHex(
+  txId: string,
+  options: { preferMempool?: boolean; timeoutMs?: number } = {},
+): Promise<string> {
+  if (!options.preferMempool) {
+    try {
+      const params = new URLSearchParams({
+        txId,
+        chain: 'btc',
+        net: NET,
+      });
+      const response = await fetchWithTimeout(
+        `${METALET_HOST}/wallet-api/v3/tx/raw?${params}`,
+        {},
+        options.timeoutMs,
+      );
+      const json = await response.json() as {
+        code?: number;
+        message?: string;
+        data?: { rawTx?: string; hex?: string };
+      };
+      if (json?.code !== 0) {
+        throw new Error(json?.message || 'Metalet BTC raw tx query failed.');
+      }
+      const rawTx = normalizeText(json?.data?.rawTx ?? json?.data?.hex);
+      if (!rawTx) {
+        throw new Error(`Metalet BTC raw tx response is empty for ${txId}.`);
+      }
+      return rawTx;
+    } catch (error) {
+      if (!isRetryableBtcProviderError(error)) {
+        throw error;
+      }
+    }
   }
-  const rawTx = normalizeText(json?.data?.rawTx ?? json?.data?.hex);
+
+  const rawTx = normalizeText(await mempoolGetText(`/tx/${txId}/hex`));
   if (!rawTx) {
-    throw new Error(`Metalet BTC raw tx response is empty for ${txId}.`);
+    throw new Error(`Mempool BTC raw tx response is empty for ${txId}.`);
   }
   return rawTx;
 }
 
 async function fetchBtcUtxos(address: string, needRawTx: boolean): Promise<BtcTransportUtxo[]> {
-  const params = new URLSearchParams({
-    address,
-    unconfirmed: '1',
-    net: NET,
-  });
-  const response = await fetch(`${METALET_HOST}/wallet-api/v3/address/btc-utxo?${params}`);
-  const json = await response.json() as {
-    code?: number;
-    message?: string;
-    data?: Array<{
+  let preferMempool = false;
+  let utxos: BtcTransportUtxo[];
+  try {
+    const params = new URLSearchParams({
+      address,
+      unconfirmed: '1',
+      net: NET,
+    });
+    const response = await fetchWithTimeout(
+      `${METALET_HOST}/wallet-api/v3/address/btc-utxo?${params}`,
+    );
+    const json = await response.json() as {
+      code?: number;
+      message?: string;
+      data?: Array<{
+        txId?: string;
+        txid?: string;
+        outputIndex?: number;
+        vout?: number;
+        satoshis?: number;
+        value?: number;
+        address?: string;
+        confirmed?: boolean;
+        status?: { confirmed?: boolean };
+      }>;
+    };
+    if (json?.code !== 0) {
+      throw new Error(json?.message || 'Metalet BTC UTXO query failed.');
+    }
+    utxos = normalizeBtcUtxos({
+      list: json?.data ?? [],
+      address,
+    });
+  } catch (error) {
+    if (!isRetryableBtcProviderError(error)) {
+      throw error;
+    }
+    preferMempool = true;
+    const mempoolUtxos = await mempoolGetJson<Array<{
       txId?: string;
       txid?: string;
       outputIndex?: number;
@@ -197,16 +311,13 @@ async function fetchBtcUtxos(address: string, needRawTx: boolean): Promise<BtcTr
       address?: string;
       confirmed?: boolean;
       status?: { confirmed?: boolean };
-    }>;
-  };
-  if (json?.code !== 0) {
-    throw new Error(json?.message || 'Metalet BTC UTXO query failed.');
+    }>>(`/address/${address}/utxo`);
+    utxos = normalizeBtcUtxos({
+      list: mempoolUtxos,
+      address,
+    });
   }
 
-  const utxos = normalizeBtcUtxos({
-    list: json?.data ?? [],
-    address,
-  });
   if (!needRawTx) {
     return utxos;
   }
@@ -215,7 +326,7 @@ async function fetchBtcUtxos(address: string, needRawTx: boolean): Promise<BtcTr
   for (const utxo of utxos) {
     withRawTx.push({
       ...utxo,
-      rawTx: await fetchBtcRawTxHex(utxo.txId),
+      rawTx: await fetchBtcRawTxHex(utxo.txId, { preferMempool }),
     });
   }
   return withRawTx;
