@@ -105,7 +105,7 @@ It lets a host keep stable installed skill identities while moving the actual re
 What is already implemented inside the Evolution Network module:
 
 - feature-gated evolution runtime
-- one stable runtime-resolve skill target: `metabot-network-manage`
+- one stable runtime-resolve skill target: `metabot-network-directory`
 - local execution recording and analysis
 - local FIX artifact generation and verification
 - manual publish of verified local artifacts to MetaWeb
@@ -288,19 +288,19 @@ Inspect the current evolution feature gate and active runtime state:
 
 ```bash
 metabot config get evolution_network.enabled
-metabot skills resolve --skill metabot-network-manage --host codex --format json
+metabot skills resolve --skill metabot-network-directory --host codex --format json
 metabot evolution status
 ```
 
 Publish, search, import, and adopt:
 
 ```bash
-metabot evolution publish --skill metabot-network-manage --variant-id <variantId>
-metabot evolution search --skill metabot-network-manage
+metabot evolution publish --skill metabot-network-directory --variant-id <variantId>
+metabot evolution search --skill metabot-network-directory
 metabot evolution import --pin-id <pinId>
-metabot evolution imported --skill metabot-network-manage
-metabot evolution adopt --skill metabot-network-manage --variant-id <variantId> --source remote
-metabot evolution rollback --skill metabot-network-manage
+metabot evolution imported --skill metabot-network-directory
+metabot evolution adopt --skill metabot-network-directory --variant-id <variantId> --source remote
+metabot evolution rollback --skill metabot-network-directory
 ```
 
 ## Handoff Docs
