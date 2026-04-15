@@ -54,6 +54,9 @@ const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
+const METALET_HOST = 'https://www.metalet.space';
+const CHAIN_NET = 'livenet';
+const MAX_MVC_BALANCE_QUERY_PAGES = 200;
 let cachedDaemonRuntimeFingerprint: string | null = null;
 
 type EvolutionPublishFailureCode =
@@ -87,6 +90,39 @@ type EvolutionRuntimeFailureCode =
 
 const EVOLUTION_IMPORT_SKILL_NAME = 'metabot-network-directory';
 
+interface MetaletEnvelope<T> {
+  code?: number;
+  message?: string;
+  data?: T;
+}
+
+interface MetaletMvcUtxoListItem {
+  flag?: string;
+  value?: number;
+  height?: number;
+}
+
+interface WalletMvcBalanceSnapshot {
+  chain: 'mvc';
+  address: string;
+  totalSatoshis: number;
+  confirmedSatoshis: number;
+  unconfirmedSatoshis: number;
+  utxoCount: number;
+  totalMvc: number;
+}
+
+interface WalletBtcBalanceSnapshot {
+  chain: 'btc';
+  address: string;
+  totalSatoshis: number;
+  confirmedSatoshis: number;
+  unconfirmedSatoshis: number;
+  totalBtc: number;
+  confirmedBtc: number;
+  unconfirmedBtc: number;
+}
+
 function normalizeBaseUrl(value: string | undefined): string {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   return trimmed || DEFAULT_DAEMON_BASE_URL;
@@ -94,6 +130,97 @@ function normalizeBaseUrl(value: string | undefined): string {
 
 function normalizeEnvText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function toFiniteNumber(value: unknown): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+async function fetchMetaletData<T>(url: string): Promise<T> {
+  const response = await fetch(url);
+  const payload = await response.json() as MetaletEnvelope<T>;
+  if (payload?.code !== 0) {
+    throw new Error(payload?.message || 'Metalet request failed.');
+  }
+  return (payload?.data ?? null) as T;
+}
+
+async function fetchMvcBalanceSnapshot(address: string): Promise<WalletMvcBalanceSnapshot> {
+  let flag = '';
+  let totalSatoshis = 0;
+  let confirmedSatoshis = 0;
+  let unconfirmedSatoshis = 0;
+  let utxoCount = 0;
+
+  for (let page = 0; page < MAX_MVC_BALANCE_QUERY_PAGES; page += 1) {
+    const params = new URLSearchParams({
+      address,
+      net: CHAIN_NET,
+      ...(flag ? { flag } : {}),
+    });
+    const data = await fetchMetaletData<{ list?: MetaletMvcUtxoListItem[] }>(
+      `${METALET_HOST}/wallet-api/v4/mvc/address/utxo-list?${params}`,
+    );
+    const list = Array.isArray(data?.list) ? data.list : [];
+    if (!list.length) {
+      break;
+    }
+
+    for (const utxo of list) {
+      const satoshis = Math.max(0, Math.floor(toFiniteNumber(utxo.value)));
+      totalSatoshis += satoshis;
+      utxoCount += 1;
+      if (toFiniteNumber(utxo.height) > 0) {
+        confirmedSatoshis += satoshis;
+      } else {
+        unconfirmedSatoshis += satoshis;
+      }
+    }
+
+    const nextFlag = normalizeEnvText(list[list.length - 1]?.flag);
+    if (!nextFlag || nextFlag === flag) {
+      break;
+    }
+    flag = nextFlag;
+  }
+
+  return {
+    chain: 'mvc',
+    address,
+    totalSatoshis,
+    confirmedSatoshis,
+    unconfirmedSatoshis,
+    utxoCount,
+    totalMvc: totalSatoshis / 1e8,
+  };
+}
+
+async function fetchBtcBalanceSnapshot(address: string): Promise<WalletBtcBalanceSnapshot> {
+  const params = new URLSearchParams({
+    address,
+    net: CHAIN_NET,
+  });
+  const data = await fetchMetaletData<{
+    balance?: number;
+    safeBalance?: number;
+    pendingBalance?: number;
+  }>(`${METALET_HOST}/wallet-api/v3/address/btc-balance?${params}`);
+
+  const totalBtc = Math.max(0, toFiniteNumber(data?.balance));
+  const confirmedBtc = Math.max(0, toFiniteNumber(data?.safeBalance ?? data?.balance));
+  const unconfirmedBtc = toFiniteNumber(data?.pendingBalance);
+
+  return {
+    chain: 'btc',
+    address,
+    totalSatoshis: Math.round(totalBtc * 1e8),
+    confirmedSatoshis: Math.round(confirmedBtc * 1e8),
+    unconfirmedSatoshis: Math.round(unconfirmedBtc * 1e8),
+    totalBtc,
+    confirmedBtc,
+    unconfirmedBtc,
+  };
 }
 
 function parseDaemonPort(value: string | undefined): number | null {
@@ -1058,6 +1185,56 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     file: {
       upload: async (input) => requestJson(context, 'POST', '/api/file/upload', input),
     },
+    wallet: {
+      balance: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const runtimeStateStore = createRuntimeStateStore(homeDir);
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed(
+            'identity_missing',
+            'No local MetaBot identity is loaded for the current active home.'
+          );
+        }
+
+        const targetChains = input.chain === 'all'
+          ? ['mvc', 'btc'] as const
+          : [input.chain];
+
+        try {
+          const balances: {
+            mvc?: WalletMvcBalanceSnapshot;
+            btc?: WalletBtcBalanceSnapshot;
+          } = {};
+          for (const chain of targetChains) {
+            if (chain === 'mvc') {
+              const mvcAddress = normalizeEnvText(state.identity.mvcAddress);
+              if (!mvcAddress) {
+                return commandFailed('identity_address_missing', 'Current identity has no mvcAddress.');
+              }
+              balances.mvc = await fetchMvcBalanceSnapshot(mvcAddress);
+              continue;
+            }
+            const btcAddress = normalizeEnvText(state.identity.btcAddress);
+            if (!btcAddress) {
+              return commandFailed('identity_address_missing', 'Current identity has no btcAddress.');
+            }
+            balances.btc = await fetchBtcBalanceSnapshot(btcAddress);
+          }
+
+          return commandSuccess({
+            chain: input.chain,
+            globalMetaId: state.identity.globalMetaId,
+            balances,
+          });
+        } catch (error) {
+          return commandFailed(
+            'wallet_balance_query_failed',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      },
+    },
     trace: {
       get: async (input) => requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}`),
       watch: async (input) => requestText(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}/watch`),
@@ -1376,6 +1553,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     services: { ...defaults.services, ...provided.services },
     chat: { ...defaults.chat, ...provided.chat },
     file: { ...defaults.file, ...provided.file },
+    wallet: { ...defaults.wallet, ...provided.wallet },
     trace: { ...defaults.trace, ...provided.trace },
     ui: { ...defaults.ui, ...provided.ui },
     skills: { ...defaults.skills, ...provided.skills },

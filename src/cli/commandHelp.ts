@@ -166,6 +166,12 @@ const CHAIN_BTC_MVC_FLAG: CommandHelpFlag = {
   description: 'Override the target chain network for this command. Defaults to mvc.',
 };
 
+const WALLET_CHAIN_ALL_BTC_MVC_FLAG: CommandHelpFlag = {
+  flag: '--chain',
+  value: '<all|mvc|btc>',
+  description: 'Select wallet balance scope. Defaults to all.',
+};
+
 export const ROOT_COMMAND_HELP: CommandHelpSpec = {
   commandPath: [],
   summary: 'Machine-first MetaBot CLI for local runtime, chain write, remote delegation, and local inspection.',
@@ -177,6 +183,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'file', summary: 'Upload local files to MetaWeb.' },
     { name: 'buzz', summary: 'Publish simplebuzz posts to MetaWeb.' },
     { name: 'chain', summary: 'Write arbitrary MetaID tuples and protocol payloads on-chain.' },
+    { name: 'wallet', summary: 'Inspect local wallet balances across supported chains.' },
     { name: 'network', summary: 'Inspect the MetaWeb yellow-pages directory and local source seeds.' },
     { name: 'services', summary: 'Publish, call, and rate remote MetaBot services.' },
     { name: 'chat', summary: 'Send encrypted private MetaWeb messages to another MetaBot.' },
@@ -419,6 +426,34 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot chain write --request-file chain-request.json',
     ],
     optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['wallet'],
+    summary: 'Wallet commands for querying local identity balances and upcoming transfer actions.',
+    usage: 'metabot wallet <subcommand>',
+    subcommands: [
+      { name: 'balance', summary: 'Query local wallet balances on supported chains.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['wallet', 'balance'],
+    summary: 'Query local wallet balances for mvc/btc. Defaults to all chains.',
+    usage: 'metabot wallet balance [--chain <all|mvc|btc>]',
+    successFields: [
+      'chain',
+      'globalMetaId',
+      'balances.mvc',
+      'balances.btc',
+    ],
+    failureSemantics: [
+      'Fails when no local identity is loaded or the selected chain balance API is unavailable.',
+    ],
+    examples: [
+      'metabot wallet balance',
+      'metabot wallet balance --chain btc',
+    ],
+    optionalFlags: [WALLET_CHAIN_ALL_BTC_MVC_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['network'],

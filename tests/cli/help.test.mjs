@@ -19,9 +19,26 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^Usage:\s+metabot <command>/m);
   assert.match(output, /^Commands:/m);
   assert.match(output, /^\s+identity\s+/m);
+  assert.match(output, /^\s+wallet\s+/m);
   assert.match(output, /^\s+services\s+/m);
   assert.match(output, /^\s+trace\s+/m);
   assert.equal(output.includes('"ok"'), false);
+});
+
+test('runCli prints wallet group help with balance subcommand', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['wallet', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot wallet <subcommand>/m);
+  assert.match(output, /^Commands:/m);
+  assert.match(output, /^\s+balance\s+/m);
 });
 
 test('runCli prints leaf help text for `metabot services call --help` with request and result semantics', async () => {

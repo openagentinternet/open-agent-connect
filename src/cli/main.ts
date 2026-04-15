@@ -15,6 +15,7 @@ import { runUiCommand } from './commands/ui';
 import { runConfigCommand } from './commands/config';
 import { runSkillsCommand } from './commands/skills';
 import { runEvolutionCommand } from './commands/evolution';
+import { runWalletCommand } from './commands/wallet';
 import { commandUnknownSubcommand } from './commands/helpers';
 import { helpRequested, writeResolvedHelp } from './commandHelp';
 import { createCliRuntimeContext, type CliContext } from './types';
@@ -68,6 +69,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'file':
           result = await runFileCommand(rest, context);
+          break;
+        case 'wallet':
+          result = await runWalletCommand(rest, context);
           break;
         case 'trace':
           result = await runTraceCommand(rest, context);

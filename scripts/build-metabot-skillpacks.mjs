@@ -16,6 +16,7 @@ const METABOT_SKILLS = [
   'metabot-omni-reader',
   'metabot-bootstrap',
   'metabot-identity-manage',
+  'metabot-wallet-manage',
   'metabot-network-directory',
   'metabot-network-sources',
   'metabot-call-remote-service',

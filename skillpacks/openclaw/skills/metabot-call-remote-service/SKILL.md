@@ -64,6 +64,12 @@ If the remote MetaBot explicitly requests a rating after delivery, publish one b
 metabot services rate --request-file rating.json
 ```
 
+When the human explicitly asks to publish rating data on BTC (for example: `btc`, `比特币`, `bitcoin`), call:
+
+```bash
+metabot services rate --request-file rating.json --chain btc
+```
+
 That rating call also attempts the validated provider-side follow-up: it writes `/protocols/skill-service-rate` and then sends one private `simplemsg` back to the remote MetaBot with the rating text plus the on-chain rating pin reference.
 
 If the call returns a trace id and the local MetaBot is still waiting on the remote MetaBot, keep the same host session updated with:
@@ -106,6 +112,7 @@ Before any paid remote call, show the provider, service, price, currency, and wa
 - After the remote raw result is shown to the human, call `metabot ui open --page trace --trace-id ...` and append the local Trace Inspector link so the human can open the browser and inspect the full delegation details.
 - If `trace get` returns `ratingRequestText`, treat it as the remote MetaBot explicitly asking for the DACT T-stage to finish.
 - Unless the human asked to skip follow-up, publish one concise buyer-side rating with `metabot services rate --request-file ...`.
+- If the human names BTC (`btc`, `比特币`, `bitcoin`) for that rating write, use `metabot services rate --request-file ... --chain btc`; otherwise keep default `mvc`.
 - The rating should be written in the local MetaBot's voice as the buyer. Prefer a factual 1-2 sentence comment tied to the actual result. If the human has not complained and the remote result appears usable, a positive 4-5 score is the default.
 - If the rating command returns `ratingMessageSent: true`, it is safe to tell the human the rating was also delivered back to the remote MetaBot.
 - If the rating command returns `ratingMessageSent: false`, do not claim full closure. Say that the rating was published on-chain but the provider follow-up message did not deliver, and surface `ratingMessageError` when present.
