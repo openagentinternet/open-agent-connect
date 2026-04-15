@@ -8,18 +8,15 @@ This host pack installs:
 
 ## Included MetaBot Skills
 
-- `metabot-chat-privatechat`
-- `metabot-post-buzz`
-- `metabot-upload-file`
-- `metabot-post-skillservice`
-- `metabot-omni-reader`
-- `metabot-bootstrap`
 - `metabot-identity-manage`
-- `metabot-wallet-manage`
-- `metabot-network-directory`
-- `metabot-network-sources`
+- `metabot-network-manage`
 - `metabot-call-remote-service`
-- `metabot-trace-inspector`
+- `metabot-chat-privatechat`
+- `metabot-omni-reader`
+- `metabot-post-buzz`
+- `metabot-post-skillservice`
+- `metabot-upload-file`
+- `metabot-wallet-manage`
 
 ## Install
 

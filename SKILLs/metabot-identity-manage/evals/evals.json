@@ -1,0 +1,23 @@
+{
+  "skill_name": "metabot-identity-manage",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我第一次安装，帮我创建本地身份 Alice，然后确认当前身份。",
+      "expected_output": "Uses identity create/list/who flow and includes doctor verification after first create.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "把当前身份切换到 David，如果不存在就创建，再告诉我现在是谁。",
+      "expected_output": "Uses list/assign-or-create/who deterministic switch workflow without touching runtime files.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "先看看线上有哪些服务，再帮我下单一个远程任务。",
+      "expected_output": "Should NOT trigger identity-manage as primary. Should hand off to network-manage then call-remote-service.",
+      "files": []
+    }
+  ]
+}

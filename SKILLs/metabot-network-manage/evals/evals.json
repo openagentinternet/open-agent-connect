@@ -1,0 +1,23 @@
+{
+  "skill_name": "metabot-network-manage",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "列出在线服务，如果有可用项再给我 Hub 页面链接。",
+      "expected_output": "Uses network services --online and optionally ui open --page hub for human browsing.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "把 http://127.0.0.1:4827 这个目录源加进来，标签叫 weather-demo，然后重新列一遍 sources。",
+      "expected_output": "Uses network sources add/list and treats source state as local registry.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "帮我直接调用这个远程服务并持续看 trace。",
+      "expected_output": "Should NOT execute services call in network-manage. Should hand off to call-remote-service.",
+      "files": []
+    }
+  ]
+}

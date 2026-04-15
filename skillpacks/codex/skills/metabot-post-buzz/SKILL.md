@@ -1,11 +1,11 @@
 ---
 name: metabot-post-buzz
-description: Use when an agent needs to publish one simplebuzz post to MetaWeb, optionally uploading local attachments first through the shared file upload path
+description: Use when an agent needs to publish one simplebuzz post to MetaWeb (optionally with uploaded attachments); do not use this skill for private chat, service-order delegation, or network source management.
 ---
 
 # MetaBot Post Buzz
 
-Publish one `simplebuzz` post to MetaWeb through the public MetaBot buzz post interface.
+Publish one `simplebuzz` post to MetaWeb through the public MetaBot buzz interface.
 
 ## Host Adapter
 
@@ -23,6 +23,19 @@ Route natural-language intent through `metabot`, then reason over the returned J
 - Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
+
+## Trigger Guidance
+
+Should trigger when:
+
+- The user asks to post one buzz/status update.
+- The user asks to include local file attachments in that buzz.
+
+Should not trigger when:
+
+- The user asks to send private direct messages.
+- The user asks to publish a discoverable paid skill service.
+- The user asks to discover providers or manage network sources.
 
 ## Command
 
@@ -51,10 +64,27 @@ metabot buzz post --request-file request.json --chain btc
 
 ## Required Semantics
 
-- Use `/protocols/simplebuzz` as the outer MetaWeb path.
-- If attachments are present, upload each one first through the shared `file upload` flow so the buzz payload can reference `metafile://...` URIs.
-- Keep the final buzz payload machine-first and stop on runtime errors instead of inventing a post result.
-- If the human names BTC (`btc`, `比特币`, `bitcoin`), pass `--chain btc`; otherwise keep default `mvc`.
+- Use `/protocols/simplebuzz` as outer MetaWeb path.
+- If attachments are present, upload each file first through shared `file upload` flow so payload can reference `metafile://...` URIs.
+- Keep final buzz payload machine-first and stop on runtime errors instead of inventing post result.
+- If human names BTC (`btc`, `比特币`, `bitcoin`), pass `--chain btc`; otherwise keep default `mvc`.
+
+## In Scope
+
+- One buzz post lifecycle with optional attachments.
+- BTC/MVC chain selection for buzz writes.
+
+## Out of Scope
+
+- Private chat and paid service delegation.
+- Network directory/source maintenance.
+- Identity create/switch operations.
+
+## Handoff To
+
+- `metabot-upload-file` when the user only wants file upload without posting buzz.
+- `metabot-chat-privatechat` for private messaging.
+- `metabot-call-remote-service` for paid service calls.
 
 ## Compatibility
 

@@ -9,18 +9,15 @@ const PRIMARY_CLI_PATH = 'metabot';
 const SHARED_COMPATIBILITY_MANIFEST = 'release/compatibility.json';
 const BUNDLED_COMPATIBILITY_MANIFEST = 'runtime/compatibility.json';
 const METABOT_SKILLS = [
-  'metabot-chat-privatechat',
-  'metabot-post-buzz',
-  'metabot-upload-file',
-  'metabot-post-skillservice',
-  'metabot-omni-reader',
-  'metabot-bootstrap',
   'metabot-identity-manage',
-  'metabot-wallet-manage',
-  'metabot-network-directory',
-  'metabot-network-sources',
+  'metabot-network-manage',
   'metabot-call-remote-service',
-  'metabot-trace-inspector',
+  'metabot-chat-privatechat',
+  'metabot-omni-reader',
+  'metabot-post-buzz',
+  'metabot-post-skillservice',
+  'metabot-upload-file',
+  'metabot-wallet-manage',
 ];
 
 const HOSTS = {
@@ -239,17 +236,6 @@ function replaceNarrativeTerms(source) {
 }
 
 function renderSourceSkill(source, sourceSkillName, outputSkillName, hostKey, host, templates) {
-  if (sourceSkillName === 'metabot-network-directory') {
-    return replaceAll(templates.runtimeResolveShim, {
-      '{{FRONTMATTER}}': extractFrontmatter(source, sourceSkillName),
-      '{{SKILL_NAME}}': outputSkillName,
-      '{{HOST_KEY}}': hostKey,
-      '{{METABOT_CLI}}': PRIMARY_CLI_PATH,
-      '{{HOST_SKILLPACK_METADATA}}': renderHostMetadata(hostKey, host),
-      '{{COMPATIBILITY_MANIFEST}}': SHARED_COMPATIBILITY_MANIFEST,
-    });
-  }
-
   const renderedTemplates = {
     confirmationContract: replaceAll(templates.confirmationContract, {
       '{{METABOT_CLI}}': PRIMARY_CLI_PATH,
@@ -298,7 +284,6 @@ export async function buildAgentConnectSkillpacks(options = {}) {
   const templates = {
     confirmationContract: await readTemplate(repoRoot, 'skillpacks/common/templates/confirmation-contract.md'),
     systemRouting: await readTemplate(repoRoot, 'skillpacks/common/templates/system-routing.md'),
-    runtimeResolveShim: await readTemplate(repoRoot, 'skillpacks/common/templates/runtime-resolve-shim.md'),
   };
 
   const hostKeys = Object.keys(HOSTS);

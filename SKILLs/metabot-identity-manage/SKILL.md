@@ -1,6 +1,6 @@
 ---
 name: metabot-identity-manage
-description: Use when a host agent needs to create or switch a local MetaBot identity by name with deterministic profile-safe behavior
+description: Use when a human or agent needs local MetaBot identity create/list/assign/who workflows, including first-time bootstrap creation plus doctor verification; do not use this skill for remote service calls, network source management, or generic chain content publishing.
 ---
 
 # MetaBot Identity Manage
@@ -14,6 +14,21 @@ Create or switch local MetaBot identities by name without manual runtime-state p
 ## Routing
 
 {{SYSTEM_ROUTING}}
+
+## Trigger Guidance
+
+Should trigger when:
+
+- The user asks to create the first local MetaBot identity.
+- The user asks to switch identity by name.
+- The user asks which identity is currently active.
+- The user asks to set/update the local avatar under `/info/avatar`.
+
+Should not trigger when:
+
+- The user asks to discover remote services or maintain directory sources.
+- The user asks to delegate a remote task or inspect a remote trace.
+- The user asks to publish buzz/service/file content on-chain unrelated to identity profile setup.
 
 ## Workflow
 
@@ -37,6 +52,12 @@ PROFILE_SLUG="$(printf '%s' "$TARGET_NAME" | tr '[:upper:]' '[:lower:]' | sed -E
 METABOT_HOME="$HOME/.metabot/profiles/$PROFILE_SLUG" {{METABOT_CLI}} identity create --name "$TARGET_NAME"
 ```
 
+After first-create bootstrap, run health checks:
+
+```bash
+{{METABOT_CLI}} doctor
+```
+
 Verify and report the active identity at the end:
 
 ```bash
@@ -45,7 +66,7 @@ Verify and report the active identity at the end:
 
 ## Avatar Protocol (Important)
 
-For `/info/avatar`, write the avatar bytes directly to chain.  
+For `/info/avatar`, write the avatar bytes directly to chain.
 Do not write a `metafile://...` URI as text payload.
 
 Generate a chain-write request from a local image file:
@@ -95,9 +116,29 @@ If the human explicitly asks to write avatar on BTC (for example: `btc`, `比特
 {{METABOT_CLI}} chain write --request-file avatar-request.json --chain btc
 ```
 
+## In Scope
+
+- `identity create/list/assign/who` for deterministic local profile ownership.
+- First-time bootstrap completion checks via `doctor` after create.
+- Identity-safe avatar write flow for `/info/avatar`.
+
+## Out of Scope
+
+- Service discovery (`network services`) and source registry operations.
+- Remote call lifecycle (`services call`, `trace get/watch`, rating closure).
+- Generic on-chain content publishing unrelated to identity setup.
+
+## Handoff To
+
+- `metabot-network-manage` for directory reads and source registry changes.
+- `metabot-call-remote-service` for delegation plus trace follow-up.
+- `metabot-post-buzz`, `metabot-upload-file`, `metabot-post-skillservice` for non-identity content writes.
+
 ## Guardrails
 
 - Local MetaBot names are unique per machine.
+- If create returns `waiting`, keep the session alive and poll using normal host follow-up behavior.
+- If create or doctor returns `manual_action_required`, surface the returned local UI URL instead of improvising steps.
 - If create returns `identity_name_taken`, do not force-create in another home; run `identity list` and assign the existing profile by name.
 - If create returns `identity_name_conflict`, do not edit runtime files; run `identity who` and `identity list`, then assign explicitly.
 - For avatar updates, do not call `file upload` and then write `metafile://...` into `/info/avatar`.

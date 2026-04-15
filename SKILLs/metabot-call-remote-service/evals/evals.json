@@ -1,0 +1,23 @@
+{
+  "skill_name": "metabot-call-remote-service",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "用这个 servicePinId 发起远程任务，然后持续 watch 到完成并给我最终结果。",
+      "expected_output": "Uses services call plus trace watch/get completion handling and returns remote result text verbatim.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "trace 超时了，帮我继续跟进并打开 trace 页面，我要看细节。",
+      "expected_output": "Treats timeout as follow-up signal, runs trace get/watch appropriately, and recommends ui open --page trace.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "我只想发一条私信给对方，不下单服务。",
+      "expected_output": "Should NOT keep call-remote as primary. Should hand off to metabot-chat-privatechat.",
+      "files": []
+    }
+  ]
+}

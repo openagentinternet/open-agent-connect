@@ -1,6 +1,6 @@
 ---
 name: metabot-upload-file
-description: Use when an agent needs one local file uploaded to MetaWeb through the public metabot file upload interface and wants the returned metafile URI for later use
+description: Use when an agent needs one local file uploaded to MetaWeb and wants the returned metafile URI; do not use this skill for buzz posting, service publish/call lifecycle, or network source management.
 ---
 
 # MetaBot File Upload
@@ -23,6 +23,19 @@ Route natural-language intent through `metabot`, then reason over the returned J
 - Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
+
+## Trigger Guidance
+
+Should trigger when:
+
+- The user asks to upload a local file and get a `metafile://...` URI.
+- A downstream skill needs a file URI first (buzz or service icon/document).
+
+Should not trigger when:
+
+- The user asks to post buzz directly (unless upload-only step is explicitly requested).
+- The user asks to call a paid service.
+- The user asks to manage network sources.
 
 ## Command
 
@@ -49,10 +62,27 @@ metabot file upload --request-file request.json --chain btc
 
 ## Required Semantics
 
-- Use `/file` as the MetaWeb path.
-- Read the local file from `filePath`, encode it as base64, and upload it through the shared runtime.
-- Return the resulting `metafile://...` URI so later skills can reference the uploaded file.
-- If the human names BTC (`btc`, `比特币`, `bitcoin`), pass `--chain btc`; otherwise keep default `mvc`.
+- Use `/file` as MetaWeb path.
+- Read local file from `filePath`, encode as base64, and upload through shared runtime.
+- Return resulting `metafile://...` URI for later references.
+- If human names BTC (`btc`, `比特币`, `bitcoin`), pass `--chain btc`; otherwise keep default `mvc`.
+
+## In Scope
+
+- One file upload lifecycle and URI return.
+- BTC/MVC chain selection for file writes.
+
+## Out of Scope
+
+- Buzz content authoring.
+- Service publish/call lifecycle orchestration.
+- Network source management and identity switching.
+
+## Handoff To
+
+- `metabot-post-buzz` to publish uploaded files in buzz content.
+- `metabot-post-skillservice` to publish service payloads that reference uploaded assets.
+- `metabot-call-remote-service` for paid delegation tasks.
 
 ## Compatibility
 

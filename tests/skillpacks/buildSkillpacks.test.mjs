@@ -12,17 +12,21 @@ const BUILD_SCRIPT_URL = pathToFileURL(path.join(REPO_ROOT, 'scripts/build-metab
 const execFile = promisify(execFileCallback);
 
 const HOSTS = ['codex', 'claude-code', 'openclaw'];
-const EXPECTED_LEGACY_SKILLS = [
-  'metabot-chat-privatechat',
-  'metabot-post-buzz',
-  'metabot-upload-file',
-  'metabot-post-skillservice',
-  'metabot-omni-reader',
-  'metabot-bootstrap',
+const EXPECTED_METABOT_SKILLS = [
   'metabot-identity-manage',
+  'metabot-network-manage',
+  'metabot-call-remote-service',
+  'metabot-chat-privatechat',
+  'metabot-omni-reader',
+  'metabot-post-buzz',
+  'metabot-post-skillservice',
+  'metabot-upload-file',
+  'metabot-wallet-manage',
+];
+const REMOVED_SKILLS = [
+  'metabot-bootstrap',
   'metabot-network-directory',
   'metabot-network-sources',
-  'metabot-call-remote-service',
   'metabot-trace-inspector',
 ];
 const EXPECTED_CLI_PATH = 'metabot';
@@ -31,8 +35,8 @@ const EXPECTED_BUNDLED_COMPATIBILITY_COPY = 'runtime/compatibility.json';
 const EXPECTED_CONFIRMATION_CONTRACT_LINE =
   'Before any paid remote call, show the provider, service, price, currency, and wait for explicit confirmation.';
 const EXPECTED_TRACE_WATCH_LINE = 'metabot trace watch --trace-id trace-123';
+const EXPECTED_TRACE_GET_LINE = 'metabot trace get --trace-id trace-123';
 const EXPECTED_TRACE_UI_LINE = 'metabot ui open --page trace --trace-id trace-123';
-const EXPECTED_HUB_UI_LINE = 'metabot ui open --page hub';
 
 async function assertFileExists(filePath) {
   const info = await stat(filePath);
@@ -63,8 +67,34 @@ test('buildAgentConnectSkillpacks renders the shared Open Agent Connect skills i
     await assertFileExists(path.join(hostRoot, 'README.md'));
     await assertFileExists(path.join(hostRoot, 'install.sh'));
 
-    for (const skillName of EXPECTED_LEGACY_SKILLS) {
+    for (const skillName of EXPECTED_METABOT_SKILLS) {
       await assertFileExists(path.join(hostRoot, 'skills', skillName, 'SKILL.md'));
+    }
+
+    for (const skillName of REMOVED_SKILLS) {
+      await assertFileMissing(path.join(hostRoot, 'skills', skillName, 'SKILL.md'));
+    }
+  }
+});
+
+test('buildAgentConnectSkillpacks host README lists only the 9 active metabot skills', async () => {
+  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
+  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
+
+  await buildAgentConnectSkillpacks({
+    repoRoot: REPO_ROOT,
+    outputRoot,
+  });
+
+  for (const host of HOSTS) {
+    const readme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
+
+    for (const skillName of EXPECTED_METABOT_SKILLS) {
+      assert.equal(readme.includes(`- \`${skillName}\``), true);
+    }
+
+    for (const removed of REMOVED_SKILLS) {
+      assert.equal(readme.includes(`- \`${removed}\``), false);
     }
   }
 });
@@ -129,7 +159,7 @@ test('buildAgentConnectSkillpacks preserves one confirmation contract across all
   assert.equal(new Set(renderedContracts).size, HOSTS.length, 'host packs may differ in metadata, but the confirmation contract text must remain intact in every host output');
 });
 
-test('buildAgentConnectSkillpacks publishes the shared remote-call demo transport contract across all host packs', async () => {
+test('buildAgentConnectSkillpacks publishes shared remote-call plus trace-inspection workflow across all host packs', async () => {
   const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
   const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
 
@@ -145,88 +175,17 @@ test('buildAgentConnectSkillpacks publishes the shared remote-call demo transpor
     );
     assert.match(content, /services call --request-file/);
     assert.match(content, new RegExp(EXPECTED_TRACE_WATCH_LINE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-    assert.match(content, /remote MetaBot/i);
-    assert.match(content, /delegate/i);
-    assert.doesNotMatch(content, /caller-to-provider daemon round-trip/i);
-  }
-});
-
-test('buildAgentConnectSkillpacks renders metabot-network-directory as a stable runtime-resolve shim in every host pack', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
-
-  for (const host of HOSTS) {
-    const content = await readFile(
-      path.join(outputRoot, host, 'skills', 'metabot-network-directory', 'SKILL.md'),
-      'utf8'
-    );
-    assert.match(content, /^name:\s*metabot-network-directory$/m);
-    assert.match(content, /^description:\s*Use when an agent or human needs the local yellow-pages view of online MetaBots before deciding which remote MetaBot should receive a delegated task$/m);
-    assert.match(
-      content,
-      new RegExp(`metabot skills resolve --skill metabot-network-directory --host ${host} --format markdown`)
-    );
-    assert.match(content, /runtime-resolve shim/i);
-    assert.match(content, /follow the resolved contract/i);
-
-    assert.doesNotMatch(content, /metabot network services --online/i);
-    assert.doesNotMatch(content, /metabot ui open --page hub/i);
-    assert.doesNotMatch(content, /providerDaemonBaseUrl/i);
-    assert.doesNotMatch(content, /## Expectations/i);
-  }
-});
-
-test('buildAgentConnectSkillpacks teaches hosts to append a trace inspector link after surfacing the remote raw result', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
-
-  for (const host of HOSTS) {
-    const content = await readFile(
-      path.join(outputRoot, host, 'skills', 'metabot-call-remote-service', 'SKILL.md'),
-      'utf8'
-    );
+    assert.match(content, new RegExp(EXPECTED_TRACE_GET_LINE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.match(content, new RegExp(EXPECTED_TRACE_UI_LINE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-    assert.match(content, /append the local Trace Inspector link/i);
-    assert.match(content, /after the remote raw result/i);
-  }
-});
-
-test('buildAgentConnectSkillpacks teaches when to recommend the local trace inspector across all host packs', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
-
-  for (const host of HOSTS) {
-    const content = await readFile(
-      path.join(outputRoot, host, 'skills', 'metabot-trace-inspector', 'SKILL.md'),
-      'utf8'
-    );
-    assert.match(content, /trace get --trace-id/);
-    assert.match(content, new RegExp(EXPECTED_TRACE_WATCH_LINE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.match(content, /timeout/i);
     assert.match(content, /clarification/i);
     assert.match(content, /manual action/i);
-    assert.match(content, /asks for details|user asks for details/i);
     assert.match(content, /remote MetaBot/i);
-    assert.doesNotMatch(content, /endpoint/i);
+    assert.match(content, /rating/i);
   }
 });
 
-test('buildAgentConnectSkillpacks publishes the shared network-source registry skill across all host packs', async () => {
+test('buildAgentConnectSkillpacks publishes merged network-manage workflow across all host packs', async () => {
   const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
   const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
 
@@ -237,16 +196,24 @@ test('buildAgentConnectSkillpacks publishes the shared network-source registry s
 
   for (const host of HOSTS) {
     const content = await readFile(
-      path.join(outputRoot, host, 'skills', 'metabot-network-sources', 'SKILL.md'),
+      path.join(outputRoot, host, 'skills', 'metabot-network-manage', 'SKILL.md'),
       'utf8'
     );
+    assert.match(content, /^name:\s*metabot-network-manage$/m);
+    assert.match(content, /network services --online/);
+    assert.match(content, /ui open --page hub/);
     assert.match(content, /network sources add/);
     assert.match(content, /network sources list/);
     assert.match(content, /network sources remove/);
+    assert.match(content, /## In Scope/);
+    assert.match(content, /## Out of Scope/);
+    assert.match(content, /## Handoff To/);
+    assert.match(content, /metabot-call-remote-service/);
+    assert.doesNotMatch(content, /runtime-resolve shim/i);
   }
 });
 
-test('buildAgentConnectSkillpacks publishes the shared identity-manage workflow across all host packs', async () => {
+test('buildAgentConnectSkillpacks publishes merged identity-manage workflow across all host packs', async () => {
   const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
   const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
 
@@ -261,16 +228,20 @@ test('buildAgentConnectSkillpacks publishes the shared identity-manage workflow 
       'utf8'
     );
     assert.match(content, /^name:\s*metabot-identity-manage$/m);
+    assert.match(content, /identity create --name/);
     assert.match(content, /identity list/);
     assert.match(content, /identity assign --name/);
+    assert.match(content, /identity who/);
+    assert.match(content, /metabot doctor/);
     assert.match(content, /METABOT_HOME="\$HOME\/\.metabot\/profiles\/\$PROFILE_SLUG"/);
     assert.match(content, /identity_name_taken/);
     assert.match(content, /identity_name_conflict/);
-    assert.match(content, /identity who/);
     assert.match(content, /\/info\/avatar/);
     assert.match(content, /image\/png;binary/);
     assert.match(content, /encoding:\s*'base64'|"encoding":\s*"base64"/);
-    assert.match(content, /metafile:\/\/\.\.\./);
+    assert.match(content, /## In Scope/);
+    assert.match(content, /## Out of Scope/);
+    assert.match(content, /## Handoff To/);
   }
 });
 
@@ -322,7 +293,8 @@ test('install.sh copies skills and installs only a runnable metabot shim from th
     },
   });
 
-  await assertFileExists(path.join(skillDest, 'metabot-bootstrap', 'SKILL.md'));
+  await assertFileExists(path.join(skillDest, 'metabot-network-manage', 'SKILL.md'));
+  await assertFileMissing(path.join(skillDest, 'metabot-network-directory', 'SKILL.md'));
   await assertFileExists(path.join(binDir, 'metabot'));
   await assertFileMissing(path.join(binDir, 'agent-connect'));
 
