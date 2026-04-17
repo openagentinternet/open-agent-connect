@@ -61,6 +61,7 @@ import {
   type AwaitMetaWebServiceReplyResult,
   type MetaWebServiceReplyWaiter,
 } from '../core/a2a/metawebReplyWaiter';
+import { parseMasterRequest, parseMasterResponse } from '../core/master/masterMessageSchema';
 import { listMasters, readChainMasterDirectoryWithFallback, summarizePublishedMaster } from '../core/master/masterDirectory';
 import { createPublishedMasterStateStore } from '../core/master/masterPublishedState';
 import { publishMasterToChain } from '../core/master/masterServicePublish';
@@ -258,11 +259,50 @@ function readCallRequest(rawInput: Record<string, unknown>) {
 }
 
 function readPrivateChatRequest(rawInput: Record<string, unknown>) {
+  let content = normalizeText(rawInput.content);
+  if (!content && rawInput.content && typeof rawInput.content === 'object') {
+    try {
+      content = JSON.stringify(rawInput.content);
+    } catch {
+      content = '';
+    }
+  }
+
   return {
     to: normalizeText(rawInput.to),
-    content: normalizeText(rawInput.content),
+    content,
     replyPin: normalizeText(rawInput.replyPin),
     peerChatPublicKey: normalizeText(rawInput.peerChatPublicKey),
+  };
+}
+
+function describeStructuredPrivateChatContent(content: string): {
+  messageType: 'master_request' | 'master_response' | null;
+  requestId: string | null;
+  traceId: string | null;
+} {
+  const request = parseMasterRequest(content);
+  if (request.ok) {
+    return {
+      messageType: 'master_request',
+      requestId: request.value.requestId,
+      traceId: request.value.traceId,
+    };
+  }
+
+  const response = parseMasterResponse(content);
+  if (response.ok) {
+    return {
+      messageType: 'master_response',
+      requestId: response.value.requestId,
+      traceId: response.value.traceId,
+    };
+  }
+
+  return {
+    messageType: null,
+    requestId: null,
+    traceId: null,
   };
 }
 
@@ -2748,6 +2788,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           content: request.content,
           replyPinId: request.replyPin,
         });
+        const structuredContent = describeStructuredPrivateChatContent(request.content);
 
         const traceId = `trace-private-${Date.now().toString(36)}`;
         const trace = buildSessionTrace({
@@ -2785,6 +2826,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 metadata: {
                   path: sent.path,
                   replyPin: request.replyPin || null,
+                  messageType: structuredContent.messageType,
+                  requestId: structuredContent.requestId,
+                  correlatedTraceId: structuredContent.traceId,
                 },
               },
             ],
@@ -2807,6 +2851,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           secretVariant: sent.secretVariant,
           deliveryMode: 'local_runtime',
           peerChatPublicKey,
+          messageType: structuredContent.messageType,
+          requestId: structuredContent.requestId,
+          correlatedTraceId: structuredContent.traceId,
           traceId: trace.traceId,
           transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
           traceMarkdownPath: artifacts.traceMarkdownPath,

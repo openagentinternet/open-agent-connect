@@ -45,6 +45,7 @@ export interface ReceivePrivateChatResult {
   fromGlobalMetaId: string;
   replyPinId: string;
   plaintext: string;
+  plaintextJson: unknown | null;
   sharedSecret: string;
   secretVariant: 'sha256' | 'raw';
 }
@@ -196,6 +197,18 @@ function tryDecryptWithSecret(cipherText: string, secret: string): string | null
   return plain;
 }
 
+function tryParsePlaintextJson(value: string): unknown | null {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    return null;
+  }
+  try {
+    return JSON.parse(normalized) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 export function sendPrivateChat(input: SendPrivateChatInput): SendPrivateChatResult {
   const peerPublicKey = requirePeerChatPublicKey(input.peerChatPublicKey);
   const toGlobalMetaId = normalizeText(input.toGlobalMetaId);
@@ -255,6 +268,7 @@ export function receivePrivateChat(input: ReceivePrivateChatInput): ReceivePriva
       fromGlobalMetaId: normalizeText(input.payload.fromGlobalMetaId),
       replyPinId: normalizeText(input.payload.replyPinId),
       plaintext: directContent,
+      plaintextJson: tryParsePlaintextJson(directContent),
       sharedSecret: '',
       secretVariant: 'sha256',
     };
@@ -277,6 +291,7 @@ export function receivePrivateChat(input: ReceivePrivateChatInput): ReceivePriva
       fromGlobalMetaId: normalizeText(input.payload.fromGlobalMetaId),
       replyPinId: normalizeText(input.payload.replyPinId),
       plaintext: plainBySha256,
+      plaintextJson: tryParsePlaintextJson(plainBySha256),
       sharedSecret: sharedSecretSha256,
       secretVariant: 'sha256',
     };
@@ -288,6 +303,7 @@ export function receivePrivateChat(input: ReceivePrivateChatInput): ReceivePriva
       fromGlobalMetaId: normalizeText(input.payload.fromGlobalMetaId),
       replyPinId: normalizeText(input.payload.replyPinId),
       plaintext: plainByRaw,
+      plaintextJson: tryParsePlaintextJson(plainByRaw),
       sharedSecret: sharedSecretRaw,
       secretVariant: 'raw',
     };
