@@ -7,6 +7,7 @@ import { buildRefundPageDefinition } from '../../ui/pages/refund/app';
 import { buildTracePageDefinition } from '../../ui/pages/trace/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
 import type { MetabotUiPageName, RouteHandler } from './types';
+import { handleBundledMetaAppRoutes } from './uiMetaApps';
 
 const UI_ROUTE_PREFIX = '/ui/';
 
@@ -118,6 +119,10 @@ export const handleUiRoutes: RouteHandler = async (context) => {
 
   if (!url.pathname.startsWith(UI_ROUTE_PREFIX)) {
     return false;
+  }
+
+  if (await handleBundledMetaAppRoutes(context)) {
+    return true;
   }
 
   if (req.method !== 'GET') {

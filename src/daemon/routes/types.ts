@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Buffer } from 'node:buffer';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 
 export type Awaitable<T> = T | Promise<T>;
@@ -59,7 +60,7 @@ export interface RouteContext {
   readJsonBody: () => Promise<Record<string, unknown>>;
   sendJson: (status: number, payload: unknown) => void;
   sendHtml: (status: number, html: string) => void;
-  sendText: (status: number, body: string, contentType?: string) => void;
+  sendText: (status: number, body: string | Buffer, contentType?: string) => void;
   sendMethodNotAllowed: (allowed: string[]) => void;
 }
 

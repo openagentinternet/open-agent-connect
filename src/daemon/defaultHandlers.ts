@@ -89,6 +89,26 @@ function resolvePaymentAddress(identity: RuntimeIdentityRecord, currency: string
   return identity.mvcAddress;
 }
 
+function buildDaemonLocalUiUrl(
+  daemon: RuntimeDaemonRecord | null | undefined,
+  pathname: string,
+  query: Record<string, string | null | undefined> = {},
+): string | undefined {
+  const baseUrl = normalizeText(daemon?.baseUrl);
+  if (!baseUrl) {
+    return undefined;
+  }
+
+  const url = new URL(pathname, baseUrl);
+  for (const [key, value] of Object.entries(query)) {
+    const normalized = normalizeText(value);
+    if (normalized) {
+      url.searchParams.set(key, normalized);
+    }
+  }
+  return url.toString();
+}
+
 function summarizeService(record: ReturnType<typeof buildPublishedService>['record']) {
   const chainPinIds = [...new Set([
     record.sourceServicePinId,
@@ -1331,7 +1351,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
             network: typeof rawInput.network === 'string' ? rawInput.network : undefined,
             signer,
           });
-          return commandSuccess(result);
+          return commandSuccess({
+            ...result,
+            localUiUrl: buildDaemonLocalUiUrl(
+              input.getDaemonRecord(),
+              '/ui/buzz',
+              { pinId: result.pinId }
+            ) ?? '/ui/buzz',
+          });
         } catch (error) {
           return commandFailed(
             'buzz_post_failed',

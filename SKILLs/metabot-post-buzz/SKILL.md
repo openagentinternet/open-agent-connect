@@ -59,6 +59,8 @@ When the human explicitly asks to post on BTC (for example: `btc`, `比特币`, 
 - If attachments are present, upload each file first through shared `file upload` flow so payload can reference `metafile://...` URIs.
 - Keep final buzz payload machine-first and stop on runtime errors instead of inventing post result.
 - If human names BTC (`btc`, `比特币`, `bitcoin`), pass `--chain btc`; otherwise keep default `mvc`.
+- If the successful result includes `localUiUrl`, surface it back to the human as the local Buzz view link (for example, a clickable "view in local Buzz" link) instead of inventing another localhost URL.
+- Do not auto-open the local Buzz page unless the human explicitly asks to open or launch it.
 
 ## In Scope
 

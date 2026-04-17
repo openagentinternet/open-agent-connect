@@ -703,6 +703,14 @@ test('buzz post succeeds immediately after bootstrap identity create', async (t)
   assert.equal(posted.payload.data.content, 'hello from the first metabot buzz');
   assert.equal(posted.payload.data.globalMetaId, created.payload.data.globalMetaId);
   assert.match(posted.payload.data.pinId, /^\/protocols\/simplebuzz-pin-/);
+  assert.match(posted.payload.data.localUiUrl, /\/ui\/buzz(?:\?|$)/);
+
+  const buzzViewResponse = await fetch(posted.payload.data.localUiUrl);
+  const buzzViewHtml = await buzzViewResponse.text();
+
+  assert.equal(buzzViewResponse.status, 200);
+  assert.match(buzzViewResponse.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(buzzViewHtml, /IDFramework - Buzz Feed Demo/);
 });
 
 test('services publish persists a local directory entry that network services --online can read back', async (t) => {

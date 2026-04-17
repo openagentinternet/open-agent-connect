@@ -261,6 +261,8 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
     );
     assert.match(buzzContent, /buzz post/);
     assert.match(buzzContent, /file upload/);
+    assert.match(buzzContent, /localUiUrl/);
+    assert.match(buzzContent, /Do not auto-open the local Buzz page/i);
 
     const fileContent = await readFile(
       path.join(outputRoot, host, 'skills', 'metabot-upload-file', 'SKILL.md'),

@@ -52,7 +52,7 @@ function sendHtml(res: http.ServerResponse, status: number, html: string): void 
 function sendText(
   res: http.ServerResponse,
   status: number,
-  body: string,
+  body: string | Buffer,
   contentType = 'text/plain; charset=utf-8',
 ): void {
   res.writeHead(status, {
