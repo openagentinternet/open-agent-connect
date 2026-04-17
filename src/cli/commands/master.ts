@@ -1,0 +1,85 @@
+import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
+import {
+  commandMissingFlag,
+  commandUnknownSubcommand,
+  hasFlag,
+  readFlagValue,
+  readJsonFile,
+} from './helpers';
+import type { CliRuntimeContext } from '../types';
+
+export async function runMasterCommand(
+  args: string[],
+  context: CliRuntimeContext
+): Promise<MetabotCommandResult<unknown>> {
+  const subcommand = args[0];
+
+  if (subcommand === 'publish') {
+    const payloadFile = readFlagValue(args, '--payload-file');
+    if (!payloadFile) {
+      return commandMissingFlag('--payload-file');
+    }
+
+    const handler = context.dependencies.master?.publish;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Master publish handler is not configured.');
+    }
+
+    const payload = await readJsonFile(context, payloadFile);
+    return handler(payload);
+  }
+
+  if (subcommand === 'list') {
+    const handler = context.dependencies.master?.list;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Master list handler is not configured.');
+    }
+
+    return handler({
+      online: hasFlag(args, '--online') ? true : undefined,
+      masterKind: readFlagValue(args, '--kind') ?? undefined,
+    });
+  }
+
+  if (subcommand === 'ask') {
+    const handler = context.dependencies.master?.ask;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Master ask handler is not configured.');
+    }
+
+    const traceId = readFlagValue(args, '--trace-id');
+    if (traceId) {
+      return handler({
+        traceId,
+        confirm: hasFlag(args, '--confirm'),
+      });
+    }
+
+    const requestFile = readFlagValue(args, '--request-file');
+    if (!requestFile) {
+      return commandMissingFlag('--request-file');
+    }
+
+    const payload = await readJsonFile(context, requestFile);
+    return handler({
+      ...payload,
+      confirm: hasFlag(args, '--confirm'),
+    });
+  }
+
+  if (subcommand === 'trace') {
+    const traceId = readFlagValue(args, '--id');
+    if (!traceId) {
+      return commandMissingFlag('--id');
+    }
+
+    const handler = context.dependencies.master?.trace;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Master trace handler is not configured.');
+    }
+
+    return handler({ traceId });
+  }
+
+  return commandUnknownSubcommand(`master ${args.join(' ')}`.trim());
+}

@@ -1435,6 +1435,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
         );
       },
     },
+    master: {
+      publish: async () => commandFailed('not_implemented', 'Master publish is not implemented yet.'),
+      list: async () => commandFailed('not_implemented', 'Master list is not implemented yet.'),
+      ask: async () => commandFailed('not_implemented', 'Master ask is not implemented yet.'),
+      trace: async () => commandFailed('not_implemented', 'Master trace is not implemented yet.'),
+    },
     network: {
       listServices: async ({ online }) => {
         const state = await runtimeStateStore.readState();

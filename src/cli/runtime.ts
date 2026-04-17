@@ -1165,6 +1165,23 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         });
       },
     },
+    master: {
+      publish: async (input) => requestJson(context, 'POST', '/api/master/publish', input),
+      list: async (input) => {
+        const query = new URLSearchParams();
+        if (input.online !== undefined) {
+          query.set('online', input.online ? 'true' : 'false');
+        }
+        if (typeof input.masterKind === 'string' && input.masterKind.trim()) {
+          query.set('kind', input.masterKind.trim());
+        }
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/master/list${suffix}`);
+      },
+      ask: async (input) => requestJson(context, 'POST', '/api/master/ask', input),
+      trace: async (input) =>
+        requestJson(context, 'GET', `/api/master/trace/${encodeURIComponent(input.traceId)}`),
+    },
     network: {
       listServices: async (input) => {
         const query = input.online === undefined ? '' : `?online=${input.online ? 'true' : 'false'}`;
@@ -1545,6 +1562,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     daemon: { ...defaults.daemon, ...provided.daemon },
     doctor: { ...defaults.doctor, ...provided.doctor },
     identity: { ...defaults.identity, ...provided.identity },
+    master: { ...defaults.master, ...provided.master },
     network: {
       ...defaultNetwork,
       ...provided.network,
