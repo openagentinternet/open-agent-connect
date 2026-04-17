@@ -38,6 +38,7 @@ import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
 import { readChainDirectoryWithFallback } from '../core/discovery/chainDirectoryReader';
+import { HEARTBEAT_ONLINE_WINDOW_SEC } from '../core/discovery/chainHeartbeatDirectory';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
 import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/sessionEngine';
 import { resolvePublicStatus } from '../core/a2a/publicStatus';
@@ -60,6 +61,11 @@ import {
   type AwaitMetaWebServiceReplyResult,
   type MetaWebServiceReplyWaiter,
 } from '../core/a2a/metawebReplyWaiter';
+import { listMasters, readChainMasterDirectoryWithFallback, summarizePublishedMaster } from '../core/master/masterDirectory';
+import { createPublishedMasterStateStore } from '../core/master/masterPublishedState';
+import { publishMasterToChain } from '../core/master/masterServicePublish';
+import { validateMasterServicePayload } from '../core/master/masterServiceSchema';
+import type { MasterDirectoryItem, PublishedMasterRecord } from '../core/master/masterTypes';
 
 const DIRECTORY_SEEDS_FILE = 'directory-seeds.json';
 const DEFAULT_CALLER_FOREGROUND_WAIT_MS = 15_000;
@@ -67,6 +73,7 @@ const DEFAULT_CALLER_BACKGROUND_WAIT_MS = 30 * 60 * 1000;
 const DEFAULT_TRACE_WATCH_WAIT_MS = 75_000;
 const TRACE_WATCH_POLL_INTERVAL_MS = 500;
 const PROVIDER_RATING_SYNC_STALE_MS = 30_000;
+const DEFAULT_MASTER_HOST_MODE = 'codex';
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -115,6 +122,32 @@ function summarizeService(record: ReturnType<typeof buildPublishedService>['reco
     available: Boolean(record.available),
     online: true,
     updatedAt: record.updatedAt,
+  };
+}
+
+function isProviderPresenceOnline(input: {
+  enabled: boolean;
+  lastHeartbeatAt: number | null;
+  lastHeartbeatPinId: string | null;
+}, nowMs: number = Date.now()): boolean {
+  if (input.enabled !== true || !input.lastHeartbeatPinId || !Number.isFinite(input.lastHeartbeatAt)) {
+    return false;
+  }
+  return (nowMs - Number(input.lastHeartbeatAt)) <= (HEARTBEAT_ONLINE_WINDOW_SEC * 1000);
+}
+
+function summarizeMaster(record: PublishedMasterRecord, options: {
+  online?: boolean;
+  lastSeenSec?: number | null;
+  providerDaemonBaseUrl?: string | null;
+  directorySeedLabel?: string | null;
+} = {}) {
+  return {
+    ...summarizePublishedMaster(record),
+    online: options.online === true,
+    lastSeenSec: options.lastSeenSec ?? null,
+    providerDaemonBaseUrl: normalizeText(options.providerDaemonBaseUrl) || null,
+    directorySeedLabel: normalizeText(options.directorySeedLabel) || null,
   };
 }
 
@@ -369,6 +402,44 @@ async function fetchRemoteAvailableServices(
   }
 }
 
+async function fetchRemoteAvailableMasters(
+  providerDaemonBaseUrl: string
+): Promise<{ masters: Array<Record<string, unknown>> } | MetabotCommandResult<unknown>> {
+  try {
+    const response = await fetch(`${providerDaemonBaseUrl}/api/master/list?online=true`);
+    const payload = await response.json() as unknown;
+    if (!response.ok) {
+      return commandFailed('remote_master_directory_unreachable', `Remote master directory returned HTTP ${response.status}.`);
+    }
+    if (!isSuccessfulCommandEnvelope(payload)) {
+      if (isManualActionEnvelope(payload)) {
+        return commandManualActionRequired(
+          normalizeText(payload.code) || 'remote_master_directory_manual_action_required',
+          normalizeText(payload.message) || 'Remote master directory requires manual action.',
+          normalizeText(payload.localUiUrl) || undefined
+        );
+      }
+      if (isFailedCommandEnvelope(payload)) {
+        return commandFailed(
+          normalizeText(payload.code) || 'remote_master_directory_unavailable',
+          normalizeText(payload.message) || 'Remote master directory is unavailable.'
+        );
+      }
+      return commandFailed('remote_master_directory_invalid_response', 'Remote master directory returned an invalid command envelope.');
+    }
+
+    const masters = Array.isArray(payload.data.masters)
+      ? payload.data.masters.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'))
+      : [];
+    return { masters };
+  } catch (error) {
+    return commandFailed(
+      'remote_master_directory_unreachable',
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+}
+
 async function readDirectorySeeds(hotRoot: string): Promise<Array<{ baseUrl: string; label: string | null }>> {
   const seedsPath = path.join(hotRoot, DIRECTORY_SEEDS_FILE);
   let payload: unknown;
@@ -464,6 +535,32 @@ async function fetchSeededDirectoryServices(hotRoot: string): Promise<Array<Reco
   }
 
   return dedupeServices(mergedServices);
+}
+
+async function fetchSeededDirectoryMasters(hotRoot: string): Promise<MasterDirectoryItem[]> {
+  const seeds = await readDirectorySeeds(hotRoot);
+  const mergedMasters: Array<Record<string, unknown>> = [];
+
+  for (const seed of seeds) {
+    const remoteDirectory = await fetchRemoteAvailableMasters(seed.baseUrl);
+    if ('ok' in remoteDirectory) {
+      continue;
+    }
+
+    for (const master of remoteDirectory.masters) {
+      mergedMasters.push({
+        ...master,
+        providerDaemonBaseUrl: normalizeText(master.providerDaemonBaseUrl) || seed.baseUrl,
+        directorySeedLabel: seed.label,
+        online: master.online !== false,
+      });
+    }
+  }
+
+  return listMasters({
+    entries: mergedMasters,
+    host: DEFAULT_MASTER_HOST_MODE,
+  });
 }
 
 async function executeRemoteServiceCall(input: {
@@ -922,6 +1019,52 @@ async function listRuntimeDirectoryServices(input: {
   };
 }
 
+async function listRuntimeDirectoryMasters(input: {
+  masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
+  hotRoot: string;
+  chainApiBaseUrl?: string;
+  onlineOnly: boolean;
+  host: string;
+  masterKind?: string;
+  localProviderOnline: boolean;
+  localLastSeenSec: number | null;
+  providerDaemonBaseUrl?: string | null;
+  providerGlobalMetaId?: string | null;
+}): Promise<{
+  masters: MasterDirectoryItem[];
+  discoverySource: 'chain' | 'seeded';
+  fallbackUsed: boolean;
+}> {
+  const localMasterState = await input.masterStateStore.read();
+  const localMasters = localMasterState.masters
+    .filter((master) => master.available === 1)
+    .map((master) => summarizeMaster(master, {
+      online: input.localProviderOnline
+        && normalizeText(master.providerGlobalMetaId) === normalizeText(input.providerGlobalMetaId),
+      lastSeenSec: input.localProviderOnline ? input.localLastSeenSec : null,
+      providerDaemonBaseUrl: input.providerDaemonBaseUrl || null,
+    }));
+  const directory = await readChainMasterDirectoryWithFallback({
+    chainApiBaseUrl: input.chainApiBaseUrl,
+    onlineOnly: input.onlineOnly,
+    fetchSeededDirectoryMasters: async () => fetchSeededDirectoryMasters(input.hotRoot),
+  });
+
+  return {
+    masters: listMasters({
+      entries: [
+        ...directory.masters,
+        ...localMasters,
+      ],
+      onlineOnly: input.onlineOnly,
+      host: input.host,
+      masterKind: input.masterKind,
+    }),
+    discoverySource: directory.source,
+    fallbackUsed: directory.fallbackUsed,
+  };
+}
+
 async function persistTraceRecord(
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>,
   trace: SessionTraceRecord,
@@ -1215,6 +1358,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   const signer = input.signer ?? createLocalMnemonicSigner({ secretStore });
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
+  const masterStateStore = createPublishedMasterStateStore(input.homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(input.homeDir);
   const ratingDetailStateStore = createRatingDetailStateStore(input.homeDir);
   const sessionStateStore = createSessionStateStore(input.homeDir);
@@ -1436,8 +1580,90 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     },
     master: {
-      publish: async () => commandFailed('not_implemented', 'Master publish is not implemented yet.'),
-      list: async () => commandFailed('not_implemented', 'Master list is not implemented yet.'),
+      publish: async (rawInput) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing masters.');
+        }
+
+        const validation = validateMasterServicePayload(rawInput);
+        if (!validation.ok) {
+          return commandFailed(validation.code, validation.message);
+        }
+
+        try {
+          const now = Date.now();
+          const network = typeof rawInput.network === 'string' ? rawInput.network : undefined;
+          const published = await publishMasterToChain({
+            signer,
+            creatorMetabotId: state.identity.metabotId,
+            providerGlobalMetaId: state.identity.globalMetaId,
+            providerAddress: state.identity.mvcAddress,
+            draft: validation.value,
+            now,
+            network,
+          });
+
+          await masterStateStore.update((currentState) => ({
+            masters: [
+              published.record,
+              ...currentState.masters.filter((master) => master.currentPinId !== published.record.currentPinId),
+            ],
+          }));
+
+          const presence = await providerPresenceStore.read();
+          const daemon = input.getDaemonRecord();
+          const online = isProviderPresenceOnline(presence, now);
+          const lastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
+            ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
+            : null;
+          return commandSuccess({
+            ...summarizeMaster(published.record, {
+              online,
+              lastSeenSec,
+              providerDaemonBaseUrl: daemon?.baseUrl || null,
+            }),
+            txids: published.chainWrite.txids,
+            totalCost: published.chainWrite.totalCost,
+            network: published.chainWrite.network,
+            operation: published.chainWrite.operation,
+            path: published.chainWrite.path,
+            contentType: published.chainWrite.contentType,
+          });
+        } catch (error) {
+          return commandFailed(
+            'master_publish_failed',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      },
+      list: async ({ online, masterKind }) => {
+        const state = await runtimeStateStore.readState();
+        const daemon = input.getDaemonRecord();
+        const presence = await providerPresenceStore.read();
+        const localProviderOnline = isProviderPresenceOnline(presence);
+        const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
+          ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
+          : null;
+        const directory = await listRuntimeDirectoryMasters({
+          masterStateStore,
+          hotRoot: runtimeStateStore.paths.hotRoot,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+          onlineOnly: online === true,
+          host: DEFAULT_MASTER_HOST_MODE,
+          masterKind,
+          localProviderOnline,
+          localLastSeenSec,
+          providerDaemonBaseUrl: daemon?.baseUrl || null,
+          providerGlobalMetaId: state.identity?.globalMetaId ?? null,
+        });
+
+        return commandSuccess({
+          masters: directory.masters,
+          discoverySource: directory.discoverySource,
+          fallbackUsed: directory.fallbackUsed,
+        });
+      },
       ask: async () => commandFailed('not_implemented', 'Master ask is not implemented yet.'),
       trace: async () => commandFailed('not_implemented', 'Master trace is not implemented yet.'),
     },

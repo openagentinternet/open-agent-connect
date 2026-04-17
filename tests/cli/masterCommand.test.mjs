@@ -82,6 +82,89 @@ test('runCli dispatches `metabot master list` without forcing an online filter b
   ]);
 });
 
+test('runCli dispatches `metabot master list --online --kind debug` with parsed filters', async () => {
+  const calls = [];
+
+  const exitCode = await runCli(['master', 'list', '--online', '--kind', 'debug'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        list: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'success',
+            data: {
+              masters: [],
+            },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [
+    {
+      online: true,
+      masterKind: 'debug',
+    },
+  ]);
+});
+
+test('runCli dispatches `metabot master publish --payload-file --chain btc` and sets network=btc', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-publish-'));
+  const payloadFile = path.join(tempDir, 'master-service.json');
+  await writeFile(payloadFile, JSON.stringify({
+    serviceName: 'official-debug-master',
+    displayName: 'Official Debug Master',
+    description: 'Structured debugging help.',
+    masterKind: 'debug',
+    specialties: ['debugging'],
+    hostModes: ['codex'],
+    modelInfo: {
+      provider: 'metaweb',
+      model: 'official-debug-master-v1',
+    },
+    style: 'direct_and_structured',
+    pricingMode: 'free',
+    price: '0',
+    currency: 'SPACE',
+    responseMode: 'structured',
+    contextPolicy: 'standard',
+    official: true,
+    trustedTier: 'official',
+  }), 'utf8');
+
+  const calls = [];
+
+  const exitCode = await runCli(['master', 'publish', '--payload-file', payloadFile, '--chain', 'btc'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        publish: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'success',
+            data: {
+              masterPinId: 'master-pin-1',
+              network: input.network,
+            },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].serviceName, 'official-debug-master');
+  assert.equal(calls[0].network, 'btc');
+});
+
 test('runCli dispatches `metabot master ask --request-file` and returns not_implemented when the handler is missing', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-ask-'));
   const requestFile = path.join(tempDir, 'master-request.json');

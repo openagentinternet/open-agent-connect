@@ -3,6 +3,7 @@ import {
   commandMissingFlag,
   commandUnknownSubcommand,
   hasFlag,
+  readChainFlag,
   readFlagValue,
   readJsonFile,
 } from './helpers';
@@ -20,13 +21,18 @@ export async function runMasterCommand(
       return commandMissingFlag('--payload-file');
     }
 
+    const chainFlag = readChainFlag(args);
+    if (chainFlag.error) {
+      return chainFlag.error;
+    }
+
     const handler = context.dependencies.master?.publish;
     if (!handler) {
       return commandFailed('not_implemented', 'Master publish handler is not configured.');
     }
 
     const payload = await readJsonFile(context, payloadFile);
-    return handler(payload);
+    return handler(chainFlag.chain ? { ...payload, network: chainFlag.chain } : payload);
   }
 
   if (subcommand === 'list') {

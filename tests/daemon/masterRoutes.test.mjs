@@ -70,3 +70,80 @@ test('GET /api/master/trace/trace-master-1 returns not_implemented before master
     message: 'Master trace handler is not configured.',
   });
 });
+
+test('GET /api/master/list forwards query filters to master.list', async (t) => {
+  const calls = [];
+  const server = await startServer({
+    master: {
+      list: async (input) => {
+        calls.push(input);
+        return {
+          ok: true,
+          state: 'success',
+          data: {
+            masters: [
+              {
+                masterPinId: 'master-pin-1',
+                masterKind: input.masterKind,
+                online: input.online,
+              },
+            ],
+          },
+        };
+      },
+    },
+  });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/master/list?online=true&kind=debug`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    {
+      online: true,
+      masterKind: 'debug',
+    },
+  ]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.masters[0].masterKind, 'debug');
+});
+
+test('POST /api/master/publish forwards the JSON payload to master.publish', async (t) => {
+  const calls = [];
+  const server = await startServer({
+    master: {
+      publish: async (input) => {
+        calls.push(input);
+        return {
+          ok: true,
+          state: 'success',
+          data: {
+            masterPinId: 'master-pin-1',
+            displayName: input.displayName,
+          },
+        };
+      },
+    },
+  });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/master/publish`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      serviceName: 'official-debug-master',
+      displayName: 'Official Debug Master',
+      masterKind: 'debug',
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].displayName, 'Official Debug Master');
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.masterPinId, 'master-pin-1');
+});

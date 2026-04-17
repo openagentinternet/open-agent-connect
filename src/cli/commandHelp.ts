@@ -471,11 +471,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['master', 'publish'],
     summary: 'Publish one master-service payload for a remote master/provider.',
-    usage: 'metabot master publish --payload-file <path>',
+    usage: 'metabot master publish --payload-file <path> [--chain <mvc|btc>]',
     requiredFlags: [
       { flag: '--payload-file', value: '<path>', description: 'JSON master-service payload file.' },
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['master', 'list'],
