@@ -147,3 +147,45 @@ test('POST /api/master/publish forwards the JSON payload to master.publish', asy
   assert.equal(payload.ok, true);
   assert.equal(payload.data.masterPinId, 'master-pin-1');
 });
+
+test('POST /api/master/receive forwards the JSON payload to master.receive', async (t) => {
+  const calls = [];
+  const server = await startServer({
+    master: {
+      receive: async (input) => {
+        calls.push(input);
+        return {
+          ok: true,
+          state: 'success',
+          data: {
+            traceId: input.traceId,
+            accepted: true,
+          },
+        };
+      },
+    },
+  });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/master/receive`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      type: 'master_request',
+      traceId: 'trace-master-receive-1',
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    {
+      type: 'master_request',
+      traceId: 'trace-master-receive-1',
+    },
+  ]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.accepted, true);
+});

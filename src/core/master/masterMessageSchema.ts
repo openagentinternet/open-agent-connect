@@ -3,7 +3,7 @@ export const MASTER_REQUEST_TYPE = 'master_request';
 export const MASTER_RESPONSE_TYPE = 'master_response';
 
 export type MasterTriggerMode = 'manual' | 'suggest' | 'auto';
-export type MasterResponseStatus = 'completed' | 'needs_clarification' | 'failed';
+export type MasterResponseStatus = 'completed' | 'need_more_context' | 'declined' | 'unavailable' | 'failed';
 
 export interface MasterMessageArtifact {
   kind: string;
@@ -183,6 +183,14 @@ function parseArtifacts(value: unknown): MasterMessageArtifact[] {
   return artifacts;
 }
 
+function parseOptionalNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function parseTriggerMode(value: unknown): MasterTriggerMode | null {
   const normalized = normalizeText(value).toLowerCase();
   if (normalized === 'manual' || normalized === 'suggest' || normalized === 'auto') {
@@ -193,10 +201,130 @@ function parseTriggerMode(value: unknown): MasterTriggerMode | null {
 
 function parseResponseStatus(value: unknown): MasterResponseStatus | null {
   const normalized = normalizeText(value).toLowerCase();
-  if (normalized === 'completed' || normalized === 'needs_clarification' || normalized === 'failed') {
+  if (
+    normalized === 'completed'
+    || normalized === 'failed'
+    || normalized === 'declined'
+    || normalized === 'unavailable'
+  ) {
     return normalized;
   }
+  if (normalized === 'need_more_context' || normalized === 'needs_clarification') {
+    return 'need_more_context';
+  }
   return null;
+}
+
+function parseDesiredOutputMode(value: unknown): string | null {
+  const direct = normalizeText(value);
+  if (direct) {
+    return direct;
+  }
+  return normalizeText(readObject(value)?.mode) || null;
+}
+
+function mergeRequestExtensions(input: {
+  original: Record<string, unknown> | null;
+  goal?: string | null;
+  errorSummary?: string | null;
+  diffSummary?: string | null;
+  constraints?: string[];
+  hostClient?: string | null;
+  hostClientVersion?: string | null;
+  sentAt?: number | null;
+}): Record<string, unknown> | null {
+  const merged: Record<string, unknown> = {
+    ...(input.original ?? {}),
+  };
+
+  if (normalizeText(input.goal)) merged.goal = normalizeText(input.goal);
+  if (normalizeText(input.errorSummary)) merged.errorSummary = normalizeText(input.errorSummary);
+  if (normalizeText(input.diffSummary)) merged.diffSummary = normalizeText(input.diffSummary);
+  const constraints = Array.isArray(input.constraints) ? input.constraints.filter(Boolean) : [];
+  if (constraints.length) merged.constraints = constraints;
+  if (normalizeText(input.hostClient)) merged.hostClient = normalizeText(input.hostClient);
+  if (normalizeText(input.hostClientVersion)) merged.hostClientVersion = normalizeText(input.hostClientVersion);
+  if (Number.isFinite(input.sentAt)) merged.sentAt = Number(input.sentAt);
+
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
+function mergeResponseExtensions(input: {
+  original: Record<string, unknown> | null;
+  respondedAt?: number | null;
+}): Record<string, unknown> | null {
+  const merged: Record<string, unknown> = {
+    ...(input.original ?? {}),
+  };
+  if (Number.isFinite(input.respondedAt)) {
+    merged.respondedAt = Number(input.respondedAt);
+  }
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
+function buildCanonicalRequestEnvelope(value: MasterRequestMessage): Record<string, unknown> {
+  const extensions = readObject(value.extensions) ?? {};
+  return {
+    type: MASTER_REQUEST_TYPE,
+    version: MASTER_MESSAGE_VERSION,
+    requestId: value.requestId,
+    traceId: value.traceId,
+    callerGlobalMetaId: value.caller.globalMetaId,
+    target: {
+      providerGlobalMetaId: value.target.providerGlobalMetaId,
+      servicePinId: value.target.masterServicePinId,
+      masterKind: value.target.masterKind,
+    },
+    host: {
+      mode: value.caller.host,
+      client: normalizeText(extensions.hostClient) || 'metabot',
+      clientVersion: normalizeText(extensions.hostClientVersion) || null,
+    },
+    trigger: {
+      mode: value.trigger.mode,
+      reason: value.trigger.reason,
+    },
+    task: {
+      userTask: value.task.userTask,
+      question: value.task.question,
+      goal: normalizeText(extensions.goal) || null,
+    },
+    context: {
+      workspaceSummary: value.context.workspaceSummary,
+      errorSummary: normalizeText(extensions.errorSummary) || null,
+      diffSummary: normalizeText(extensions.diffSummary) || null,
+      relevantFiles: [...value.context.relevantFiles],
+      artifacts: [...value.context.artifacts],
+    },
+    constraints: parseStringArray(extensions.constraints),
+    desiredOutput: value.desiredOutput ? { mode: value.desiredOutput } : null,
+    sentAt: parseOptionalNumber(extensions.sentAt),
+  };
+}
+
+function buildCanonicalResponseEnvelope(value: MasterResponseMessage): Record<string, unknown> {
+  const structuredData = readObject(value.structuredData) ?? {};
+  const extensions = readObject(value.extensions);
+  return {
+    type: MASTER_RESPONSE_TYPE,
+    version: MASTER_MESSAGE_VERSION,
+    requestId: value.requestId,
+    traceId: value.traceId,
+    providerGlobalMetaId: value.responder.providerGlobalMetaId,
+    servicePinId: value.responder.masterServicePinId,
+    masterKind: value.responder.masterKind,
+    status: value.status,
+    summary: value.summary,
+    findings: parseStringArray(structuredData.findings ?? structuredData.diagnosis),
+    recommendations: parseStringArray(structuredData.recommendations ?? structuredData.nextSteps),
+    missing: parseStringArray(structuredData.missing),
+    risks: parseStringArray(structuredData.risks),
+    confidence: parseOptionalNumber(structuredData.confidence ?? extensions?.confidence),
+    followUpQuestion: value.followUpQuestion,
+    respondedAt: parseOptionalNumber(extensions?.respondedAt),
+    responseText: value.responseText,
+    errorCode: value.errorCode,
+  };
 }
 
 function validateTypeAndVersion(
@@ -252,6 +380,7 @@ export function parseMasterRequest(value: unknown): MasterRequestParseResult {
   }
 
   const caller = readObject(envelope.value.caller);
+  const host = readObject(envelope.value.host);
   const target = readObject(envelope.value.target);
   const task = readObject(envelope.value.task);
   const context = readObject(envelope.value.context) ?? {};
@@ -268,13 +397,13 @@ export function parseMasterRequest(value: unknown): MasterRequestParseResult {
     return failRequest('master_request.traceId is required.');
   }
 
-  const callerGlobalMetaId = normalizeText(caller?.globalMetaId);
-  const callerHost = normalizeText(caller?.host);
+  const callerGlobalMetaId = normalizeText(caller?.globalMetaId || envelope.value.callerGlobalMetaId);
+  const callerHost = normalizeText(caller?.host || host?.mode || envelope.value.host);
   if (!callerGlobalMetaId || !callerHost) {
     return failRequest('master_request.caller.globalMetaId and master_request.caller.host are required.');
   }
 
-  const masterServicePinId = normalizeText(target?.masterServicePinId);
+  const masterServicePinId = normalizeText(target?.masterServicePinId || target?.servicePinId);
   const providerGlobalMetaId = normalizeText(target?.providerGlobalMetaId);
   const masterKind = normalizeText(target?.masterKind);
   if (!masterServicePinId || !providerGlobalMetaId || !masterKind) {
@@ -322,8 +451,17 @@ export function parseMasterRequest(value: unknown): MasterRequestParseResult {
         mode: triggerMode,
         reason: normalizeText(trigger?.reason) || null,
       },
-      desiredOutput: normalizeText(envelope.value.desiredOutput) || null,
-      extensions,
+      desiredOutput: parseDesiredOutputMode(envelope.value.desiredOutput),
+      extensions: mergeRequestExtensions({
+        original: extensions,
+        goal: normalizeText(task?.goal) || null,
+        errorSummary: normalizeText(context.errorSummary) || null,
+        diffSummary: normalizeText(context.diffSummary) || null,
+        constraints: parseStringArray(envelope.value.constraints),
+        hostClient: normalizeText(host?.client) || null,
+        hostClientVersion: normalizeText(host?.clientVersion) || null,
+        sentAt: parseOptionalNumber(envelope.value.sentAt),
+      }),
     },
   };
 }
@@ -353,22 +491,40 @@ export function parseMasterResponse(value: unknown): MasterResponseParseResult {
     return failResponse('master_response.traceId is required.');
   }
 
-  const providerGlobalMetaId = normalizeText(responder?.providerGlobalMetaId);
-  const masterServicePinId = normalizeText(responder?.masterServicePinId);
-  const masterKind = normalizeText(responder?.masterKind);
+  const providerGlobalMetaId = normalizeText(responder?.providerGlobalMetaId || envelope.value.providerGlobalMetaId);
+  const masterServicePinId = normalizeText(
+    responder?.masterServicePinId
+    || envelope.value.servicePinId
+    || envelope.value.masterServicePinId
+  );
+  const masterKind = normalizeText(responder?.masterKind || envelope.value.masterKind);
   if (!providerGlobalMetaId || !masterServicePinId || !masterKind) {
     return failResponse('master_response.responder.providerGlobalMetaId, masterServicePinId, and masterKind are required.');
   }
 
   const status = parseResponseStatus(envelope.value.status);
   if (!status) {
-    return failResponse('master_response.status must be one of completed, needs_clarification, failed.');
+    return failResponse('master_response.status must be one of completed, need_more_context, declined, unavailable, failed.');
   }
 
   const summary = normalizeText(envelope.value.summary);
   if (!summary) {
     return failResponse('master_response.summary is required.');
   }
+
+  const mergedStructuredData: Record<string, unknown> = {
+    ...structuredData,
+  };
+  const findings = parseStringArray(envelope.value.findings);
+  const recommendations = parseStringArray(envelope.value.recommendations);
+  const missing = parseStringArray(envelope.value.missing);
+  const risks = parseStringArray(envelope.value.risks);
+  const confidence = parseOptionalNumber(envelope.value.confidence);
+  if (findings.length) mergedStructuredData.findings = findings;
+  if (recommendations.length) mergedStructuredData.recommendations = recommendations;
+  if (missing.length) mergedStructuredData.missing = missing;
+  if (risks.length) mergedStructuredData.risks = risks;
+  if (confidence !== null) mergedStructuredData.confidence = confidence;
 
   return {
     ok: true,
@@ -385,10 +541,13 @@ export function parseMasterResponse(value: unknown): MasterResponseParseResult {
       status,
       summary,
       responseText: normalizeText(envelope.value.responseText) || null,
-      structuredData,
+      structuredData: mergedStructuredData,
       followUpQuestion: normalizeText(envelope.value.followUpQuestion) || null,
       errorCode: normalizeText(envelope.value.errorCode) || null,
-      extensions,
+      extensions: mergeResponseExtensions({
+        original: extensions,
+        respondedAt: parseOptionalNumber(envelope.value.respondedAt),
+      }),
     },
   };
 }
@@ -398,7 +557,7 @@ export function buildMasterRequestJson(value: unknown): string {
   if (!parsed.ok) {
     throw new Error(parsed.message);
   }
-  return JSON.stringify(parsed.value);
+  return JSON.stringify(buildCanonicalRequestEnvelope(parsed.value));
 }
 
 export function buildMasterResponseJson(value: unknown): string {
@@ -406,5 +565,5 @@ export function buildMasterResponseJson(value: unknown): string {
   if (!parsed.ok) {
     throw new Error(parsed.message);
   }
-  return JSON.stringify(parsed.value);
+  return JSON.stringify(buildCanonicalResponseEnvelope(parsed.value));
 }

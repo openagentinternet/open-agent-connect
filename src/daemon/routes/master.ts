@@ -52,6 +52,20 @@ export const handleMasterRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  if (url.pathname === '/api/master/receive') {
+    if (req.method !== 'POST') {
+      context.sendMethodNotAllowed(['POST']);
+      return true;
+    }
+
+    const input = await context.readJsonBody();
+    const result = handlers.master?.receive
+      ? await handlers.master.receive(input)
+      : commandFailed('not_implemented', 'Master receive handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
   if (url.pathname.startsWith(MASTER_TRACE_PREFIX)) {
     if (req.method !== 'GET') {
       context.sendMethodNotAllowed(['GET']);

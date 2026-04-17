@@ -62,6 +62,65 @@ function createSellerTrace(overrides = {}) {
   };
 }
 
+function createMasterTrace(overrides = {}) {
+  return {
+    traceId: 'trace-master-provider-1',
+    createdAt: 1_775_000_040_000,
+    session: {
+      id: 'session-master-provider-1',
+      title: 'Official Debug Master Ask',
+      type: 'a2a',
+      metabotId: 1,
+      peerGlobalMetaId: 'idq1caller',
+      peerName: 'Caller Bot',
+      externalConversationId: 'master:idq1caller:idq1provider:trace-master-provider-1',
+    },
+    order: null,
+    a2a: {
+      role: 'provider',
+      publicStatus: 'completed',
+      latestEvent: 'provider_completed',
+      taskRunState: 'completed',
+      callerGlobalMetaId: 'idq1caller',
+      callerName: 'Caller Bot',
+      providerGlobalMetaId: 'idq1provider',
+      servicePinId: 'master-pin-1',
+    },
+    ...overrides,
+  };
+}
+
+function createMasterRecord(overrides = {}) {
+  return {
+    id: 'master-pin-1',
+    sourceMasterPinId: 'master-pin-1',
+    currentPinId: 'master-pin-1',
+    creatorMetabotId: 1,
+    providerGlobalMetaId: 'idq1provider',
+    providerAddress: 'mvc-address-1',
+    serviceName: 'official-debug-master',
+    displayName: 'Official Debug Master',
+    description: 'Structured debugging help.',
+    masterKind: 'debug',
+    specialties: ['debugging'],
+    hostModes: ['codex'],
+    modelInfoJson: '{"provider":"metaweb","model":"official-debug-master-v1"}',
+    style: 'direct_and_structured',
+    pricingMode: 'free',
+    price: '0',
+    currency: 'MVC',
+    responseMode: 'structured',
+    contextPolicy: 'standard',
+    official: 1,
+    trustedTier: 'official',
+    payloadJson: '{}',
+    available: 1,
+    revokedAt: null,
+    updatedAt: 1_775_000_035_000,
+    ...overrides,
+  };
+}
+
 test('buildProviderConsoleSnapshot summarizes published services and seller-side order activity', () => {
   const snapshot = buildProviderConsoleSnapshot({
     services: [createServiceRecord()],
@@ -209,4 +268,29 @@ test('buildProviderConsoleSnapshot drops manual refund work once the seller trac
   });
 
   assert.deepEqual(snapshot.manualActions, []);
+});
+
+test('buildProviderConsoleSnapshot projects recent provider-side master requests', () => {
+  const snapshot = buildProviderConsoleSnapshot({
+    services: [],
+    masters: [createMasterRecord()],
+    traces: [createMasterTrace()],
+    ratingDetails: [],
+  });
+
+  assert.deepEqual(snapshot.recentMasterRequests, [
+    {
+      traceId: 'trace-master-provider-1',
+      servicePinId: 'master-pin-1',
+      serviceName: 'official-debug-master',
+      displayName: 'Official Debug Master',
+      masterKind: 'debug',
+      callerGlobalMetaId: 'idq1caller',
+      callerName: 'Caller Bot',
+      publicStatus: 'completed',
+      latestEvent: 'provider_completed',
+      createdAt: 1_775_000_040_000,
+    },
+  ]);
+  assert.equal(snapshot.totals.masterRequestCount, 1);
 });

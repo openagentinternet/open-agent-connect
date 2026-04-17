@@ -64,6 +64,7 @@ import {
   type MetaWebServiceReplyWaiter,
 } from '../core/a2a/metawebReplyWaiter';
 import { parseMasterRequest, parseMasterResponse } from '../core/master/masterMessageSchema';
+import { handleMasterProviderRequest } from '../core/master/masterProviderRuntime';
 import { listMasters, readChainMasterDirectoryWithFallback, summarizePublishedMaster } from '../core/master/masterDirectory';
 import { createPendingMasterAskStateStore } from '../core/master/masterPendingAskState';
 import { createPublishedMasterStateStore } from '../core/master/masterPublishedState';
@@ -195,12 +196,14 @@ function readStringArray(value: unknown): string[] {
 function buildProviderSummaryPayload(input: {
   state: RuntimeState;
   presence: Awaited<ReturnType<ReturnType<typeof createProviderPresenceStateStore>['read']>>;
+  masters?: PublishedMasterRecord[];
   ratingDetails?: Awaited<ReturnType<ReturnType<typeof createRatingDetailStateStore>['read']>>['items'];
   ratingSyncState?: 'ready' | 'sync_error';
   ratingSyncError?: string | null;
 }) {
   const snapshot = buildProviderConsoleSnapshot({
     services: input.state.services,
+    masters: input.masters,
     traces: input.state.traces as unknown as ProviderConsoleTraceRecord[],
     ratingDetails: input.ratingDetails,
     ratingSyncState: input.ratingSyncState,
@@ -219,6 +222,7 @@ function buildProviderSummaryPayload(input: {
     services: snapshot.services,
     recentOrders: snapshot.recentOrders,
     manualActions: snapshot.manualActions,
+    recentMasterRequests: snapshot.recentMasterRequests,
     totals: snapshot.totals,
     ratingSyncState: input.ratingSyncState === 'sync_error' ? 'sync_error' : 'ready',
     ratingSyncError: normalizeText(input.ratingSyncError) || null,
@@ -2142,6 +2146,229 @@ export function createDefaultMetabotDaemonHandlers(input: {
           transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
         });
       },
+      receive: async (rawInput) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before serving Ask Master requests.');
+        }
+
+        const masterState = await masterStateStore.read();
+        const handled = await handleMasterProviderRequest({
+          rawRequest: rawInput,
+          providerIdentity: {
+            globalMetaId: state.identity.globalMetaId,
+            name: state.identity.name,
+          },
+          publishedMasters: masterState.masters,
+          sessionEngine,
+        });
+        if (!handled.ok) {
+          return commandFailed(handled.code, handled.message);
+        }
+
+        const receivedStatus = await persistSessionMutation(sessionStateStore, handled.received);
+        await appendA2ATranscriptItems(sessionStateStore, [
+          {
+            id: `${handled.request.traceId}-master-request`,
+            sessionId: handled.received.session.sessionId,
+            taskRunId: handled.received.taskRun.runId,
+            timestamp: handled.received.session.createdAt,
+            type: 'user_task',
+            sender: 'caller',
+            content: handled.request.task.question,
+            metadata: {
+              userTask: handled.request.task.userTask,
+              callerGlobalMetaId: handled.request.caller.globalMetaId,
+              callerName: handled.request.caller.name,
+              publicStatus: receivedStatus.status,
+              servicePinId: handled.publishedMaster.currentPinId,
+              masterKind: handled.publishedMaster.masterKind,
+            },
+          },
+        ]);
+
+        const appliedStatus = await persistSessionMutation(sessionStateStore, handled.applied);
+        await appendA2ATranscriptItems(sessionStateStore, [
+          {
+            id: `${handled.request.traceId}-master-response`,
+            sessionId: handled.received.session.sessionId,
+            taskRunId: handled.applied.taskRun.runId,
+            timestamp: handled.applied.session.updatedAt,
+            type: handled.response.status === 'failed'
+              ? 'failure'
+              : handled.response.status === 'need_more_context'
+                ? 'clarification_request'
+                : 'assistant',
+            sender: handled.response.status === 'failed' ? 'system' : 'provider',
+            content: handled.response.summary,
+            metadata: {
+              publicStatus: appliedStatus.status,
+              event: handled.applied.event,
+              requestId: handled.request.requestId,
+              responseStatus: handled.response.status,
+              servicePinId: handled.publishedMaster.currentPinId,
+              masterKind: handled.publishedMaster.masterKind,
+            },
+          },
+        ]);
+
+        const trace = buildSessionTrace({
+          traceId: handled.request.traceId,
+          channel: 'simplemsg',
+          exportRoot: runtimeStateStore.paths.exportRoot,
+          session: {
+            id: `master-provider-${handled.request.traceId}`,
+            title: `${handled.publishedMaster.displayName} Ask`,
+            type: 'a2a',
+            metabotId: state.identity.metabotId,
+            peerGlobalMetaId: handled.request.caller.globalMetaId,
+            peerName: handled.request.caller.name || null,
+            externalConversationId: `master:${handled.request.caller.globalMetaId}:${state.identity.globalMetaId}:${handled.request.traceId}`,
+          },
+          a2a: {
+            sessionId: handled.received.session.sessionId,
+            taskRunId: handled.applied.taskRun.runId,
+            role: handled.received.session.role,
+            publicStatus: appliedStatus.status,
+            latestEvent: handled.applied.event,
+            taskRunState: handled.applied.taskRun.state,
+            callerGlobalMetaId: handled.request.caller.globalMetaId,
+            callerName: handled.request.caller.name || null,
+            providerGlobalMetaId: state.identity.globalMetaId,
+            providerName: state.identity.name,
+            servicePinId: handled.publishedMaster.currentPinId,
+          },
+        });
+        const artifacts = await exportSessionArtifacts({
+          trace,
+          transcript: {
+            sessionId: trace.session.id,
+            title: trace.session.title || 'Ask Master Provider Runtime',
+            messages: [
+              {
+                id: `${trace.traceId}-caller`,
+                type: 'user',
+                timestamp: trace.createdAt,
+                content: handled.request.task.question,
+                metadata: {
+                  requestId: handled.request.requestId,
+                  callerGlobalMetaId: handled.request.caller.globalMetaId,
+                  servicePinId: handled.publishedMaster.currentPinId,
+                  masterKind: handled.publishedMaster.masterKind,
+                },
+              },
+              {
+                id: `${trace.traceId}-provider`,
+                type: handled.response.status === 'failed' ? 'system' : 'assistant',
+                timestamp: handled.applied.session.updatedAt,
+                content: handled.response.summary,
+                metadata: {
+                  responseStatus: handled.response.status,
+                  followUpQuestion: handled.response.followUpQuestion,
+                  providerGlobalMetaId: state.identity.globalMetaId,
+                  requestId: handled.request.requestId,
+                },
+              },
+            ],
+          },
+        });
+        await persistTraceRecord(runtimeStateStore, trace);
+
+        const shouldDeliverResponse = rawInput.deliverResponse !== false;
+        const replyPin = normalizeText(rawInput.replyPin);
+        const explicitCallerChatPublicKey = normalizeText(rawInput.callerChatPublicKey);
+        let messagePinId: string | null = null;
+        const markDeliveryFailure = async (code: string, message: string) => {
+          await persistTraceRecord(runtimeStateStore, {
+            ...trace,
+            a2a: trace.a2a
+              ? {
+                  ...trace.a2a,
+                  publicStatus: 'local_runtime_error',
+                  latestEvent: 'provider_delivery_failed',
+                }
+              : trace.a2a,
+          });
+          return commandFailed(code, message);
+        };
+
+        if (shouldDeliverResponse) {
+          let privateChatIdentity;
+          try {
+            privateChatIdentity = await signer.getPrivateChatIdentity();
+          } catch (error) {
+            return markDeliveryFailure(
+              'identity_secret_missing',
+              error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.'
+            );
+          }
+
+          const callerChatPublicKey = explicitCallerChatPublicKey
+            || (await resolvePeerChatPublicKey(handled.request.caller.globalMetaId))
+            || '';
+          if (!callerChatPublicKey) {
+            return markDeliveryFailure(
+              'peer_chat_public_key_missing',
+              'Caller has no published chat public key on chain and none was provided.'
+            );
+          }
+
+          let outboundResponse;
+          try {
+            outboundResponse = sendPrivateChat({
+              fromIdentity: {
+                globalMetaId: privateChatIdentity.globalMetaId,
+                privateKeyHex: privateChatIdentity.privateKeyHex,
+              },
+              toGlobalMetaId: handled.request.caller.globalMetaId,
+              peerChatPublicKey: callerChatPublicKey,
+              content: handled.responseJson,
+              replyPinId: replyPin || null,
+            });
+          } catch (error) {
+            return markDeliveryFailure(
+              'master_response_build_failed',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
+
+          try {
+            const write = await signer.writePin({
+              operation: 'create',
+              path: outboundResponse.path,
+              encryption: outboundResponse.encryption,
+              version: outboundResponse.version,
+              contentType: outboundResponse.contentType,
+              payload: outboundResponse.payload,
+              encoding: 'utf-8',
+              network: 'mvc',
+            });
+            messagePinId = normalizeText(write.pinId) || null;
+          } catch (error) {
+            return markDeliveryFailure(
+              'master_response_delivery_failed',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
+        }
+
+        return commandSuccess({
+          traceId: handled.request.traceId,
+          requestId: handled.request.requestId,
+          response: handled.response,
+          responseJson: handled.responseJson,
+          messagePinId,
+          traceSummary: handled.traceSummary,
+          session: {
+            state: handled.applied.session.state,
+            publicStatus: appliedStatus.status,
+            event: handled.applied.event,
+          },
+          traceJsonPath: artifacts.traceJsonPath,
+          traceMarkdownPath: artifacts.traceMarkdownPath,
+          transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
+        });
+      },
       trace: async () => commandFailed('not_implemented', 'Master trace is not implemented yet.'),
     },
     network: {
@@ -2226,6 +2453,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     provider: {
       getSummary: async () => {
         const state = await runtimeStateStore.readState();
+        const masterState = await masterStateStore.read();
         const presence = await providerPresenceStore.read();
         const ratingSnapshot = await readRatingDetailSnapshot({
           ratingDetailStateStore,
@@ -2234,6 +2462,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         return commandSuccess(buildProviderSummaryPayload({
           state,
           presence,
+          masters: masterState.masters,
           ratingDetails: ratingSnapshot.ratingDetails,
           ratingSyncState: ratingSnapshot.ratingSyncState,
           ratingSyncError: ratingSnapshot.ratingSyncError,

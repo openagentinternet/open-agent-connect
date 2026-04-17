@@ -23,6 +23,7 @@ export interface MetabotDaemonHttpHandlers {
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     list?: (input: { online?: boolean; masterKind?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     ask?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    receive?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     trace?: (input: { traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   network?: {
