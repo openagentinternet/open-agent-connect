@@ -69,6 +69,7 @@ import { listMasters, readChainMasterDirectoryWithFallback, summarizePublishedMa
 import { createPendingMasterAskStateStore } from '../core/master/masterPendingAskState';
 import { createPublishedMasterStateStore } from '../core/master/masterPublishedState';
 import { buildMasterAskPreview } from '../core/master/masterPreview';
+import { buildMasterTraceMetadata, buildMasterTraceView } from '../core/master/masterTrace';
 import { publishMasterToChain } from '../core/master/masterServicePublish';
 import { validateMasterServicePayload } from '../core/master/masterServiceSchema';
 import type { MasterDirectoryItem, PublishedMasterRecord } from '../core/master/masterTypes';
@@ -1945,6 +1946,26 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   latestEvent: 'request_sent',
                   taskRunState: 'running',
                 },
+                askMaster: buildMasterTraceMetadata({
+                  role: 'caller',
+                  latestEvent: 'request_sent',
+                  publicStatus: 'requesting_remote',
+                  requestId: pendingAsk.requestId,
+                  masterKind: resolvedTarget.masterKind,
+                  servicePinId: resolvedTarget.masterPinId,
+                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+                  displayName: resolvedTarget.displayName,
+                  triggerMode: currentTrace.askMaster?.triggerMode ?? normalizeText(pendingAsk.request.trigger.mode),
+                  contextMode: currentTrace.askMaster?.contextMode
+                    ?? normalizeText(pendingAsk.request.extensions?.contextMode),
+                  confirmationMode: currentTrace.askMaster?.confirmationMode ?? config.askMaster.confirmationMode,
+                  preview: currentTrace.askMaster?.preview ?? {
+                    userTask: pendingAsk.request.task.userTask,
+                    question: pendingAsk.request.task.question,
+                  },
+                  response: currentTrace.askMaster?.response,
+                  failure: null,
+                }),
               }
             : buildSessionTrace({
                 traceId,
@@ -1970,6 +1991,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   providerName: resolvedTarget.displayName,
                   servicePinId: resolvedTarget.masterPinId,
                 },
+                askMaster: buildMasterTraceMetadata({
+                  role: 'caller',
+                  latestEvent: 'request_sent',
+                  publicStatus: 'requesting_remote',
+                  requestId: pendingAsk.requestId,
+                  masterKind: resolvedTarget.masterKind,
+                  servicePinId: resolvedTarget.masterPinId,
+                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+                  displayName: resolvedTarget.displayName,
+                  triggerMode: normalizeText(pendingAsk.request.trigger.mode),
+                  contextMode: normalizeText(pendingAsk.request.extensions?.contextMode),
+                  confirmationMode: config.askMaster.confirmationMode,
+                  preview: {
+                    userTask: pendingAsk.request.task.userTask,
+                    question: pendingAsk.request.task.question,
+                  },
+                }),
               });
 
           const confirmCommand = `metabot master ask --trace-id ${traceId} --confirm`;
@@ -2105,6 +2143,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
             providerName: resolvedTarget.displayName,
             servicePinId: resolvedTarget.masterPinId,
           },
+          askMaster: buildMasterTraceMetadata({
+            role: 'caller',
+            latestEvent: 'master_preview_ready',
+            publicStatus: 'awaiting_confirmation',
+            requestId,
+            masterKind: resolvedTarget.masterKind,
+            servicePinId: resolvedTarget.masterPinId,
+            providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+            displayName: resolvedTarget.displayName,
+            triggerMode: normalizeText(prepared.request.trigger.mode),
+            contextMode: normalizeText(prepared.request.extensions?.contextMode),
+            confirmationMode: config.askMaster.confirmationMode,
+            preview: {
+              userTask: prepared.request.task.userTask,
+              question: prepared.request.task.question,
+            },
+          }),
         });
 
         const artifacts = await exportSessionArtifacts({
@@ -2214,7 +2269,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         const trace = buildSessionTrace({
           traceId: handled.request.traceId,
-          channel: 'simplemsg',
+          channel: 'a2a',
           exportRoot: runtimeStateStore.paths.exportRoot,
           session: {
             id: `master-provider-${handled.request.traceId}`,
@@ -2238,6 +2293,27 @@ export function createDefaultMetabotDaemonHandlers(input: {
             providerName: state.identity.name,
             servicePinId: handled.publishedMaster.currentPinId,
           },
+          askMaster: buildMasterTraceMetadata({
+            role: handled.received.session.role,
+            latestEvent: handled.applied.event,
+            publicStatus: appliedStatus.status,
+            requestId: handled.request.requestId,
+            masterKind: handled.publishedMaster.masterKind,
+            servicePinId: handled.publishedMaster.currentPinId,
+            providerGlobalMetaId: state.identity.globalMetaId,
+            displayName: handled.publishedMaster.displayName,
+            triggerMode: normalizeText(handled.request.trigger.mode),
+            contextMode: normalizeText(handled.request.extensions?.contextMode),
+            preview: {
+              userTask: handled.request.task.userTask,
+              question: handled.request.task.question,
+            },
+            response: {
+              status: handled.response.status,
+              summary: handled.response.summary,
+              followUpQuestion: handled.response.followUpQuestion,
+            },
+          }),
         });
         const artifacts = await exportSessionArtifacts({
           trace,
@@ -2288,6 +2364,25 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   latestEvent: 'provider_delivery_failed',
                 }
               : trace.a2a,
+            askMaster: buildMasterTraceMetadata({
+              role: trace.a2a?.role,
+              latestEvent: 'provider_delivery_failed',
+              publicStatus: 'local_runtime_error',
+              requestId: trace.askMaster?.requestId,
+              masterKind: trace.askMaster?.masterKind,
+              servicePinId: trace.askMaster?.servicePinId,
+              providerGlobalMetaId: trace.askMaster?.providerGlobalMetaId,
+              displayName: trace.askMaster?.displayName,
+              triggerMode: trace.askMaster?.triggerMode,
+              contextMode: trace.askMaster?.contextMode,
+              confirmationMode: trace.askMaster?.confirmationMode,
+              preview: trace.askMaster?.preview,
+              response: trace.askMaster?.response,
+              failure: {
+                code,
+                message,
+              },
+            }),
           });
           return commandFailed(code, message);
         };
@@ -2369,7 +2464,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
           transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
         });
       },
-      trace: async () => commandFailed('not_implemented', 'Master trace is not implemented yet.'),
+      trace: async ({ traceId }) => {
+        const state = await runtimeStateStore.readState();
+        const trace = state.traces.find((entry) => entry.traceId === traceId);
+        if (!trace) {
+          return commandFailed('trace_not_found', `Trace not found: ${traceId}`);
+        }
+
+        const view = buildMasterTraceView(trace);
+        if (!view) {
+          return commandFailed('trace_not_master_flow', `Trace is not an Ask Master flow: ${traceId}`);
+        }
+
+        return commandSuccess(view);
+      },
     },
     network: {
       listServices: async ({ online }) => {

@@ -147,6 +147,24 @@ function renderTranscriptMarkdown(input: ExportSessionArtifactsInput): string {
   if (input.trace.a2a?.taskRunState) {
     lines.push(`Task Run State: ${input.trace.a2a.taskRunState}`);
   }
+  if (input.trace.askMaster?.flow === 'master') {
+    lines.push(`Ask Master Flow: ${input.trace.askMaster.flow}`);
+    if (input.trace.askMaster.displayName) {
+      lines.push(`Master: ${input.trace.askMaster.displayName}`);
+    }
+    if (input.trace.askMaster.masterKind) {
+      lines.push(`Master Kind: ${input.trace.askMaster.masterKind}`);
+    }
+    if (input.trace.askMaster.requestId) {
+      lines.push(`Request ID: ${input.trace.askMaster.requestId}`);
+    }
+    if (input.trace.askMaster.canonicalStatus) {
+      lines.push(`Ask Master Status: ${input.trace.askMaster.canonicalStatus}`);
+    }
+    if (input.trace.askMaster.transport) {
+      lines.push(`Ask Master Transport: ${input.trace.askMaster.transport}`);
+    }
+  }
   if (input.trace.a2a?.publicStatus === 'timeout') {
     lines.push(renderTimeoutNote('transcript'));
   }
@@ -195,6 +213,24 @@ function renderTraceMarkdown(trace: SessionTraceRecord): string {
   }
   if (trace.a2a?.taskRunState) {
     lines.push(`Task Run State: ${trace.a2a.taskRunState}`);
+  }
+  if (trace.askMaster?.flow === 'master') {
+    lines.push(`Ask Master Flow: ${trace.askMaster.flow}`);
+    if (trace.askMaster.displayName) {
+      lines.push(`Master: ${trace.askMaster.displayName}`);
+    }
+    if (trace.askMaster.masterKind) {
+      lines.push(`Master Kind: ${trace.askMaster.masterKind}`);
+    }
+    if (trace.askMaster.requestId) {
+      lines.push(`Request ID: ${trace.askMaster.requestId}`);
+    }
+    if (trace.askMaster.canonicalStatus) {
+      lines.push(`Ask Master Status: ${trace.askMaster.canonicalStatus}`);
+    }
+    if (trace.askMaster.transport) {
+      lines.push(`Ask Master Transport: ${trace.askMaster.transport}`);
+    }
   }
   if (trace.a2a?.publicStatus === 'timeout') {
     lines.push(renderTimeoutNote('trace'));
