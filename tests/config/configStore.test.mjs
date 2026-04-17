@@ -30,12 +30,26 @@ test('createConfigStore defaults to evolution_network enabled true and persists 
     const defaults = await store.read();
     assert.strictEqual(defaults.evolution_network.enabled, true);
     assert.strictEqual(defaults.evolution_network.autoRecordExecutions, true);
+    assert.deepEqual(defaults.askMaster, {
+      enabled: true,
+      triggerMode: 'manual',
+      confirmationMode: 'always',
+      contextMode: 'standard',
+      trustedMasters: [],
+    });
 
     const updated = {
       evolution_network: {
         enabled: false,
         autoAdoptSameSkillSameScope: true,
         autoRecordExecutions: true
+      },
+      askMaster: {
+        enabled: true,
+        triggerMode: 'suggest',
+        confirmationMode: 'always',
+        contextMode: 'compact',
+        trustedMasters: ['master-pin-1'],
       }
     };
 
@@ -62,6 +76,13 @@ test('read merges defaults when config fields are missing', async () => {
         enabled: false,
         autoAdoptSameSkillSameScope: false,
         autoRecordExecutions: true
+      },
+      askMaster: {
+        enabled: true,
+        triggerMode: 'manual',
+        confirmationMode: 'always',
+        contextMode: 'standard',
+        trustedMasters: [],
       }
     });
   });
@@ -86,6 +107,13 @@ test('read ignores non-boolean config values and falls back to defaults', async 
         enabled: true,
         autoAdoptSameSkillSameScope: false,
         autoRecordExecutions: true
+      },
+      askMaster: {
+        enabled: true,
+        triggerMode: 'manual',
+        confirmationMode: 'always',
+        contextMode: 'standard',
+        trustedMasters: [],
       }
     });
   });

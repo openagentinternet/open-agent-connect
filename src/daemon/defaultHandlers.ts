@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
+  commandAwaitingConfirmation,
   commandFailed,
   commandManualActionRequired,
   commandSuccess,
@@ -55,6 +56,7 @@ import {
 } from '../core/bootstrap/localIdentityBootstrap';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import { buildDelegationOrderPayload } from '../core/orders/delegationOrderMessage';
+import { createConfigStore } from '../core/config/configStore';
 import {
   createSocketIoMetaWebReplyWaiter,
   type AwaitMetaWebServiceReplyInput,
@@ -63,7 +65,9 @@ import {
 } from '../core/a2a/metawebReplyWaiter';
 import { parseMasterRequest, parseMasterResponse } from '../core/master/masterMessageSchema';
 import { listMasters, readChainMasterDirectoryWithFallback, summarizePublishedMaster } from '../core/master/masterDirectory';
+import { createPendingMasterAskStateStore } from '../core/master/masterPendingAskState';
 import { createPublishedMasterStateStore } from '../core/master/masterPublishedState';
+import { buildMasterAskPreview } from '../core/master/masterPreview';
 import { publishMasterToChain } from '../core/master/masterServicePublish';
 import { validateMasterServicePayload } from '../core/master/masterServiceSchema';
 import type { MasterDirectoryItem, PublishedMasterRecord } from '../core/master/masterTypes';
@@ -88,6 +92,25 @@ async function sleep(ms: number): Promise<void> {
 
 function sanitizeServiceSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'service';
+}
+
+function buildMasterTraceId(input: {
+  providerGlobalMetaId: string;
+  servicePinId: string;
+  question: string;
+  now: number;
+}): string {
+  const providerPart = sanitizeServiceSegment(normalizeText(input.providerGlobalMetaId).slice(0, 16)) || 'provider';
+  const servicePart = sanitizeServiceSegment(normalizeText(input.servicePinId).slice(0, 16)) || 'master';
+  const suffix = createHash('sha256')
+    .update(`${input.now}:${input.question}`)
+    .digest('hex')
+    .slice(0, 8);
+  return `trace-master-${providerPart}-${servicePart}-${suffix}`;
+}
+
+function buildMasterRequestId(now: number): string {
+  return `master-req-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function resolvePaymentAddress(identity: RuntimeIdentityRecord, currency: string): string {
@@ -303,6 +326,30 @@ function describeStructuredPrivateChatContent(content: string): {
     messageType: null,
     requestId: null,
     traceId: null,
+  };
+}
+
+function readMasterAskDraft(rawInput: Record<string, unknown>) {
+  const target = readObject(rawInput.target) ?? {};
+  return {
+    target: {
+      servicePinId: normalizeText(target.servicePinId),
+      providerGlobalMetaId: normalizeText(target.providerGlobalMetaId),
+      masterKind: normalizeText(target.masterKind),
+      displayName: normalizeText(target.displayName) || null,
+    },
+    triggerMode: normalizeText(rawInput.triggerMode) || null,
+    contextMode: normalizeText(rawInput.contextMode) || null,
+    userTask: normalizeText(rawInput.userTask),
+    question: normalizeText(rawInput.question),
+    goal: normalizeText(rawInput.goal) || null,
+    workspaceSummary: normalizeText(rawInput.workspaceSummary) || null,
+    errorSummary: normalizeText(rawInput.errorSummary) || null,
+    diffSummary: normalizeText(rawInput.diffSummary) || null,
+    relevantFiles: readStringArray(rawInput.relevantFiles),
+    artifacts: Array.isArray(rawInput.artifacts) ? rawInput.artifacts : [],
+    constraints: readStringArray(rawInput.constraints),
+    desiredOutput: readObject(rawInput.desiredOutput),
   };
 }
 
@@ -1105,6 +1152,42 @@ async function listRuntimeDirectoryMasters(input: {
   };
 }
 
+async function resolveExplicitMasterTarget(input: {
+  draft: ReturnType<typeof readMasterAskDraft>;
+  masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
+  hotRoot: string;
+  chainApiBaseUrl?: string;
+  providerGlobalMetaId?: string | null;
+  localProviderOnline: boolean;
+  localLastSeenSec: number | null;
+  providerDaemonBaseUrl?: string | null;
+}): Promise<MasterDirectoryItem | null> {
+  const servicePinId = normalizeText(input.draft.target.servicePinId);
+  const providerGlobalMetaId = normalizeText(input.draft.target.providerGlobalMetaId);
+  const masterKind = normalizeText(input.draft.target.masterKind);
+  if (!servicePinId || !providerGlobalMetaId || !masterKind) {
+    return null;
+  }
+
+  const directory = await listRuntimeDirectoryMasters({
+    masterStateStore: input.masterStateStore,
+    hotRoot: input.hotRoot,
+    chainApiBaseUrl: input.chainApiBaseUrl,
+    onlineOnly: false,
+    host: DEFAULT_MASTER_HOST_MODE,
+    masterKind,
+    localProviderOnline: input.localProviderOnline,
+    localLastSeenSec: input.localLastSeenSec,
+    providerDaemonBaseUrl: input.providerDaemonBaseUrl,
+    providerGlobalMetaId: input.providerGlobalMetaId,
+  });
+
+  return directory.masters.find((entry) => (
+    normalizeText(entry.masterPinId) === servicePinId
+    && normalizeText(entry.providerGlobalMetaId) === providerGlobalMetaId
+  )) ?? null;
+}
+
 async function persistTraceRecord(
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>,
   trace: SessionTraceRecord,
@@ -1397,8 +1480,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
 }): MetabotDaemonHttpHandlers {
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   const signer = input.signer ?? createLocalMnemonicSigner({ secretStore });
+  const configStore = createConfigStore(input.homeDir);
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
   const masterStateStore = createPublishedMasterStateStore(input.homeDir);
+  const pendingMasterAskStateStore = createPendingMasterAskStateStore(input.homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(input.homeDir);
   const ratingDetailStateStore = createRatingDetailStateStore(input.homeDir);
   const sessionStateStore = createSessionStateStore(input.homeDir);
@@ -1704,7 +1789,359 @@ export function createDefaultMetabotDaemonHandlers(input: {
           fallbackUsed: directory.fallbackUsed,
         });
       },
-      ask: async () => commandFailed('not_implemented', 'Master ask is not implemented yet.'),
+      ask: async (rawInput) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
+        }
+
+        const config = await configStore.read();
+        if (!config.askMaster.enabled) {
+          return commandFailed('ask_master_disabled', 'Ask Master is disabled in the local config.');
+        }
+
+        const daemon = input.getDaemonRecord();
+        const presence = await providerPresenceStore.read();
+        const localProviderOnline = isProviderPresenceOnline(presence);
+        const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
+          ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
+          : null;
+
+        if (rawInput.confirm === true) {
+          const traceId = normalizeText(rawInput.traceId);
+          if (!traceId) {
+            return commandFailed('missing_trace_id', 'Master ask confirmation requires traceId.');
+          }
+
+          let pendingAsk;
+          try {
+            pendingAsk = await pendingMasterAskStateStore.get(traceId);
+          } catch {
+            return commandFailed('pending_master_ask_not_found', `Pending Ask Master record not found: ${traceId}`);
+          }
+
+          const resolvedTarget = await resolveExplicitMasterTarget({
+            draft: {
+              target: {
+                servicePinId: normalizeText(pendingAsk.target.servicePinId),
+                providerGlobalMetaId: normalizeText(pendingAsk.target.providerGlobalMetaId),
+                masterKind: normalizeText(pendingAsk.target.masterKind),
+                displayName: normalizeText(pendingAsk.target.displayName) || null,
+              },
+              triggerMode: null,
+              contextMode: null,
+              userTask: normalizeText(pendingAsk.request.task.userTask),
+              question: normalizeText(pendingAsk.request.task.question),
+              goal: null,
+              workspaceSummary: null,
+              errorSummary: null,
+              diffSummary: null,
+              relevantFiles: [],
+              artifacts: [],
+              constraints: [],
+              desiredOutput: null,
+            },
+            masterStateStore,
+            hotRoot: runtimeStateStore.paths.hotRoot,
+            chainApiBaseUrl: input.chainApiBaseUrl,
+            localProviderOnline,
+            localLastSeenSec,
+            providerDaemonBaseUrl: daemon?.baseUrl || null,
+            providerGlobalMetaId: state.identity.globalMetaId,
+          });
+          if (!resolvedTarget) {
+            return commandFailed('master_target_not_found', 'Target Master is no longer available for confirmation.');
+          }
+
+          let privateChatIdentity;
+          try {
+            privateChatIdentity = await signer.getPrivateChatIdentity();
+          } catch (error) {
+            return commandFailed(
+              'identity_secret_missing',
+              error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.'
+            );
+          }
+
+          const peerChatPublicKey = resolvedTarget.providerGlobalMetaId === state.identity.globalMetaId
+            ? state.identity.chatPublicKey
+            : await resolvePeerChatPublicKey(resolvedTarget.providerGlobalMetaId) ?? '';
+          if (!peerChatPublicKey) {
+            return commandFailed(
+              'peer_chat_public_key_missing',
+              'Target Master has no published chat public key on chain.'
+            );
+          }
+
+          let outboundRequest;
+          try {
+            outboundRequest = sendPrivateChat({
+              fromIdentity: {
+                globalMetaId: privateChatIdentity.globalMetaId,
+                privateKeyHex: privateChatIdentity.privateKeyHex,
+              },
+              toGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+              peerChatPublicKey,
+              content: pendingAsk.requestJson,
+            });
+          } catch (error) {
+            return commandFailed(
+              'master_request_build_failed',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
+
+          let messagePinId = '';
+          try {
+            const write = await signer.writePin({
+              operation: 'create',
+              path: outboundRequest.path,
+              encryption: outboundRequest.encryption,
+              version: outboundRequest.version,
+              contentType: outboundRequest.contentType,
+              payload: outboundRequest.payload,
+              encoding: 'utf-8',
+              network: 'mvc',
+            });
+            messagePinId = normalizeText(write.pinId);
+          } catch (error) {
+            return commandFailed(
+              'master_request_broadcast_failed',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
+
+          await pendingMasterAskStateStore.put({
+            ...pendingAsk,
+            confirmationState: 'sent',
+            updatedAt: Date.now(),
+            sentAt: Date.now(),
+            messagePinId: messagePinId || null,
+          });
+
+          const currentTrace = state.traces.find((entry) => entry.traceId === traceId);
+          const updatedTrace = currentTrace
+            ? {
+                ...currentTrace,
+                a2a: {
+                  ...(currentTrace.a2a ?? {
+                    sessionId: null,
+                    taskRunId: null,
+                    role: 'caller',
+                    publicStatus: null,
+                    latestEvent: null,
+                    taskRunState: null,
+                    callerGlobalMetaId: state.identity.globalMetaId,
+                    callerName: state.identity.name,
+                    providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+                    providerName: resolvedTarget.displayName,
+                    servicePinId: resolvedTarget.masterPinId,
+                  }),
+                  publicStatus: 'requesting_remote',
+                  latestEvent: 'request_sent',
+                  taskRunState: 'running',
+                },
+              }
+            : buildSessionTrace({
+                traceId,
+                channel: 'a2a',
+                exportRoot: runtimeStateStore.paths.exportRoot,
+                session: {
+                  id: `master-${traceId}`,
+                  title: `${resolvedTarget.displayName} Ask`,
+                  type: 'a2a',
+                  metabotId: state.identity.metabotId,
+                  peerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+                  peerName: resolvedTarget.displayName,
+                  externalConversationId: `master:${state.identity.globalMetaId}:${resolvedTarget.providerGlobalMetaId}:${traceId}`,
+                },
+                a2a: {
+                  role: 'caller',
+                  publicStatus: 'requesting_remote',
+                  latestEvent: 'request_sent',
+                  taskRunState: 'running',
+                  callerGlobalMetaId: state.identity.globalMetaId,
+                  callerName: state.identity.name,
+                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+                  providerName: resolvedTarget.displayName,
+                  servicePinId: resolvedTarget.masterPinId,
+                },
+              });
+
+          const confirmCommand = `metabot master ask --trace-id ${traceId} --confirm`;
+          const artifacts = await exportSessionArtifacts({
+            trace: updatedTrace,
+            transcript: {
+              sessionId: updatedTrace.session.id,
+              title: updatedTrace.session.title || 'Ask Master',
+              messages: [
+                {
+                  id: `${traceId}-user`,
+                  type: 'user',
+                  timestamp: updatedTrace.createdAt,
+                  content: normalizeText(pendingAsk.request.task.question),
+                },
+                {
+                  id: `${traceId}-preview`,
+                  type: 'assistant',
+                  timestamp: updatedTrace.createdAt,
+                  content: `Preview prepared for ${normalizeText(pendingAsk.target.displayName) || resolvedTarget.displayName}.`,
+                  metadata: {
+                    confirmCommand,
+                  },
+                },
+                {
+                  id: `${traceId}-sent`,
+                  type: 'assistant',
+                  timestamp: Date.now(),
+                  content: `Ask Master request sent to ${resolvedTarget.displayName} over simplemsg.`,
+                  metadata: {
+                    messagePinId: messagePinId || null,
+                    path: outboundRequest.path,
+                  },
+                },
+              ],
+            },
+          });
+
+          await persistTraceRecord(runtimeStateStore, updatedTrace);
+
+          return commandSuccess({
+            traceId,
+            requestId: pendingAsk.requestId,
+            messagePinId: messagePinId || null,
+            session: {
+              state: 'requesting_remote',
+              publicStatus: 'requesting_remote',
+              event: 'request_sent',
+            },
+            traceJsonPath: artifacts.traceJsonPath,
+            traceMarkdownPath: artifacts.traceMarkdownPath,
+            transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
+          });
+        }
+
+        const draft = readMasterAskDraft(rawInput);
+        const resolvedTarget = await resolveExplicitMasterTarget({
+          draft,
+          masterStateStore,
+          hotRoot: runtimeStateStore.paths.hotRoot,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+          localProviderOnline,
+          localLastSeenSec,
+          providerDaemonBaseUrl: daemon?.baseUrl || null,
+          providerGlobalMetaId: state.identity.globalMetaId,
+        });
+        if (!resolvedTarget) {
+          return commandFailed('master_target_not_found', 'Target Master could not be resolved from the local directory.');
+        }
+
+        const now = Date.now();
+        const traceId = buildMasterTraceId({
+          providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+          servicePinId: resolvedTarget.masterPinId,
+          question: draft.question,
+          now,
+        });
+        const requestId = buildMasterRequestId(now);
+        let prepared;
+        try {
+          prepared = buildMasterAskPreview({
+            draft,
+            resolvedTarget,
+            caller: {
+              globalMetaId: state.identity.globalMetaId,
+              name: state.identity.name,
+              host: DEFAULT_MASTER_HOST_MODE,
+            },
+            traceId,
+            requestId,
+            confirmationMode: config.askMaster.confirmationMode,
+          });
+        } catch (error) {
+          return commandFailed(
+            'invalid_master_ask_draft',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+
+        await pendingMasterAskStateStore.put({
+          traceId,
+          requestId,
+          createdAt: now,
+          updatedAt: now,
+          confirmationState: 'awaiting_confirmation',
+          requestJson: prepared.requestJson,
+          request: prepared.request,
+          target: prepared.preview.target,
+          preview: prepared.preview,
+        });
+
+        const trace = buildSessionTrace({
+          traceId,
+          channel: 'a2a',
+          exportRoot: runtimeStateStore.paths.exportRoot,
+          session: {
+            id: `master-${traceId}`,
+            title: `${resolvedTarget.displayName} Ask`,
+            type: 'a2a',
+            metabotId: state.identity.metabotId,
+            peerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+            peerName: resolvedTarget.displayName,
+            externalConversationId: `master:${state.identity.globalMetaId}:${resolvedTarget.providerGlobalMetaId}:${traceId}`,
+          },
+          a2a: {
+            role: 'caller',
+            publicStatus: 'awaiting_confirmation',
+            latestEvent: 'master_preview_ready',
+            taskRunState: 'queued',
+            callerGlobalMetaId: state.identity.globalMetaId,
+            callerName: state.identity.name,
+            providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+            providerName: resolvedTarget.displayName,
+            servicePinId: resolvedTarget.masterPinId,
+          },
+        });
+
+        const artifacts = await exportSessionArtifacts({
+          trace,
+          transcript: {
+            sessionId: trace.session.id,
+            title: trace.session.title || 'Ask Master',
+            messages: [
+              {
+                id: `${traceId}-user`,
+                type: 'user',
+                timestamp: now,
+                content: prepared.request.task.question,
+              },
+              {
+                id: `${traceId}-assistant`,
+                type: 'assistant',
+                timestamp: now,
+                content: `Ask Master preview prepared for ${resolvedTarget.displayName}.`,
+                metadata: {
+                  confirmCommand: prepared.preview.confirmation.confirmCommand,
+                  servicePinId: resolvedTarget.masterPinId,
+                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+                },
+              },
+            ],
+          },
+        });
+
+        await persistTraceRecord(runtimeStateStore, trace);
+
+        return commandAwaitingConfirmation({
+          traceId,
+          requestId,
+          confirmation: prepared.preview.confirmation,
+          preview: prepared.preview,
+          traceJsonPath: artifacts.traceJsonPath,
+          traceMarkdownPath: artifacts.traceMarkdownPath,
+          transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
+        });
+      },
       trace: async () => commandFailed('not_implemented', 'Master trace is not implemented yet.'),
     },
     network: {

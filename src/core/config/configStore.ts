@@ -26,29 +26,73 @@ function normalizeBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+function normalizeString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const entry of value) {
+    const text = normalizeString(entry);
+    if (!text || seen.has(text)) {
+      continue;
+    }
+    seen.add(text);
+    normalized.push(text);
+  }
+  return normalized;
+}
+
 function normalizeConfig(input: unknown): MetabotConfig {
   const defaults = createDefaultConfig();
   if (!input || typeof input !== 'object') {
     return defaults;
   }
 
-  const maybeNetwork = (input as Record<string, unknown>)['evolution_network'];
-  if (!maybeNetwork || typeof maybeNetwork !== 'object') {
-    return defaults;
-  }
+  const root = input as Record<string, unknown>;
+  const maybeNetwork = root['evolution_network'];
+  const maybeAskMaster = root['askMaster'];
 
-  const source = maybeNetwork as Record<string, unknown>;
+  const networkSource = maybeNetwork && typeof maybeNetwork === 'object'
+    ? maybeNetwork as Record<string, unknown>
+    : {};
+  const askMasterSource = maybeAskMaster && typeof maybeAskMaster === 'object'
+    ? maybeAskMaster as Record<string, unknown>
+    : {};
+
+  const triggerMode = normalizeString(askMasterSource.triggerMode);
+  const confirmationMode = normalizeString(askMasterSource.confirmationMode);
+  const contextMode = normalizeString(askMasterSource.contextMode);
+
   return {
     evolution_network: {
-      enabled: normalizeBoolean(source.enabled, defaults.evolution_network.enabled),
+      enabled: normalizeBoolean(networkSource.enabled, defaults.evolution_network.enabled),
       autoAdoptSameSkillSameScope: normalizeBoolean(
-        source.autoAdoptSameSkillSameScope,
+        networkSource.autoAdoptSameSkillSameScope,
         defaults.evolution_network.autoAdoptSameSkillSameScope
       ),
       autoRecordExecutions: normalizeBoolean(
-        source.autoRecordExecutions,
+        networkSource.autoRecordExecutions,
         defaults.evolution_network.autoRecordExecutions
       )
+    },
+    askMaster: {
+      enabled: normalizeBoolean(askMasterSource.enabled, defaults.askMaster.enabled),
+      triggerMode: triggerMode === 'manual' || triggerMode === 'suggest' || triggerMode === 'auto'
+        ? triggerMode
+        : defaults.askMaster.triggerMode,
+      confirmationMode: confirmationMode === 'always' || confirmationMode === 'sensitive_only' || confirmationMode === 'never'
+        ? confirmationMode
+        : defaults.askMaster.confirmationMode,
+      contextMode: contextMode === 'compact' || contextMode === 'standard' || contextMode === 'full_task'
+        ? contextMode
+        : defaults.askMaster.contextMode,
+      trustedMasters: normalizeStringArray(askMasterSource.trustedMasters),
     }
   };
 }
@@ -59,7 +103,14 @@ function cloneConfig(config: MetabotConfig): MetabotConfig {
       enabled: config.evolution_network.enabled,
       autoAdoptSameSkillSameScope: config.evolution_network.autoAdoptSameSkillSameScope,
       autoRecordExecutions: config.evolution_network.autoRecordExecutions
-    }
+    },
+    askMaster: {
+      enabled: config.askMaster.enabled,
+      triggerMode: config.askMaster.triggerMode,
+      confirmationMode: config.askMaster.confirmationMode,
+      contextMode: config.askMaster.contextMode,
+      trustedMasters: [...config.askMaster.trustedMasters],
+    },
   };
 }
 

@@ -9,6 +9,7 @@ export interface MetabotPaths {
   daemonStatePath: string;
   providerPresenceStatePath: string;
   ratingDetailStatePath: string;
+  masterPendingAskStatePath: string;
   secretsPath: string;
   configPath: string;
   evolutionRoot: string;
@@ -48,6 +49,7 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     daemonStatePath: path.join(hotRoot, 'daemon.json'),
     providerPresenceStatePath: path.join(hotRoot, 'provider-presence.json'),
     ratingDetailStatePath: path.join(hotRoot, 'rating-detail.json'),
+    masterPendingAskStatePath: path.join(hotRoot, 'master-pending-asks.json'),
     secretsPath: path.join(hotRoot, 'secrets.json'),
     configPath,
     evolutionRoot,
