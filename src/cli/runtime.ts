@@ -465,6 +465,16 @@ function resolveCliEntrypoint(): string {
   return path.join(__dirname, 'main.js');
 }
 
+function resolveLocalUiPath(page: string): string {
+  if (page === 'buzz') {
+    return '/ui/buzz/app/index.html';
+  }
+  if (page === 'chat') {
+    return '/ui/chat/app/chat.html';
+  }
+  return `/ui/${page}`;
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1247,7 +1257,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           : '';
         return commandSuccess({
           page: input.page,
-          localUiUrl: `${baseUrl}/ui/${input.page}${query}`,
+          localUiUrl: `${baseUrl}${resolveLocalUiPath(input.page)}${query}`,
         });
       },
     },

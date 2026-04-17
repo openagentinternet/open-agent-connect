@@ -1355,9 +1355,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
             ...result,
             localUiUrl: buildDaemonLocalUiUrl(
               input.getDaemonRecord(),
-              '/ui/buzz',
+              '/ui/buzz/app/index.html',
               { pinId: result.pinId }
-            ) ?? '/ui/buzz',
+            ) ?? '/ui/buzz/app/index.html',
           });
         } catch (error) {
           return commandFailed(

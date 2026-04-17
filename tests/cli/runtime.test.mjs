@@ -684,6 +684,30 @@ test('ui open trace returns a local trace inspector url with the requested trace
   assert.match(opened.payload.data.localUiUrl, /\/ui\/trace\?traceId=trace-123$/);
 });
 
+test('ui open buzz returns the bundled Buzz entry html url', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  t.after(async () => stopDaemon(homeDir));
+
+  const opened = await runCommand(homeDir, ['ui', 'open', '--page', 'buzz']);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, true);
+  assert.equal(opened.payload.data.page, 'buzz');
+  assert.match(opened.payload.data.localUiUrl, /\/ui\/buzz\/app\/index\.html$/);
+});
+
+test('ui open chat returns the bundled Chat entry html url', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  t.after(async () => stopDaemon(homeDir));
+
+  const opened = await runCommand(homeDir, ['ui', 'open', '--page', 'chat']);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, true);
+  assert.equal(opened.payload.data.page, 'chat');
+  assert.match(opened.payload.data.localUiUrl, /\/ui\/chat\/app\/chat\.html$/);
+});
+
 test('buzz post succeeds immediately after bootstrap identity create', async (t) => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
   t.after(async () => stopDaemon(homeDir));
@@ -703,7 +727,7 @@ test('buzz post succeeds immediately after bootstrap identity create', async (t)
   assert.equal(posted.payload.data.content, 'hello from the first metabot buzz');
   assert.equal(posted.payload.data.globalMetaId, created.payload.data.globalMetaId);
   assert.match(posted.payload.data.pinId, /^\/protocols\/simplebuzz-pin-/);
-  assert.match(posted.payload.data.localUiUrl, /\/ui\/buzz(?:\?|$)/);
+  assert.match(posted.payload.data.localUiUrl, /\/ui\/buzz\/app\/index\.html(?:\?|$)/);
 
   const buzzViewResponse = await fetch(posted.payload.data.localUiUrl);
   const buzzViewHtml = await buzzViewResponse.text();

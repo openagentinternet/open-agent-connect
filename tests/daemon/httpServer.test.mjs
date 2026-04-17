@@ -749,6 +749,19 @@ test('GET /ui/buzz serves the bundled Buzz MetaApp entry from the daemon server'
   assert.match(html, /app\.js/);
 });
 
+test('GET /ui/buzz/app/index.html serves the bundled Buzz entry html from the daemon server', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/buzz/app/index.html`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /IDFramework - Buzz Feed Demo/);
+  assert.match(html, /<base href="\/ui\/buzz\/app\/">/);
+});
+
 test('GET /ui/buzz/app/app.css serves bundled Buzz static assets from the same daemon', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
@@ -774,6 +787,19 @@ test('GET /ui/chat serves the bundled Chat MetaApp entry from the daemon server'
   assert.match(html, /<base href="\/ui\/chat\/app\/">/);
   assert.match(html, /id-chat-input-box/);
   assert.match(html, /chat\.js/);
+});
+
+test('GET /ui/chat/app/chat.html serves the bundled Chat entry html from the daemon server', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/chat/app/chat.html`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /IDFramework - Chat Demo/);
+  assert.match(html, /<base href="\/ui\/chat\/app\/">/);
 });
 
 test('GET /ui/chat/app/chat.js serves bundled Chat static assets from the same daemon', async (t) => {
