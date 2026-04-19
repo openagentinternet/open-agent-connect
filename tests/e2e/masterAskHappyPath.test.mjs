@@ -435,3 +435,86 @@ test('caller surfaces failed replies as remote_failed and preserves the structur
   const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /The remote master could not validate the request payload/i);
 });
+
+test('caller surfaces declined replies as remote_failed and preserves the decline details', { concurrency: false }, async (t) => {
+  const prepared = await prepareMasterHomes(t);
+  const responseJson = buildFakeMasterResponse(prepared.preview, {
+    status: 'declined',
+    summary: 'The remote master declined because the request is outside its supported scope.',
+    errorCode: 'master_declined',
+    structuredData: {
+      risks: ['This master is intentionally refusing the request rather than failing to process it.'],
+    },
+    followUpQuestion: 'Can you route this to a planning-oriented master instead?',
+  });
+
+  const confirm = await runCommand(
+    prepared.callerHome,
+    ['master', 'ask', '--trace-id', prepared.preview.payload.data.traceId, '--confirm'],
+    {
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: VALID_TEST_PROVIDER_CHAT_PUBLIC_KEY,
+      METABOT_TEST_FAKE_MASTER_REPLY: JSON.stringify({ responseJson }),
+    }
+  );
+
+  assert.equal(confirm.exitCode, 0);
+  assert.equal(confirm.payload.ok, true);
+  assert.equal(confirm.payload.data.session.publicStatus, 'remote_failed');
+  assert.equal(confirm.payload.data.session.event, 'provider_failed');
+  assert.equal(confirm.payload.data.response.status, 'declined');
+  assert.equal(confirm.payload.data.response.errorCode, 'master_declined');
+  assert.equal(
+    confirm.payload.data.response.followUpQuestion,
+    'Can you route this to a planning-oriented master instead?'
+  );
+
+  const trace = await runCommand(prepared.callerHome, ['master', 'trace', '--id', prepared.preview.payload.data.traceId]);
+  assert.equal(trace.exitCode, 0);
+  assert.equal(trace.payload.ok, true);
+  assert.equal(trace.payload.data.canonicalStatus, 'failed');
+  assert.equal(trace.payload.data.response.status, 'declined');
+  assert.equal(trace.payload.data.response.errorCode, 'master_declined');
+  assert.equal(trace.payload.data.failure.code, 'master_declined');
+
+  const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
+  assert.match(transcriptMarkdown, /outside its supported scope/i);
+});
+
+test('caller surfaces unavailable replies as remote_failed and preserves the availability details', { concurrency: false }, async (t) => {
+  const prepared = await prepareMasterHomes(t);
+  const responseJson = buildFakeMasterResponse(prepared.preview, {
+    status: 'unavailable',
+    summary: 'The remote master is temporarily unavailable while the provider is restarting.',
+    errorCode: 'master_temporarily_unavailable',
+    structuredData: {
+      risks: ['Retrying immediately may fail until the provider finishes restarting.'],
+    },
+  });
+
+  const confirm = await runCommand(
+    prepared.callerHome,
+    ['master', 'ask', '--trace-id', prepared.preview.payload.data.traceId, '--confirm'],
+    {
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: VALID_TEST_PROVIDER_CHAT_PUBLIC_KEY,
+      METABOT_TEST_FAKE_MASTER_REPLY: JSON.stringify({ responseJson }),
+    }
+  );
+
+  assert.equal(confirm.exitCode, 0);
+  assert.equal(confirm.payload.ok, true);
+  assert.equal(confirm.payload.data.session.publicStatus, 'remote_failed');
+  assert.equal(confirm.payload.data.session.event, 'provider_failed');
+  assert.equal(confirm.payload.data.response.status, 'unavailable');
+  assert.equal(confirm.payload.data.response.errorCode, 'master_temporarily_unavailable');
+
+  const trace = await runCommand(prepared.callerHome, ['master', 'trace', '--id', prepared.preview.payload.data.traceId]);
+  assert.equal(trace.exitCode, 0);
+  assert.equal(trace.payload.ok, true);
+  assert.equal(trace.payload.data.canonicalStatus, 'failed');
+  assert.equal(trace.payload.data.response.status, 'unavailable');
+  assert.equal(trace.payload.data.response.errorCode, 'master_temporarily_unavailable');
+  assert.equal(trace.payload.data.failure.code, 'master_temporarily_unavailable');
+
+  const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
+  assert.match(transcriptMarkdown, /temporarily unavailable/i);
+});
