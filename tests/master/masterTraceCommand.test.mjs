@@ -8,8 +8,12 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
+const { createSessionStateStore } = require('../../dist/core/a2a/sessionStateStore.js');
 const { createPendingMasterAskStateStore } = require('../../dist/core/master/masterPendingAskState.js');
-const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
+const {
+  createDefaultMetabotDaemonHandlers,
+  rebuildTraceArtifactsFromSessionState,
+} = require('../../dist/daemon/defaultHandlers.js');
 const { buildSessionTrace } = require('../../dist/core/chat/sessionTrace.js');
 const { buildMasterRequestJson, parseMasterRequest } = require('../../dist/core/master/masterMessageSchema.js');
 const { buildMasterTraceMetadata } = require('../../dist/core/master/masterTrace.js');
@@ -181,4 +185,183 @@ test('master trace reads ask master semantics instead of private chat wording', 
   assert.equal(payload.data.preview.question, 'Why does the local build fail only in this workspace?');
   assert.equal(payload.data.response, null);
   assert.doesNotMatch(JSON.stringify(payload.data), /Private Chat|refund|rating|payment/i);
+});
+
+test('master trace retains ask master metadata after caller trace artifacts are rebuilt', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-trace-rebuild-'));
+  t.after(async () => {
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  const traceId = 'trace-master-rebuild-1';
+  const requestId = 'master-req-rebuild-1';
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+  const sessionStateStore = createSessionStateStore(homeDir);
+  const request = buildRequest(traceId, requestId);
+  const baseTrace = buildSessionTrace({
+    traceId,
+    channel: 'a2a',
+    exportRoot: runtimeStateStore.paths.exportRoot,
+    createdAt: 1_776_000_000_000,
+    session: {
+      id: `master-${traceId}`,
+      title: 'Official Debug Master Ask',
+      type: 'a2a',
+      metabotId: 7,
+      peerGlobalMetaId: 'idq1provider',
+      peerName: 'Official Debug Master',
+      externalConversationId: `master:idq1caller:idq1provider:${traceId}`,
+    },
+    a2a: {
+      sessionId: 'a2a-master-rebuild-1',
+      taskRunId: 'task-master-rebuild-1',
+      role: 'caller',
+      publicStatus: 'requesting_remote',
+      latestEvent: 'request_sent',
+      taskRunState: 'running',
+      callerGlobalMetaId: 'idq1caller',
+      callerName: 'Caller Bot',
+      providerGlobalMetaId: 'idq1provider',
+      providerName: 'Official Debug Master',
+      servicePinId: 'master-pin-1',
+    },
+    askMaster: buildMasterTraceMetadata({
+      role: 'caller',
+      latestEvent: 'request_sent',
+      publicStatus: 'requesting_remote',
+      requestId,
+      masterKind: 'debug',
+      servicePinId: 'master-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      displayName: 'Official Debug Master',
+      triggerMode: 'manual',
+      contextMode: 'standard',
+      confirmationMode: 'always',
+      preview: {
+        userTask: request.task.userTask,
+        question: request.task.question,
+      },
+    }),
+  });
+
+  await runtimeStateStore.writeState({
+    identity: {
+      metabotId: 7,
+      name: 'Caller Bot',
+      createdAt: 1_776_000_000_000,
+      path: "m/44'/10001'/0'/0/0",
+      publicKey: 'pubkey',
+      chatPublicKey: 'chat-pubkey',
+      mvcAddress: 'mvc-address',
+      btcAddress: 'btc-address',
+      dogeAddress: 'doge-address',
+      metaId: 'metaid-caller',
+      globalMetaId: 'idq1caller',
+    },
+    services: [],
+    traces: [baseTrace],
+  });
+
+  await sessionStateStore.writeState({
+    version: 1,
+    sessions: [
+      {
+        sessionId: 'a2a-master-rebuild-1',
+        traceId,
+        role: 'caller',
+        state: 'completed',
+        createdAt: 1_776_000_000_000,
+        updatedAt: 1_776_000_000_100,
+        callerGlobalMetaId: 'idq1caller',
+        providerGlobalMetaId: 'idq1provider',
+        servicePinId: 'master-pin-1',
+        currentTaskRunId: 'task-master-rebuild-1',
+        latestTaskRunState: 'completed',
+      },
+    ],
+    taskRuns: [
+      {
+        runId: 'task-master-rebuild-1',
+        sessionId: 'a2a-master-rebuild-1',
+        state: 'completed',
+        createdAt: 1_776_000_000_000,
+        updatedAt: 1_776_000_000_100,
+        startedAt: 1_776_000_000_000,
+        completedAt: 1_776_000_000_100,
+        failureCode: null,
+        failureReason: null,
+        clarificationRounds: [],
+      },
+    ],
+    transcriptItems: [
+      {
+        id: `${traceId}-user`,
+        sessionId: 'a2a-master-rebuild-1',
+        taskRunId: 'task-master-rebuild-1',
+        timestamp: 1_776_000_000_000,
+        type: 'user',
+        sender: 'caller',
+        content: request.task.question,
+        metadata: null,
+      },
+      {
+        id: `${traceId}-provider`,
+        sessionId: 'a2a-master-rebuild-1',
+        taskRunId: 'task-master-rebuild-1',
+        timestamp: 1_776_000_000_100,
+        type: 'assistant',
+        sender: 'provider',
+        content: 'The provider recommends re-adding the source.',
+        metadata: {
+          event: 'provider_completed',
+        },
+      },
+    ],
+    cursors: {
+      caller: null,
+      provider: null,
+    },
+    publicStatusSnapshots: [
+      {
+        sessionId: 'a2a-master-rebuild-1',
+        taskRunId: 'task-master-rebuild-1',
+        status: 'completed',
+        mapped: true,
+        rawEvent: 'provider_completed',
+        resolvedAt: 1_776_000_000_100,
+      },
+    ],
+  });
+
+  await rebuildTraceArtifactsFromSessionState({
+    baseTrace,
+    runtimeStateStore,
+    sessionStateStore,
+  });
+
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    getDaemonRecord: () => null,
+  });
+
+  const stdout = [];
+  const exitCode = await runCli(['master', 'trace', '--id', traceId], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        trace: handlers.master.trace,
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  const payload = parseOutput(stdout);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.requestId, requestId);
+  assert.equal(payload.data.masterKind, 'debug');
+  assert.equal(payload.data.triggerMode, 'manual');
+  assert.equal(payload.data.contextMode, 'standard');
+  assert.equal(payload.data.confirmationMode, 'always');
+  assert.equal(payload.data.preview.question, 'Why does the local build fail only in this workspace?');
 });

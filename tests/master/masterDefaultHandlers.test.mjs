@@ -401,3 +401,132 @@ test('default master handlers send the generated master_response over simplemsg 
   assert.equal(parsed.value.requestId, 'request-provider-delivery-1');
   assert.equal(parsed.value.status, 'completed');
 });
+
+test('default master handlers regenerate exported trace artifacts when provider response delivery fails', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-provider-delivery-failure-'));
+  t.after(async () => {
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  const providerPair = createIdentityPair();
+  const callerPair = createIdentityPair();
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+  const masterStateStore = createPublishedMasterStateStore(homeDir);
+  await runtimeStateStore.writeState({
+    identity: {
+      ...createIdentity(),
+      chatPublicKey: providerPair.publicKeyHex,
+    },
+    services: [],
+    traces: [],
+  });
+  await masterStateStore.write({
+    masters: [
+      {
+        id: 'master-pin-1',
+        sourceMasterPinId: 'master-pin-1',
+        currentPinId: 'master-pin-1',
+        creatorMetabotId: 1,
+        providerGlobalMetaId: 'idq1provider',
+        providerAddress: 'mvc-provider-address',
+        serviceName: 'official-debug-master',
+        displayName: 'Official Debug Master',
+        description: 'Structured debugging help.',
+        masterKind: 'debug',
+        specialties: ['debugging'],
+        hostModes: ['codex'],
+        modelInfoJson: '{"provider":"metaweb","model":"official-debug-master-v1"}',
+        style: 'direct_and_structured',
+        pricingMode: 'free',
+        price: '0',
+        currency: 'MVC',
+        responseMode: 'structured',
+        contextPolicy: 'standard',
+        official: 1,
+        trustedTier: 'official',
+        payloadJson: '{}',
+        available: 1,
+        revokedAt: null,
+        updatedAt: 1_776_000_000_000,
+      },
+    ],
+  });
+
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:25200' }),
+    signer: {
+      async getPrivateChatIdentity() {
+        return {
+          globalMetaId: 'idq1provider',
+          privateKeyHex: providerPair.privateKeyHex,
+        };
+      },
+      async writePin() {
+        throw new Error('simulated simplemsg delivery failure');
+      },
+    },
+  });
+
+  const result = await handlers.master.receive({
+    type: 'master_request',
+    version: '1.0.0',
+    requestId: 'request-provider-delivery-failure-1',
+    traceId: 'trace-provider-delivery-failure-1',
+    callerGlobalMetaId: 'idq1caller',
+    target: {
+      providerGlobalMetaId: 'idq1provider',
+      servicePinId: 'master-pin-1',
+      masterKind: 'debug',
+    },
+    host: {
+      mode: 'codex',
+      client: 'metabot',
+      clientVersion: '0.1.0',
+    },
+    trigger: {
+      mode: 'manual',
+      reason: 'user_requested_help',
+    },
+    task: {
+      userTask: 'Diagnose empty master discovery.',
+      question: 'metabot master list returns an empty masters list. What should I check first?',
+      goal: 'Return the shortest fix path.',
+    },
+    context: {
+      workspaceSummary: 'Caller-side Ask Master smoke test.',
+      errorSummary: 'Observed local output: {"ok":true,"state":"success","data":{"masters":[]}}',
+      relevantFiles: [],
+      artifacts: [
+        {
+          kind: 'text',
+          label: 'master-list-output',
+          content: '{"ok":true,"state":"success","data":{"masters":[]}}',
+        },
+      ],
+    },
+    constraints: ['Keep the answer concrete and minimal.'],
+    desiredOutput: {
+      mode: 'structured_help',
+    },
+    replyPin: 'incoming-master-request-pin-failure-1',
+    callerChatPublicKey: callerPair.publicKeyHex,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'master_response_delivery_failed');
+
+  const state = await runtimeStateStore.readState();
+  assert.equal(state.traces.length, 1);
+  const trace = state.traces[0];
+  assert.equal(trace.askMaster.canonicalStatus, 'failed');
+  assert.equal(trace.askMaster.failure.code, 'master_response_delivery_failed');
+
+  const traceJson = JSON.parse(readFileSync(trace.artifacts.traceJsonPath, 'utf8'));
+  const traceMarkdown = readFileSync(trace.artifacts.traceMarkdownPath, 'utf8');
+  assert.equal(traceJson.askMaster.canonicalStatus, 'failed');
+  assert.equal(traceJson.askMaster.failure.code, 'master_response_delivery_failed');
+  assert.equal(traceJson.askMaster.failure.message, 'simulated simplemsg delivery failure');
+  assert.match(traceMarkdown, /Ask Master Status: failed/);
+  assert.match(traceMarkdown, /Request ID: request-provider-delivery-failure-1/);
+});

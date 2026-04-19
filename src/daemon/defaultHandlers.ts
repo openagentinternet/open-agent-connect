@@ -1206,7 +1206,7 @@ async function persistTraceRecord(
   }));
 }
 
-async function rebuildCallerTraceArtifacts(input: {
+export async function rebuildTraceArtifactsFromSessionState(input: {
   baseTrace: SessionTraceRecord;
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
   sessionStateStore: ReturnType<typeof createSessionStateStore>;
@@ -1265,6 +1265,28 @@ async function rebuildCallerTraceArtifacts(input: {
           servicePinId: latestSession.servicePinId,
         }
       : input.baseTrace.a2a,
+    askMaster: input.baseTrace.askMaster
+      ? buildMasterTraceMetadata({
+          role: latestSession?.role ?? input.baseTrace.a2a?.role,
+          latestEvent: latestSnapshot?.rawEvent ?? input.baseTrace.a2a?.latestEvent,
+          publicStatus: latestSnapshot?.status ?? input.baseTrace.a2a?.publicStatus,
+          requestId: input.baseTrace.askMaster.requestId,
+          masterKind: input.baseTrace.askMaster.masterKind,
+          servicePinId: latestSession?.servicePinId
+            ?? input.baseTrace.askMaster.servicePinId
+            ?? input.baseTrace.a2a?.servicePinId,
+          providerGlobalMetaId: latestSession?.providerGlobalMetaId
+            ?? input.baseTrace.askMaster.providerGlobalMetaId
+            ?? input.baseTrace.a2a?.providerGlobalMetaId,
+          displayName: input.baseTrace.askMaster.displayName,
+          triggerMode: input.baseTrace.askMaster.triggerMode,
+          contextMode: input.baseTrace.askMaster.contextMode,
+          confirmationMode: input.baseTrace.askMaster.confirmationMode,
+          preview: input.baseTrace.askMaster.preview,
+          response: input.baseTrace.askMaster.response,
+          failure: input.baseTrace.askMaster.failure,
+        })
+      : null,
   });
 
   const artifacts = await exportSessionArtifacts({
@@ -1404,7 +1426,7 @@ async function applyCallerReplyResult(input: {
   }
   await appendA2ATranscriptItems(input.sessionStateStore, transcriptItems);
 
-  const rebuilt = await rebuildCallerTraceArtifacts({
+  const rebuilt = await rebuildTraceArtifactsFromSessionState({
     baseTrace: input.trace,
     runtimeStateStore: input.runtimeStateStore,
     sessionStateStore: input.sessionStateStore,
@@ -1455,7 +1477,7 @@ async function applyCallerForegroundTimeout(input: {
     },
   ]);
 
-  const rebuilt = await rebuildCallerTraceArtifacts({
+  const rebuilt = await rebuildTraceArtifactsFromSessionState({
     baseTrace: input.trace,
     runtimeStateStore: input.runtimeStateStore,
     sessionStateStore: input.sessionStateStore,
@@ -2355,7 +2377,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const explicitCallerChatPublicKey = normalizeText(rawInput.callerChatPublicKey);
         let messagePinId: string | null = null;
         const markDeliveryFailure = async (code: string, message: string) => {
-          await persistTraceRecord(runtimeStateStore, {
+          const failedTrace = {
             ...trace,
             a2a: trace.a2a
               ? {
@@ -2383,6 +2405,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 message,
               },
             }),
+          };
+          if (trace.a2a?.sessionId) {
+            await sessionStateStore.appendPublicStatusSnapshots([
+              {
+                sessionId: trace.a2a.sessionId,
+                taskRunId: trace.a2a.taskRunId ?? null,
+                status: 'local_runtime_error',
+                mapped: true,
+                rawEvent: 'provider_delivery_failed',
+                resolvedAt: Date.now(),
+              },
+            ]);
+          }
+          await rebuildTraceArtifactsFromSessionState({
+            baseTrace: failedTrace,
+            runtimeStateStore,
+            sessionStateStore,
           });
           return commandFailed(code, message);
         };
@@ -3265,7 +3304,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               },
             ]);
           }
-          const rebuilt = await rebuildCallerTraceArtifacts({
+          const rebuilt = await rebuildTraceArtifactsFromSessionState({
             baseTrace: trace,
             runtimeStateStore,
             sessionStateStore,
