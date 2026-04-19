@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
+
+const require = createRequire(import.meta.url);
+const { validateMasterServicePayload } = require('../../dist/core/master/masterServiceSchema.js');
+const { buildPublishedMaster } = require('../../dist/core/master/masterServicePublish.js');
+const { summarizePublishedMaster } = require('../../dist/core/master/masterDirectory.js');
+const { buildMasterAskPreview } = require('../../dist/core/master/masterPreview.js');
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const PROVIDER_FIXTURE_PATH = path.join(REPO_ROOT, 'e2e/fixtures/provider-service.json');
 const CALLER_FIXTURE_PATH = path.join(REPO_ROOT, 'e2e/fixtures/caller-request.json');
+const MASTER_PROVIDER_FIXTURE_PATH = path.join(REPO_ROOT, 'e2e/fixtures/master-service-debug.json');
+const MASTER_REQUEST_FIXTURE_PATH = path.join(REPO_ROOT, 'e2e/fixtures/master-ask-request.json');
 const CODEX_CLAUDE_URL = pathToFileURL(path.join(REPO_ROOT, 'e2e/run-codex-claude.mjs')).href;
 const OPENCLAW_CODEX_URL = pathToFileURL(path.join(REPO_ROOT, 'e2e/run-openclaw-codex.mjs')).href;
 
@@ -45,4 +55,58 @@ test('fixture harness generates a trace record after the remote call plan succee
     result.trace.artifacts.traceJsonPath.includes(`/traces/${result.trace.traceId}.json`),
     true
   );
+});
+
+test('official debug master fixture validates as a publishable master-service payload', async () => {
+  const payload = JSON.parse(await readFile(MASTER_PROVIDER_FIXTURE_PATH, 'utf8'));
+  const validated = validateMasterServicePayload(payload);
+
+  assert.equal(validated.ok, true);
+  assert.equal(validated.value.masterKind, 'debug');
+  assert.equal(validated.value.displayName, 'Official Debug Master');
+});
+
+test('master ask fixture can build a preview against the official debug master fixture without widening context', async () => {
+  const servicePayload = JSON.parse(await readFile(MASTER_PROVIDER_FIXTURE_PATH, 'utf8'));
+  const requestFixture = JSON.parse(await readFile(MASTER_REQUEST_FIXTURE_PATH, 'utf8'));
+  const published = buildPublishedMaster({
+    sourceMasterPinId: 'master-pin-fixture-1',
+    currentPinId: 'master-pin-fixture-1',
+    creatorMetabotId: 7,
+    providerGlobalMetaId: 'idq1fixtureprovider',
+    providerAddress: 'mvc-fixture-provider',
+    draft: servicePayload,
+    payloadJson: JSON.stringify(servicePayload),
+    now: 1_776_500_000_000,
+  });
+  const summary = summarizePublishedMaster(published.record);
+
+  const prepared = buildMasterAskPreview({
+    draft: {
+      ...requestFixture,
+      target: {
+        ...requestFixture.target,
+        servicePinId: summary.masterPinId,
+        providerGlobalMetaId: summary.providerGlobalMetaId,
+      },
+    },
+    resolvedTarget: {
+      ...summary,
+      online: true,
+      providerDaemonBaseUrl: 'http://127.0.0.1:25200',
+    },
+    caller: {
+      globalMetaId: 'idq1fixturecaller',
+      name: 'Fixture Caller',
+      host: 'codex',
+    },
+    traceId: 'trace-fixture-master-1',
+    requestId: 'master-req-fixture-1',
+    confirmationMode: 'always',
+  });
+
+  assert.equal(prepared.preview.target.displayName, 'Official Debug Master');
+  assert.equal(prepared.preview.request.type, 'master_request');
+  assert.equal(prepared.preview.request.target.masterKind, 'debug');
+  assert.equal(prepared.preview.context.relevantFiles.includes('src/daemon/defaultHandlers.ts'), true);
 });

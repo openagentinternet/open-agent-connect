@@ -17,6 +17,8 @@ async function startServer(options = {}) {
     chain: [],
     file: [],
     buzz: [],
+    master: [],
+    masterTrace: [],
     services: [],
     serviceExecutions: [],
     trace: [],
@@ -87,6 +89,30 @@ async function startServer(options = {}) {
               online: true,
             },
           ],
+        });
+      },
+    },
+    master: {
+      ask: async (input) => {
+        calls.master.push(input);
+        return commandSuccess({
+          traceId: 'trace-master-123',
+          session: {
+            state: 'requesting_remote',
+            publicStatus: 'requesting_remote',
+            event: 'request_sent',
+          },
+        });
+      },
+      trace: async (input) => {
+        calls.masterTrace.push(input);
+        return commandSuccess({
+          traceId: input.traceId,
+          canonicalStatus: 'completed',
+          response: {
+            status: 'completed',
+            summary: 'The Debug Master found the likely root cause.',
+          },
         });
       },
     },
@@ -446,6 +472,45 @@ test('POST /api/services/call returns a delegation, session, and trace start con
       },
     },
   });
+});
+
+test('POST /api/master/ask forwards the preview-or-confirm payload to master.ask', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const request = {
+    traceId: 'trace-master-123',
+    confirm: true,
+  };
+
+  const response = await fetch(`${server.baseUrl}/api/master/ask`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.master, [request]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.traceId, 'trace-master-123');
+  assert.equal(payload.data.session.publicStatus, 'requesting_remote');
+});
+
+test('GET /api/master/trace/:traceId is mounted on the main HTTP server', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/master/trace/trace-master-123`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.masterTrace, [{ traceId: 'trace-master-123' }]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.canonicalStatus, 'completed');
+  assert.equal(payload.data.response.summary, 'The Debug Master found the likely root cause.');
 });
 
 test('POST /api/services/execute forwards remote execution payloads to services.execute', async (t) => {

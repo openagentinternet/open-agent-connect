@@ -1,0 +1,34 @@
+{
+  "target": {
+    "servicePinId": "",
+    "providerGlobalMetaId": "",
+    "masterKind": "debug",
+    "displayName": "Official Debug Master"
+  },
+  "triggerMode": "manual",
+  "contextMode": "standard",
+  "userTask": "Diagnose why the local Ask Master integration is not giving a useful answer yet.",
+  "question": "I am stuck on an Ask Master integration issue. Please diagnose the most likely root cause and give the shortest concrete fix path.",
+  "goal": "Get a structured diagnosis and next steps from the official Debug Master.",
+  "workspaceSummary": "Local Open Agent Connect workspace used for Ask Master phase-1 verification.",
+  "errorSummary": "The host can generate a preview, but the final result should come back as a structured master_response.",
+  "diffSummary": "Task 8 focuses on the end-to-end Ask Master happy path and timeout parity.",
+  "relevantFiles": [
+    "tests/e2e/masterAskHappyPath.test.mjs",
+    "src/daemon/defaultHandlers.ts"
+  ],
+  "artifacts": [
+    {
+      "kind": "text",
+      "label": "task8-goal",
+      "content": "Verify the manual Ask Master preview/confirm flow and preserve timeout semantics."
+    }
+  ],
+  "constraints": [
+    "Do not expand the context beyond this minimal fixture payload.",
+    "Return structured guidance that the caller trace can show back to the host."
+  ],
+  "desiredOutput": {
+    "mode": "structured_help"
+  }
+}

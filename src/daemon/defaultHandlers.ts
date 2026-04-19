@@ -63,10 +63,15 @@ import {
   type AwaitMetaWebServiceReplyResult,
   type MetaWebServiceReplyWaiter,
 } from '../core/a2a/metawebReplyWaiter';
-import { parseMasterRequest, parseMasterResponse } from '../core/master/masterMessageSchema';
+import { parseMasterRequest, parseMasterResponse, type MasterResponseMessage } from '../core/master/masterMessageSchema';
+import {
+  type AwaitMetaWebMasterReplyInput,
+  type AwaitMetaWebMasterReplyResult,
+  type MetaWebMasterReplyWaiter,
+} from '../core/master/metawebMasterReplyWaiter';
 import { handleMasterProviderRequest } from '../core/master/masterProviderRuntime';
 import { listMasters, readChainMasterDirectoryWithFallback, summarizePublishedMaster } from '../core/master/masterDirectory';
-import { createPendingMasterAskStateStore } from '../core/master/masterPendingAskState';
+import { createPendingMasterAskStateStore, type PendingMasterAskRecord } from '../core/master/masterPendingAskState';
 import { createPublishedMasterStateStore } from '../core/master/masterPublishedState';
 import { buildMasterAskPreview } from '../core/master/masterPreview';
 import { buildMasterTraceMetadata, buildMasterTraceView } from '../core/master/masterTrace';
@@ -1478,6 +1483,292 @@ async function createMasterAskPreviewResult(input: {
   });
 }
 
+function buildMasterCallerTraceAfterReply(input: {
+  baseTrace: SessionTraceRecord;
+  pendingAsk: PendingMasterAskRecord;
+  latestEvent: 'provider_completed' | 'clarification_needed' | 'provider_failed' | 'timeout';
+  publicStatus: 'completed' | 'manual_action_required' | 'remote_failed' | 'timeout';
+  taskRunState: 'completed' | 'needs_clarification' | 'failed' | 'timeout';
+  response?: {
+    status: string;
+    summary: string;
+    followUpQuestion: string | null;
+    errorCode: string | null;
+  } | null;
+}): SessionTraceRecord {
+  const preview = input.baseTrace.askMaster?.preview ?? {
+    userTask: input.pendingAsk.request.task.userTask,
+    question: input.pendingAsk.request.task.question,
+  };
+  const response = input.response
+    ? {
+        status: input.response.status,
+        summary: input.response.summary,
+        followUpQuestion: input.response.followUpQuestion,
+      }
+    : input.baseTrace.askMaster?.response;
+  const failure = input.response && (
+    input.response.status === 'failed'
+    || input.response.status === 'declined'
+    || input.response.status === 'unavailable'
+  )
+    ? {
+        code: normalizeText(input.response.errorCode) || `master_${input.response.status}`,
+        message: input.response.summary,
+      }
+    : null;
+
+  return {
+    ...input.baseTrace,
+    a2a: {
+      ...(input.baseTrace.a2a ?? {
+        sessionId: null,
+        taskRunId: null,
+        role: 'caller',
+        publicStatus: null,
+        latestEvent: null,
+        taskRunState: null,
+        callerGlobalMetaId: null,
+        callerName: null,
+        providerGlobalMetaId: null,
+        providerName: null,
+        servicePinId: null,
+      }),
+      publicStatus: input.publicStatus,
+      latestEvent: input.latestEvent,
+      taskRunState: input.taskRunState,
+    },
+    askMaster: buildMasterTraceMetadata({
+      role: input.baseTrace.a2a?.role,
+      latestEvent: input.latestEvent,
+      publicStatus: input.publicStatus,
+      requestId: input.pendingAsk.requestId,
+      masterKind: input.baseTrace.askMaster?.masterKind ?? input.pendingAsk.request.target.masterKind,
+      servicePinId: input.baseTrace.askMaster?.servicePinId ?? input.pendingAsk.request.target.masterServicePinId,
+      providerGlobalMetaId: input.baseTrace.askMaster?.providerGlobalMetaId ?? input.pendingAsk.request.target.providerGlobalMetaId,
+      displayName: input.baseTrace.askMaster?.displayName
+        || normalizeText(input.pendingAsk.target.displayName)
+        || input.baseTrace.session.peerName,
+      triggerMode: input.baseTrace.askMaster?.triggerMode ?? normalizeText(input.pendingAsk.request.trigger.mode),
+      contextMode: input.baseTrace.askMaster?.contextMode ?? normalizeText(input.pendingAsk.request.extensions?.contextMode),
+      confirmationMode: input.baseTrace.askMaster?.confirmationMode,
+      preview,
+      response,
+      failure,
+    }),
+  };
+}
+
+async function exportAndPersistMasterCallerTrace(input: {
+  trace: SessionTraceRecord;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  pendingAsk: PendingMasterAskRecord;
+  requestPath: string;
+  messagePinId: string | null;
+  outcome: {
+    type: 'requesting_remote' | 'response' | 'timeout';
+    timestamp: number;
+    deliveryPinId?: string | null;
+    responseStatus?: string | null;
+    summary?: string | null;
+    followUpQuestion?: string | null;
+  };
+}): Promise<Awaited<ReturnType<typeof exportSessionArtifacts>>> {
+  const targetDisplayName = normalizeText(input.trace.askMaster?.displayName)
+    || normalizeText(input.pendingAsk.target.displayName)
+    || input.trace.session.peerName
+    || 'Master';
+  const confirmCommand = `metabot master ask --trace-id ${input.trace.traceId} --confirm`;
+  const messages: Parameters<typeof exportSessionArtifacts>[0]['transcript']['messages'] = [
+    {
+      id: `${input.trace.traceId}-user`,
+      type: 'user',
+      timestamp: input.trace.createdAt,
+      content: normalizeText(input.pendingAsk.request.task.question),
+    },
+    {
+      id: `${input.trace.traceId}-preview`,
+      type: 'assistant',
+      timestamp: input.trace.createdAt,
+      content: `Preview prepared for ${targetDisplayName}.`,
+      metadata: {
+        confirmCommand,
+      },
+    },
+    {
+      id: `${input.trace.traceId}-sent`,
+      type: 'assistant',
+      timestamp: Number.isFinite(input.pendingAsk.sentAt) ? Number(input.pendingAsk.sentAt) : input.outcome.timestamp,
+      content: `Ask Master request sent to ${targetDisplayName} over simplemsg.`,
+      metadata: {
+        messagePinId: input.messagePinId,
+        path: input.requestPath,
+      },
+    },
+  ];
+
+  if (input.outcome.type === 'response') {
+    messages.push({
+      id: `${input.trace.traceId}-response`,
+      type: input.outcome.responseStatus === 'need_more_context'
+        ? 'clarification_request'
+        : input.outcome.responseStatus === 'failed'
+          || input.outcome.responseStatus === 'declined'
+          || input.outcome.responseStatus === 'unavailable'
+          ? 'system'
+          : 'assistant',
+      timestamp: input.outcome.timestamp,
+      content: normalizeText(input.outcome.summary),
+      metadata: {
+        responseStatus: input.outcome.responseStatus ?? null,
+        followUpQuestion: input.outcome.followUpQuestion ?? null,
+        deliveryPinId: input.outcome.deliveryPinId ?? null,
+      },
+    });
+  } else if (input.outcome.type === 'timeout') {
+    messages.push({
+      id: `${input.trace.traceId}-timeout`,
+      type: 'status_note',
+      timestamp: input.outcome.timestamp,
+      content: 'Foreground wait ended before the remote MetaBot returned. The task may still continue remotely.',
+      metadata: {
+        event: 'timeout',
+      },
+    });
+  }
+
+  const artifacts = await exportSessionArtifacts({
+    trace: input.trace,
+    transcript: {
+      sessionId: input.trace.session.id,
+      title: input.trace.session.title || 'Ask Master',
+      messages,
+    },
+  });
+  await persistTraceRecord(input.runtimeStateStore, input.trace);
+  return artifacts;
+}
+
+async function applyMasterCallerReplyResult(input: {
+  reply: Extract<AwaitMetaWebMasterReplyResult, { state: 'completed' }>;
+  trace: SessionTraceRecord;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  pendingAsk: PendingMasterAskRecord;
+  requestPath: string;
+  messagePinId: string | null;
+}): Promise<{
+  trace: SessionTraceRecord;
+  artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>>;
+  session: {
+    state: 'completed' | 'manual_action_required' | 'remote_failed';
+    publicStatus: 'completed' | 'manual_action_required' | 'remote_failed';
+    event: 'provider_completed' | 'clarification_needed' | 'provider_failed';
+  };
+}> {
+  const responseStatus = input.reply.response.status;
+  const session = responseStatus === 'completed'
+    ? {
+        state: 'completed' as const,
+        publicStatus: 'completed' as const,
+        event: 'provider_completed' as const,
+      }
+    : responseStatus === 'need_more_context'
+      ? {
+          state: 'manual_action_required' as const,
+          publicStatus: 'manual_action_required' as const,
+          event: 'clarification_needed' as const,
+        }
+      : {
+          state: 'remote_failed' as const,
+          publicStatus: 'remote_failed' as const,
+          event: 'provider_failed' as const,
+        };
+  const taskRunState = responseStatus === 'completed'
+    ? 'completed' as const
+    : responseStatus === 'need_more_context'
+      ? 'needs_clarification' as const
+      : 'failed' as const;
+  const trace = buildMasterCallerTraceAfterReply({
+    baseTrace: input.trace,
+    pendingAsk: input.pendingAsk,
+    latestEvent: session.event,
+    publicStatus: session.publicStatus,
+    taskRunState,
+    response: {
+      status: input.reply.response.status,
+      summary: input.reply.response.summary,
+      followUpQuestion: input.reply.response.followUpQuestion,
+      errorCode: input.reply.response.errorCode,
+    },
+  });
+  const artifacts = await exportAndPersistMasterCallerTrace({
+    trace,
+    runtimeStateStore: input.runtimeStateStore,
+    pendingAsk: input.pendingAsk,
+    requestPath: input.requestPath,
+    messagePinId: input.messagePinId,
+    outcome: {
+      type: 'response',
+      timestamp: input.reply.observedAt ?? Date.now(),
+      deliveryPinId: input.reply.deliveryPinId,
+      responseStatus: input.reply.response.status,
+      summary: input.reply.response.summary,
+      followUpQuestion: input.reply.response.followUpQuestion,
+    },
+  });
+
+  return {
+    trace,
+    artifacts,
+    session,
+  };
+}
+
+async function applyMasterCallerForegroundTimeout(input: {
+  trace: SessionTraceRecord;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  pendingAsk: PendingMasterAskRecord;
+  requestPath: string;
+  messagePinId: string | null;
+}): Promise<{
+  trace: SessionTraceRecord;
+  artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>>;
+  session: {
+    state: 'timeout';
+    publicStatus: 'timeout';
+    event: 'timeout';
+  };
+}> {
+  const trace = buildMasterCallerTraceAfterReply({
+    baseTrace: input.trace,
+    pendingAsk: input.pendingAsk,
+    latestEvent: 'timeout',
+    publicStatus: 'timeout',
+    taskRunState: 'timeout',
+  });
+  const artifacts = await exportAndPersistMasterCallerTrace({
+    trace,
+    runtimeStateStore: input.runtimeStateStore,
+    pendingAsk: input.pendingAsk,
+    requestPath: input.requestPath,
+    messagePinId: input.messagePinId,
+    outcome: {
+      type: 'timeout',
+      timestamp: Date.now(),
+    },
+  });
+
+  return {
+    trace,
+    artifacts,
+    session: {
+      state: 'timeout',
+      publicStatus: 'timeout',
+      event: 'timeout',
+    },
+  };
+}
+
 export async function rebuildTraceArtifactsFromSessionState(input: {
   baseTrace: SessionTraceRecord;
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
@@ -1772,6 +2063,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   chainApiBaseUrl?: string;
   fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
   callerReplyWaiter?: MetaWebServiceReplyWaiter;
+  masterReplyWaiter?: MetaWebMasterReplyWaiter;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   requestMvcGasSubsidy?: (
     options: RequestMvcGasSubsidyOptions
@@ -1789,6 +2081,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const sessionEngine = createA2ASessionEngine();
   const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey ?? fetchPeerChatPublicKey;
   const callerReplyWaiter = input.callerReplyWaiter ?? createSocketIoMetaWebReplyWaiter();
+  const masterReplyWaiter = input.masterReplyWaiter ?? null;
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
@@ -2343,18 +2636,75 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
           await persistTraceRecord(runtimeStateStore, updatedTrace);
 
+          let finalTrace = updatedTrace;
+          let finalArtifacts = artifacts;
+          let finalSession: {
+            state: 'requesting_remote' | 'completed' | 'manual_action_required' | 'remote_failed' | 'timeout';
+            publicStatus: 'requesting_remote' | 'completed' | 'manual_action_required' | 'remote_failed' | 'timeout';
+            event: 'request_sent' | 'provider_completed' | 'clarification_needed' | 'provider_failed' | 'timeout';
+          } = {
+            state: 'requesting_remote',
+            publicStatus: 'requesting_remote',
+            event: 'request_sent',
+          };
+          let responseJson: string | null = null;
+          let deliveryPinId: string | null = null;
+          let structuredResponse: MasterResponseMessage | null = null;
+
+          if (masterReplyWaiter) {
+            const reply = await masterReplyWaiter.awaitMasterReply({
+              callerGlobalMetaId: privateChatIdentity.globalMetaId,
+              callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+              providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+              providerChatPublicKey: peerChatPublicKey,
+              masterServicePinId: resolvedTarget.masterPinId,
+              requestId: pendingAsk.requestId,
+              traceId,
+              timeoutMs: DEFAULT_CALLER_FOREGROUND_WAIT_MS,
+            });
+
+            if (reply.state === 'completed') {
+              const applied = await applyMasterCallerReplyResult({
+                reply,
+                trace: updatedTrace,
+                runtimeStateStore,
+                pendingAsk,
+                requestPath: outboundRequest.path,
+                messagePinId: messagePinId || null,
+              });
+              finalTrace = applied.trace;
+              finalArtifacts = applied.artifacts;
+              finalSession = applied.session;
+              structuredResponse = reply.response;
+              responseJson = reply.responseJson;
+              deliveryPinId = reply.deliveryPinId;
+            } else {
+              const timedOut = await applyMasterCallerForegroundTimeout({
+                trace: updatedTrace,
+                runtimeStateStore,
+                pendingAsk,
+                requestPath: outboundRequest.path,
+                messagePinId: messagePinId || null,
+              });
+              finalTrace = timedOut.trace;
+              finalArtifacts = timedOut.artifacts;
+              finalSession = timedOut.session;
+            }
+          }
+
           return commandSuccess({
             traceId,
             requestId: pendingAsk.requestId,
             messagePinId: messagePinId || null,
-            session: {
-              state: 'requesting_remote',
-              publicStatus: 'requesting_remote',
-              event: 'request_sent',
-            },
-            traceJsonPath: artifacts.traceJsonPath,
-            traceMarkdownPath: artifacts.traceMarkdownPath,
-            transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
+            ...(deliveryPinId ? { deliveryPinId } : {}),
+            ...(structuredResponse ? {
+              response: structuredResponse,
+              responseJson,
+            } : {}),
+            session: finalSession,
+            traceJsonPath: finalArtifacts.traceJsonPath,
+            traceMarkdownPath: finalArtifacts.traceMarkdownPath,
+            transcriptMarkdownPath: finalArtifacts.transcriptMarkdownPath,
           });
         }
 
