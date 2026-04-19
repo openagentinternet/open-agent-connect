@@ -250,3 +250,79 @@ test('caller timeout semantics remain unchanged after master ask integration', a
   const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /Foreground wait ended before the remote MetaBot returned|Foreground timeout reached/i);
 });
+
+test('caller trace upgrades when a late master_response arrives after the foreground timeout', async (t) => {
+  const prepared = await prepareMasterHomes(t);
+
+  const providerReply = await fetchJson(prepared.providerDaemonBaseUrl, '/api/master/receive', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      ...prepared.preview.payload.data.preview.request,
+      deliverResponse: false,
+    }),
+  });
+
+  assert.equal(providerReply.response.status, 200);
+  assert.equal(providerReply.payload.ok, true);
+  assert.equal(providerReply.payload.data.response.status, 'completed');
+
+  const replyConfig = JSON.stringify({
+    sequence: [
+      {
+        state: 'timeout',
+      },
+      {
+        responseJson: providerReply.payload.data.responseJson,
+        delayMs: 50,
+      },
+    ],
+  });
+
+  const confirm = await runCommand(
+    prepared.callerHome,
+    ['master', 'ask', '--trace-id', prepared.preview.payload.data.traceId, '--confirm'],
+    {
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: VALID_TEST_PROVIDER_CHAT_PUBLIC_KEY,
+      METABOT_TEST_FAKE_MASTER_REPLY: replyConfig,
+    }
+  );
+
+  assert.equal(confirm.exitCode, 0);
+  assert.equal(confirm.payload.ok, true);
+  assert.equal(confirm.payload.data.session.publicStatus, 'timeout');
+  assert.equal(confirm.payload.data.session.event, 'timeout');
+
+  let trace = null;
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    trace = await runCommand(
+      prepared.callerHome,
+      ['master', 'trace', '--id', prepared.preview.payload.data.traceId],
+      {
+        METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: VALID_TEST_PROVIDER_CHAT_PUBLIC_KEY,
+        METABOT_TEST_FAKE_MASTER_REPLY: replyConfig,
+      }
+    );
+    if (trace.payload?.data?.canonicalStatus === 'completed') {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  assert.ok(trace, 'expected master trace polling to produce a response');
+  assert.equal(trace.exitCode, 0);
+  assert.equal(trace.payload.ok, true);
+  assert.equal(trace.payload.data.canonicalStatus, 'completed');
+  assert.equal(trace.payload.data.response.status, 'completed');
+  assert.equal(trace.payload.data.response.summary, providerReply.payload.data.response.summary);
+
+  const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
+  assert.match(transcriptMarkdown, /Foreground wait ended before the remote MetaBot returned|Foreground timeout reached/i);
+  assert.match(
+    transcriptMarkdown,
+    new RegExp(providerReply.payload.data.response.summary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  );
+});

@@ -1565,6 +1565,7 @@ async function exportAndPersistMasterCallerTrace(input: {
   pendingAsk: PendingMasterAskRecord;
   requestPath: string;
   messagePinId: string | null;
+  includeTimeoutNote?: boolean;
   outcome: {
     type: 'requesting_remote' | 'response' | 'timeout';
     timestamp: number;
@@ -1578,6 +1579,9 @@ async function exportAndPersistMasterCallerTrace(input: {
     || normalizeText(input.pendingAsk.target.displayName)
     || input.trace.session.peerName
     || 'Master';
+  const shouldIncludeTimeoutNote = input.includeTimeoutNote === true
+    || input.trace.askMaster?.canonicalStatus === 'timed_out'
+    || input.trace.a2a?.publicStatus === 'timeout';
   const confirmCommand = `metabot master ask --trace-id ${input.trace.traceId} --confirm`;
   const messages: Parameters<typeof exportSessionArtifacts>[0]['transcript']['messages'] = [
     {
@@ -1607,6 +1611,21 @@ async function exportAndPersistMasterCallerTrace(input: {
     },
   ];
 
+  if (shouldIncludeTimeoutNote) {
+    messages.push({
+      id: `${input.trace.traceId}-timeout`,
+      type: 'status_note',
+      timestamp: Math.max(
+        input.trace.createdAt + 1,
+        input.outcome.timestamp - (input.outcome.type === 'response' ? 1 : 0),
+      ),
+      content: 'Foreground wait ended before the remote MetaBot returned. The task may still continue remotely.',
+      metadata: {
+        event: 'timeout',
+      },
+    });
+  }
+
   if (input.outcome.type === 'response') {
     messages.push({
       id: `${input.trace.traceId}-response`,
@@ -1625,7 +1644,7 @@ async function exportAndPersistMasterCallerTrace(input: {
         deliveryPinId: input.outcome.deliveryPinId ?? null,
       },
     });
-  } else if (input.outcome.type === 'timeout') {
+  } else if (input.outcome.type === 'timeout' && !shouldIncludeTimeoutNote) {
     messages.push({
       id: `${input.trace.traceId}-timeout`,
       type: 'status_note',
@@ -1666,6 +1685,8 @@ async function applyMasterCallerReplyResult(input: {
   };
 }> {
   const responseStatus = input.reply.response.status;
+  const includeTimeoutNote = input.trace.askMaster?.canonicalStatus === 'timed_out'
+    || input.trace.a2a?.publicStatus === 'timeout';
   const session = responseStatus === 'completed'
     ? {
         state: 'completed' as const,
@@ -1707,6 +1728,7 @@ async function applyMasterCallerReplyResult(input: {
     pendingAsk: input.pendingAsk,
     requestPath: input.requestPath,
     messagePinId: input.messagePinId,
+    includeTimeoutNote,
     outcome: {
       type: 'response',
       timestamp: input.reply.observedAt ?? Date.now(),
@@ -1767,6 +1789,15 @@ async function applyMasterCallerForegroundTimeout(input: {
       event: 'timeout',
     },
   };
+}
+
+async function loadMasterContinuationTrace(input: {
+  traceId: string;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  fallbackTrace: SessionTraceRecord;
+}): Promise<SessionTraceRecord> {
+  const runtimeState = await input.runtimeStateStore.readState();
+  return runtimeState.traces.find((entry) => entry.traceId === input.traceId) ?? input.fallbackTrace;
 }
 
 export async function rebuildTraceArtifactsFromSessionState(input: {
@@ -2085,6 +2116,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
+  const pendingMasterReplyContinuations = new Map<string, Promise<void>>();
   let masterTriggerMemoryState = createMasterTriggerMemoryState();
 
   async function trackActiveIdentityProfile(identity: RuntimeIdentityRecord): Promise<void> {
@@ -2152,6 +2184,62 @@ export function createDefaultMetabotDaemonHandlers(input: {
     })();
 
     pendingCallerReplyContinuations.set(input.trace.traceId, continuation);
+  }
+
+  function scheduleMasterReplyContinuation(input: {
+    trace: SessionTraceRecord;
+    pendingAsk: PendingMasterAskRecord;
+    requestPath: string;
+    messagePinId: string | null;
+    waiterInput: AwaitMetaWebMasterReplyInput;
+  }): void {
+    if (!masterReplyWaiter || pendingMasterReplyContinuations.has(input.trace.traceId)) {
+      return;
+    }
+
+    const continuation = (async () => {
+      try {
+        const reply = await masterReplyWaiter.awaitMasterReply({
+          ...input.waiterInput,
+          timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+        });
+        if (reply.state !== 'completed') {
+          return;
+        }
+
+        const currentTrace = await loadMasterContinuationTrace({
+          traceId: input.trace.traceId,
+          runtimeStateStore,
+          fallbackTrace: input.trace,
+        });
+        const currentStatus = normalizeText(
+          currentTrace.askMaster?.canonicalStatus
+          ?? currentTrace.a2a?.publicStatus,
+        );
+        if (
+          currentStatus === 'completed'
+          || currentStatus === 'need_more_context'
+          || currentStatus === 'failed'
+        ) {
+          return;
+        }
+
+        await applyMasterCallerReplyResult({
+          reply,
+          trace: currentTrace,
+          runtimeStateStore,
+          pendingAsk: input.pendingAsk,
+          requestPath: input.requestPath,
+          messagePinId: input.messagePinId,
+        });
+      } catch {
+        // Best effort follow-up: keep the persisted timeout state if late delivery capture fails.
+      } finally {
+        pendingMasterReplyContinuations.delete(input.trace.traceId);
+      }
+    })();
+
+    pendingMasterReplyContinuations.set(input.trace.traceId, continuation);
   }
 
   return {
@@ -2411,6 +2499,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
             pendingAsk = await pendingMasterAskStateStore.get(traceId);
           } catch {
             return commandFailed('pending_master_ask_not_found', `Pending Ask Master record not found: ${traceId}`);
+          }
+          if (pendingAsk.confirmationState === 'sent') {
+            return commandFailed(
+              'master_request_already_sent',
+              `Ask Master request has already been sent for this trace: ${traceId}. Create a new Ask Master request to retry.`
+            );
           }
 
           const resolvedTarget = await resolveExplicitMasterTarget({
@@ -2689,6 +2783,28 @@ export function createDefaultMetabotDaemonHandlers(input: {
               finalTrace = timedOut.trace;
               finalArtifacts = timedOut.artifacts;
               finalSession = timedOut.session;
+              scheduleMasterReplyContinuation({
+                trace: timedOut.trace,
+                pendingAsk: {
+                  ...pendingAsk,
+                  confirmationState: 'sent',
+                  updatedAt: Date.now(),
+                  sentAt: Number.isFinite(pendingAsk.sentAt) ? pendingAsk.sentAt : Date.now(),
+                  messagePinId: messagePinId || null,
+                },
+                requestPath: outboundRequest.path,
+                messagePinId: messagePinId || null,
+                waiterInput: {
+                  callerGlobalMetaId: privateChatIdentity.globalMetaId,
+                  callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+                  providerChatPublicKey: peerChatPublicKey,
+                  masterServicePinId: resolvedTarget.masterPinId,
+                  requestId: pendingAsk.requestId,
+                  traceId,
+                  timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+                },
+              });
             }
           }
 

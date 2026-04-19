@@ -217,4 +217,21 @@ test('master ask returns awaiting_confirmation and confirm reuses the stored pen
     parsedRequest.value.task.question,
     'Will the original preview question survive even if the file changes later?'
   );
+
+  const duplicateConfirmStdout = [];
+  const duplicateConfirmExitCode = await runCli(['master', 'ask', '--trace-id', preview.data.traceId, '--confirm'], {
+    stdout: { write: (chunk) => { duplicateConfirmStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        ask: handlers.master.ask,
+      },
+    },
+  });
+
+  assert.equal(duplicateConfirmExitCode, 1);
+  const duplicateConfirm = parseOutput(duplicateConfirmStdout);
+  assert.equal(duplicateConfirm.ok, false);
+  assert.equal(duplicateConfirm.code, 'master_request_already_sent');
+  assert.equal(writes.length, 1);
 });
