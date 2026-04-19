@@ -72,6 +72,11 @@ import { buildMasterAskPreview } from '../core/master/masterPreview';
 import { buildMasterTraceMetadata, buildMasterTraceView } from '../core/master/masterTrace';
 import { publishMasterToChain } from '../core/master/masterServicePublish';
 import { validateMasterServicePayload } from '../core/master/masterServiceSchema';
+import {
+  collectAndEvaluateMasterTrigger,
+  createMasterTriggerMemoryState,
+  recordMasterTriggerOutcome,
+} from '../core/master/masterTriggerEngine';
 import type { MasterDirectoryItem, PublishedMasterRecord } from '../core/master/masterTypes';
 
 const DIRECTORY_SEEDS_FILE = 'directory-seeds.json';
@@ -184,6 +189,25 @@ function readObject(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function readBoolean(value: unknown): boolean {
+  return value === true;
+}
+
+function readInteger(value: unknown, fallback = 0): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.trunc(value));
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.trunc(parsed));
+    }
+  }
+
+  return fallback;
+}
+
 function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -192,6 +216,54 @@ function readStringArray(value: unknown): string[] {
     .filter((entry): entry is string => typeof entry === 'string')
     .map((entry) => normalizeText(entry))
     .filter(Boolean);
+}
+
+function readMasterTriggerObservation(rawInput: Record<string, unknown>) {
+  const observation = readObject(rawInput.observation) ?? rawInput;
+  const userIntent = readObject(observation.userIntent) ?? {};
+  const activity = readObject(observation.activity) ?? {};
+  const diagnostics = readObject(observation.diagnostics) ?? {};
+  const workState = readObject(observation.workState) ?? {};
+  const directory = readObject(observation.directory) ?? {};
+
+  return {
+    now: readInteger(observation.now, Date.now()),
+    traceId: normalizeText(observation.traceId) || null,
+    hostMode: normalizeText(observation.hostMode) || DEFAULT_MASTER_HOST_MODE,
+    workspaceId: normalizeText(observation.workspaceId) || null,
+    userIntent: {
+      explicitlyAskedForMaster: readBoolean(userIntent.explicitlyAskedForMaster),
+      explicitlyRejectedSuggestion: readBoolean(userIntent.explicitlyRejectedSuggestion),
+    },
+    activity: {
+      recentUserMessages: readInteger(activity.recentUserMessages),
+      recentAssistantMessages: readInteger(activity.recentAssistantMessages),
+      recentToolCalls: readInteger(activity.recentToolCalls),
+      recentFailures: readInteger(activity.recentFailures),
+      repeatedFailureCount: readInteger(activity.repeatedFailureCount),
+      noProgressWindowMs: observation.activity && activity.noProgressWindowMs !== undefined && activity.noProgressWindowMs !== null
+        ? readInteger(activity.noProgressWindowMs)
+        : null,
+    },
+    diagnostics: {
+      failingTests: readInteger(diagnostics.failingTests),
+      failingCommands: readInteger(diagnostics.failingCommands),
+      repeatedErrorSignatures: readStringArray(diagnostics.repeatedErrorSignatures),
+      uncertaintySignals: readStringArray(diagnostics.uncertaintySignals),
+    },
+    workState: {
+      hasPlan: readBoolean(workState.hasPlan),
+      todoBlocked: readBoolean(workState.todoBlocked),
+      diffChangedRecently: readBoolean(workState.diffChangedRecently),
+      onlyReadingWithoutConverging: readBoolean(workState.onlyReadingWithoutConverging),
+    },
+    directory: {
+      availableMasters: readInteger(directory.availableMasters),
+      trustedMasters: readInteger(directory.trustedMasters),
+      onlineMasters: readInteger(directory.onlineMasters),
+    },
+    candidateMasterKindHint: normalizeText(observation.candidateMasterKindHint) || null,
+  };
 }
 
 function buildProviderSummaryPayload(input: {
@@ -1193,6 +1265,64 @@ async function resolveExplicitMasterTarget(input: {
   )) ?? null;
 }
 
+async function resolveSuggestedMasterTarget(input: {
+  draft: ReturnType<typeof readMasterAskDraft>;
+  preferredMasterKind?: string | null;
+  trustedMasters?: string[];
+  masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
+  hotRoot: string;
+  chainApiBaseUrl?: string;
+  providerGlobalMetaId?: string | null;
+  localProviderOnline: boolean;
+  localLastSeenSec: number | null;
+  providerDaemonBaseUrl?: string | null;
+}): Promise<MasterDirectoryItem | null> {
+  const explicit = await resolveExplicitMasterTarget({
+    draft: input.draft,
+    masterStateStore: input.masterStateStore,
+    hotRoot: input.hotRoot,
+    chainApiBaseUrl: input.chainApiBaseUrl,
+    providerGlobalMetaId: input.providerGlobalMetaId,
+    localProviderOnline: input.localProviderOnline,
+    localLastSeenSec: input.localLastSeenSec,
+    providerDaemonBaseUrl: input.providerDaemonBaseUrl,
+  });
+  if (explicit?.online) {
+    return explicit;
+  }
+
+  const preferredMasterKind = normalizeText(input.preferredMasterKind) || normalizeText(input.draft.target.masterKind);
+  const directory = await listRuntimeDirectoryMasters({
+    masterStateStore: input.masterStateStore,
+    hotRoot: input.hotRoot,
+    chainApiBaseUrl: input.chainApiBaseUrl,
+    onlineOnly: true,
+    host: DEFAULT_MASTER_HOST_MODE,
+    masterKind: preferredMasterKind || undefined,
+    localProviderOnline: input.localProviderOnline,
+    localLastSeenSec: input.localLastSeenSec,
+    providerDaemonBaseUrl: input.providerDaemonBaseUrl,
+    providerGlobalMetaId: input.providerGlobalMetaId,
+  });
+
+  const trustedMasterSet = new Set(
+    (input.trustedMasters ?? [])
+      .map((entry) => normalizeText(entry))
+      .filter(Boolean)
+  );
+
+  return [...directory.masters].sort((left, right) => {
+    const leftTrusted = trustedMasterSet.has(normalizeText(left.masterPinId)) ? 1 : 0;
+    const rightTrusted = trustedMasterSet.has(normalizeText(right.masterPinId)) ? 1 : 0;
+    return (
+      rightTrusted - leftTrusted
+      || Number(right.official) - Number(left.official)
+      || Number(right.online) - Number(left.online)
+      || right.updatedAt - left.updatedAt
+    );
+  })[0] ?? null;
+}
+
 async function persistTraceRecord(
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>,
   trace: SessionTraceRecord,
@@ -1204,6 +1334,148 @@ async function persistTraceRecord(
       ...state.traces.filter((entry) => entry.traceId !== trace.traceId),
     ],
   }));
+}
+
+async function createMasterAskPreviewResult(input: {
+  draft: ReturnType<typeof readMasterAskDraft>;
+  resolvedTarget: MasterDirectoryItem;
+  state: RuntimeState;
+  config: Awaited<ReturnType<ReturnType<typeof createConfigStore>['read']>>;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  pendingMasterAskStateStore: ReturnType<typeof createPendingMasterAskStateStore>;
+  triggerModeOverride?: string | null;
+}) {
+  if (!input.state.identity) {
+    return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
+  }
+
+  const draft = {
+    ...input.draft,
+    triggerMode: normalizeText(input.triggerModeOverride) || input.draft.triggerMode,
+  };
+  const now = Date.now();
+  const traceId = buildMasterTraceId({
+    providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+    servicePinId: input.resolvedTarget.masterPinId,
+    question: draft.question,
+    now,
+  });
+  const requestId = buildMasterRequestId(now);
+
+  let prepared;
+  try {
+    prepared = buildMasterAskPreview({
+      draft,
+      resolvedTarget: input.resolvedTarget,
+      caller: {
+        globalMetaId: input.state.identity.globalMetaId,
+        name: input.state.identity.name,
+        host: DEFAULT_MASTER_HOST_MODE,
+      },
+      traceId,
+      requestId,
+      confirmationMode: input.config.askMaster.confirmationMode,
+    });
+  } catch (error) {
+    return commandFailed(
+      'invalid_master_ask_draft',
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+
+  await input.pendingMasterAskStateStore.put({
+    traceId,
+    requestId,
+    createdAt: now,
+    updatedAt: now,
+    confirmationState: 'awaiting_confirmation',
+    requestJson: prepared.requestJson,
+    request: prepared.request,
+    target: prepared.preview.target,
+    preview: prepared.preview,
+  });
+
+  const trace = buildSessionTrace({
+    traceId,
+    channel: 'a2a',
+    exportRoot: input.runtimeStateStore.paths.exportRoot,
+    session: {
+      id: `master-${traceId}`,
+      title: `${input.resolvedTarget.displayName} Ask`,
+      type: 'a2a',
+      metabotId: input.state.identity.metabotId,
+      peerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+      peerName: input.resolvedTarget.displayName,
+      externalConversationId: `master:${input.state.identity.globalMetaId}:${input.resolvedTarget.providerGlobalMetaId}:${traceId}`,
+    },
+    a2a: {
+      role: 'caller',
+      publicStatus: 'awaiting_confirmation',
+      latestEvent: 'master_preview_ready',
+      taskRunState: 'queued',
+      callerGlobalMetaId: input.state.identity.globalMetaId,
+      callerName: input.state.identity.name,
+      providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+      providerName: input.resolvedTarget.displayName,
+      servicePinId: input.resolvedTarget.masterPinId,
+    },
+    askMaster: buildMasterTraceMetadata({
+      role: 'caller',
+      latestEvent: 'master_preview_ready',
+      publicStatus: 'awaiting_confirmation',
+      requestId,
+      masterKind: input.resolvedTarget.masterKind,
+      servicePinId: input.resolvedTarget.masterPinId,
+      providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+      displayName: input.resolvedTarget.displayName,
+      triggerMode: normalizeText(prepared.request.trigger.mode),
+      contextMode: normalizeText(prepared.request.extensions?.contextMode),
+      confirmationMode: input.config.askMaster.confirmationMode,
+      preview: {
+        userTask: prepared.request.task.userTask,
+        question: prepared.request.task.question,
+      },
+    }),
+  });
+
+  const artifacts = await exportSessionArtifacts({
+    trace,
+    transcript: {
+      sessionId: trace.session.id,
+      title: trace.session.title || 'Ask Master',
+      messages: [
+        {
+          id: `${traceId}-user`,
+          type: 'user',
+          timestamp: now,
+          content: prepared.request.task.question,
+        },
+        {
+          id: `${traceId}-assistant`,
+          type: 'assistant',
+          timestamp: now,
+          content: `Ask Master preview prepared for ${input.resolvedTarget.displayName}.`,
+          metadata: {
+            confirmCommand: prepared.preview.confirmation.confirmCommand,
+            servicePinId: input.resolvedTarget.masterPinId,
+            providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+          },
+        },
+      ],
+    },
+  });
+
+  await persistTraceRecord(input.runtimeStateStore, trace);
+
+  return commandAwaitingConfirmation({
+    traceId,
+    requestId,
+    confirmation: prepared.preview.confirmation,
+    preview: prepared.preview,
+    traceJsonPath: artifacts.traceJsonPath,
+    traceMarkdownPath: artifacts.traceMarkdownPath,
+    transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
+  });
 }
 
 export async function rebuildTraceArtifactsFromSessionState(input: {
@@ -1520,6 +1792,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
+  let masterTriggerMemoryState = createMasterTriggerMemoryState();
 
   async function trackActiveIdentityProfile(identity: RuntimeIdentityRecord): Promise<void> {
     try {
@@ -2100,128 +2373,130 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('master_target_not_found', 'Target Master could not be resolved from the local directory.');
         }
 
-        const now = Date.now();
-        const traceId = buildMasterTraceId({
-          providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
-          servicePinId: resolvedTarget.masterPinId,
-          question: draft.question,
-          now,
+        const previewResult = await createMasterAskPreviewResult({
+          draft,
+          resolvedTarget,
+          state,
+          config,
+          runtimeStateStore,
+          pendingMasterAskStateStore,
+          triggerModeOverride: 'manual',
         });
-        const requestId = buildMasterRequestId(now);
-        let prepared;
-        try {
-          prepared = buildMasterAskPreview({
-            draft,
-            resolvedTarget,
-            caller: {
-              globalMetaId: state.identity.globalMetaId,
-              name: state.identity.name,
-              host: DEFAULT_MASTER_HOST_MODE,
+        if (previewResult.ok && previewResult.state === 'awaiting_confirmation') {
+          masterTriggerMemoryState = recordMasterTriggerOutcome({
+            state: masterTriggerMemoryState,
+            observation: {
+              now: Date.now(),
+              traceId: previewResult.data.traceId,
+              hostMode: DEFAULT_MASTER_HOST_MODE,
+              userIntent: {
+                explicitlyAskedForMaster: true,
+                explicitlyRejectedSuggestion: false,
+              },
+              directory: {
+                availableMasters: 1,
+                trustedMasters: config.askMaster.trustedMasters.includes(resolvedTarget.masterPinId) ? 1 : 0,
+                onlineMasters: resolvedTarget.online ? 1 : 0,
+              },
+              candidateMasterKindHint: resolvedTarget.masterKind,
             },
-            traceId,
-            requestId,
-            confirmationMode: config.askMaster.confirmationMode,
+            decision: {
+              action: 'manual_requested',
+              reason: 'Caller explicitly invoked metabot master ask.',
+            },
           });
-        } catch (error) {
-          return commandFailed(
-            'invalid_master_ask_draft',
-            error instanceof Error ? error.message : String(error)
-          );
+        }
+        return previewResult;
+      },
+      suggest: async (rawInput: Record<string, unknown>) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
         }
 
-        await pendingMasterAskStateStore.put({
-          traceId,
-          requestId,
-          createdAt: now,
-          updatedAt: now,
-          confirmationState: 'awaiting_confirmation',
-          requestJson: prepared.requestJson,
-          request: prepared.request,
-          target: prepared.preview.target,
-          preview: prepared.preview,
+        const config = await configStore.read();
+        const daemon = input.getDaemonRecord();
+        const presence = await providerPresenceStore.read();
+        const localProviderOnline = isProviderPresenceOnline(presence);
+        const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
+          ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
+          : null;
+        const draft = readMasterAskDraft(readObject(rawInput.draft) ?? rawInput);
+        const trigger = await collectAndEvaluateMasterTrigger({
+          config: config.askMaster,
+          suppression: masterTriggerMemoryState,
+          collectObservation: async () => readMasterTriggerObservation(rawInput),
         });
 
-        const trace = buildSessionTrace({
-          traceId,
-          channel: 'a2a',
-          exportRoot: runtimeStateStore.paths.exportRoot,
-          session: {
-            id: `master-${traceId}`,
-            title: `${resolvedTarget.displayName} Ask`,
-            type: 'a2a',
-            metabotId: state.identity.metabotId,
-            peerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
-            peerName: resolvedTarget.displayName,
-            externalConversationId: `master:${state.identity.globalMetaId}:${resolvedTarget.providerGlobalMetaId}:${traceId}`,
-          },
-          a2a: {
-            role: 'caller',
-            publicStatus: 'awaiting_confirmation',
-            latestEvent: 'master_preview_ready',
-            taskRunState: 'queued',
-            callerGlobalMetaId: state.identity.globalMetaId,
-            callerName: state.identity.name,
-            providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
-            providerName: resolvedTarget.displayName,
-            servicePinId: resolvedTarget.masterPinId,
-          },
-          askMaster: buildMasterTraceMetadata({
-            role: 'caller',
-            latestEvent: 'master_preview_ready',
-            publicStatus: 'awaiting_confirmation',
-            requestId,
-            masterKind: resolvedTarget.masterKind,
-            servicePinId: resolvedTarget.masterPinId,
-            providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
-            displayName: resolvedTarget.displayName,
-            triggerMode: normalizeText(prepared.request.trigger.mode),
-            contextMode: normalizeText(prepared.request.extensions?.contextMode),
-            confirmationMode: config.askMaster.confirmationMode,
-            preview: {
-              userTask: prepared.request.task.userTask,
-              question: prepared.request.task.question,
+        if (trigger.collected && trigger.observation?.userIntent.explicitlyRejectedSuggestion) {
+          masterTriggerMemoryState = recordMasterTriggerOutcome({
+            state: masterTriggerMemoryState,
+            observation: trigger.observation,
+            decision: trigger.decision,
+          });
+        }
+
+        if (trigger.decision.action === 'no_action') {
+          return commandSuccess({
+            collected: trigger.collected,
+            decision: trigger.decision,
+          });
+        }
+
+        const resolvedTarget = await resolveSuggestedMasterTarget({
+          draft,
+          preferredMasterKind: 'candidateMasterKind' in trigger.decision
+            ? normalizeText(trigger.decision.candidateMasterKind)
+            : null,
+          trustedMasters: config.askMaster.trustedMasters,
+          masterStateStore,
+          hotRoot: runtimeStateStore.paths.hotRoot,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+          localProviderOnline,
+          localLastSeenSec,
+          providerDaemonBaseUrl: daemon?.baseUrl || null,
+          providerGlobalMetaId: state.identity.globalMetaId,
+        });
+        if (!resolvedTarget) {
+          return commandSuccess({
+            collected: trigger.collected,
+            decision: {
+              action: 'no_action',
+              reason: 'No matching online Master could be resolved for this suggestion.',
             },
-          }),
-        });
+          });
+        }
 
-        const artifacts = await exportSessionArtifacts({
-          trace,
-          transcript: {
-            sessionId: trace.session.id,
-            title: trace.session.title || 'Ask Master',
-            messages: [
-              {
-                id: `${traceId}-user`,
-                type: 'user',
-                timestamp: now,
-                content: prepared.request.task.question,
-              },
-              {
-                id: `${traceId}-assistant`,
-                type: 'assistant',
-                timestamp: now,
-                content: `Ask Master preview prepared for ${resolvedTarget.displayName}.`,
-                metadata: {
-                  confirmCommand: prepared.preview.confirmation.confirmCommand,
-                  servicePinId: resolvedTarget.masterPinId,
-                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
-                },
-              },
-            ],
-          },
+        const previewResult = await createMasterAskPreviewResult({
+          draft,
+          resolvedTarget,
+          state,
+          config,
+          runtimeStateStore,
+          pendingMasterAskStateStore,
+          triggerModeOverride: trigger.decision.action === 'manual_requested'
+            ? 'manual'
+            : trigger.decision.action === 'auto_candidate'
+              ? 'auto'
+              : 'suggest',
         });
+        if (previewResult.ok && previewResult.state === 'awaiting_confirmation' && trigger.observation) {
+          masterTriggerMemoryState = recordMasterTriggerOutcome({
+            state: masterTriggerMemoryState,
+            observation: trigger.observation,
+            decision: trigger.decision,
+          });
+          return {
+            ...previewResult,
+            data: {
+              ...previewResult.data,
+              collected: trigger.collected,
+              decision: trigger.decision,
+            },
+          };
+        }
 
-        await persistTraceRecord(runtimeStateStore, trace);
-
-        return commandAwaitingConfirmation({
-          traceId,
-          requestId,
-          confirmation: prepared.preview.confirmation,
-          preview: prepared.preview,
-          traceJsonPath: artifacts.traceJsonPath,
-          traceMarkdownPath: artifacts.traceMarkdownPath,
-          transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
-        });
+        return previewResult;
       },
       receive: async (rawInput) => {
         const state = await runtimeStateStore.readState();
