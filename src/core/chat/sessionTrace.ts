@@ -90,6 +90,7 @@ export interface SessionTraceAskMasterRecord {
     status: string | null;
     summary: string | null;
     followUpQuestion: string | null;
+    errorCode: string | null;
   } | null;
   failure: {
     code: string | null;
@@ -195,6 +196,7 @@ function buildAskMasterTraceRecord(input?: SessionTraceAskMasterInput | null): S
         status: normalizeText(input.response.status) || null,
         summary: normalizeText(input.response.summary) || null,
         followUpQuestion: normalizeText(input.response.followUpQuestion) || null,
+        errorCode: normalizeText(input.response.errorCode) || null,
       }
     : null;
   const failure = input.failure && typeof input.failure === 'object'
@@ -217,7 +219,7 @@ function buildAskMasterTraceRecord(input?: SessionTraceAskMasterInput | null): S
     providerGlobalMetaId: normalizeText(input.providerGlobalMetaId) || null,
     displayName: normalizeText(input.displayName) || null,
     preview: preview && (preview.userTask || preview.question) ? preview : null,
-    response: response && (response.status || response.summary || response.followUpQuestion) ? response : null,
+    response: response && (response.status || response.summary || response.followUpQuestion || response.errorCode) ? response : null,
     failure: failure && (failure.code || failure.message) ? failure : null,
   };
 

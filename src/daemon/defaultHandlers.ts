@@ -1505,6 +1505,7 @@ function buildMasterCallerTraceAfterReply(input: {
         status: input.response.status,
         summary: input.response.summary,
         followUpQuestion: input.response.followUpQuestion,
+        errorCode: input.response.errorCode,
       }
     : input.baseTrace.askMaster?.response;
   const failure = input.response && (

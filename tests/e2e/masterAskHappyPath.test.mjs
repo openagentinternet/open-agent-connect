@@ -8,6 +8,7 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
+const { buildMasterResponseJson } = require('../../dist/core/master/masterMessageSchema.js');
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const MASTER_PROVIDER_FIXTURE_PATH = path.join(REPO_ROOT, 'e2e/fixtures/master-service-debug.json');
@@ -98,14 +99,16 @@ async function fetchJson(baseUrl, routePath, options = {}) {
 async function prepareMasterHomes(t) {
   const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-e2e-caller-'));
   const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-e2e-provider-'));
+  const providerName = `Debug Master Provider ${path.basename(providerHome)}`;
+  const callerName = `Caller Bot ${path.basename(callerHome)}`;
   t.after(async () => stopDaemon(callerHome));
   t.after(async () => stopDaemon(providerHome));
   t.after(async () => rm(callerHome, { recursive: true, force: true }));
   t.after(async () => rm(providerHome, { recursive: true, force: true }));
 
-  const providerIdentity = await runCommand(providerHome, ['identity', 'create', '--name', 'Debug Master Provider']);
+  const providerIdentity = await runCommand(providerHome, ['identity', 'create', '--name', providerName]);
   assert.equal(providerIdentity.exitCode, 0);
-  const callerIdentity = await runCommand(callerHome, ['identity', 'create', '--name', 'Caller Bot']);
+  const callerIdentity = await runCommand(callerHome, ['identity', 'create', '--name', callerName]);
   assert.equal(callerIdentity.exitCode, 0);
 
   const publishPayload = await readFile(MASTER_PROVIDER_FIXTURE_PATH, 'utf8');
@@ -171,7 +174,30 @@ async function prepareMasterHomes(t) {
   };
 }
 
-test('caller can preview, confirm, and receive a structured response from the official debug master', async (t) => {
+function buildFakeMasterResponse(preview, overrides = {}) {
+  const request = preview.payload.data.preview.request;
+  return buildMasterResponseJson({
+    type: 'master_response',
+    version: '1.0.0',
+    requestId: preview.payload.data.requestId,
+    traceId: preview.payload.data.traceId,
+    responder: {
+      providerGlobalMetaId: request.target.providerGlobalMetaId,
+      masterServicePinId: request.target.masterServicePinId,
+      masterKind: request.target.masterKind,
+    },
+    status: 'completed',
+    summary: 'Default fake master response.',
+    structuredData: {
+      findings: [],
+      recommendations: [],
+      risks: [],
+    },
+    ...overrides,
+  });
+}
+
+test('caller can preview, confirm, and receive a structured response from the official debug master', { concurrency: false }, async (t) => {
   const prepared = await prepareMasterHomes(t);
 
   const providerReply = await fetchJson(prepared.providerDaemonBaseUrl, '/api/master/receive', {
@@ -221,7 +247,7 @@ test('caller can preview, confirm, and receive a structured response from the of
   assert.match(transcriptMarkdown, new RegExp(providerReply.payload.data.response.summary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
-test('caller timeout semantics remain unchanged after master ask integration', async (t) => {
+test('caller timeout semantics remain unchanged after master ask integration', { concurrency: false }, async (t) => {
   const prepared = await prepareMasterHomes(t);
 
   const confirm = await runCommand(
@@ -251,7 +277,7 @@ test('caller timeout semantics remain unchanged after master ask integration', a
   assert.match(transcriptMarkdown, /Foreground wait ended before the remote MetaBot returned|Foreground timeout reached/i);
 });
 
-test('caller trace upgrades when a late master_response arrives after the foreground timeout', async (t) => {
+test('caller trace upgrades when a late master_response arrives after the foreground timeout', { concurrency: false }, async (t) => {
   const prepared = await prepareMasterHomes(t);
 
   const providerReply = await fetchJson(prepared.providerDaemonBaseUrl, '/api/master/receive', {
@@ -325,4 +351,87 @@ test('caller trace upgrades when a late master_response arrives after the foregr
     transcriptMarkdown,
     new RegExp(providerReply.payload.data.response.summary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
   );
+});
+
+test('caller surfaces need_more_context replies as manual_action_required and preserves the follow-up question', { concurrency: false }, async (t) => {
+  const prepared = await prepareMasterHomes(t);
+  const responseJson = buildFakeMasterResponse(prepared.preview, {
+    status: 'need_more_context',
+    summary: 'More concrete failure output is required before a reliable diagnosis is possible.',
+    structuredData: {
+      missing: ['The exact failing command output.'],
+      risks: ['Any fix would be low-confidence without the concrete failing output.'],
+    },
+    followUpQuestion: 'Can you share the exact failing command output?',
+  });
+
+  const confirm = await runCommand(
+    prepared.callerHome,
+    ['master', 'ask', '--trace-id', prepared.preview.payload.data.traceId, '--confirm'],
+    {
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: VALID_TEST_PROVIDER_CHAT_PUBLIC_KEY,
+      METABOT_TEST_FAKE_MASTER_REPLY: JSON.stringify({ responseJson }),
+    }
+  );
+
+  assert.equal(confirm.exitCode, 0);
+  assert.equal(confirm.payload.ok, true);
+  assert.equal(confirm.payload.data.session.publicStatus, 'manual_action_required');
+  assert.equal(confirm.payload.data.session.event, 'clarification_needed');
+  assert.equal(confirm.payload.data.response.status, 'need_more_context');
+  assert.equal(
+    confirm.payload.data.response.followUpQuestion,
+    'Can you share the exact failing command output?'
+  );
+
+  const trace = await runCommand(prepared.callerHome, ['master', 'trace', '--id', prepared.preview.payload.data.traceId]);
+  assert.equal(trace.exitCode, 0);
+  assert.equal(trace.payload.ok, true);
+  assert.equal(trace.payload.data.canonicalStatus, 'need_more_context');
+  assert.equal(trace.payload.data.response.status, 'need_more_context');
+  assert.equal(
+    trace.payload.data.response.followUpQuestion,
+    'Can you share the exact failing command output?'
+  );
+
+  const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
+  assert.match(transcriptMarkdown, /More concrete failure output is required/i);
+});
+
+test('caller surfaces failed replies as remote_failed and preserves the structured failure details', { concurrency: false }, async (t) => {
+  const prepared = await prepareMasterHomes(t);
+  const responseJson = buildFakeMasterResponse(prepared.preview, {
+    status: 'failed',
+    summary: 'The remote master could not validate the request payload.',
+    errorCode: 'invalid_master_runner_result',
+    structuredData: {
+      risks: ['The provider response was structurally invalid for the requested operation.'],
+    },
+  });
+
+  const confirm = await runCommand(
+    prepared.callerHome,
+    ['master', 'ask', '--trace-id', prepared.preview.payload.data.traceId, '--confirm'],
+    {
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: VALID_TEST_PROVIDER_CHAT_PUBLIC_KEY,
+      METABOT_TEST_FAKE_MASTER_REPLY: JSON.stringify({ responseJson }),
+    }
+  );
+
+  assert.equal(confirm.exitCode, 0);
+  assert.equal(confirm.payload.ok, true);
+  assert.equal(confirm.payload.data.session.publicStatus, 'remote_failed');
+  assert.equal(confirm.payload.data.session.event, 'provider_failed');
+  assert.equal(confirm.payload.data.response.status, 'failed');
+  assert.equal(confirm.payload.data.response.errorCode, 'invalid_master_runner_result');
+
+  const trace = await runCommand(prepared.callerHome, ['master', 'trace', '--id', prepared.preview.payload.data.traceId]);
+  assert.equal(trace.exitCode, 0);
+  assert.equal(trace.payload.ok, true);
+  assert.equal(trace.payload.data.canonicalStatus, 'failed');
+  assert.equal(trace.payload.data.response.status, 'failed');
+  assert.equal(trace.payload.data.response.errorCode, 'invalid_master_runner_result');
+
+  const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
+  assert.match(transcriptMarkdown, /The remote master could not validate the request payload/i);
 });

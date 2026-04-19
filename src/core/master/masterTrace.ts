@@ -22,6 +22,7 @@ export interface AskMasterTraceResponseSummary {
   status: string | null;
   summary: string | null;
   followUpQuestion: string | null;
+  errorCode: string | null;
 }
 
 export interface AskMasterTraceFailureSummary {
@@ -68,6 +69,7 @@ export interface BuildMasterTraceMetadataInput {
     status?: string | null;
     summary?: string | null;
     followUpQuestion?: string | null;
+    errorCode?: string | null;
   } | null;
   failure?: {
     code?: string | null;
@@ -136,9 +138,10 @@ function normalizeResponse(
     status: normalizeNullableText(value.status),
     summary: normalizeNullableText(value.summary),
     followUpQuestion: normalizeNullableText(value.followUpQuestion),
+    errorCode: normalizeNullableText(value.errorCode),
   };
 
-  return response.status || response.summary || response.followUpQuestion ? response : null;
+  return response.status || response.summary || response.followUpQuestion || response.errorCode ? response : null;
 }
 
 function normalizeFailure(
