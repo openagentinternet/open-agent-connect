@@ -37,6 +37,41 @@ test('createProviderPresenceStateStore persists enabled and latest heartbeat met
   }
 });
 
+test('createProviderPresenceStateStore keeps reads parseable while writes race', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-provider-presence-race-'));
+
+  try {
+    const store = createProviderPresenceStateStore(homeDir);
+    await store.write({
+      enabled: true,
+      lastHeartbeatAt: null,
+      lastHeartbeatPinId: null,
+      lastHeartbeatTxid: null,
+    });
+
+    await Promise.all([
+      (async () => {
+        for (let index = 0; index < 2000; index += 1) {
+          await store.write({
+            enabled: true,
+            lastHeartbeatAt: index,
+            lastHeartbeatPinId: `/protocols/metabot-heartbeat-pin-${index}`,
+            lastHeartbeatTxid: `/protocols/metabot-heartbeat-tx-${index}`,
+          });
+        }
+      })(),
+      (async () => {
+        for (let index = 0; index < 2000; index += 1) {
+          const current = await store.read();
+          assert.equal(current.enabled, true);
+        }
+      })(),
+    ]);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
 test('ProviderHeartbeatLoop writes /protocols/metabot-heartbeat and records the latest heartbeat metadata', async () => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-provider-heartbeat-'));
   const writes = [];

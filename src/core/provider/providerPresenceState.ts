@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { ensureHotLayout } from '../state/runtimeStateStore';
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 
@@ -19,6 +20,8 @@ export interface ProviderPresenceStateStore {
     ) => ProviderPresenceState | Promise<ProviderPresenceState>
   ): Promise<ProviderPresenceState>;
 }
+
+let atomicWriteSequence = 0;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -67,6 +70,18 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
   }
 }
 
+function nextAtomicWriteSuffix(): string {
+  atomicWriteSequence += 1;
+  return `${process.pid}.${Date.now()}.${atomicWriteSequence}`;
+}
+
+async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tempPath = `${filePath}.${nextAtomicWriteSuffix()}.tmp`;
+  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  await fs.rename(tempPath, filePath);
+}
+
 export function createProviderPresenceStateStore(homeDirOrPaths: string | MetabotPaths): ProviderPresenceStateStore {
   const paths = typeof homeDirOrPaths === 'string' ? resolveMetabotPaths(homeDirOrPaths) : homeDirOrPaths;
 
@@ -80,7 +95,7 @@ export function createProviderPresenceStateStore(homeDirOrPaths: string | Metabo
     async write(nextState) {
       await ensureHotLayout(paths);
       const normalized = normalizeProviderPresenceState(nextState);
-      await fs.writeFile(paths.providerPresenceStatePath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
+      await writeJsonAtomic(paths.providerPresenceStatePath, normalized);
       return normalized;
     },
     async update(updater) {
