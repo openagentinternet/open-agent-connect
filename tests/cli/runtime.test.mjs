@@ -1562,6 +1562,69 @@ test('network services merges remote demo directory seeds and returns provider d
   assert.equal(listed.payload.data.services[0].online, true);
 });
 
+test('master list merges remote debug-master directory seeds and returns provider daemon base urls for caller-side invocation', async (t) => {
+  const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-caller-'));
+  const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-provider-'));
+  t.after(async () => stopDaemon(callerHome));
+  t.after(async () => stopDaemon(providerHome));
+
+  const providerIdentity = await runCommand(providerHome, ['identity', 'create', '--name', 'Debug Master Provider']);
+  assert.equal(providerIdentity.exitCode, 0);
+
+  const publishFile = path.join(providerHome, 'master-payload.json');
+  await writeFile(publishFile, JSON.stringify({
+    serviceName: 'official-debug-master',
+    displayName: 'Official Debug Master',
+    description: 'Structured debugging help from the official Ask Master fixture.',
+    masterKind: 'debug',
+    specialties: ['debugging'],
+    hostModes: ['codex'],
+    modelInfo: {
+      provider: 'metaweb',
+      model: 'official-debug-master-v1',
+    },
+    style: 'direct_and_structured',
+    pricingMode: 'free',
+    price: '0',
+    currency: 'SPACE',
+    responseMode: 'structured',
+    contextPolicy: 'standard',
+    official: true,
+    trustedTier: 'official',
+  }), 'utf8');
+
+  const published = await runCommand(providerHome, ['master', 'publish', '--payload-file', publishFile]);
+  assert.equal(published.exitCode, 0);
+
+  const providerPresenceStore = createProviderPresenceStateStore(providerHome);
+  await providerPresenceStore.write({
+    enabled: true,
+    lastHeartbeatAt: Date.now(),
+    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-1',
+    lastHeartbeatTxid: 'heartbeat-tx-master-1',
+  });
+
+  const providerDaemon = await runCommand(providerHome, ['daemon', 'start']);
+  assert.equal(providerDaemon.exitCode, 0);
+  assert.equal(providerDaemon.payload.ok, true);
+
+  await writeDirectorySeeds(callerHome, [{
+    baseUrl: providerDaemon.payload.data.baseUrl,
+    label: 'debug-master-demo',
+  }]);
+
+  const listed = await runCommand(callerHome, ['master', 'list']);
+
+  assert.equal(listed.exitCode, 0);
+  assert.equal(listed.payload.ok, true);
+  assert.equal(Array.isArray(listed.payload.data.masters), true);
+  assert.equal(listed.payload.data.masters.length, 1);
+  assert.equal(listed.payload.data.masters[0].displayName, 'Official Debug Master');
+  assert.equal(listed.payload.data.masters[0].providerGlobalMetaId, providerIdentity.payload.data.globalMetaId);
+  assert.equal(listed.payload.data.masters[0].providerDaemonBaseUrl, providerDaemon.payload.data.baseUrl);
+  assert.equal(listed.payload.data.masters[0].online, true);
+});
+
 test('network sources add/list/remove manages the local demo provider registry without manual file edits', async (t) => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
   t.after(async () => stopDaemon(homeDir));

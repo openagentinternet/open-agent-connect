@@ -185,6 +185,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'chain', summary: 'Write arbitrary MetaID tuples and protocol payloads on-chain.' },
     { name: 'wallet', summary: 'Inspect local wallet balances across supported chains.' },
     { name: 'network', summary: 'Inspect the MetaWeb yellow-pages directory and local source seeds.' },
+    { name: 'master', summary: 'Publish, discover, ask, and inspect Ask Master flows.' },
     { name: 'services', summary: 'Publish, call, and rate remote MetaBot services.' },
     { name: 'chat', summary: 'Send encrypted private MetaWeb messages to another MetaBot.' },
     { name: 'trace', summary: 'Watch or inspect structured remote delegation traces.' },
@@ -454,6 +455,62 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot wallet balance --chain btc',
     ],
     optionalFlags: [WALLET_CHAIN_ALL_BTC_MVC_FLAG, HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['master'],
+    summary: 'Ask Master commands for publishing, discovering, asking, and tracing remote masters.',
+    usage: 'metabot master <subcommand>',
+    subcommands: [
+      { name: 'publish', summary: 'Publish one master-service record to the chain-backed directory.' },
+      { name: 'list', summary: 'List discoverable master-service entries for the current host.' },
+      { name: 'ask', summary: 'Preview or confirm one Ask Master request.' },
+      { name: 'trace', summary: 'Inspect one Ask Master trace by trace id.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['master', 'publish'],
+    summary: 'Publish one master-service payload for a remote master/provider.',
+    usage: 'metabot master publish --payload-file <path> [--chain <mvc|btc>]',
+    requiredFlags: [
+      { flag: '--payload-file', value: '<path>', description: 'JSON master-service payload file.' },
+    ],
+    optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['master', 'list'],
+    summary: 'List master-service directory entries visible to the current host runtime.',
+    usage: 'metabot master list [--online] [--kind <kind>]',
+    optionalFlags: [
+      { flag: '--online', description: 'Return only currently online masters.' },
+      { flag: '--kind', value: '<kind>', description: 'Filter by master kind, such as debug.' },
+      HELP_JSON_FLAG,
+    ],
+  },
+  {
+    commandPath: ['master', 'ask'],
+    summary: 'Preview or confirm one Ask Master request from a request file or pending trace.',
+    usage: 'metabot master ask --request-file <path> | --trace-id <trace-id> [--confirm]',
+    requiredFlags: [
+      {
+        flag: '--request-file | --trace-id',
+        value: '<path|trace-id>',
+        description: 'Provide either a new request draft file or an existing pending Ask Master trace id.',
+      },
+    ],
+    optionalFlags: [
+      { flag: '--confirm', description: 'Send a previously previewed Ask Master request.' },
+      HELP_JSON_FLAG,
+    ],
+  },
+  {
+    commandPath: ['master', 'trace'],
+    summary: 'Inspect one Ask Master trace record.',
+    usage: 'metabot master trace --id <trace-id>',
+    requiredFlags: [
+      { flag: '--id', value: '<trace-id>', description: 'Ask Master trace id.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
   },
   {
     commandPath: ['network'],

@@ -1,4 +1,4 @@
-export type MetabotCommandState = 'success' | 'waiting' | 'manual_action_required' | 'failed';
+export type MetabotCommandState = 'success' | 'awaiting_confirmation' | 'waiting' | 'manual_action_required' | 'failed';
 
 type CommandBase = {
   state: MetabotCommandState;
@@ -9,6 +9,12 @@ type CommandBase = {
 type CommandSuccess<T> = CommandBase & {
   ok: true;
   state: 'success';
+  data: T;
+};
+
+type CommandAwaitingConfirmation<T> = CommandBase & {
+  ok: true;
+  state: 'awaiting_confirmation';
   data: T;
 };
 
@@ -31,6 +37,7 @@ type CommandFailed = CommandBase & {
 
 export type MetabotCommandResult<T> =
   | CommandSuccess<T>
+  | CommandAwaitingConfirmation<T>
   | CommandWaiting
   | CommandManualActionRequired
   | CommandFailed;
@@ -39,6 +46,12 @@ export const commandSuccess = <T>(data: T): MetabotCommandResult<T> => ({
   ok: true,
   state: 'success',
   data
+});
+
+export const commandAwaitingConfirmation = <T>(data: T): MetabotCommandResult<T> => ({
+  ok: true,
+  state: 'awaiting_confirmation',
+  data,
 });
 
 export const commandWaiting = (code: string, message: string, pollAfterMs: number): MetabotCommandResult<never> => ({

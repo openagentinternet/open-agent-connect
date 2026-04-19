@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { PublicStatus } from '../a2a/publicStatus';
 import type { A2ASessionRole, A2ATaskRunState } from '../a2a/sessionTypes';
+import type { AskMasterTraceMetadata } from '../master/masterTrace';
 
 export interface SessionTraceSessionInput {
   id: string;
@@ -30,6 +31,7 @@ export interface BuildSessionTraceInput {
   session: SessionTraceSessionInput;
   order?: SessionTraceOrderInput | null;
   a2a?: SessionTraceA2AInput | null;
+  askMaster?: SessionTraceAskMasterInput | null;
 }
 
 export interface SessionTraceArtifacts {
@@ -66,6 +68,36 @@ export interface SessionTraceA2ARecord {
   servicePinId: string | null;
 }
 
+export interface SessionTraceAskMasterInput extends AskMasterTraceMetadata {}
+
+export interface SessionTraceAskMasterRecord {
+  flow: 'master';
+  transport: string | null;
+  canonicalStatus: string | null;
+  triggerMode: string | null;
+  contextMode: string | null;
+  confirmationMode: string | null;
+  requestId: string | null;
+  masterKind: string | null;
+  servicePinId: string | null;
+  providerGlobalMetaId: string | null;
+  displayName: string | null;
+  preview: {
+    userTask: string | null;
+    question: string | null;
+  } | null;
+  response: {
+    status: string | null;
+    summary: string | null;
+    followUpQuestion: string | null;
+    errorCode: string | null;
+  } | null;
+  failure: {
+    code: string | null;
+    message: string | null;
+  } | null;
+}
+
 export interface SessionTraceRecord {
   traceId: string;
   channel: string;
@@ -89,6 +121,7 @@ export interface SessionTraceRecord {
     paymentAmount: string | null;
   } | null;
   a2a: SessionTraceA2ARecord | null;
+  askMaster: SessionTraceAskMasterRecord | null;
   artifacts: SessionTraceArtifacts;
 }
 
@@ -145,6 +178,55 @@ function buildA2ATraceRecord(input?: SessionTraceA2AInput | null): SessionTraceA
   };
 
   return Object.values(record).some(Boolean) ? record : null;
+}
+
+function buildAskMasterTraceRecord(input?: SessionTraceAskMasterInput | null): SessionTraceAskMasterRecord | null {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const preview = input.preview && typeof input.preview === 'object'
+    ? {
+        userTask: normalizeText(input.preview.userTask) || null,
+        question: normalizeText(input.preview.question) || null,
+      }
+    : null;
+  const response = input.response && typeof input.response === 'object'
+    ? {
+        status: normalizeText(input.response.status) || null,
+        summary: normalizeText(input.response.summary) || null,
+        followUpQuestion: normalizeText(input.response.followUpQuestion) || null,
+        errorCode: normalizeText(input.response.errorCode) || null,
+      }
+    : null;
+  const failure = input.failure && typeof input.failure === 'object'
+    ? {
+        code: normalizeText(input.failure.code) || null,
+        message: normalizeText(input.failure.message) || null,
+      }
+    : null;
+
+  const record: SessionTraceAskMasterRecord = {
+    flow: 'master',
+    transport: normalizeText(input.transport) || null,
+    canonicalStatus: normalizeText(input.canonicalStatus) || null,
+    triggerMode: normalizeText(input.triggerMode) || null,
+    contextMode: normalizeText(input.contextMode) || null,
+    confirmationMode: normalizeText(input.confirmationMode) || null,
+    requestId: normalizeText(input.requestId) || null,
+    masterKind: normalizeText(input.masterKind) || null,
+    servicePinId: normalizeText(input.servicePinId) || null,
+    providerGlobalMetaId: normalizeText(input.providerGlobalMetaId) || null,
+    displayName: normalizeText(input.displayName) || null,
+    preview: preview && (preview.userTask || preview.question) ? preview : null,
+    response: response && (response.status || response.summary || response.followUpQuestion || response.errorCode) ? response : null,
+    failure: failure && (failure.code || failure.message) ? failure : null,
+  };
+
+  return record.canonicalStatus || record.requestId || record.masterKind || record.servicePinId || record.displayName
+    || record.preview || record.response || record.failure
+    ? record
+    : null;
 }
 
 export function buildServiceOrderObserverConversationId(
@@ -237,6 +319,7 @@ export function buildSessionTrace(input: BuildSessionTraceInput): SessionTraceRe
         }
       : null,
     a2a: buildA2ATraceRecord(input.a2a),
+    askMaster: buildAskMasterTraceRecord(input.askMaster),
     artifacts: {
       transcriptMarkdownPath,
       traceMarkdownPath,

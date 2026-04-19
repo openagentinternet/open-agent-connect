@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
+  commandAwaitingConfirmation,
   commandFailed,
   commandManualActionRequired,
   commandSuccess,
@@ -38,6 +39,7 @@ import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
 import { readChainDirectoryWithFallback } from '../core/discovery/chainDirectoryReader';
+import { HEARTBEAT_ONLINE_WINDOW_SEC } from '../core/discovery/chainHeartbeatDirectory';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
 import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/sessionEngine';
 import { resolvePublicStatus } from '../core/a2a/publicStatus';
@@ -54,12 +56,33 @@ import {
 } from '../core/bootstrap/localIdentityBootstrap';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import { buildDelegationOrderPayload } from '../core/orders/delegationOrderMessage';
+import { createConfigStore } from '../core/config/configStore';
 import {
   createSocketIoMetaWebReplyWaiter,
   type AwaitMetaWebServiceReplyInput,
   type AwaitMetaWebServiceReplyResult,
   type MetaWebServiceReplyWaiter,
 } from '../core/a2a/metawebReplyWaiter';
+import { parseMasterRequest, parseMasterResponse, type MasterResponseMessage } from '../core/master/masterMessageSchema';
+import {
+  type AwaitMetaWebMasterReplyInput,
+  type AwaitMetaWebMasterReplyResult,
+  type MetaWebMasterReplyWaiter,
+} from '../core/master/metawebMasterReplyWaiter';
+import { handleMasterProviderRequest } from '../core/master/masterProviderRuntime';
+import { listMasters, readChainMasterDirectoryWithFallback, summarizePublishedMaster } from '../core/master/masterDirectory';
+import { createPendingMasterAskStateStore, type PendingMasterAskRecord } from '../core/master/masterPendingAskState';
+import { createPublishedMasterStateStore } from '../core/master/masterPublishedState';
+import { buildMasterAskPreview } from '../core/master/masterPreview';
+import { buildMasterTraceMetadata, buildMasterTraceView } from '../core/master/masterTrace';
+import { publishMasterToChain } from '../core/master/masterServicePublish';
+import { validateMasterServicePayload } from '../core/master/masterServiceSchema';
+import {
+  collectAndEvaluateMasterTrigger,
+  createMasterTriggerMemoryState,
+  recordMasterTriggerOutcome,
+} from '../core/master/masterTriggerEngine';
+import type { MasterDirectoryItem, PublishedMasterRecord } from '../core/master/masterTypes';
 
 const DIRECTORY_SEEDS_FILE = 'directory-seeds.json';
 const DEFAULT_CALLER_FOREGROUND_WAIT_MS = 15_000;
@@ -67,6 +90,7 @@ const DEFAULT_CALLER_BACKGROUND_WAIT_MS = 30 * 60 * 1000;
 const DEFAULT_TRACE_WATCH_WAIT_MS = 75_000;
 const TRACE_WATCH_POLL_INTERVAL_MS = 500;
 const PROVIDER_RATING_SYNC_STALE_MS = 30_000;
+const DEFAULT_MASTER_HOST_MODE = 'codex';
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -80,6 +104,25 @@ async function sleep(ms: number): Promise<void> {
 
 function sanitizeServiceSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'service';
+}
+
+function buildMasterTraceId(input: {
+  providerGlobalMetaId: string;
+  servicePinId: string;
+  question: string;
+  now: number;
+}): string {
+  const providerPart = sanitizeServiceSegment(normalizeText(input.providerGlobalMetaId).slice(0, 16)) || 'provider';
+  const servicePart = sanitizeServiceSegment(normalizeText(input.servicePinId).slice(0, 16)) || 'master';
+  const suffix = createHash('sha256')
+    .update(`${input.now}:${input.question}`)
+    .digest('hex')
+    .slice(0, 8);
+  return `trace-master-${providerPart}-${servicePart}-${suffix}`;
+}
+
+function buildMasterRequestId(now: number): string {
+  return `master-req-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function resolvePaymentAddress(identity: RuntimeIdentityRecord, currency: string): string {
@@ -138,11 +181,56 @@ function summarizeService(record: ReturnType<typeof buildPublishedService>['reco
   };
 }
 
+function isProviderPresenceOnline(input: {
+  enabled: boolean;
+  lastHeartbeatAt: number | null;
+  lastHeartbeatPinId: string | null;
+}, nowMs: number = Date.now()): boolean {
+  if (input.enabled !== true || !input.lastHeartbeatPinId || !Number.isFinite(input.lastHeartbeatAt)) {
+    return false;
+  }
+  return (nowMs - Number(input.lastHeartbeatAt)) <= (HEARTBEAT_ONLINE_WINDOW_SEC * 1000);
+}
+
+function summarizeMaster(record: PublishedMasterRecord, options: {
+  online?: boolean;
+  lastSeenSec?: number | null;
+  providerDaemonBaseUrl?: string | null;
+  directorySeedLabel?: string | null;
+} = {}) {
+  return {
+    ...summarizePublishedMaster(record),
+    online: options.online === true,
+    lastSeenSec: options.lastSeenSec ?? null,
+    providerDaemonBaseUrl: normalizeText(options.providerDaemonBaseUrl) || null,
+    directorySeedLabel: normalizeText(options.directorySeedLabel) || null,
+  };
+}
+
 function readObject(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
   }
   return value as Record<string, unknown>;
+}
+
+function readBoolean(value: unknown): boolean {
+  return value === true;
+}
+
+function readInteger(value: unknown, fallback = 0): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.trunc(value));
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.trunc(parsed));
+    }
+  }
+
+  return fallback;
 }
 
 function readStringArray(value: unknown): string[] {
@@ -155,15 +243,65 @@ function readStringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function readMasterTriggerObservation(rawInput: Record<string, unknown>) {
+  const observation = readObject(rawInput.observation) ?? rawInput;
+  const userIntent = readObject(observation.userIntent) ?? {};
+  const activity = readObject(observation.activity) ?? {};
+  const diagnostics = readObject(observation.diagnostics) ?? {};
+  const workState = readObject(observation.workState) ?? {};
+  const directory = readObject(observation.directory) ?? {};
+
+  return {
+    now: readInteger(observation.now, Date.now()),
+    traceId: normalizeText(observation.traceId) || null,
+    hostMode: normalizeText(observation.hostMode) || DEFAULT_MASTER_HOST_MODE,
+    workspaceId: normalizeText(observation.workspaceId) || null,
+    userIntent: {
+      explicitlyAskedForMaster: readBoolean(userIntent.explicitlyAskedForMaster),
+      explicitlyRejectedSuggestion: readBoolean(userIntent.explicitlyRejectedSuggestion),
+    },
+    activity: {
+      recentUserMessages: readInteger(activity.recentUserMessages),
+      recentAssistantMessages: readInteger(activity.recentAssistantMessages),
+      recentToolCalls: readInteger(activity.recentToolCalls),
+      recentFailures: readInteger(activity.recentFailures),
+      repeatedFailureCount: readInteger(activity.repeatedFailureCount),
+      noProgressWindowMs: observation.activity && activity.noProgressWindowMs !== undefined && activity.noProgressWindowMs !== null
+        ? readInteger(activity.noProgressWindowMs)
+        : null,
+    },
+    diagnostics: {
+      failingTests: readInteger(diagnostics.failingTests),
+      failingCommands: readInteger(diagnostics.failingCommands),
+      repeatedErrorSignatures: readStringArray(diagnostics.repeatedErrorSignatures),
+      uncertaintySignals: readStringArray(diagnostics.uncertaintySignals),
+    },
+    workState: {
+      hasPlan: readBoolean(workState.hasPlan),
+      todoBlocked: readBoolean(workState.todoBlocked),
+      diffChangedRecently: readBoolean(workState.diffChangedRecently),
+      onlyReadingWithoutConverging: readBoolean(workState.onlyReadingWithoutConverging),
+    },
+    directory: {
+      availableMasters: readInteger(directory.availableMasters),
+      trustedMasters: readInteger(directory.trustedMasters),
+      onlineMasters: readInteger(directory.onlineMasters),
+    },
+    candidateMasterKindHint: normalizeText(observation.candidateMasterKindHint) || null,
+  };
+}
+
 function buildProviderSummaryPayload(input: {
   state: RuntimeState;
   presence: Awaited<ReturnType<ReturnType<typeof createProviderPresenceStateStore>['read']>>;
+  masters?: PublishedMasterRecord[];
   ratingDetails?: Awaited<ReturnType<ReturnType<typeof createRatingDetailStateStore>['read']>>['items'];
   ratingSyncState?: 'ready' | 'sync_error';
   ratingSyncError?: string | null;
 }) {
   const snapshot = buildProviderConsoleSnapshot({
     services: input.state.services,
+    masters: input.masters,
     traces: input.state.traces as unknown as ProviderConsoleTraceRecord[],
     ratingDetails: input.ratingDetails,
     ratingSyncState: input.ratingSyncState,
@@ -182,6 +320,7 @@ function buildProviderSummaryPayload(input: {
     services: snapshot.services,
     recentOrders: snapshot.recentOrders,
     manualActions: snapshot.manualActions,
+    recentMasterRequests: snapshot.recentMasterRequests,
     totals: snapshot.totals,
     ratingSyncState: input.ratingSyncState === 'sync_error' ? 'sync_error' : 'ready',
     ratingSyncError: normalizeText(input.ratingSyncError) || null,
@@ -245,11 +384,74 @@ function readCallRequest(rawInput: Record<string, unknown>) {
 }
 
 function readPrivateChatRequest(rawInput: Record<string, unknown>) {
+  let content = normalizeText(rawInput.content);
+  if (!content && rawInput.content && typeof rawInput.content === 'object') {
+    try {
+      content = JSON.stringify(rawInput.content);
+    } catch {
+      content = '';
+    }
+  }
+
   return {
     to: normalizeText(rawInput.to),
-    content: normalizeText(rawInput.content),
+    content,
     replyPin: normalizeText(rawInput.replyPin),
     peerChatPublicKey: normalizeText(rawInput.peerChatPublicKey),
+  };
+}
+
+function describeStructuredPrivateChatContent(content: string): {
+  messageType: 'master_request' | 'master_response' | null;
+  requestId: string | null;
+  traceId: string | null;
+} {
+  const request = parseMasterRequest(content);
+  if (request.ok) {
+    return {
+      messageType: 'master_request',
+      requestId: request.value.requestId,
+      traceId: request.value.traceId,
+    };
+  }
+
+  const response = parseMasterResponse(content);
+  if (response.ok) {
+    return {
+      messageType: 'master_response',
+      requestId: response.value.requestId,
+      traceId: response.value.traceId,
+    };
+  }
+
+  return {
+    messageType: null,
+    requestId: null,
+    traceId: null,
+  };
+}
+
+function readMasterAskDraft(rawInput: Record<string, unknown>) {
+  const target = readObject(rawInput.target) ?? {};
+  return {
+    target: {
+      servicePinId: normalizeText(target.servicePinId),
+      providerGlobalMetaId: normalizeText(target.providerGlobalMetaId),
+      masterKind: normalizeText(target.masterKind),
+      displayName: normalizeText(target.displayName) || null,
+    },
+    triggerMode: normalizeText(rawInput.triggerMode) || null,
+    contextMode: normalizeText(rawInput.contextMode) || null,
+    userTask: normalizeText(rawInput.userTask),
+    question: normalizeText(rawInput.question),
+    goal: normalizeText(rawInput.goal) || null,
+    workspaceSummary: normalizeText(rawInput.workspaceSummary) || null,
+    errorSummary: normalizeText(rawInput.errorSummary) || null,
+    diffSummary: normalizeText(rawInput.diffSummary) || null,
+    relevantFiles: readStringArray(rawInput.relevantFiles),
+    artifacts: Array.isArray(rawInput.artifacts) ? rawInput.artifacts : [],
+    constraints: readStringArray(rawInput.constraints),
+    desiredOutput: readObject(rawInput.desiredOutput),
   };
 }
 
@@ -389,6 +591,44 @@ async function fetchRemoteAvailableServices(
   }
 }
 
+async function fetchRemoteAvailableMasters(
+  providerDaemonBaseUrl: string
+): Promise<{ masters: Array<Record<string, unknown>> } | MetabotCommandResult<unknown>> {
+  try {
+    const response = await fetch(`${providerDaemonBaseUrl}/api/master/list?online=true`);
+    const payload = await response.json() as unknown;
+    if (!response.ok) {
+      return commandFailed('remote_master_directory_unreachable', `Remote master directory returned HTTP ${response.status}.`);
+    }
+    if (!isSuccessfulCommandEnvelope(payload)) {
+      if (isManualActionEnvelope(payload)) {
+        return commandManualActionRequired(
+          normalizeText(payload.code) || 'remote_master_directory_manual_action_required',
+          normalizeText(payload.message) || 'Remote master directory requires manual action.',
+          normalizeText(payload.localUiUrl) || undefined
+        );
+      }
+      if (isFailedCommandEnvelope(payload)) {
+        return commandFailed(
+          normalizeText(payload.code) || 'remote_master_directory_unavailable',
+          normalizeText(payload.message) || 'Remote master directory is unavailable.'
+        );
+      }
+      return commandFailed('remote_master_directory_invalid_response', 'Remote master directory returned an invalid command envelope.');
+    }
+
+    const masters = Array.isArray(payload.data.masters)
+      ? payload.data.masters.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'))
+      : [];
+    return { masters };
+  } catch (error) {
+    return commandFailed(
+      'remote_master_directory_unreachable',
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+}
+
 async function readDirectorySeeds(hotRoot: string): Promise<Array<{ baseUrl: string; label: string | null }>> {
   const seedsPath = path.join(hotRoot, DIRECTORY_SEEDS_FILE);
   let payload: unknown;
@@ -484,6 +724,32 @@ async function fetchSeededDirectoryServices(hotRoot: string): Promise<Array<Reco
   }
 
   return dedupeServices(mergedServices);
+}
+
+async function fetchSeededDirectoryMasters(hotRoot: string): Promise<MasterDirectoryItem[]> {
+  const seeds = await readDirectorySeeds(hotRoot);
+  const mergedMasters: Array<Record<string, unknown>> = [];
+
+  for (const seed of seeds) {
+    const remoteDirectory = await fetchRemoteAvailableMasters(seed.baseUrl);
+    if ('ok' in remoteDirectory) {
+      continue;
+    }
+
+    for (const master of remoteDirectory.masters) {
+      mergedMasters.push({
+        ...master,
+        providerDaemonBaseUrl: normalizeText(master.providerDaemonBaseUrl) || seed.baseUrl,
+        directorySeedLabel: seed.label,
+        online: master.online !== false,
+      });
+    }
+  }
+
+  return listMasters({
+    entries: mergedMasters,
+    host: DEFAULT_MASTER_HOST_MODE,
+  });
 }
 
 async function executeRemoteServiceCall(input: {
@@ -942,6 +1208,146 @@ async function listRuntimeDirectoryServices(input: {
   };
 }
 
+async function listRuntimeDirectoryMasters(input: {
+  masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
+  hotRoot: string;
+  chainApiBaseUrl?: string;
+  onlineOnly: boolean;
+  host: string;
+  masterKind?: string;
+  localProviderOnline: boolean;
+  localLastSeenSec: number | null;
+  providerDaemonBaseUrl?: string | null;
+  providerGlobalMetaId?: string | null;
+}): Promise<{
+  masters: MasterDirectoryItem[];
+  discoverySource: 'chain' | 'seeded';
+  fallbackUsed: boolean;
+}> {
+  const localMasterState = await input.masterStateStore.read();
+  const localMasters = localMasterState.masters
+    .filter((master) => master.available === 1)
+    .map((master) => summarizeMaster(master, {
+      online: input.localProviderOnline
+        && normalizeText(master.providerGlobalMetaId) === normalizeText(input.providerGlobalMetaId),
+      lastSeenSec: input.localProviderOnline ? input.localLastSeenSec : null,
+      providerDaemonBaseUrl: input.providerDaemonBaseUrl || null,
+    }));
+  const directory = await readChainMasterDirectoryWithFallback({
+    chainApiBaseUrl: input.chainApiBaseUrl,
+    onlineOnly: input.onlineOnly,
+    fetchSeededDirectoryMasters: async () => fetchSeededDirectoryMasters(input.hotRoot),
+  });
+
+  return {
+    masters: listMasters({
+      entries: [
+        ...directory.masters,
+        ...localMasters,
+      ],
+      onlineOnly: input.onlineOnly,
+      host: input.host,
+      masterKind: input.masterKind,
+    }),
+    discoverySource: directory.source,
+    fallbackUsed: directory.fallbackUsed,
+  };
+}
+
+async function resolveExplicitMasterTarget(input: {
+  draft: ReturnType<typeof readMasterAskDraft>;
+  masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
+  hotRoot: string;
+  chainApiBaseUrl?: string;
+  providerGlobalMetaId?: string | null;
+  localProviderOnline: boolean;
+  localLastSeenSec: number | null;
+  providerDaemonBaseUrl?: string | null;
+}): Promise<MasterDirectoryItem | null> {
+  const servicePinId = normalizeText(input.draft.target.servicePinId);
+  const providerGlobalMetaId = normalizeText(input.draft.target.providerGlobalMetaId);
+  const masterKind = normalizeText(input.draft.target.masterKind);
+  if (!servicePinId || !providerGlobalMetaId || !masterKind) {
+    return null;
+  }
+
+  const directory = await listRuntimeDirectoryMasters({
+    masterStateStore: input.masterStateStore,
+    hotRoot: input.hotRoot,
+    chainApiBaseUrl: input.chainApiBaseUrl,
+    onlineOnly: false,
+    host: DEFAULT_MASTER_HOST_MODE,
+    masterKind,
+    localProviderOnline: input.localProviderOnline,
+    localLastSeenSec: input.localLastSeenSec,
+    providerDaemonBaseUrl: input.providerDaemonBaseUrl,
+    providerGlobalMetaId: input.providerGlobalMetaId,
+  });
+
+  return directory.masters.find((entry) => (
+    normalizeText(entry.masterPinId) === servicePinId
+    && normalizeText(entry.providerGlobalMetaId) === providerGlobalMetaId
+  )) ?? null;
+}
+
+async function resolveSuggestedMasterTarget(input: {
+  draft: ReturnType<typeof readMasterAskDraft>;
+  preferredMasterKind?: string | null;
+  trustedMasters?: string[];
+  masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
+  hotRoot: string;
+  chainApiBaseUrl?: string;
+  providerGlobalMetaId?: string | null;
+  localProviderOnline: boolean;
+  localLastSeenSec: number | null;
+  providerDaemonBaseUrl?: string | null;
+}): Promise<MasterDirectoryItem | null> {
+  const explicit = await resolveExplicitMasterTarget({
+    draft: input.draft,
+    masterStateStore: input.masterStateStore,
+    hotRoot: input.hotRoot,
+    chainApiBaseUrl: input.chainApiBaseUrl,
+    providerGlobalMetaId: input.providerGlobalMetaId,
+    localProviderOnline: input.localProviderOnline,
+    localLastSeenSec: input.localLastSeenSec,
+    providerDaemonBaseUrl: input.providerDaemonBaseUrl,
+  });
+  if (explicit?.online) {
+    return explicit;
+  }
+
+  const preferredMasterKind = normalizeText(input.preferredMasterKind) || normalizeText(input.draft.target.masterKind);
+  const directory = await listRuntimeDirectoryMasters({
+    masterStateStore: input.masterStateStore,
+    hotRoot: input.hotRoot,
+    chainApiBaseUrl: input.chainApiBaseUrl,
+    onlineOnly: true,
+    host: DEFAULT_MASTER_HOST_MODE,
+    masterKind: preferredMasterKind || undefined,
+    localProviderOnline: input.localProviderOnline,
+    localLastSeenSec: input.localLastSeenSec,
+    providerDaemonBaseUrl: input.providerDaemonBaseUrl,
+    providerGlobalMetaId: input.providerGlobalMetaId,
+  });
+
+  const trustedMasterSet = new Set(
+    (input.trustedMasters ?? [])
+      .map((entry) => normalizeText(entry))
+      .filter(Boolean)
+  );
+
+  return [...directory.masters].sort((left, right) => {
+    const leftTrusted = trustedMasterSet.has(normalizeText(left.masterPinId)) ? 1 : 0;
+    const rightTrusted = trustedMasterSet.has(normalizeText(right.masterPinId)) ? 1 : 0;
+    return (
+      rightTrusted - leftTrusted
+      || Number(right.official) - Number(left.official)
+      || Number(right.online) - Number(left.online)
+      || right.updatedAt - left.updatedAt
+    );
+  })[0] ?? null;
+}
+
 async function persistTraceRecord(
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>,
   trace: SessionTraceRecord,
@@ -955,7 +1361,467 @@ async function persistTraceRecord(
   }));
 }
 
-async function rebuildCallerTraceArtifacts(input: {
+async function createMasterAskPreviewResult(input: {
+  draft: ReturnType<typeof readMasterAskDraft>;
+  resolvedTarget: MasterDirectoryItem;
+  state: RuntimeState;
+  config: Awaited<ReturnType<ReturnType<typeof createConfigStore>['read']>>;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  pendingMasterAskStateStore: ReturnType<typeof createPendingMasterAskStateStore>;
+  triggerModeOverride?: string | null;
+}) {
+  if (!input.state.identity) {
+    return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
+  }
+
+  const draft = {
+    ...input.draft,
+    triggerMode: normalizeText(input.triggerModeOverride) || input.draft.triggerMode,
+  };
+  const now = Date.now();
+  const traceId = buildMasterTraceId({
+    providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+    servicePinId: input.resolvedTarget.masterPinId,
+    question: draft.question,
+    now,
+  });
+  const requestId = buildMasterRequestId(now);
+
+  let prepared;
+  try {
+    prepared = buildMasterAskPreview({
+      draft,
+      resolvedTarget: input.resolvedTarget,
+      caller: {
+        globalMetaId: input.state.identity.globalMetaId,
+        name: input.state.identity.name,
+        host: DEFAULT_MASTER_HOST_MODE,
+      },
+      traceId,
+      requestId,
+      confirmationMode: input.config.askMaster.confirmationMode,
+    });
+  } catch (error) {
+    return commandFailed(
+      'invalid_master_ask_draft',
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+
+  await input.pendingMasterAskStateStore.put({
+    traceId,
+    requestId,
+    createdAt: now,
+    updatedAt: now,
+    confirmationState: 'awaiting_confirmation',
+    requestJson: prepared.requestJson,
+    request: prepared.request,
+    target: prepared.preview.target,
+    preview: prepared.preview,
+  });
+
+  const trace = buildSessionTrace({
+    traceId,
+    channel: 'a2a',
+    exportRoot: input.runtimeStateStore.paths.exportRoot,
+    session: {
+      id: `master-${traceId}`,
+      title: `${input.resolvedTarget.displayName} Ask`,
+      type: 'a2a',
+      metabotId: input.state.identity.metabotId,
+      peerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+      peerName: input.resolvedTarget.displayName,
+      externalConversationId: `master:${input.state.identity.globalMetaId}:${input.resolvedTarget.providerGlobalMetaId}:${traceId}`,
+    },
+    a2a: {
+      role: 'caller',
+      publicStatus: 'awaiting_confirmation',
+      latestEvent: 'master_preview_ready',
+      taskRunState: 'queued',
+      callerGlobalMetaId: input.state.identity.globalMetaId,
+      callerName: input.state.identity.name,
+      providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+      providerName: input.resolvedTarget.displayName,
+      servicePinId: input.resolvedTarget.masterPinId,
+    },
+    askMaster: buildMasterTraceMetadata({
+      role: 'caller',
+      latestEvent: 'master_preview_ready',
+      publicStatus: 'awaiting_confirmation',
+      requestId,
+      masterKind: input.resolvedTarget.masterKind,
+      servicePinId: input.resolvedTarget.masterPinId,
+      providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+      displayName: input.resolvedTarget.displayName,
+      triggerMode: normalizeText(prepared.request.trigger.mode),
+      contextMode: normalizeText(prepared.request.extensions?.contextMode),
+      confirmationMode: input.config.askMaster.confirmationMode,
+      preview: {
+        userTask: prepared.request.task.userTask,
+        question: prepared.request.task.question,
+      },
+    }),
+  });
+
+  const artifacts = await exportSessionArtifacts({
+    trace,
+    transcript: {
+      sessionId: trace.session.id,
+      title: trace.session.title || 'Ask Master',
+      messages: [
+        {
+          id: `${traceId}-user`,
+          type: 'user',
+          timestamp: now,
+          content: prepared.request.task.question,
+        },
+        {
+          id: `${traceId}-assistant`,
+          type: 'assistant',
+          timestamp: now,
+          content: `Ask Master preview prepared for ${input.resolvedTarget.displayName}.`,
+          metadata: {
+            confirmCommand: prepared.preview.confirmation.confirmCommand,
+            servicePinId: input.resolvedTarget.masterPinId,
+            providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+          },
+        },
+      ],
+    },
+  });
+
+  await persistTraceRecord(input.runtimeStateStore, trace);
+
+  return commandAwaitingConfirmation({
+    traceId,
+    requestId,
+    confirmation: prepared.preview.confirmation,
+    preview: prepared.preview,
+    traceJsonPath: artifacts.traceJsonPath,
+    traceMarkdownPath: artifacts.traceMarkdownPath,
+    transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
+  });
+}
+
+function buildMasterCallerTraceAfterReply(input: {
+  baseTrace: SessionTraceRecord;
+  pendingAsk: PendingMasterAskRecord;
+  latestEvent: 'provider_completed' | 'clarification_needed' | 'provider_failed' | 'timeout';
+  publicStatus: 'completed' | 'manual_action_required' | 'remote_failed' | 'timeout';
+  taskRunState: 'completed' | 'needs_clarification' | 'failed' | 'timeout';
+  response?: {
+    status: string;
+    summary: string;
+    followUpQuestion: string | null;
+    errorCode: string | null;
+  } | null;
+}): SessionTraceRecord {
+  const preview = input.baseTrace.askMaster?.preview ?? {
+    userTask: input.pendingAsk.request.task.userTask,
+    question: input.pendingAsk.request.task.question,
+  };
+  const response = input.response
+    ? {
+        status: input.response.status,
+        summary: input.response.summary,
+        followUpQuestion: input.response.followUpQuestion,
+        errorCode: input.response.errorCode,
+      }
+    : input.baseTrace.askMaster?.response;
+  const failure = input.response && (
+    input.response.status === 'failed'
+    || input.response.status === 'declined'
+    || input.response.status === 'unavailable'
+  )
+    ? {
+        code: normalizeText(input.response.errorCode) || `master_${input.response.status}`,
+        message: input.response.summary,
+      }
+    : null;
+
+  return {
+    ...input.baseTrace,
+    a2a: {
+      ...(input.baseTrace.a2a ?? {
+        sessionId: null,
+        taskRunId: null,
+        role: 'caller',
+        publicStatus: null,
+        latestEvent: null,
+        taskRunState: null,
+        callerGlobalMetaId: null,
+        callerName: null,
+        providerGlobalMetaId: null,
+        providerName: null,
+        servicePinId: null,
+      }),
+      publicStatus: input.publicStatus,
+      latestEvent: input.latestEvent,
+      taskRunState: input.taskRunState,
+    },
+    askMaster: buildMasterTraceMetadata({
+      role: input.baseTrace.a2a?.role,
+      latestEvent: input.latestEvent,
+      publicStatus: input.publicStatus,
+      requestId: input.pendingAsk.requestId,
+      masterKind: input.baseTrace.askMaster?.masterKind ?? input.pendingAsk.request.target.masterKind,
+      servicePinId: input.baseTrace.askMaster?.servicePinId ?? input.pendingAsk.request.target.masterServicePinId,
+      providerGlobalMetaId: input.baseTrace.askMaster?.providerGlobalMetaId ?? input.pendingAsk.request.target.providerGlobalMetaId,
+      displayName: input.baseTrace.askMaster?.displayName
+        || normalizeText(input.pendingAsk.target.displayName)
+        || input.baseTrace.session.peerName,
+      triggerMode: input.baseTrace.askMaster?.triggerMode ?? normalizeText(input.pendingAsk.request.trigger.mode),
+      contextMode: input.baseTrace.askMaster?.contextMode ?? normalizeText(input.pendingAsk.request.extensions?.contextMode),
+      confirmationMode: input.baseTrace.askMaster?.confirmationMode,
+      preview,
+      response,
+      failure,
+    }),
+  };
+}
+
+async function exportAndPersistMasterCallerTrace(input: {
+  trace: SessionTraceRecord;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  pendingAsk: PendingMasterAskRecord;
+  requestPath: string;
+  messagePinId: string | null;
+  includeTimeoutNote?: boolean;
+  outcome: {
+    type: 'requesting_remote' | 'response' | 'timeout';
+    timestamp: number;
+    deliveryPinId?: string | null;
+    responseStatus?: string | null;
+    summary?: string | null;
+    followUpQuestion?: string | null;
+  };
+}): Promise<Awaited<ReturnType<typeof exportSessionArtifacts>>> {
+  const targetDisplayName = normalizeText(input.trace.askMaster?.displayName)
+    || normalizeText(input.pendingAsk.target.displayName)
+    || input.trace.session.peerName
+    || 'Master';
+  const shouldIncludeTimeoutNote = input.includeTimeoutNote === true
+    || input.trace.askMaster?.canonicalStatus === 'timed_out'
+    || input.trace.a2a?.publicStatus === 'timeout';
+  const confirmCommand = `metabot master ask --trace-id ${input.trace.traceId} --confirm`;
+  const messages: Parameters<typeof exportSessionArtifacts>[0]['transcript']['messages'] = [
+    {
+      id: `${input.trace.traceId}-user`,
+      type: 'user',
+      timestamp: input.trace.createdAt,
+      content: normalizeText(input.pendingAsk.request.task.question),
+    },
+    {
+      id: `${input.trace.traceId}-preview`,
+      type: 'assistant',
+      timestamp: input.trace.createdAt,
+      content: `Preview prepared for ${targetDisplayName}.`,
+      metadata: {
+        confirmCommand,
+      },
+    },
+    {
+      id: `${input.trace.traceId}-sent`,
+      type: 'assistant',
+      timestamp: Number.isFinite(input.pendingAsk.sentAt) ? Number(input.pendingAsk.sentAt) : input.outcome.timestamp,
+      content: `Ask Master request sent to ${targetDisplayName} over simplemsg.`,
+      metadata: {
+        messagePinId: input.messagePinId,
+        path: input.requestPath,
+      },
+    },
+  ];
+
+  if (shouldIncludeTimeoutNote) {
+    messages.push({
+      id: `${input.trace.traceId}-timeout`,
+      type: 'status_note',
+      timestamp: Math.max(
+        input.trace.createdAt + 1,
+        input.outcome.timestamp - (input.outcome.type === 'response' ? 1 : 0),
+      ),
+      content: 'Foreground wait ended before the remote MetaBot returned. The task may still continue remotely.',
+      metadata: {
+        event: 'timeout',
+      },
+    });
+  }
+
+  if (input.outcome.type === 'response') {
+    messages.push({
+      id: `${input.trace.traceId}-response`,
+      type: input.outcome.responseStatus === 'need_more_context'
+        ? 'clarification_request'
+        : input.outcome.responseStatus === 'failed'
+          || input.outcome.responseStatus === 'declined'
+          || input.outcome.responseStatus === 'unavailable'
+          ? 'system'
+          : 'assistant',
+      timestamp: input.outcome.timestamp,
+      content: normalizeText(input.outcome.summary),
+      metadata: {
+        responseStatus: input.outcome.responseStatus ?? null,
+        followUpQuestion: input.outcome.followUpQuestion ?? null,
+        deliveryPinId: input.outcome.deliveryPinId ?? null,
+      },
+    });
+  } else if (input.outcome.type === 'timeout' && !shouldIncludeTimeoutNote) {
+    messages.push({
+      id: `${input.trace.traceId}-timeout`,
+      type: 'status_note',
+      timestamp: input.outcome.timestamp,
+      content: 'Foreground wait ended before the remote MetaBot returned. The task may still continue remotely.',
+      metadata: {
+        event: 'timeout',
+      },
+    });
+  }
+
+  const artifacts = await exportSessionArtifacts({
+    trace: input.trace,
+    transcript: {
+      sessionId: input.trace.session.id,
+      title: input.trace.session.title || 'Ask Master',
+      messages,
+    },
+  });
+  await persistTraceRecord(input.runtimeStateStore, input.trace);
+  return artifacts;
+}
+
+async function applyMasterCallerReplyResult(input: {
+  reply: Extract<AwaitMetaWebMasterReplyResult, { state: 'completed' }>;
+  trace: SessionTraceRecord;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  pendingAsk: PendingMasterAskRecord;
+  requestPath: string;
+  messagePinId: string | null;
+}): Promise<{
+  trace: SessionTraceRecord;
+  artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>>;
+  session: {
+    state: 'completed' | 'manual_action_required' | 'remote_failed';
+    publicStatus: 'completed' | 'manual_action_required' | 'remote_failed';
+    event: 'provider_completed' | 'clarification_needed' | 'provider_failed';
+  };
+}> {
+  const responseStatus = input.reply.response.status;
+  const includeTimeoutNote = input.trace.askMaster?.canonicalStatus === 'timed_out'
+    || input.trace.a2a?.publicStatus === 'timeout';
+  const session = responseStatus === 'completed'
+    ? {
+        state: 'completed' as const,
+        publicStatus: 'completed' as const,
+        event: 'provider_completed' as const,
+      }
+    : responseStatus === 'need_more_context'
+      ? {
+          state: 'manual_action_required' as const,
+          publicStatus: 'manual_action_required' as const,
+          event: 'clarification_needed' as const,
+        }
+      : {
+          state: 'remote_failed' as const,
+          publicStatus: 'remote_failed' as const,
+          event: 'provider_failed' as const,
+        };
+  const taskRunState = responseStatus === 'completed'
+    ? 'completed' as const
+    : responseStatus === 'need_more_context'
+      ? 'needs_clarification' as const
+      : 'failed' as const;
+  const trace = buildMasterCallerTraceAfterReply({
+    baseTrace: input.trace,
+    pendingAsk: input.pendingAsk,
+    latestEvent: session.event,
+    publicStatus: session.publicStatus,
+    taskRunState,
+    response: {
+      status: input.reply.response.status,
+      summary: input.reply.response.summary,
+      followUpQuestion: input.reply.response.followUpQuestion,
+      errorCode: input.reply.response.errorCode,
+    },
+  });
+  const artifacts = await exportAndPersistMasterCallerTrace({
+    trace,
+    runtimeStateStore: input.runtimeStateStore,
+    pendingAsk: input.pendingAsk,
+    requestPath: input.requestPath,
+    messagePinId: input.messagePinId,
+    includeTimeoutNote,
+    outcome: {
+      type: 'response',
+      timestamp: input.reply.observedAt ?? Date.now(),
+      deliveryPinId: input.reply.deliveryPinId,
+      responseStatus: input.reply.response.status,
+      summary: input.reply.response.summary,
+      followUpQuestion: input.reply.response.followUpQuestion,
+    },
+  });
+
+  return {
+    trace,
+    artifacts,
+    session,
+  };
+}
+
+async function applyMasterCallerForegroundTimeout(input: {
+  trace: SessionTraceRecord;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  pendingAsk: PendingMasterAskRecord;
+  requestPath: string;
+  messagePinId: string | null;
+}): Promise<{
+  trace: SessionTraceRecord;
+  artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>>;
+  session: {
+    state: 'timeout';
+    publicStatus: 'timeout';
+    event: 'timeout';
+  };
+}> {
+  const trace = buildMasterCallerTraceAfterReply({
+    baseTrace: input.trace,
+    pendingAsk: input.pendingAsk,
+    latestEvent: 'timeout',
+    publicStatus: 'timeout',
+    taskRunState: 'timeout',
+  });
+  const artifacts = await exportAndPersistMasterCallerTrace({
+    trace,
+    runtimeStateStore: input.runtimeStateStore,
+    pendingAsk: input.pendingAsk,
+    requestPath: input.requestPath,
+    messagePinId: input.messagePinId,
+    outcome: {
+      type: 'timeout',
+      timestamp: Date.now(),
+    },
+  });
+
+  return {
+    trace,
+    artifacts,
+    session: {
+      state: 'timeout',
+      publicStatus: 'timeout',
+      event: 'timeout',
+    },
+  };
+}
+
+async function loadMasterContinuationTrace(input: {
+  traceId: string;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  fallbackTrace: SessionTraceRecord;
+}): Promise<SessionTraceRecord> {
+  const runtimeState = await input.runtimeStateStore.readState();
+  return runtimeState.traces.find((entry) => entry.traceId === input.traceId) ?? input.fallbackTrace;
+}
+
+export async function rebuildTraceArtifactsFromSessionState(input: {
   baseTrace: SessionTraceRecord;
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
   sessionStateStore: ReturnType<typeof createSessionStateStore>;
@@ -1014,6 +1880,28 @@ async function rebuildCallerTraceArtifacts(input: {
           servicePinId: latestSession.servicePinId,
         }
       : input.baseTrace.a2a,
+    askMaster: input.baseTrace.askMaster
+      ? buildMasterTraceMetadata({
+          role: latestSession?.role ?? input.baseTrace.a2a?.role,
+          latestEvent: latestSnapshot?.rawEvent ?? input.baseTrace.a2a?.latestEvent,
+          publicStatus: latestSnapshot?.status ?? input.baseTrace.a2a?.publicStatus,
+          requestId: input.baseTrace.askMaster.requestId,
+          masterKind: input.baseTrace.askMaster.masterKind,
+          servicePinId: latestSession?.servicePinId
+            ?? input.baseTrace.askMaster.servicePinId
+            ?? input.baseTrace.a2a?.servicePinId,
+          providerGlobalMetaId: latestSession?.providerGlobalMetaId
+            ?? input.baseTrace.askMaster.providerGlobalMetaId
+            ?? input.baseTrace.a2a?.providerGlobalMetaId,
+          displayName: input.baseTrace.askMaster.displayName,
+          triggerMode: input.baseTrace.askMaster.triggerMode,
+          contextMode: input.baseTrace.askMaster.contextMode,
+          confirmationMode: input.baseTrace.askMaster.confirmationMode,
+          preview: input.baseTrace.askMaster.preview,
+          response: input.baseTrace.askMaster.response,
+          failure: input.baseTrace.askMaster.failure,
+        })
+      : null,
   });
 
   const artifacts = await exportSessionArtifacts({
@@ -1153,7 +2041,7 @@ async function applyCallerReplyResult(input: {
   }
   await appendA2ATranscriptItems(input.sessionStateStore, transcriptItems);
 
-  const rebuilt = await rebuildCallerTraceArtifacts({
+  const rebuilt = await rebuildTraceArtifactsFromSessionState({
     baseTrace: input.trace,
     runtimeStateStore: input.runtimeStateStore,
     sessionStateStore: input.sessionStateStore,
@@ -1204,7 +2092,7 @@ async function applyCallerForegroundTimeout(input: {
     },
   ]);
 
-  const rebuilt = await rebuildCallerTraceArtifacts({
+  const rebuilt = await rebuildTraceArtifactsFromSessionState({
     baseTrace: input.trace,
     runtimeStateStore: input.runtimeStateStore,
     sessionStateStore: input.sessionStateStore,
@@ -1227,6 +2115,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   chainApiBaseUrl?: string;
   fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
   callerReplyWaiter?: MetaWebServiceReplyWaiter;
+  masterReplyWaiter?: MetaWebMasterReplyWaiter;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   requestMvcGasSubsidy?: (
     options: RequestMvcGasSubsidyOptions
@@ -1234,16 +2123,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
 }): MetabotDaemonHttpHandlers {
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   const signer = input.signer ?? createLocalMnemonicSigner({ secretStore });
+  const configStore = createConfigStore(input.homeDir);
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
+  const masterStateStore = createPublishedMasterStateStore(input.homeDir);
+  const pendingMasterAskStateStore = createPendingMasterAskStateStore(input.homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(input.homeDir);
   const ratingDetailStateStore = createRatingDetailStateStore(input.homeDir);
   const sessionStateStore = createSessionStateStore(input.homeDir);
   const sessionEngine = createA2ASessionEngine();
   const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey ?? fetchPeerChatPublicKey;
   const callerReplyWaiter = input.callerReplyWaiter ?? createSocketIoMetaWebReplyWaiter();
+  const masterReplyWaiter = input.masterReplyWaiter ?? null;
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
+  const pendingMasterReplyContinuations = new Map<string, Promise<void>>();
+  let masterTriggerMemoryState = createMasterTriggerMemoryState();
 
   async function trackActiveIdentityProfile(identity: RuntimeIdentityRecord): Promise<void> {
     try {
@@ -1310,6 +2205,62 @@ export function createDefaultMetabotDaemonHandlers(input: {
     })();
 
     pendingCallerReplyContinuations.set(input.trace.traceId, continuation);
+  }
+
+  function scheduleMasterReplyContinuation(input: {
+    trace: SessionTraceRecord;
+    pendingAsk: PendingMasterAskRecord;
+    requestPath: string;
+    messagePinId: string | null;
+    waiterInput: AwaitMetaWebMasterReplyInput;
+  }): void {
+    if (!masterReplyWaiter || pendingMasterReplyContinuations.has(input.trace.traceId)) {
+      return;
+    }
+
+    const continuation = (async () => {
+      try {
+        const reply = await masterReplyWaiter.awaitMasterReply({
+          ...input.waiterInput,
+          timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+        });
+        if (reply.state !== 'completed') {
+          return;
+        }
+
+        const currentTrace = await loadMasterContinuationTrace({
+          traceId: input.trace.traceId,
+          runtimeStateStore,
+          fallbackTrace: input.trace,
+        });
+        const currentStatus = normalizeText(
+          currentTrace.askMaster?.canonicalStatus
+          ?? currentTrace.a2a?.publicStatus,
+        );
+        if (
+          currentStatus === 'completed'
+          || currentStatus === 'need_more_context'
+          || currentStatus === 'failed'
+        ) {
+          return;
+        }
+
+        await applyMasterCallerReplyResult({
+          reply,
+          trace: currentTrace,
+          runtimeStateStore,
+          pendingAsk: input.pendingAsk,
+          requestPath: input.requestPath,
+          messagePinId: input.messagePinId,
+        });
+      } catch {
+        // Best effort follow-up: keep the persisted timeout state if late delivery capture fails.
+      } finally {
+        pendingMasterReplyContinuations.delete(input.trace.traceId);
+      }
+    })();
+
+    pendingMasterReplyContinuations.set(input.trace.traceId, continuation);
   }
 
   return {
@@ -1462,6 +2413,880 @@ export function createDefaultMetabotDaemonHandlers(input: {
         );
       },
     },
+    master: {
+      publish: async (rawInput) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing masters.');
+        }
+
+        const validation = validateMasterServicePayload(rawInput);
+        if (!validation.ok) {
+          return commandFailed(validation.code, validation.message);
+        }
+
+        try {
+          const now = Date.now();
+          const network = typeof rawInput.network === 'string' ? rawInput.network : undefined;
+          const published = await publishMasterToChain({
+            signer,
+            creatorMetabotId: state.identity.metabotId,
+            providerGlobalMetaId: state.identity.globalMetaId,
+            providerAddress: state.identity.mvcAddress,
+            draft: validation.value,
+            now,
+            network,
+          });
+
+          await masterStateStore.update((currentState) => ({
+            masters: [
+              published.record,
+              ...currentState.masters.filter((master) => master.currentPinId !== published.record.currentPinId),
+            ],
+          }));
+
+          const presence = await providerPresenceStore.read();
+          const daemon = input.getDaemonRecord();
+          const online = isProviderPresenceOnline(presence, now);
+          const lastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
+            ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
+            : null;
+          return commandSuccess({
+            ...summarizeMaster(published.record, {
+              online,
+              lastSeenSec,
+              providerDaemonBaseUrl: daemon?.baseUrl || null,
+            }),
+            txids: published.chainWrite.txids,
+            totalCost: published.chainWrite.totalCost,
+            network: published.chainWrite.network,
+            operation: published.chainWrite.operation,
+            path: published.chainWrite.path,
+            contentType: published.chainWrite.contentType,
+          });
+        } catch (error) {
+          return commandFailed(
+            'master_publish_failed',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      },
+      list: async ({ online, masterKind }) => {
+        const state = await runtimeStateStore.readState();
+        const daemon = input.getDaemonRecord();
+        const presence = await providerPresenceStore.read();
+        const localProviderOnline = isProviderPresenceOnline(presence);
+        const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
+          ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
+          : null;
+        const directory = await listRuntimeDirectoryMasters({
+          masterStateStore,
+          hotRoot: runtimeStateStore.paths.hotRoot,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+          onlineOnly: online === true,
+          host: DEFAULT_MASTER_HOST_MODE,
+          masterKind,
+          localProviderOnline,
+          localLastSeenSec,
+          providerDaemonBaseUrl: daemon?.baseUrl || null,
+          providerGlobalMetaId: state.identity?.globalMetaId ?? null,
+        });
+
+        return commandSuccess({
+          masters: directory.masters,
+          discoverySource: directory.discoverySource,
+          fallbackUsed: directory.fallbackUsed,
+        });
+      },
+      ask: async (rawInput) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
+        }
+
+        const config = await configStore.read();
+        if (!config.askMaster.enabled) {
+          return commandFailed('ask_master_disabled', 'Ask Master is disabled in the local config.');
+        }
+
+        const daemon = input.getDaemonRecord();
+        const presence = await providerPresenceStore.read();
+        const localProviderOnline = isProviderPresenceOnline(presence);
+        const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
+          ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
+          : null;
+
+        if (rawInput.confirm === true) {
+          const traceId = normalizeText(rawInput.traceId);
+          if (!traceId) {
+            return commandFailed('missing_trace_id', 'Master ask confirmation requires traceId.');
+          }
+
+          let pendingAsk;
+          try {
+            pendingAsk = await pendingMasterAskStateStore.get(traceId);
+          } catch {
+            return commandFailed('pending_master_ask_not_found', `Pending Ask Master record not found: ${traceId}`);
+          }
+          if (pendingAsk.confirmationState === 'sent') {
+            return commandFailed(
+              'master_request_already_sent',
+              `Ask Master request has already been sent for this trace: ${traceId}. Create a new Ask Master request to retry.`
+            );
+          }
+
+          const resolvedTarget = await resolveExplicitMasterTarget({
+            draft: {
+              target: {
+                servicePinId: normalizeText(pendingAsk.target.servicePinId),
+                providerGlobalMetaId: normalizeText(pendingAsk.target.providerGlobalMetaId),
+                masterKind: normalizeText(pendingAsk.target.masterKind),
+                displayName: normalizeText(pendingAsk.target.displayName) || null,
+              },
+              triggerMode: null,
+              contextMode: null,
+              userTask: normalizeText(pendingAsk.request.task.userTask),
+              question: normalizeText(pendingAsk.request.task.question),
+              goal: null,
+              workspaceSummary: null,
+              errorSummary: null,
+              diffSummary: null,
+              relevantFiles: [],
+              artifacts: [],
+              constraints: [],
+              desiredOutput: null,
+            },
+            masterStateStore,
+            hotRoot: runtimeStateStore.paths.hotRoot,
+            chainApiBaseUrl: input.chainApiBaseUrl,
+            localProviderOnline,
+            localLastSeenSec,
+            providerDaemonBaseUrl: daemon?.baseUrl || null,
+            providerGlobalMetaId: state.identity.globalMetaId,
+          });
+          if (!resolvedTarget) {
+            return commandFailed('master_target_not_found', 'Target Master is no longer available for confirmation.');
+          }
+
+          let privateChatIdentity;
+          try {
+            privateChatIdentity = await signer.getPrivateChatIdentity();
+          } catch (error) {
+            return commandFailed(
+              'identity_secret_missing',
+              error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.'
+            );
+          }
+
+          const peerChatPublicKey = resolvedTarget.providerGlobalMetaId === state.identity.globalMetaId
+            ? state.identity.chatPublicKey
+            : await resolvePeerChatPublicKey(resolvedTarget.providerGlobalMetaId) ?? '';
+          if (!peerChatPublicKey) {
+            return commandFailed(
+              'peer_chat_public_key_missing',
+              'Target Master has no published chat public key on chain.'
+            );
+          }
+
+          let outboundRequest;
+          try {
+            outboundRequest = sendPrivateChat({
+              fromIdentity: {
+                globalMetaId: privateChatIdentity.globalMetaId,
+                privateKeyHex: privateChatIdentity.privateKeyHex,
+              },
+              toGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+              peerChatPublicKey,
+              content: pendingAsk.requestJson,
+            });
+          } catch (error) {
+            return commandFailed(
+              'master_request_build_failed',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
+
+          let messagePinId = '';
+          try {
+            const write = await signer.writePin({
+              operation: 'create',
+              path: outboundRequest.path,
+              encryption: outboundRequest.encryption,
+              version: outboundRequest.version,
+              contentType: outboundRequest.contentType,
+              payload: outboundRequest.payload,
+              encoding: 'utf-8',
+              network: 'mvc',
+            });
+            messagePinId = normalizeText(write.pinId);
+          } catch (error) {
+            return commandFailed(
+              'master_request_broadcast_failed',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
+
+          await pendingMasterAskStateStore.put({
+            ...pendingAsk,
+            confirmationState: 'sent',
+            updatedAt: Date.now(),
+            sentAt: Date.now(),
+            messagePinId: messagePinId || null,
+          });
+
+          const currentTrace = state.traces.find((entry) => entry.traceId === traceId);
+          const updatedTrace = currentTrace
+            ? {
+                ...currentTrace,
+                a2a: {
+                  ...(currentTrace.a2a ?? {
+                    sessionId: null,
+                    taskRunId: null,
+                    role: 'caller',
+                    publicStatus: null,
+                    latestEvent: null,
+                    taskRunState: null,
+                    callerGlobalMetaId: state.identity.globalMetaId,
+                    callerName: state.identity.name,
+                    providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+                    providerName: resolvedTarget.displayName,
+                    servicePinId: resolvedTarget.masterPinId,
+                  }),
+                  publicStatus: 'requesting_remote',
+                  latestEvent: 'request_sent',
+                  taskRunState: 'running',
+                },
+                askMaster: buildMasterTraceMetadata({
+                  role: 'caller',
+                  latestEvent: 'request_sent',
+                  publicStatus: 'requesting_remote',
+                  requestId: pendingAsk.requestId,
+                  masterKind: resolvedTarget.masterKind,
+                  servicePinId: resolvedTarget.masterPinId,
+                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+                  displayName: resolvedTarget.displayName,
+                  triggerMode: currentTrace.askMaster?.triggerMode ?? normalizeText(pendingAsk.request.trigger.mode),
+                  contextMode: currentTrace.askMaster?.contextMode
+                    ?? normalizeText(pendingAsk.request.extensions?.contextMode),
+                  confirmationMode: currentTrace.askMaster?.confirmationMode ?? config.askMaster.confirmationMode,
+                  preview: currentTrace.askMaster?.preview ?? {
+                    userTask: pendingAsk.request.task.userTask,
+                    question: pendingAsk.request.task.question,
+                  },
+                  response: currentTrace.askMaster?.response,
+                  failure: null,
+                }),
+              }
+            : buildSessionTrace({
+                traceId,
+                channel: 'a2a',
+                exportRoot: runtimeStateStore.paths.exportRoot,
+                session: {
+                  id: `master-${traceId}`,
+                  title: `${resolvedTarget.displayName} Ask`,
+                  type: 'a2a',
+                  metabotId: state.identity.metabotId,
+                  peerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+                  peerName: resolvedTarget.displayName,
+                  externalConversationId: `master:${state.identity.globalMetaId}:${resolvedTarget.providerGlobalMetaId}:${traceId}`,
+                },
+                a2a: {
+                  role: 'caller',
+                  publicStatus: 'requesting_remote',
+                  latestEvent: 'request_sent',
+                  taskRunState: 'running',
+                  callerGlobalMetaId: state.identity.globalMetaId,
+                  callerName: state.identity.name,
+                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+                  providerName: resolvedTarget.displayName,
+                  servicePinId: resolvedTarget.masterPinId,
+                },
+                askMaster: buildMasterTraceMetadata({
+                  role: 'caller',
+                  latestEvent: 'request_sent',
+                  publicStatus: 'requesting_remote',
+                  requestId: pendingAsk.requestId,
+                  masterKind: resolvedTarget.masterKind,
+                  servicePinId: resolvedTarget.masterPinId,
+                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+                  displayName: resolvedTarget.displayName,
+                  triggerMode: normalizeText(pendingAsk.request.trigger.mode),
+                  contextMode: normalizeText(pendingAsk.request.extensions?.contextMode),
+                  confirmationMode: config.askMaster.confirmationMode,
+                  preview: {
+                    userTask: pendingAsk.request.task.userTask,
+                    question: pendingAsk.request.task.question,
+                  },
+                }),
+              });
+
+          const confirmCommand = `metabot master ask --trace-id ${traceId} --confirm`;
+          const artifacts = await exportSessionArtifacts({
+            trace: updatedTrace,
+            transcript: {
+              sessionId: updatedTrace.session.id,
+              title: updatedTrace.session.title || 'Ask Master',
+              messages: [
+                {
+                  id: `${traceId}-user`,
+                  type: 'user',
+                  timestamp: updatedTrace.createdAt,
+                  content: normalizeText(pendingAsk.request.task.question),
+                },
+                {
+                  id: `${traceId}-preview`,
+                  type: 'assistant',
+                  timestamp: updatedTrace.createdAt,
+                  content: `Preview prepared for ${normalizeText(pendingAsk.target.displayName) || resolvedTarget.displayName}.`,
+                  metadata: {
+                    confirmCommand,
+                  },
+                },
+                {
+                  id: `${traceId}-sent`,
+                  type: 'assistant',
+                  timestamp: Date.now(),
+                  content: `Ask Master request sent to ${resolvedTarget.displayName} over simplemsg.`,
+                  metadata: {
+                    messagePinId: messagePinId || null,
+                    path: outboundRequest.path,
+                  },
+                },
+              ],
+            },
+          });
+
+          await persistTraceRecord(runtimeStateStore, updatedTrace);
+
+          let finalTrace = updatedTrace;
+          let finalArtifacts = artifacts;
+          let finalSession: {
+            state: 'requesting_remote' | 'completed' | 'manual_action_required' | 'remote_failed' | 'timeout';
+            publicStatus: 'requesting_remote' | 'completed' | 'manual_action_required' | 'remote_failed' | 'timeout';
+            event: 'request_sent' | 'provider_completed' | 'clarification_needed' | 'provider_failed' | 'timeout';
+          } = {
+            state: 'requesting_remote',
+            publicStatus: 'requesting_remote',
+            event: 'request_sent',
+          };
+          let responseJson: string | null = null;
+          let deliveryPinId: string | null = null;
+          let structuredResponse: MasterResponseMessage | null = null;
+
+          if (masterReplyWaiter) {
+            const reply = await masterReplyWaiter.awaitMasterReply({
+              callerGlobalMetaId: privateChatIdentity.globalMetaId,
+              callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+              providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+              providerChatPublicKey: peerChatPublicKey,
+              masterServicePinId: resolvedTarget.masterPinId,
+              requestId: pendingAsk.requestId,
+              traceId,
+              timeoutMs: DEFAULT_CALLER_FOREGROUND_WAIT_MS,
+            });
+
+            if (reply.state === 'completed') {
+              const applied = await applyMasterCallerReplyResult({
+                reply,
+                trace: updatedTrace,
+                runtimeStateStore,
+                pendingAsk,
+                requestPath: outboundRequest.path,
+                messagePinId: messagePinId || null,
+              });
+              finalTrace = applied.trace;
+              finalArtifacts = applied.artifacts;
+              finalSession = applied.session;
+              structuredResponse = reply.response;
+              responseJson = reply.responseJson;
+              deliveryPinId = reply.deliveryPinId;
+            } else {
+              const timedOut = await applyMasterCallerForegroundTimeout({
+                trace: updatedTrace,
+                runtimeStateStore,
+                pendingAsk,
+                requestPath: outboundRequest.path,
+                messagePinId: messagePinId || null,
+              });
+              finalTrace = timedOut.trace;
+              finalArtifacts = timedOut.artifacts;
+              finalSession = timedOut.session;
+              scheduleMasterReplyContinuation({
+                trace: timedOut.trace,
+                pendingAsk: {
+                  ...pendingAsk,
+                  confirmationState: 'sent',
+                  updatedAt: Date.now(),
+                  sentAt: Number.isFinite(pendingAsk.sentAt) ? pendingAsk.sentAt : Date.now(),
+                  messagePinId: messagePinId || null,
+                },
+                requestPath: outboundRequest.path,
+                messagePinId: messagePinId || null,
+                waiterInput: {
+                  callerGlobalMetaId: privateChatIdentity.globalMetaId,
+                  callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+                  providerChatPublicKey: peerChatPublicKey,
+                  masterServicePinId: resolvedTarget.masterPinId,
+                  requestId: pendingAsk.requestId,
+                  traceId,
+                  timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+                },
+              });
+            }
+          }
+
+          return commandSuccess({
+            traceId,
+            requestId: pendingAsk.requestId,
+            messagePinId: messagePinId || null,
+            ...(deliveryPinId ? { deliveryPinId } : {}),
+            ...(structuredResponse ? {
+              response: structuredResponse,
+              responseJson,
+            } : {}),
+            session: finalSession,
+            traceJsonPath: finalArtifacts.traceJsonPath,
+            traceMarkdownPath: finalArtifacts.traceMarkdownPath,
+            transcriptMarkdownPath: finalArtifacts.transcriptMarkdownPath,
+          });
+        }
+
+        const draft = readMasterAskDraft(rawInput);
+        const resolvedTarget = await resolveExplicitMasterTarget({
+          draft,
+          masterStateStore,
+          hotRoot: runtimeStateStore.paths.hotRoot,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+          localProviderOnline,
+          localLastSeenSec,
+          providerDaemonBaseUrl: daemon?.baseUrl || null,
+          providerGlobalMetaId: state.identity.globalMetaId,
+        });
+        if (!resolvedTarget) {
+          return commandFailed('master_target_not_found', 'Target Master could not be resolved from the local directory.');
+        }
+
+        const previewResult = await createMasterAskPreviewResult({
+          draft,
+          resolvedTarget,
+          state,
+          config,
+          runtimeStateStore,
+          pendingMasterAskStateStore,
+          triggerModeOverride: 'manual',
+        });
+        if (previewResult.ok && previewResult.state === 'awaiting_confirmation') {
+          masterTriggerMemoryState = recordMasterTriggerOutcome({
+            state: masterTriggerMemoryState,
+            observation: {
+              now: Date.now(),
+              traceId: previewResult.data.traceId,
+              hostMode: DEFAULT_MASTER_HOST_MODE,
+              userIntent: {
+                explicitlyAskedForMaster: true,
+                explicitlyRejectedSuggestion: false,
+              },
+              directory: {
+                availableMasters: 1,
+                trustedMasters: config.askMaster.trustedMasters.includes(resolvedTarget.masterPinId) ? 1 : 0,
+                onlineMasters: resolvedTarget.online ? 1 : 0,
+              },
+              candidateMasterKindHint: resolvedTarget.masterKind,
+            },
+            decision: {
+              action: 'manual_requested',
+              reason: 'Caller explicitly invoked metabot master ask.',
+            },
+          });
+        }
+        return previewResult;
+      },
+      suggest: async (rawInput: Record<string, unknown>) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
+        }
+
+        const config = await configStore.read();
+        const daemon = input.getDaemonRecord();
+        const presence = await providerPresenceStore.read();
+        const localProviderOnline = isProviderPresenceOnline(presence);
+        const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
+          ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
+          : null;
+        const draft = readMasterAskDraft(readObject(rawInput.draft) ?? rawInput);
+        const trigger = await collectAndEvaluateMasterTrigger({
+          config: config.askMaster,
+          suppression: masterTriggerMemoryState,
+          collectObservation: async () => readMasterTriggerObservation(rawInput),
+        });
+
+        if (trigger.collected && trigger.observation?.userIntent.explicitlyRejectedSuggestion) {
+          masterTriggerMemoryState = recordMasterTriggerOutcome({
+            state: masterTriggerMemoryState,
+            observation: trigger.observation,
+            decision: trigger.decision,
+          });
+        }
+
+        if (trigger.decision.action === 'no_action') {
+          return commandSuccess({
+            collected: trigger.collected,
+            decision: trigger.decision,
+          });
+        }
+
+        const resolvedTarget = await resolveSuggestedMasterTarget({
+          draft,
+          preferredMasterKind: 'candidateMasterKind' in trigger.decision
+            ? normalizeText(trigger.decision.candidateMasterKind)
+            : null,
+          trustedMasters: config.askMaster.trustedMasters,
+          masterStateStore,
+          hotRoot: runtimeStateStore.paths.hotRoot,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+          localProviderOnline,
+          localLastSeenSec,
+          providerDaemonBaseUrl: daemon?.baseUrl || null,
+          providerGlobalMetaId: state.identity.globalMetaId,
+        });
+        if (!resolvedTarget) {
+          return commandSuccess({
+            collected: trigger.collected,
+            decision: {
+              action: 'no_action',
+              reason: 'No matching online Master could be resolved for this suggestion.',
+            },
+          });
+        }
+
+        const previewResult = await createMasterAskPreviewResult({
+          draft,
+          resolvedTarget,
+          state,
+          config,
+          runtimeStateStore,
+          pendingMasterAskStateStore,
+          triggerModeOverride: trigger.decision.action === 'manual_requested'
+            ? 'manual'
+            : trigger.decision.action === 'auto_candidate'
+              ? 'auto'
+              : 'suggest',
+        });
+        if (previewResult.ok && previewResult.state === 'awaiting_confirmation' && trigger.observation) {
+          masterTriggerMemoryState = recordMasterTriggerOutcome({
+            state: masterTriggerMemoryState,
+            observation: trigger.observation,
+            decision: trigger.decision,
+          });
+          return {
+            ...previewResult,
+            data: {
+              ...previewResult.data,
+              collected: trigger.collected,
+              decision: trigger.decision,
+            },
+          };
+        }
+
+        return previewResult;
+      },
+      receive: async (rawInput) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before serving Ask Master requests.');
+        }
+
+        const masterState = await masterStateStore.read();
+        const handled = await handleMasterProviderRequest({
+          rawRequest: rawInput,
+          providerIdentity: {
+            globalMetaId: state.identity.globalMetaId,
+            name: state.identity.name,
+          },
+          publishedMasters: masterState.masters,
+          sessionEngine,
+        });
+        if (!handled.ok) {
+          return commandFailed(handled.code, handled.message);
+        }
+
+        const receivedStatus = await persistSessionMutation(sessionStateStore, handled.received);
+        await appendA2ATranscriptItems(sessionStateStore, [
+          {
+            id: `${handled.request.traceId}-master-request`,
+            sessionId: handled.received.session.sessionId,
+            taskRunId: handled.received.taskRun.runId,
+            timestamp: handled.received.session.createdAt,
+            type: 'user_task',
+            sender: 'caller',
+            content: handled.request.task.question,
+            metadata: {
+              userTask: handled.request.task.userTask,
+              callerGlobalMetaId: handled.request.caller.globalMetaId,
+              callerName: handled.request.caller.name,
+              publicStatus: receivedStatus.status,
+              servicePinId: handled.publishedMaster.currentPinId,
+              masterKind: handled.publishedMaster.masterKind,
+            },
+          },
+        ]);
+
+        const appliedStatus = await persistSessionMutation(sessionStateStore, handled.applied);
+        await appendA2ATranscriptItems(sessionStateStore, [
+          {
+            id: `${handled.request.traceId}-master-response`,
+            sessionId: handled.received.session.sessionId,
+            taskRunId: handled.applied.taskRun.runId,
+            timestamp: handled.applied.session.updatedAt,
+            type: handled.response.status === 'failed'
+              ? 'failure'
+              : handled.response.status === 'need_more_context'
+                ? 'clarification_request'
+                : 'assistant',
+            sender: handled.response.status === 'failed' ? 'system' : 'provider',
+            content: handled.response.summary,
+            metadata: {
+              publicStatus: appliedStatus.status,
+              event: handled.applied.event,
+              requestId: handled.request.requestId,
+              responseStatus: handled.response.status,
+              servicePinId: handled.publishedMaster.currentPinId,
+              masterKind: handled.publishedMaster.masterKind,
+            },
+          },
+        ]);
+
+        const trace = buildSessionTrace({
+          traceId: handled.request.traceId,
+          channel: 'a2a',
+          exportRoot: runtimeStateStore.paths.exportRoot,
+          session: {
+            id: `master-provider-${handled.request.traceId}`,
+            title: `${handled.publishedMaster.displayName} Ask`,
+            type: 'a2a',
+            metabotId: state.identity.metabotId,
+            peerGlobalMetaId: handled.request.caller.globalMetaId,
+            peerName: handled.request.caller.name || null,
+            externalConversationId: `master:${handled.request.caller.globalMetaId}:${state.identity.globalMetaId}:${handled.request.traceId}`,
+          },
+          a2a: {
+            sessionId: handled.received.session.sessionId,
+            taskRunId: handled.applied.taskRun.runId,
+            role: handled.received.session.role,
+            publicStatus: appliedStatus.status,
+            latestEvent: handled.applied.event,
+            taskRunState: handled.applied.taskRun.state,
+            callerGlobalMetaId: handled.request.caller.globalMetaId,
+            callerName: handled.request.caller.name || null,
+            providerGlobalMetaId: state.identity.globalMetaId,
+            providerName: state.identity.name,
+            servicePinId: handled.publishedMaster.currentPinId,
+          },
+          askMaster: buildMasterTraceMetadata({
+            role: handled.received.session.role,
+            latestEvent: handled.applied.event,
+            publicStatus: appliedStatus.status,
+            requestId: handled.request.requestId,
+            masterKind: handled.publishedMaster.masterKind,
+            servicePinId: handled.publishedMaster.currentPinId,
+            providerGlobalMetaId: state.identity.globalMetaId,
+            displayName: handled.publishedMaster.displayName,
+            triggerMode: normalizeText(handled.request.trigger.mode),
+            contextMode: normalizeText(handled.request.extensions?.contextMode),
+            preview: {
+              userTask: handled.request.task.userTask,
+              question: handled.request.task.question,
+            },
+            response: {
+              status: handled.response.status,
+              summary: handled.response.summary,
+              followUpQuestion: handled.response.followUpQuestion,
+            },
+          }),
+        });
+        const artifacts = await exportSessionArtifacts({
+          trace,
+          transcript: {
+            sessionId: trace.session.id,
+            title: trace.session.title || 'Ask Master Provider Runtime',
+            messages: [
+              {
+                id: `${trace.traceId}-caller`,
+                type: 'user',
+                timestamp: trace.createdAt,
+                content: handled.request.task.question,
+                metadata: {
+                  requestId: handled.request.requestId,
+                  callerGlobalMetaId: handled.request.caller.globalMetaId,
+                  servicePinId: handled.publishedMaster.currentPinId,
+                  masterKind: handled.publishedMaster.masterKind,
+                },
+              },
+              {
+                id: `${trace.traceId}-provider`,
+                type: handled.response.status === 'failed' ? 'system' : 'assistant',
+                timestamp: handled.applied.session.updatedAt,
+                content: handled.response.summary,
+                metadata: {
+                  responseStatus: handled.response.status,
+                  followUpQuestion: handled.response.followUpQuestion,
+                  providerGlobalMetaId: state.identity.globalMetaId,
+                  requestId: handled.request.requestId,
+                },
+              },
+            ],
+          },
+        });
+        await persistTraceRecord(runtimeStateStore, trace);
+
+        const shouldDeliverResponse = rawInput.deliverResponse !== false;
+        const replyPin = normalizeText(rawInput.replyPin);
+        const explicitCallerChatPublicKey = normalizeText(rawInput.callerChatPublicKey);
+        let messagePinId: string | null = null;
+        const markDeliveryFailure = async (code: string, message: string) => {
+          const failedTrace = {
+            ...trace,
+            a2a: trace.a2a
+              ? {
+                  ...trace.a2a,
+                  publicStatus: 'local_runtime_error',
+                  latestEvent: 'provider_delivery_failed',
+                }
+              : trace.a2a,
+            askMaster: buildMasterTraceMetadata({
+              role: trace.a2a?.role,
+              latestEvent: 'provider_delivery_failed',
+              publicStatus: 'local_runtime_error',
+              requestId: trace.askMaster?.requestId,
+              masterKind: trace.askMaster?.masterKind,
+              servicePinId: trace.askMaster?.servicePinId,
+              providerGlobalMetaId: trace.askMaster?.providerGlobalMetaId,
+              displayName: trace.askMaster?.displayName,
+              triggerMode: trace.askMaster?.triggerMode,
+              contextMode: trace.askMaster?.contextMode,
+              confirmationMode: trace.askMaster?.confirmationMode,
+              preview: trace.askMaster?.preview,
+              response: trace.askMaster?.response,
+              failure: {
+                code,
+                message,
+              },
+            }),
+          };
+          if (trace.a2a?.sessionId) {
+            await sessionStateStore.appendPublicStatusSnapshots([
+              {
+                sessionId: trace.a2a.sessionId,
+                taskRunId: trace.a2a.taskRunId ?? null,
+                status: 'local_runtime_error',
+                mapped: true,
+                rawEvent: 'provider_delivery_failed',
+                resolvedAt: Date.now(),
+              },
+            ]);
+          }
+          await rebuildTraceArtifactsFromSessionState({
+            baseTrace: failedTrace,
+            runtimeStateStore,
+            sessionStateStore,
+          });
+          return commandFailed(code, message);
+        };
+
+        if (shouldDeliverResponse) {
+          let privateChatIdentity;
+          try {
+            privateChatIdentity = await signer.getPrivateChatIdentity();
+          } catch (error) {
+            return markDeliveryFailure(
+              'identity_secret_missing',
+              error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.'
+            );
+          }
+
+          const callerChatPublicKey = explicitCallerChatPublicKey
+            || (await resolvePeerChatPublicKey(handled.request.caller.globalMetaId))
+            || '';
+          if (!callerChatPublicKey) {
+            return markDeliveryFailure(
+              'peer_chat_public_key_missing',
+              'Caller has no published chat public key on chain and none was provided.'
+            );
+          }
+
+          let outboundResponse;
+          try {
+            outboundResponse = sendPrivateChat({
+              fromIdentity: {
+                globalMetaId: privateChatIdentity.globalMetaId,
+                privateKeyHex: privateChatIdentity.privateKeyHex,
+              },
+              toGlobalMetaId: handled.request.caller.globalMetaId,
+              peerChatPublicKey: callerChatPublicKey,
+              content: handled.responseJson,
+              replyPinId: replyPin || null,
+            });
+          } catch (error) {
+            return markDeliveryFailure(
+              'master_response_build_failed',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
+
+          try {
+            const write = await signer.writePin({
+              operation: 'create',
+              path: outboundResponse.path,
+              encryption: outboundResponse.encryption,
+              version: outboundResponse.version,
+              contentType: outboundResponse.contentType,
+              payload: outboundResponse.payload,
+              encoding: 'utf-8',
+              network: 'mvc',
+            });
+            messagePinId = normalizeText(write.pinId) || null;
+          } catch (error) {
+            return markDeliveryFailure(
+              'master_response_delivery_failed',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
+        }
+
+        return commandSuccess({
+          traceId: handled.request.traceId,
+          requestId: handled.request.requestId,
+          response: handled.response,
+          responseJson: handled.responseJson,
+          messagePinId,
+          traceSummary: handled.traceSummary,
+          session: {
+            state: handled.applied.session.state,
+            publicStatus: appliedStatus.status,
+            event: handled.applied.event,
+          },
+          traceJsonPath: artifacts.traceJsonPath,
+          traceMarkdownPath: artifacts.traceMarkdownPath,
+          transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
+        });
+      },
+      trace: async ({ traceId }) => {
+        const state = await runtimeStateStore.readState();
+        const trace = state.traces.find((entry) => entry.traceId === traceId);
+        if (!trace) {
+          return commandFailed('trace_not_found', `Trace not found: ${traceId}`);
+        }
+
+        const view = buildMasterTraceView(trace);
+        if (!view) {
+          return commandFailed('trace_not_master_flow', `Trace is not an Ask Master flow: ${traceId}`);
+        }
+
+        return commandSuccess(view);
+      },
+    },
     network: {
       listServices: async ({ online }) => {
         const state = await runtimeStateStore.readState();
@@ -1544,6 +3369,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     provider: {
       getSummary: async () => {
         const state = await runtimeStateStore.readState();
+        const masterState = await masterStateStore.read();
         const presence = await providerPresenceStore.read();
         const ratingSnapshot = await readRatingDetailSnapshot({
           ratingDetailStateStore,
@@ -1552,6 +3378,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         return commandSuccess(buildProviderSummaryPayload({
           state,
           presence,
+          masters: masterState.masters,
           ratingDetails: ratingSnapshot.ratingDetails,
           ratingSyncState: ratingSnapshot.ratingSyncState,
           ratingSyncError: ratingSnapshot.ratingSyncError,
@@ -2246,7 +4073,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               },
             ]);
           }
-          const rebuilt = await rebuildCallerTraceArtifacts({
+          const rebuilt = await rebuildTraceArtifactsFromSessionState({
             baseTrace: trace,
             runtimeStateStore,
             sessionStateStore,
@@ -2543,6 +4370,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           content: request.content,
           replyPinId: request.replyPin,
         });
+        const structuredContent = describeStructuredPrivateChatContent(request.content);
 
         const traceId = `trace-private-${Date.now().toString(36)}`;
         const trace = buildSessionTrace({
@@ -2580,6 +4408,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 metadata: {
                   path: sent.path,
                   replyPin: request.replyPin || null,
+                  messageType: structuredContent.messageType,
+                  requestId: structuredContent.requestId,
+                  correlatedTraceId: structuredContent.traceId,
                 },
               },
             ],
@@ -2602,6 +4433,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           secretVariant: sent.secretVariant,
           deliveryMode: 'local_runtime',
           peerChatPublicKey,
+          messageType: structuredContent.messageType,
+          requestId: structuredContent.requestId,
+          correlatedTraceId: structuredContent.traceId,
           traceId: trace.traceId,
           transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
           traceMarkdownPath: artifacts.traceMarkdownPath,

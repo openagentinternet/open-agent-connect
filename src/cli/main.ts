@@ -4,6 +4,7 @@ import { commandFailed, type MetabotCommandResult } from '../core/contracts/comm
 import { runDaemonCommand } from './commands/daemon';
 import { runDoctorCommand } from './commands/doctor';
 import { runIdentityCommand } from './commands/identity';
+import { runMasterCommand } from './commands/master';
 import { runNetworkCommand } from './commands/network';
 import { runServicesCommand } from './commands/services';
 import { runBuzzCommand } from './commands/buzz';
@@ -57,6 +58,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'identity':
           result = await runIdentityCommand(rest, context);
+          break;
+        case 'master':
+          result = await runMasterCommand(rest, context);
           break;
         case 'network':
           result = await runNetworkCommand(rest, context);

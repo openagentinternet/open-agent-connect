@@ -40,6 +40,8 @@ import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers } from '../daemon/defaultHandlers';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
+import { createSocketIoMetaWebMasterReplyWaiter, type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
+import { parseMasterResponse } from '../core/master/masterMessageSchema';
 import type { CliDependencies, CliRuntimeContext } from './types';
 
 const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
@@ -53,6 +55,7 @@ const TEST_FAKE_CHAIN_WRITE_ENV = 'METABOT_TEST_FAKE_CHAIN_WRITE';
 const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
+const TEST_FAKE_MASTER_REPLY_ENV = 'METABOT_TEST_FAKE_MASTER_REPLY';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
@@ -444,6 +447,7 @@ export function buildDaemonConfigHash(
       fakeSubsidy: normalizeEnvText(env[TEST_FAKE_SUBSIDY_ENV]),
       fakeProviderChatPublicKey: normalizeEnvText(env[TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV]),
       fakeMetaWebReply: normalizeEnvText(env[TEST_FAKE_METAWEB_REPLY_ENV]),
+      fakeMasterReply: normalizeEnvText(env[TEST_FAKE_MASTER_REPLY_ENV]),
     }))
     .digest('hex');
 }
@@ -1014,6 +1018,85 @@ function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceRep
   };
 }
 
+function createTestMasterReplyWaiter(env: NodeJS.ProcessEnv): MetaWebMasterReplyWaiter | undefined {
+  const raw = typeof env[TEST_FAKE_MASTER_REPLY_ENV] === 'string'
+    ? env[TEST_FAKE_MASTER_REPLY_ENV]!.trim()
+    : '';
+  if (!raw) {
+    return undefined;
+  }
+
+  let parsed: {
+    state?: unknown;
+    responseJson?: unknown;
+    deliveryPinId?: unknown;
+    observedAt?: unknown;
+    delayMs?: unknown;
+    sequence?: Array<{
+      state?: unknown;
+      responseJson?: unknown;
+      deliveryPinId?: unknown;
+      observedAt?: unknown;
+      delayMs?: unknown;
+    }> | unknown;
+  };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch (error) {
+    throw new Error(
+      `Invalid ${TEST_FAKE_MASTER_REPLY_ENV}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  const sequence = Array.isArray(parsed.sequence) && parsed.sequence.length > 0
+    ? parsed.sequence
+    : [parsed];
+  let replyIndex = 0;
+
+  return {
+    awaitMasterReply: async (input) => {
+      const step = sequence[Math.min(replyIndex, sequence.length - 1)] ?? parsed;
+      replyIndex += 1;
+
+      const delayMs = Number.isFinite(step.delayMs)
+        ? Math.max(0, Math.floor(Number(step.delayMs)))
+        : 0;
+      if (delayMs > 0) {
+        await sleep(Math.min(delayMs, input.timeoutMs));
+      }
+
+      if (step.state === 'timeout') {
+        return {
+          state: 'timeout',
+        };
+      }
+
+      const responseJson = typeof step.responseJson === 'string' ? step.responseJson.trim() : '';
+      if (!responseJson) {
+        throw new Error(`Invalid ${TEST_FAKE_MASTER_REPLY_ENV}: responseJson is required unless state=timeout.`);
+      }
+
+      const parsedResponse = parseMasterResponse(responseJson);
+      if (!parsedResponse.ok) {
+        throw new Error(`Invalid ${TEST_FAKE_MASTER_REPLY_ENV}: ${parsedResponse.message}`);
+      }
+
+      return {
+        state: 'completed',
+        response: parsedResponse.value,
+        responseJson,
+        deliveryPinId: typeof step.deliveryPinId === 'string' ? step.deliveryPinId : null,
+        observedAt: Number.isFinite(step.observedAt)
+          ? Number(step.observedAt)
+          : Date.now(),
+        rawMessage: {
+          source: 'test-fake-master-reply',
+        },
+      };
+    },
+  };
+}
+
 export function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies {
   return {
     config: {
@@ -1174,6 +1257,23 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           assignedProfile: selected,
         });
       },
+    },
+    master: {
+      publish: async (input) => requestJson(context, 'POST', '/api/master/publish', input),
+      list: async (input) => {
+        const query = new URLSearchParams();
+        if (input.online !== undefined) {
+          query.set('online', input.online ? 'true' : 'false');
+        }
+        if (typeof input.masterKind === 'string' && input.masterKind.trim()) {
+          query.set('kind', input.masterKind.trim());
+        }
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/master/list${suffix}`);
+      },
+      ask: async (input) => requestJson(context, 'POST', '/api/master/ask', input),
+      trace: async (input) =>
+        requestJson(context, 'GET', `/api/master/trace/${encodeURIComponent(input.traceId)}`),
     },
     network: {
       listServices: async (input) => {
@@ -1555,6 +1655,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     daemon: { ...defaults.daemon, ...provided.daemon },
     doctor: { ...defaults.doctor, ...provided.doctor },
     identity: { ...defaults.identity, ...provided.identity },
+    master: { ...defaults.master, ...provided.master },
     network: {
       ...defaultNetwork,
       ...provided.network,
@@ -1585,6 +1686,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     : undefined;
   const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
   const callerReplyWaiter = createTestMetaWebReplyWaiter(context.env);
+  const masterReplyWaiter = createTestMasterReplyWaiter(context.env) ?? createSocketIoMetaWebMasterReplyWaiter();
 
   const daemon = createMetabotDaemon({
     homeDirOrPaths: paths,
@@ -1598,6 +1700,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
       fetchPeerChatPublicKey,
       callerReplyWaiter,
+      masterReplyWaiter,
       requestMvcGasSubsidy,
     }),
   });

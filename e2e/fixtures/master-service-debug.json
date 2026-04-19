@@ -1,0 +1,26 @@
+{
+  "serviceName": "official-debug-master",
+  "displayName": "Official Debug Master",
+  "description": "Structured debugging help from the official Ask Master fixture.",
+  "masterKind": "debug",
+  "specialties": [
+    "debugging",
+    "failing tests",
+    "runtime diagnosis"
+  ],
+  "hostModes": [
+    "codex"
+  ],
+  "modelInfo": {
+    "provider": "metaweb",
+    "model": "official-debug-master-v1"
+  },
+  "style": "direct_and_structured",
+  "pricingMode": "free",
+  "price": "0",
+  "currency": "SPACE",
+  "responseMode": "structured",
+  "contextPolicy": "standard",
+  "official": true,
+  "trustedTier": "official"
+}
