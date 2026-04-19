@@ -4,7 +4,7 @@ Use this document when you want Codex to install and configure `Open Agent Conne
 
 ## Agent Goal
 
-Install the Codex host pack, make `metabot` runnable in the current environment, then verify the runtime is healthy.
+Install the Codex host pack, make `metabot` runnable in the current environment, then verify the runtime is healthy and the latest Ask Master skill contract is active.
 
 ## Execution Mode
 
@@ -67,6 +67,28 @@ Success criteria:
 - `daemon_reachable` is present
 - install path shows Codex skills under `${CODEX_HOME:-$HOME/.codex}/skills`
 
+Then verify the installed Codex skill file directly:
+
+```bash
+INSTALLED_SKILL="${CODEX_HOME:-$HOME/.codex}/skills/metabot-ask-master/SKILL.md"
+test -f "$INSTALLED_SKILL"
+rg -n "metabot master|metabot advisor" "$INSTALLED_SKILL"
+```
+
+Success criteria:
+
+- `"$INSTALLED_SKILL"` exists
+- output shows `metabot master` lines
+- output does not show stale `metabot advisor` lines
+
+Optional future verification after Ask Master is added to the base skill registry in phase-2 Task 1:
+
+```bash
+metabot skills resolve --skill metabot-ask-master --host codex --format markdown
+```
+
+Use that command only after Task 1 lands. It validates the repo/base contract that should be rendered into the host pack, but it still does **not** by itself prove that the installed Codex skill file has already been refreshed.
+
 ## Optional First-Run Bootstrap
 
 Only if local identity is not initialized yet, run:
@@ -103,4 +125,19 @@ At the end, return:
 
 - It is safe to re-run this runbook.
 - Re-running `./install.sh` overwrites installed skill folders with the latest generated copies.
+- Re-running `./install.sh` also overwrites any stale installed `metabot-ask-master` copy with the freshly built contract.
 - Re-running build steps refreshes `dist/` and skillpacks without requiring manual cleanup.
+- If Ask Master behavior looks stale after a rebuild, re-run `npm run build:skillpacks`, reinstall the Codex pack, then repeat:
+
+```bash
+INSTALLED_SKILL="${CODEX_HOME:-$HOME/.codex}/skills/metabot-ask-master/SKILL.md"
+rg -n "metabot master|metabot advisor" "$INSTALLED_SKILL"
+```
+
+If phase-2 Task 1 has already landed, you may additionally run:
+
+```bash
+metabot skills resolve --skill metabot-ask-master --host codex --format markdown
+```
+
+The installed-file check confirms the actual Codex skill currently active in your environment; `skills resolve` is only an extra repo/base contract check once that support exists.
