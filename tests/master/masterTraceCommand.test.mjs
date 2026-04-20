@@ -463,3 +463,110 @@ test('master trace retains ask master metadata after caller trace artifacts are 
   assert.equal(payload.data.confirmationMode, 'always');
   assert.equal(payload.data.preview.question, 'Why does the local build fail only in this workspace?');
 });
+
+test('master trace renders completed ask master traces that originated from an accepted suggestion', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-trace-suggest-completed-command-'));
+  t.after(async () => {
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  const traceId = 'trace-master-suggest-completed-command-1';
+  const requestId = 'master-req-suggest-completed-1';
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+
+  await runtimeStateStore.writeState({
+    identity: {
+      metabotId: 7,
+      name: 'Caller Bot',
+      createdAt: 1_776_000_000_000,
+      path: "m/44'/10001'/0'/0/0",
+      publicKey: 'pubkey',
+      chatPublicKey: 'chat-pubkey',
+      mvcAddress: 'mvc-address',
+      btcAddress: 'btc-address',
+      dogeAddress: 'doge-address',
+      metaId: 'metaid-caller',
+      globalMetaId: 'idq1caller',
+    },
+    services: [],
+    traces: [
+      buildSessionTrace({
+        traceId,
+        channel: 'a2a',
+        exportRoot: runtimeStateStore.paths.exportRoot,
+        session: {
+          id: `master-${traceId}`,
+          title: 'Official Debug Master Ask',
+          type: 'a2a',
+          metabotId: 7,
+          peerGlobalMetaId: 'idq1provider',
+          peerName: 'Official Debug Master',
+          externalConversationId: `master:idq1caller:idq1provider:${traceId}`,
+        },
+        a2a: {
+          role: 'caller',
+          publicStatus: 'completed',
+          latestEvent: 'provider_completed',
+          taskRunState: 'completed',
+          callerGlobalMetaId: 'idq1caller',
+          callerName: 'Caller Bot',
+          providerGlobalMetaId: 'idq1provider',
+          providerName: 'Official Debug Master',
+          servicePinId: 'master-pin-1',
+        },
+        askMaster: buildMasterTraceMetadata({
+          role: 'caller',
+          latestEvent: 'provider_completed',
+          publicStatus: 'completed',
+          requestId,
+          masterKind: 'debug',
+          servicePinId: 'master-pin-1',
+          providerGlobalMetaId: 'idq1provider',
+          displayName: 'Official Debug Master',
+          triggerMode: 'suggest',
+          contextMode: 'standard',
+          confirmationMode: 'always',
+          preview: {
+            userTask: 'Diagnose the repeated blocked preview/confirm loop.',
+            question: 'Should I ask the Debug Master for help with this blocked flow?',
+          },
+          response: {
+            status: 'completed',
+            summary: 'Persist the preview snapshot before confirmation so accepted suggestions can send normally.',
+            followUpQuestion: null,
+            findings: ['The accepted suggestion completed normally.'],
+            recommendations: ['Keep suggest provenance in the completed trace.'],
+            risks: ['Dropping suggest metadata hides why this trace exists.'],
+          },
+        }),
+      }),
+    ],
+  });
+
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    getDaemonRecord: () => null,
+  });
+
+  const stdout = [];
+  const exitCode = await runCli(['master', 'trace', '--id', traceId], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        trace: handlers.master.trace,
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  const payload = parseOutput(stdout);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.flow, 'master');
+  assert.equal(payload.data.canonicalStatus, 'completed');
+  assert.equal(payload.data.triggerMode, 'suggest');
+  assert.equal(payload.data.requestId, requestId);
+  assert.equal(payload.data.response.status, 'completed');
+  assert.match(payload.data.response.summary, /Persist the preview snapshot/i);
+  assert.equal(payload.data.display.statusText, 'Completed');
+});

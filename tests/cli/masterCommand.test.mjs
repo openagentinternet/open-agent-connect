@@ -317,3 +317,34 @@ test('runCli dispatches `metabot master host-action --request-file` with parsed 
   assert.equal(calls[0].action.preferredMasterName, 'Debug Master');
   assert.equal(calls[0].context.traceId, 'trace-host-action-cli-2');
 });
+
+test('runCli dispatches `metabot master trace --id` with the parsed trace id', async () => {
+  const calls = [];
+
+  const exitCode = await runCli(['master', 'trace', '--id', 'trace-master-cli-1'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        trace: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'success',
+            data: {
+              traceId: input.traceId,
+              flow: 'master',
+            },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [
+    {
+      traceId: 'trace-master-cli-1',
+    },
+  ]);
+});

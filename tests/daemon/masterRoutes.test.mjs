@@ -241,3 +241,35 @@ test('POST /api/master/host-action forwards the JSON payload to master.hostActio
   assert.equal(payload.ok, true);
   assert.equal(payload.data.hostAction, 'manual_ask');
 });
+
+test('GET /api/master/trace/:id forwards the trace id to master.trace', async (t) => {
+  const calls = [];
+  const server = await startServer({
+    master: {
+      trace: async (input) => {
+        calls.push(input);
+        return {
+          ok: true,
+          state: 'success',
+          data: {
+            traceId: input.traceId,
+            flow: 'master',
+          },
+        };
+      },
+    },
+  });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/master/trace/trace-master-route-1`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    {
+      traceId: 'trace-master-route-1',
+    },
+  ]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.flow, 'master');
+});

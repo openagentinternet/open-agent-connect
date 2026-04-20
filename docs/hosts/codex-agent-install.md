@@ -89,6 +89,37 @@ metabot skills resolve --skill metabot-ask-master --host codex --format markdown
 
 That command now validates the repo/base contract that should be rendered into the host pack, but it still does **not** by itself prove that the installed Codex skill file has already been refreshed.
 
+## Fresh Install Smoke
+
+After a fresh install or reinstall, run this minimal Ask Master smoke check:
+
+```bash
+INSTALLED_SKILL="${CODEX_HOME:-$HOME/.codex}/skills/metabot-ask-master/SKILL.md"
+test -f "$INSTALLED_SKILL"
+rg -n "metabot master" "$INSTALLED_SKILL"
+if rg -n "metabot advisor" "$INSTALLED_SKILL"; then
+  echo "stale advisor semantics found in installed Ask Master skill" >&2
+  exit 1
+fi
+metabot skills resolve --skill metabot-ask-master --host codex --format markdown
+```
+
+Smoke expectations:
+
+- the installed skill file exists under the Codex skills directory
+- the installed skill file contains `metabot master` and fails fast if any stale `metabot advisor` contract remains
+- `skills resolve` returns the repo/base Ask Master contract rendered for Codex
+
+After the first real Ask Master request succeeds, inspect that trace with:
+
+```bash
+metabot master trace --id <real-trace-id>
+```
+
+That is the active trace inspection path for Ask Master, but it is a post-flow check, not part of the zero-state fresh install smoke.
+
+If the installed skill file is correct but Codex still behaves like an older session, restart Codex session state and begin a new session before re-testing the Ask Master flow.
+
 ## Optional First-Run Bootstrap
 
 Only if local identity is not initialized yet, run:

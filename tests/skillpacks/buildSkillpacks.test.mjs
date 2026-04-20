@@ -396,3 +396,23 @@ test('repository keeps no deprecated skill aliases after migration', async () =>
     throw error;
   }
 });
+
+test('codex install runbook documents the post-install Ask Master smoke contract', async () => {
+  const installRunbook = await readFile(
+    path.join(REPO_ROOT, 'docs', 'hosts', 'codex-agent-install.md'),
+    'utf8'
+  );
+
+  assert.match(installRunbook, /npm run build:skillpacks/);
+  assert.match(installRunbook, /\$\{CODEX_HOME:-\$HOME\/\.codex\}\/skills\/metabot-ask-master\/SKILL\.md/);
+  assert.match(installRunbook, /metabot skills resolve --skill metabot-ask-master --host codex --format markdown/);
+  assert.match(installRunbook, /if rg -n "metabot advisor" "\$INSTALLED_SKILL"; then/);
+  assert.match(installRunbook, /stale advisor semantics found in installed Ask Master skill/);
+  assert.match(installRunbook, /exit 1/);
+  assert.match(installRunbook, /metabot master trace --id <real-trace-id>/);
+  assert.doesNotMatch(installRunbook, /metabot master trace --id trace-123/);
+  assert.match(installRunbook, /post-flow check, not part of the zero-state fresh install smoke/i);
+  assert.match(installRunbook, /restart Codex session/i);
+  assert.match(installRunbook, /fresh install smoke/i);
+  assert.doesNotMatch(installRunbook, /metabot advisor (list|ask|trace)/);
+});
