@@ -8,6 +8,11 @@ const {
   evaluateMasterTrigger,
   recordMasterTriggerOutcome,
 } = require('../../dist/core/master/masterTriggerEngine.js');
+const {
+  MASTER_SUGGEST_REJECTION_COOLDOWN_MS,
+  MASTER_SUGGEST_SIGNATURE_COOLDOWN_MS,
+  deriveMasterTriggerMemoryStateFromSuggestState,
+} = require('../../dist/core/master/masterSuggestState.js');
 
 function buildConfig(overrides = {}) {
   return {
@@ -187,4 +192,71 @@ test('recent identical failure signatures suppress another suggest even on a new
     action: 'no_action',
     reason: 'This failure signature was already suggested recently.',
   });
+});
+
+test('old suggested and accepted records age out instead of suppressing future traces forever', () => {
+  const now = 1_776_000_000_000;
+  const suppression = deriveMasterTriggerMemoryStateFromSuggestState({
+    now,
+    state: {
+      items: [
+        {
+          suggestionId: 'master-suggest-old-accepted',
+          traceId: 'trace-old-accepted',
+          createdAt: now - MASTER_SUGGEST_REJECTION_COOLDOWN_MS - 1_000,
+          updatedAt: now - MASTER_SUGGEST_REJECTION_COOLDOWN_MS - 1_000,
+          acceptedAt: now - MASTER_SUGGEST_REJECTION_COOLDOWN_MS - 1_000,
+          status: 'accepted',
+          hostMode: 'codex',
+          candidateMasterKind: 'debug',
+          candidateDisplayName: 'Official Debug Master',
+          reason: 'Repeated failures make Ask Master worthwhile.',
+          confidence: 0.9,
+          failureSignatures: ['ERR_OLD_ACCEPTED_SIGNATURE'],
+          draft: {},
+          target: {
+            servicePinId: 'master-pin-accepted',
+            providerGlobalMetaId: 'idq1provider',
+            masterKind: 'debug',
+            displayName: 'Official Debug Master',
+          },
+        },
+        {
+          suggestionId: 'master-suggest-old-suggested',
+          traceId: 'trace-old-suggested',
+          createdAt: now - MASTER_SUGGEST_SIGNATURE_COOLDOWN_MS - 1_000,
+          updatedAt: now - MASTER_SUGGEST_SIGNATURE_COOLDOWN_MS - 1_000,
+          status: 'suggested',
+          hostMode: 'codex',
+          candidateMasterKind: 'debug',
+          candidateDisplayName: 'Official Debug Master',
+          reason: 'Repeated failures make Ask Master worthwhile.',
+          confidence: 0.88,
+          failureSignatures: ['ERR_OLD_SUGGESTED_SIGNATURE'],
+          draft: {},
+          target: {
+            servicePinId: 'master-pin-suggested',
+            providerGlobalMetaId: 'idq1provider',
+            masterKind: 'debug',
+            displayName: 'Official Debug Master',
+          },
+        },
+      ],
+    },
+  });
+
+  const decision = evaluateMasterTrigger({
+    config: buildConfig(),
+    observation: buildObservation({
+      now,
+      traceId: 'trace-suggest-fresh',
+      diagnostics: {
+        repeatedErrorSignatures: ['ERR_OLD_ACCEPTED_SIGNATURE'],
+      },
+    }),
+    suppression,
+  });
+
+  assert.equal(decision.action, 'suggest');
+  assert.equal(decision.candidateMasterKind, 'debug');
 });

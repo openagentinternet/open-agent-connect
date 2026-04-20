@@ -296,6 +296,17 @@ export function createMasterTriggerMemoryState(): MasterTriggerMemoryState {
   };
 }
 
+export function mergeMasterTriggerMemoryStates(
+  ...states: Array<Partial<MasterTriggerMemoryState> | null | undefined>
+): MasterTriggerMemoryState {
+  return normalizeMemoryState({
+    suggestedTraceIds: states.flatMap((state) => normalizeMemoryState(state).suggestedTraceIds),
+    rejectedMasterKinds: states.flatMap((state) => normalizeMemoryState(state).rejectedMasterKinds),
+    recentFailureSignatures: states.flatMap((state) => normalizeMemoryState(state).recentFailureSignatures),
+    manuallyRequestedMasterKinds: states.flatMap((state) => normalizeMemoryState(state).manuallyRequestedMasterKinds),
+  });
+}
+
 export async function collectAndEvaluateMasterTrigger(input: {
   config?: Partial<AskMasterConfig> | null;
   suppression?: Partial<MasterTriggerMemoryState> | null;

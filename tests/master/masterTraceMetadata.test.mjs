@@ -69,3 +69,61 @@ test('ask master traces include askMaster.flow and askMaster.canonicalStatus', (
     question: 'Why does the local build fail only in this workspace?',
   });
 });
+
+test('suggested ask master traces keep the suggested canonical status and preview summary', () => {
+  const exportRoot = path.join(mkdtempSync(path.join(tmpdir(), 'metabot-master-trace-suggested-')), '.metabot', 'exports');
+  const askMaster = buildMasterTraceMetadata({
+    role: 'caller',
+    canonicalStatus: 'suggested',
+    latestEvent: 'master_suggested',
+    publicStatus: 'discovered',
+    requestId: null,
+    masterKind: 'debug',
+    servicePinId: 'master-pin-1',
+    providerGlobalMetaId: 'idq1provider',
+    displayName: 'Official Debug Master',
+    triggerMode: 'suggest',
+    contextMode: 'standard',
+    confirmationMode: 'always',
+    preview: {
+      userTask: 'Diagnose the repeated failing test loop.',
+      question: 'Should I ask the Debug Master for help?',
+    },
+  });
+
+  const trace = buildSessionTrace({
+    traceId: 'trace-master-suggested-1',
+    channel: 'a2a',
+    exportRoot,
+    session: {
+      id: 'master-trace-suggested-1',
+      title: 'Official Debug Master Ask',
+      type: 'a2a',
+      metabotId: 7,
+      peerGlobalMetaId: 'idq1provider',
+      peerName: 'Official Debug Master',
+      externalConversationId: 'master:idq1caller:idq1provider:trace-master-suggested-1',
+    },
+    a2a: {
+      role: 'caller',
+      publicStatus: 'discovered',
+      latestEvent: 'master_suggested',
+      taskRunState: 'queued',
+      callerGlobalMetaId: 'idq1caller',
+      callerName: 'Caller Bot',
+      providerGlobalMetaId: 'idq1provider',
+      providerName: 'Official Debug Master',
+      servicePinId: 'master-pin-1',
+    },
+    askMaster,
+  });
+
+  assert.equal(trace.askMaster.flow, 'master');
+  assert.equal(trace.askMaster.canonicalStatus, 'suggested');
+  assert.equal(trace.askMaster.requestId, null);
+  assert.equal(trace.askMaster.triggerMode, 'suggest');
+  assert.deepEqual(trace.askMaster.preview, {
+    userTask: 'Diagnose the repeated failing test loop.',
+    question: 'Should I ask the Debug Master for help?',
+  });
+});

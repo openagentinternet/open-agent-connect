@@ -127,3 +127,83 @@ test('collectAndEvaluateMasterTrigger skips collection when askMaster is disable
     reason: 'Ask Master is disabled by local config.',
   });
 });
+
+test('trigger engine emits suggest for no-progress loops even without failure counters', () => {
+  const decision = evaluateMasterTrigger({
+    config: buildConfig({ triggerMode: 'suggest' }),
+    observation: buildObservation({
+      activity: {
+        recentFailures: 0,
+        repeatedFailureCount: 0,
+        noProgressWindowMs: 600_000,
+      },
+      diagnostics: {
+        failingTests: 0,
+        failingCommands: 0,
+        repeatedErrorSignatures: [],
+        uncertaintySignals: [],
+      },
+      workState: {
+        todoBlocked: false,
+        onlyReadingWithoutConverging: true,
+      },
+    }),
+  });
+
+  assert.equal(decision.action, 'suggest');
+  assert.equal(decision.candidateMasterKind, 'debug');
+});
+
+test('trigger engine emits suggest for a repeated error signature even without no-progress signals', () => {
+  const decision = evaluateMasterTrigger({
+    config: buildConfig({ triggerMode: 'suggest' }),
+    observation: buildObservation({
+      activity: {
+        recentFailures: 0,
+        repeatedFailureCount: 0,
+        noProgressWindowMs: null,
+      },
+      diagnostics: {
+        failingTests: 0,
+        failingCommands: 0,
+        repeatedErrorSignatures: ['ERR_ONLY_SIGNATURE'],
+        uncertaintySignals: [],
+      },
+      workState: {
+        todoBlocked: false,
+        onlyReadingWithoutConverging: false,
+      },
+    }),
+  });
+
+  assert.equal(decision.action, 'suggest');
+  assert.equal(decision.candidateMasterKind, 'debug');
+});
+
+test('trigger engine does not surface suggest when there is no online master available', () => {
+  const decision = evaluateMasterTrigger({
+    config: buildConfig({ triggerMode: 'suggest' }),
+    observation: buildObservation({
+      directory: {
+        availableMasters: 0,
+        trustedMasters: 0,
+        onlineMasters: 0,
+      },
+      diagnostics: {
+        failingTests: 1,
+        failingCommands: 1,
+        repeatedErrorSignatures: ['ERR_STILL_STUCK'],
+        uncertaintySignals: ['stuck'],
+      },
+      workState: {
+        todoBlocked: true,
+        onlyReadingWithoutConverging: true,
+      },
+    }),
+  });
+
+  assert.deepEqual(decision, {
+    action: 'no_action',
+    reason: 'No online Master is currently available.',
+  });
+});

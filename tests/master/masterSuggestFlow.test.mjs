@@ -58,7 +58,7 @@ function createDebugMasterRecord() {
   };
 }
 
-test('master suggest hands off into the existing preview flow when repeated failures justify asking the Debug Master', async (t) => {
+test('master suggest materializes a suggestion first, then accept_suggest enters the existing preview flow', async (t) => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-suggest-flow-'));
   t.after(async () => {
     await rm(homeDir, { recursive: true, force: true });
@@ -150,10 +150,25 @@ test('master suggest hands off into the existing preview flow when repeated fail
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.state, 'awaiting_confirmation');
+  assert.equal(result.state, 'success');
   assert.equal(result.data.decision.action, 'suggest');
-  assert.equal(result.data.preview.target.displayName, 'Official Debug Master');
-  assert.equal(result.data.preview.request.trigger.mode, 'suggest');
-  assert.equal(result.data.preview.request.target.masterKind, 'debug');
-  assert.match(result.data.confirmation.confirmCommand, /^metabot master ask --trace-id trace-master-/);
+  assert.equal(result.data.suggestion.traceId, 'trace-master-suggest-1');
+  assert.equal(result.data.suggestion.candidateDisplayName, 'Official Debug Master');
+  assert.match(result.data.suggestion.suggestionId, /^master-suggest-/);
+  assert.equal(result.data.preview, undefined);
+
+  const acceptResult = await handlers.master.hostAction({
+    action: {
+      kind: 'accept_suggest',
+      traceId: result.data.suggestion.traceId,
+      suggestionId: result.data.suggestion.suggestionId,
+    },
+  });
+
+  assert.equal(acceptResult.ok, true);
+  assert.equal(acceptResult.state, 'awaiting_confirmation');
+  assert.equal(acceptResult.data.preview.target.displayName, 'Official Debug Master');
+  assert.equal(acceptResult.data.preview.request.trigger.mode, 'suggest');
+  assert.equal(acceptResult.data.preview.request.target.masterKind, 'debug');
+  assert.match(acceptResult.data.confirmation.confirmCommand, /^metabot master ask --trace-id trace-master-/);
 });

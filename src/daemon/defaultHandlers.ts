@@ -79,9 +79,17 @@ import { prepareManualAskHostAction } from '../core/master/masterHostAdapter';
 import { publishMasterToChain } from '../core/master/masterServicePublish';
 import { validateMasterServicePayload } from '../core/master/masterServiceSchema';
 import {
+  buildMasterSuggestionId,
+  createMasterSuggestStateStore,
+  deriveMasterTriggerMemoryStateFromSuggestState,
+  type StoredMasterSuggestRecord,
+} from '../core/master/masterSuggestState';
+import {
   collectAndEvaluateMasterTrigger,
   createMasterTriggerMemoryState,
+  mergeMasterTriggerMemoryStates,
   recordMasterTriggerOutcome,
+  type TriggerDecision,
 } from '../core/master/masterTriggerEngine';
 import type { MasterDirectoryItem, PublishedMasterRecord } from '../core/master/masterTypes';
 
@@ -1277,6 +1285,7 @@ async function resolveExplicitMasterTarget(input: {
   hotRoot: string;
   chainApiBaseUrl?: string;
   host?: string | null;
+  onlineOnly?: boolean;
   providerGlobalMetaId?: string | null;
   localProviderOnline: boolean;
   localLastSeenSec: number | null;
@@ -1293,7 +1302,7 @@ async function resolveExplicitMasterTarget(input: {
     masterStateStore: input.masterStateStore,
     hotRoot: input.hotRoot,
     chainApiBaseUrl: input.chainApiBaseUrl,
-    onlineOnly: false,
+    onlineOnly: input.onlineOnly === true,
     host: normalizeText(input.host) || DEFAULT_MASTER_HOST_MODE,
     masterKind,
     localProviderOnline: input.localProviderOnline,
@@ -1315,6 +1324,7 @@ async function resolveSuggestedMasterTarget(input: {
   masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
   hotRoot: string;
   chainApiBaseUrl?: string;
+  host?: string | null;
   providerGlobalMetaId?: string | null;
   localProviderOnline: boolean;
   localLastSeenSec: number | null;
@@ -1325,6 +1335,8 @@ async function resolveSuggestedMasterTarget(input: {
     masterStateStore: input.masterStateStore,
     hotRoot: input.hotRoot,
     chainApiBaseUrl: input.chainApiBaseUrl,
+    host: input.host,
+    onlineOnly: true,
     providerGlobalMetaId: input.providerGlobalMetaId,
     localProviderOnline: input.localProviderOnline,
     localLastSeenSec: input.localLastSeenSec,
@@ -1340,7 +1352,7 @@ async function resolveSuggestedMasterTarget(input: {
     hotRoot: input.hotRoot,
     chainApiBaseUrl: input.chainApiBaseUrl,
     onlineOnly: true,
-    host: DEFAULT_MASTER_HOST_MODE,
+    host: normalizeText(input.host) || DEFAULT_MASTER_HOST_MODE,
     masterKind: preferredMasterKind || undefined,
     localProviderOnline: input.localProviderOnline,
     localLastSeenSec: input.localLastSeenSec,
@@ -1388,6 +1400,7 @@ async function createMasterAskPreviewResult(input: {
   pendingMasterAskStateStore: ReturnType<typeof createPendingMasterAskStateStore>;
   triggerModeOverride?: string | null;
   callerHostOverride?: string | null;
+  traceIdOverride?: string | null;
   sendPreparedRequest?: (input: {
     traceId: string;
     pendingAsk: PendingMasterAskRecord;
@@ -1405,7 +1418,7 @@ async function createMasterAskPreviewResult(input: {
     triggerMode: normalizeText(input.triggerModeOverride) || input.draft.triggerMode,
   };
   const now = Date.now();
-  const traceId = buildMasterTraceId({
+  const traceId = normalizeText(input.traceIdOverride) || buildMasterTraceId({
     providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
     servicePinId: input.resolvedTarget.masterPinId,
     question: draft.question,
@@ -1544,6 +1557,253 @@ async function createMasterAskPreviewResult(input: {
     traceMarkdownPath: artifacts.traceMarkdownPath,
     transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
   });
+}
+
+function buildStoredMasterSuggestDraft(input: {
+  draft: ReturnType<typeof readMasterAskDraft>;
+  resolvedTarget: MasterDirectoryItem;
+}): Record<string, unknown> {
+  return {
+    target: {
+      servicePinId: input.resolvedTarget.masterPinId,
+      providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+      masterKind: input.resolvedTarget.masterKind,
+      displayName: input.resolvedTarget.displayName,
+    },
+    triggerMode: 'suggest',
+    contextMode: input.draft.contextMode,
+    userTask: input.draft.userTask,
+    question: input.draft.question,
+    goal: input.draft.goal,
+    workspaceSummary: input.draft.workspaceSummary,
+    errorSummary: input.draft.errorSummary,
+    diffSummary: input.draft.diffSummary,
+    relevantFiles: [...input.draft.relevantFiles],
+    artifacts: [...input.draft.artifacts],
+    constraints: [...input.draft.constraints],
+    desiredOutput: input.draft.desiredOutput,
+  };
+}
+
+function buildMasterSuggestTriggerObservation(input: {
+  now: number;
+  traceId: string;
+  hostMode: string;
+  masterKind: string | null;
+  failureSignatures: string[];
+  explicitlyRejectedSuggestion?: boolean;
+}): ReturnType<typeof readMasterTriggerObservation> {
+  return {
+    now: input.now,
+    traceId: input.traceId,
+    hostMode: input.hostMode,
+    workspaceId: null,
+    userIntent: {
+      explicitlyAskedForMaster: false,
+      explicitlyRejectedSuggestion: input.explicitlyRejectedSuggestion === true,
+    },
+    activity: {
+      recentUserMessages: 0,
+      recentAssistantMessages: 0,
+      recentToolCalls: 0,
+      recentFailures: 0,
+      repeatedFailureCount: 0,
+      noProgressWindowMs: null,
+    },
+    diagnostics: {
+      failingTests: 0,
+      failingCommands: 0,
+      repeatedErrorSignatures: [...input.failureSignatures],
+      uncertaintySignals: [],
+    },
+    workState: {
+      hasPlan: false,
+      todoBlocked: false,
+      diffChangedRecently: false,
+      onlyReadingWithoutConverging: false,
+    },
+    directory: {
+      availableMasters: 1,
+      trustedMasters: 0,
+      onlineMasters: 1,
+    },
+    candidateMasterKindHint: input.masterKind,
+  };
+}
+
+async function createMasterSuggestResult(input: {
+  draft: ReturnType<typeof readMasterAskDraft>;
+  resolvedTarget: MasterDirectoryItem;
+  state: RuntimeState;
+  config: Awaited<ReturnType<ReturnType<typeof createConfigStore>['read']>>;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  masterSuggestStateStore: ReturnType<typeof createMasterSuggestStateStore>;
+  observation: ReturnType<typeof readMasterTriggerObservation>;
+  decision: Extract<TriggerDecision, { action: 'suggest' }>;
+}): Promise<MetabotCommandResult<Record<string, unknown>>> {
+  if (!input.state.identity) {
+    return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
+  }
+
+  const now = Date.now();
+  const traceId = normalizeText(input.observation.traceId) || buildMasterTraceId({
+    providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+    servicePinId: input.resolvedTarget.masterPinId,
+    question: input.draft.question,
+    now,
+  });
+  const suggestionId = buildMasterSuggestionId(now);
+  const hostMode = normalizeText(input.observation.hostMode) || DEFAULT_MASTER_HOST_MODE;
+  const storedDraft = buildStoredMasterSuggestDraft({
+    draft: input.draft,
+    resolvedTarget: input.resolvedTarget,
+  });
+  const suggestionRecord: StoredMasterSuggestRecord = {
+    suggestionId,
+    traceId,
+    createdAt: now,
+    updatedAt: now,
+    status: 'suggested',
+    hostMode,
+    candidateMasterKind: normalizeText(input.decision.candidateMasterKind) || input.resolvedTarget.masterKind,
+    candidateDisplayName: input.resolvedTarget.displayName,
+    reason: input.decision.reason,
+    confidence: input.decision.confidence,
+    failureSignatures: [...input.observation.diagnostics.repeatedErrorSignatures],
+    draft: storedDraft,
+    target: {
+      servicePinId: input.resolvedTarget.masterPinId,
+      providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+      masterKind: input.resolvedTarget.masterKind,
+      displayName: input.resolvedTarget.displayName,
+    },
+  };
+
+  const trace = buildSessionTrace({
+    traceId,
+    channel: 'a2a',
+    exportRoot: input.runtimeStateStore.paths.exportRoot,
+    createdAt: now,
+    session: {
+      id: `master-${traceId}`,
+      title: `${input.resolvedTarget.displayName} Ask`,
+      type: 'a2a',
+      metabotId: input.state.identity.metabotId,
+      peerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+      peerName: input.resolvedTarget.displayName,
+      externalConversationId: `master:${input.state.identity.globalMetaId}:${input.resolvedTarget.providerGlobalMetaId}:${traceId}`,
+    },
+    a2a: {
+      role: 'caller',
+      publicStatus: 'discovered',
+      latestEvent: 'master_suggested',
+      taskRunState: 'queued',
+      callerGlobalMetaId: input.state.identity.globalMetaId,
+      callerName: input.state.identity.name,
+      providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+      providerName: input.resolvedTarget.displayName,
+      servicePinId: input.resolvedTarget.masterPinId,
+    },
+    askMaster: buildMasterTraceMetadata({
+      role: 'caller',
+      canonicalStatus: 'suggested',
+      latestEvent: 'master_suggested',
+      publicStatus: 'discovered',
+      requestId: null,
+      masterKind: input.resolvedTarget.masterKind,
+      servicePinId: input.resolvedTarget.masterPinId,
+      providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+      displayName: input.resolvedTarget.displayName,
+      triggerMode: 'suggest',
+      contextMode: normalizeText(input.draft.contextMode) || input.config.askMaster.contextMode,
+      confirmationMode: input.config.askMaster.confirmationMode,
+      preview: {
+        userTask: input.draft.userTask,
+        question: input.draft.question,
+      },
+    }),
+  });
+
+  const artifacts = await exportSessionArtifacts({
+    trace,
+    transcript: {
+      sessionId: trace.session.id,
+      title: trace.session.title || 'Ask Master Suggestion',
+      messages: [
+        {
+          id: `${traceId}-suggest`,
+          type: 'assistant',
+          timestamp: now,
+          content: `Suggest asking ${input.resolvedTarget.displayName}: ${input.decision.reason}`,
+          metadata: {
+            suggestionId,
+            confidence: input.decision.confidence,
+          },
+        },
+      ],
+    },
+  });
+
+  await persistTraceRecord(input.runtimeStateStore, trace);
+  await input.masterSuggestStateStore.put(suggestionRecord);
+
+  return commandSuccess({
+    traceId,
+    suggestion: {
+      suggestionId,
+      traceId,
+      candidateMasterKind: suggestionRecord.candidateMasterKind,
+      candidateDisplayName: suggestionRecord.candidateDisplayName,
+      reason: suggestionRecord.reason,
+      confidence: suggestionRecord.confidence,
+      createdAt: suggestionRecord.createdAt,
+    },
+    traceJsonPath: artifacts.traceJsonPath,
+    traceMarkdownPath: artifacts.traceMarkdownPath,
+    transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
+  });
+}
+
+function buildMasterRejectedSuggestionTrace(input: {
+  baseTrace: SessionTraceRecord;
+  suggestion: StoredMasterSuggestRecord;
+  rejectedAt: number;
+}): SessionTraceRecord {
+  const preview = input.baseTrace.askMaster?.preview ?? {
+    userTask: normalizeText(input.suggestion.draft.userTask) || null,
+    question: normalizeText(input.suggestion.draft.question) || null,
+  };
+
+  return {
+    ...input.baseTrace,
+    a2a: input.baseTrace.a2a
+      ? {
+          ...input.baseTrace.a2a,
+          role: 'caller',
+          publicStatus: 'discovered',
+          latestEvent: 'master_suggestion_rejected',
+          taskRunState: 'queued',
+        }
+      : null,
+    askMaster: buildMasterTraceMetadata({
+      role: 'caller',
+      canonicalStatus: 'discovered',
+      latestEvent: 'master_suggestion_rejected',
+      publicStatus: 'discovered',
+      requestId: null,
+      masterKind: normalizeText(input.suggestion.target.masterKind) || input.baseTrace.askMaster?.masterKind,
+      servicePinId: normalizeText(input.suggestion.target.servicePinId) || input.baseTrace.askMaster?.servicePinId,
+      providerGlobalMetaId: normalizeText(input.suggestion.target.providerGlobalMetaId)
+        || input.baseTrace.askMaster?.providerGlobalMetaId,
+      displayName: normalizeText(input.suggestion.target.displayName)
+        || input.baseTrace.askMaster?.displayName
+        || input.baseTrace.session.peerName,
+      triggerMode: 'suggest',
+      contextMode: input.baseTrace.askMaster?.contextMode,
+      confirmationMode: input.baseTrace.askMaster?.confirmationMode,
+      preview,
+    }),
+  };
 }
 
 function buildMasterCallerTraceAfterReply(input: {
@@ -2170,6 +2430,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
   const masterStateStore = createPublishedMasterStateStore(input.homeDir);
   const pendingMasterAskStateStore = createPendingMasterAskStateStore(input.homeDir);
+  const masterSuggestStateStore = createMasterSuggestStateStore(input.homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(input.homeDir);
   const ratingDetailStateStore = createRatingDetailStateStore(input.homeDir);
   const sessionStateStore = createSessionStateStore(input.homeDir);
@@ -2857,6 +3118,199 @@ export function createDefaultMetabotDaemonHandlers(input: {
           : null;
         const request = readMasterHostActionRequest(rawInput);
         const actionKind = normalizeText(request.action.kind);
+        const hostContext = readObject(request.context) ?? {};
+        const hostMode = normalizeText(hostContext.hostMode) || DEFAULT_MASTER_HOST_MODE;
+        if (actionKind === 'accept_suggest') {
+          const traceId = normalizeText(request.action.traceId);
+          const suggestionId = normalizeText(request.action.suggestionId);
+          if (!traceId || !suggestionId) {
+            return commandFailed(
+              'invalid_master_host_action',
+              'Accepting an Ask Master suggestion requires both traceId and suggestionId.'
+            );
+          }
+
+          let suggestion;
+          try {
+            suggestion = await masterSuggestStateStore.get(traceId, suggestionId);
+          } catch {
+            return commandFailed(
+              'master_suggestion_not_found',
+              `Ask Master suggestion not found: ${traceId}:${suggestionId}`
+            );
+          }
+
+          if (suggestion.status === 'rejected') {
+            return commandFailed(
+              'master_suggestion_rejected',
+              'This Ask Master suggestion was already rejected.'
+            );
+          }
+
+          const previewDraft = readMasterAskDraft(suggestion.draft);
+          const resolvedTarget = await resolveExplicitMasterTarget({
+            draft: previewDraft,
+            masterStateStore,
+            hotRoot: runtimeStateStore.paths.hotRoot,
+            chainApiBaseUrl: input.chainApiBaseUrl,
+            host: suggestion.hostMode,
+            onlineOnly: true,
+            localProviderOnline,
+            localLastSeenSec,
+            providerDaemonBaseUrl: daemon?.baseUrl || null,
+            providerGlobalMetaId: identity.globalMetaId,
+          });
+          if (!resolvedTarget) {
+            return commandFailed(
+              'master_target_not_found',
+              'Suggested Master is no longer available for preview.'
+            );
+          }
+
+          const previewResult = await createMasterAskPreviewResult({
+            draft: previewDraft,
+            resolvedTarget,
+            state,
+            config,
+            runtimeStateStore,
+            pendingMasterAskStateStore,
+            triggerModeOverride: 'suggest',
+            callerHostOverride: suggestion.hostMode,
+            traceIdOverride: suggestion.traceId,
+            sendPreparedRequest: sendPendingMasterAskRequest,
+          });
+          if (previewResult.ok && previewResult.state === 'awaiting_confirmation') {
+            await masterSuggestStateStore.put({
+              ...suggestion,
+              status: 'accepted',
+              updatedAt: Date.now(),
+              acceptedAt: Date.now(),
+            });
+            masterTriggerMemoryState = recordMasterTriggerOutcome({
+              state: masterTriggerMemoryState,
+              observation: buildMasterSuggestTriggerObservation({
+                now: Date.now(),
+                traceId: suggestion.traceId,
+                hostMode: suggestion.hostMode,
+                masterKind: suggestion.candidateMasterKind,
+                failureSignatures: suggestion.failureSignatures,
+              }),
+              decision: {
+                action: 'manual_requested',
+                reason: 'User accepted Ask Master suggestion.',
+              },
+            });
+          }
+
+          if (!previewResult.ok) {
+            return previewResult;
+          }
+
+          return {
+            ...previewResult,
+            data: {
+              ...previewResult.data,
+              hostAction: 'accept_suggest',
+              suggestionId,
+            },
+          };
+        }
+
+        if (actionKind === 'reject_suggest') {
+          const traceId = normalizeText(request.action.traceId);
+          const suggestionId = normalizeText(request.action.suggestionId);
+          if (!traceId || !suggestionId) {
+            return commandFailed(
+              'invalid_master_host_action',
+              'Rejecting an Ask Master suggestion requires both traceId and suggestionId.'
+            );
+          }
+
+          let suggestion;
+          try {
+            suggestion = await masterSuggestStateStore.get(traceId, suggestionId);
+          } catch {
+            return commandFailed(
+              'master_suggestion_not_found',
+              `Ask Master suggestion not found: ${traceId}:${suggestionId}`
+            );
+          }
+
+          const rejectionReason = normalizeText(request.action.reason) || null;
+          const rejectedAt = Date.now();
+          await masterSuggestStateStore.put({
+            ...suggestion,
+            status: 'rejected',
+            updatedAt: rejectedAt,
+            rejectedAt,
+            rejectionReason,
+          });
+          masterTriggerMemoryState = recordMasterTriggerOutcome({
+            state: masterTriggerMemoryState,
+            observation: buildMasterSuggestTriggerObservation({
+              now: rejectedAt,
+              traceId: suggestion.traceId,
+              hostMode: suggestion.hostMode,
+              masterKind: suggestion.candidateMasterKind,
+              failureSignatures: suggestion.failureSignatures,
+              explicitlyRejectedSuggestion: true,
+            }),
+            decision: {
+              action: 'no_action',
+              reason: 'User rejected the previous suggestion.',
+            },
+          });
+          const currentState = await runtimeStateStore.readState();
+          const baseTrace = currentState.traces.find((entry) => entry.traceId === traceId) ?? null;
+          if (baseTrace) {
+            const updatedTrace = buildMasterRejectedSuggestionTrace({
+              baseTrace,
+              suggestion,
+              rejectedAt,
+            });
+            await exportSessionArtifacts({
+              trace: updatedTrace,
+              transcript: {
+                sessionId: updatedTrace.session.id,
+                title: updatedTrace.session.title || 'Ask Master Suggestion',
+                messages: [
+                  {
+                    id: `${traceId}-suggest`,
+                    type: 'assistant',
+                    timestamp: suggestion.createdAt,
+                    content: `Suggest asking ${suggestion.target.displayName || suggestion.candidateDisplayName || 'the Master'}: ${suggestion.reason}`,
+                    metadata: {
+                      suggestionId,
+                      confidence: suggestion.confidence,
+                    },
+                  },
+                  {
+                    id: `${traceId}-reject`,
+                    type: 'user',
+                    timestamp: rejectedAt,
+                    content: rejectionReason
+                      ? `Rejected Ask Master suggestion: ${rejectionReason}`
+                      : 'Rejected Ask Master suggestion.',
+                    metadata: {
+                      event: 'master_suggestion_rejected',
+                      suggestionId,
+                    },
+                  },
+                ],
+              },
+            });
+            await persistTraceRecord(runtimeStateStore, updatedTrace);
+          }
+
+          return commandSuccess({
+            hostAction: 'reject_suggest',
+            traceId,
+            suggestionId,
+            rejected: true,
+            reason: rejectionReason,
+          });
+        }
+
         if (actionKind !== 'manual_ask') {
           return commandFailed(
             'not_implemented',
@@ -2864,8 +3318,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
           );
         }
 
-        const hostContext = readObject(request.context) ?? {};
-        const hostMode = normalizeText(hostContext.hostMode) || DEFAULT_MASTER_HOST_MODE;
         const directory = await listRuntimeDirectoryMasters({
           masterStateStore,
           hotRoot: runtimeStateStore.paths.hotRoot,
@@ -3386,10 +3838,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
           ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
           : null;
         const draft = readMasterAskDraft(readObject(rawInput.draft) ?? rawInput);
+        const observation = readMasterTriggerObservation(rawInput);
+        const suggestState = await masterSuggestStateStore.read();
         const trigger = await collectAndEvaluateMasterTrigger({
           config: config.askMaster,
-          suppression: masterTriggerMemoryState,
-          collectObservation: async () => readMasterTriggerObservation(rawInput),
+          suppression: mergeMasterTriggerMemoryStates(
+            masterTriggerMemoryState,
+            deriveMasterTriggerMemoryStateFromSuggestState({
+              state: suggestState,
+              now: observation.now,
+            })
+          ),
+          collectObservation: async () => observation,
         });
 
         if (trigger.collected && trigger.observation?.userIntent.explicitlyRejectedSuggestion) {
@@ -3407,6 +3867,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
           });
         }
 
+        if (trigger.decision.action === 'manual_requested' || trigger.decision.action === 'auto_candidate') {
+          if (trigger.observation) {
+            masterTriggerMemoryState = recordMasterTriggerOutcome({
+              state: masterTriggerMemoryState,
+              observation: trigger.observation,
+              decision: trigger.decision,
+            });
+          }
+          return commandSuccess({
+            collected: trigger.collected,
+            decision: trigger.decision,
+          });
+        }
+
         const resolvedTarget = await resolveSuggestedMasterTarget({
           draft,
           preferredMasterKind: 'candidateMasterKind' in trigger.decision
@@ -3416,6 +3890,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           masterStateStore,
           hotRoot: runtimeStateStore.paths.hotRoot,
           chainApiBaseUrl: input.chainApiBaseUrl,
+          host: observation.hostMode,
           localProviderOnline,
           localLastSeenSec,
           providerDaemonBaseUrl: daemon?.baseUrl || null,
@@ -3431,37 +3906,34 @@ export function createDefaultMetabotDaemonHandlers(input: {
           });
         }
 
-        const previewResult = await createMasterAskPreviewResult({
+        const suggestResult = await createMasterSuggestResult({
           draft,
           resolvedTarget,
           state,
           config,
           runtimeStateStore,
-          pendingMasterAskStateStore,
-          triggerModeOverride: trigger.decision.action === 'manual_requested'
-            ? 'manual'
-            : trigger.decision.action === 'auto_candidate'
-              ? 'auto'
-              : 'suggest',
-          sendPreparedRequest: sendPendingMasterAskRequest,
+          masterSuggestStateStore,
+          observation,
+          decision: trigger.decision,
         });
-        if (previewResult.ok && trigger.observation) {
+        if (suggestResult.ok && trigger.observation) {
+          const suggestData = suggestResult.data;
           masterTriggerMemoryState = recordMasterTriggerOutcome({
             state: masterTriggerMemoryState,
             observation: trigger.observation,
             decision: trigger.decision,
           });
           return {
-            ...previewResult,
+            ...suggestResult,
             data: {
-              ...previewResult.data,
+              ...suggestData,
               collected: trigger.collected,
               decision: trigger.decision,
             },
           };
         }
 
-        return previewResult;
+        return suggestResult;
       },
       receive: async (rawInput) => {
         const state = await runtimeStateStore.readState();

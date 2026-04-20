@@ -187,6 +187,104 @@ test('master trace reads ask master semantics instead of private chat wording', 
   assert.doesNotMatch(JSON.stringify(payload.data), /Private Chat|refund|rating|payment/i);
 });
 
+test('master trace renders suggested ask master traces before confirmation', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-trace-suggested-command-'));
+  t.after(async () => {
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  const traceId = 'trace-master-suggested-command-1';
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+
+  await runtimeStateStore.writeState({
+    identity: {
+      metabotId: 7,
+      name: 'Caller Bot',
+      createdAt: 1_776_000_000_000,
+      path: "m/44'/10001'/0'/0/0",
+      publicKey: 'pubkey',
+      chatPublicKey: 'chat-pubkey',
+      mvcAddress: 'mvc-address',
+      btcAddress: 'btc-address',
+      dogeAddress: 'doge-address',
+      metaId: 'metaid-caller',
+      globalMetaId: 'idq1caller',
+    },
+    services: [],
+    traces: [
+      buildSessionTrace({
+        traceId,
+        channel: 'a2a',
+        exportRoot: runtimeStateStore.paths.exportRoot,
+        session: {
+          id: `master-${traceId}`,
+          title: 'Official Debug Master Ask',
+          type: 'a2a',
+          metabotId: 7,
+          peerGlobalMetaId: 'idq1provider',
+          peerName: 'Official Debug Master',
+          externalConversationId: `master:idq1caller:idq1provider:${traceId}`,
+        },
+        a2a: {
+          role: 'caller',
+          publicStatus: 'discovered',
+          latestEvent: 'master_suggested',
+          taskRunState: 'queued',
+          callerGlobalMetaId: 'idq1caller',
+          callerName: 'Caller Bot',
+          providerGlobalMetaId: 'idq1provider',
+          providerName: 'Official Debug Master',
+          servicePinId: 'master-pin-1',
+        },
+        askMaster: buildMasterTraceMetadata({
+          role: 'caller',
+          canonicalStatus: 'suggested',
+          latestEvent: 'master_suggested',
+          publicStatus: 'discovered',
+          requestId: null,
+          masterKind: 'debug',
+          servicePinId: 'master-pin-1',
+          providerGlobalMetaId: 'idq1provider',
+          displayName: 'Official Debug Master',
+          triggerMode: 'suggest',
+          contextMode: 'standard',
+          confirmationMode: 'always',
+          preview: {
+            userTask: 'Diagnose the repeated failing local build loop.',
+            question: 'Should I ask the Debug Master for help?',
+          },
+        }),
+      }),
+    ],
+  });
+
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    getDaemonRecord: () => null,
+  });
+
+  const stdout = [];
+  const exitCode = await runCli(['master', 'trace', '--id', traceId], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        trace: handlers.master.trace,
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  const payload = parseOutput(stdout);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.flow, 'master');
+  assert.equal(payload.data.canonicalStatus, 'suggested');
+  assert.equal(payload.data.display.statusText, 'Suggested');
+  assert.equal(payload.data.requestId, null);
+  assert.equal(payload.data.triggerMode, 'suggest');
+  assert.equal(payload.data.preview.question, 'Should I ask the Debug Master for help?');
+});
+
 test('master trace retains ask master metadata after caller trace artifacts are rebuilt', async (t) => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-trace-rebuild-'));
   t.after(async () => {
