@@ -26,6 +26,28 @@ export interface MasterContextFileExcerpt {
   content: string;
 }
 
+export interface MasterHostDirectorySnapshot {
+  availableMasters: number;
+  trustedMasters: number;
+  onlineMasters: number;
+}
+
+export interface MasterHostSignalsInput {
+  workspaceId?: string | null;
+  explicitlyAskedForMaster?: boolean;
+  explicitlyRejectedSuggestion?: boolean;
+  explicitlyRejectedAutoAsk?: boolean;
+  noProgressWindowMs?: number | null;
+  lastMeaningfulDiffAt?: number | null;
+  activeFileCount?: number | null;
+  diffChangedRecently?: boolean;
+  reviewCheckpointRisk?: boolean;
+  uncertaintySignals?: string[];
+  preferredMasterName?: string | null;
+  candidateMasterKindHint?: string | null;
+  directory?: Partial<MasterHostDirectorySnapshot> | null;
+}
+
 export interface MasterContextCollectionInput {
   now: number;
   hostMode: string;
@@ -48,6 +70,48 @@ export interface MasterContextCollectionInput {
     hasPlan: boolean;
     todoBlocked: boolean;
     onlyReadingWithoutConverging: boolean;
+  };
+  hostSignals?: MasterHostSignalsInput;
+}
+
+export interface MasterHostObservationFrame {
+  now: number;
+  traceId: string | null;
+  hostMode: string;
+  workspaceId: string | null;
+  userIntent: {
+    explicitlyAskedForMaster: boolean;
+    explicitlyRejectedSuggestion: boolean;
+    explicitlyRejectedAutoAsk: boolean;
+  };
+  activity: {
+    recentUserMessages: number;
+    recentAssistantMessages: number;
+    recentToolCalls: number;
+    recentFailures: number;
+    repeatedFailureCount: number;
+    noProgressWindowMs: number | null;
+    lastMeaningfulDiffAt: number | null;
+  };
+  diagnostics: {
+    failingTests: number;
+    failingCommands: number;
+    repeatedErrorSignatures: string[];
+    uncertaintySignals: string[];
+    lastFailureSummary: string | null;
+  };
+  workState: {
+    hasPlan: boolean;
+    todoBlocked: boolean;
+    diffChangedRecently: boolean;
+    onlyReadingWithoutConverging: boolean;
+    activeFileCount: number;
+  };
+  directory: MasterHostDirectorySnapshot;
+  hints: {
+    candidateMasterKindHint: string | null;
+    preferredMasterName: string | null;
+    reviewCheckpointRisk: boolean;
   };
 }
 

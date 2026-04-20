@@ -76,6 +76,10 @@ import { createPublishedMasterStateStore } from '../core/master/masterPublishedS
 import { buildMasterAskPreview } from '../core/master/masterPreview';
 import { buildMasterTraceMetadata, buildMasterTraceView } from '../core/master/masterTrace';
 import { prepareManualAskHostAction } from '../core/master/masterHostAdapter';
+import {
+  buildTriggerObservationFromHostContext,
+  buildTriggerObservationFromHostObservationFrame,
+} from '../core/master/masterHostSignalBridge';
 import { evaluateMasterPolicy } from '../core/master/masterPolicyGate';
 import { resolveMasterCandidate, selectMasterCandidate } from '../core/master/masterSelector';
 import { publishMasterToChain } from '../core/master/masterServicePublish';
@@ -92,6 +96,7 @@ import {
   mergeMasterTriggerMemoryStates,
   recordMasterTriggerOutcome,
   type TriggerDecision,
+  type TriggerObservation,
 } from '../core/master/masterTriggerEngine';
 import type { MasterDirectoryItem, PublishedMasterRecord } from '../core/master/masterTypes';
 
@@ -254,8 +259,17 @@ function readStringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
-function readMasterTriggerObservation(rawInput: Record<string, unknown>) {
-  const observation = readObject(rawInput.observation) ?? rawInput;
+function hasOwn(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function looksLikeMasterHostObservationFrame(value: Record<string, unknown>): boolean {
+  return readObject(value.hints) !== null
+    || readObject(value.activity)?.lastMeaningfulDiffAt !== undefined
+    || readObject(value.diagnostics)?.lastFailureSummary !== undefined;
+}
+
+function parseMasterTriggerObservationRecord(observation: Record<string, unknown>): TriggerObservation {
   const userIntent = readObject(observation.userIntent) ?? {};
   const activity = readObject(observation.activity) ?? {};
   const diagnostics = readObject(observation.diagnostics) ?? {};
@@ -270,6 +284,7 @@ function readMasterTriggerObservation(rawInput: Record<string, unknown>) {
     userIntent: {
       explicitlyAskedForMaster: readBoolean(userIntent.explicitlyAskedForMaster),
       explicitlyRejectedSuggestion: readBoolean(userIntent.explicitlyRejectedSuggestion),
+      explicitlyRejectedAutoAsk: readBoolean(userIntent.explicitlyRejectedAutoAsk),
     },
     activity: {
       recentUserMessages: readInteger(activity.recentUserMessages),
@@ -299,6 +314,200 @@ function readMasterTriggerObservation(rawInput: Record<string, unknown>) {
       onlineMasters: readInteger(directory.onlineMasters),
     },
     candidateMasterKindHint: normalizeText(observation.candidateMasterKindHint) || null,
+  };
+}
+
+function mergeMasterTriggerObservation(
+  base: TriggerObservation,
+  overrideRecord: Record<string, unknown>,
+  overrideObservation: TriggerObservation
+): TriggerObservation {
+  const overrideUserIntent = readObject(overrideRecord.userIntent) ?? {};
+  const overrideActivity = readObject(overrideRecord.activity) ?? {};
+  const overrideDiagnostics = readObject(overrideRecord.diagnostics) ?? {};
+  const overrideWorkState = readObject(overrideRecord.workState) ?? {};
+  const overrideDirectory = readObject(overrideRecord.directory) ?? {};
+  const hostObservationOverride = looksLikeMasterHostObservationFrame(overrideRecord);
+
+  return {
+    now: hasOwn(overrideRecord, 'now') ? overrideObservation.now : base.now,
+    traceId: hasOwn(overrideRecord, 'traceId') ? overrideObservation.traceId : base.traceId,
+    hostMode: hasOwn(overrideRecord, 'hostMode') ? overrideObservation.hostMode : base.hostMode,
+    workspaceId: hasOwn(overrideRecord, 'workspaceId') ? overrideObservation.workspaceId : base.workspaceId,
+    userIntent: {
+      explicitlyAskedForMaster: hasOwn(overrideUserIntent, 'explicitlyAskedForMaster')
+        ? overrideObservation.userIntent?.explicitlyAskedForMaster === true
+        : base.userIntent?.explicitlyAskedForMaster === true,
+      explicitlyRejectedSuggestion: hasOwn(overrideUserIntent, 'explicitlyRejectedSuggestion')
+        ? overrideObservation.userIntent?.explicitlyRejectedSuggestion === true
+        : base.userIntent?.explicitlyRejectedSuggestion === true,
+      explicitlyRejectedAutoAsk: hasOwn(overrideUserIntent, 'explicitlyRejectedAutoAsk')
+        ? overrideObservation.userIntent?.explicitlyRejectedAutoAsk === true
+        : base.userIntent?.explicitlyRejectedAutoAsk === true,
+    },
+    activity: {
+      recentUserMessages: hasOwn(overrideActivity, 'recentUserMessages')
+        ? overrideObservation.activity?.recentUserMessages ?? 0
+        : base.activity?.recentUserMessages ?? 0,
+      recentAssistantMessages: hasOwn(overrideActivity, 'recentAssistantMessages')
+        ? overrideObservation.activity?.recentAssistantMessages ?? 0
+        : base.activity?.recentAssistantMessages ?? 0,
+      recentToolCalls: hasOwn(overrideActivity, 'recentToolCalls')
+        ? overrideObservation.activity?.recentToolCalls ?? 0
+        : base.activity?.recentToolCalls ?? 0,
+      recentFailures: hasOwn(overrideActivity, 'recentFailures')
+        ? overrideObservation.activity?.recentFailures ?? 0
+        : base.activity?.recentFailures ?? 0,
+      repeatedFailureCount: hasOwn(overrideActivity, 'repeatedFailureCount')
+        ? overrideObservation.activity?.repeatedFailureCount ?? 0
+        : base.activity?.repeatedFailureCount ?? 0,
+      noProgressWindowMs: hasOwn(overrideActivity, 'noProgressWindowMs')
+        ? (overrideObservation.activity?.noProgressWindowMs ?? null)
+        : (base.activity?.noProgressWindowMs ?? null),
+    },
+    diagnostics: {
+      failingTests: hasOwn(overrideDiagnostics, 'failingTests')
+        ? overrideObservation.diagnostics?.failingTests ?? 0
+        : base.diagnostics?.failingTests ?? 0,
+      failingCommands: hasOwn(overrideDiagnostics, 'failingCommands')
+        ? overrideObservation.diagnostics?.failingCommands ?? 0
+        : base.diagnostics?.failingCommands ?? 0,
+      repeatedErrorSignatures: hasOwn(overrideDiagnostics, 'repeatedErrorSignatures')
+        ? overrideObservation.diagnostics?.repeatedErrorSignatures ?? []
+        : base.diagnostics?.repeatedErrorSignatures ?? [],
+      uncertaintySignals: hasOwn(overrideDiagnostics, 'uncertaintySignals')
+        ? overrideObservation.diagnostics?.uncertaintySignals ?? []
+        : base.diagnostics?.uncertaintySignals ?? [],
+    },
+    workState: {
+      hasPlan: hasOwn(overrideWorkState, 'hasPlan')
+        ? overrideObservation.workState?.hasPlan === true
+        : base.workState?.hasPlan === true,
+      todoBlocked: hasOwn(overrideWorkState, 'todoBlocked')
+        ? overrideObservation.workState?.todoBlocked === true
+        : base.workState?.todoBlocked === true,
+      diffChangedRecently: hasOwn(overrideWorkState, 'diffChangedRecently')
+        ? overrideObservation.workState?.diffChangedRecently === true
+        : base.workState?.diffChangedRecently === true,
+      onlyReadingWithoutConverging: hasOwn(overrideWorkState, 'onlyReadingWithoutConverging')
+        ? overrideObservation.workState?.onlyReadingWithoutConverging === true
+        : base.workState?.onlyReadingWithoutConverging === true,
+    },
+    directory: {
+      availableMasters: hasOwn(overrideDirectory, 'availableMasters')
+        ? overrideObservation.directory?.availableMasters ?? 0
+        : base.directory?.availableMasters ?? 0,
+      trustedMasters: hasOwn(overrideDirectory, 'trustedMasters')
+        ? overrideObservation.directory?.trustedMasters ?? 0
+        : base.directory?.trustedMasters ?? 0,
+      onlineMasters: hasOwn(overrideDirectory, 'onlineMasters')
+        ? overrideObservation.directory?.onlineMasters ?? 0
+        : base.directory?.onlineMasters ?? 0,
+    },
+    candidateMasterKindHint: hasOwn(overrideRecord, 'candidateMasterKindHint') || hostObservationOverride
+      ? overrideObservation.candidateMasterKindHint ?? null
+      : base.candidateMasterKindHint ?? null,
+  };
+}
+
+function readMasterTriggerObservation(rawInput: Record<string, unknown>): TriggerObservation {
+  const context = readObject(rawInput.context);
+  const contextObservation = context
+    ? buildTriggerObservationFromHostContext(context)
+    : null;
+  const explicitObservation = readObject(rawInput.observation);
+  if (!explicitObservation) {
+    return contextObservation ?? parseMasterTriggerObservationRecord(rawInput);
+  }
+
+  const parsedExplicit = looksLikeMasterHostObservationFrame(explicitObservation)
+    ? buildTriggerObservationFromHostObservationFrame(
+      explicitObservation as unknown as Parameters<typeof buildTriggerObservationFromHostObservationFrame>[0]
+    )
+    : parseMasterTriggerObservationRecord(explicitObservation);
+
+  return contextObservation
+    ? mergeMasterTriggerObservation(contextObservation, explicitObservation, parsedExplicit)
+    : parsedExplicit;
+}
+
+function readMasterTriggerDirectoryPresence(rawInput: Record<string, unknown>): {
+  availableMasters: boolean;
+  trustedMasters: boolean;
+  onlineMasters: boolean;
+} {
+  const explicitDirectory = readObject(readObject(rawInput.observation)?.directory);
+  const contextDirectory = readObject(readObject(readObject(rawInput.context)?.hostSignals)?.directory);
+  const combined = {
+    availableMasters: false,
+    trustedMasters: false,
+    onlineMasters: false,
+  };
+
+  for (const directory of [contextDirectory, explicitDirectory]) {
+    if (!directory) {
+      continue;
+    }
+    combined.availableMasters = combined.availableMasters || hasOwn(directory, 'availableMasters');
+    combined.trustedMasters = combined.trustedMasters || hasOwn(directory, 'trustedMasters');
+    combined.onlineMasters = combined.onlineMasters || hasOwn(directory, 'onlineMasters');
+  }
+
+  return combined;
+}
+
+async function hydrateMasterTriggerObservationDirectory(input: {
+  observation: TriggerObservation;
+  trustedMasters: string[];
+  directoryPresence: {
+    availableMasters: boolean;
+    trustedMasters: boolean;
+    onlineMasters: boolean;
+  };
+  masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
+  hotRoot: string;
+  chainApiBaseUrl?: string;
+  localProviderOnline: boolean;
+  localLastSeenSec: number | null;
+  providerDaemonBaseUrl?: string | null;
+  providerGlobalMetaId?: string | null;
+}): Promise<TriggerObservation> {
+  if (
+    input.directoryPresence.availableMasters
+    && input.directoryPresence.onlineMasters
+    && input.directoryPresence.trustedMasters
+  ) {
+    return input.observation;
+  }
+
+  const directory = await listRuntimeDirectoryMasters({
+    masterStateStore: input.masterStateStore,
+    hotRoot: input.hotRoot,
+    chainApiBaseUrl: input.chainApiBaseUrl,
+    onlineOnly: false,
+    host: input.observation.hostMode,
+    localProviderOnline: input.localProviderOnline,
+    localLastSeenSec: input.localLastSeenSec,
+    providerDaemonBaseUrl: input.providerDaemonBaseUrl,
+    providerGlobalMetaId: input.providerGlobalMetaId,
+  });
+  const trustedPins = new Set(input.trustedMasters.map((entry) => normalizeText(entry)).filter(Boolean));
+  const trustedCount = directory.masters.filter((master) => trustedPins.has(normalizeText(master.masterPinId))).length;
+  const onlineCount = directory.masters.filter((master) => master.online).length;
+
+  return {
+    ...input.observation,
+    directory: {
+      availableMasters: input.directoryPresence.availableMasters
+        ? (input.observation.directory?.availableMasters ?? 0)
+        : Math.max(input.observation.directory?.availableMasters ?? 0, directory.masters.length),
+      trustedMasters: input.directoryPresence.trustedMasters
+        ? (input.observation.directory?.trustedMasters ?? 0)
+        : Math.max(input.observation.directory?.trustedMasters ?? 0, trustedCount),
+      onlineMasters: input.directoryPresence.onlineMasters
+        ? (input.observation.directory?.onlineMasters ?? 0)
+        : Math.max(input.observation.directory?.onlineMasters ?? 0, onlineCount),
+    },
   };
 }
 
@@ -1694,7 +1903,7 @@ async function createMasterSuggestResult(input: {
     candidateDisplayName: input.resolvedTarget.displayName,
     reason: input.decision.reason,
     confidence: input.decision.confidence,
-    failureSignatures: [...input.observation.diagnostics.repeatedErrorSignatures],
+    failureSignatures: [...(input.observation.diagnostics?.repeatedErrorSignatures ?? [])],
     draft: storedDraft,
     target: {
       servicePinId: input.resolvedTarget.masterPinId,
@@ -3891,7 +4100,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
           ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
           : null;
         const draft = readMasterAskDraft(readObject(rawInput.draft) ?? rawInput);
-        const observation = readMasterTriggerObservation(rawInput);
+        const directoryPresence = readMasterTriggerDirectoryPresence(rawInput);
+        const observation = await hydrateMasterTriggerObservationDirectory({
+          observation: readMasterTriggerObservation(rawInput),
+          trustedMasters: config.askMaster.trustedMasters,
+          directoryPresence,
+          masterStateStore,
+          hotRoot: runtimeStateStore.paths.hotRoot,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+          localProviderOnline,
+          localLastSeenSec,
+          providerDaemonBaseUrl: daemon?.baseUrl || null,
+          providerGlobalMetaId: state.identity.globalMetaId,
+        });
         const suggestState = await masterSuggestStateStore.read();
         const trigger = await collectAndEvaluateMasterTrigger({
           config: config.askMaster,

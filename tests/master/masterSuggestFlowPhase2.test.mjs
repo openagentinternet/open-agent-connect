@@ -11,6 +11,7 @@ const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateS
 const { createPublishedMasterStateStore } = require('../../dist/core/master/masterPublishedState.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
+const { buildMasterHostObservation } = require('../../dist/core/master/masterHostObservation.js');
 
 function createIdentity() {
   return {
@@ -216,6 +217,522 @@ test('master suggest materializes a suggested trace instead of jumping directly 
   assert.equal(traceView.ok, true);
   assert.equal(traceView.data.canonicalStatus, 'suggested');
   assert.equal(traceView.data.display.statusText, 'Suggested');
+});
+
+test('master suggest can derive trigger observation from host context when explicit observation is omitted', async (t) => {
+  const harness = await createSuggestHarness({
+    masters: [
+      createDebugMasterRecord(),
+    ],
+  });
+  t.after(async () => {
+    await rm(harness.homeDir, { recursive: true, force: true });
+  });
+
+  const result = await harness.handlers.master.suggest({
+    draft: {
+      userTask: 'Diagnose the repeated preview/confirm loop before asking a Master.',
+      question: 'Should I ask the Debug Master about this repeated preview loop?',
+      workspaceSummary: 'Suggest flow deriving observation from host context.',
+      errorSummary: 'Repeated ERR_HOST_CONTEXT_SUGGEST failures.',
+      relevantFiles: ['tests/master/masterSuggestFlowPhase2.test.mjs'],
+      constraints: ['Keep the answer structured and concise.'],
+      artifacts: [],
+    },
+    context: {
+      now: 1_776_000_000_000,
+      hostMode: 'codex',
+      traceId: 'trace-master-suggest-phase2-context-derived',
+      conversation: {
+        currentUserRequest: 'The preview still never leaves confirmation after I accept it.',
+        recentMessages: [
+          { role: 'user', content: 'The preview still never leaves confirmation after I accept it.' },
+          { role: 'assistant', content: 'I only kept reading trace exports without converging on a fix.' },
+        ],
+      },
+      tools: {
+        recentToolResults: [
+          {
+            toolName: 'npm test',
+            exitCode: 1,
+            stdout: 'not ok 1 - preview confirm loop remains stuck',
+            stderr: 'AssertionError: expected Ask Master preview to progress after confirmation',
+          },
+          {
+            toolName: 'node scripts/check-preview.mjs',
+            exitCode: 1,
+            stdout: '',
+            stderr: 'Error: ERR_HOST_CONTEXT_SUGGEST',
+          },
+        ],
+      },
+      workspace: {
+        goal: 'Break the repeated Ask Master preview/confirm loop.',
+        constraints: ['Do not upload the whole repository.'],
+        relevantFiles: ['src/daemon/defaultHandlers.ts'],
+        diffSummary: 'Tracing the preview/confirm loop through defaultHandlers.',
+        fileExcerpts: [],
+      },
+      planner: {
+        hasPlan: true,
+        todoBlocked: true,
+        onlyReadingWithoutConverging: true,
+      },
+      hostSignals: {
+        noProgressWindowMs: 900_000,
+        uncertaintySignals: ['still_stuck'],
+        directory: {
+          availableMasters: 1,
+          trustedMasters: 1,
+          onlineMasters: 1,
+        },
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.decision.action, 'suggest');
+  assert.equal(result.data.decision.candidateMasterKind, 'debug');
+  assert.equal(result.data.suggestion.traceId, 'trace-master-suggest-phase2-context-derived');
+});
+
+test('master suggest can derive directory availability from runtime state when host context omits directory counts', async (t) => {
+  const harness = await createSuggestHarness();
+  t.after(async () => {
+    await rm(harness.homeDir, { recursive: true, force: true });
+  });
+
+  const result = await harness.handlers.master.suggest({
+    draft: {
+      userTask: 'Decide whether Ask Master should trigger from bare host context.',
+      question: 'Should I ask the Debug Master about this repeated host-context failure loop?',
+      workspaceSummary: 'Suggest flow without caller-supplied directory counts.',
+      errorSummary: 'Repeated ERR_HOST_CONTEXT_DIRECTORY failures.',
+      relevantFiles: ['tests/master/masterSuggestFlowPhase2.test.mjs'],
+      constraints: ['Keep the answer structured and concise.'],
+      artifacts: [],
+    },
+    context: {
+      now: 1_776_000_000_000,
+      hostMode: 'codex',
+      traceId: 'trace-master-suggest-phase2-context-runtime-directory',
+      conversation: {
+        currentUserRequest: 'I keep hitting the same failure and need a better diagnosis.',
+        recentMessages: [
+          { role: 'user', content: 'I keep hitting the same failure and need a better diagnosis.' },
+          { role: 'assistant', content: 'I reran the same failing checks without converging.' },
+        ],
+      },
+      tools: {
+        recentToolResults: [
+          {
+            toolName: 'npm test',
+            exitCode: 1,
+            stdout: 'not ok 1 - host context still fails',
+            stderr: 'AssertionError: expected context-derived suggest to survive missing directory counts',
+          },
+          {
+            toolName: 'node scripts/check-host-context.mjs',
+            exitCode: 1,
+            stdout: '',
+            stderr: 'Error: ERR_HOST_CONTEXT_DIRECTORY',
+          },
+        ],
+      },
+      workspace: {
+        goal: 'Keep context-derived suggest self-sufficient.',
+        constraints: ['Do not upload the whole repository.'],
+        relevantFiles: ['src/daemon/defaultHandlers.ts'],
+        diffSummary: 'Inspecting how suggest derives observation from host context.',
+        fileExcerpts: [],
+      },
+      planner: {
+        hasPlan: true,
+        todoBlocked: true,
+        onlyReadingWithoutConverging: true,
+      },
+      hostSignals: {
+        noProgressWindowMs: 900_000,
+        uncertaintySignals: ['still_stuck'],
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.decision.action, 'suggest');
+  assert.equal(result.data.suggestion.traceId, 'trace-master-suggest-phase2-context-runtime-directory');
+});
+
+test('master suggest preserves an explicit offline directory signal instead of overwriting it from runtime state', async (t) => {
+  const harness = await createSuggestHarness();
+  t.after(async () => {
+    await rm(harness.homeDir, { recursive: true, force: true });
+  });
+
+  const result = await harness.handlers.master.suggest({
+    draft: {
+      userTask: 'Respect an explicit offline directory snapshot.',
+      question: 'Should Ask Master stay suppressed when the host explicitly reports no online masters?',
+      workspaceSummary: 'Suggest flow with an explicit offline directory snapshot.',
+      errorSummary: 'Repeated ERR_EXPLICIT_DIRECTORY_OFFLINE failures.',
+      relevantFiles: ['src/daemon/defaultHandlers.ts'],
+      constraints: ['Keep the answer structured and concise.'],
+      artifacts: [],
+    },
+    context: {
+      now: 1_776_000_000_000,
+      hostMode: 'codex',
+      traceId: 'trace-master-suggest-phase2-explicit-directory-offline',
+      conversation: {
+        currentUserRequest: 'The host says no masters are online right now.',
+        recentMessages: [
+          { role: 'user', content: 'The host says no masters are online right now.' },
+          { role: 'assistant', content: 'Repeated checks still see the same issue.' },
+        ],
+      },
+      tools: {
+        recentToolResults: [
+          {
+            toolName: 'npm test',
+            exitCode: 1,
+            stdout: 'not ok 1 - explicit directory offline remains true',
+            stderr: 'AssertionError: expected explicit offline directory state to suppress suggest',
+          },
+        ],
+      },
+      workspace: {
+        goal: 'Preserve explicit directory state from the host.',
+        constraints: ['Do not upload the whole repository.'],
+        relevantFiles: ['src/daemon/defaultHandlers.ts'],
+        diffSummary: 'Reviewing how suggest hydrates directory state.',
+        fileExcerpts: [],
+      },
+      planner: {
+        hasPlan: true,
+        todoBlocked: true,
+        onlyReadingWithoutConverging: true,
+      },
+      hostSignals: {
+        noProgressWindowMs: 900_000,
+        uncertaintySignals: ['still_stuck'],
+        directory: {
+          availableMasters: 1,
+          trustedMasters: 0,
+          onlineMasters: 0,
+        },
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.decision, {
+    action: 'no_action',
+    reason: 'No online Master is currently available.',
+  });
+});
+
+test('master suggest merges partial trigger observation with host context instead of dropping derived fields', async (t) => {
+  const harness = await createSuggestHarness();
+  t.after(async () => {
+    await rm(harness.homeDir, { recursive: true, force: true });
+  });
+
+  const result = await harness.handlers.master.suggest({
+    draft: {
+      userTask: 'Preserve context-derived trigger fields when a wrapper adds partial observation data.',
+      question: 'Should I still ask the Debug Master if the wrapper adds a small observation override?',
+      workspaceSummary: 'Suggest flow merging partial observation with host context.',
+      errorSummary: 'Repeated ERR_PARTIAL_OBSERVATION_MERGE failures.',
+      relevantFiles: ['src/daemon/defaultHandlers.ts'],
+      constraints: ['Keep the answer structured and concise.'],
+      artifacts: [],
+    },
+    observation: {
+      userIntent: {
+        explicitlyRejectedSuggestion: false,
+      },
+    },
+    context: {
+      now: 1_776_000_000_000,
+      hostMode: 'codex',
+      traceId: 'trace-master-suggest-phase2-partial-observation-merge',
+      conversation: {
+        currentUserRequest: 'The wrapper only added a user-intent flag.',
+        recentMessages: [
+          { role: 'user', content: 'The wrapper only added a user-intent flag.' },
+          { role: 'assistant', content: 'The underlying host context still shows repeated failures.' },
+        ],
+      },
+      tools: {
+        recentToolResults: [
+          {
+            toolName: 'npm test',
+            exitCode: 1,
+            stdout: 'not ok 1 - merge still fails',
+            stderr: 'AssertionError: expected partial observation to merge with derived context',
+          },
+          {
+            toolName: 'node scripts/check-merge.mjs',
+            exitCode: 1,
+            stdout: '',
+            stderr: 'Error: ERR_PARTIAL_OBSERVATION_MERGE',
+          },
+        ],
+      },
+      workspace: {
+        goal: 'Merge partial observation with host context safely.',
+        constraints: ['Do not upload the whole repository.'],
+        relevantFiles: ['src/daemon/defaultHandlers.ts'],
+        diffSummary: 'Inspecting partial observation precedence for suggest.',
+        fileExcerpts: [],
+      },
+      planner: {
+        hasPlan: true,
+        todoBlocked: true,
+        onlyReadingWithoutConverging: true,
+      },
+      hostSignals: {
+        noProgressWindowMs: 900_000,
+        uncertaintySignals: ['still_stuck'],
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.decision.action, 'suggest');
+  assert.equal(result.data.suggestion.traceId, 'trace-master-suggest-phase2-partial-observation-merge');
+});
+
+test('master suggest accepts a host observation frame directly under observation', async (t) => {
+  const harness = await createSuggestHarness({
+    masters: [
+      createDebugMasterRecord({
+        id: 'master-pin-review',
+        sourceMasterPinId: 'master-pin-review',
+        currentPinId: 'master-pin-review',
+        serviceName: 'official-review-master',
+        displayName: 'Official Review Master',
+        masterKind: 'review',
+        hostModes: ['codex'],
+        updatedAt: 1_776_000_000_100,
+      }),
+    ],
+  });
+  t.after(async () => {
+    await rm(harness.homeDir, { recursive: true, force: true });
+  });
+
+  const hostContext = {
+    now: 1_776_000_000_000,
+    hostMode: 'codex',
+    traceId: 'trace-master-suggest-phase2-host-observation-frame',
+    conversation: {
+      currentUserRequest: 'Please review this patch before I land it.',
+      recentMessages: [
+        { role: 'user', content: 'Please review this patch before I land it.' },
+        { role: 'assistant', content: 'I inspected the diff but want another review pass.' },
+      ],
+    },
+    tools: {
+      recentToolResults: [],
+    },
+    workspace: {
+      goal: 'Land the patch with lower regression risk.',
+      constraints: ['Do not upload the whole repository.'],
+      relevantFiles: ['src/core/master/masterHostAdapter.ts'],
+      diffSummary: 'Patch is ready for a review-style checkpoint.',
+      fileExcerpts: [],
+    },
+    planner: {
+      hasPlan: true,
+      todoBlocked: false,
+      onlyReadingWithoutConverging: false,
+    },
+    hostSignals: {
+      reviewCheckpointRisk: true,
+      uncertaintySignals: ['patch_risk'],
+      directory: {
+        availableMasters: 1,
+        trustedMasters: 0,
+        onlineMasters: 1,
+      },
+    },
+  };
+
+  const result = await harness.handlers.master.suggest({
+    draft: {
+      userTask: 'Decide whether a review checkpoint should ask the Review Master.',
+      question: 'Should I ask the Review Master to review this patch before landing it?',
+      workspaceSummary: 'Suggest flow reading a host observation frame directly.',
+      errorSummary: null,
+      relevantFiles: ['src/core/master/masterHostAdapter.ts'],
+      constraints: ['Keep the answer structured and concise.'],
+      artifacts: [],
+    },
+    observation: buildMasterHostObservation(hostContext),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.decision.action, 'suggest');
+  assert.equal(result.data.decision.candidateMasterKind, 'review');
+  assert.equal(result.data.suggestion.candidateDisplayName, 'Official Review Master');
+});
+
+test('master suggest in auto mode hydrates missing trusted-master counts before evaluating auto_candidate', async (t) => {
+  const harness = await createSuggestHarness({
+    askMasterConfig: {
+      triggerMode: 'auto',
+      trustedMasters: ['master-pin-1'],
+    },
+  });
+  t.after(async () => {
+    await rm(harness.homeDir, { recursive: true, force: true });
+  });
+
+  const result = await harness.handlers.master.suggest({
+    draft: {
+      userTask: 'Reach the phase-2 auto-mode block through hydrated trusted counts.',
+      question: 'Should auto mode resolve to the phase-2 auto block instead of a plain suggestion?',
+      workspaceSummary: 'Auto-mode suggest flow with partial directory state.',
+      errorSummary: 'Repeated ERR_AUTO_DIRECTORY_TRUST failures.',
+      relevantFiles: ['src/daemon/defaultHandlers.ts'],
+      constraints: ['Keep the answer structured and concise.'],
+      artifacts: [],
+    },
+    context: {
+      now: 1_776_000_000_000,
+      hostMode: 'codex',
+      traceId: 'trace-master-suggest-phase2-auto-directory-trust',
+      conversation: {
+        currentUserRequest: 'Auto mode should see this trusted master as eligible.',
+        recentMessages: [
+          { role: 'user', content: 'Auto mode should see this trusted master as eligible.' },
+          { role: 'assistant', content: 'The task is still stuck and trusted routing matters here.' },
+        ],
+      },
+      tools: {
+        recentToolResults: [
+          {
+            toolName: 'npm test',
+            exitCode: 1,
+            stdout: 'not ok 1 - auto trust hydration still fails',
+            stderr: 'AssertionError: expected trusted master counts to hydrate before auto evaluation',
+          },
+          {
+            toolName: 'node scripts/check-auto-trust.mjs',
+            exitCode: 1,
+            stdout: '',
+            stderr: 'Error: ERR_AUTO_DIRECTORY_TRUST',
+          },
+        ],
+      },
+      workspace: {
+        goal: 'Keep auto-mode directory hydration consistent.',
+        constraints: ['Do not upload the whole repository.'],
+        relevantFiles: ['src/daemon/defaultHandlers.ts'],
+        diffSummary: 'Inspecting directory hydration before auto trigger evaluation.',
+        fileExcerpts: [],
+      },
+      planner: {
+        hasPlan: true,
+        todoBlocked: true,
+        onlyReadingWithoutConverging: true,
+      },
+      hostSignals: {
+        noProgressWindowMs: 900_000,
+        uncertaintySignals: ['still_stuck'],
+        directory: {
+          availableMasters: 1,
+          onlineMasters: 1,
+        },
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.decision, {
+    action: 'no_action',
+    reason: 'Auto Ask Master is not exposed in the phase-2 host flow.',
+  });
+  assert.deepEqual(result.data.blocked, {
+    code: null,
+    message: 'Auto Ask Master is not exposed in the phase-2 host flow.',
+  });
+});
+
+test('master suggest honors explicitlyRejectedAutoAsk before surfacing the phase-2 auto block', async (t) => {
+  const harness = await createSuggestHarness({
+    askMasterConfig: {
+      triggerMode: 'auto',
+      trustedMasters: ['master-pin-1'],
+    },
+  });
+  t.after(async () => {
+    await rm(harness.homeDir, { recursive: true, force: true });
+  });
+
+  const result = await harness.handlers.master.suggest({
+    draft: {
+      userTask: 'Respect a prior auto-ask rejection.',
+      question: 'Should auto mode stop before the phase-2 block when the host already rejected auto ask?',
+      workspaceSummary: 'Auto-mode suggest flow honoring explicitlyRejectedAutoAsk.',
+      errorSummary: 'Repeated ERR_AUTO_REJECTED failures.',
+      relevantFiles: ['src/daemon/defaultHandlers.ts'],
+      constraints: ['Keep the answer structured and concise.'],
+      artifacts: [],
+    },
+    context: {
+      now: 1_776_000_000_000,
+      hostMode: 'codex',
+      traceId: 'trace-master-suggest-phase2-auto-rejected',
+      conversation: {
+        currentUserRequest: 'I already rejected this automatic escalation.',
+        recentMessages: [
+          { role: 'user', content: 'I already rejected this automatic escalation.' },
+          { role: 'assistant', content: 'The host should respect that rejection before trying auto ask again.' },
+        ],
+      },
+      tools: {
+        recentToolResults: [
+          {
+            toolName: 'npm test',
+            exitCode: 1,
+            stdout: 'not ok 1 - auto rejection still ignored',
+            stderr: 'AssertionError: expected explicitlyRejectedAutoAsk to stop auto evaluation',
+          },
+          {
+            toolName: 'node scripts/check-auto-reject.mjs',
+            exitCode: 1,
+            stdout: '',
+            stderr: 'Error: ERR_AUTO_REJECTED',
+          },
+        ],
+      },
+      workspace: {
+        goal: 'Respect explicit auto-ask rejection.',
+        constraints: ['Do not upload the whole repository.'],
+        relevantFiles: ['src/daemon/defaultHandlers.ts'],
+        diffSummary: 'Inspecting auto rejection handling before trigger evaluation.',
+        fileExcerpts: [],
+      },
+      planner: {
+        hasPlan: true,
+        todoBlocked: true,
+        onlyReadingWithoutConverging: true,
+      },
+      hostSignals: {
+        explicitlyRejectedAutoAsk: true,
+        noProgressWindowMs: 900_000,
+        uncertaintySignals: ['still_stuck'],
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.decision, {
+    action: 'no_action',
+    reason: 'User explicitly rejected automatic Ask Master escalation.',
+  });
 });
 
 test('accept_suggest enters the same preview flow as manual ask and still requires confirmation', async (t) => {

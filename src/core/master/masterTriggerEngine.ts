@@ -8,6 +8,7 @@ export interface TriggerObservation {
   userIntent?: {
     explicitlyAskedForMaster?: boolean;
     explicitlyRejectedSuggestion?: boolean;
+    explicitlyRejectedAutoAsk?: boolean;
   };
   activity?: {
     recentUserMessages?: number;
@@ -80,6 +81,7 @@ interface NormalizedTriggerObservation {
   userIntent: {
     explicitlyAskedForMaster: boolean;
     explicitlyRejectedSuggestion: boolean;
+    explicitlyRejectedAutoAsk: boolean;
   };
   activity: {
     recentUserMessages: number;
@@ -167,6 +169,7 @@ function normalizeObservation(input: TriggerObservation): NormalizedTriggerObser
     userIntent: {
       explicitlyAskedForMaster: normalizeBoolean(input.userIntent?.explicitlyAskedForMaster),
       explicitlyRejectedSuggestion: normalizeBoolean(input.userIntent?.explicitlyRejectedSuggestion),
+      explicitlyRejectedAutoAsk: normalizeBoolean(input.userIntent?.explicitlyRejectedAutoAsk),
     },
     activity: {
       recentUserMessages: normalizeInteger(input.activity?.recentUserMessages),
@@ -363,6 +366,13 @@ export function evaluateMasterTrigger(input: {
     return {
       action: 'no_action',
       reason: 'User explicitly rejected Ask Master suggestion.',
+    };
+  }
+
+  if (observation.userIntent.explicitlyRejectedAutoAsk && config.triggerMode === 'auto') {
+    return {
+      action: 'no_action',
+      reason: 'User explicitly rejected automatic Ask Master escalation.',
     };
   }
 
