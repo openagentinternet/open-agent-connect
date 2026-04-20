@@ -570,3 +570,115 @@ test('master trace renders completed ask master traces that originated from an a
   assert.match(payload.data.response.summary, /Persist the preview snapshot/i);
   assert.equal(payload.data.display.statusText, 'Completed');
 });
+
+test('master trace exposes auto metadata and declined display state for rejected auto previews', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-trace-auto-command-'));
+  t.after(async () => {
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  const traceId = 'trace-master-auto-command-1';
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+
+  await runtimeStateStore.writeState({
+    identity: {
+      metabotId: 7,
+      name: 'Caller Bot',
+      createdAt: 1_776_000_000_000,
+      path: "m/44'/10001'/0'/0/0",
+      publicKey: 'pubkey',
+      chatPublicKey: 'chat-pubkey',
+      mvcAddress: 'mvc-address',
+      btcAddress: 'btc-address',
+      dogeAddress: 'doge-address',
+      metaId: 'metaid-caller',
+      globalMetaId: 'idq1caller',
+    },
+    services: [],
+    traces: [
+      buildSessionTrace({
+        traceId,
+        channel: 'a2a',
+        exportRoot: runtimeStateStore.paths.exportRoot,
+        session: {
+          id: `master-${traceId}`,
+          title: 'Official Debug Master Ask',
+          type: 'a2a',
+          metabotId: 7,
+          peerGlobalMetaId: 'idq1provider',
+          peerName: 'Official Debug Master',
+          externalConversationId: `master:idq1caller:idq1provider:${traceId}`,
+        },
+        a2a: {
+          role: 'caller',
+          publicStatus: 'local_runtime_error',
+          latestEvent: 'auto_preview_rejected',
+          taskRunState: 'failed',
+          callerGlobalMetaId: 'idq1caller',
+          callerName: 'Caller Bot',
+          providerGlobalMetaId: 'idq1provider',
+          providerName: 'Official Debug Master',
+          servicePinId: 'master-pin-1',
+        },
+        askMaster: buildMasterTraceMetadata({
+          role: 'caller',
+          latestEvent: 'auto_preview_rejected',
+          publicStatus: 'local_runtime_error',
+          requestId: 'master-req-auto-command-1',
+          masterKind: 'debug',
+          servicePinId: 'master-pin-1',
+          providerGlobalMetaId: 'idq1provider',
+          displayName: 'Official Debug Master',
+          triggerMode: 'auto',
+          contextMode: 'standard',
+          confirmationMode: 'always',
+          preview: {
+            userTask: 'Diagnose the repeated blocked flow.',
+            question: 'Should the Debug Master inspect the blocked flow now?',
+          },
+          failure: {
+            code: 'auto_rejected_by_user',
+            message: 'User declined the automatic Ask Master preview.',
+          },
+          auto: {
+            reason: 'Repeated failures and a trusted Master make automatic Ask Master entry viable.',
+            confidence: 0.84,
+            frictionMode: 'preview_confirm',
+            detectorVersion: 'phase3-v1',
+            selectedMasterTrusted: true,
+            sensitivity: {
+              isSensitive: false,
+              reasons: [],
+            },
+          },
+        }),
+      }),
+    ],
+  });
+
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    getDaemonRecord: () => null,
+  });
+
+  const stdout = [];
+  const exitCode = await runCli(['master', 'trace', '--id', traceId], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        trace: handlers.master.trace,
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  const payload = parseOutput(stdout);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.triggerMode, 'auto');
+  assert.equal(payload.data.auto.reason, 'Repeated failures and a trusted Master make automatic Ask Master entry viable.');
+  assert.equal(payload.data.auto.confidence, 0.84);
+  assert.equal(payload.data.auto.frictionMode, 'preview_confirm');
+  assert.equal(payload.data.auto.selectedMasterTrusted, true);
+  assert.equal(payload.data.display.statusText, 'Declined');
+});

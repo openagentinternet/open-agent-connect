@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createECDH } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +12,7 @@ const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaul
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { createPublishedMasterStateStore } = require('../../dist/core/master/masterPublishedState.js');
 const { createPendingMasterAskStateStore } = require('../../dist/core/master/masterPendingAskState.js');
+const { createMasterAutoFeedbackStateStore } = require('../../dist/core/master/masterAutoFeedbackState.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 const { buildMasterResponseJson } = require('../../dist/core/master/masterMessageSchema.js');
@@ -162,6 +164,7 @@ async function createAutoHarness(options = {}) {
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const masterStateStore = createPublishedMasterStateStore(homeDir);
   const pendingMasterAskStateStore = createPendingMasterAskStateStore(homeDir);
+  const autoFeedbackStateStore = createMasterAutoFeedbackStateStore(homeDir);
   const configStore = createConfigStore(homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(homeDir);
   const writes = [];
@@ -273,6 +276,7 @@ async function createAutoHarness(options = {}) {
     writes,
     identityPair,
     pendingMasterAskStateStore,
+    autoFeedbackStateStore,
   };
 }
 
@@ -353,6 +357,22 @@ test('master suggest in auto mode can direct send for trusted non-sensitive payl
   assert.equal(traceView.ok, true);
   assert.equal(traceView.data.canonicalStatus, 'completed');
   assert.equal(traceView.data.triggerMode, 'auto');
+
+  const feedback = await harness.autoFeedbackStateStore.get(result.data.traceId);
+  assert.equal(feedback.status, 'completed');
+
+  const followUp = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-direct-send-1', {
+    observation: {
+      diagnostics: {
+        repeatedErrorSignatures: ['ERR_DEBUG_MASTER_LOOP_FOLLOWUP'],
+      },
+    },
+  }));
+  assert.equal(followUp.ok, true);
+  assert.deepEqual(followUp.data.decision, {
+    action: 'no_action',
+    reason: 'This trace was already suggested for Ask Master.',
+  });
 });
 
 test('master suggest in auto mode falls back to preview when the packaged payload still looks sensitive', async (t) => {
@@ -535,4 +555,7 @@ test('direct-send transport failures update the trace out of awaiting_confirmati
   assert.equal(traceView.ok, true);
   assert.equal(traceView.data.canonicalStatus, 'failed');
   assert.equal(traceView.data.failure.code, 'identity_secret_missing');
+
+  const transcriptMarkdown = await readFile(traceView.data.artifacts.transcriptMarkdownPath, 'utf8');
+  assert.match(transcriptMarkdown, /Preview prepared for Official Debug Master/);
 });

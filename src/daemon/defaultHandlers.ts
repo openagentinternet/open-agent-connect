@@ -74,9 +74,18 @@ import { listMasters, readChainMasterDirectoryWithFallback, summarizePublishedMa
 import { createPendingMasterAskStateStore, type PendingMasterAskRecord } from '../core/master/masterPendingAskState';
 import { createPublishedMasterStateStore } from '../core/master/masterPublishedState';
 import { buildMasterAskPreview } from '../core/master/masterPreview';
-import { buildMasterTraceMetadata, buildMasterTraceView } from '../core/master/masterTrace';
+import {
+  buildMasterTraceMetadata,
+  buildMasterTraceView,
+  type AskMasterTraceAutoMetadata,
+} from '../core/master/masterTrace';
 import { prepareAutoMasterAskPlan } from '../core/master/masterAutoOrchestrator';
 import { prepareManualAskHostAction } from '../core/master/masterHostAdapter';
+import {
+  createMasterAutoFeedbackStateStore,
+  deriveMasterTriggerMemoryStateFromAutoFeedbackState,
+  findRecentAutoFeedbackForTarget,
+} from '../core/master/masterAutoFeedbackState';
 import {
   buildTriggerObservationFromHostContext,
   buildTriggerObservationFromHostObservationFrame,
@@ -1637,6 +1646,13 @@ async function createMasterAskPreviewResult(input: {
   callerHostOverride?: string | null;
   traceIdOverride?: string | null;
   requiresConfirmationOverride?: boolean | null;
+  latestEventOverride?: string | null;
+  askMasterAutoMetadata?: AskMasterTraceAutoMetadata | null;
+  afterPreviewPersisted?: (input: {
+    trace: SessionTraceRecord;
+    pendingAsk: PendingMasterAskRecord;
+    preview: Awaited<ReturnType<typeof buildMasterAskPreview>>;
+  }) => Promise<void> | void;
   sendPreparedRequest?: (input: {
     traceId: string;
     pendingAsk: PendingMasterAskRecord;
@@ -1701,6 +1717,8 @@ async function createMasterAskPreviewResult(input: {
     ...pendingAskRecord,
   });
 
+  const previewLatestEvent = normalizeText(input.latestEventOverride) || 'master_preview_ready';
+
   const trace = buildSessionTrace({
     traceId,
     channel: 'a2a',
@@ -1717,7 +1735,7 @@ async function createMasterAskPreviewResult(input: {
     a2a: {
       role: 'caller',
       publicStatus: 'awaiting_confirmation',
-      latestEvent: 'master_preview_ready',
+      latestEvent: previewLatestEvent,
       taskRunState: 'queued',
       callerGlobalMetaId: input.state.identity.globalMetaId,
       callerName: input.state.identity.name,
@@ -1727,7 +1745,7 @@ async function createMasterAskPreviewResult(input: {
     },
     askMaster: buildMasterTraceMetadata({
       role: 'caller',
-      latestEvent: 'master_preview_ready',
+      latestEvent: previewLatestEvent,
       publicStatus: 'awaiting_confirmation',
       requestId,
       masterKind: input.resolvedTarget.masterKind,
@@ -1741,6 +1759,7 @@ async function createMasterAskPreviewResult(input: {
         userTask: prepared.request.task.userTask,
         question: prepared.request.task.question,
       },
+      auto: input.askMasterAutoMetadata,
     }),
   });
 
@@ -1772,6 +1791,13 @@ async function createMasterAskPreviewResult(input: {
   });
 
   await persistTraceRecord(input.runtimeStateStore, trace);
+  if (input.afterPreviewPersisted) {
+    await input.afterPreviewPersisted({
+      trace,
+      pendingAsk: pendingAskRecord,
+      preview: prepared,
+    });
+  }
 
   if (!prepared.preview.confirmation.requiresConfirmation) {
     return input.state.identity && input.sendPreparedRequest
@@ -2116,6 +2142,7 @@ function buildMasterCallerTraceAfterReply(input: {
       preview,
       response,
       failure,
+      auto: input.baseTrace.askMaster?.auto,
     }),
   };
 }
@@ -2440,6 +2467,7 @@ export async function rebuildTraceArtifactsFromSessionState(input: {
           preview: input.baseTrace.askMaster.preview,
           response: input.baseTrace.askMaster.response,
           failure: input.baseTrace.askMaster.failure,
+          auto: input.baseTrace.askMaster.auto,
         })
       : null,
   });
@@ -2668,6 +2696,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const masterStateStore = createPublishedMasterStateStore(input.homeDir);
   const pendingMasterAskStateStore = createPendingMasterAskStateStore(input.homeDir);
   const masterSuggestStateStore = createMasterSuggestStateStore(input.homeDir);
+  const masterAutoFeedbackStateStore = createMasterAutoFeedbackStateStore(input.homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(input.homeDir);
   const ratingDetailStateStore = createRatingDetailStateStore(input.homeDir);
   const sessionStateStore = createSessionStateStore(input.homeDir);
@@ -2699,6 +2728,109 @@ export function createDefaultMetabotDaemonHandlers(input: {
     if (Number.isFinite(now)) {
       lastMasterAutoPreparedAt = Math.max(0, Math.trunc(now));
     }
+  }
+
+  function buildAutoTriggerReasonSignature(input: {
+    observation?: TriggerObservation | null;
+    autoReason?: string | null;
+  }): string | null {
+    const repeatedErrorSignatures = readStringArray(readObject(input.observation?.diagnostics)?.repeatedErrorSignatures);
+    if (repeatedErrorSignatures.length > 0) {
+      return repeatedErrorSignatures[0];
+    }
+    return normalizeText(input.autoReason) || null;
+  }
+
+  function buildAskMasterAutoMetadata(input: {
+    reason?: string | null;
+    confidence?: number | null;
+    frictionMode?: 'preview_confirm' | 'direct_send' | null;
+    detectorVersion?: string | null;
+    selectedMasterTrusted?: boolean | null;
+    sensitivity?: {
+      isSensitive?: boolean | null;
+      reasons?: string[] | null;
+    } | null;
+  }): AskMasterTraceAutoMetadata | null {
+    const reason = normalizeText(input.reason) || null;
+    const confidence = typeof input.confidence === 'number' && Number.isFinite(input.confidence)
+      ? input.confidence
+      : Number.isFinite(Number(input.confidence))
+        ? Number(input.confidence)
+        : null;
+    const frictionMode = normalizeText(input.frictionMode);
+    const sensitivityReasons = readStringArray(input.sensitivity?.reasons);
+    const auto: AskMasterTraceAutoMetadata = {
+      reason,
+      confidence,
+      frictionMode: frictionMode === 'preview_confirm' || frictionMode === 'direct_send'
+        ? frictionMode
+        : null,
+      detectorVersion: normalizeText(input.detectorVersion) || null,
+      selectedMasterTrusted: typeof input.selectedMasterTrusted === 'boolean'
+        ? input.selectedMasterTrusted
+        : null,
+      sensitivity: input.sensitivity
+        ? {
+            isSensitive: input.sensitivity.isSensitive === true,
+            reasons: sensitivityReasons,
+          }
+        : null,
+    };
+
+    return auto.reason
+      || auto.confidence !== null
+      || auto.frictionMode
+      || auto.detectorVersion
+      || auto.selectedMasterTrusted !== null
+      || auto.sensitivity
+      ? auto
+      : null;
+  }
+
+  async function readMasterAutoFeedback(traceId: string | null | undefined) {
+    const normalizedTraceId = normalizeText(traceId);
+    if (!normalizedTraceId) {
+      return null;
+    }
+    try {
+      return await masterAutoFeedbackStateStore.get(normalizedTraceId);
+    } catch {
+      return null;
+    }
+  }
+
+  async function putMasterAutoFeedback(input: {
+    traceId: string | null | undefined;
+    status: 'prepared' | 'confirmed' | 'rejected' | 'sent' | 'timed_out' | 'completed';
+    masterKind?: string | null;
+    masterServicePinId?: string | null;
+    triggerReasonSignature?: string | null;
+    updatedAt?: number | null;
+    createdAt?: number | null;
+  }): Promise<void> {
+    const traceId = normalizeText(input.traceId);
+    if (!traceId) {
+      return;
+    }
+
+    const existing = await readMasterAutoFeedback(traceId);
+    const createdAt = Number.isFinite(input.createdAt) && input.createdAt !== null
+      ? Math.max(0, Math.trunc(Number(input.createdAt)))
+      : existing?.createdAt ?? Date.now();
+    const updatedAt = Number.isFinite(input.updatedAt) && input.updatedAt !== null
+      ? Math.max(0, Math.trunc(Number(input.updatedAt)))
+      : Date.now();
+
+    await masterAutoFeedbackStateStore.put({
+      traceId,
+      masterKind: normalizeText(input.masterKind) || existing?.masterKind || null,
+      masterServicePinId: normalizeText(input.masterServicePinId) || existing?.masterServicePinId || null,
+      triggerReasonSignature: normalizeText(input.triggerReasonSignature) || existing?.triggerReasonSignature || null,
+      status: input.status,
+      createdAt,
+      updatedAt,
+    });
   }
 
   async function trackActiveIdentityProfile(identity: RuntimeIdentityRecord): Promise<void> {
@@ -2814,6 +2946,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
           requestPath: input.requestPath,
           messagePinId: input.messagePinId,
         });
+        if (normalizeText(input.pendingAsk.request.trigger.mode) === 'auto') {
+          await putMasterAutoFeedback({
+            traceId: input.trace.traceId,
+            status: 'completed',
+            masterKind: input.pendingAsk.request.target.masterKind,
+            masterServicePinId: input.pendingAsk.request.target.masterServicePinId,
+            updatedAt: reply.observedAt ?? Date.now(),
+          });
+        }
       } catch {
         // Best effort follow-up: keep the persisted timeout state if late delivery capture fails.
       } finally {
@@ -2837,6 +2978,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
       return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
     }
     const existingTrace = initialState.traces.find((entry) => entry.traceId === input.traceId) ?? null;
+    const previewConfirmation = readObject(input.pendingAsk.preview)?.confirmation;
+    const requiresConfirmation = readObject(previewConfirmation)?.requiresConfirmation === true;
+    const isAutoAsk = normalizeText(
+      existingTrace?.askMaster?.triggerMode
+      ?? input.pendingAsk.request.trigger.mode
+    ) === 'auto';
+    const requestingLatestEvent = isAutoAsk && !requiresConfirmation
+      ? 'auto_sent_without_confirmation'
+      : 'request_sent';
     const markSendFailure = async (code: string, message: string) => {
       if (existingTrace) {
         const failedTrace = {
@@ -2882,10 +3032,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
               code,
               message,
             },
+            auto: existingTrace.askMaster?.auto,
           }),
         };
-        const previewConfirmation = readObject(input.pendingAsk.preview)?.confirmation;
-        const requiresConfirmation = readObject(previewConfirmation)?.requiresConfirmation === true;
         await exportSessionArtifacts({
           trace: failedTrace,
           transcript: {
@@ -2898,17 +3047,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 timestamp: failedTrace.createdAt,
                 content: normalizeText(input.pendingAsk.request.task.question),
               },
-              ...(requiresConfirmation
-                ? [{
-                    id: `${input.traceId}-preview`,
-                    type: 'assistant',
-                    timestamp: failedTrace.createdAt,
-                    content: `Preview prepared for ${normalizeText(input.pendingAsk.target.displayName) || input.resolvedTarget.displayName}.`,
-                    metadata: {
+              {
+                id: `${input.traceId}-preview`,
+                type: 'assistant',
+                timestamp: failedTrace.createdAt,
+                content: `Preview prepared for ${normalizeText(input.pendingAsk.target.displayName) || input.resolvedTarget.displayName}.`,
+                metadata: requiresConfirmation
+                  ? {
                       confirmCommand: `metabot master ask --trace-id ${input.traceId} --confirm`,
-                    },
-                  }]
-                : []),
+                    }
+                  : undefined,
+              },
               {
                 id: `${input.traceId}-failure`,
                 type: 'system',
@@ -2922,6 +3071,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
           },
         });
         await persistTraceRecord(runtimeStateStore, failedTrace);
+      }
+      if (isAutoAsk) {
+        await putMasterAutoFeedback({
+          traceId: input.traceId,
+          status: 'prepared',
+          masterKind: existingTrace?.askMaster?.masterKind ?? input.resolvedTarget.masterKind,
+          masterServicePinId: existingTrace?.askMaster?.servicePinId ?? input.resolvedTarget.masterPinId,
+        });
       }
 
       const traceSuffix = existingTrace ? ` Trace ID: ${input.traceId}` : '';
@@ -2995,6 +3152,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
       messagePinId: messagePinId || null,
     };
     await pendingMasterAskStateStore.put(sentPendingAsk);
+    if (isAutoAsk) {
+      await putMasterAutoFeedback({
+        traceId: input.traceId,
+        status: 'sent',
+        masterKind: input.resolvedTarget.masterKind,
+        masterServicePinId: input.resolvedTarget.masterPinId,
+        updatedAt: sentAt,
+      });
+    }
 
     const currentState = await runtimeStateStore.readState();
     const currentTrace = currentState.traces.find((entry) => entry.traceId === input.traceId);
@@ -3016,12 +3182,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
               servicePinId: input.resolvedTarget.masterPinId,
             }),
             publicStatus: 'requesting_remote',
-            latestEvent: 'request_sent',
+            latestEvent: requestingLatestEvent,
             taskRunState: 'running',
           },
           askMaster: buildMasterTraceMetadata({
             role: 'caller',
-            latestEvent: 'request_sent',
+            latestEvent: requestingLatestEvent,
             publicStatus: 'requesting_remote',
             requestId: input.pendingAsk.requestId,
             masterKind: input.resolvedTarget.masterKind,
@@ -3038,6 +3204,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             },
             response: currentTrace.askMaster?.response,
             failure: null,
+            auto: currentTrace.askMaster?.auto,
           }),
         }
       : buildSessionTrace({
@@ -3056,7 +3223,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           a2a: {
             role: 'caller',
             publicStatus: 'requesting_remote',
-            latestEvent: 'request_sent',
+            latestEvent: requestingLatestEvent,
             taskRunState: 'running',
             callerGlobalMetaId: currentIdentity.globalMetaId,
             callerName: currentIdentity.name,
@@ -3066,7 +3233,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           },
           askMaster: buildMasterTraceMetadata({
             role: 'caller',
-            latestEvent: 'request_sent',
+            latestEvent: requestingLatestEvent,
             publicStatus: 'requesting_remote',
             requestId: input.pendingAsk.requestId,
             masterKind: input.resolvedTarget.masterKind,
@@ -3080,11 +3247,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
               userTask: input.pendingAsk.request.task.userTask,
               question: input.pendingAsk.request.task.question,
             },
+            auto: existingTrace?.askMaster?.auto ?? null,
           }),
         });
 
-    const previewConfirmation = readObject(input.pendingAsk.preview)?.confirmation;
-    const requiresConfirmation = readObject(previewConfirmation)?.requiresConfirmation === true;
     const confirmCommand = `metabot master ask --trace-id ${input.traceId} --confirm`;
     const transcriptMessages = [
       {
@@ -3165,21 +3331,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
         finalTrace = applied.trace;
         finalArtifacts = applied.artifacts;
         finalSession = applied.session;
-        structuredResponse = reply.response;
-        responseJson = reply.responseJson;
-        deliveryPinId = reply.deliveryPinId;
-      } else {
-        const timedOut = await applyMasterCallerForegroundTimeout({
-          trace: updatedTrace,
+            structuredResponse = reply.response;
+            responseJson = reply.responseJson;
+            deliveryPinId = reply.deliveryPinId;
+            if (isAutoAsk) {
+              await putMasterAutoFeedback({
+                traceId: input.traceId,
+                status: 'completed',
+                masterKind: input.resolvedTarget.masterKind,
+                masterServicePinId: input.resolvedTarget.masterPinId,
+                updatedAt: reply.observedAt ?? Date.now(),
+              });
+            }
+          } else {
+            const timedOut = await applyMasterCallerForegroundTimeout({
+              trace: updatedTrace,
           runtimeStateStore,
           pendingAsk: sentPendingAsk,
           requestPath: outboundRequest.path,
           messagePinId: messagePinId || null,
-        });
-        finalTrace = timedOut.trace;
-        finalArtifacts = timedOut.artifacts;
-        finalSession = timedOut.session;
-        scheduleMasterReplyContinuation({
+            });
+            finalTrace = timedOut.trace;
+            finalArtifacts = timedOut.artifacts;
+            finalSession = timedOut.session;
+            if (isAutoAsk) {
+              await putMasterAutoFeedback({
+                traceId: input.traceId,
+                status: 'timed_out',
+                masterKind: input.resolvedTarget.masterKind,
+                masterServicePinId: input.resolvedTarget.masterPinId,
+                updatedAt: Date.now(),
+              });
+            }
+            scheduleMasterReplyContinuation({
           trace: timedOut.trace,
           pendingAsk: sentPendingAsk,
           requestPath: outboundRequest.path,
@@ -3459,7 +3643,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const request = readMasterHostActionRequest(rawInput);
         const actionKind = normalizeText(request.action.kind);
         const config = await configStore.read();
-        if (!config.askMaster.enabled && actionKind !== 'reject_suggest') {
+        if (!config.askMaster.enabled && actionKind !== 'reject_suggest' && actionKind !== 'reject_auto_preview') {
           return commandFailed('ask_master_disabled', 'Ask Master is disabled in the local config.');
         }
 
@@ -3675,6 +3859,145 @@ export function createDefaultMetabotDaemonHandlers(input: {
           });
         }
 
+        if (actionKind === 'reject_auto_preview') {
+          const traceId = normalizeText(request.action.traceId);
+          if (!traceId) {
+            return commandFailed(
+              'invalid_master_host_action',
+              'Rejecting an automatic Ask Master preview requires traceId.'
+            );
+          }
+
+          let pendingAsk;
+          try {
+            pendingAsk = await pendingMasterAskStateStore.get(traceId);
+          } catch {
+            return commandFailed(
+              'pending_master_ask_not_found',
+              `Pending Ask Master record not found: ${traceId}`
+            );
+          }
+          if (normalizeText(pendingAsk.request.trigger.mode) !== 'auto') {
+            return commandFailed(
+              'not_auto_preview',
+              `Trace is not an automatic Ask Master preview: ${traceId}`
+            );
+          }
+          if (pendingAsk.confirmationState === 'sent') {
+            return commandFailed(
+              'master_request_already_sent',
+              `Ask Master request has already been sent for this trace: ${traceId}.`
+            );
+          }
+
+          const rejectedAt = Date.now();
+          const rejectionReason = normalizeText(request.action.reason) || null;
+          const currentState = await runtimeStateStore.readState();
+          const baseTrace = currentState.traces.find((entry) => entry.traceId === traceId) ?? null;
+          if (!baseTrace) {
+            return commandFailed('trace_not_found', `Trace not found: ${traceId}`);
+          }
+
+          const updatedTrace = {
+            ...baseTrace,
+            a2a: {
+              ...(baseTrace.a2a ?? {
+                sessionId: null,
+                taskRunId: null,
+                role: 'caller',
+                publicStatus: null,
+                latestEvent: null,
+                taskRunState: null,
+                callerGlobalMetaId: state.identity.globalMetaId,
+                callerName: state.identity.name,
+                providerGlobalMetaId: pendingAsk.request.target.providerGlobalMetaId,
+                providerName: normalizeText(pendingAsk.target.displayName) || baseTrace.session.peerName,
+                servicePinId: pendingAsk.request.target.masterServicePinId,
+              }),
+              publicStatus: 'local_runtime_error',
+              latestEvent: 'auto_preview_rejected',
+              taskRunState: 'failed',
+            },
+            askMaster: buildMasterTraceMetadata({
+              role: 'caller',
+              latestEvent: 'auto_preview_rejected',
+              publicStatus: 'local_runtime_error',
+              requestId: pendingAsk.requestId,
+              masterKind: pendingAsk.request.target.masterKind,
+              servicePinId: pendingAsk.request.target.masterServicePinId,
+              providerGlobalMetaId: pendingAsk.request.target.providerGlobalMetaId,
+              displayName: normalizeText(pendingAsk.target.displayName) || baseTrace.askMaster?.displayName || baseTrace.session.peerName,
+              triggerMode: 'auto',
+              contextMode: baseTrace.askMaster?.contextMode ?? normalizeText(pendingAsk.request.extensions?.contextMode),
+              confirmationMode: baseTrace.askMaster?.confirmationMode ?? config.askMaster.confirmationMode,
+              preview: baseTrace.askMaster?.preview ?? {
+                userTask: pendingAsk.request.task.userTask,
+                question: pendingAsk.request.task.question,
+              },
+              response: baseTrace.askMaster?.response,
+              failure: {
+                code: 'auto_rejected_by_user',
+                message: rejectionReason
+                  ? `User declined the automatic Ask Master preview: ${rejectionReason}`
+                  : 'User declined the automatic Ask Master preview.',
+              },
+              auto: baseTrace.askMaster?.auto,
+            }),
+          };
+
+          await exportSessionArtifacts({
+            trace: updatedTrace,
+            transcript: {
+              sessionId: updatedTrace.session.id,
+              title: updatedTrace.session.title || 'Ask Master',
+              messages: [
+                {
+                  id: `${traceId}-user`,
+                  type: 'user',
+                  timestamp: updatedTrace.createdAt,
+                  content: normalizeText(pendingAsk.request.task.question),
+                },
+                {
+                  id: `${traceId}-preview`,
+                  type: 'assistant',
+                  timestamp: updatedTrace.createdAt,
+                  content: `Preview prepared for ${normalizeText(pendingAsk.target.displayName) || updatedTrace.session.peerName || 'the Master'}.`,
+                  metadata: {
+                    confirmCommand: `metabot master ask --trace-id ${traceId} --confirm`,
+                  },
+                },
+                {
+                  id: `${traceId}-reject`,
+                  type: 'user',
+                  timestamp: rejectedAt,
+                  content: rejectionReason
+                    ? `Declined automatic Ask Master preview: ${rejectionReason}`
+                    : 'Declined automatic Ask Master preview.',
+                  metadata: {
+                    event: 'auto_preview_rejected',
+                    code: 'auto_rejected_by_user',
+                  },
+                },
+              ],
+            },
+          });
+          await persistTraceRecord(runtimeStateStore, updatedTrace);
+          await putMasterAutoFeedback({
+            traceId,
+            status: 'rejected',
+            masterKind: pendingAsk.request.target.masterKind,
+            masterServicePinId: pendingAsk.request.target.masterServicePinId,
+            updatedAt: rejectedAt,
+          });
+
+          return commandSuccess({
+            hostAction: 'reject_auto_preview',
+            traceId,
+            rejected: true,
+            reason: rejectionReason,
+          });
+        }
+
         if (actionKind !== 'manual_ask') {
           return commandFailed(
             'not_implemented',
@@ -3819,11 +4142,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
           } catch {
             return commandFailed('pending_master_ask_not_found', `Pending Ask Master record not found: ${traceId}`);
           }
+          const isAutoPreview = normalizeText(pendingAsk.request.trigger.mode) === 'auto';
           if (pendingAsk.confirmationState === 'sent') {
             return commandFailed(
               'master_request_already_sent',
               `Ask Master request has already been sent for this trace: ${traceId}. Create a new Ask Master request to retry.`
             );
+          }
+          if (isAutoPreview) {
+            const feedback = await readMasterAutoFeedback(traceId);
+            if (feedback?.status === 'rejected') {
+              return commandFailed(
+                'auto_preview_rejected',
+                `This automatic Ask Master preview was already rejected: ${traceId}`
+              );
+            }
           }
 
           const resolvedTarget = await resolveExplicitMasterTarget({
@@ -3929,6 +4262,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
             sentAt: Date.now(),
             messagePinId: messagePinId || null,
           });
+          if (isAutoPreview) {
+            await putMasterAutoFeedback({
+              traceId,
+              status: 'confirmed',
+              masterKind: pendingAsk.request.target.masterKind,
+              masterServicePinId: pendingAsk.request.target.masterServicePinId,
+              updatedAt: Date.now(),
+            });
+          }
 
           const currentTrace = state.traces.find((entry) => entry.traceId === traceId);
           const updatedTrace = currentTrace
@@ -3971,6 +4313,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   },
                   response: currentTrace.askMaster?.response,
                   failure: null,
+                  auto: currentTrace.askMaster?.auto,
                 }),
               }
             : buildSessionTrace({
@@ -4013,6 +4356,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                     userTask: pendingAsk.request.task.userTask,
                     question: pendingAsk.request.task.question,
                   },
+                  auto: null,
                 }),
               });
 
@@ -4096,6 +4440,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
               structuredResponse = reply.response;
               responseJson = reply.responseJson;
               deliveryPinId = reply.deliveryPinId;
+              if (isAutoPreview) {
+                await putMasterAutoFeedback({
+                  traceId,
+                  status: 'completed',
+                  masterKind: pendingAsk.request.target.masterKind,
+                  masterServicePinId: pendingAsk.request.target.masterServicePinId,
+                  updatedAt: reply.observedAt ?? Date.now(),
+                });
+              }
             } else {
               const timedOut = await applyMasterCallerForegroundTimeout({
                 trace: updatedTrace,
@@ -4107,6 +4460,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
               finalTrace = timedOut.trace;
               finalArtifacts = timedOut.artifacts;
               finalSession = timedOut.session;
+              if (isAutoPreview) {
+                await putMasterAutoFeedback({
+                  traceId,
+                  status: 'timed_out',
+                  masterKind: pendingAsk.request.target.masterKind,
+                  masterServicePinId: pendingAsk.request.target.masterServicePinId,
+                  updatedAt: Date.now(),
+                });
+              }
               scheduleMasterReplyContinuation({
                 trace: timedOut.trace,
                 pendingAsk: {
@@ -4231,12 +4593,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
           providerGlobalMetaId: state.identity.globalMetaId,
         });
         const suggestState = await masterSuggestStateStore.read();
+        const autoFeedbackState = await masterAutoFeedbackStateStore.read();
         const trigger = await collectAndEvaluateMasterTrigger({
           config: config.askMaster,
           suppression: mergeMasterTriggerMemoryStates(
             masterTriggerMemoryState,
             deriveMasterTriggerMemoryStateFromSuggestState({
               state: suggestState,
+              now: observation.now,
+            }),
+            deriveMasterTriggerMemoryStateFromAutoFeedbackState({
+              state: autoFeedbackState,
               now: observation.now,
             })
           ),
@@ -4335,6 +4702,36 @@ export function createDefaultMetabotDaemonHandlers(input: {
           });
         }
         if (trigger.decision.action === 'auto_candidate') {
+          const recentTargetFeedback = findRecentAutoFeedbackForTarget({
+            state: autoFeedbackState,
+            masterServicePinId: resolvedTarget.masterPinId,
+            now: observation.now,
+          });
+          if (recentTargetFeedback) {
+            const reason = recentTargetFeedback.status === 'timed_out'
+              ? 'The same Master target timed out recently.'
+              : 'The same Master target was rejected recently.';
+            return commandSuccess({
+              collected: trigger.collected,
+              decision: {
+                action: 'no_action',
+                reason,
+              },
+              blocked: {
+                code: recentTargetFeedback.status === 'timed_out'
+                  ? 'auto_global_cooldown'
+                  : 'auto_per_trace_limited',
+                message: reason,
+              },
+              target: {
+                masterPinId: resolvedTarget.masterPinId,
+                displayName: resolvedTarget.displayName,
+                masterKind: resolvedTarget.masterKind,
+                providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+              },
+            });
+          }
+
           const autoPlan = prepareAutoMasterAskPlan({
             draft,
             resolvedTarget,
@@ -4378,6 +4775,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
             });
           }
 
+          const autoTraceMetadata = buildAskMasterAutoMetadata({
+            reason: autoPlan.autoReason || trigger.decision.reason,
+            confidence: autoPlan.confidence,
+            frictionMode: autoPlan.policy.selectedFrictionMode,
+            detectorVersion: 'phase3-v1',
+            selectedMasterTrusted: autoPlan.policy.trustedTarget,
+            sensitivity: autoPlan.policy.sensitivity,
+          });
+
           const autoResult = await createMasterAskPreviewResult({
             draft,
             resolvedTarget,
@@ -4389,6 +4795,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
             callerHostOverride: observation.hostMode,
             traceIdOverride: observation.traceId,
             requiresConfirmationOverride: autoPlan.policy.requiresConfirmation,
+            latestEventOverride: 'auto_preview_prepared',
+            askMasterAutoMetadata: autoTraceMetadata,
+            afterPreviewPersisted: async ({ trace }) => {
+              await putMasterAutoFeedback({
+                traceId: trace.traceId,
+                status: 'prepared',
+                masterKind: resolvedTarget.masterKind,
+                masterServicePinId: resolvedTarget.masterPinId,
+                triggerReasonSignature: buildAutoTriggerReasonSignature({
+                  observation,
+                  autoReason: autoPlan.autoReason || trigger.decision.reason,
+                }),
+                createdAt: trace.createdAt,
+                updatedAt: trace.createdAt,
+              });
+            },
             sendPreparedRequest: sendPendingMasterAskRequest,
           });
           if (!autoResult.ok) {

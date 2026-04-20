@@ -30,6 +30,18 @@ export interface AskMasterTraceFailureSummary {
   message: string | null;
 }
 
+export interface AskMasterTraceAutoMetadata {
+  reason: string | null;
+  confidence: number | null;
+  frictionMode: 'preview_confirm' | 'direct_send' | null;
+  detectorVersion: string | null;
+  selectedMasterTrusted: boolean | null;
+  sensitivity: {
+    isSensitive: boolean;
+    reasons: string[];
+  } | null;
+}
+
 export interface AskMasterTraceMetadata {
   flow: 'master';
   transport: 'simplemsg';
@@ -45,6 +57,7 @@ export interface AskMasterTraceMetadata {
   preview: AskMasterTracePreviewSummary | null;
   response: AskMasterTraceResponseSummary | null;
   failure: AskMasterTraceFailureSummary | null;
+  auto: AskMasterTraceAutoMetadata | null;
 }
 
 export interface BuildMasterTraceMetadataInput {
@@ -75,6 +88,17 @@ export interface BuildMasterTraceMetadataInput {
     code?: string | null;
     message?: string | null;
   } | null;
+  auto?: {
+    reason?: string | null;
+    confidence?: number | null;
+    frictionMode?: 'preview_confirm' | 'direct_send' | string | null;
+    detectorVersion?: string | null;
+    selectedMasterTrusted?: boolean | null;
+    sensitivity?: {
+      isSensitive?: boolean | null;
+      reasons?: string[] | null;
+    } | null;
+  } | null;
 }
 
 export interface MasterTraceView {
@@ -95,6 +119,7 @@ export interface MasterTraceView {
   preview: AskMasterTracePreviewSummary | null;
   response: AskMasterTraceResponseSummary | null;
   failure: AskMasterTraceFailureSummary | null;
+  auto: AskMasterTraceAutoMetadata | null;
   display: {
     title: string;
     statusText: string;
@@ -159,6 +184,58 @@ function normalizeFailure(
   return failure.code || failure.message ? failure : null;
 }
 
+function normalizeAutoMetadata(
+  value: BuildMasterTraceMetadataInput['auto'] | AskMasterTraceMetadata['auto']
+): AskMasterTraceAutoMetadata | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const frictionMode = normalizeText(value.frictionMode);
+  const normalizedFrictionMode: 'preview_confirm' | 'direct_send' | null =
+    frictionMode === 'preview_confirm' || frictionMode === 'direct_send'
+      ? frictionMode
+      : null;
+  const confidence = typeof value.confidence === 'number' && Number.isFinite(value.confidence)
+    ? value.confidence
+    : Number.isFinite(Number(value.confidence))
+      ? Number(value.confidence)
+      : null;
+  const sensitivityValue = value.sensitivity && typeof value.sensitivity === 'object' && !Array.isArray(value.sensitivity)
+    ? value.sensitivity
+    : null;
+  const reasons = Array.isArray(sensitivityValue?.reasons)
+    ? sensitivityValue.reasons
+      .map((entry) => normalizeText(entry))
+      .filter(Boolean)
+    : [];
+
+  const auto = {
+    reason: normalizeNullableText(value.reason),
+    confidence,
+    frictionMode: normalizedFrictionMode,
+    detectorVersion: normalizeNullableText(value.detectorVersion),
+    selectedMasterTrusted: typeof value.selectedMasterTrusted === 'boolean'
+      ? value.selectedMasterTrusted
+      : null,
+    sensitivity: sensitivityValue
+      ? {
+          isSensitive: sensitivityValue.isSensitive === true,
+          reasons,
+        }
+      : null,
+  };
+
+  return auto.reason
+    || auto.confidence !== null
+    || auto.frictionMode
+    || auto.detectorVersion
+    || auto.selectedMasterTrusted !== null
+    || auto.sensitivity
+    ? auto
+    : null;
+}
+
 function isCanonicalStatus(value: string): value is MasterTraceCanonicalStatus {
   return value === 'discovered'
     || value === 'suggested'
@@ -173,6 +250,9 @@ function isCanonicalStatus(value: string): value is MasterTraceCanonicalStatus {
 }
 
 function mapLatestEventToCanonicalStatus(event: string): MasterTraceCanonicalStatus | null {
+  if (event === 'auto_preview_prepared') return 'awaiting_confirmation';
+  if (event === 'auto_sent_without_confirmation') return 'requesting_remote';
+  if (event === 'auto_preview_rejected') return 'failed';
   if (event === 'master_preview_ready') return 'awaiting_confirmation';
   if (event === 'request_sent') return 'requesting_remote';
   if (event === 'provider_received') return 'remote_received';
@@ -244,6 +324,7 @@ function inferMasterTraceMetadata(trace: SessionTraceRecord): AskMasterTraceMeta
       preview: trace.askMaster?.preview,
       response: trace.askMaster?.response,
       failure: trace.askMaster?.failure,
+      auto: trace.askMaster?.auto,
     });
   }
 
@@ -277,6 +358,7 @@ export function buildMasterTraceMetadata(input: BuildMasterTraceMetadataInput): 
     preview: normalizePreview(input.preview),
     response: normalizeResponse(input.response),
     failure: normalizeFailure(input.failure),
+    auto: normalizeAutoMetadata(input.auto),
   };
 }
 
@@ -284,7 +366,18 @@ export function isAskMasterTrace(trace: SessionTraceRecord | null | undefined): 
   return Boolean(trace && inferMasterTraceMetadata(trace));
 }
 
-function renderStatusText(status: MasterTraceCanonicalStatus | null): string {
+function renderStatusText(input: {
+  status: MasterTraceCanonicalStatus | null;
+  latestEvent: string | null;
+  failure: AskMasterTraceFailureSummary | null;
+}): string {
+  if (
+    input.latestEvent === 'auto_preview_rejected'
+    || normalizeNullableText(input.failure?.code) === 'auto_rejected_by_user'
+  ) {
+    return 'Declined';
+  }
+  const status = input.status;
   if (status === 'awaiting_confirmation') return 'Waiting for your confirmation';
   if (status === 'requesting_remote') return 'Request sent to Master';
   if (status === 'remote_received') return 'Master received the request';
@@ -326,9 +419,14 @@ export function buildMasterTraceView(trace: SessionTraceRecord): MasterTraceView
     preview: askMaster.preview,
     response: askMaster.response,
     failure: askMaster.failure,
+    auto: askMaster.auto,
     display: {
       title,
-      statusText: renderStatusText(askMaster.canonicalStatus),
+      statusText: renderStatusText({
+        status: askMaster.canonicalStatus,
+        latestEvent: normalizeNullableText(trace.a2a?.latestEvent),
+        failure: askMaster.failure,
+      }),
     },
     artifacts: trace.artifacts,
     trace: {

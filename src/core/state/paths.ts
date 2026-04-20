@@ -11,6 +11,7 @@ export interface MetabotPaths {
   ratingDetailStatePath: string;
   masterPendingAskStatePath: string;
   masterSuggestStatePath: string;
+  masterAutoFeedbackStatePath: string;
   secretsPath: string;
   configPath: string;
   evolutionRoot: string;
@@ -52,6 +53,7 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     ratingDetailStatePath: path.join(hotRoot, 'rating-detail.json'),
     masterPendingAskStatePath: path.join(hotRoot, 'master-pending-asks.json'),
     masterSuggestStatePath: path.join(hotRoot, 'master-suggest-state.json'),
+    masterAutoFeedbackStatePath: path.join(hotRoot, 'master-auto-feedback-state.json'),
     secretsPath: path.join(hotRoot, 'secrets.json'),
     configPath,
     evolutionRoot,

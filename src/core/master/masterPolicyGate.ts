@@ -32,6 +32,7 @@ export interface MasterPolicyDecision {
   contextMode: AskMasterConfig['contextMode'];
   policyReason: string | null;
   sensitivity: MasterPayloadSafetySummary;
+  trustedTarget: boolean;
 }
 
 function normalizeConfig(config?: Partial<AskMasterConfig> | null): AskMasterConfig {
@@ -87,6 +88,7 @@ export function evaluateMasterPolicy(input: {
         isSensitive: false,
         reasons: [],
       },
+      trustedTarget: false,
     };
   }
 
@@ -103,6 +105,7 @@ export function evaluateMasterPolicy(input: {
         isSensitive: false,
         reasons: [],
       },
+      trustedTarget: false,
     };
   }
 
@@ -119,6 +122,7 @@ export function evaluateMasterPolicy(input: {
         isSensitive: false,
         reasons: [],
       },
+      trustedTarget: false,
     };
   }
 
@@ -141,6 +145,7 @@ export function evaluateMasterPolicy(input: {
       contextMode: autoDecision.contextMode,
       policyReason: autoDecision.policyReason,
       sensitivity: autoDecision.sensitivity,
+      trustedTarget: autoDecision.trustedTarget,
     };
   }
 
@@ -158,5 +163,6 @@ export function evaluateMasterPolicy(input: {
       isSensitive: false,
       reasons: [],
     },
+    trustedTarget: false,
   };
 }

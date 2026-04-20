@@ -189,3 +189,76 @@ test('completed ask master traces preserve suggest trigger metadata after sugges
   assert.equal(trace.askMaster.response?.status, 'completed');
   assert.equal(trace.askMaster.response?.summary, 'The blocked flow needs a persisted preview snapshot before confirmation.');
 });
+
+test('auto ask master traces preserve auto metadata on the trace record', () => {
+  const exportRoot = path.join(mkdtempSync(path.join(tmpdir(), 'metabot-master-trace-auto-')), '.metabot', 'exports');
+  const askMaster = buildMasterTraceMetadata({
+    role: 'caller',
+    latestEvent: 'auto_preview_prepared',
+    publicStatus: 'awaiting_confirmation',
+    requestId: 'master-req-auto-1',
+    masterKind: 'debug',
+    servicePinId: 'master-pin-1',
+    providerGlobalMetaId: 'idq1provider',
+    displayName: 'Official Debug Master',
+    triggerMode: 'auto',
+    contextMode: 'standard',
+    confirmationMode: 'always',
+    preview: {
+      userTask: 'Diagnose why the caller remains blocked after repeated tool failures.',
+      question: 'Should the Debug Master inspect the blocked caller flow now?',
+    },
+    auto: {
+      reason: 'Repeated failures and a trusted Master make automatic Ask Master entry viable.',
+      confidence: 0.85,
+      frictionMode: 'preview_confirm',
+      detectorVersion: 'phase3-v1',
+      selectedMasterTrusted: true,
+      sensitivity: {
+        isSensitive: false,
+        reasons: [],
+      },
+    },
+  });
+
+  const trace = buildSessionTrace({
+    traceId: 'trace-master-auto-preview-1',
+    channel: 'a2a',
+    exportRoot,
+    session: {
+      id: 'master-trace-auto-preview-1',
+      title: 'Official Debug Master Ask',
+      type: 'a2a',
+      metabotId: 7,
+      peerGlobalMetaId: 'idq1provider',
+      peerName: 'Official Debug Master',
+      externalConversationId: 'master:idq1caller:idq1provider:trace-master-auto-preview-1',
+    },
+    a2a: {
+      role: 'caller',
+      publicStatus: 'awaiting_confirmation',
+      latestEvent: 'auto_preview_prepared',
+      taskRunState: 'queued',
+      callerGlobalMetaId: 'idq1caller',
+      callerName: 'Caller Bot',
+      providerGlobalMetaId: 'idq1provider',
+      providerName: 'Official Debug Master',
+      servicePinId: 'master-pin-1',
+    },
+    askMaster,
+  });
+
+  assert.equal(trace.askMaster.flow, 'master');
+  assert.equal(trace.askMaster.triggerMode, 'auto');
+  assert.deepEqual(trace.askMaster.auto, {
+    reason: 'Repeated failures and a trusted Master make automatic Ask Master entry viable.',
+    confidence: 0.85,
+    frictionMode: 'preview_confirm',
+    detectorVersion: 'phase3-v1',
+    selectedMasterTrusted: true,
+    sensitivity: {
+      isSensitive: false,
+      reasons: [],
+    },
+  });
+});

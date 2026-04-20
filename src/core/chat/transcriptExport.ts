@@ -55,6 +55,55 @@ function renderTimeoutNote(prefix: 'transcript' | 'trace'): string {
   return 'Trace remains inspectable after timeout; remote completion may still arrive later.';
 }
 
+function formatAskMasterSensitivity(value: SessionTraceRecord['askMaster'] extends infer T
+  ? T extends { auto: infer A }
+    ? A extends { sensitivity: infer S }
+      ? S
+      : never
+    : never
+  : never): string {
+  if (!value) {
+    return 'unknown';
+  }
+
+  if (value.isSensitive !== true) {
+    return 'not_sensitive';
+  }
+
+  if (Array.isArray(value.reasons) && value.reasons.length > 0) {
+    return `sensitive (${value.reasons.join('; ')})`;
+  }
+
+  return 'sensitive';
+}
+
+function renderAskMasterStatusText(trace: SessionTraceRecord): string | null {
+  const askMaster = trace.askMaster;
+  if (!askMaster) {
+    return null;
+  }
+
+  if (
+    normalizeText(trace.a2a?.latestEvent) === 'auto_preview_rejected'
+    || normalizeText(askMaster.failure?.code) === 'auto_rejected_by_user'
+  ) {
+    return 'Declined';
+  }
+
+  const status = normalizeText(askMaster.canonicalStatus);
+  if (status === 'awaiting_confirmation') return 'Waiting for your confirmation';
+  if (status === 'requesting_remote') return 'Request sent to Master';
+  if (status === 'remote_received') return 'Master received the request';
+  if (status === 'master_responded') return 'Master has responded';
+  if (status === 'completed') return 'Completed';
+  if (status === 'timed_out') return 'Stopped waiting locally';
+  if (status === 'failed') return 'Failed';
+  if (status === 'need_more_context') return 'Need more context';
+  if (status === 'suggested') return 'Suggested';
+  if (status === 'discovered') return 'Discovered';
+  return null;
+}
+
 function buildCallerLabel(trace: SessionTraceRecord): string {
   if (trace.a2a) {
     return formatConnectedAgentLabel({
@@ -161,8 +210,33 @@ function renderTranscriptMarkdown(input: ExportSessionArtifactsInput): string {
     if (input.trace.askMaster.canonicalStatus) {
       lines.push(`Ask Master Status: ${input.trace.askMaster.canonicalStatus}`);
     }
+    if (input.trace.askMaster.triggerMode) {
+      lines.push(`Trigger Mode: ${input.trace.askMaster.triggerMode}`);
+    }
+    const statusText = renderAskMasterStatusText(input.trace);
+    if (statusText) {
+      lines.push(`Current Status: ${statusText}`);
+    }
+    if (input.trace.askMaster.confirmationMode) {
+      lines.push(`Confirmation Mode: ${input.trace.askMaster.confirmationMode}`);
+    }
     if (input.trace.askMaster.transport) {
       lines.push(`Ask Master Transport: ${input.trace.askMaster.transport}`);
+    }
+    if (input.trace.askMaster.auto) {
+      if (input.trace.askMaster.auto.reason) {
+        lines.push(`Auto Reason: ${input.trace.askMaster.auto.reason}`);
+      }
+      if (input.trace.askMaster.auto.confidence !== null) {
+        lines.push(`Confidence: ${input.trace.askMaster.auto.confidence}`);
+      }
+      if (input.trace.askMaster.auto.frictionMode) {
+        lines.push(`Friction Mode: ${input.trace.askMaster.auto.frictionMode}`);
+      }
+      if (input.trace.askMaster.auto.selectedMasterTrusted !== null) {
+        lines.push(`Trusted Target: ${input.trace.askMaster.auto.selectedMasterTrusted ? 'yes' : 'no'}`);
+      }
+      lines.push(`Sensitivity: ${formatAskMasterSensitivity(input.trace.askMaster.auto.sensitivity)}`);
     }
   }
   if (input.trace.a2a?.publicStatus === 'timeout') {
@@ -228,8 +302,33 @@ function renderTraceMarkdown(trace: SessionTraceRecord): string {
     if (trace.askMaster.canonicalStatus) {
       lines.push(`Ask Master Status: ${trace.askMaster.canonicalStatus}`);
     }
+    if (trace.askMaster.triggerMode) {
+      lines.push(`Trigger Mode: ${trace.askMaster.triggerMode}`);
+    }
+    const statusText = renderAskMasterStatusText(trace);
+    if (statusText) {
+      lines.push(`Current Status: ${statusText}`);
+    }
+    if (trace.askMaster.confirmationMode) {
+      lines.push(`Confirmation Mode: ${trace.askMaster.confirmationMode}`);
+    }
     if (trace.askMaster.transport) {
       lines.push(`Ask Master Transport: ${trace.askMaster.transport}`);
+    }
+    if (trace.askMaster.auto) {
+      if (trace.askMaster.auto.reason) {
+        lines.push(`Auto Reason: ${trace.askMaster.auto.reason}`);
+      }
+      if (trace.askMaster.auto.confidence !== null) {
+        lines.push(`Confidence: ${trace.askMaster.auto.confidence}`);
+      }
+      if (trace.askMaster.auto.frictionMode) {
+        lines.push(`Friction Mode: ${trace.askMaster.auto.frictionMode}`);
+      }
+      if (trace.askMaster.auto.selectedMasterTrusted !== null) {
+        lines.push(`Trusted Target: ${trace.askMaster.auto.selectedMasterTrusted ? 'yes' : 'no'}`);
+      }
+      lines.push(`Sensitivity: ${formatAskMasterSensitivity(trace.askMaster.auto.sensitivity)}`);
     }
   }
   if (trace.a2a?.publicStatus === 'timeout') {

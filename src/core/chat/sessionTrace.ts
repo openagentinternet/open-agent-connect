@@ -96,6 +96,17 @@ export interface SessionTraceAskMasterRecord {
     code: string | null;
     message: string | null;
   } | null;
+  auto: {
+    reason: string | null;
+    confidence: number | null;
+    frictionMode: 'preview_confirm' | 'direct_send' | null;
+    detectorVersion: string | null;
+    selectedMasterTrusted: boolean | null;
+    sensitivity: {
+      isSensitive: boolean;
+      reasons: string[];
+    } | null;
+  } | null;
 }
 
 export interface SessionTraceRecord {
@@ -205,6 +216,35 @@ function buildAskMasterTraceRecord(input?: SessionTraceAskMasterInput | null): S
         message: normalizeText(input.failure.message) || null,
       }
     : null;
+  const auto = input.auto && typeof input.auto === 'object'
+    ? {
+        reason: normalizeText(input.auto.reason) || null,
+        confidence: typeof input.auto.confidence === 'number' && Number.isFinite(input.auto.confidence)
+          ? input.auto.confidence
+          : Number.isFinite(Number(input.auto.confidence))
+            ? Number(input.auto.confidence)
+            : null,
+        frictionMode: normalizeText(input.auto.frictionMode) === 'preview_confirm'
+          || normalizeText(input.auto.frictionMode) === 'direct_send'
+          ? normalizeText(input.auto.frictionMode) as 'preview_confirm' | 'direct_send'
+          : null,
+        detectorVersion: normalizeText(input.auto.detectorVersion) || null,
+        selectedMasterTrusted: typeof input.auto.selectedMasterTrusted === 'boolean'
+          ? input.auto.selectedMasterTrusted
+          : null,
+        sensitivity: input.auto.sensitivity && typeof input.auto.sensitivity === 'object'
+          ? {
+              isSensitive: input.auto.sensitivity.isSensitive === true,
+              reasons: Array.isArray(input.auto.sensitivity.reasons)
+                ? input.auto.sensitivity.reasons
+                  .filter((entry): entry is string => typeof entry === 'string')
+                  .map((entry) => normalizeText(entry))
+                  .filter(Boolean)
+                : [],
+            }
+          : null,
+      }
+    : null;
 
   const record: SessionTraceAskMasterRecord = {
     flow: 'master',
@@ -221,10 +261,18 @@ function buildAskMasterTraceRecord(input?: SessionTraceAskMasterInput | null): S
     preview: preview && (preview.userTask || preview.question) ? preview : null,
     response: response && (response.status || response.summary || response.followUpQuestion || response.errorCode) ? response : null,
     failure: failure && (failure.code || failure.message) ? failure : null,
+    auto: auto && (
+      auto.reason
+      || auto.confidence !== null
+      || auto.frictionMode
+      || auto.detectorVersion
+      || auto.selectedMasterTrusted !== null
+      || auto.sensitivity
+    ) ? auto : null,
   };
 
   return record.canonicalStatus || record.requestId || record.masterKind || record.servicePinId || record.displayName
-    || record.preview || record.response || record.failure
+    || record.preview || record.response || record.failure || record.auto
     ? record
     : null;
 }
