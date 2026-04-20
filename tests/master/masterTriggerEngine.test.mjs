@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const {
   collectAndEvaluateMasterTrigger,
   evaluateMasterTrigger,
+  recordMasterTriggerOutcome,
 } = require('../../dist/core/master/masterTriggerEngine.js');
 
 function buildObservation(overrides = {}) {
@@ -206,4 +207,21 @@ test('trigger engine does not surface suggest when there is no online master ava
     action: 'no_action',
     reason: 'No online Master is currently available.',
   });
+});
+
+test('recordMasterTriggerOutcome suppresses the same master kind after an explicit auto-ask rejection', () => {
+  const nextState = recordMasterTriggerOutcome({
+    observation: buildObservation({
+      userIntent: {
+        explicitlyRejectedAutoAsk: true,
+      },
+      candidateMasterKindHint: 'debug',
+    }),
+    decision: {
+      action: 'no_action',
+      reason: 'User explicitly rejected automatic Ask Master escalation.',
+    },
+  });
+
+  assert.deepEqual(nextState.rejectedMasterKinds, ['debug']);
 });

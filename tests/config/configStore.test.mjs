@@ -36,6 +36,13 @@ test('createConfigStore defaults to evolution_network enabled true and persists 
       confirmationMode: 'always',
       contextMode: 'standard',
       trustedMasters: [],
+      autoPolicy: {
+        minConfidence: 0.9,
+        minNoProgressWindowMs: 300_000,
+        perTraceLimit: 1,
+        globalCooldownMs: 1_800_000,
+        allowTrustedAutoSend: false,
+      },
     });
 
     const updated = {
@@ -50,6 +57,13 @@ test('createConfigStore defaults to evolution_network enabled true and persists 
         confirmationMode: 'always',
         contextMode: 'compact',
         trustedMasters: ['master-pin-1'],
+        autoPolicy: {
+          minConfidence: 0.84,
+          minNoProgressWindowMs: 600_000,
+          perTraceLimit: 2,
+          globalCooldownMs: 90_000,
+          allowTrustedAutoSend: true,
+        },
       }
     };
 
@@ -83,6 +97,13 @@ test('read merges defaults when config fields are missing', async () => {
         confirmationMode: 'always',
         contextMode: 'standard',
         trustedMasters: [],
+        autoPolicy: {
+          minConfidence: 0.9,
+          minNoProgressWindowMs: 300_000,
+          perTraceLimit: 1,
+          globalCooldownMs: 1_800_000,
+          allowTrustedAutoSend: false,
+        },
       }
     });
   });
@@ -114,6 +135,13 @@ test('read ignores non-boolean config values and falls back to defaults', async 
         confirmationMode: 'always',
         contextMode: 'standard',
         trustedMasters: [],
+        autoPolicy: {
+          minConfidence: 0.9,
+          minNoProgressWindowMs: 300_000,
+          perTraceLimit: 1,
+          globalCooldownMs: 1_800_000,
+          allowTrustedAutoSend: false,
+        },
       }
     });
   });
@@ -125,5 +153,37 @@ test('read throws when config file contains malformed JSON', async () => {
     await store.ensureLayout();
     await fs.writeFile(store.paths.configPath, '{ not json', 'utf8');
     await assert.rejects(() => store.read(), { name: 'SyntaxError' });
+  });
+});
+
+test('set normalizes partial askMaster autoPolicy when callers omit new phase-3 fields', async () => {
+  await withTempHome(async () => {
+    const store = createConfigStore();
+    await store.set({
+      evolution_network: {
+        enabled: true,
+        autoAdoptSameSkillSameScope: false,
+        autoRecordExecutions: true
+      },
+      askMaster: {
+        enabled: true,
+        triggerMode: 'auto',
+        confirmationMode: 'never',
+        contextMode: 'standard',
+        trustedMasters: ['master-pin-1'],
+        autoPolicy: {
+          minConfidence: 0.75,
+        },
+      }
+    });
+
+    const reloaded = await store.read();
+    assert.deepEqual(reloaded.askMaster.autoPolicy, {
+      minConfidence: 0.75,
+      minNoProgressWindowMs: 300_000,
+      perTraceLimit: 1,
+      globalCooldownMs: 1_800_000,
+      allowTrustedAutoSend: false,
+    });
   });
 });

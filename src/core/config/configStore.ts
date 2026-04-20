@@ -8,6 +8,7 @@ import {
   isAskMasterConfirmationMode,
   isAskMasterContextMode,
   isAskMasterTriggerMode,
+  normalizeAskMasterAutoPolicyConfig,
   type MetabotConfig,
 } from './configTypes';
 
@@ -99,24 +100,8 @@ function normalizeConfig(input: unknown): MetabotConfig {
         ? contextMode
         : defaults.askMaster.contextMode,
       trustedMasters: normalizeStringArray(askMasterSource.trustedMasters),
+      autoPolicy: normalizeAskMasterAutoPolicyConfig(askMasterSource.autoPolicy),
     }
-  };
-}
-
-function cloneConfig(config: MetabotConfig): MetabotConfig {
-  return {
-    evolution_network: {
-      enabled: config.evolution_network.enabled,
-      autoAdoptSameSkillSameScope: config.evolution_network.autoAdoptSameSkillSameScope,
-      autoRecordExecutions: config.evolution_network.autoRecordExecutions
-    },
-    askMaster: {
-      enabled: config.askMaster.enabled,
-      triggerMode: config.askMaster.triggerMode,
-      confirmationMode: config.askMaster.confirmationMode,
-      contextMode: config.askMaster.contextMode,
-      trustedMasters: [...config.askMaster.trustedMasters],
-    },
   };
 }
 
@@ -156,7 +141,7 @@ export function createConfigStore(homeDirOrPaths?: string | MetabotPaths): Confi
     },
     async set(value: MetabotConfig) {
       await ensureLayout(paths);
-      const normalized = cloneConfig(value);
+      const normalized = normalizeConfig(value);
       await fs.writeFile(paths.configPath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
     }
   };

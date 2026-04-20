@@ -2677,6 +2677,26 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
   const pendingMasterReplyContinuations = new Map<string, Promise<void>>();
   let masterTriggerMemoryState = createMasterTriggerMemoryState();
+  const masterAutoPrepareCounts = new Map<string, number>();
+  let lastMasterAutoPreparedAt: number | null = null;
+
+  function getMasterAutoPrepareCount(traceId: string | null | undefined): number {
+    const normalizedTraceId = normalizeText(traceId);
+    if (!normalizedTraceId) {
+      return 0;
+    }
+    return masterAutoPrepareCounts.get(normalizedTraceId) ?? 0;
+  }
+
+  function recordMasterAutoPrepare(traceId: string | null | undefined, now: number): void {
+    const normalizedTraceId = normalizeText(traceId);
+    if (normalizedTraceId) {
+      masterAutoPrepareCounts.set(normalizedTraceId, getMasterAutoPrepareCount(normalizedTraceId) + 1);
+    }
+    if (Number.isFinite(now)) {
+      lastMasterAutoPreparedAt = Math.max(0, Math.trunc(now));
+    }
+  }
 
   async function trackActiveIdentityProfile(identity: RuntimeIdentityRecord): Promise<void> {
     try {
@@ -4126,7 +4146,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
           collectObservation: async () => observation,
         });
 
-        if (trigger.collected && trigger.observation?.userIntent.explicitlyRejectedSuggestion) {
+        if (
+          trigger.collected
+          && (
+            trigger.observation?.userIntent.explicitlyRejectedSuggestion
+            || trigger.observation?.userIntent.explicitlyRejectedAutoAsk
+          )
+        ) {
           masterTriggerMemoryState = recordMasterTriggerOutcome({
             state: masterTriggerMemoryState,
             observation: trigger.observation,
@@ -4153,7 +4179,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           });
         }
 
-        if (trigger.decision.action === 'manual_requested' || trigger.decision.action === 'auto_candidate') {
+        if (trigger.decision.action === 'manual_requested') {
           const policy = evaluateMasterPolicy({
             config: config.askMaster,
             action: trigger.decision.action,
@@ -4208,6 +4234,71 @@ export function createDefaultMetabotDaemonHandlers(input: {
             blocked: {
               code: 'master_not_found',
               message: 'No matching online Master could be resolved for this suggestion.',
+            },
+          });
+        }
+        if (trigger.decision.action === 'auto_candidate') {
+          const policy = evaluateMasterPolicy({
+            config: config.askMaster,
+            action: 'auto_candidate',
+            selectedMaster: resolvedTarget,
+            auto: {
+              confidence: trigger.decision.confidence,
+              sensitivity: {
+                isSensitive: true,
+                reasons: ['Payload safety summary has not been materialized yet.'],
+              },
+              traceAutoPrepareCount: getMasterAutoPrepareCount(observation.traceId),
+              lastAutoAt: lastMasterAutoPreparedAt,
+              now: observation.now,
+            },
+          });
+          if (!policy.allowed) {
+            return commandSuccess({
+              collected: trigger.collected,
+              decision: {
+                action: 'no_action',
+                reason: policy.blockedReason || trigger.decision.reason,
+              },
+              blocked: {
+                code: policy.code,
+                message: policy.blockedReason || trigger.decision.reason,
+              },
+              autoPolicy: {
+                selectedFrictionMode: policy.selectedFrictionMode,
+                requiresConfirmation: policy.requiresConfirmation,
+                policyReason: policy.policyReason,
+              },
+              target: {
+                masterPinId: resolvedTarget.masterPinId,
+                displayName: resolvedTarget.displayName,
+                masterKind: resolvedTarget.masterKind,
+                providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+              },
+            });
+          }
+          recordMasterAutoPrepare(observation.traceId, observation.now);
+          if (trigger.observation) {
+            masterTriggerMemoryState = recordMasterTriggerOutcome({
+              state: masterTriggerMemoryState,
+              observation: trigger.observation,
+              decision: trigger.decision,
+            });
+          }
+          return commandSuccess({
+            collected: trigger.collected,
+            decision: trigger.decision,
+            blocked: null,
+            autoPolicy: {
+              selectedFrictionMode: policy.selectedFrictionMode,
+              requiresConfirmation: policy.requiresConfirmation,
+              policyReason: policy.policyReason,
+            },
+            target: {
+              masterPinId: resolvedTarget.masterPinId,
+              displayName: resolvedTarget.displayName,
+              masterKind: resolvedTarget.masterKind,
+              providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
             },
           });
         }

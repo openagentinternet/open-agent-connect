@@ -1,4 +1,4 @@
-import type { AskMasterConfig } from '../config/configTypes';
+import { createDefaultConfig, type AskMasterConfig } from '../config/configTypes';
 
 export interface TriggerObservation {
   now: number;
@@ -200,7 +200,10 @@ function normalizeObservation(input: TriggerObservation): NormalizedTriggerObser
   };
 }
 
-function normalizeConfig(config?: Partial<AskMasterConfig> | null): Pick<AskMasterConfig, 'enabled' | 'triggerMode' | 'trustedMasters'> {
+function normalizeConfig(
+  config?: Partial<AskMasterConfig> | null
+): Pick<AskMasterConfig, 'enabled' | 'triggerMode' | 'trustedMasters' | 'autoPolicy'> {
+  const defaults = createDefaultConfig().askMaster;
   return {
     enabled: config?.enabled !== false,
     triggerMode: config?.triggerMode === 'suggest' || config?.triggerMode === 'auto'
@@ -209,6 +212,25 @@ function normalizeConfig(config?: Partial<AskMasterConfig> | null): Pick<AskMast
     trustedMasters: Array.isArray(config?.trustedMasters)
       ? normalizeStringArray(config?.trustedMasters)
       : [],
+    autoPolicy: {
+      minConfidence: typeof config?.autoPolicy?.minConfidence === 'number'
+        && Number.isFinite(config.autoPolicy.minConfidence)
+        ? Math.max(0, Math.min(0.99, config.autoPolicy.minConfidence))
+        : defaults.autoPolicy.minConfidence,
+      minNoProgressWindowMs: typeof config?.autoPolicy?.minNoProgressWindowMs === 'number'
+        && Number.isFinite(config.autoPolicy.minNoProgressWindowMs)
+        ? Math.max(0, Math.trunc(config.autoPolicy.minNoProgressWindowMs))
+        : defaults.autoPolicy.minNoProgressWindowMs,
+      perTraceLimit: typeof config?.autoPolicy?.perTraceLimit === 'number'
+        && Number.isFinite(config.autoPolicy.perTraceLimit)
+        ? Math.max(1, Math.trunc(config.autoPolicy.perTraceLimit))
+        : defaults.autoPolicy.perTraceLimit,
+      globalCooldownMs: typeof config?.autoPolicy?.globalCooldownMs === 'number'
+        && Number.isFinite(config.autoPolicy.globalCooldownMs)
+        ? Math.max(0, Math.trunc(config.autoPolicy.globalCooldownMs))
+        : defaults.autoPolicy.globalCooldownMs,
+      allowTrustedAutoSend: config?.autoPolicy?.allowTrustedAutoSend === true,
+    },
   };
 }
 
@@ -240,7 +262,10 @@ function determineCandidateMasterKind(observation: NormalizedTriggerObservation)
   return null;
 }
 
-function hasSuggestSignals(observation: NormalizedTriggerObservation): boolean {
+function hasSuggestSignals(
+  observation: NormalizedTriggerObservation,
+  minNoProgressWindowMs: number,
+): boolean {
   return observation.activity.repeatedFailureCount >= 2
     || observation.activity.recentFailures >= 2
     || observation.diagnostics.failingTests > 0
@@ -250,7 +275,7 @@ function hasSuggestSignals(observation: NormalizedTriggerObservation): boolean {
     || observation.workState.todoBlocked
     || (
       observation.workState.onlyReadingWithoutConverging
-      && (observation.activity.noProgressWindowMs ?? 0) >= 300_000
+      && (observation.activity.noProgressWindowMs ?? 0) >= minNoProgressWindowMs
     );
 }
 
@@ -267,7 +292,7 @@ function roundConfidence(value: number): number {
 }
 
 function computeConfidence(
-  config: Pick<AskMasterConfig, 'enabled' | 'triggerMode' | 'trustedMasters'>,
+  config: Pick<AskMasterConfig, 'enabled' | 'triggerMode' | 'trustedMasters' | 'autoPolicy'>,
   observation: NormalizedTriggerObservation,
 ): number {
   let score = 0.35;
@@ -280,7 +305,7 @@ function computeConfidence(
   if (observation.workState.todoBlocked) score += 0.05;
   if (
     observation.workState.onlyReadingWithoutConverging
-    && (observation.activity.noProgressWindowMs ?? 0) >= 300_000
+    && (observation.activity.noProgressWindowMs ?? 0) >= config.autoPolicy.minNoProgressWindowMs
   ) {
     score += 0.05;
   }
@@ -419,7 +444,7 @@ export function evaluateMasterTrigger(input: {
     };
   }
 
-  if (!hasSuggestSignals(observation)) {
+  if (!hasSuggestSignals(observation, config.autoPolicy.minNoProgressWindowMs)) {
     return {
       action: 'no_action',
       reason: 'Current signals do not justify Ask Master yet.',
@@ -427,7 +452,11 @@ export function evaluateMasterTrigger(input: {
   }
 
   const confidence = computeConfidence(config, observation);
-  if (config.triggerMode === 'auto' && observation.directory.trustedMasters > 0 && confidence >= 0.9) {
+  if (
+    config.triggerMode === 'auto'
+    && observation.directory.trustedMasters > 0
+    && confidence >= config.autoPolicy.minConfidence
+  ) {
     return {
       action: 'auto_candidate',
       reason: 'Repeated failures and a trusted Master make automatic Ask Master entry viable.',
@@ -456,7 +485,10 @@ export function recordMasterTriggerOutcome(input: {
   ) || determineCandidateMasterKind(observation);
 
   const next = normalizeMemoryState(state);
-  if (observation.userIntent.explicitlyRejectedSuggestion && candidateMasterKind) {
+  if (
+    (observation.userIntent.explicitlyRejectedSuggestion || observation.userIntent.explicitlyRejectedAutoAsk)
+    && candidateMasterKind
+  ) {
     next.rejectedMasterKinds = normalizeStringArray([
       ...next.rejectedMasterKinds,
       candidateMasterKind,

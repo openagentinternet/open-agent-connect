@@ -35,6 +35,13 @@ test('createConfigStore exposes askMaster defaults', async () => {
       confirmationMode: 'always',
       contextMode: 'standard',
       trustedMasters: [],
+      autoPolicy: {
+        minConfidence: 0.9,
+        minNoProgressWindowMs: 300_000,
+        perTraceLimit: 1,
+        globalCooldownMs: 1_800_000,
+        allowTrustedAutoSend: false,
+      },
     });
   });
 });
@@ -58,6 +65,13 @@ test('read merges askMaster defaults when fields are missing or malformed', asyn
       confirmationMode: 'always',
       contextMode: 'standard',
       trustedMasters: ['master-pin-1'],
+      autoPolicy: {
+        minConfidence: 0.9,
+        minNoProgressWindowMs: 300_000,
+        perTraceLimit: 1,
+        globalCooldownMs: 1_800_000,
+        allowTrustedAutoSend: false,
+      },
     });
   });
 });
@@ -73,6 +87,13 @@ test('read preserves valid askMaster policy enums', async () => {
         confirmationMode: 'sensitive_only',
         contextMode: 'full_task',
         trustedMasters: ['master-pin-1'],
+        autoPolicy: {
+          minConfidence: 0.82,
+          minNoProgressWindowMs: 420_000,
+          perTraceLimit: 2,
+          globalCooldownMs: 900_000,
+          allowTrustedAutoSend: true,
+        },
       },
     }, null, 2)}\n`, 'utf8');
 
@@ -83,6 +104,40 @@ test('read preserves valid askMaster policy enums', async () => {
       confirmationMode: 'sensitive_only',
       contextMode: 'full_task',
       trustedMasters: ['master-pin-1'],
+      autoPolicy: {
+        minConfidence: 0.82,
+        minNoProgressWindowMs: 420_000,
+        perTraceLimit: 2,
+        globalCooldownMs: 900_000,
+        allowTrustedAutoSend: true,
+      },
+    });
+  });
+});
+
+test('read normalizes malformed nested autoPolicy fields and clamps unsafe values', async () => {
+  await withTempHome(async () => {
+    const store = createConfigStore();
+    await store.ensureLayout();
+    await fs.writeFile(store.paths.configPath, `${JSON.stringify({
+      askMaster: {
+        autoPolicy: {
+          minConfidence: 5,
+          minNoProgressWindowMs: -1,
+          perTraceLimit: 0,
+          globalCooldownMs: '120000',
+          allowTrustedAutoSend: 'yes',
+        },
+      },
+    }, null, 2)}\n`, 'utf8');
+
+    const config = await store.read();
+    assert.deepEqual(config.askMaster.autoPolicy, {
+      minConfidence: 0.99,
+      minNoProgressWindowMs: 0,
+      perTraceLimit: 1,
+      globalCooldownMs: 120_000,
+      allowTrustedAutoSend: false,
     });
   });
 });

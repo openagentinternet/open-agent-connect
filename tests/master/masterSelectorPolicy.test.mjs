@@ -43,7 +43,22 @@ function createPolicyConfig(overrides = {}) {
     confirmationMode: 'always',
     contextMode: 'standard',
     trustedMasters: [],
+    autoPolicy: {
+      minConfidence: 0.9,
+      minNoProgressWindowMs: 300_000,
+      perTraceLimit: 1,
+      globalCooldownMs: 1_800_000,
+      allowTrustedAutoSend: false,
+    },
     ...overrides,
+    autoPolicy: {
+      minConfidence: 0.9,
+      minNoProgressWindowMs: 300_000,
+      perTraceLimit: 1,
+      globalCooldownMs: 1_800_000,
+      allowTrustedAutoSend: false,
+      ...(overrides.autoPolicy ?? {}),
+    },
   };
 }
 
@@ -195,7 +210,7 @@ test('evaluateMasterPolicy does not surface suggestions when triggerMode is manu
   assert.equal(decision.blockedReason, 'Ask Master trigger mode is manual.');
 });
 
-test('evaluateMasterPolicy keeps the phase-2 auto_candidate branch reachable without a selected master', () => {
+test('evaluateMasterPolicy blocks auto_candidate when no selected master was resolved', () => {
   const decision = evaluateMasterPolicy({
     config: createPolicyConfig({ triggerMode: 'auto' }),
     action: 'auto_candidate',
@@ -204,5 +219,65 @@ test('evaluateMasterPolicy keeps the phase-2 auto_candidate branch reachable wit
 
   assert.equal(decision.allowed, false);
   assert.equal(decision.code, null);
-  assert.equal(decision.blockedReason, 'Auto Ask Master is not exposed in the phase-2 host flow.');
+  assert.equal(decision.blockedReason, 'No eligible Master was selected.');
+  assert.equal(decision.requiresConfirmation, true);
+  assert.equal(decision.selectedFrictionMode, 'preview_confirm');
+});
+
+test('evaluateMasterPolicy exposes friction metadata for an eligible auto candidate', () => {
+  const decision = evaluateMasterPolicy({
+    config: createPolicyConfig({
+      triggerMode: 'auto',
+      confirmationMode: 'sensitive_only',
+      trustedMasters: ['master-pin-1'],
+    }),
+    action: 'auto_candidate',
+    selectedMaster: createMaster({
+      masterPinId: 'master-pin-1',
+      trustedTier: null,
+      official: false,
+    }),
+    auto: {
+      confidence: 0.95,
+      sensitivity: {
+        isSensitive: false,
+        reasons: [],
+      },
+      traceAutoPrepareCount: 0,
+      lastAutoAt: null,
+      now: 1_776_300_100_000,
+    },
+  });
+
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.selectedFrictionMode, 'direct_send');
+  assert.equal(decision.requiresConfirmation, false);
+  assert.match(decision.policyReason, /trusted non-sensitive payload/i);
+});
+
+test('evaluateMasterPolicy keeps auto_candidate on preview_confirm when the safety summary is still unknown', () => {
+  const decision = evaluateMasterPolicy({
+    config: createPolicyConfig({
+      triggerMode: 'auto',
+      confirmationMode: 'sensitive_only',
+      trustedMasters: ['master-pin-1'],
+    }),
+    action: 'auto_candidate',
+    selectedMaster: createMaster({
+      masterPinId: 'master-pin-1',
+      trustedTier: null,
+      official: false,
+    }),
+    auto: {
+      confidence: 0.95,
+      traceAutoPrepareCount: 0,
+      lastAutoAt: null,
+      now: 1_776_300_100_000,
+    },
+  });
+
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.selectedFrictionMode, 'preview_confirm');
+  assert.equal(decision.requiresConfirmation, true);
+  assert.match(decision.policyReason, /sensitive/i);
 });

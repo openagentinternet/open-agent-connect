@@ -578,7 +578,7 @@ test('master suggest accepts a host observation frame directly under observation
   assert.equal(result.data.suggestion.candidateDisplayName, 'Official Review Master');
 });
 
-test('master suggest in auto mode hydrates missing trusted-master counts before evaluating auto_candidate', async (t) => {
+test('master suggest in auto mode hydrates missing trusted-master counts before surfacing auto_candidate', async (t) => {
   const harness = await createSuggestHarness({
     askMasterConfig: {
       triggerMode: 'auto',
@@ -591,9 +591,9 @@ test('master suggest in auto mode hydrates missing trusted-master counts before 
 
   const result = await harness.handlers.master.suggest({
     draft: {
-      userTask: 'Reach the phase-2 auto-mode block through hydrated trusted counts.',
-      question: 'Should auto mode resolve to the phase-2 auto block instead of a plain suggestion?',
-      workspaceSummary: 'Auto-mode suggest flow with partial directory state.',
+      userTask: 'Surface a real auto candidate once trusted counts are hydrated.',
+      question: 'Should auto mode surface auto_candidate instead of falling back to a plain suggestion?',
+      workspaceSummary: 'Auto-mode suggest flow with partial directory state and trusted hydration.',
       errorSummary: 'Repeated ERR_AUTO_DIRECTORY_TRUST failures.',
       relevantFiles: ['src/daemon/defaultHandlers.ts'],
       constraints: ['Keep the answer structured and concise.'],
@@ -650,13 +650,21 @@ test('master suggest in auto mode hydrates missing trusted-master counts before 
   });
 
   assert.equal(result.ok, true);
-  assert.deepEqual(result.data.decision, {
-    action: 'no_action',
-    reason: 'Auto Ask Master is not exposed in the phase-2 host flow.',
+  assert.equal(result.data.decision.action, 'auto_candidate');
+  assert.equal(result.data.decision.candidateMasterKind, 'debug');
+  assert.equal(result.data.decision.confidence, 0.95);
+  assert.match(result.data.decision.reason, /trusted Master/i);
+  assert.equal(result.data.blocked, null);
+  assert.deepEqual(result.data.autoPolicy, {
+    selectedFrictionMode: 'preview_confirm',
+    requiresConfirmation: true,
+    policyReason: 'Confirmation mode always requires a preview confirmation step.',
   });
-  assert.deepEqual(result.data.blocked, {
-    code: null,
-    message: 'Auto Ask Master is not exposed in the phase-2 host flow.',
+  assert.deepEqual(result.data.target, {
+    masterPinId: 'master-pin-1',
+    displayName: 'Official Debug Master',
+    masterKind: 'debug',
+    providerGlobalMetaId: 'idq1caller',
   });
 });
 
@@ -732,6 +740,68 @@ test('master suggest honors explicitlyRejectedAutoAsk before surfacing the phase
   assert.deepEqual(result.data.decision, {
     action: 'no_action',
     reason: 'User explicitly rejected automatic Ask Master escalation.',
+  });
+
+  const followUp = await harness.handlers.master.suggest({
+    draft: {
+      userTask: 'Respect the stored rejection on the next auto attempt.',
+      question: 'Should the previous auto rejection suppress the next auto candidate?',
+      workspaceSummary: 'Auto-mode suggest flow honoring stored explicitlyRejectedAutoAsk suppression.',
+      errorSummary: 'Repeated ERR_AUTO_REJECTED_FOLLOWUP failures.',
+      relevantFiles: ['src/daemon/defaultHandlers.ts'],
+      constraints: ['Keep the answer structured and concise.'],
+      artifacts: [],
+    },
+    context: {
+      now: 1_776_000_060_000,
+      hostMode: 'codex',
+      traceId: 'trace-master-suggest-phase2-auto-rejected-followup',
+      conversation: {
+        currentUserRequest: 'Try automatic escalation again now that the same loop is still happening.',
+        recentMessages: [
+          { role: 'user', content: 'Try automatic escalation again now that the same loop is still happening.' },
+          { role: 'assistant', content: 'The same debug loop is still active.' },
+        ],
+      },
+      tools: {
+        recentToolResults: [
+          {
+            toolName: 'npm test',
+            exitCode: 1,
+            stdout: 'not ok 1 - auto rejection follow-up still fails',
+            stderr: 'AssertionError: expected stored auto rejection to suppress the next auto candidate',
+          },
+        ],
+      },
+      workspace: {
+        goal: 'Keep auto-mode rejection suppression stable.',
+        constraints: ['Do not upload the whole repository.'],
+        relevantFiles: ['src/daemon/defaultHandlers.ts'],
+        diffSummary: 'Re-checking the same auto-rejected debug loop.',
+        fileExcerpts: [],
+      },
+      planner: {
+        hasPlan: true,
+        todoBlocked: true,
+        onlyReadingWithoutConverging: true,
+      },
+      hostSignals: {
+        noProgressWindowMs: 900_000,
+        uncertaintySignals: ['still_stuck'],
+        directory: {
+          availableMasters: 1,
+          onlineMasters: 1,
+          trustedMasters: 1,
+        },
+        candidateMasterKindHint: 'debug',
+      },
+    },
+  });
+
+  assert.equal(followUp.ok, true);
+  assert.deepEqual(followUp.data.decision, {
+    action: 'no_action',
+    reason: 'The same Master kind was rejected recently.',
   });
 });
 
@@ -1034,7 +1104,7 @@ test('reject_suggest still succeeds after Ask Master is disabled locally', async
   assert.equal(rejectResult.data.hostAction, 'reject_suggest');
 });
 
-test('master suggest exposes the phase-2 auto-mode blocked reason when triggerMode is auto', async (t) => {
+test('master suggest surfaces auto_candidate when triggerMode is auto', async (t) => {
   const harness = await createSuggestHarness({
     askMasterConfig: {
       triggerMode: 'auto',
@@ -1048,12 +1118,73 @@ test('master suggest exposes the phase-2 auto-mode blocked reason when triggerMo
 
   assert.equal(result.ok, true);
   assert.equal(result.state, 'success');
-  assert.deepEqual(result.data.decision, {
-    action: 'no_action',
-    reason: 'Auto Ask Master is not exposed in the phase-2 host flow.',
+  assert.equal(result.data.decision.action, 'auto_candidate');
+  assert.equal(result.data.decision.candidateMasterKind, 'debug');
+  assert.equal(result.data.decision.confidence, 0.99);
+  assert.match(result.data.decision.reason, /trusted Master/i);
+  assert.equal(result.data.blocked, null);
+  assert.deepEqual(result.data.autoPolicy, {
+    selectedFrictionMode: 'preview_confirm',
+    requiresConfirmation: true,
+    policyReason: 'Confirmation mode always requires a preview confirmation step.',
   });
-  assert.deepEqual(result.data.blocked, {
-    code: null,
-    message: 'Auto Ask Master is not exposed in the phase-2 host flow.',
+});
+
+test('master suggest enforces the global cooldown on repeated auto candidates across traces', async (t) => {
+  const harness = await createSuggestHarness({
+    askMasterConfig: {
+      triggerMode: 'auto',
+      autoPolicy: {
+        perTraceLimit: 2,
+        globalCooldownMs: 60_000,
+      },
+    },
+  });
+  t.after(async () => {
+    await rm(harness.homeDir, { recursive: true, force: true });
+  });
+
+  const first = await harness.handlers.master.suggest(buildSuggestInput(
+    'trace-master-suggest-phase2-auto-limit-1',
+    {
+      draft: {
+        errorSummary: 'Repeated ERR_AUTO_COOLDOWN_ONE failures.',
+      },
+      observation: {
+        diagnostics: {
+          repeatedErrorSignatures: ['ERR_AUTO_COOLDOWN_ONE'],
+        },
+      },
+    }
+  ));
+  const second = await harness.handlers.master.suggest(buildSuggestInput(
+    'trace-master-suggest-phase2-auto-limit-2',
+    {
+      draft: {
+        errorSummary: 'Repeated ERR_AUTO_COOLDOWN_TWO failures.',
+      },
+      observation: {
+        diagnostics: {
+          repeatedErrorSignatures: ['ERR_AUTO_COOLDOWN_TWO'],
+        },
+      },
+    }
+  ));
+
+  assert.equal(first.ok, true);
+  assert.equal(first.data.decision.action, 'auto_candidate');
+  assert.equal(second.ok, true);
+  assert.deepEqual(second.data.decision, {
+    action: 'no_action',
+    reason: 'Auto Ask Master is still inside the configured global cooldown window.',
+  });
+  assert.deepEqual(second.data.blocked, {
+    code: 'auto_global_cooldown',
+    message: 'Auto Ask Master is still inside the configured global cooldown window.',
+  });
+  assert.deepEqual(second.data.autoPolicy, {
+    selectedFrictionMode: 'preview_confirm',
+    requiresConfirmation: true,
+    policyReason: 'Recent automatic Ask Master activity is being throttled.',
   });
 });
