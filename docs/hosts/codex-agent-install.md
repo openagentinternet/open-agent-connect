@@ -81,13 +81,13 @@ Success criteria:
 - output shows `metabot master` lines
 - output does not show stale `metabot advisor` lines
 
-Optional future verification after Ask Master is added to the base skill registry in phase-2 Task 1:
+Then verify the repo/base Ask Master contract that should be rendered into the host pack:
 
 ```bash
 metabot skills resolve --skill metabot-ask-master --host codex --format markdown
 ```
 
-Use that command only after Task 1 lands. It validates the repo/base contract that should be rendered into the host pack, but it still does **not** by itself prove that the installed Codex skill file has already been refreshed.
+That command now validates the repo/base contract that should be rendered into the host pack, but it still does **not** by itself prove that the installed Codex skill file has already been refreshed.
 
 ## Optional First-Run Bootstrap
 
@@ -134,10 +134,10 @@ INSTALLED_SKILL="${CODEX_HOME:-$HOME/.codex}/skills/metabot-ask-master/SKILL.md"
 rg -n "metabot master|metabot advisor" "$INSTALLED_SKILL"
 ```
 
-If phase-2 Task 1 has already landed, you may additionally run:
+You may additionally run:
 
 ```bash
 metabot skills resolve --skill metabot-ask-master --host codex --format markdown
 ```
 
-The installed-file check confirms the actual Codex skill currently active in your environment; `skills resolve` is only an extra repo/base contract check once that support exists.
+The installed-file check confirms the actual Codex skill currently active in your environment; `skills resolve` is the extra repo/base contract check that the built skillpack should match.

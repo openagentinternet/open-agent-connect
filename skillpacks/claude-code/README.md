@@ -8,6 +8,7 @@ This host pack installs:
 
 ## Included MetaBot Skills
 
+- `metabot-ask-master`
 - `metabot-identity-manage`
 - `metabot-network-manage`
 - `metabot-call-remote-service`

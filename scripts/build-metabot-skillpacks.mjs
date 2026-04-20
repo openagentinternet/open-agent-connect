@@ -9,6 +9,7 @@ const PRIMARY_CLI_PATH = 'metabot';
 const SHARED_COMPATIBILITY_MANIFEST = 'release/compatibility.json';
 const BUNDLED_COMPATIBILITY_MANIFEST = 'runtime/compatibility.json';
 const METABOT_SKILLS = [
+  'metabot-ask-master',
   'metabot-identity-manage',
   'metabot-network-manage',
   'metabot-call-remote-service',

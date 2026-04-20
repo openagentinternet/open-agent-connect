@@ -1,6 +1,27 @@
 import type { BaseSkillContract, SkillPermissionScope } from './skillContractTypes';
 
 const BASE_SKILL_REGISTRY: Record<string, BaseSkillContract> = {
+  'metabot-ask-master': {
+    skillName: 'metabot-ask-master',
+    title: 'MetaBot Ask Master',
+    summary: 'Preview, confirm, and inspect one Ask Master request through the validated master runtime.',
+    instructions: 'Use metabot master list to resolve a target Master, then preview with metabot master ask --request-file before any explicit confirm step. Stop on failure instead of falling back to private chat, advisor commands, simplemsg, or services call.',
+    commandTemplate: 'metabot master ask --request-file master-request.json',
+    outputExpectation: 'Return structured JSON. The preview call should return awaiting_confirmation with preview, traceId, and requestId; after explicit confirmation, follow with metabot master trace --id when more evidence is needed.',
+    fallbackPolicy: 'If no matching Master is available or the human declines confirmation, stop and surface the failure. Do not fall back to private chat, simplemsg, advisor commands, or services call.',
+    scope: {
+      allowedCommands: [
+        'metabot master list --online',
+        'metabot master ask --request-file master-request.json',
+        'metabot master ask --trace-id trace-master-123 --confirm',
+        'metabot master trace --id trace-master-123',
+      ],
+      chainRead: true,
+      chainWrite: true,
+      localUiOpen: false,
+      remoteDelegation: true,
+    },
+  },
   'metabot-network-directory': {
     skillName: 'metabot-network-directory',
     title: 'MetaBot Network Directory',
@@ -56,4 +77,3 @@ export function getBaseSkillContract(skillName: string): BaseSkillContract {
   }
   return cloneBaseSkillContract(contract);
 }
-

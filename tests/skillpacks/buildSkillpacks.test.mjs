@@ -13,6 +13,7 @@ const execFile = promisify(execFileCallback);
 
 const HOSTS = ['codex', 'claude-code', 'openclaw'];
 const EXPECTED_METABOT_SKILLS = [
+  'metabot-ask-master',
   'metabot-identity-manage',
   'metabot-network-manage',
   'metabot-call-remote-service',
@@ -77,7 +78,61 @@ test('buildAgentConnectSkillpacks renders the shared Open Agent Connect skills i
   }
 });
 
-test('buildAgentConnectSkillpacks host README lists only the 9 active metabot skills', async () => {
+test('buildAgentConnectSkillpacks includes the Ask Master skill with only master command semantics across all host packs', async () => {
+  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
+  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
+
+  await buildAgentConnectSkillpacks({
+    repoRoot: REPO_ROOT,
+    outputRoot,
+  });
+
+  for (const host of HOSTS) {
+    const content = await readFile(
+      path.join(outputRoot, host, 'skills', 'metabot-ask-master', 'SKILL.md'),
+      'utf8'
+    );
+    assert.match(content, /^name:\s*metabot-ask-master$/m);
+    assert.match(content, /metabot master list/);
+    assert.match(content, /metabot master ask --request-file/);
+    assert.match(content, /metabot master trace --id/);
+    assert.match(content, /Do not call `services call` directly/i);
+    assert.doesNotMatch(content, /metabot advisor (list|ask|trace)/);
+    assert.doesNotMatch(content, /type":\s*"advisor_request"/);
+  }
+});
+
+test('repository tracked Ask Master skillpack artifacts stay in sync with a fresh build', async () => {
+  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
+  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
+
+  await buildAgentConnectSkillpacks({
+    repoRoot: REPO_ROOT,
+    outputRoot,
+  });
+
+  for (const host of HOSTS) {
+    const freshReadme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
+    const trackedReadme = await readFile(path.join(REPO_ROOT, 'skillpacks', host, 'README.md'), 'utf8');
+    assert.equal(trackedReadme, freshReadme, `tracked ${host} README should match a fresh build`);
+
+    const freshInstall = await readFile(path.join(outputRoot, host, 'install.sh'), 'utf8');
+    const trackedInstall = await readFile(path.join(REPO_ROOT, 'skillpacks', host, 'install.sh'), 'utf8');
+    assert.equal(trackedInstall, freshInstall, `tracked ${host} install.sh should match a fresh build`);
+
+    const freshSkill = await readFile(
+      path.join(outputRoot, host, 'skills', 'metabot-ask-master', 'SKILL.md'),
+      'utf8'
+    );
+    const trackedSkill = await readFile(
+      path.join(REPO_ROOT, 'skillpacks', host, 'skills', 'metabot-ask-master', 'SKILL.md'),
+      'utf8'
+    );
+    assert.equal(trackedSkill, freshSkill, `tracked ${host} Ask Master skill should match a fresh build`);
+  }
+});
+
+test('buildAgentConnectSkillpacks host README lists the active metabot skills including Ask Master', async () => {
   const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
   const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
 
@@ -295,10 +350,15 @@ test('install.sh copies skills and installs only a runnable metabot shim from th
     },
   });
 
+  await assertFileExists(path.join(skillDest, 'metabot-ask-master', 'SKILL.md'));
   await assertFileExists(path.join(skillDest, 'metabot-network-manage', 'SKILL.md'));
   await assertFileMissing(path.join(skillDest, 'metabot-network-directory', 'SKILL.md'));
   await assertFileExists(path.join(binDir, 'metabot'));
   await assertFileMissing(path.join(binDir, 'agent-connect'));
+
+  const installedAskMaster = await readFile(path.join(skillDest, 'metabot-ask-master', 'SKILL.md'), 'utf8');
+  assert.match(installedAskMaster, /metabot master ask --request-file/);
+  assert.doesNotMatch(installedAskMaster, /metabot advisor ask/);
 
   let commandFailure = null;
   try {
