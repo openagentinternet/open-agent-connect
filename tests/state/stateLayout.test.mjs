@@ -16,6 +16,7 @@ test('resolveMetabotPaths splits hot state and exports under .metabot', () => {
     providerPresenceStatePath: '/tmp/home/.metabot/hot/provider-presence.json',
     ratingDetailStatePath: '/tmp/home/.metabot/hot/rating-detail.json',
     masterPendingAskStatePath: '/tmp/home/.metabot/hot/master-pending-asks.json',
+    masterSuggestStatePath: '/tmp/home/.metabot/hot/master-suggest-state.json',
     secretsPath: '/tmp/home/.metabot/hot/secrets.json',
     configPath: '/tmp/home/.metabot/hot/config.json',
     evolutionRoot: '/tmp/home/.metabot/evolution',
