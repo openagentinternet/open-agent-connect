@@ -226,5 +226,10 @@ test('prepareManualAskHostAction fails loudly when the named master is unavailab
       contextMode: 'standard',
       trustedMasters: [],
     },
-  }), /No eligible online Master matched the current host action/i);
+  }), (error) => {
+    assert.equal(error?.code, 'master_not_found');
+    assert.match(String(error?.message), /No eligible online Master matched the current host action/i);
+    assert.match(String(error?.message), /requested Master could not be found/i);
+    return true;
+  });
 });

@@ -76,6 +76,8 @@ import { createPublishedMasterStateStore } from '../core/master/masterPublishedS
 import { buildMasterAskPreview } from '../core/master/masterPreview';
 import { buildMasterTraceMetadata, buildMasterTraceView } from '../core/master/masterTrace';
 import { prepareManualAskHostAction } from '../core/master/masterHostAdapter';
+import { evaluateMasterPolicy } from '../core/master/masterPolicyGate';
+import { resolveMasterCandidate, selectMasterCandidate } from '../core/master/masterSelector';
 import { publishMasterToChain } from '../core/master/masterServicePublish';
 import { validateMasterServicePayload } from '../core/master/masterServiceSchema';
 import {
@@ -1290,31 +1292,43 @@ async function resolveExplicitMasterTarget(input: {
   localProviderOnline: boolean;
   localLastSeenSec: number | null;
   providerDaemonBaseUrl?: string | null;
-}): Promise<MasterDirectoryItem | null> {
+}): Promise<{
+  selectedMaster: MasterDirectoryItem | null;
+  failureCode: 'master_not_found' | 'master_offline' | 'master_host_mode_mismatch' | null;
+  failureMessage: string | null;
+}> {
   const servicePinId = normalizeText(input.draft.target.servicePinId);
   const providerGlobalMetaId = normalizeText(input.draft.target.providerGlobalMetaId);
   const masterKind = normalizeText(input.draft.target.masterKind);
   if (!servicePinId || !providerGlobalMetaId || !masterKind) {
-    return null;
+    return {
+      selectedMaster: null,
+      failureCode: null,
+      failureMessage: null,
+    };
   }
 
   const directory = await listRuntimeDirectoryMasters({
     masterStateStore: input.masterStateStore,
     hotRoot: input.hotRoot,
     chainApiBaseUrl: input.chainApiBaseUrl,
-    onlineOnly: input.onlineOnly === true,
-    host: normalizeText(input.host) || DEFAULT_MASTER_HOST_MODE,
-    masterKind,
+    onlineOnly: false,
+    host: '',
+    masterKind: undefined,
     localProviderOnline: input.localProviderOnline,
     localLastSeenSec: input.localLastSeenSec,
     providerDaemonBaseUrl: input.providerDaemonBaseUrl,
     providerGlobalMetaId: input.providerGlobalMetaId,
   });
 
-  return directory.masters.find((entry) => (
-    normalizeText(entry.masterPinId) === servicePinId
-    && normalizeText(entry.providerGlobalMetaId) === providerGlobalMetaId
-  )) ?? null;
+  return resolveMasterCandidate({
+    hostMode: normalizeText(input.host) || DEFAULT_MASTER_HOST_MODE,
+    preferredMasterPinId: servicePinId,
+    preferredProviderGlobalMetaId: providerGlobalMetaId,
+    preferredMasterKind: masterKind,
+    onlineOnly: input.onlineOnly === true,
+    candidates: directory.masters,
+  });
 }
 
 async function resolveSuggestedMasterTarget(input: {
@@ -1342,8 +1356,8 @@ async function resolveSuggestedMasterTarget(input: {
     localLastSeenSec: input.localLastSeenSec,
     providerDaemonBaseUrl: input.providerDaemonBaseUrl,
   });
-  if (explicit?.online) {
-    return explicit;
+  if (explicit.selectedMaster?.online) {
+    return explicit.selectedMaster;
   }
 
   const preferredMasterKind = normalizeText(input.preferredMasterKind) || normalizeText(input.draft.target.masterKind);
@@ -1366,16 +1380,27 @@ async function resolveSuggestedMasterTarget(input: {
       .filter(Boolean)
   );
 
-  return [...directory.masters].sort((left, right) => {
-    const leftTrusted = trustedMasterSet.has(normalizeText(left.masterPinId)) ? 1 : 0;
-    const rightTrusted = trustedMasterSet.has(normalizeText(right.masterPinId)) ? 1 : 0;
-    return (
-      rightTrusted - leftTrusted
-      || Number(right.official) - Number(left.official)
-      || Number(right.online) - Number(left.online)
-      || right.updatedAt - left.updatedAt
-    );
-  })[0] ?? null;
+  return selectMasterCandidate({
+    hostMode: normalizeText(input.host) || DEFAULT_MASTER_HOST_MODE,
+    preferredMasterKind,
+    trustedMasters: [...trustedMasterSet],
+    onlineOnly: true,
+    candidates: directory.masters,
+  });
+}
+
+function commandFailedForExplicitMasterSelection(input: {
+  selection: Awaited<ReturnType<typeof resolveExplicitMasterTarget>>;
+  notFoundMessage: string;
+}): MetabotCommandResult<never> {
+  const message = input.selection.failureMessage || input.notFoundMessage;
+  if (input.selection.failureCode === 'master_offline') {
+    return commandFailed('master_offline', message);
+  }
+  if (input.selection.failureCode === 'master_host_mode_mismatch') {
+    return commandFailed('master_host_mode_mismatch', message);
+  }
+  return commandFailed('master_target_not_found', message);
 }
 
 async function persistTraceRecord(
@@ -3105,8 +3130,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
         const identity = state.identity;
 
+        const request = readMasterHostActionRequest(rawInput);
+        const actionKind = normalizeText(request.action.kind);
         const config = await configStore.read();
-        if (!config.askMaster.enabled) {
+        if (!config.askMaster.enabled && actionKind !== 'reject_suggest') {
           return commandFailed('ask_master_disabled', 'Ask Master is disabled in the local config.');
         }
 
@@ -3116,8 +3143,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
           ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
           : null;
-        const request = readMasterHostActionRequest(rawInput);
-        const actionKind = normalizeText(request.action.kind);
         const hostContext = readObject(request.context) ?? {};
         const hostMode = normalizeText(hostContext.hostMode) || DEFAULT_MASTER_HOST_MODE;
         if (actionKind === 'accept_suggest') {
@@ -3160,16 +3185,29 @@ export function createDefaultMetabotDaemonHandlers(input: {
             providerDaemonBaseUrl: daemon?.baseUrl || null,
             providerGlobalMetaId: identity.globalMetaId,
           });
-          if (!resolvedTarget) {
+          if (!resolvedTarget.selectedMaster) {
+            return commandFailedForExplicitMasterSelection({
+              selection: resolvedTarget,
+              notFoundMessage: 'Suggested Master is no longer available for preview.',
+            });
+          }
+          const policy = evaluateMasterPolicy({
+            config: config.askMaster,
+            action: 'accept_suggest',
+            selectedMaster: resolvedTarget.selectedMaster,
+          });
+          if (!policy.allowed) {
             return commandFailed(
-              'master_target_not_found',
-              'Suggested Master is no longer available for preview.'
+              policy.blockedReason === 'Ask Master is disabled by local config.'
+                ? 'ask_master_disabled'
+                : 'master_target_not_found',
+              policy.blockedReason || 'Ask Master policy blocked the accepted suggestion.'
             );
           }
 
           const previewResult = await createMasterAskPreviewResult({
             draft: previewDraft,
-            resolvedTarget,
+            resolvedTarget: resolvedTarget.selectedMaster,
             state,
             config,
             runtimeStateStore,
@@ -3345,16 +3383,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
             context: request.context,
             masters: eligibleMasters,
             config: {
+              enabled: config.askMaster.enabled,
+              triggerMode: config.askMaster.triggerMode,
+              confirmationMode: config.askMaster.confirmationMode,
               contextMode: config.askMaster.contextMode,
               trustedMasters: config.askMaster.trustedMasters,
             },
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
+          const errorCode = error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string'
+            ? (error as { code: string }).code
+            : null;
           return commandFailed(
-            message.includes('No eligible online Master')
-              ? 'master_target_not_found'
-              : 'invalid_master_host_action',
+            errorCode
+              || (message.includes('No eligible online Master')
+                ? 'master_target_not_found'
+                : 'invalid_master_host_action'),
             message
           );
         }
@@ -3485,9 +3530,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
             providerDaemonBaseUrl: daemon?.baseUrl || null,
             providerGlobalMetaId: state.identity.globalMetaId,
           });
-          if (!resolvedTarget) {
-            return commandFailed('master_target_not_found', 'Target Master is no longer available for confirmation.');
+          if (!resolvedTarget.selectedMaster) {
+            return commandFailedForExplicitMasterSelection({
+              selection: resolvedTarget,
+              notFoundMessage: 'Target Master is no longer available for confirmation.',
+            });
           }
+          const selectedTarget = resolvedTarget.selectedMaster;
 
           let privateChatIdentity;
           try {
@@ -3499,9 +3548,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
             );
           }
 
-          const peerChatPublicKey = resolvedTarget.providerGlobalMetaId === state.identity.globalMetaId
+          const peerChatPublicKey = selectedTarget.providerGlobalMetaId === state.identity.globalMetaId
             ? state.identity.chatPublicKey
-            : await resolvePeerChatPublicKey(resolvedTarget.providerGlobalMetaId) ?? '';
+            : await resolvePeerChatPublicKey(selectedTarget.providerGlobalMetaId) ?? '';
           if (!peerChatPublicKey) {
             return commandFailed(
               'peer_chat_public_key_missing',
@@ -3516,7 +3565,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 globalMetaId: privateChatIdentity.globalMetaId,
                 privateKeyHex: privateChatIdentity.privateKeyHex,
               },
-              toGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+              toGlobalMetaId: selectedTarget.providerGlobalMetaId,
               peerChatPublicKey,
               content: pendingAsk.requestJson,
             });
@@ -3569,9 +3618,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
                     taskRunState: null,
                     callerGlobalMetaId: state.identity.globalMetaId,
                     callerName: state.identity.name,
-                    providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
-                    providerName: resolvedTarget.displayName,
-                    servicePinId: resolvedTarget.masterPinId,
+                    providerGlobalMetaId: selectedTarget.providerGlobalMetaId,
+                    providerName: selectedTarget.displayName,
+                    servicePinId: selectedTarget.masterPinId,
                   }),
                   publicStatus: 'requesting_remote',
                   latestEvent: 'request_sent',
@@ -3582,10 +3631,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   latestEvent: 'request_sent',
                   publicStatus: 'requesting_remote',
                   requestId: pendingAsk.requestId,
-                  masterKind: resolvedTarget.masterKind,
-                  servicePinId: resolvedTarget.masterPinId,
-                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
-                  displayName: resolvedTarget.displayName,
+                  masterKind: selectedTarget.masterKind,
+                  servicePinId: selectedTarget.masterPinId,
+                  providerGlobalMetaId: selectedTarget.providerGlobalMetaId,
+                  displayName: selectedTarget.displayName,
                   triggerMode: currentTrace.askMaster?.triggerMode ?? normalizeText(pendingAsk.request.trigger.mode),
                   contextMode: currentTrace.askMaster?.contextMode
                     ?? normalizeText(pendingAsk.request.extensions?.contextMode),
@@ -3604,12 +3653,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 exportRoot: runtimeStateStore.paths.exportRoot,
                 session: {
                   id: `master-${traceId}`,
-                  title: `${resolvedTarget.displayName} Ask`,
+                  title: `${selectedTarget.displayName} Ask`,
                   type: 'a2a',
                   metabotId: state.identity.metabotId,
-                  peerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
-                  peerName: resolvedTarget.displayName,
-                  externalConversationId: `master:${state.identity.globalMetaId}:${resolvedTarget.providerGlobalMetaId}:${traceId}`,
+                  peerGlobalMetaId: selectedTarget.providerGlobalMetaId,
+                  peerName: selectedTarget.displayName,
+                  externalConversationId: `master:${state.identity.globalMetaId}:${selectedTarget.providerGlobalMetaId}:${traceId}`,
                 },
                 a2a: {
                   role: 'caller',
@@ -3618,19 +3667,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   taskRunState: 'running',
                   callerGlobalMetaId: state.identity.globalMetaId,
                   callerName: state.identity.name,
-                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
-                  providerName: resolvedTarget.displayName,
-                  servicePinId: resolvedTarget.masterPinId,
+                  providerGlobalMetaId: selectedTarget.providerGlobalMetaId,
+                  providerName: selectedTarget.displayName,
+                  servicePinId: selectedTarget.masterPinId,
                 },
                 askMaster: buildMasterTraceMetadata({
                   role: 'caller',
                   latestEvent: 'request_sent',
                   publicStatus: 'requesting_remote',
                   requestId: pendingAsk.requestId,
-                  masterKind: resolvedTarget.masterKind,
-                  servicePinId: resolvedTarget.masterPinId,
-                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
-                  displayName: resolvedTarget.displayName,
+                  masterKind: selectedTarget.masterKind,
+                  servicePinId: selectedTarget.masterPinId,
+                  providerGlobalMetaId: selectedTarget.providerGlobalMetaId,
+                  displayName: selectedTarget.displayName,
                   triggerMode: normalizeText(pendingAsk.request.trigger.mode),
                   contextMode: normalizeText(pendingAsk.request.extensions?.contextMode),
                   confirmationMode: config.askMaster.confirmationMode,
@@ -3658,7 +3707,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   id: `${traceId}-preview`,
                   type: 'assistant',
                   timestamp: updatedTrace.createdAt,
-                  content: `Preview prepared for ${normalizeText(pendingAsk.target.displayName) || resolvedTarget.displayName}.`,
+                  content: `Preview prepared for ${normalizeText(pendingAsk.target.displayName) || selectedTarget.displayName}.`,
                   metadata: {
                     confirmCommand,
                   },
@@ -3667,7 +3716,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   id: `${traceId}-sent`,
                   type: 'assistant',
                   timestamp: Date.now(),
-                  content: `Ask Master request sent to ${resolvedTarget.displayName} over simplemsg.`,
+                  content: `Ask Master request sent to ${selectedTarget.displayName} over simplemsg.`,
                   metadata: {
                     messagePinId: messagePinId || null,
                     path: outboundRequest.path,
@@ -3698,9 +3747,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
             const reply = await masterReplyWaiter.awaitMasterReply({
               callerGlobalMetaId: privateChatIdentity.globalMetaId,
               callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
-              providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+              providerGlobalMetaId: selectedTarget.providerGlobalMetaId,
               providerChatPublicKey: peerChatPublicKey,
-              masterServicePinId: resolvedTarget.masterPinId,
+              masterServicePinId: selectedTarget.masterPinId,
               requestId: pendingAsk.requestId,
               traceId,
               timeoutMs: DEFAULT_CALLER_FOREGROUND_WAIT_MS,
@@ -3746,9 +3795,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 waiterInput: {
                   callerGlobalMetaId: privateChatIdentity.globalMetaId,
                   callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
-                  providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
-                  providerChatPublicKey: peerChatPublicKey,
-                  masterServicePinId: resolvedTarget.masterPinId,
+                    providerGlobalMetaId: selectedTarget.providerGlobalMetaId,
+                    providerChatPublicKey: peerChatPublicKey,
+                    masterServicePinId: selectedTarget.masterPinId,
                   requestId: pendingAsk.requestId,
                   traceId,
                   timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
@@ -3784,13 +3833,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
           providerDaemonBaseUrl: daemon?.baseUrl || null,
           providerGlobalMetaId: state.identity.globalMetaId,
         });
-        if (!resolvedTarget) {
-          return commandFailed('master_target_not_found', 'Target Master could not be resolved from the local directory.');
+        if (!resolvedTarget.selectedMaster) {
+          return commandFailedForExplicitMasterSelection({
+            selection: resolvedTarget,
+            notFoundMessage: 'Target Master could not be resolved from the local directory.',
+          });
         }
+        const selectedTarget = resolvedTarget.selectedMaster;
 
         const previewResult = await createMasterAskPreviewResult({
           draft,
-          resolvedTarget,
+          resolvedTarget: selectedTarget,
           state,
           config,
           runtimeStateStore,
@@ -3811,10 +3864,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
               },
               directory: {
                 availableMasters: 1,
-                trustedMasters: config.askMaster.trustedMasters.includes(resolvedTarget.masterPinId) ? 1 : 0,
-                onlineMasters: resolvedTarget.online ? 1 : 0,
+                trustedMasters: config.askMaster.trustedMasters.includes(selectedTarget.masterPinId) ? 1 : 0,
+                onlineMasters: selectedTarget.online ? 1 : 0,
               },
-              candidateMasterKindHint: resolvedTarget.masterKind,
+              candidateMasterKindHint: selectedTarget.masterKind,
             },
             decision: {
               action: 'manual_requested',
@@ -3861,13 +3914,30 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         if (trigger.decision.action === 'no_action') {
+          const blocked = trigger.decision.reason === 'Ask Master is disabled by local config.'
+            ? {
+                code: 'ask_master_disabled',
+                message: trigger.decision.reason,
+              }
+            : trigger.decision.reason === 'Ask Master trigger mode is manual.'
+              ? {
+                  code: 'trigger_mode_disallows_suggest',
+                  message: trigger.decision.reason,
+                }
+              : null;
           return commandSuccess({
             collected: trigger.collected,
             decision: trigger.decision,
+            blocked,
           });
         }
 
         if (trigger.decision.action === 'manual_requested' || trigger.decision.action === 'auto_candidate') {
+          const policy = evaluateMasterPolicy({
+            config: config.askMaster,
+            action: trigger.decision.action,
+            selectedMaster: null,
+          });
           if (trigger.observation) {
             masterTriggerMemoryState = recordMasterTriggerOutcome({
               state: masterTriggerMemoryState,
@@ -3877,7 +3947,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }
           return commandSuccess({
             collected: trigger.collected,
-            decision: trigger.decision,
+            decision: policy.allowed
+              ? trigger.decision
+              : {
+                  action: 'no_action',
+                  reason: policy.blockedReason || trigger.decision.reason,
+                },
+            blocked: !policy.allowed
+              ? {
+                  code: policy.code,
+                  message: policy.blockedReason || trigger.decision.reason,
+                }
+              : null,
           });
         }
 
@@ -3902,6 +3983,28 @@ export function createDefaultMetabotDaemonHandlers(input: {
             decision: {
               action: 'no_action',
               reason: 'No matching online Master could be resolved for this suggestion.',
+            },
+            blocked: {
+              code: 'master_not_found',
+              message: 'No matching online Master could be resolved for this suggestion.',
+            },
+          });
+        }
+        const policy = evaluateMasterPolicy({
+          config: config.askMaster,
+          action: 'suggest',
+          selectedMaster: resolvedTarget,
+        });
+        if (!policy.allowed) {
+          return commandSuccess({
+            collected: trigger.collected,
+            decision: {
+              action: 'no_action',
+              reason: policy.blockedReason || 'Ask Master policy blocked this suggestion.',
+            },
+            blocked: {
+              code: policy.code,
+              message: policy.blockedReason || 'Ask Master policy blocked this suggestion.',
             },
           });
         }

@@ -366,3 +366,144 @@ test('master ask sends immediately when confirmationMode is never', async (t) =>
   assert.equal(result.data.session.publicStatus, 'requesting_remote');
   assert.equal(writes.length, 1);
 });
+
+test('master ask does not resolve a target from providerDaemonBaseUrl alone without a complete explicit target', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-ask-direct-provider-hint-'));
+  t.after(async () => {
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  const identityPair = createIdentityPair();
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+  const masterStateStore = createPublishedMasterStateStore(homeDir);
+  await runtimeStateStore.writeState({
+    identity: createIdentity(identityPair.publicKeyHex),
+    services: [],
+    traces: [],
+  });
+  await masterStateStore.write({
+    masters: [
+      {
+        id: 'master-pin-1',
+        sourceMasterPinId: 'master-pin-1',
+        currentPinId: 'master-pin-1',
+        creatorMetabotId: 1,
+        providerGlobalMetaId: 'idq1alice',
+        providerAddress: 'mvc-address',
+        serviceName: 'official-debug-master',
+        displayName: 'Official Debug Master',
+        description: 'Structured debugging help.',
+        masterKind: 'debug',
+        specialties: ['debugging'],
+        hostModes: ['codex'],
+        modelInfoJson: JSON.stringify({ provider: 'metaweb', model: 'official-debug-master-v1' }),
+        style: 'direct_and_structured',
+        pricingMode: 'free',
+        price: '0',
+        currency: 'MVC',
+        responseMode: 'structured',
+        contextPolicy: 'standard',
+        official: 1,
+        trustedTier: 'official',
+        payloadJson: '{}',
+        available: 1,
+        revokedAt: null,
+        updatedAt: 1_776_000_000_000,
+      },
+    ],
+  });
+
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.master.ask({
+    providerDaemonBaseUrl: 'http://127.0.0.1:27333',
+    target: {
+      displayName: 'Official Debug Master',
+    },
+    triggerMode: 'manual',
+    contextMode: 'standard',
+    userTask: 'Verify direct provider hint contract.',
+    question: 'Can providerDaemonBaseUrl alone resolve a master target?',
+    workspaceSummary: 'Caller-side integration test.',
+    relevantFiles: ['tests/master/masterAskFlow.test.mjs'],
+    artifacts: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'master_target_not_found');
+});
+
+test('master ask reports master_host_mode_mismatch when the explicit target exists but does not support the current host', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-ask-host-mismatch-'));
+  t.after(async () => {
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  const identityPair = createIdentityPair();
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+  const masterStateStore = createPublishedMasterStateStore(homeDir);
+  await runtimeStateStore.writeState({
+    identity: createIdentity(identityPair.publicKeyHex),
+    services: [],
+    traces: [],
+  });
+  await masterStateStore.write({
+    masters: [
+      {
+        id: 'master-pin-1',
+        sourceMasterPinId: 'master-pin-1',
+        currentPinId: 'master-pin-1',
+        creatorMetabotId: 1,
+        providerGlobalMetaId: 'idq1alice',
+        providerAddress: 'mvc-address',
+        serviceName: 'official-debug-master',
+        displayName: 'Official Debug Master',
+        description: 'Structured debugging help.',
+        masterKind: 'debug',
+        specialties: ['debugging'],
+        hostModes: ['claude'],
+        modelInfoJson: JSON.stringify({ provider: 'metaweb', model: 'official-debug-master-v1' }),
+        style: 'direct_and_structured',
+        pricingMode: 'free',
+        price: '0',
+        currency: 'MVC',
+        responseMode: 'structured',
+        contextPolicy: 'standard',
+        official: 1,
+        trustedTier: 'official',
+        payloadJson: '{}',
+        available: 1,
+        revokedAt: null,
+        updatedAt: 1_776_000_000_000,
+      },
+    ],
+  });
+
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.master.ask({
+    target: {
+      servicePinId: 'master-pin-1',
+      providerGlobalMetaId: 'idq1alice',
+      masterKind: 'debug',
+      displayName: 'Official Debug Master',
+    },
+    triggerMode: 'manual',
+    contextMode: 'standard',
+    userTask: 'Verify explicit target host mode mismatch semantics.',
+    question: 'Does Ask Master report host mismatch when the target only supports another host mode?',
+    workspaceSummary: 'Caller-side integration test.',
+    relevantFiles: ['tests/master/masterAskFlow.test.mjs'],
+    artifacts: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'master_host_mode_mismatch');
+  assert.match(result.message, /host mode/i);
+});

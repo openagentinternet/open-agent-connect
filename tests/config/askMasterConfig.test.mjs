@@ -61,3 +61,28 @@ test('read merges askMaster defaults when fields are missing or malformed', asyn
     });
   });
 });
+
+test('read preserves valid askMaster policy enums', async () => {
+  await withTempHome(async () => {
+    const store = createConfigStore();
+    await store.ensureLayout();
+    await fs.writeFile(store.paths.configPath, `${JSON.stringify({
+      askMaster: {
+        enabled: true,
+        triggerMode: 'auto',
+        confirmationMode: 'sensitive_only',
+        contextMode: 'full_task',
+        trustedMasters: ['master-pin-1'],
+      },
+    }, null, 2)}\n`, 'utf8');
+
+    const config = await store.read();
+    assert.deepEqual(config.askMaster, {
+      enabled: true,
+      triggerMode: 'auto',
+      confirmationMode: 'sensitive_only',
+      contextMode: 'full_task',
+      trustedMasters: ['master-pin-1'],
+    });
+  });
+});

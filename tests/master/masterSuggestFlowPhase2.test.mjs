@@ -103,6 +103,7 @@ async function createSuggestHarness(options = {}) {
   return {
     homeDir,
     masterStateStore,
+    configStore,
     providerPresenceStore,
     handlers: createDefaultMetabotDaemonHandlers({
       homeDir,
@@ -336,7 +337,8 @@ test('accept_suggest fails once the suggested master is offline and the suggesti
   });
 
   assert.equal(acceptResult.ok, false);
-  assert.equal(acceptResult.code, 'master_target_not_found');
+  assert.equal(acceptResult.code, 'master_offline');
+  assert.match(acceptResult.message, /offline/i);
 });
 
 test('master suggest does not surface a suggestion when no online matching master can be resolved', async (t) => {
@@ -406,4 +408,135 @@ test('master suggest resolves the target using the current host mode instead of 
   assert.equal(result.ok, true);
   assert.equal(result.state, 'success');
   assert.equal(result.data.suggestion.candidateDisplayName, 'Claude Debug Master');
+});
+
+test('master suggest reports trigger_mode_disallows_suggest when runtime config is manual', async (t) => {
+  const harness = await createSuggestHarness({
+    askMasterConfig: {
+      triggerMode: 'manual',
+    },
+  });
+  t.after(async () => {
+    await rm(harness.homeDir, { recursive: true, force: true });
+  });
+
+  const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-manual-mode'));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'success');
+  assert.deepEqual(result.data.decision, {
+    action: 'no_action',
+    reason: 'Ask Master trigger mode is manual.',
+  });
+  assert.deepEqual(result.data.blocked, {
+    code: 'trigger_mode_disallows_suggest',
+    message: 'Ask Master trigger mode is manual.',
+  });
+});
+
+test('manual hostAction reports ask_master_disabled when Ask Master is disabled in config', async (t) => {
+  const harness = await createSuggestHarness({
+    askMasterConfig: {
+      enabled: false,
+    },
+  });
+  t.after(async () => {
+    await rm(harness.homeDir, { recursive: true, force: true });
+  });
+
+  const result = await harness.handlers.master.hostAction({
+    action: {
+      kind: 'manual_ask',
+      utterance: 'Please ask Debug Master about this bug.',
+    },
+    context: {
+      hostMode: 'codex',
+      traceId: 'trace-master-host-action-disabled',
+      conversation: {
+        currentUserRequest: 'Please ask Debug Master about this bug.',
+        recentMessages: [
+          { role: 'user', content: 'The confirmation preview never moves to a response.' },
+        ],
+      },
+      tools: {
+        recentToolResults: [],
+      },
+      workspace: {
+        goal: 'Diagnose the blocked Ask Master runtime.',
+        constraints: ['Keep context minimal.'],
+        relevantFiles: ['src/daemon/defaultHandlers.ts'],
+        diffSummary: 'Testing disabled policy handling.',
+        fileExcerpts: [],
+      },
+      planner: {
+        hasPlan: true,
+        todoBlocked: true,
+        onlyReadingWithoutConverging: false,
+      },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'ask_master_disabled');
+});
+
+test('reject_suggest still succeeds after Ask Master is disabled locally', async (t) => {
+  const harness = await createSuggestHarness();
+  t.after(async () => {
+    await rm(harness.homeDir, { recursive: true, force: true });
+  });
+
+  const suggestion = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-reject-disabled'));
+  assert.equal(suggestion.ok, true);
+
+  await harness.configStore.set({
+    evolution_network: {
+      enabled: true,
+      autoAdoptSameSkillSameScope: false,
+      autoRecordExecutions: true,
+    },
+    askMaster: {
+      enabled: false,
+      triggerMode: 'suggest',
+      confirmationMode: 'always',
+      contextMode: 'standard',
+      trustedMasters: [],
+    },
+  });
+
+  const rejectResult = await harness.handlers.master.hostAction({
+    action: {
+      kind: 'reject_suggest',
+      traceId: suggestion.data.suggestion.traceId,
+      suggestionId: suggestion.data.suggestion.suggestionId,
+      reason: 'Disable flow and dismiss this suggestion.',
+    },
+  });
+
+  assert.equal(rejectResult.ok, true);
+  assert.equal(rejectResult.data.hostAction, 'reject_suggest');
+});
+
+test('master suggest exposes the phase-2 auto-mode blocked reason when triggerMode is auto', async (t) => {
+  const harness = await createSuggestHarness({
+    askMasterConfig: {
+      triggerMode: 'auto',
+    },
+  });
+  t.after(async () => {
+    await rm(harness.homeDir, { recursive: true, force: true });
+  });
+
+  const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-auto-mode'));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'success');
+  assert.deepEqual(result.data.decision, {
+    action: 'no_action',
+    reason: 'Auto Ask Master is not exposed in the phase-2 host flow.',
+  });
+  assert.deepEqual(result.data.blocked, {
+    code: null,
+    message: 'Auto Ask Master is not exposed in the phase-2 host flow.',
+  });
 });

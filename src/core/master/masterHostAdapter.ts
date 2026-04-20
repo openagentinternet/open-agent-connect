@@ -6,6 +6,8 @@ import type {
   MasterContextCollectionInput,
   PackagedMasterAskDraft,
 } from './masterContextTypes';
+import { evaluateMasterPolicy } from './masterPolicyGate';
+import { resolveMasterCandidate, selectMasterCandidate } from './masterSelector';
 import type { MasterDirectoryItem } from './masterTypes';
 
 export interface ManualAskHostAction {
@@ -50,33 +52,8 @@ function normalizeManualAskAction(action: ManualAskHostAction | Record<string, u
   };
 }
 
-function normalizeStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-  for (const entry of value) {
-    const text = normalizeText(entry);
-    if (!text || seen.has(text)) {
-      continue;
-    }
-    seen.add(text);
-    normalized.push(text);
-  }
-  return normalized;
-}
-
 function mentionsDebugMaster(value: string): boolean {
   return /\bdebug master\b/i.test(value);
-}
-
-function normalizeComparableText(value: unknown): string {
-  return normalizeText(value)
-    .toLowerCase()
-    .replace(/[-_]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function isManualAskCommand(value: string): boolean {
@@ -138,52 +115,6 @@ function derivePreferredMasterKind(action: ManualAskHostAction): string | null {
   return null;
 }
 
-function matchesPreferredMasterName(entry: MasterDirectoryItem, preferredMasterName: string | null): boolean {
-  const preferredName = normalizeComparableText(preferredMasterName);
-  if (!preferredName) {
-    return false;
-  }
-  const displayName = normalizeComparableText(entry.displayName);
-  const serviceName = normalizeComparableText(entry.serviceName);
-  return displayName === preferredName
-    || serviceName === preferredName
-    || displayName.includes(preferredName)
-    || serviceName.includes(preferredName);
-}
-
-function matchesPreferredMasterKind(entry: MasterDirectoryItem, preferredMasterKind: string | null): boolean {
-  const preferredKind = normalizeComparableText(preferredMasterKind);
-  if (!preferredKind) {
-    return false;
-  }
-  return normalizeComparableText(entry.masterKind) === preferredKind;
-}
-
-function scoreManualAskTarget(input: {
-  entry: MasterDirectoryItem;
-  preferredMasterName: string | null;
-  preferredMasterKind: string | null;
-  trustedMasterPins: Set<string>;
-}): [number, number, number, number, number, number] {
-  const displayName = normalizeComparableText(input.entry.displayName);
-  const serviceName = normalizeComparableText(input.entry.serviceName);
-  const preferredName = normalizeComparableText(input.preferredMasterName);
-  const preferredKind = normalizeComparableText(input.preferredMasterKind);
-  const exactNameMatch = preferredName
-    ? Number(displayName === preferredName || serviceName === preferredName)
-    : 0;
-  const partialNameMatch = preferredName
-    ? Number(displayName.includes(preferredName) || serviceName.includes(preferredName))
-    : 0;
-  const kindMatch = preferredKind
-    ? Number(normalizeComparableText(input.entry.masterKind) === preferredKind)
-    : 0;
-  const trusted = Number(input.trustedMasterPins.has(normalizeText(input.entry.masterPinId)));
-  const official = Number(input.entry.official === true);
-  const updatedAt = Number.isFinite(input.entry.updatedAt) ? Math.trunc(input.entry.updatedAt) : 0;
-  return [exactNameMatch, partialNameMatch, kindMatch, trusted, official, updatedAt];
-}
-
 function extractFallbackTaskText(input: {
   utterance: string;
   context: MasterContextCollectionInput | Record<string, unknown>;
@@ -219,74 +150,77 @@ function extractFallbackTaskText(input: {
 export function selectMasterForManualAsk(input: {
   action: ManualAskHostAction | Record<string, unknown>;
   masters: MasterDirectoryItem[];
+  hostMode?: string | null;
   trustedMasters?: string[];
 }): MasterDirectoryItem | null {
   const action = normalizeManualAskAction(input.action);
   const preferredMasterName = derivePreferredMasterName(action);
   const preferredMasterKind = derivePreferredMasterKind(action);
-  const trustedMasterPins = new Set(normalizeStringArray(input.trustedMasters));
-  const candidates = input.masters.filter((entry) => entry.available !== false && entry.online !== false);
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  const nameMatchedCandidates = preferredMasterName
-    ? candidates.filter((entry) => matchesPreferredMasterName(entry, preferredMasterName))
-    : candidates;
-  if (preferredMasterName && nameMatchedCandidates.length === 0) {
-    return null;
-  }
-
-  const kindMatchedCandidates = preferredMasterKind
-    ? nameMatchedCandidates.filter((entry) => matchesPreferredMasterKind(entry, preferredMasterKind))
-    : nameMatchedCandidates;
-  if (preferredMasterKind && kindMatchedCandidates.length === 0) {
-    return null;
-  }
-
-  return [...kindMatchedCandidates].sort((left, right) => {
-    const leftScore = scoreManualAskTarget({
-      entry: left,
-      preferredMasterName,
-      preferredMasterKind,
-      trustedMasterPins,
-    });
-    const rightScore = scoreManualAskTarget({
-      entry: right,
-      preferredMasterName,
-      preferredMasterKind,
-      trustedMasterPins,
-    });
-    for (let index = 0; index < leftScore.length; index += 1) {
-      if (rightScore[index] !== leftScore[index]) {
-        return rightScore[index] - leftScore[index];
-      }
-    }
-    return 0;
-  })[0] ?? null;
+  return selectMasterCandidate({
+    hostMode: normalizeText(input.hostMode) || 'unknown',
+    preferredDisplayName: preferredMasterName,
+    preferredMasterKind,
+    trustedMasters: input.trustedMasters,
+    onlineOnly: true,
+    candidates: input.masters,
+  });
 }
 
 export function prepareManualAskHostAction(input: {
   action: ManualAskHostAction | Record<string, unknown>;
   context: MasterContextCollectionInput | Record<string, unknown>;
   masters: MasterDirectoryItem[];
-  config: Pick<AskMasterConfig, 'contextMode' | 'trustedMasters'>;
+  config: Pick<AskMasterConfig, 'contextMode' | 'trustedMasters'>
+    & Partial<Pick<AskMasterConfig, 'enabled' | 'triggerMode' | 'confirmationMode'>>;
 }): PreparedManualAskHostAction {
   const action = normalizeManualAskAction(input.action);
   if (!action.utterance) {
     throw new Error('Manual Ask Master host action requires a non-empty utterance.');
   }
 
-  const selectedTarget = selectMasterForManualAsk({
+  const collected = collectMasterContext(input.context);
+  const preferredMasterName = derivePreferredMasterName(action);
+  const preferredMasterKind = derivePreferredMasterKind(action);
+  const selection = resolveMasterCandidate({
+    hostMode: collected.hostMode,
+    preferredDisplayName: preferredMasterName,
+    preferredMasterKind,
+    trustedMasters: input.config.trustedMasters,
+    onlineOnly: true,
+    candidates: input.masters,
+  });
+  const selectedTarget = selection.selectedMaster ?? selectMasterForManualAsk({
     action,
     masters: input.masters,
+    hostMode: collected.hostMode,
     trustedMasters: input.config.trustedMasters,
   });
+  const policy = evaluateMasterPolicy({
+    config: input.config,
+    action: 'manual_ask',
+    selectedMaster: selectedTarget,
+  });
+  if (!policy.allowed && policy.code) {
+    const error = new Error(policy.blockedReason || 'Ask Master policy blocked the current host action.');
+    (error as Error & { code?: string }).code = policy.code || undefined;
+    throw error;
+  }
   if (!selectedTarget) {
-    throw new Error('No eligible online Master matched the current host action.');
+    const failureDetail = normalizeText(selection.failureMessage);
+    const error = new Error(
+      failureDetail
+        ? `No eligible online Master matched the current host action. ${failureDetail}`
+        : 'No eligible online Master matched the current host action.'
+    );
+    (error as Error & { code?: string }).code = selection.failureCode || 'master_not_found';
+    throw error;
+  }
+  if (!policy.allowed) {
+    const error = new Error(policy.blockedReason || 'Ask Master policy blocked the current host action.');
+    (error as Error & { code?: string }).code = policy.code || undefined;
+    throw error;
   }
 
-  const collected = collectMasterContext(input.context);
   const fallbackTaskText = extractFallbackTaskText({
     utterance: action.utterance,
     context: input.context,
@@ -303,7 +237,7 @@ export function prepareManualAskHostAction(input: {
       displayName: selectedTarget.displayName,
     },
     triggerMode: 'manual',
-    contextMode: input.config.contextMode,
+    contextMode: policy.contextMode,
     explicitUserTask: explicitTaskText,
     explicitQuestion: explicitTaskText,
   });

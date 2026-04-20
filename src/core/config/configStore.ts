@@ -3,7 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
-import { createDefaultConfig, type MetabotConfig } from './configTypes';
+import {
+  createDefaultConfig,
+  isAskMasterConfirmationMode,
+  isAskMasterContextMode,
+  isAskMasterTriggerMode,
+  type MetabotConfig,
+} from './configTypes';
 
 async function ensureLayout(paths: MetabotPaths): Promise<void> {
   await fs.mkdir(path.dirname(paths.configPath), { recursive: true });
@@ -83,13 +89,13 @@ function normalizeConfig(input: unknown): MetabotConfig {
     },
     askMaster: {
       enabled: normalizeBoolean(askMasterSource.enabled, defaults.askMaster.enabled),
-      triggerMode: triggerMode === 'manual' || triggerMode === 'suggest' || triggerMode === 'auto'
+      triggerMode: isAskMasterTriggerMode(triggerMode)
         ? triggerMode
         : defaults.askMaster.triggerMode,
-      confirmationMode: confirmationMode === 'always' || confirmationMode === 'sensitive_only' || confirmationMode === 'never'
+      confirmationMode: isAskMasterConfirmationMode(confirmationMode)
         ? confirmationMode
         : defaults.askMaster.confirmationMode,
-      contextMode: contextMode === 'compact' || contextMode === 'standard' || contextMode === 'full_task'
+      contextMode: isAskMasterContextMode(contextMode)
         ? contextMode
         : defaults.askMaster.contextMode,
       trustedMasters: normalizeStringArray(askMasterSource.trustedMasters),
