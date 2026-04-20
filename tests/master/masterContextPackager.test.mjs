@@ -330,5 +330,46 @@ test('packageMasterContextForAsk emits a preview-ready standard draft with safet
   assert.equal(preview.preview.context.artifacts.length, 8);
   assert.equal(preview.preview.safety.noImplicitRepoUpload, true);
   assert.equal(preview.preview.safety.noImplicitSecrets, true);
+  assert.deepEqual(preview.preview.safety.sensitivity, {
+    isSensitive: false,
+    reasons: [],
+  });
   assert.equal(preview.preview.request.trigger.mode, 'suggest');
+});
+
+test('buildMasterAskPreview exposes a conservative safety summary for auto-flow gating', () => {
+  const draft = packageMasterContextForAsk({
+    collected: {
+      ...createCollectedContext(),
+      taskSummary: 'Diagnose why the token recovery path is stuck.',
+      questionCandidate: 'What is the next best fix for the current token fallback issue?',
+      artifacts: [
+        {
+          kind: 'text',
+          label: 'token_context',
+          content: 'The current payload still discusses token handling and secret rotation.',
+          source: 'chat',
+          path: null,
+        },
+      ],
+    },
+    triggerMode: 'auto',
+    contextMode: 'standard',
+  });
+
+  const preview = buildMasterAskPreview({
+    draft,
+    resolvedTarget: createResolvedTarget(),
+    caller: {
+      globalMetaId: 'idq1caller',
+      name: 'Caller Bot',
+      host: 'codex',
+    },
+    traceId: 'trace-master-context-preview-safety',
+    requestId: 'request-master-context-preview-safety',
+    confirmationMode: 'sensitive_only',
+  });
+
+  assert.equal(preview.preview.safety.sensitivity.isSensitive, true);
+  assert.match(preview.preview.safety.sensitivity.reasons.join(' '), /sensitive auth material/i);
 });

@@ -75,6 +75,7 @@ import { createPendingMasterAskStateStore, type PendingMasterAskRecord } from '.
 import { createPublishedMasterStateStore } from '../core/master/masterPublishedState';
 import { buildMasterAskPreview } from '../core/master/masterPreview';
 import { buildMasterTraceMetadata, buildMasterTraceView } from '../core/master/masterTrace';
+import { prepareAutoMasterAskPlan } from '../core/master/masterAutoOrchestrator';
 import { prepareManualAskHostAction } from '../core/master/masterHostAdapter';
 import {
   buildTriggerObservationFromHostContext,
@@ -1635,6 +1636,7 @@ async function createMasterAskPreviewResult(input: {
   triggerModeOverride?: string | null;
   callerHostOverride?: string | null;
   traceIdOverride?: string | null;
+  requiresConfirmationOverride?: boolean | null;
   sendPreparedRequest?: (input: {
     traceId: string;
     pendingAsk: PendingMasterAskRecord;
@@ -1674,6 +1676,7 @@ async function createMasterAskPreviewResult(input: {
       traceId,
       requestId,
       confirmationMode: input.config.askMaster.confirmationMode,
+      requiresConfirmationOverride: input.requiresConfirmationOverride,
     });
   } catch (error) {
     return commandFailed(
@@ -1693,18 +1696,6 @@ async function createMasterAskPreviewResult(input: {
     target: prepared.preview.target,
     preview: prepared.preview,
   };
-
-  if (!prepared.preview.confirmation.requiresConfirmation) {
-    return input.state.identity && input.sendPreparedRequest
-      ? input.sendPreparedRequest({
-          traceId,
-          pendingAsk: pendingAskRecord,
-          resolvedTarget: input.resolvedTarget,
-          state: input.state,
-          config: input.config,
-        })
-      : commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
-  }
 
   await input.pendingMasterAskStateStore.put({
     ...pendingAskRecord,
@@ -1781,6 +1772,18 @@ async function createMasterAskPreviewResult(input: {
   });
 
   await persistTraceRecord(input.runtimeStateStore, trace);
+
+  if (!prepared.preview.confirmation.requiresConfirmation) {
+    return input.state.identity && input.sendPreparedRequest
+      ? input.sendPreparedRequest({
+          traceId,
+          pendingAsk: pendingAskRecord,
+          resolvedTarget: input.resolvedTarget,
+          state: input.state,
+          config: input.config,
+        })
+      : commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
+  }
 
   return commandAwaitingConfirmation({
     traceId,
@@ -2828,25 +2831,118 @@ export function createDefaultMetabotDaemonHandlers(input: {
     state: RuntimeState;
     config: Awaited<ReturnType<ReturnType<typeof createConfigStore>['read']>>;
   }) {
-    if (!input.state.identity) {
+    const initialState = await runtimeStateStore.readState();
+    const currentIdentity = initialState.identity ?? input.state.identity;
+    if (!currentIdentity) {
       return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
     }
+    const existingTrace = initialState.traces.find((entry) => entry.traceId === input.traceId) ?? null;
+    const markSendFailure = async (code: string, message: string) => {
+      if (existingTrace) {
+        const failedTrace = {
+          ...existingTrace,
+          a2a: {
+            ...(existingTrace.a2a ?? {
+              sessionId: null,
+              taskRunId: null,
+              role: 'caller',
+              publicStatus: null,
+              latestEvent: null,
+              taskRunState: null,
+              callerGlobalMetaId: currentIdentity.globalMetaId,
+              callerName: currentIdentity.name,
+              providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+              providerName: input.resolvedTarget.displayName,
+              servicePinId: input.resolvedTarget.masterPinId,
+            }),
+            publicStatus: 'local_runtime_error',
+            latestEvent: 'provider_delivery_failed',
+            taskRunState: 'failed',
+          },
+          askMaster: buildMasterTraceMetadata({
+            role: existingTrace.a2a?.role ?? 'caller',
+            latestEvent: 'provider_delivery_failed',
+            publicStatus: 'local_runtime_error',
+            requestId: existingTrace.askMaster?.requestId ?? input.pendingAsk.requestId,
+            masterKind: existingTrace.askMaster?.masterKind ?? input.resolvedTarget.masterKind,
+            servicePinId: existingTrace.askMaster?.servicePinId ?? input.resolvedTarget.masterPinId,
+            providerGlobalMetaId: existingTrace.askMaster?.providerGlobalMetaId
+              ?? input.resolvedTarget.providerGlobalMetaId,
+            displayName: existingTrace.askMaster?.displayName ?? input.resolvedTarget.displayName,
+            triggerMode: existingTrace.askMaster?.triggerMode ?? normalizeText(input.pendingAsk.request.trigger.mode),
+            contextMode: existingTrace.askMaster?.contextMode
+              ?? normalizeText(input.pendingAsk.request.extensions?.contextMode),
+            confirmationMode: existingTrace.askMaster?.confirmationMode ?? input.config.askMaster.confirmationMode,
+            preview: existingTrace.askMaster?.preview ?? {
+              userTask: input.pendingAsk.request.task.userTask,
+              question: input.pendingAsk.request.task.question,
+            },
+            response: existingTrace.askMaster?.response,
+            failure: {
+              code,
+              message,
+            },
+          }),
+        };
+        const previewConfirmation = readObject(input.pendingAsk.preview)?.confirmation;
+        const requiresConfirmation = readObject(previewConfirmation)?.requiresConfirmation === true;
+        await exportSessionArtifacts({
+          trace: failedTrace,
+          transcript: {
+            sessionId: failedTrace.session.id,
+            title: failedTrace.session.title || 'Ask Master',
+            messages: [
+              {
+                id: `${input.traceId}-user`,
+                type: 'user',
+                timestamp: failedTrace.createdAt,
+                content: normalizeText(input.pendingAsk.request.task.question),
+              },
+              ...(requiresConfirmation
+                ? [{
+                    id: `${input.traceId}-preview`,
+                    type: 'assistant',
+                    timestamp: failedTrace.createdAt,
+                    content: `Preview prepared for ${normalizeText(input.pendingAsk.target.displayName) || input.resolvedTarget.displayName}.`,
+                    metadata: {
+                      confirmCommand: `metabot master ask --trace-id ${input.traceId} --confirm`,
+                    },
+                  }]
+                : []),
+              {
+                id: `${input.traceId}-failure`,
+                type: 'system',
+                timestamp: Date.now(),
+                content: `Ask Master auto send failed: ${message}`,
+                metadata: {
+                  code,
+                },
+              },
+            ],
+          },
+        });
+        await persistTraceRecord(runtimeStateStore, failedTrace);
+      }
+
+      const traceSuffix = existingTrace ? ` Trace ID: ${input.traceId}` : '';
+      return commandFailed(code, `${message}${traceSuffix}`);
+    };
 
     let privateChatIdentity;
     try {
       privateChatIdentity = await signer.getPrivateChatIdentity();
     } catch (error) {
-      return commandFailed(
+      return markSendFailure(
         'identity_secret_missing',
         error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.'
       );
     }
 
-    const peerChatPublicKey = input.resolvedTarget.providerGlobalMetaId === input.state.identity.globalMetaId
-      ? input.state.identity.chatPublicKey
+    const peerChatPublicKey = input.resolvedTarget.providerGlobalMetaId === currentIdentity.globalMetaId
+      ? currentIdentity.chatPublicKey
       : await resolvePeerChatPublicKey(input.resolvedTarget.providerGlobalMetaId) ?? '';
     if (!peerChatPublicKey) {
-      return commandFailed(
+      return markSendFailure(
         'peer_chat_public_key_missing',
         'Target Master has no published chat public key on chain.'
       );
@@ -2864,7 +2960,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         content: input.pendingAsk.requestJson,
       });
     } catch (error) {
-      return commandFailed(
+      return markSendFailure(
         'master_request_build_failed',
         error instanceof Error ? error.message : String(error)
       );
@@ -2884,7 +2980,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       });
       messagePinId = normalizeText(write.pinId);
     } catch (error) {
-      return commandFailed(
+      return markSendFailure(
         'master_request_broadcast_failed',
         error instanceof Error ? error.message : String(error)
       );
@@ -2900,7 +2996,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
     };
     await pendingMasterAskStateStore.put(sentPendingAsk);
 
-    const currentTrace = input.state.traces.find((entry) => entry.traceId === input.traceId);
+    const currentState = await runtimeStateStore.readState();
+    const currentTrace = currentState.traces.find((entry) => entry.traceId === input.traceId);
     const updatedTrace = currentTrace
       ? {
           ...currentTrace,
@@ -2912,8 +3009,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
               publicStatus: null,
               latestEvent: null,
               taskRunState: null,
-              callerGlobalMetaId: input.state.identity.globalMetaId,
-              callerName: input.state.identity.name,
+              callerGlobalMetaId: currentIdentity.globalMetaId,
+              callerName: currentIdentity.name,
               providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
               providerName: input.resolvedTarget.displayName,
               servicePinId: input.resolvedTarget.masterPinId,
@@ -2951,18 +3048,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
             id: `master-${input.traceId}`,
             title: `${input.resolvedTarget.displayName} Ask`,
             type: 'a2a',
-            metabotId: input.state.identity.metabotId,
+            metabotId: currentIdentity.metabotId,
             peerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
             peerName: input.resolvedTarget.displayName,
-            externalConversationId: `master:${input.state.identity.globalMetaId}:${input.resolvedTarget.providerGlobalMetaId}:${input.traceId}`,
+            externalConversationId: `master:${currentIdentity.globalMetaId}:${input.resolvedTarget.providerGlobalMetaId}:${input.traceId}`,
           },
           a2a: {
             role: 'caller',
             publicStatus: 'requesting_remote',
             latestEvent: 'request_sent',
             taskRunState: 'running',
-            callerGlobalMetaId: input.state.identity.globalMetaId,
-            callerName: input.state.identity.name,
+            callerGlobalMetaId: currentIdentity.globalMetaId,
+            callerName: currentIdentity.name,
             providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
             providerName: input.resolvedTarget.displayName,
             servicePinId: input.resolvedTarget.masterPinId,
@@ -4238,36 +4335,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
           });
         }
         if (trigger.decision.action === 'auto_candidate') {
-          const policy = evaluateMasterPolicy({
+          const autoPlan = prepareAutoMasterAskPlan({
+            draft,
+            resolvedTarget,
+            caller: {
+              globalMetaId: state.identity.globalMetaId,
+              name: state.identity.name,
+              host: observation.hostMode,
+            },
             config: config.askMaster,
-            action: 'auto_candidate',
-            selectedMaster: resolvedTarget,
             auto: {
+              reason: trigger.decision.reason,
               confidence: trigger.decision.confidence,
-              sensitivity: {
-                isSensitive: true,
-                reasons: ['Payload safety summary has not been materialized yet.'],
-              },
               traceAutoPrepareCount: getMasterAutoPrepareCount(observation.traceId),
               lastAutoAt: lastMasterAutoPreparedAt,
               now: observation.now,
             },
           });
-          if (!policy.allowed) {
+          if (!autoPlan.policy.allowed) {
             return commandSuccess({
               collected: trigger.collected,
               decision: {
                 action: 'no_action',
-                reason: policy.blockedReason || trigger.decision.reason,
+                reason: autoPlan.policy.blockedReason || trigger.decision.reason,
               },
               blocked: {
-                code: policy.code,
-                message: policy.blockedReason || trigger.decision.reason,
+                code: autoPlan.policy.code,
+                message: autoPlan.policy.blockedReason || trigger.decision.reason,
               },
               autoPolicy: {
-                selectedFrictionMode: policy.selectedFrictionMode,
-                requiresConfirmation: policy.requiresConfirmation,
-                policyReason: policy.policyReason,
+                selectedFrictionMode: autoPlan.policy.selectedFrictionMode,
+                requiresConfirmation: autoPlan.policy.requiresConfirmation,
+                policyReason: autoPlan.policy.policyReason,
+                sensitivity: autoPlan.policy.sensitivity,
               },
               target: {
                 masterPinId: resolvedTarget.masterPinId,
@@ -4277,6 +4377,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
               },
             });
           }
+
+          const autoResult = await createMasterAskPreviewResult({
+            draft,
+            resolvedTarget,
+            state,
+            config,
+            runtimeStateStore,
+            pendingMasterAskStateStore,
+            triggerModeOverride: 'auto',
+            callerHostOverride: observation.hostMode,
+            traceIdOverride: observation.traceId,
+            requiresConfirmationOverride: autoPlan.policy.requiresConfirmation,
+            sendPreparedRequest: sendPendingMasterAskRequest,
+          });
+          if (!autoResult.ok) {
+            return autoResult;
+          }
+
           recordMasterAutoPrepare(observation.traceId, observation.now);
           if (trigger.observation) {
             masterTriggerMemoryState = recordMasterTriggerOutcome({
@@ -4285,22 +4403,42 @@ export function createDefaultMetabotDaemonHandlers(input: {
               decision: trigger.decision,
             });
           }
-          return commandSuccess({
-            collected: trigger.collected,
-            decision: trigger.decision,
-            blocked: null,
-            autoPolicy: {
-              selectedFrictionMode: policy.selectedFrictionMode,
-              requiresConfirmation: policy.requiresConfirmation,
-              policyReason: policy.policyReason,
+
+          let preview = readObject(autoResult.data.preview) ?? null;
+          if (!preview) {
+            try {
+              const pendingAsk = await pendingMasterAskStateStore.get(autoResult.data.traceId);
+              preview = readObject(pendingAsk.preview) ?? null;
+            } catch {
+              preview = null;
+            }
+          }
+
+          return {
+            ...autoResult,
+            data: {
+              ...autoResult.data,
+              collected: trigger.collected,
+              blocked: null,
+              triggerMode: 'auto',
+              decision: trigger.decision,
+              autoReason: autoPlan.autoReason || trigger.decision.reason,
+              confidence: autoPlan.confidence,
+              autoPolicy: {
+                selectedFrictionMode: autoPlan.policy.selectedFrictionMode,
+                requiresConfirmation: autoPlan.policy.requiresConfirmation,
+                policyReason: autoPlan.policy.policyReason,
+                sensitivity: autoPlan.policy.sensitivity,
+              },
+              target: {
+                masterPinId: resolvedTarget.masterPinId,
+                displayName: resolvedTarget.displayName,
+                masterKind: resolvedTarget.masterKind,
+                providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
+              },
+              ...(preview ? { preview } : {}),
             },
-            target: {
-              masterPinId: resolvedTarget.masterPinId,
-              displayName: resolvedTarget.displayName,
-              masterKind: resolvedTarget.masterKind,
-              providerGlobalMetaId: resolvedTarget.providerGlobalMetaId,
-            },
-          });
+          };
         }
         const policy = evaluateMasterPolicy({
           config: config.askMaster,

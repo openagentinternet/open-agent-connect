@@ -7,12 +7,16 @@ import {
   type MasterAskTriggerMode,
 } from './masterContextTypes';
 import {
+  hasSensitiveContent,
+  hasSensitivePathSnippet,
+  isSensitivePath,
   sanitizeArtifacts,
   sanitizeConstraintList,
   sanitizeRelevantFiles,
   sanitizeSummaryText,
   sanitizeTaskText,
 } from './masterContextSanitizer';
+import type { MasterPayloadSafetySummary } from './masterAutoPolicy';
 import type { MasterDirectoryItem } from './masterTypes';
 
 export type MasterAskConfirmationMode = 'always' | 'sensitive_only' | 'never';
@@ -68,10 +72,12 @@ export interface PreparedMasterAskPreview {
       noImplicitSecrets: true;
       transport: 'simplemsg';
       deliveryTarget: string;
+      sensitivity: MasterPayloadSafetySummary;
     };
     confirmation: {
       requiresConfirmation: boolean;
       policyMode: MasterAskConfirmationMode;
+      frictionMode: 'preview_confirm' | 'direct_send';
       confirmCommand: string;
     };
     request: MasterRequestMessage;
@@ -97,6 +103,93 @@ function resolveDesiredOutputMode(value: unknown): string | null {
   return normalizeText(value) || null;
 }
 
+function readExtensionStrings(value: unknown): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return [];
+  }
+
+  const extension = value as Record<string, unknown>;
+  const strings: string[] = [];
+  for (const entry of [
+    extension.goal,
+    extension.errorSummary,
+    extension.diffSummary,
+    extension.constraints,
+  ]) {
+    if (typeof entry === 'string') {
+      const text = normalizeText(entry);
+      if (text) {
+        strings.push(text);
+      }
+      continue;
+    }
+    if (Array.isArray(entry)) {
+      for (const item of entry) {
+        const text = normalizeText(item);
+        if (text) {
+          strings.push(text);
+        }
+      }
+    }
+  }
+  return strings;
+}
+
+function appendSafetyReason(reasons: string[], reason: string): void {
+  if (!reasons.includes(reason)) {
+    reasons.push(reason);
+  }
+}
+
+function stillLooksSensitive(value: string): boolean {
+  return /\b(token|secret|credential|password)\b/i.test(value);
+}
+
+function buildMasterPayloadSafetySummary(request: MasterRequestMessage): MasterPayloadSafetySummary {
+  const reasons: string[] = [];
+  const textFields = [
+    request.task.userTask,
+    request.task.question,
+    request.context.workspaceSummary ?? '',
+    ...readExtensionStrings(request.extensions),
+  ].filter(Boolean);
+
+  for (const field of textFields) {
+    if (hasSensitiveContent(field)) {
+      appendSafetyReason(reasons, 'Request payload still includes secret-like content.');
+    }
+    if (hasSensitivePathSnippet(field)) {
+      appendSafetyReason(reasons, 'Request payload still references a sensitive file path.');
+    }
+    if (stillLooksSensitive(field)) {
+      appendSafetyReason(reasons, 'Request payload still references potentially sensitive auth material.');
+    }
+  }
+
+  for (const filePath of request.context.relevantFiles) {
+    if (isSensitivePath(filePath)) {
+      appendSafetyReason(reasons, 'Request payload still references a sensitive file path.');
+    }
+  }
+
+  for (const artifact of request.context.artifacts) {
+    if (hasSensitiveContent(artifact.label) || hasSensitiveContent(artifact.content)) {
+      appendSafetyReason(reasons, 'Request artifact still includes secret-like content.');
+    }
+    if (hasSensitivePathSnippet(artifact.label) || hasSensitivePathSnippet(artifact.content)) {
+      appendSafetyReason(reasons, 'Request artifact still references a sensitive file path.');
+    }
+    if (stillLooksSensitive(artifact.label) || stillLooksSensitive(artifact.content)) {
+      appendSafetyReason(reasons, 'Request artifact still references potentially sensitive auth material.');
+    }
+  }
+
+  return {
+    isSensitive: reasons.length > 0,
+    reasons,
+  };
+}
+
 export function buildMasterAskPreview(input: {
   draft: MasterAskDraft | Record<string, unknown>;
   resolvedTarget: MasterDirectoryItem;
@@ -108,6 +201,7 @@ export function buildMasterAskPreview(input: {
   traceId: string;
   requestId: string;
   confirmationMode: MasterAskConfirmationMode;
+  requiresConfirmationOverride?: boolean | null;
 }): PreparedMasterAskPreview {
   const draft = input.draft as MasterAskDraft;
   const rawUserTask = normalizeText(draft.userTask);
@@ -174,6 +268,8 @@ export function buildMasterAskPreview(input: {
   if (!parsedRequest.ok) {
     throw new Error(parsedRequest.message);
   }
+  const safetySummary = buildMasterPayloadSafetySummary(parsedRequest.value);
+  const requiresConfirmation = input.requiresConfirmationOverride ?? input.confirmationMode !== 'never';
 
   return {
     request: parsedRequest.value,
@@ -208,10 +304,12 @@ export function buildMasterAskPreview(input: {
         noImplicitSecrets: true,
         transport: 'simplemsg',
         deliveryTarget: input.resolvedTarget.providerGlobalMetaId,
+        sensitivity: safetySummary,
       },
       confirmation: {
-        requiresConfirmation: input.confirmationMode !== 'never',
+        requiresConfirmation,
         policyMode: input.confirmationMode,
+        frictionMode: requiresConfirmation ? 'preview_confirm' : 'direct_send',
         confirmCommand: `metabot master ask --trace-id ${input.traceId} --confirm`,
       },
       request: parsedRequest.value,
