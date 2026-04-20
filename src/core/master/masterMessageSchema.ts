@@ -305,6 +305,17 @@ function buildCanonicalRequestEnvelope(value: MasterRequestMessage): Record<stri
 function buildCanonicalResponseEnvelope(value: MasterResponseMessage): Record<string, unknown> {
   const structuredData = readObject(value.structuredData) ?? {};
   const extensions = readObject(value.extensions);
+  const findings = parseStringArray(
+    structuredData.findings
+    ?? structuredData.reviewFindings
+    ?? structuredData.diagnosis
+  );
+  const recommendations = parseStringArray(
+    structuredData.recommendations
+    ?? structuredData.reviewRecommendations
+    ?? structuredData.actionItems
+    ?? structuredData.nextSteps
+  );
   return {
     type: MASTER_RESPONSE_TYPE,
     version: MASTER_MESSAGE_VERSION,
@@ -315,8 +326,8 @@ function buildCanonicalResponseEnvelope(value: MasterResponseMessage): Record<st
     masterKind: value.responder.masterKind,
     status: value.status,
     summary: value.summary,
-    findings: parseStringArray(structuredData.findings ?? structuredData.diagnosis),
-    recommendations: parseStringArray(structuredData.recommendations ?? structuredData.nextSteps),
+    findings,
+    recommendations,
     missing: parseStringArray(structuredData.missing),
     risks: parseStringArray(structuredData.risks),
     confidence: parseOptionalNumber(structuredData.confidence ?? extensions?.confidence),
@@ -515,8 +526,22 @@ export function parseMasterResponse(value: unknown): MasterResponseParseResult {
   const mergedStructuredData: Record<string, unknown> = {
     ...structuredData,
   };
-  const findings = parseStringArray(envelope.value.findings);
-  const recommendations = parseStringArray(envelope.value.recommendations);
+  const findings = parseStringArray(
+    envelope.value.findings
+    ?? envelope.value.reviewFindings
+    ?? mergedStructuredData.findings
+    ?? mergedStructuredData.reviewFindings
+    ?? mergedStructuredData.diagnosis
+  );
+  const recommendations = parseStringArray(
+    envelope.value.recommendations
+    ?? envelope.value.reviewRecommendations
+    ?? envelope.value.actionItems
+    ?? mergedStructuredData.recommendations
+    ?? mergedStructuredData.reviewRecommendations
+    ?? mergedStructuredData.actionItems
+    ?? mergedStructuredData.nextSteps
+  );
   const missing = parseStringArray(envelope.value.missing);
   const risks = parseStringArray(envelope.value.risks);
   const confidence = parseOptionalNumber(envelope.value.confidence);

@@ -1,0 +1,26 @@
+{
+  "serviceName": "official-review-master",
+  "displayName": "Official Review Master",
+  "description": "Structured review help from the official Ask Master fixture.",
+  "masterKind": "review",
+  "specialties": [
+    "patch review",
+    "regression risk",
+    "release readiness"
+  ],
+  "hostModes": [
+    "codex"
+  ],
+  "modelInfo": {
+    "provider": "metaweb",
+    "model": "official-review-master-v1"
+  },
+  "style": "direct_and_structured",
+  "pricingMode": "free",
+  "price": "0",
+  "currency": "SPACE",
+  "responseMode": "structured",
+  "contextPolicy": "standard",
+  "official": true,
+  "trustedTier": "official"
+}

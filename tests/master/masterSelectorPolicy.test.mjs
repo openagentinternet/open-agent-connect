@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
-const { selectMasterCandidate } = require('../../dist/core/master/masterSelector.js');
+const { selectMasterCandidate, resolveMasterCandidate } = require('../../dist/core/master/masterSelector.js');
 const { evaluateMasterPolicy } = require('../../dist/core/master/masterPolicyGate.js');
 
 function createMaster(overrides = {}) {
@@ -173,6 +173,160 @@ test('selectMasterCandidate applies host mode, master kind, trusted, official, o
   });
 
   assert.equal(selected?.masterPinId, 'master-pin-trusted-claude');
+});
+
+test('selectMasterCandidate keeps a review target stable even when a trusted debug master is newer', () => {
+  const selected = selectMasterCandidate({
+    hostMode: 'codex',
+    preferredMasterKind: 'review',
+    trustedMasters: ['master-pin-debug-trusted'],
+    onlineOnly: true,
+    candidates: [
+      createMaster({
+        masterPinId: 'master-pin-debug-trusted',
+        sourceMasterPinId: 'master-pin-debug-trusted',
+        chainPinIds: ['master-pin-debug-trusted'],
+        displayName: 'Trusted Debug Master',
+        updatedAt: 1_776_700_000_000,
+      }),
+      createMaster({
+        masterPinId: 'master-pin-review-official',
+        sourceMasterPinId: 'master-pin-review-official',
+        chainPinIds: ['master-pin-review-official'],
+        serviceName: 'official-review-master',
+        displayName: 'Official Review Master',
+        masterKind: 'review',
+        specialties: ['review', 'regression risk'],
+        updatedAt: 1_776_100_000_000,
+      }),
+    ],
+  });
+
+  assert.equal(selected?.masterPinId, 'master-pin-review-official');
+  assert.equal(selected?.masterKind, 'review');
+});
+
+test('resolveMasterCandidate honors an explicit manual review target instead of drifting back to debug', () => {
+  const result = resolveMasterCandidate({
+    hostMode: 'codex',
+    preferredDisplayName: 'Official Review Master',
+    preferredMasterKind: 'review',
+    trustedMasters: ['master-pin-debug-trusted'],
+    onlineOnly: true,
+    candidates: [
+      createMaster({
+        masterPinId: 'master-pin-debug-trusted',
+        sourceMasterPinId: 'master-pin-debug-trusted',
+        chainPinIds: ['master-pin-debug-trusted'],
+        displayName: 'Official Debug Master',
+      }),
+      createMaster({
+        masterPinId: 'master-pin-review-official',
+        sourceMasterPinId: 'master-pin-review-official',
+        chainPinIds: ['master-pin-review-official'],
+        serviceName: 'official-review-master',
+        displayName: 'Official Review Master',
+        masterKind: 'review',
+        specialties: ['review', 'regression risk'],
+      }),
+    ],
+  });
+
+  assert.equal(result.failureCode, null);
+  assert.equal(result.selectedMaster?.masterPinId, 'master-pin-review-official');
+  assert.equal(result.selectedMaster?.masterKind, 'review');
+});
+
+test('resolveMasterCandidate fails clearly when review was requested but no review master matches', () => {
+  const result = resolveMasterCandidate({
+    hostMode: 'codex',
+    preferredMasterKind: 'review',
+    trustedMasters: ['master-pin-debug-trusted'],
+    onlineOnly: true,
+    candidates: [
+      createMaster({
+        masterPinId: 'master-pin-debug-trusted',
+        sourceMasterPinId: 'master-pin-debug-trusted',
+        chainPinIds: ['master-pin-debug-trusted'],
+        displayName: 'Official Debug Master',
+      }),
+    ],
+  });
+
+  assert.equal(result.selectedMaster, null);
+  assert.equal(result.failureCode, 'master_not_found');
+  assert.match(result.failureMessage, /requested master kind/i);
+});
+
+test('evaluateMasterPolicy treats an official review master as trusted for non-sensitive auto direct send', () => {
+  const decision = evaluateMasterPolicy({
+    config: createPolicyConfig({
+      triggerMode: 'auto',
+      confirmationMode: 'sensitive_only',
+    }),
+    action: 'auto_candidate',
+    selectedMaster: createMaster({
+      masterPinId: 'master-pin-review-official',
+      sourceMasterPinId: 'master-pin-review-official',
+      chainPinIds: ['master-pin-review-official'],
+      serviceName: 'official-review-master',
+      displayName: 'Official Review Master',
+      masterKind: 'review',
+      specialties: ['review', 'regression risk'],
+    }),
+    auto: {
+      confidence: 0.96,
+      sensitivity: {
+        isSensitive: false,
+        reasons: [],
+      },
+      traceAutoPrepareCount: 0,
+      lastAutoAt: null,
+      now: 1_776_300_200_000,
+    },
+  });
+
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.requiresConfirmation, false);
+  assert.equal(decision.selectedFrictionMode, 'direct_send');
+  assert.equal(decision.trustedTarget, true);
+});
+
+test('evaluateMasterPolicy also honors trustedMasters config for a non-official review target', () => {
+  const decision = evaluateMasterPolicy({
+    config: createPolicyConfig({
+      triggerMode: 'auto',
+      confirmationMode: 'sensitive_only',
+      trustedMasters: ['master-pin-review-trusted'],
+    }),
+    action: 'auto_candidate',
+    selectedMaster: createMaster({
+      masterPinId: 'master-pin-review-trusted',
+      sourceMasterPinId: 'master-pin-review-trusted',
+      chainPinIds: ['master-pin-review-trusted'],
+      serviceName: 'trusted-review-master',
+      displayName: 'Trusted Review Master',
+      masterKind: 'review',
+      specialties: ['review', 'regression risk'],
+      official: false,
+      trustedTier: null,
+    }),
+    auto: {
+      confidence: 0.96,
+      sensitivity: {
+        isSensitive: false,
+        reasons: [],
+      },
+      traceAutoPrepareCount: 0,
+      lastAutoAt: null,
+      now: 1_776_300_210_000,
+    },
+  });
+
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.requiresConfirmation, false);
+  assert.equal(decision.selectedFrictionMode, 'direct_send');
+  assert.equal(decision.trustedTarget, true);
 });
 
 test('evaluateMasterPolicy blocks Ask Master completely when disabled', () => {

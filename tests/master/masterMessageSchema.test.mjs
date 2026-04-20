@@ -250,3 +250,53 @@ test('buildMasterResponseJson emits a parseable normalized master_response snaps
   assert.equal(reparsed.value.type, 'master_response');
   assert.equal(reparsed.value.followUpQuestion, 'Can you share whether the failure only happens in the full suite?');
 });
+
+test('master response schema accepts review-specific aliases and normalizes them into canonical findings and recommendations', () => {
+  const jsonText = buildMasterResponseJson({
+    type: 'master_response',
+    version: '1.0.0',
+    requestId: 'request-master-review-1',
+    traceId: 'trace-master-review-1',
+    responder: {
+      providerGlobalMetaId: 'idq1provider',
+      masterServicePinId: 'master-pin-review-1',
+      masterKind: 'review',
+    },
+    status: 'completed',
+    summary: 'The review is ready.',
+    structuredData: {
+      reviewFindings: ['Routing could drift back to Debug Master if kind filtering regresses.'],
+      reviewRecommendations: ['Add a no-match review selector regression test.'],
+      risks: ['Review fallback could become opaque.'],
+    },
+    followUpQuestion: null,
+    errorCode: null,
+  });
+
+  const raw = JSON.parse(jsonText);
+  assert.deepEqual(raw.findings, ['Routing could drift back to Debug Master if kind filtering regresses.']);
+  assert.deepEqual(raw.recommendations, ['Add a no-match review selector regression test.']);
+
+  const parsed = parseMasterResponse({
+    type: 'master_response',
+    version: '1.0.0',
+    requestId: 'request-master-review-2',
+    traceId: 'trace-master-review-2',
+    providerGlobalMetaId: 'idq1provider',
+    servicePinId: 'master-pin-review-1',
+    masterKind: 'review',
+    status: 'completed',
+    summary: 'The review aliases parsed correctly.',
+    reviewFindings: ['The provider matrix should prove both official masters stay discoverable.'],
+    reviewRecommendations: ['Keep the review target explicit in selector coverage.'],
+    risks: ['Review alias branches can drift without schema tests.'],
+  });
+
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.value.structuredData.findings, [
+    'The provider matrix should prove both official masters stay discoverable.',
+  ]);
+  assert.deepEqual(parsed.value.structuredData.recommendations, [
+    'Keep the review target explicit in selector coverage.',
+  ]);
+});

@@ -1,5 +1,9 @@
 export const MASTER_SERVICE_PROTOCOL_PATH = '/protocols/master-service';
 export const PENDING_MASTER_PIN_ID = 'pending-master-service-pin';
+export const MASTER_KIND_DEBUG = 'debug';
+export const MASTER_KIND_REVIEW = 'review';
+export const OFFICIAL_DEBUG_MASTER_SERVICE_NAME = 'official-debug-master';
+export const OFFICIAL_REVIEW_MASTER_SERVICE_NAME = 'official-review-master';
 
 export interface PublishedMasterDraft {
   serviceName: string;

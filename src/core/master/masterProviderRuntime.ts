@@ -14,7 +14,14 @@ import {
   type MasterResponseStatus,
 } from './masterMessageSchema';
 import { runOfficialDebugMaster } from './debugMasterFixture';
-import type { PublishedMasterRecord } from './masterTypes';
+import { runOfficialReviewMaster } from './reviewMasterFixture';
+import {
+  MASTER_KIND_DEBUG,
+  MASTER_KIND_REVIEW,
+  OFFICIAL_DEBUG_MASTER_SERVICE_NAME,
+  OFFICIAL_REVIEW_MASTER_SERVICE_NAME,
+  type PublishedMasterRecord,
+} from './masterTypes';
 
 export interface MasterProviderIdentity {
   globalMetaId: string;
@@ -252,10 +259,16 @@ function resolvePublishedMaster(
 
 function resolveDefaultRunner(input: MasterRunnerInput): MasterRunner | null {
   if (
-    normalizeText(input.publishedMaster.masterKind) === 'debug'
-    && normalizeText(input.publishedMaster.serviceName) === 'official-debug-master'
+    normalizeText(input.publishedMaster.masterKind) === MASTER_KIND_DEBUG
+    && normalizeText(input.publishedMaster.serviceName) === OFFICIAL_DEBUG_MASTER_SERVICE_NAME
   ) {
     return ({ request }) => runOfficialDebugMaster({ request });
+  }
+  if (
+    normalizeText(input.publishedMaster.masterKind) === MASTER_KIND_REVIEW
+    && normalizeText(input.publishedMaster.serviceName) === OFFICIAL_REVIEW_MASTER_SERVICE_NAME
+  ) {
+    return ({ request }) => runOfficialReviewMaster({ request });
   }
   return null;
 }
