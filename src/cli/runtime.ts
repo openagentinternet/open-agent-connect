@@ -1272,6 +1272,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         return requestJson(context, 'GET', `/api/master/list${suffix}`);
       },
       ask: async (input) => requestJson(context, 'POST', '/api/master/ask', input),
+      hostAction: async (input) => requestJson(context, 'POST', '/api/master/host-action', input),
       trace: async (input) =>
         requestJson(context, 'GET', `/api/master/trace/${encodeURIComponent(input.traceId)}`),
     },

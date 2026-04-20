@@ -464,6 +464,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'publish', summary: 'Publish one master-service record to the chain-backed directory.' },
       { name: 'list', summary: 'List discoverable master-service entries for the current host.' },
       { name: 'ask', summary: 'Preview or confirm one Ask Master request.' },
+      { name: 'host-action', summary: 'Bridge one host-facing Ask Master action into the existing runtime.' },
       { name: 'trace', summary: 'Inspect one Ask Master trace by trace id.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
@@ -502,6 +503,19 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { flag: '--confirm', description: 'Send a previously previewed Ask Master request.' },
       HELP_JSON_FLAG,
     ],
+  },
+  {
+    commandPath: ['master', 'host-action'],
+    summary: 'Run one host-facing Ask Master action such as manual_ask through the local runtime bridge.',
+    usage: 'metabot master host-action --request-file <path>',
+    requiredFlags: [
+      {
+        flag: '--request-file',
+        value: '<path>',
+        description: 'JSON host-action request file.',
+      },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
   },
   {
     commandPath: ['master', 'trace'],

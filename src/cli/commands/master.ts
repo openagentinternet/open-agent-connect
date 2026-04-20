@@ -73,6 +73,21 @@ export async function runMasterCommand(
     });
   }
 
+  if (subcommand === 'host-action') {
+    const handler = context.dependencies.master?.hostAction;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Master host-action handler is not configured.');
+    }
+
+    const requestFile = readFlagValue(args, '--request-file');
+    if (!requestFile) {
+      return commandMissingFlag('--request-file');
+    }
+
+    const payload = await readJsonFile(context, requestFile);
+    return handler(payload);
+  }
+
   if (subcommand === 'trace') {
     const traceId = readFlagValue(args, '--id');
     if (!traceId) {

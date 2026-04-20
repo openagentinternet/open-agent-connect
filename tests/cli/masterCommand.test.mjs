@@ -199,3 +199,121 @@ test('runCli dispatches `metabot master ask --request-file` and returns not_impl
     message: 'Master ask handler is not configured.',
   });
 });
+
+test('runCli dispatches `metabot master host-action --request-file` and returns not_implemented when the handler is missing', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-host-action-'));
+  const requestFile = path.join(tempDir, 'master-host-action.json');
+  await writeFile(requestFile, JSON.stringify({
+    action: {
+      kind: 'manual_ask',
+      utterance: 'Go ask Debug Master about this bug.',
+    },
+    context: {
+      now: 1_776_300_000_000,
+      hostMode: 'codex',
+      traceId: 'trace-host-action-cli-1',
+      conversation: {
+        currentUserRequest: 'Why does the preview never leave confirmation?',
+        recentMessages: [],
+      },
+      tools: {
+        recentToolResults: [],
+      },
+      workspace: {
+        goal: 'Get the shortest fix path.',
+        constraints: [],
+        relevantFiles: [],
+        diffSummary: null,
+        fileExcerpts: [],
+      },
+      planner: {
+        hasPlan: true,
+        todoBlocked: true,
+        onlyReadingWithoutConverging: false,
+      },
+    },
+  }), 'utf8');
+
+  const stdout = [];
+
+  const exitCode = await runCli(['master', 'host-action', '--request-file', requestFile], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        hostAction: undefined,
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(parseJsonEnvelope(stdout), {
+    ok: false,
+    state: 'failed',
+    code: 'not_implemented',
+    message: 'Master host-action handler is not configured.',
+  });
+});
+
+test('runCli dispatches `metabot master host-action --request-file` with parsed JSON payload', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-host-action-dispatch-'));
+  const requestFile = path.join(tempDir, 'master-host-action.json');
+  await writeFile(requestFile, JSON.stringify({
+    action: {
+      kind: 'manual_ask',
+      utterance: 'Go ask Debug Master about this bug.',
+      preferredMasterName: 'Debug Master',
+    },
+    context: {
+      now: 1_776_300_000_000,
+      hostMode: 'codex',
+      traceId: 'trace-host-action-cli-2',
+      conversation: {
+        currentUserRequest: 'Why does the preview never leave confirmation?',
+        recentMessages: [],
+      },
+      tools: {
+        recentToolResults: [],
+      },
+      workspace: {
+        goal: 'Get the shortest fix path.',
+        constraints: [],
+        relevantFiles: [],
+        diffSummary: null,
+        fileExcerpts: [],
+      },
+      planner: {
+        hasPlan: true,
+        todoBlocked: true,
+        onlyReadingWithoutConverging: false,
+      },
+    },
+  }), 'utf8');
+
+  const calls = [];
+
+  const exitCode = await runCli(['master', 'host-action', '--request-file', requestFile], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        hostAction: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'awaiting_confirmation',
+            data: {
+              hostAction: 'manual_ask',
+            },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].action.kind, 'manual_ask');
+  assert.equal(calls[0].action.preferredMasterName, 'Debug Master');
+  assert.equal(calls[0].context.traceId, 'trace-host-action-cli-2');
+});

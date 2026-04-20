@@ -189,3 +189,55 @@ test('POST /api/master/receive forwards the JSON payload to master.receive', asy
   assert.equal(payload.ok, true);
   assert.equal(payload.data.accepted, true);
 });
+
+test('POST /api/master/host-action forwards the JSON payload to master.hostAction', async (t) => {
+  const calls = [];
+  const server = await startServer({
+    master: {
+      hostAction: async (input) => {
+        calls.push(input);
+        return {
+          ok: true,
+          state: 'awaiting_confirmation',
+          data: {
+            hostAction: input.action?.kind ?? null,
+            traceId: 'trace-master-host-action-1',
+          },
+        };
+      },
+    },
+  });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/master/host-action`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      action: {
+        kind: 'manual_ask',
+        utterance: 'Go ask Debug Master about this bug.',
+      },
+      context: {
+        hostMode: 'codex',
+      },
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    {
+      action: {
+        kind: 'manual_ask',
+        utterance: 'Go ask Debug Master about this bug.',
+      },
+      context: {
+        hostMode: 'codex',
+      },
+    },
+  ]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.hostAction, 'manual_ask');
+});

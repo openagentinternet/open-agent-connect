@@ -75,6 +75,7 @@ import { createPendingMasterAskStateStore, type PendingMasterAskRecord } from '.
 import { createPublishedMasterStateStore } from '../core/master/masterPublishedState';
 import { buildMasterAskPreview } from '../core/master/masterPreview';
 import { buildMasterTraceMetadata, buildMasterTraceView } from '../core/master/masterTrace';
+import { prepareManualAskHostAction } from '../core/master/masterHostAdapter';
 import { publishMasterToChain } from '../core/master/masterServicePublish';
 import { validateMasterServicePayload } from '../core/master/masterServiceSchema';
 import {
@@ -452,6 +453,22 @@ function readMasterAskDraft(rawInput: Record<string, unknown>) {
     artifacts: Array.isArray(rawInput.artifacts) ? rawInput.artifacts : [],
     constraints: readStringArray(rawInput.constraints),
     desiredOutput: readObject(rawInput.desiredOutput),
+  };
+}
+
+function readMasterHostActionRequest(rawInput: Record<string, unknown>) {
+  const action = readObject(rawInput.action) ?? {};
+  return {
+    action: {
+      kind: normalizeText(action.kind),
+      utterance: normalizeText(action.utterance),
+      preferredMasterName: normalizeText(action.preferredMasterName) || null,
+      preferredMasterKind: normalizeText(action.preferredMasterKind) || null,
+      traceId: normalizeText(action.traceId) || null,
+      suggestionId: normalizeText(action.suggestionId) || null,
+      reason: normalizeText(action.reason) || null,
+    },
+    context: readObject(rawInput.context) ?? {},
   };
 }
 
@@ -1259,6 +1276,7 @@ async function resolveExplicitMasterTarget(input: {
   masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
   hotRoot: string;
   chainApiBaseUrl?: string;
+  host?: string | null;
   providerGlobalMetaId?: string | null;
   localProviderOnline: boolean;
   localLastSeenSec: number | null;
@@ -1276,7 +1294,7 @@ async function resolveExplicitMasterTarget(input: {
     hotRoot: input.hotRoot,
     chainApiBaseUrl: input.chainApiBaseUrl,
     onlineOnly: false,
-    host: DEFAULT_MASTER_HOST_MODE,
+    host: normalizeText(input.host) || DEFAULT_MASTER_HOST_MODE,
     masterKind,
     localProviderOnline: input.localProviderOnline,
     localLastSeenSec: input.localLastSeenSec,
@@ -1369,6 +1387,7 @@ async function createMasterAskPreviewResult(input: {
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
   pendingMasterAskStateStore: ReturnType<typeof createPendingMasterAskStateStore>;
   triggerModeOverride?: string | null;
+  callerHostOverride?: string | null;
   sendPreparedRequest?: (input: {
     traceId: string;
     pendingAsk: PendingMasterAskRecord;
@@ -1393,6 +1412,7 @@ async function createMasterAskPreviewResult(input: {
     now,
   });
   const requestId = buildMasterRequestId(now);
+  const callerHost = normalizeText(input.callerHostOverride) || DEFAULT_MASTER_HOST_MODE;
 
   let prepared;
   try {
@@ -1402,7 +1422,7 @@ async function createMasterAskPreviewResult(input: {
       caller: {
         globalMetaId: input.state.identity.globalMetaId,
         name: input.state.identity.name,
-        host: DEFAULT_MASTER_HOST_MODE,
+        host: callerHost,
       },
       traceId,
       requestId,
@@ -2817,6 +2837,135 @@ export function createDefaultMetabotDaemonHandlers(input: {
           fallbackUsed: directory.fallbackUsed,
         });
       },
+      hostAction: async (rawInput) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
+        }
+        const identity = state.identity;
+
+        const config = await configStore.read();
+        if (!config.askMaster.enabled) {
+          return commandFailed('ask_master_disabled', 'Ask Master is disabled in the local config.');
+        }
+
+        const daemon = input.getDaemonRecord();
+        const presence = await providerPresenceStore.read();
+        const localProviderOnline = isProviderPresenceOnline(presence);
+        const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
+          ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
+          : null;
+        const request = readMasterHostActionRequest(rawInput);
+        const actionKind = normalizeText(request.action.kind);
+        if (actionKind !== 'manual_ask') {
+          return commandFailed(
+            'not_implemented',
+            `Master host-action kind is not implemented yet: ${actionKind || 'unknown'}.`
+          );
+        }
+
+        const hostContext = readObject(request.context) ?? {};
+        const hostMode = normalizeText(hostContext.hostMode) || DEFAULT_MASTER_HOST_MODE;
+        const directory = await listRuntimeDirectoryMasters({
+          masterStateStore,
+          hotRoot: runtimeStateStore.paths.hotRoot,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+          onlineOnly: false,
+          host: hostMode,
+          localProviderOnline,
+          localLastSeenSec,
+          providerDaemonBaseUrl: daemon?.baseUrl || null,
+          providerGlobalMetaId: identity.globalMetaId,
+        });
+        const eligibleMasters = directory.masters.map((entry) => (
+          normalizeText(entry.providerGlobalMetaId) === identity.globalMetaId
+            ? {
+                ...entry,
+                online: true,
+              }
+            : entry
+        ));
+
+        let prepared;
+        try {
+          prepared = prepareManualAskHostAction({
+            action: request.action,
+            context: request.context,
+            masters: eligibleMasters,
+            config: {
+              contextMode: config.askMaster.contextMode,
+              trustedMasters: config.askMaster.trustedMasters,
+            },
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return commandFailed(
+            message.includes('No eligible online Master')
+              ? 'master_target_not_found'
+              : 'invalid_master_host_action',
+            message
+          );
+        }
+
+        const previewDraft = readMasterAskDraft({
+          ...prepared.draft,
+          target: {
+            servicePinId: prepared.selectedTarget.masterPinId,
+            providerGlobalMetaId: prepared.selectedTarget.providerGlobalMetaId,
+            masterKind: prepared.selectedTarget.masterKind,
+            displayName: prepared.selectedTarget.displayName,
+          },
+        });
+        const previewResult = await createMasterAskPreviewResult({
+          draft: previewDraft,
+          resolvedTarget: prepared.selectedTarget,
+          state,
+          config,
+          runtimeStateStore,
+          pendingMasterAskStateStore,
+          triggerModeOverride: 'manual',
+          callerHostOverride: hostMode,
+          sendPreparedRequest: sendPendingMasterAskRequest,
+        });
+        if (previewResult.ok && previewResult.state === 'awaiting_confirmation') {
+          masterTriggerMemoryState = recordMasterTriggerOutcome({
+            state: masterTriggerMemoryState,
+            observation: {
+              now: Date.now(),
+              traceId: previewResult.data.traceId,
+              hostMode,
+              userIntent: {
+                explicitlyAskedForMaster: true,
+                explicitlyRejectedSuggestion: false,
+              },
+              directory: {
+                availableMasters: eligibleMasters.length,
+                trustedMasters: eligibleMasters.filter((entry) => (
+                  config.askMaster.trustedMasters.includes(entry.masterPinId)
+                )).length,
+                onlineMasters: eligibleMasters.filter((entry) => entry.online).length,
+              },
+              candidateMasterKindHint: prepared.selectedTarget.masterKind,
+            },
+            decision: {
+              action: 'manual_requested',
+              reason: 'Host adapter received a manual Ask Master action.',
+            },
+          });
+        }
+
+        if (!previewResult.ok) {
+          return previewResult;
+        }
+
+        return {
+          ...previewResult,
+          data: {
+            ...previewResult.data,
+            hostAction: 'manual_ask',
+          },
+        };
+      },
       ask: async (rawInput) => {
         const state = await runtimeStateStore.readState();
         if (!state.identity) {
@@ -2878,6 +3027,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             masterStateStore,
             hotRoot: runtimeStateStore.paths.hotRoot,
             chainApiBaseUrl: input.chainApiBaseUrl,
+            host: normalizeText(pendingAsk.request.caller.host) || DEFAULT_MASTER_HOST_MODE,
             localProviderOnline,
             localLastSeenSec,
             providerDaemonBaseUrl: daemon?.baseUrl || null,

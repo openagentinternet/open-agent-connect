@@ -52,6 +52,20 @@ export const handleMasterRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  if (url.pathname === '/api/master/host-action') {
+    if (req.method !== 'POST') {
+      context.sendMethodNotAllowed(['POST']);
+      return true;
+    }
+
+    const input = await context.readJsonBody();
+    const result = handlers.master?.hostAction
+      ? await handlers.master.hostAction(input)
+      : commandFailed('not_implemented', 'Master host-action handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
   if (url.pathname === '/api/master/receive') {
     if (req.method !== 'POST') {
       context.sendMethodNotAllowed(['POST']);
