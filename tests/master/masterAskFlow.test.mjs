@@ -9,6 +9,7 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
+const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { createPublishedMasterStateStore } = require('../../dist/core/master/masterPublishedState.js');
 const { receivePrivateChat } = require('../../dist/core/chat/privateChat.js');
@@ -233,5 +234,135 @@ test('master ask returns awaiting_confirmation and confirm reuses the stored pen
   const duplicateConfirm = parseOutput(duplicateConfirmStdout);
   assert.equal(duplicateConfirm.ok, false);
   assert.equal(duplicateConfirm.code, 'master_request_already_sent');
+  assert.equal(writes.length, 1);
+});
+
+test('master ask sends immediately when confirmationMode is never', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-ask-no-confirm-'));
+  t.after(async () => {
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  const identityPair = createIdentityPair();
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+  const configStore = createConfigStore(homeDir);
+  const masterStateStore = createPublishedMasterStateStore(homeDir);
+  await runtimeStateStore.writeState({
+    identity: createIdentity(identityPair.publicKeyHex),
+    services: [],
+    traces: [],
+  });
+  await configStore.set({
+    evolution_network: {
+      enabled: true,
+      autoAdoptSameSkillSameScope: false,
+      autoRecordExecutions: true,
+    },
+    askMaster: {
+      enabled: true,
+      triggerMode: 'manual',
+      confirmationMode: 'never',
+      contextMode: 'standard',
+      trustedMasters: [],
+    },
+  });
+  await masterStateStore.write({
+    masters: [
+      {
+        id: 'master-pin-1',
+        sourceMasterPinId: 'master-pin-1',
+        currentPinId: 'master-pin-1',
+        creatorMetabotId: 1,
+        providerGlobalMetaId: 'idq1alice',
+        providerAddress: 'mvc-address',
+        serviceName: 'official-debug-master',
+        displayName: 'Official Debug Master',
+        description: 'Structured debugging help.',
+        masterKind: 'debug',
+        specialties: ['debugging'],
+        hostModes: ['codex'],
+        modelInfoJson: JSON.stringify({ provider: 'metaweb', model: 'official-debug-master-v1' }),
+        style: 'direct_and_structured',
+        pricingMode: 'free',
+        price: '0',
+        currency: 'MVC',
+        responseMode: 'structured',
+        contextPolicy: 'standard',
+        official: 1,
+        trustedTier: 'official',
+        payloadJson: '{}',
+        available: 1,
+        revokedAt: null,
+        updatedAt: 1_776_000_000_000,
+      },
+    ],
+  });
+
+  const writes = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    getDaemonRecord: () => null,
+    signer: {
+      async getPrivateChatIdentity() {
+        return {
+          globalMetaId: 'idq1alice',
+          privateKeyHex: identityPair.privateKeyHex,
+        };
+      },
+      async writePin(input) {
+        writes.push(input);
+        return {
+          txids: ['simplemsg-tx-1'],
+          pinId: 'simplemsg-pin-1',
+          totalCost: 1,
+          network: 'mvc',
+          operation: 'create',
+          path: '/protocols/simplemsg',
+          contentType: 'application/json',
+          encoding: 'utf-8',
+          globalMetaId: 'idq1alice',
+          mvcAddress: 'mvc-address',
+        };
+      },
+    },
+  });
+
+  const requestFile = path.join(homeDir, 'master-ask-no-confirm.json');
+  await writeFile(requestFile, JSON.stringify({
+    target: {
+      servicePinId: 'master-pin-1',
+      providerGlobalMetaId: 'idq1alice',
+      masterKind: 'debug',
+      displayName: 'Official Debug Master',
+    },
+    triggerMode: 'manual',
+    contextMode: 'standard',
+    userTask: 'Send without confirmation.',
+    question: 'Should this request be sent immediately when confirmationMode is never?',
+    workspaceSummary: 'Caller-side integration test.',
+    relevantFiles: ['tests/master/masterAskFlow.test.mjs'],
+    artifacts: [],
+    desiredOutput: {
+      mode: 'structured_help',
+    },
+  }, null, 2), 'utf8');
+
+  const stdout = [];
+  const exitCode = await runCli(['master', 'ask', '--request-file', requestFile], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        ask: handlers.master.ask,
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  const result = parseOutput(stdout);
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'success');
+  assert.equal(result.data.session.state, 'requesting_remote');
+  assert.equal(result.data.session.publicStatus, 'requesting_remote');
   assert.equal(writes.length, 1);
 });

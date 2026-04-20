@@ -1,17 +1,24 @@
 import { buildMasterRequestJson, parseMasterRequest, type MasterMessageArtifact, type MasterRequestMessage } from './masterMessageSchema';
+import {
+  getMasterContextBudget,
+  resolvePublicMasterAskContextMode,
+  type MasterAskContextMode,
+  type MasterAskTargetRef,
+  type MasterAskTriggerMode,
+} from './masterContextTypes';
+import {
+  sanitizeArtifacts,
+  sanitizeConstraintList,
+  sanitizeRelevantFiles,
+  sanitizeSummaryText,
+  sanitizeTaskText,
+} from './masterContextSanitizer';
 import type { MasterDirectoryItem } from './masterTypes';
 
-export type MasterAskContextMode = 'compact' | 'standard' | 'full_task';
-export type MasterAskTriggerMode = 'manual' | 'suggest' | 'auto';
 export type MasterAskConfirmationMode = 'always' | 'sensitive_only' | 'never';
 
 export interface MasterAskDraft {
-  target: {
-    servicePinId: string;
-    providerGlobalMetaId: string;
-    masterKind: string;
-    displayName?: string | null;
-  };
+  target: MasterAskTargetRef;
   triggerMode?: MasterAskTriggerMode | string | null;
   contextMode?: MasterAskContextMode | string | null;
   userTask: string;
@@ -75,62 +82,6 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function normalizeStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-  for (const entry of value) {
-    const text = normalizeText(entry);
-    if (!text || seen.has(text)) {
-      continue;
-    }
-    seen.add(text);
-    normalized.push(text);
-  }
-  return normalized;
-}
-
-function normalizeArtifacts(value: unknown, limit: number): MasterMessageArtifact[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const artifacts: MasterMessageArtifact[] = [];
-  for (const entry of value) {
-    if (artifacts.length >= limit) {
-      break;
-    }
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      continue;
-    }
-    const item = entry as Record<string, unknown>;
-    const kind = normalizeText(item.kind);
-    const label = normalizeText(item.label);
-    const content = normalizeText(item.content);
-    if (!kind || !label || !content) {
-      continue;
-    }
-    artifacts.push({
-      kind,
-      label,
-      content,
-      mimeType: normalizeText(item.mimeType) || null,
-    });
-  }
-  return artifacts;
-}
-
-function resolveContextMode(value: unknown): 'compact' | 'standard' {
-  const normalized = normalizeText(value).toLowerCase();
-  if (normalized === 'compact') {
-    return 'compact';
-  }
-  return 'standard';
-}
-
 function resolveTriggerMode(value: unknown): MasterAskTriggerMode {
   const normalized = normalizeText(value).toLowerCase();
   if (normalized === 'suggest' || normalized === 'auto') {
@@ -159,19 +110,25 @@ export function buildMasterAskPreview(input: {
   confirmationMode: MasterAskConfirmationMode;
 }): PreparedMasterAskPreview {
   const draft = input.draft as MasterAskDraft;
-  const userTask = normalizeText(draft.userTask);
-  const question = normalizeText(draft.question);
-  if (!userTask || !question) {
+  const rawUserTask = normalizeText(draft.userTask);
+  const rawQuestion = normalizeText(draft.question);
+  if (!rawUserTask || !rawQuestion) {
     throw new Error('Master ask draft must include userTask and question.');
   }
+  const userTask = sanitizeTaskText(rawUserTask, rawUserTask);
+  const question = sanitizeTaskText(rawQuestion, rawQuestion);
 
-  const contextMode = resolveContextMode(draft.contextMode);
-  const itemLimit = contextMode === 'compact' ? 3 : 8;
-  const relevantFiles = normalizeStringArray(draft.relevantFiles).slice(0, itemLimit);
-  const artifacts = normalizeArtifacts(draft.artifacts, itemLimit);
-  const constraints = normalizeStringArray(draft.constraints);
+  const contextMode = resolvePublicMasterAskContextMode(draft.contextMode);
+  const budget = getMasterContextBudget(contextMode);
+  const relevantFiles = sanitizeRelevantFiles(draft.relevantFiles, budget.relevantFiles);
+  const artifacts = sanitizeArtifacts(draft.artifacts, budget.artifacts, budget.artifactChars);
+  const constraints = sanitizeConstraintList(draft.constraints);
   const triggerMode = resolveTriggerMode(draft.triggerMode);
   const desiredOutputMode = resolveDesiredOutputMode(draft.desiredOutput) || 'structured_help';
+  const goal = sanitizeSummaryText(draft.goal);
+  const workspaceSummary = sanitizeSummaryText(draft.workspaceSummary);
+  const errorSummary = sanitizeSummaryText(draft.errorSummary);
+  const diffSummary = sanitizeSummaryText(draft.diffSummary);
 
   const requestJson = buildMasterRequestJson({
     type: 'master_request',
@@ -193,7 +150,7 @@ export function buildMasterAskPreview(input: {
       question,
     },
     context: {
-      workspaceSummary: normalizeText(draft.workspaceSummary) || null,
+      workspaceSummary,
       relevantFiles,
       artifacts,
     },
@@ -205,9 +162,9 @@ export function buildMasterAskPreview(input: {
     },
     desiredOutput: desiredOutputMode,
     extensions: {
-      goal: normalizeText(draft.goal) || null,
-      errorSummary: normalizeText(draft.errorSummary) || null,
-      diffSummary: normalizeText(draft.diffSummary) || null,
+      goal,
+      errorSummary,
+      diffSummary,
       constraints,
       contextMode,
       targetDisplayName: normalizeText(draft.target?.displayName) || input.resolvedTarget.displayName,
@@ -235,13 +192,13 @@ export function buildMasterAskPreview(input: {
       intent: {
         userTask,
         question,
-        goal: normalizeText(draft.goal) || null,
+        goal,
       },
       context: {
         contextMode,
-        workspaceSummary: normalizeText(draft.workspaceSummary) || null,
-        errorSummary: normalizeText(draft.errorSummary) || null,
-        diffSummary: normalizeText(draft.diffSummary) || null,
+        workspaceSummary,
+        errorSummary,
+        diffSummary,
         relevantFiles,
         artifacts,
         constraints,
@@ -253,7 +210,7 @@ export function buildMasterAskPreview(input: {
         deliveryTarget: input.resolvedTarget.providerGlobalMetaId,
       },
       confirmation: {
-        requiresConfirmation: true,
+        requiresConfirmation: input.confirmationMode !== 'never',
         policyMode: input.confirmationMode,
         confirmCommand: `metabot master ask --trace-id ${input.traceId} --confirm`,
       },

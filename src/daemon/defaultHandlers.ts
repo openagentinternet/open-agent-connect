@@ -1369,6 +1369,13 @@ async function createMasterAskPreviewResult(input: {
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
   pendingMasterAskStateStore: ReturnType<typeof createPendingMasterAskStateStore>;
   triggerModeOverride?: string | null;
+  sendPreparedRequest?: (input: {
+    traceId: string;
+    pendingAsk: PendingMasterAskRecord;
+    resolvedTarget: MasterDirectoryItem;
+    state: RuntimeState;
+    config: Awaited<ReturnType<ReturnType<typeof createConfigStore>['read']>>;
+  }) => Promise<any>;
 }) {
   if (!input.state.identity) {
     return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
@@ -1408,7 +1415,7 @@ async function createMasterAskPreviewResult(input: {
     );
   }
 
-  await input.pendingMasterAskStateStore.put({
+  const pendingAskRecord: PendingMasterAskRecord = {
     traceId,
     requestId,
     createdAt: now,
@@ -1418,6 +1425,22 @@ async function createMasterAskPreviewResult(input: {
     request: prepared.request,
     target: prepared.preview.target,
     preview: prepared.preview,
+  };
+
+  if (!prepared.preview.confirmation.requiresConfirmation) {
+    return input.state.identity && input.sendPreparedRequest
+      ? input.sendPreparedRequest({
+          traceId,
+          pendingAsk: pendingAskRecord,
+          resolvedTarget: input.resolvedTarget,
+          state: input.state,
+          config: input.config,
+        })
+      : commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
+  }
+
+  await input.pendingMasterAskStateStore.put({
+    ...pendingAskRecord,
   });
 
   const trace = buildSessionTrace({
@@ -2263,6 +2286,302 @@ export function createDefaultMetabotDaemonHandlers(input: {
     pendingMasterReplyContinuations.set(input.trace.traceId, continuation);
   }
 
+  async function sendPendingMasterAskRequest(input: {
+    traceId: string;
+    pendingAsk: PendingMasterAskRecord;
+    resolvedTarget: MasterDirectoryItem;
+    state: RuntimeState;
+    config: Awaited<ReturnType<ReturnType<typeof createConfigStore>['read']>>;
+  }) {
+    if (!input.state.identity) {
+      return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
+    }
+
+    let privateChatIdentity;
+    try {
+      privateChatIdentity = await signer.getPrivateChatIdentity();
+    } catch (error) {
+      return commandFailed(
+        'identity_secret_missing',
+        error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.'
+      );
+    }
+
+    const peerChatPublicKey = input.resolvedTarget.providerGlobalMetaId === input.state.identity.globalMetaId
+      ? input.state.identity.chatPublicKey
+      : await resolvePeerChatPublicKey(input.resolvedTarget.providerGlobalMetaId) ?? '';
+    if (!peerChatPublicKey) {
+      return commandFailed(
+        'peer_chat_public_key_missing',
+        'Target Master has no published chat public key on chain.'
+      );
+    }
+
+    let outboundRequest;
+    try {
+      outboundRequest = sendPrivateChat({
+        fromIdentity: {
+          globalMetaId: privateChatIdentity.globalMetaId,
+          privateKeyHex: privateChatIdentity.privateKeyHex,
+        },
+        toGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+        peerChatPublicKey,
+        content: input.pendingAsk.requestJson,
+      });
+    } catch (error) {
+      return commandFailed(
+        'master_request_build_failed',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+
+    let messagePinId = '';
+    try {
+      const write = await signer.writePin({
+        operation: 'create',
+        path: outboundRequest.path,
+        encryption: outboundRequest.encryption,
+        version: outboundRequest.version,
+        contentType: outboundRequest.contentType,
+        payload: outboundRequest.payload,
+        encoding: 'utf-8',
+        network: 'mvc',
+      });
+      messagePinId = normalizeText(write.pinId);
+    } catch (error) {
+      return commandFailed(
+        'master_request_broadcast_failed',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+
+    const sentAt = Date.now();
+    const sentPendingAsk: PendingMasterAskRecord = {
+      ...input.pendingAsk,
+      confirmationState: 'sent',
+      updatedAt: sentAt,
+      sentAt,
+      messagePinId: messagePinId || null,
+    };
+    await pendingMasterAskStateStore.put(sentPendingAsk);
+
+    const currentTrace = input.state.traces.find((entry) => entry.traceId === input.traceId);
+    const updatedTrace = currentTrace
+      ? {
+          ...currentTrace,
+          a2a: {
+            ...(currentTrace.a2a ?? {
+              sessionId: null,
+              taskRunId: null,
+              role: 'caller',
+              publicStatus: null,
+              latestEvent: null,
+              taskRunState: null,
+              callerGlobalMetaId: input.state.identity.globalMetaId,
+              callerName: input.state.identity.name,
+              providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+              providerName: input.resolvedTarget.displayName,
+              servicePinId: input.resolvedTarget.masterPinId,
+            }),
+            publicStatus: 'requesting_remote',
+            latestEvent: 'request_sent',
+            taskRunState: 'running',
+          },
+          askMaster: buildMasterTraceMetadata({
+            role: 'caller',
+            latestEvent: 'request_sent',
+            publicStatus: 'requesting_remote',
+            requestId: input.pendingAsk.requestId,
+            masterKind: input.resolvedTarget.masterKind,
+            servicePinId: input.resolvedTarget.masterPinId,
+            providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+            displayName: input.resolvedTarget.displayName,
+            triggerMode: currentTrace.askMaster?.triggerMode ?? normalizeText(input.pendingAsk.request.trigger.mode),
+            contextMode: currentTrace.askMaster?.contextMode
+              ?? normalizeText(input.pendingAsk.request.extensions?.contextMode),
+            confirmationMode: currentTrace.askMaster?.confirmationMode ?? input.config.askMaster.confirmationMode,
+            preview: currentTrace.askMaster?.preview ?? {
+              userTask: input.pendingAsk.request.task.userTask,
+              question: input.pendingAsk.request.task.question,
+            },
+            response: currentTrace.askMaster?.response,
+            failure: null,
+          }),
+        }
+      : buildSessionTrace({
+          traceId: input.traceId,
+          channel: 'a2a',
+          exportRoot: runtimeStateStore.paths.exportRoot,
+          session: {
+            id: `master-${input.traceId}`,
+            title: `${input.resolvedTarget.displayName} Ask`,
+            type: 'a2a',
+            metabotId: input.state.identity.metabotId,
+            peerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+            peerName: input.resolvedTarget.displayName,
+            externalConversationId: `master:${input.state.identity.globalMetaId}:${input.resolvedTarget.providerGlobalMetaId}:${input.traceId}`,
+          },
+          a2a: {
+            role: 'caller',
+            publicStatus: 'requesting_remote',
+            latestEvent: 'request_sent',
+            taskRunState: 'running',
+            callerGlobalMetaId: input.state.identity.globalMetaId,
+            callerName: input.state.identity.name,
+            providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+            providerName: input.resolvedTarget.displayName,
+            servicePinId: input.resolvedTarget.masterPinId,
+          },
+          askMaster: buildMasterTraceMetadata({
+            role: 'caller',
+            latestEvent: 'request_sent',
+            publicStatus: 'requesting_remote',
+            requestId: input.pendingAsk.requestId,
+            masterKind: input.resolvedTarget.masterKind,
+            servicePinId: input.resolvedTarget.masterPinId,
+            providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+            displayName: input.resolvedTarget.displayName,
+            triggerMode: normalizeText(input.pendingAsk.request.trigger.mode),
+            contextMode: normalizeText(input.pendingAsk.request.extensions?.contextMode),
+            confirmationMode: input.config.askMaster.confirmationMode,
+            preview: {
+              userTask: input.pendingAsk.request.task.userTask,
+              question: input.pendingAsk.request.task.question,
+            },
+          }),
+        });
+
+    const previewConfirmation = readObject(input.pendingAsk.preview)?.confirmation;
+    const requiresConfirmation = readObject(previewConfirmation)?.requiresConfirmation === true;
+    const confirmCommand = `metabot master ask --trace-id ${input.traceId} --confirm`;
+    const transcriptMessages = [
+      {
+        id: `${input.traceId}-user`,
+        type: 'user' as const,
+        timestamp: updatedTrace.createdAt,
+        content: normalizeText(input.pendingAsk.request.task.question),
+      },
+      ...(requiresConfirmation
+        ? [{
+            id: `${input.traceId}-preview`,
+            type: 'assistant' as const,
+            timestamp: updatedTrace.createdAt,
+            content: `Preview prepared for ${normalizeText(input.pendingAsk.target.displayName) || input.resolvedTarget.displayName}.`,
+            metadata: {
+              confirmCommand,
+            },
+          }]
+        : []),
+      {
+        id: `${input.traceId}-sent`,
+        type: 'assistant' as const,
+        timestamp: sentAt,
+        content: `Ask Master request sent to ${input.resolvedTarget.displayName} over simplemsg.`,
+        metadata: {
+          messagePinId: messagePinId || null,
+          path: outboundRequest.path,
+        },
+      },
+    ];
+    const artifacts = await exportSessionArtifacts({
+      trace: updatedTrace,
+      transcript: {
+        sessionId: updatedTrace.session.id,
+        title: updatedTrace.session.title || 'Ask Master',
+        messages: transcriptMessages,
+      },
+    });
+
+    await persistTraceRecord(runtimeStateStore, updatedTrace);
+
+    let finalTrace = updatedTrace;
+    let finalArtifacts = artifacts;
+    let finalSession: {
+      state: 'requesting_remote' | 'completed' | 'manual_action_required' | 'remote_failed' | 'timeout';
+      publicStatus: 'requesting_remote' | 'completed' | 'manual_action_required' | 'remote_failed' | 'timeout';
+      event: 'request_sent' | 'provider_completed' | 'clarification_needed' | 'provider_failed' | 'timeout';
+    } = {
+      state: 'requesting_remote',
+      publicStatus: 'requesting_remote',
+      event: 'request_sent',
+    };
+    let responseJson: string | null = null;
+    let deliveryPinId: string | null = null;
+    let structuredResponse: MasterResponseMessage | null = null;
+
+    if (masterReplyWaiter) {
+      const reply = await masterReplyWaiter.awaitMasterReply({
+        callerGlobalMetaId: privateChatIdentity.globalMetaId,
+        callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+        providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+        providerChatPublicKey: peerChatPublicKey,
+        masterServicePinId: input.resolvedTarget.masterPinId,
+        requestId: input.pendingAsk.requestId,
+        traceId: input.traceId,
+        timeoutMs: DEFAULT_CALLER_FOREGROUND_WAIT_MS,
+      });
+
+      if (reply.state === 'completed') {
+        const applied = await applyMasterCallerReplyResult({
+          reply,
+          trace: updatedTrace,
+          runtimeStateStore,
+          pendingAsk: sentPendingAsk,
+          requestPath: outboundRequest.path,
+          messagePinId: messagePinId || null,
+        });
+        finalTrace = applied.trace;
+        finalArtifacts = applied.artifacts;
+        finalSession = applied.session;
+        structuredResponse = reply.response;
+        responseJson = reply.responseJson;
+        deliveryPinId = reply.deliveryPinId;
+      } else {
+        const timedOut = await applyMasterCallerForegroundTimeout({
+          trace: updatedTrace,
+          runtimeStateStore,
+          pendingAsk: sentPendingAsk,
+          requestPath: outboundRequest.path,
+          messagePinId: messagePinId || null,
+        });
+        finalTrace = timedOut.trace;
+        finalArtifacts = timedOut.artifacts;
+        finalSession = timedOut.session;
+        scheduleMasterReplyContinuation({
+          trace: timedOut.trace,
+          pendingAsk: sentPendingAsk,
+          requestPath: outboundRequest.path,
+          messagePinId: messagePinId || null,
+          waiterInput: {
+            callerGlobalMetaId: privateChatIdentity.globalMetaId,
+            callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+            providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+            providerChatPublicKey: peerChatPublicKey,
+            masterServicePinId: input.resolvedTarget.masterPinId,
+            requestId: input.pendingAsk.requestId,
+            traceId: input.traceId,
+            timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+          },
+        });
+      }
+    }
+
+    return commandSuccess({
+      traceId: input.traceId,
+      requestId: input.pendingAsk.requestId,
+      messagePinId: messagePinId || null,
+      ...(deliveryPinId ? { deliveryPinId } : {}),
+      ...(structuredResponse ? {
+        response: structuredResponse,
+        responseJson,
+      } : {}),
+      session: finalSession,
+      traceJsonPath: finalArtifacts.traceJsonPath,
+      traceMarkdownPath: finalArtifacts.traceMarkdownPath,
+      transcriptMarkdownPath: finalArtifacts.transcriptMarkdownPath,
+    });
+  }
+
   return {
     chain: {
       write: async (rawInput) => {
@@ -2875,6 +3194,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           runtimeStateStore,
           pendingMasterAskStateStore,
           triggerModeOverride: 'manual',
+          sendPreparedRequest: sendPendingMasterAskRequest,
         });
         if (previewResult.ok && previewResult.state === 'awaiting_confirmation') {
           masterTriggerMemoryState = recordMasterTriggerOutcome({
@@ -2973,8 +3293,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
             : trigger.decision.action === 'auto_candidate'
               ? 'auto'
               : 'suggest',
+          sendPreparedRequest: sendPendingMasterAskRequest,
         });
-        if (previewResult.ok && previewResult.state === 'awaiting_confirmation' && trigger.observation) {
+        if (previewResult.ok && trigger.observation) {
           masterTriggerMemoryState = recordMasterTriggerOutcome({
             state: masterTriggerMemoryState,
             observation: trigger.observation,
