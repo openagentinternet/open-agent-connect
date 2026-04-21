@@ -110,6 +110,72 @@ Smoke expectations:
 - the installed skill file contains `metabot master` and fails fast if any stale `metabot advisor` contract remains
 - `skills resolve` returns the repo/base Ask Master contract rendered for Codex
 
+## Ask Master Acceptance Lanes
+
+After the install smoke is green, interpret the three Phase-3 Ask Master lanes like this:
+
+- `manual`: the human explicitly asks for one Master, the host builds a request, and the runtime usually stops at preview/confirm before send unless local `confirmationMode=never` allows immediate continuation after request preparation.
+- `suggest`: the host notices a stuck or risky situation and proposes Ask Master. After the user accepts, it follows the same local confirmation rule as `manual`.
+- `auto`: the host/runtime may prepare or send Ask Master without a new human wording prompt, but only when local Ask Master config and policy allow it.
+
+For Codex acceptance, `manual`, `suggest`, and `auto` should all be explainable in a fresh session. The important part is not that all three always send immediately; the important part is that the host clearly follows the configured confirmation contract.
+
+## Confirmation Mode Semantics
+
+`confirmationMode` controls whether Ask Master must stop at preview/confirm:
+
+- `always`: always stop at preview/confirm before dispatch.
+- `sensitive_only`: only trusted plus non-sensitive `auto` payloads may direct send; `manual` and accepted `suggest` still stay in preview/confirm.
+- `never`: `manual` asks and accepted `suggest` flows may continue immediately after request preparation. `auto` still needs trusted plus safe payload plus explicit local auto-send policy before it may direct send.
+
+Phase-3 acceptance should focus on `always` and `sensitive_only`. Even in `auto`, preview and confirm remain valid outcomes whenever the local policy picks `preview_confirm`. If you cover `never`, make sure you verify both the reduced-friction `manual/suggest` continuation and the stricter `auto` direct-send gate.
+
+## Single-Machine Dual Terminal Smoke
+
+Use a single-machine dual terminal smoke setup when you want the most realistic local acceptance path without involving a second computer.
+
+Provider terminal:
+
+```bash
+metabot identity create --name "Debug Master Provider"
+metabot master publish --payload-file e2e/fixtures/master-service-debug.json
+metabot daemon start
+```
+
+Caller terminal:
+
+```bash
+metabot identity create --name "Caller Bot"
+metabot network sources add --base-url <provider-base-url>
+metabot master list --online
+cp e2e/fixtures/master-ask-request.json /tmp/master-request.json
+```
+
+Before the caller sends, edit `/tmp/master-request.json` so `target.servicePinId` and `target.providerGlobalMetaId` match one row from `metabot master list --online`.
+
+Manual lane:
+
+```bash
+metabot master ask --request-file /tmp/master-request.json
+metabot master ask --trace-id <preview-trace-id> --confirm
+```
+
+Suggest lane:
+
+- open a fresh Codex session after install
+- ask in natural language for Ask Master help and require preview first
+- expect the installed `metabot-ask-master` contract to keep the flow on Ask Master, not private chat
+- expect the host to show preview/confirm before any send unless local `confirmationMode=never` allows immediate continuation after request preparation
+
+Auto lane:
+
+- enable local Ask Master auto mode before testing
+- create a controlled stuck scenario or run the auto e2e coverage from this repo
+- expect either preview/confirm or direct send depending local `confirmationMode`, trust, and privacy gate
+- if direct send happens, the trace should still explain why that was allowed
+
+This single-machine two-terminal smoke is the clearest acceptance setup for Phase-3 because it lets you inspect provider state, caller preview/confirm behavior, and the resulting Ask Master trace separately.
+
 After the first real Ask Master request succeeds, inspect that trace with:
 
 ```bash

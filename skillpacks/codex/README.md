@@ -51,6 +51,24 @@ For a local smoke test from the repository root:
 node e2e/run-local-cross-host-demo.mjs
 ```
 
+## Ask Master Smoke
+
+The Ask Master host contract in this pack supports `manual / suggest / auto` lanes.
+
+- `manual`: preview first with `metabot master ask --request-file ...`, then confirm with `metabot master ask --trace-id ... --confirm`, unless local `confirmationMode=never` continues immediately after request preparation
+- `suggest`: the host may recommend Ask Master, and accepted suggestions follow the same local confirmation rule as manual asks
+- `auto`: still controlled by local config and `confirmationMode`; auto may stop at preview/confirm or direct-send only when local policy allows it
+
+Confirmation modes:
+
+- `confirmationMode`: `always` / `sensitive_only` / `never`
+
+- `always`: always preview/confirm
+- `sensitive_only`: trusted non-sensitive auto payloads may direct-send; manual and accepted suggest flows still stay in preview/confirm
+- `never`: manual asks and accepted suggest flows may continue immediately after request preparation; auto still needs trusted safe payloads plus explicit local auto-send policy before direct-send
+
+For a single machine dual terminal smoke, keep one provider terminal online with a published Debug Master and run the caller flow separately so you can inspect preview, confirm, and trace behavior end to end.
+
 ## Shared Runtime Contract
 
 - Primary CLI path: `metabot`

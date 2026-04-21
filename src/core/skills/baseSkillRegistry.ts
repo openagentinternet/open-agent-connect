@@ -4,11 +4,11 @@ const BASE_SKILL_REGISTRY: Record<string, BaseSkillContract> = {
   'metabot-ask-master': {
     skillName: 'metabot-ask-master',
     title: 'MetaBot Ask Master',
-    summary: 'Preview, confirm, and inspect one Ask Master request through the validated master runtime.',
-    instructions: 'Use metabot master list to resolve a target Master, then preview with metabot master ask --request-file before any explicit confirm step. Stop on failure instead of falling back to private chat, advisor commands, simplemsg, or services call.',
+    summary: 'Preview, confirm, and inspect one Ask Master request across manual / suggest / auto flows through the validated master runtime.',
+    instructions: 'Use metabot master list to resolve a target Master. In manual flow, start with metabot master ask --request-file so the runtime can prepare preview metadata; when confirmationMode=never, the runtime may continue immediately after request preparation instead of waiting for confirm. Accepted suggest flows follow the same local confirmation rule. Auto flows may stop at preview/confirm or direct-send depending local policy. confirmationMode=always / sensitive_only / never stays a local policy boundary: always requires preview/confirm, sensitive_only only allows direct send for trusted non-sensitive auto payloads, and never allows immediate manual/suggest continuation plus trusted safe auto direct send when explicit auto policy enables it. Stop on failure instead of falling back to private chat, advisor commands, simplemsg, or services call.',
     commandTemplate: 'metabot master ask --request-file master-request.json',
-    outputExpectation: 'Return structured JSON. The preview call should return awaiting_confirmation with preview, traceId, and requestId; after explicit confirmation, follow with metabot master trace --id when more evidence is needed.',
-    fallbackPolicy: 'If no matching Master is available or the human declines confirmation, stop and surface the failure. Do not fall back to private chat, simplemsg, advisor commands, or services call.',
+    outputExpectation: 'Return structured JSON. Manual and suggest flows usually surface awaiting_confirmation with preview, traceId, and requestId, but confirmationMode=never may continue immediately after request preparation. Auto may also stop at awaiting_confirmation when local policy selects preview_confirm; direct_send is only valid when local config/policy explicitly allows it. After confirm or direct send, follow with metabot master trace --id when more evidence is needed.',
+    fallbackPolicy: 'If no matching Master is available, local policy blocks auto send, or the human declines confirmation, stop and surface the failure. Do not fall back to private chat, simplemsg, advisor commands, or services call.',
     scope: {
       allowedCommands: [
         'metabot master list --online',

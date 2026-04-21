@@ -3727,17 +3727,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
             traceIdOverride: suggestion.traceId,
             sendPreparedRequest: sendPendingMasterAskRequest,
           });
-          if (previewResult.ok && previewResult.state === 'awaiting_confirmation') {
+          if (previewResult.ok) {
+            const acceptedAt = Date.now();
             await masterSuggestStateStore.put({
               ...suggestion,
               status: 'accepted',
-              updatedAt: Date.now(),
-              acceptedAt: Date.now(),
+              updatedAt: acceptedAt,
+              acceptedAt,
             });
             masterTriggerMemoryState = recordMasterTriggerOutcome({
               state: masterTriggerMemoryState,
               observation: buildMasterSuggestTriggerObservation({
-                now: Date.now(),
+                now: acceptedAt,
                 traceId: suggestion.traceId,
                 hostMode: suggestion.hostMode,
                 masterKind: suggestion.candidateMasterKind,

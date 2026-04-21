@@ -88,6 +88,9 @@ test('runCli supports `metabot skills resolve --skill metabot-ask-master --host 
   assert.equal(typeof result.payload.data, 'string');
   assert.equal(result.payload.data.includes('# Resolved Skill Contract: metabot-ask-master'), true);
   assert.match(result.payload.data, /metabot master ask --request-file/);
+  assert.match(result.payload.data, /manual \/ suggest \/ auto|manual, suggest, and auto/i);
+  assert.match(result.payload.data, /always.*sensitive_only.*never/i);
+  assert.match(result.payload.data, /confirmationMode=never may continue immediately after request preparation/i);
   assert.doesNotMatch(result.payload.data, /metabot advisor ask/);
 });
 
@@ -109,6 +112,9 @@ test('runCli supports `metabot skills resolve --skill metabot-ask-master --host 
   assert.equal(result.payload.data.format, 'json');
   assert.equal(result.payload.data.host, 'codex');
   assert.equal(result.payload.data.contract.skillName, 'metabot-ask-master');
+  assert.match(result.payload.data.contract.summary, /manual \/ suggest \/ auto|manual, suggest, and auto/i);
+  assert.match(result.payload.data.contract.instructions, /always.*sensitive_only.*never/i);
+  assert.match(result.payload.data.contract.outputExpectation, /confirmationMode=never may continue immediately after request preparation/i);
   assert.match(result.payload.data.contract.commandTemplate, /metabot master ask --request-file/);
   assert.doesNotMatch(result.payload.data.contract.commandTemplate, /metabot advisor ask/);
 });

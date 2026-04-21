@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createECDH } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -9,18 +10,29 @@ const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { createPublishedMasterStateStore } = require('../../dist/core/master/masterPublishedState.js');
+const { createMasterSuggestStateStore } = require('../../dist/core/master/masterSuggestState.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 const { buildMasterHostObservation } = require('../../dist/core/master/masterHostObservation.js');
+const { buildMasterResponseJson } = require('../../dist/core/master/masterMessageSchema.js');
 
-function createIdentity() {
+function createIdentityPair() {
+  const ecdh = createECDH('prime256v1');
+  ecdh.generateKeys();
+  return {
+    privateKeyHex: ecdh.getPrivateKey('hex'),
+    publicKeyHex: ecdh.getPublicKey('hex', 'uncompressed'),
+  };
+}
+
+function createIdentity(chatPublicKey = 'chat-pubkey') {
   return {
     metabotId: 1,
     name: 'Caller Bot',
     createdAt: 1_775_000_000_000,
     path: "m/44'/10001'/0'/0/0",
     publicKey: 'pubkey',
-    chatPublicKey: 'chat-pubkey',
+    chatPublicKey,
     mvcAddress: 'mvc-address',
     btcAddress: 'btc-address',
     dogeAddress: 'doge-address',
@@ -62,8 +74,10 @@ function createDebugMasterRecord(overrides = {}) {
 
 async function createSuggestHarness(options = {}) {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-suggest-phase2-'));
+  const identityPair = options.identityPair ?? createIdentityPair();
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const masterStateStore = createPublishedMasterStateStore(homeDir);
+  const masterSuggestStateStore = createMasterSuggestStateStore(homeDir);
   const configStore = createConfigStore(homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(homeDir);
   const masters = Array.isArray(options.masters) && options.masters.length > 0
@@ -71,7 +85,7 @@ async function createSuggestHarness(options = {}) {
     : [createDebugMasterRecord()];
 
   await runtimeStateStore.writeState({
-    identity: createIdentity(),
+    identity: createIdentity(identityPair.publicKeyHex),
     services: [],
     traces: [],
   });
@@ -103,12 +117,16 @@ async function createSuggestHarness(options = {}) {
 
   return {
     homeDir,
+    identityPair,
     masterStateStore,
+    masterSuggestStateStore,
     configStore,
     providerPresenceStore,
     handlers: createDefaultMetabotDaemonHandlers({
       homeDir,
       getDaemonRecord: () => null,
+      signer: options.signerOverride,
+      masterReplyWaiter: options.masterReplyWaiterOverride,
     }),
   };
 }
@@ -650,16 +668,22 @@ test('master suggest in auto mode hydrates missing trusted-master counts before 
   });
 
   assert.equal(result.ok, true);
+  assert.equal(result.state, 'awaiting_confirmation');
   assert.equal(result.data.decision.action, 'auto_candidate');
   assert.equal(result.data.decision.candidateMasterKind, 'debug');
   assert.equal(result.data.decision.confidence, 0.95);
   assert.match(result.data.decision.reason, /trusted Master/i);
   assert.equal(result.data.blocked, null);
-  assert.deepEqual(result.data.autoPolicy, {
-    selectedFrictionMode: 'preview_confirm',
-    requiresConfirmation: true,
-    policyReason: 'Confirmation mode always requires a preview confirmation step.',
+  assert.equal(result.data.autoPolicy.selectedFrictionMode, 'preview_confirm');
+  assert.equal(result.data.autoPolicy.requiresConfirmation, true);
+  assert.equal(result.data.autoPolicy.policyReason, 'Confirmation mode always requires a preview confirmation step.');
+  assert.deepEqual(result.data.autoPolicy.sensitivity, {
+    isSensitive: false,
+    reasons: [],
   });
+  assert.equal(result.data.preview.confirmation.requiresConfirmation, true);
+  assert.equal(result.data.preview.confirmation.frictionMode, 'preview_confirm');
+  assert.equal(result.data.preview.request.trigger.mode, 'auto');
   assert.deepEqual(result.data.target, {
     masterPinId: 'master-pin-1',
     displayName: 'Official Debug Master',
@@ -828,6 +852,98 @@ test('accept_suggest enters the same preview flow as manual ask and still requir
   assert.equal(acceptResult.data.suggestionId, suggestResult.data.suggestion.suggestionId);
   assert.equal(acceptResult.data.preview.request.trigger.mode, 'suggest');
   assert.match(acceptResult.data.confirmation.confirmCommand, /^metabot master ask --trace-id /);
+});
+
+test('accept_suggest marks the suggestion accepted even when confirmationMode=never direct-sends immediately', async (t) => {
+  const identityPair = createIdentityPair();
+  const writes = [];
+  const harness = await createSuggestHarness({
+    identityPair,
+    askMasterConfig: {
+      confirmationMode: 'never',
+    },
+    signerOverride: {
+      async getPrivateChatIdentity() {
+        return {
+          globalMetaId: 'idq1caller',
+          privateKeyHex: identityPair.privateKeyHex,
+        };
+      },
+      async writePin(input) {
+        writes.push(input);
+        return {
+          txids: ['simplemsg-tx-suggest-never-1'],
+          pinId: 'simplemsg-pin-suggest-never-1',
+          totalCost: 1,
+          network: 'mvc',
+          operation: 'create',
+          path: '/protocols/simplemsg',
+          contentType: 'application/json',
+          encoding: 'utf-8',
+          globalMetaId: 'idq1caller',
+          mvcAddress: 'mvc-address',
+        };
+      },
+    },
+    masterReplyWaiterOverride: {
+      async awaitMasterReply(input) {
+        const responseJson = buildMasterResponseJson({
+          type: 'master_response',
+          version: '1.0.0',
+          requestId: input.requestId,
+          traceId: input.traceId,
+          responder: {
+            providerGlobalMetaId: input.providerGlobalMetaId,
+            masterServicePinId: input.masterServicePinId,
+            masterKind: 'debug',
+          },
+          status: 'completed',
+          summary: 'Accepted suggest requests can continue immediately under confirmationMode=never.',
+          structuredData: {
+            diagnosis: ['The request was sent immediately after accepting the suggestion.'],
+            nextSteps: ['Verify the suggestion state is recorded as accepted.'],
+            risks: ['State bookkeeping must stay consistent across direct-send lanes.'],
+          },
+        });
+        return {
+          state: 'completed',
+          response: JSON.parse(responseJson),
+          responseJson,
+          deliveryPinId: 'simplemsg-reply-pin-suggest-never-1',
+          observedAt: Date.now(),
+          rawMessage: null,
+        };
+      },
+    },
+  });
+  t.after(async () => {
+    await rm(harness.homeDir, { recursive: true, force: true });
+  });
+
+  const suggestResult = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-accept-direct-send'));
+  assert.equal(suggestResult.ok, true);
+
+  const acceptResult = await harness.handlers.master.hostAction({
+    action: {
+      kind: 'accept_suggest',
+      traceId: suggestResult.data.suggestion.traceId,
+      suggestionId: suggestResult.data.suggestion.suggestionId,
+    },
+  });
+
+  assert.equal(acceptResult.ok, true);
+  assert.equal(acceptResult.state, 'success');
+  assert.equal(acceptResult.data.hostAction, 'accept_suggest');
+  assert.equal(acceptResult.data.suggestionId, suggestResult.data.suggestion.suggestionId);
+  assert.equal(acceptResult.data.session.publicStatus, 'completed');
+  assert.equal(writes.length, 1);
+
+  const storedSuggestion = await harness.masterSuggestStateStore.get(
+    suggestResult.data.suggestion.traceId,
+    suggestResult.data.suggestion.suggestionId
+  );
+  assert.equal(storedSuggestion.status, 'accepted');
+  assert.equal(typeof storedSuggestion.acceptedAt, 'number');
 });
 
 test('reject_suggest records suppression so the same kind is not suggested again immediately', async (t) => {
@@ -1117,17 +1233,22 @@ test('master suggest surfaces auto_candidate when triggerMode is auto', async (t
   const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-auto-mode'));
 
   assert.equal(result.ok, true);
-  assert.equal(result.state, 'success');
+  assert.equal(result.state, 'awaiting_confirmation');
   assert.equal(result.data.decision.action, 'auto_candidate');
   assert.equal(result.data.decision.candidateMasterKind, 'debug');
   assert.equal(result.data.decision.confidence, 0.99);
   assert.match(result.data.decision.reason, /trusted Master/i);
   assert.equal(result.data.blocked, null);
-  assert.deepEqual(result.data.autoPolicy, {
-    selectedFrictionMode: 'preview_confirm',
-    requiresConfirmation: true,
-    policyReason: 'Confirmation mode always requires a preview confirmation step.',
+  assert.equal(result.data.autoPolicy.selectedFrictionMode, 'preview_confirm');
+  assert.equal(result.data.autoPolicy.requiresConfirmation, true);
+  assert.equal(result.data.autoPolicy.policyReason, 'Confirmation mode always requires a preview confirmation step.');
+  assert.deepEqual(result.data.autoPolicy.sensitivity, {
+    isSensitive: false,
+    reasons: [],
   });
+  assert.equal(result.data.preview.confirmation.requiresConfirmation, true);
+  assert.equal(result.data.preview.confirmation.frictionMode, 'preview_confirm');
+  assert.equal(result.data.preview.request.trigger.mode, 'auto');
 });
 
 test('master suggest enforces the global cooldown on repeated auto candidates across traces', async (t) => {
@@ -1172,6 +1293,7 @@ test('master suggest enforces the global cooldown on repeated auto candidates ac
   ));
 
   assert.equal(first.ok, true);
+  assert.equal(first.state, 'awaiting_confirmation');
   assert.equal(first.data.decision.action, 'auto_candidate');
   assert.equal(second.ok, true);
   assert.deepEqual(second.data.decision, {
@@ -1182,9 +1304,11 @@ test('master suggest enforces the global cooldown on repeated auto candidates ac
     code: 'auto_global_cooldown',
     message: 'Auto Ask Master is still inside the configured global cooldown window.',
   });
-  assert.deepEqual(second.data.autoPolicy, {
-    selectedFrictionMode: 'preview_confirm',
-    requiresConfirmation: true,
-    policyReason: 'Recent automatic Ask Master activity is being throttled.',
+  assert.equal(second.data.autoPolicy.selectedFrictionMode, 'preview_confirm');
+  assert.equal(second.data.autoPolicy.requiresConfirmation, true);
+  assert.equal(second.data.autoPolicy.policyReason, 'Recent automatic Ask Master activity is being throttled.');
+  assert.deepEqual(second.data.autoPolicy.sensitivity, {
+    isSensitive: false,
+    reasons: [],
   });
 });
