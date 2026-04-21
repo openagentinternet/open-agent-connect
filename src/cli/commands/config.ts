@@ -30,12 +30,13 @@ export async function runConfigCommand(args: string[], context: CliRuntimeContex
     if (!rawValue) {
       return commandFailed('missing_argument', 'Missing required config value.');
     }
-    if (rawValue !== 'true' && rawValue !== 'false') {
-      return commandFailed('invalid_argument', 'Config value must be `true` or `false`.');
-    }
     return handler({
       key,
-      value: rawValue === 'true',
+      value: rawValue === 'true'
+        ? true
+        : rawValue === 'false'
+          ? false
+          : rawValue,
     });
   }
 

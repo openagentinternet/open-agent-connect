@@ -53,12 +53,37 @@ export async function runMasterCommand(
       return commandFailed('not_implemented', 'Master ask handler is not configured.');
     }
 
+    const confirm = hasFlag(args, '--confirm');
     const traceId = readFlagValue(args, '--trace-id');
     if (traceId) {
       return handler({
         traceId,
-        confirm: hasFlag(args, '--confirm'),
+        confirm,
       });
+    }
+
+    const requestFile = readFlagValue(args, '--request-file');
+    if (!requestFile) {
+      return commandMissingFlag('--request-file');
+    }
+    if (confirm) {
+      return commandFailed(
+        'invalid_argument',
+        '`metabot master ask --confirm` requires `--trace-id <trace-id>` and cannot be combined with `--request-file`.',
+      );
+    }
+
+    const payload = await readJsonFile(context, requestFile);
+    return handler({
+      ...payload,
+      confirm,
+    });
+  }
+
+  if (subcommand === 'suggest') {
+    const handler = context.dependencies.master?.suggest;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Master suggest handler is not configured.');
     }
 
     const requestFile = readFlagValue(args, '--request-file');
@@ -67,10 +92,7 @@ export async function runMasterCommand(
     }
 
     const payload = await readJsonFile(context, requestFile);
-    return handler({
-      ...payload,
-      confirm: hasFlag(args, '--confirm'),
-    });
+    return handler(payload);
   }
 
   if (subcommand === 'host-action') {

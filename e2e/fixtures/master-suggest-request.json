@@ -1,0 +1,54 @@
+{
+  "draft": {
+    "userTask": "Diagnose why the caller host keeps circling on the same blocked bugfix.",
+    "question": "Should I ask the Debug Master for the shortest fix path?",
+    "workspaceSummary": "Ask Master suggest acceptance fixture for local host verification.",
+    "errorSummary": "Repeated blocked preview/confirm flow in the same host task.",
+    "relevantFiles": [
+      "tests/e2e/masterAskHostFlow.test.mjs"
+    ],
+    "constraints": [
+      "Keep the answer structured and concise."
+    ],
+    "artifacts": []
+  },
+  "observation": {
+    "now": 1776000000000,
+    "traceId": "trace-ask-master-release-suggest-1",
+    "hostMode": "codex",
+    "userIntent": {
+      "explicitlyAskedForMaster": false,
+      "explicitlyRejectedSuggestion": false
+    },
+    "activity": {
+      "recentUserMessages": 2,
+      "recentAssistantMessages": 6,
+      "recentToolCalls": 7,
+      "recentFailures": 3,
+      "repeatedFailureCount": 2,
+      "noProgressWindowMs": 1200000
+    },
+    "diagnostics": {
+      "failingTests": 1,
+      "failingCommands": 1,
+      "repeatedErrorSignatures": [
+        "ERR_ASK_MASTER_RELEASE_SMOKE"
+      ],
+      "uncertaintySignals": [
+        "stuck"
+      ]
+    },
+    "workState": {
+      "hasPlan": true,
+      "todoBlocked": true,
+      "diffChangedRecently": false,
+      "onlyReadingWithoutConverging": true
+    },
+    "directory": {
+      "availableMasters": 1,
+      "trustedMasters": 0,
+      "onlineMasters": 1
+    },
+    "candidateMasterKindHint": "debug"
+  }
+}

@@ -7,7 +7,7 @@ export type Awaitable<T> = T | Promise<T>;
 export interface CliDependencies {
   config?: {
     get?: (input: { key: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    set?: (input: { key: string; value: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    set?: (input: { key: string; value: boolean | string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   buzz?: {
     post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
@@ -31,6 +31,7 @@ export interface CliDependencies {
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     list?: (input: { online?: boolean; masterKind?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     ask?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    suggest?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     hostAction?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     trace?: (input: { traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };

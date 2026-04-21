@@ -94,15 +94,13 @@ test('buildAgentConnectSkillpacks includes the Ask Master skill with only master
     );
     assert.match(content, /^name:\s*metabot-ask-master$/m);
     assert.match(content, /metabot master list/);
+    assert.match(content, /metabot master suggest --request-file/);
     assert.match(content, /metabot master ask --request-file/);
     assert.match(content, /metabot master trace --id/);
-    assert.match(content, /manual \/ suggest \/ auto|manual, suggest, and auto/i);
-    assert.match(content, /confirmationMode=always/);
-    assert.match(content, /confirmationMode=sensitive_only/);
-    assert.match(content, /confirmationMode=never/);
-    assert.match(content, /manual.*asks and accepted.*suggest.*flows can continue immediately after request preparation/i);
+    assert.match(content, /manual \/ suggest|manual and suggest/i);
+    assert.match(content, /preview first, then explicit confirmation|preview\/confirm\/send path/i);
+    assert.match(content, /accepted `suggest` enters the same preview\/confirm\/send path as `manual`/i);
     assert.match(content, /single-machine two-terminal smoke|single machine dual terminal/i);
-    assert.match(content, /preview.*confirm.*auto/i);
     assert.match(content, /Do not call `services call` directly/i);
     assert.doesNotMatch(content, /metabot advisor (list|ask|trace)/);
     assert.doesNotMatch(content, /type":\s*"advisor_request"/);
@@ -172,11 +170,13 @@ test('buildAgentConnectSkillpacks host README advertises the phase-3 Ask Master 
 
   for (const host of HOSTS) {
     const readme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
-    assert.match(readme, /manual.*suggest.*auto/i);
+    assert.match(readme, /manual.*suggest/i);
     assert.match(readme, /single-machine two-terminal|single machine dual terminal/i);
     assert.match(readme, /preview\/confirm|preview first/i);
-    assert.match(readme, /confirmationMode`: `always` \/ `sensitive_only` \/ `never`|confirmationMode.*always.*sensitive_only.*never/i);
-    assert.match(readme, /manual asks and accepted suggest flows may continue immediately after request preparation/i);
+    assert.match(readme, /metabot config get askMaster.enabled/);
+    assert.match(readme, /metabot config set askMaster.triggerMode suggest/);
+    assert.match(readme, /accepted suggestions follow the same preview\/confirm\/send path as manual asks/i);
+    assert.match(readme, /metabot master suggest --request-file/);
     assert.match(readme, /metabot master ask --request-file/);
     assert.doesNotMatch(readme, /metabot advisor (list|ask|trace)/);
   }
@@ -438,15 +438,17 @@ test('codex install runbook documents the post-install Ask Master smoke contract
   assert.match(installRunbook, /stale advisor semantics found in installed Ask Master skill/);
   assert.match(installRunbook, /exit 1/);
   assert.match(installRunbook, /metabot master trace --id <real-trace-id>/);
-  assert.match(installRunbook, /manual.*suggest.*auto/i);
+  assert.match(installRunbook, /manual.*suggest/i);
   assert.match(installRunbook, /single-machine two-terminal|single machine dual terminal/i);
   assert.match(installRunbook, /preview\/confirm|preview and confirm/i);
-  assert.match(installRunbook, /- `always`: always stop at preview\/confirm before dispatch\./);
-  assert.match(installRunbook, /- `sensitive_only`: only trusted plus non-sensitive `auto` payloads may direct send/);
-  assert.match(installRunbook, /- `never`: `manual` asks and accepted `suggest` flows may continue immediately after request preparation\./);
+  assert.match(installRunbook, /metabot config get askMaster.enabled/);
+  assert.match(installRunbook, /metabot config set askMaster.triggerMode suggest/);
+  assert.match(installRunbook, /keep `askMaster.enabled = true`/);
+  assert.match(installRunbook, /keep `askMaster.triggerMode = suggest`/);
   assert.doesNotMatch(installRunbook, /metabot master trace --id trace-123/);
   assert.match(installRunbook, /post-flow check, not part of the zero-state fresh install smoke/i);
   assert.match(installRunbook, /restart Codex session/i);
   assert.match(installRunbook, /fresh install smoke/i);
+  assert.doesNotMatch(installRunbook, /only trusted plus non-sensitive `auto` payloads may direct send/i);
   assert.doesNotMatch(installRunbook, /metabot advisor (list|ask|trace)/);
 });

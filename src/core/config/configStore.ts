@@ -55,6 +55,10 @@ function normalizeStringArray(value: unknown): string[] {
   return normalized;
 }
 
+function allowInternalAskMasterAutoTriggerMode(): boolean {
+  return process.env.METABOT_INTERNAL_ASK_MASTER_AUTO === '1';
+}
+
 function normalizeConfig(input: unknown): MetabotConfig {
   const defaults = createDefaultConfig();
   if (!input || typeof input !== 'object') {
@@ -90,9 +94,11 @@ function normalizeConfig(input: unknown): MetabotConfig {
     },
     askMaster: {
       enabled: normalizeBoolean(askMasterSource.enabled, defaults.askMaster.enabled),
-      triggerMode: isAskMasterTriggerMode(triggerMode)
-        ? triggerMode
-        : defaults.askMaster.triggerMode,
+      triggerMode: triggerMode === 'auto' && !allowInternalAskMasterAutoTriggerMode()
+        ? defaults.askMaster.triggerMode
+        : isAskMasterTriggerMode(triggerMode)
+          ? triggerMode
+          : defaults.askMaster.triggerMode,
       confirmationMode: isAskMasterConfirmationMode(confirmationMode)
         ? confirmationMode
         : defaults.askMaster.confirmationMode,

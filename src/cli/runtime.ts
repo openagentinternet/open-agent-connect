@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import net from 'node:net';
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
+import type { AskMasterTriggerMode } from '../core/config/configTypes';
 import { createNetworkDirectoryEvolutionService } from '../core/evolution/service';
 import { createLocalEvolutionStore, parseSkillActiveVariantRef } from '../core/evolution/localEvolutionStore';
 import { createRemoteEvolutionStore } from '../core/evolution/remoteEvolutionStore';
@@ -273,15 +274,25 @@ function isAddressInUseError(error: unknown): boolean {
   );
 }
 
-type SupportedConfigKey =
+type SupportedBooleanConfigKey =
   | 'evolution_network.enabled'
   | 'evolution_network.autoAdoptSameSkillSameScope'
-  | 'evolution_network.autoRecordExecutions';
+  | 'evolution_network.autoRecordExecutions'
+  | 'askMaster.enabled';
+
+type SupportedEnumConfigKey =
+  | 'askMaster.triggerMode';
+
+type SupportedConfigKey = SupportedBooleanConfigKey | SupportedEnumConfigKey;
+
+type SupportedConfigValue = boolean | AskMasterTriggerMode;
 
 const SUPPORTED_CONFIG_KEYS = new Set<SupportedConfigKey>([
   'evolution_network.enabled',
   'evolution_network.autoAdoptSameSkillSameScope',
   'evolution_network.autoRecordExecutions',
+  'askMaster.enabled',
+  'askMaster.triggerMode',
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -330,15 +341,31 @@ function isSupportedConfigKey(key: string): key is SupportedConfigKey {
   return SUPPORTED_CONFIG_KEYS.has(key as SupportedConfigKey);
 }
 
+function isSupportedBooleanConfigKey(key: SupportedConfigKey): key is SupportedBooleanConfigKey {
+  return key === 'evolution_network.enabled'
+    || key === 'evolution_network.autoAdoptSameSkillSameScope'
+    || key === 'evolution_network.autoRecordExecutions'
+    || key === 'askMaster.enabled';
+}
+
 function readConfigValue(
   config: Awaited<ReturnType<ConfigStore['read']>>,
   key: SupportedConfigKey,
-): boolean {
+): SupportedConfigValue {
   if (key === 'evolution_network.enabled') {
     return config.evolution_network.enabled;
   }
   if (key === 'evolution_network.autoAdoptSameSkillSameScope') {
     return config.evolution_network.autoAdoptSameSkillSameScope;
+  }
+  if (key === 'evolution_network.autoRecordExecutions') {
+    return config.evolution_network.autoRecordExecutions;
+  }
+  if (key === 'askMaster.enabled') {
+    return config.askMaster.enabled;
+  }
+  if (key === 'askMaster.triggerMode') {
+    return config.askMaster.triggerMode;
   }
   return config.evolution_network.autoRecordExecutions;
 }
@@ -346,14 +373,32 @@ function readConfigValue(
 function writeConfigValue(
   config: Awaited<ReturnType<ConfigStore['read']>>,
   key: SupportedConfigKey,
-  value: boolean,
+  value: SupportedConfigValue,
 ): Awaited<ReturnType<ConfigStore['read']>> {
+  if (key === 'askMaster.enabled') {
+    return {
+      ...config,
+      askMaster: {
+        ...config.askMaster,
+        enabled: value === true,
+      },
+    };
+  }
+  if (key === 'askMaster.triggerMode') {
+    return {
+      ...config,
+      askMaster: {
+        ...config.askMaster,
+        triggerMode: value as AskMasterTriggerMode,
+      },
+    };
+  }
   if (key === 'evolution_network.enabled') {
     return {
       ...config,
       evolution_network: {
         ...config.evolution_network,
-        enabled: value,
+        enabled: value === true,
       },
     };
   }
@@ -362,7 +407,7 @@ function writeConfigValue(
       ...config,
       evolution_network: {
         ...config.evolution_network,
-        autoAdoptSameSkillSameScope: value,
+        autoAdoptSameSkillSameScope: value === true,
       },
     };
   }
@@ -370,8 +415,50 @@ function writeConfigValue(
     ...config,
     evolution_network: {
       ...config.evolution_network,
-      autoRecordExecutions: value,
+      autoRecordExecutions: value === true,
     },
+  };
+}
+
+function normalizeConfigValueForKey(input: {
+  key: SupportedConfigKey;
+  value: boolean | string;
+}): {
+  ok: true;
+  value: SupportedConfigValue;
+} | {
+  ok: false;
+  message: string;
+} {
+  if (isSupportedBooleanConfigKey(input.key)) {
+    if (typeof input.value !== 'boolean') {
+      return {
+        ok: false,
+        message: `Config key ${input.key} requires a boolean value.`,
+      };
+    }
+    return {
+      ok: true,
+      value: input.value,
+    };
+  }
+
+  if (input.key === 'askMaster.triggerMode') {
+    if (input.value !== 'manual' && input.value !== 'suggest') {
+      return {
+        ok: false,
+        message: 'Config value for askMaster.triggerMode must be one of `manual` or `suggest`.',
+      };
+    }
+    return {
+      ok: true,
+      value: input.value,
+    };
+  }
+
+  return {
+    ok: false,
+    message: `Unsupported config key: ${input.key}`,
   };
 }
 
@@ -1122,10 +1209,20 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             `Unsupported config key: ${input.key}`,
           );
         }
+        const normalizedValue = normalizeConfigValueForKey({
+          key: input.key,
+          value: input.value,
+        });
+        if (!normalizedValue.ok) {
+          return commandFailed(
+            'invalid_argument',
+            normalizedValue.message,
+          );
+        }
         const homeDir = normalizeHomeDir(context.env, context.cwd);
         const configStore = createConfigStore(homeDir);
         const config = await configStore.read();
-        const nextConfig = writeConfigValue(config, input.key, input.value);
+        const nextConfig = writeConfigValue(config, input.key, normalizedValue.value);
         await configStore.set(nextConfig);
         return commandSuccess({
           key: input.key,
@@ -1272,6 +1369,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         return requestJson(context, 'GET', `/api/master/list${suffix}`);
       },
       ask: async (input) => requestJson(context, 'POST', '/api/master/ask', input),
+      suggest: async (input) => requestJson(context, 'POST', '/api/master/suggest', input),
       hostAction: async (input) => requestJson(context, 'POST', '/api/master/host-action', input),
       trace: async (input) =>
         requestJson(context, 'GET', `/api/master/trace/${encodeURIComponent(input.traceId)}`),

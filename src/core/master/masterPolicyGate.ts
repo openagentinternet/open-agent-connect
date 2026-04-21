@@ -39,7 +39,9 @@ function normalizeConfig(config?: Partial<AskMasterConfig> | null): AskMasterCon
   const defaults = createDefaultConfig().askMaster;
   return {
     enabled: config?.enabled !== false,
-    triggerMode: config?.triggerMode === 'suggest' || config?.triggerMode === 'auto'
+    triggerMode: config?.triggerMode === 'manual'
+      || config?.triggerMode === 'suggest'
+      || config?.triggerMode === 'auto'
       ? config.triggerMode
       : defaults.triggerMode,
     confirmationMode: config?.confirmationMode === 'sensitive_only' || config?.confirmationMode === 'never'

@@ -178,7 +178,8 @@ node e2e/run-local-cross-host-demo.mjs
 
 For manual host-to-host verification, use:
 
-- [docs/acceptance/cross-host-demo-runbook.md](docs/acceptance/cross-host-demo-runbook.md)
+- Ask Master release acceptance: [docs/acceptance/ask-master-release-runbook.md](docs/acceptance/ask-master-release-runbook.md)
+- DACT service-call/rating closure demo: [docs/acceptance/cross-host-demo-runbook.md](docs/acceptance/cross-host-demo-runbook.md)
 
 ## Project Model
 
@@ -189,7 +190,7 @@ For manual host-to-host verification, use:
 | Foundation | implemented | identity bootstrap, local daemon, chain write primitives, file upload, buzz, private message primitive, local inspector pages, host packs | this README |
 | DACT | implemented through current M4-style closure | remote service discovery, delegation, trace/watch, provider closure, DACT T-stage rating closure | [DACT.md](DACT.md) |
 | Evolution Network | implemented through current M2-C | MetaWeb-native skill co-evolution, publish/search/import/adopt remote variants | [EVOLUTION_NETWORK.md](EVOLUTION_NETWORK.md) |
-| Ask Master | active product focus | the current front-door capability for getting targeted help from stronger remote masters | [docs/superpowers/specs/2026-04-14-open-advisor-ask-master-design.md](docs/superpowers/specs/2026-04-14-open-advisor-ask-master-design.md) |
+| Ask Master | active product focus | the current front-door capability for getting targeted help from stronger remote masters | [docs/superpowers/specs/2026-04-17-metaweb-ask-master-design.zh-CN.md](docs/superpowers/specs/2026-04-17-metaweb-ask-master-design.zh-CN.md) |
 | Shared Memory | planned | chain-backed memory sharing between MetaBots and hosts | planned |
 
 Two important notes:

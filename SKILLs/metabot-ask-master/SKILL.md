@@ -22,7 +22,7 @@ Should trigger when:
 - The human explicitly asks to ask a Master or Debug Master.
 - The human wants a preview before sending one Ask Master request.
 - The human wants to inspect an Ask Master result or follow-up trace.
-- The host is in `suggest` or `auto` mode and local Ask Master policy says a structured remote opinion is worth preparing.
+- The host is in `suggest` mode and local Ask Master policy says a structured remote opinion is worth preparing.
 
 Should not trigger when:
 
@@ -91,17 +91,15 @@ Inspect Ask Master trace details when needed:
 
 ## Trigger Modes
 
-The three Ask Master trigger lanes are `manual / suggest / auto`.
+The current public Ask Master lanes are `manual / suggest`.
 
-- `manual`: the human explicitly asks to ask one Master. Build the request, show preview, and wait for confirm before dispatch unless a later local confirmation policy explicitly permits direct send.
-- `suggest`: the host proposes Ask Master because it sees a stuck or risky situation. Accepted `suggest` follows the same local confirmation rule as `manual` and should not silently degrade into private chat.
-- `auto`: the runtime may prepare or dispatch Ask Master when local stuck detection, trust, privacy, and cooldown policy all allow it. `auto` does not mean unconditional send; it may still stop at preview/confirm.
+- `manual`: the human explicitly asks to ask one Master. Build the request, show preview, and wait for confirm before dispatch.
+- `suggest`: the host proposes Ask Master because it sees a stuck or risky situation. Accepted `suggest` enters the same preview/confirm/send path as `manual` and should not silently degrade into private chat.
 
-## Confirmation Modes
+## Public Confirmation Contract
 
-- `confirmationMode=always`: always stop at preview/confirm before dispatch.
-- `confirmationMode=sensitive_only`: only trusted plus non-sensitive `auto` payloads may direct send; `manual` and accepted `suggest` still stay in preview/confirm.
-- `confirmationMode=never`: `manual` asks and accepted `suggest` flows can continue immediately after request preparation. `auto` only direct-sends when the payload is trusted, safe, and local explicit auto policy enables it; otherwise it falls back to preview/confirm.
+- Current public release contract: preview first, then explicit confirmation before dispatch.
+- Treat `confirmationMode=always` as the user-facing baseline for manual and accepted suggest flows.
 
 ## Expectations
 
@@ -122,12 +120,10 @@ The three Ask Master trigger lanes are `manual / suggest / auto`.
 - Keep `relevantFiles` as short file-path lists only.
 - Keep `artifacts` small and summarized.
 - Always call `{{METABOT_CLI}} master ask --request-file ...` first so the runtime can build the preview.
+- Use `{{METABOT_CLI}} master suggest --request-file ...` when the host wants the runtime to evaluate a structured stuck/risk observation and surface an Ask Master suggestion.
 - If the command returns `awaiting_confirmation`, show the preview and wait for explicit approval before dispatching anything.
-- When `confirmationMode=never`, `manual` and accepted `suggest` asks may continue immediately after request preparation instead of pausing at `awaiting_confirmation`.
-- In `auto`, preview/confirm can still be the correct outcome when the local policy selects `preview_confirm` instead of `direct_send`.
 - If the human declines, stop without calling the confirmed command.
 - After approval, reuse the returned trace id and run `{{METABOT_CLI}} master ask --trace-id ... --confirm`.
-- If `auto` uses direct send, explain that it happened because local config, trust, privacy gate, and `confirmationMode` allowed it.
 - Do not call `services call` directly for Ask Master.
 - Do not hand-write `/protocols/simplemsg` payloads.
 - Do not fall back to private chat or old advisor commands.
@@ -144,10 +140,9 @@ The three Ask Master trigger lanes are `manual / suggest / auto`.
 ## Single Machine Dual Terminal Smoke
 
 - Keep one provider terminal online with a published Debug Master fixture.
-- In one caller terminal or fresh host session, verify `manual`, `suggest`, and `auto` are all explainable:
-  - `manual`: preview with `{{METABOT_CLI}} master ask --request-file ...`, then confirm with `{{METABOT_CLI}} master ask --trace-id ... --confirm`, unless local `confirmationMode=never` continues immediately after preparation.
-  - `suggest`: the host proposes Ask Master first; after acceptance it either stops at preview/confirm or continues immediately under the same `confirmationMode=never` rule.
-  - `auto`: the runtime may still land on preview/confirm; direct send is only valid when local `confirmationMode` and auto policy permit it.
+- In one caller terminal or fresh host session, verify both public lanes:
+  - `manual`: preview with `{{METABOT_CLI}} master ask --request-file ...`, then confirm with `{{METABOT_CLI}} master ask --trace-id ... --confirm`.
+  - `suggest`: the host calls `{{METABOT_CLI}} master suggest --request-file ...`, then after acceptance it enters preview/confirm and continues through the same confirm path.
 - After a real run, inspect the result with `{{METABOT_CLI}} master trace --id ...`.
 
 ## In Scope

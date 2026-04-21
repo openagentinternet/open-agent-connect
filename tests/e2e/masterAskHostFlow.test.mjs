@@ -517,3 +517,259 @@ test('accepted suggestion can preview, confirm, complete, and keep suggest metad
   assert.equal(trace.data.preview.question, 'Should I ask the Debug Master for help with the blocked suggest flow?');
   assert.match(trace.data.response.summary, /accepted suggestion completed/i);
 });
+
+test('suggest host flow can run through CLI entrypoints before accept, preview, confirm, and trace', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-host-suggest-cli-flow-'));
+  t.after(async () => {
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  const identityPair = createIdentityPair();
+  const configStore = createConfigStore(homeDir);
+  const providerPresenceStore = createProviderPresenceStateStore(homeDir);
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+  const masterStateStore = createPublishedMasterStateStore(homeDir);
+  await runtimeStateStore.writeState({
+    identity: createIdentity(identityPair.publicKeyHex),
+    services: [],
+    traces: [],
+  });
+  await configStore.set({
+    evolution_network: {
+      enabled: true,
+      autoAdoptSameSkillSameScope: false,
+      autoRecordExecutions: true,
+    },
+    askMaster: {
+      enabled: true,
+      triggerMode: 'suggest',
+      confirmationMode: 'always',
+      contextMode: 'standard',
+      trustedMasters: [],
+    },
+  });
+  await masterStateStore.write({
+    masters: [
+      {
+        id: 'master-pin-1',
+        sourceMasterPinId: 'master-pin-1',
+        currentPinId: 'master-pin-1',
+        creatorMetabotId: 1,
+        providerGlobalMetaId: 'idq1caller',
+        providerAddress: 'mvc-address',
+        serviceName: 'official-debug-master',
+        displayName: 'Official Debug Master',
+        description: 'Structured debugging help.',
+        masterKind: 'debug',
+        specialties: ['debugging'],
+        hostModes: ['codex'],
+        modelInfoJson: JSON.stringify({ provider: 'metaweb', model: 'official-debug-master-v1' }),
+        style: 'direct_and_structured',
+        pricingMode: 'free',
+        price: '0',
+        currency: 'MVC',
+        responseMode: 'structured',
+        contextPolicy: 'standard',
+        official: 1,
+        trustedTier: 'official',
+        payloadJson: '{}',
+        available: 1,
+        revokedAt: null,
+        updatedAt: 1_776_000_000_000,
+      },
+    ],
+  });
+  await providerPresenceStore.write({
+    enabled: true,
+    lastHeartbeatAt: Date.now(),
+    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-4',
+    lastHeartbeatTxid: 'heartbeat-tx-4',
+  });
+
+  const writes = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    getDaemonRecord: () => null,
+    signer: {
+      async getPrivateChatIdentity() {
+        return {
+          globalMetaId: 'idq1caller',
+          privateKeyHex: identityPair.privateKeyHex,
+        };
+      },
+      async writePin(input) {
+        writes.push(input);
+        return {
+          txids: ['simplemsg-tx-3'],
+          pinId: 'simplemsg-pin-3',
+          totalCost: 1,
+          network: 'mvc',
+          operation: 'create',
+          path: '/protocols/simplemsg',
+          contentType: 'application/json',
+          encoding: 'utf-8',
+          globalMetaId: 'idq1caller',
+          mvcAddress: 'mvc-address',
+        };
+      },
+    },
+    masterReplyWaiter: {
+      async awaitMasterReply(input) {
+        const responseJson = buildMasterResponseJson({
+          type: 'master_response',
+          version: '1.0.0',
+          requestId: input.requestId,
+          traceId: input.traceId,
+          responder: {
+            providerGlobalMetaId: input.providerGlobalMetaId,
+            masterServicePinId: input.masterServicePinId,
+            masterKind: 'debug',
+          },
+          status: 'completed',
+          summary: 'The CLI-backed suggest flow completed after the accepted suggestion entered preview and confirm normally.',
+          structuredData: {
+            diagnosis: ['The suggest entrypoint remained on the Ask Master runtime.'],
+            nextSteps: ['Keep the CLI suggest bridge aligned with host-action accept flow.'],
+            risks: ['A stale host bridge could bypass the structured preview path.'],
+          },
+        });
+        return {
+          state: 'completed',
+          response: JSON.parse(responseJson),
+          responseJson,
+          deliveryPinId: 'simplemsg-reply-pin-3',
+          observedAt: Date.now(),
+          rawMessage: null,
+        };
+      },
+    },
+  });
+
+  const suggestRequestFile = path.join(homeDir, 'master-suggest.json');
+  await writeFile(suggestRequestFile, JSON.stringify({
+    draft: {
+      userTask: 'Diagnose why the CLI suggest entrypoint might drift from the host action flow.',
+      question: 'Should I ask the Debug Master for help with the blocked suggest bridge?',
+      workspaceSummary: 'Ask Master suggest CLI e2e integration test.',
+      errorSummary: 'Repeated blocked preview/confirm flow in the same host task.',
+      relevantFiles: ['tests/e2e/masterAskHostFlow.test.mjs'],
+      constraints: ['Keep the answer structured and concise.'],
+      artifacts: [],
+    },
+    observation: {
+      now: 1_776_000_000_000,
+      traceId: 'trace-host-action-e2e-suggest-cli-1',
+      hostMode: 'codex',
+      userIntent: {
+        explicitlyAskedForMaster: false,
+        explicitlyRejectedSuggestion: false,
+      },
+      activity: {
+        recentUserMessages: 2,
+        recentAssistantMessages: 6,
+        recentToolCalls: 7,
+        recentFailures: 3,
+        repeatedFailureCount: 2,
+        noProgressWindowMs: 1_200_000,
+      },
+      diagnostics: {
+        failingTests: 1,
+        failingCommands: 1,
+        repeatedErrorSignatures: ['ERR_HOST_SUGGEST_CLI_LOOP'],
+        uncertaintySignals: ['stuck'],
+      },
+      workState: {
+        hasPlan: true,
+        todoBlocked: true,
+        diffChangedRecently: false,
+        onlyReadingWithoutConverging: true,
+      },
+      directory: {
+        availableMasters: 1,
+        trustedMasters: 0,
+        onlineMasters: 1,
+      },
+      candidateMasterKindHint: 'debug',
+    },
+  }, null, 2), 'utf8');
+
+  const suggestStdout = [];
+  const suggestExitCode = await runCli(['master', 'suggest', '--request-file', suggestRequestFile], {
+    stdout: { write: (chunk) => { suggestStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        suggest: handlers.master.suggest,
+      },
+    },
+  });
+
+  assert.equal(suggestExitCode, 0);
+  const suggestResult = parseOutput(suggestStdout);
+  assert.equal(suggestResult.ok, true);
+  assert.equal(suggestResult.data.decision.action, 'suggest');
+
+  const acceptRequestFile = path.join(homeDir, 'master-accept-suggest.json');
+  await writeFile(acceptRequestFile, JSON.stringify({
+    action: {
+      kind: 'accept_suggest',
+      traceId: suggestResult.data.suggestion.traceId,
+      suggestionId: suggestResult.data.suggestion.suggestionId,
+    },
+  }, null, 2), 'utf8');
+
+  const acceptStdout = [];
+  const acceptExitCode = await runCli(['master', 'host-action', '--request-file', acceptRequestFile], {
+    stdout: { write: (chunk) => { acceptStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        hostAction: handlers.master.hostAction,
+      },
+    },
+  });
+
+  assert.equal(acceptExitCode, 0);
+  const acceptResult = parseOutput(acceptStdout);
+  assert.equal(acceptResult.ok, true);
+  assert.equal(acceptResult.state, 'awaiting_confirmation');
+  assert.equal(acceptResult.data.hostAction, 'accept_suggest');
+  assert.equal(acceptResult.data.preview.request.trigger.mode, 'suggest');
+
+  const confirmStdout = [];
+  const confirmExitCode = await runCli(['master', 'ask', '--trace-id', acceptResult.data.traceId, '--confirm'], {
+    stdout: { write: (chunk) => { confirmStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        ask: handlers.master.ask,
+        trace: handlers.master.trace,
+      },
+    },
+  });
+
+  assert.equal(confirmExitCode, 0);
+  const confirm = parseOutput(confirmStdout);
+  assert.equal(confirm.ok, true);
+  assert.equal(confirm.state, 'success');
+  assert.equal(confirm.data.session.publicStatus, 'completed');
+  assert.equal(confirm.data.response.status, 'completed');
+  assert.equal(writes.length, 1);
+
+  const traceStdout = [];
+  const traceExitCode = await runCli(['master', 'trace', '--id', acceptResult.data.traceId], {
+    stdout: { write: (chunk) => { traceStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        trace: handlers.master.trace,
+      },
+    },
+  });
+
+  assert.equal(traceExitCode, 0);
+  const trace = parseOutput(traceStdout);
+  assert.equal(trace.ok, true);
+  assert.equal(trace.data.triggerMode, 'suggest');
+  assert.match(trace.data.response.summary, /CLI-backed suggest flow completed/i);
+});

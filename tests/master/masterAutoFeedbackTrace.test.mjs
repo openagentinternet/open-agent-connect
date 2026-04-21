@@ -17,6 +17,18 @@ const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 const { buildMasterResponseJson } = require('../../dist/core/master/masterMessageSchema.js');
 
+const previousInternalAuto = process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
+test.before(() => {
+  process.env.METABOT_INTERNAL_ASK_MASTER_AUTO = '1';
+});
+test.after(() => {
+  if (previousInternalAuto === undefined) {
+    delete process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
+    return;
+  }
+  process.env.METABOT_INTERNAL_ASK_MASTER_AUTO = previousInternalAuto;
+});
+
 function createIdentityPair() {
   const ecdh = createECDH('prime256v1');
   ecdh.generateKeys();

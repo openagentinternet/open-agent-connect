@@ -19,10 +19,79 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^Usage:\s+metabot <command>/m);
   assert.match(output, /^Commands:/m);
   assert.match(output, /^\s+identity\s+/m);
+  assert.match(output, /^\s+config\s+/m);
   assert.match(output, /^\s+wallet\s+/m);
   assert.match(output, /^\s+services\s+/m);
   assert.match(output, /^\s+trace\s+/m);
   assert.equal(output.includes('"ok"'), false);
+});
+
+test('runCli prints config group help with get and set subcommands', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['config', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot config <subcommand>/m);
+  assert.match(output, /^Commands:/m);
+  assert.match(output, /^\s+get\s+/m);
+  assert.match(output, /^\s+set\s+/m);
+  assert.match(output, /askMaster\.enabled/);
+  assert.match(output, /askMaster\.triggerMode suggest/);
+});
+
+test('runCli prints config set help with the public Ask Master trigger modes only', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['config', 'set', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot config set <key> <value>/m);
+  assert.match(output, /Ask Master trigger mode is intentionally limited to manual or suggest/i);
+  assert.match(output, /Fails when askMaster\.triggerMode is not one of `manual` or `suggest`\./);
+  assert.doesNotMatch(output, /`manual`, `suggest`, or `auto`/);
+});
+
+test('runCli prints master host-action help with both manual_ask and accept_suggest examples', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['master', 'host-action', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot master host-action --request-file <path>/m);
+  assert.match(output, /manual_ask or accept_suggest/i);
+  assert.match(output, /master-manual-ask\.json/);
+  assert.match(output, /master-accept-suggest\.json/);
+});
+
+test('runCli prints master ask help with confirm limited to the trace-id continuation path', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['master', 'ask', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot master ask --request-file <path> \| metabot master ask --trace-id <trace-id> \[--confirm\]/m);
+  assert.match(output, /Only valid together with `--trace-id`\./);
 });
 
 test('runCli prints wallet group help with balance subcommand', async () => {

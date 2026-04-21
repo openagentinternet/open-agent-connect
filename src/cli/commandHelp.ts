@@ -178,6 +178,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
   usage: 'metabot <command>',
   subcommands: [
     { name: 'identity', summary: 'Create the local MetaBot identity and bootstrap chain state.' },
+    { name: 'config', summary: 'Read or change supported public runtime switches.' },
     { name: 'doctor', summary: 'Check daemon health, identity state, and local runtime readiness.' },
     { name: 'daemon', summary: 'Start the local MetaBot daemon process.' },
     { name: 'file', summary: 'Upload local files to MetaWeb.' },
@@ -193,6 +194,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
   ],
   optionalFlags: [HELP_JSON_FLAG],
   examples: [
+    'metabot config get askMaster.enabled',
     'metabot services call --help',
     'metabot chat private --help --json',
   ],
@@ -200,6 +202,57 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
 
 const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   ROOT_COMMAND_HELP,
+  {
+    commandPath: ['config'],
+    summary: 'Read or change supported public runtime switches such as Ask Master availability.',
+    usage: 'metabot config <subcommand>',
+    subcommands: [
+      { name: 'get', summary: 'Read one supported config key from the active local runtime home.' },
+      { name: 'set', summary: 'Persist one supported config key for the active local runtime home.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+    examples: [
+      'metabot config get askMaster.enabled',
+      'metabot config set askMaster.triggerMode suggest',
+    ],
+  },
+  {
+    commandPath: ['config', 'get'],
+    summary: 'Read one supported public config key such as Ask Master availability or trigger mode.',
+    usage: 'metabot config get <key>',
+    successFields: [
+      'key',
+      'value',
+    ],
+    failureSemantics: [
+      'Fails with missing_argument when the config key is omitted.',
+      'Fails with unsupported_config_key when the requested key is not in the public CLI allowlist.',
+    ],
+    examples: [
+      'metabot config get askMaster.enabled',
+      'metabot config get askMaster.triggerMode',
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['config', 'set'],
+    summary: 'Persist one supported public config key. Ask Master trigger mode is intentionally limited to manual or suggest for the current release.',
+    usage: 'metabot config set <key> <value>',
+    successFields: [
+      'key',
+      'value',
+    ],
+    failureSemantics: [
+      'Fails with missing_argument when the key or value is omitted.',
+      'Fails with unsupported_config_key when the requested key is not in the public CLI allowlist.',
+      'Fails when askMaster.triggerMode is not one of `manual` or `suggest`.',
+    ],
+    examples: [
+      'metabot config set askMaster.enabled false',
+      'metabot config set askMaster.triggerMode suggest',
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
   {
     commandPath: ['identity'],
     summary: 'Identity commands for creating, listing, and switching local MetaBot identity profiles.',
@@ -464,6 +517,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'publish', summary: 'Publish one master-service record to the chain-backed directory.' },
       { name: 'list', summary: 'List discoverable master-service entries for the current host.' },
       { name: 'ask', summary: 'Preview or confirm one Ask Master request.' },
+      { name: 'suggest', summary: 'Evaluate one host-visible stuck/risk frame and surface a suggest result.' },
       { name: 'host-action', summary: 'Bridge one host-facing Ask Master action into the existing runtime.' },
       { name: 'trace', summary: 'Inspect one Ask Master trace by trace id.' },
     ],
@@ -491,7 +545,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['master', 'ask'],
     summary: 'Preview or confirm one Ask Master request from a request file or pending trace.',
-    usage: 'metabot master ask --request-file <path> | --trace-id <trace-id> [--confirm]',
+    usage: 'metabot master ask --request-file <path> | metabot master ask --trace-id <trace-id> [--confirm]',
     requiredFlags: [
       {
         flag: '--request-file | --trace-id',
@@ -500,13 +554,26 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       },
     ],
     optionalFlags: [
-      { flag: '--confirm', description: 'Send a previously previewed Ask Master request.' },
+      { flag: '--confirm', description: 'Send a previously previewed Ask Master request. Only valid together with `--trace-id`.' },
       HELP_JSON_FLAG,
     ],
   },
   {
+    commandPath: ['master', 'suggest'],
+    summary: 'Evaluate one host-visible Ask Master suggest request through the runtime trigger engine.',
+    usage: 'metabot master suggest --request-file <path>',
+    requiredFlags: [
+      {
+        flag: '--request-file',
+        value: '<path>',
+        description: 'JSON suggest request file containing draft plus host observation.',
+      },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
     commandPath: ['master', 'host-action'],
-    summary: 'Run one host-facing Ask Master action such as manual_ask through the local runtime bridge.',
+    summary: 'Run one host-facing Ask Master action such as manual_ask or accept_suggest through the local runtime bridge.',
     usage: 'metabot master host-action --request-file <path>',
     requiredFlags: [
       {
@@ -514,6 +581,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
         value: '<path>',
         description: 'JSON host-action request file.',
       },
+    ],
+    examples: [
+      'metabot master host-action --request-file master-manual-ask.json',
+      'metabot master host-action --request-file master-accept-suggest.json',
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },

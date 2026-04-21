@@ -112,19 +112,23 @@ node e2e/run-local-cross-host-demo.mjs
 
 ## Ask Master Smoke
 
-The Ask Master host contract in this pack supports \`manual / suggest / auto\` lanes.
+The Ask Master host contract in this pack publicly supports \`manual / suggest\` lanes.
 
-- \`manual\`: preview first with \`${PRIMARY_CLI_PATH} master ask --request-file ...\`, then confirm with \`${PRIMARY_CLI_PATH} master ask --trace-id ... --confirm\`, unless local \`confirmationMode=never\` continues immediately after request preparation
-- \`suggest\`: the host may recommend Ask Master, and accepted suggestions follow the same local confirmation rule as manual asks
-- \`auto\`: still controlled by local config and \`confirmationMode\`; auto may stop at preview/confirm or direct-send only when local policy allows it
+- \`manual\`: preview first with \`${PRIMARY_CLI_PATH} master ask --request-file ...\`, then confirm with \`${PRIMARY_CLI_PATH} master ask --trace-id ... --confirm\`
+- \`suggest\`: ask the runtime to evaluate a stuck/risk observation with \`${PRIMARY_CLI_PATH} master suggest --request-file ...\`, then accepted suggestions follow the same preview/confirm/send path as manual asks
 
-Confirmation modes:
+Public Ask Master controls:
 
-- \`confirmationMode\`: \`always\` / \`sensitive_only\` / \`never\`
+- \`metabot config get askMaster.enabled\`
+- \`metabot config set askMaster.enabled false\`
+- \`metabot config get askMaster.triggerMode\`
+- \`metabot config set askMaster.triggerMode suggest\`
 
-- \`always\`: always preview/confirm
-- \`sensitive_only\`: trusted non-sensitive auto payloads may direct-send; manual and accepted suggest flows still stay in preview/confirm
-- \`never\`: manual asks and accepted suggest flows may continue immediately after request preparation; auto still needs trusted safe payloads plus explicit local auto-send policy before direct-send
+Public release expectation:
+
+- keep Ask Master enabled when you want the feature available
+- use \`triggerMode=suggest\` when you want proactive suggestions in addition to manual ask
+- manual and accepted suggest flows stay on preview/confirm before send
 
 For a single machine dual terminal smoke, keep one provider terminal online with a published Debug Master and run the caller flow separately so you can inspect preview, confirm, and trace behavior end to end.
 

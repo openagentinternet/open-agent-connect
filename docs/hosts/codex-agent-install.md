@@ -112,23 +112,29 @@ Smoke expectations:
 
 ## Ask Master Acceptance Lanes
 
-After the install smoke is green, interpret the three Phase-3 Ask Master lanes like this:
+After the install smoke is green, interpret the current public Ask Master lanes like this:
 
-- `manual`: the human explicitly asks for one Master, the host builds a request, and the runtime usually stops at preview/confirm before send unless local `confirmationMode=never` allows immediate continuation after request preparation.
-- `suggest`: the host notices a stuck or risky situation and proposes Ask Master. After the user accepts, it follows the same local confirmation rule as `manual`.
-- `auto`: the host/runtime may prepare or send Ask Master without a new human wording prompt, but only when local Ask Master config and policy allow it.
+- `manual`: the human explicitly asks for one Master, the host builds a request, and the runtime stops at preview/confirm before send.
+- `suggest`: the host notices a stuck or risky situation and proposes Ask Master. After the user accepts, it enters the same preview/confirm/send path as `manual`.
 
-For Codex acceptance, `manual`, `suggest`, and `auto` should all be explainable in a fresh session. The important part is not that all three always send immediately; the important part is that the host clearly follows the configured confirmation contract.
+For the current release, Codex acceptance should focus on `manual + suggest`. The key requirement is that both lanes stay on the validated Ask Master preview/confirm contract and never degrade into private chat or ad-hoc transport.
 
-## Confirmation Mode Semantics
+## Ask Master Public Controls
 
-`confirmationMode` controls whether Ask Master must stop at preview/confirm:
+Use these commands to verify or change the public Ask Master controls:
 
-- `always`: always stop at preview/confirm before dispatch.
-- `sensitive_only`: only trusted plus non-sensitive `auto` payloads may direct send; `manual` and accepted `suggest` still stay in preview/confirm.
-- `never`: `manual` asks and accepted `suggest` flows may continue immediately after request preparation. `auto` still needs trusted plus safe payload plus explicit local auto-send policy before it may direct send.
+```bash
+metabot config get askMaster.enabled
+metabot config set askMaster.enabled true
+metabot config get askMaster.triggerMode
+metabot config set askMaster.triggerMode suggest
+```
 
-Phase-3 acceptance should focus on `always` and `sensitive_only`. Even in `auto`, preview and confirm remain valid outcomes whenever the local policy picks `preview_confirm`. If you cover `never`, make sure you verify both the reduced-friction `manual/suggest` continuation and the stricter `auto` direct-send gate.
+Recommended release posture:
+
+- keep `askMaster.enabled = true`
+- keep `askMaster.triggerMode = suggest` so both manual ask and proactive suggestions are available
+- treat preview-first confirmation as the public release contract
 
 ## Single-Machine Dual Terminal Smoke
 
@@ -163,18 +169,16 @@ metabot master ask --trace-id <preview-trace-id> --confirm
 Suggest lane:
 
 - open a fresh Codex session after install
+- verify `metabot config get askMaster.enabled` returns `true`
+- verify `metabot config get askMaster.triggerMode` returns `suggest`
 - ask in natural language for Ask Master help and require preview first
 - expect the installed `metabot-ask-master` contract to keep the flow on Ask Master, not private chat
-- expect the host to show preview/confirm before any send unless local `confirmationMode=never` allows immediate continuation after request preparation
+- expect the host to either:
+  - call `metabot master suggest --request-file ...` through the bridge and surface a suggestion first
+  - or present an equivalent host-facing suggestion that still stays on Ask Master semantics
+- after acceptance, expect the normal preview/confirm/send path
 
-Auto lane:
-
-- enable local Ask Master auto mode before testing
-- create a controlled stuck scenario or run the auto e2e coverage from this repo
-- expect either preview/confirm or direct send depending local `confirmationMode`, trust, and privacy gate
-- if direct send happens, the trace should still explain why that was allowed
-
-This single-machine two-terminal smoke is the clearest acceptance setup for Phase-3 because it lets you inspect provider state, caller preview/confirm behavior, and the resulting Ask Master trace separately.
+This single-machine two-terminal smoke is the clearest acceptance setup for the current release because it lets you inspect provider state, caller preview/confirm behavior, suggestion acceptance, and the resulting Ask Master trace separately.
 
 After the first real Ask Master request succeeds, inspect that trace with:
 

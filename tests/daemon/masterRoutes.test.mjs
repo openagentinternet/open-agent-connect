@@ -242,6 +242,64 @@ test('POST /api/master/host-action forwards the JSON payload to master.hostActio
   assert.equal(payload.data.hostAction, 'manual_ask');
 });
 
+test('POST /api/master/suggest forwards the JSON payload to master.suggest', async (t) => {
+  const calls = [];
+  const server = await startServer({
+    master: {
+      suggest: async (input) => {
+        calls.push(input);
+        return {
+          ok: true,
+          state: 'success',
+          data: {
+            decision: {
+              action: 'suggest',
+            },
+            suggestion: {
+              traceId: 'trace-master-suggest-route-1',
+            },
+          },
+        };
+      },
+    },
+  });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/master/suggest`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      draft: {
+        userTask: 'Diagnose a repeated blocked preview flow.',
+        question: 'Should I ask Debug Master for help?',
+      },
+      observation: {
+        traceId: 'trace-master-suggest-route-1',
+        hostMode: 'codex',
+      },
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    {
+      draft: {
+        userTask: 'Diagnose a repeated blocked preview flow.',
+        question: 'Should I ask Debug Master for help?',
+      },
+      observation: {
+        traceId: 'trace-master-suggest-route-1',
+        hostMode: 'codex',
+      },
+    },
+  ]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.decision.action, 'suggest');
+});
+
 test('GET /api/master/trace/:id forwards the trace id to master.trace', async (t) => {
   const calls = [];
   const server = await startServer({

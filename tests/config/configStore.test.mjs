@@ -8,10 +8,16 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 
-async function withTempHome(action) {
+async function withTempHome(action, options = {}) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-config-'));
   const previousHome = process.env.METABOT_HOME;
+  const previousInternalAuto = process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
   process.env.METABOT_HOME = tempDir;
+  if (options.allowInternalAuto) {
+    process.env.METABOT_INTERNAL_ASK_MASTER_AUTO = '1';
+  } else {
+    delete process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
+  }
   try {
     await action(tempDir);
   } finally {
@@ -19,6 +25,11 @@ async function withTempHome(action) {
       delete process.env.METABOT_HOME;
     } else {
       process.env.METABOT_HOME = previousHome;
+    }
+    if (previousInternalAuto === undefined) {
+      delete process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
+    } else {
+      process.env.METABOT_INTERNAL_ASK_MASTER_AUTO = previousInternalAuto;
     }
     await fs.rm(tempDir, { recursive: true, force: true });
   }
@@ -32,7 +43,7 @@ test('createConfigStore defaults to evolution_network enabled true and persists 
     assert.strictEqual(defaults.evolution_network.autoRecordExecutions, true);
     assert.deepEqual(defaults.askMaster, {
       enabled: true,
-      triggerMode: 'manual',
+      triggerMode: 'suggest',
       confirmationMode: 'always',
       contextMode: 'standard',
       trustedMasters: [],
@@ -93,7 +104,7 @@ test('read merges defaults when config fields are missing', async () => {
       },
       askMaster: {
         enabled: true,
-        triggerMode: 'manual',
+        triggerMode: 'suggest',
         confirmationMode: 'always',
         contextMode: 'standard',
         trustedMasters: [],
@@ -131,7 +142,7 @@ test('read ignores non-boolean config values and falls back to defaults', async 
       },
       askMaster: {
         enabled: true,
-        triggerMode: 'manual',
+        triggerMode: 'suggest',
         confirmationMode: 'always',
         contextMode: 'standard',
         trustedMasters: [],
@@ -178,6 +189,7 @@ test('set normalizes partial askMaster autoPolicy when callers omit new phase-3 
     });
 
     const reloaded = await store.read();
+    assert.equal(reloaded.askMaster.triggerMode, 'suggest');
     assert.deepEqual(reloaded.askMaster.autoPolicy, {
       minConfidence: 0.75,
       minNoProgressWindowMs: 300_000,
@@ -186,4 +198,34 @@ test('set normalizes partial askMaster autoPolicy when callers omit new phase-3 
       allowTrustedAutoSend: false,
     });
   });
+});
+
+test('set preserves internal auto triggerMode when the internal override is enabled', async () => {
+  await withTempHome(async () => {
+    const store = createConfigStore();
+    await store.set({
+      evolution_network: {
+        enabled: true,
+        autoAdoptSameSkillSameScope: false,
+        autoRecordExecutions: true
+      },
+      askMaster: {
+        enabled: true,
+        triggerMode: 'auto',
+        confirmationMode: 'never',
+        contextMode: 'standard',
+        trustedMasters: [],
+        autoPolicy: {
+          minConfidence: 0.75,
+          minNoProgressWindowMs: 300_000,
+          perTraceLimit: 1,
+          globalCooldownMs: 1_800_000,
+          allowTrustedAutoSend: false,
+        },
+      }
+    });
+
+    const reloaded = await store.read();
+    assert.equal(reloaded.askMaster.triggerMode, 'auto');
+  }, { allowInternalAuto: true });
 });

@@ -102,7 +102,7 @@ export function createDefaultConfig(): MetabotConfig {
     },
     askMaster: {
       enabled: true,
-      triggerMode: 'manual',
+      triggerMode: 'suggest',
       confirmationMode: 'always',
       contextMode: 'standard',
       trustedMasters: [],

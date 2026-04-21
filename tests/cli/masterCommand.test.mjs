@@ -200,6 +200,52 @@ test('runCli dispatches `metabot master ask --request-file` and returns not_impl
   });
 });
 
+test('runCli rejects `metabot master ask --request-file ... --confirm` before it reaches the runtime handler', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-ask-confirm-request-file-'));
+  const requestFile = path.join(tempDir, 'master-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      type: 'master_request',
+      masterServicePinId: 'master-pin-1',
+      providerGlobalMetaId: 'gm-debug-master',
+      masterKind: 'debug',
+      userTask: 'help me debug a failing test',
+      question: 'What should I check first?',
+    },
+  }), 'utf8');
+
+  const stdout = [];
+  const calls = [];
+
+  const exitCode = await runCli(['master', 'ask', '--request-file', requestFile, '--confirm'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        ask: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'success',
+            data: {
+              traceId: 'trace-should-not-run',
+            },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(calls.length, 0);
+  assert.deepEqual(parseJsonEnvelope(stdout), {
+    ok: false,
+    state: 'failed',
+    code: 'invalid_argument',
+    message: '`metabot master ask --confirm` requires `--trace-id <trace-id>` and cannot be combined with `--request-file`.',
+  });
+});
+
 test('runCli dispatches `metabot master host-action --request-file` and returns not_implemented when the handler is missing', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-host-action-'));
   const requestFile = path.join(tempDir, 'master-host-action.json');
@@ -316,6 +362,142 @@ test('runCli dispatches `metabot master host-action --request-file` with parsed 
   assert.equal(calls[0].action.kind, 'manual_ask');
   assert.equal(calls[0].action.preferredMasterName, 'Debug Master');
   assert.equal(calls[0].context.traceId, 'trace-host-action-cli-2');
+});
+
+test('runCli dispatches `metabot master suggest --request-file` and returns not_implemented when the handler is missing', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-suggest-'));
+  const requestFile = path.join(tempDir, 'master-suggest.json');
+  await writeFile(requestFile, JSON.stringify({
+    draft: {
+      userTask: 'Diagnose a repeated blocked preview flow.',
+      question: 'Should I ask Debug Master for help?',
+      workspaceSummary: 'Ask Master suggest cli dispatch test.',
+    },
+    observation: {
+      now: 1_776_300_000_000,
+      traceId: 'trace-master-suggest-cli-1',
+      hostMode: 'codex',
+      userIntent: {
+        explicitlyAskedForMaster: false,
+        explicitlyRejectedSuggestion: false,
+      },
+      activity: {
+        recentFailures: 3,
+        repeatedFailureCount: 2,
+        noProgressWindowMs: 600000,
+      },
+      diagnostics: {
+        failingTests: 1,
+        failingCommands: 1,
+        repeatedErrorSignatures: ['ERR_MASTER_SUGGEST_CLI'],
+        uncertaintySignals: ['stuck'],
+      },
+      workState: {
+        hasPlan: true,
+        todoBlocked: true,
+        diffChangedRecently: false,
+        onlyReadingWithoutConverging: true,
+      },
+      directory: {
+        availableMasters: 1,
+        trustedMasters: 0,
+        onlineMasters: 1,
+      },
+      candidateMasterKindHint: 'debug',
+    },
+  }), 'utf8');
+
+  const stdout = [];
+
+  const exitCode = await runCli(['master', 'suggest', '--request-file', requestFile], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        suggest: undefined,
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(parseJsonEnvelope(stdout), {
+    ok: false,
+    state: 'failed',
+    code: 'not_implemented',
+    message: 'Master suggest handler is not configured.',
+  });
+});
+
+test('runCli dispatches `metabot master suggest --request-file` with parsed JSON payload', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-suggest-dispatch-'));
+  const requestFile = path.join(tempDir, 'master-suggest.json');
+  await writeFile(requestFile, JSON.stringify({
+    draft: {
+      userTask: 'Diagnose a repeated blocked preview flow.',
+      question: 'Should I ask Debug Master for help?',
+      workspaceSummary: 'Ask Master suggest cli dispatch test.',
+    },
+    observation: {
+      now: 1_776_300_000_000,
+      traceId: 'trace-master-suggest-cli-2',
+      hostMode: 'codex',
+      userIntent: {
+        explicitlyAskedForMaster: false,
+        explicitlyRejectedSuggestion: false,
+      },
+      activity: {
+        recentFailures: 3,
+        repeatedFailureCount: 2,
+        noProgressWindowMs: 600000,
+      },
+      diagnostics: {
+        failingTests: 1,
+        failingCommands: 1,
+        repeatedErrorSignatures: ['ERR_MASTER_SUGGEST_CLI'],
+        uncertaintySignals: ['stuck'],
+      },
+      workState: {
+        hasPlan: true,
+        todoBlocked: true,
+        diffChangedRecently: false,
+        onlyReadingWithoutConverging: true,
+      },
+      directory: {
+        availableMasters: 1,
+        trustedMasters: 0,
+        onlineMasters: 1,
+      },
+      candidateMasterKindHint: 'debug',
+    },
+  }), 'utf8');
+
+  const calls = [];
+
+  const exitCode = await runCli(['master', 'suggest', '--request-file', requestFile], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        suggest: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'success',
+            data: {
+              decision: {
+                action: 'suggest',
+              },
+            },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].draft.question, 'Should I ask Debug Master for help?');
+  assert.equal(calls[0].observation.traceId, 'trace-master-suggest-cli-2');
 });
 
 test('runCli dispatches `metabot master trace --id` with the parsed trace id', async () => {
