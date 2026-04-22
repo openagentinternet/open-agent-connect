@@ -1379,6 +1379,17 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const query = input.online === undefined ? '' : `?online=${input.online ? 'true' : 'false'}`;
         return requestJson(context, 'GET', `/api/network/services${query}`);
       },
+      listBots: async (input) => {
+        const query = new URLSearchParams();
+        if (input.online !== undefined) {
+          query.set('online', input.online ? 'true' : 'false');
+        }
+        if (typeof input.limit === 'number' && Number.isFinite(input.limit)) {
+          query.set('limit', String(Math.max(1, Math.floor(input.limit))));
+        }
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/network/bots${suffix}`);
+      },
       listSources: async () => requestJson(context, 'GET', '/api/network/sources'),
       addSource: async (input) => requestJson(context, 'POST', '/api/network/sources', input),
       removeSource: async (input) => requestJson(context, 'DELETE', '/api/network/sources', input),

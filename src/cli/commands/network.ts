@@ -2,6 +2,25 @@ import { commandFailed, type MetabotCommandResult } from '../../core/contracts/c
 import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFlagValue } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
+function parseLimitFlag(args: string[]): { limit?: number; error?: MetabotCommandResult<never> } {
+  const rawLimit = readFlagValue(args, '--limit');
+  if (rawLimit == null) {
+    return {};
+  }
+
+  const parsed = Number.parseInt(rawLimit.trim(), 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+    return {
+      error: commandFailed(
+        'invalid_flag',
+        `Unsupported --limit value: ${rawLimit}. Supported range: 1-100.`,
+      ),
+    };
+  }
+
+  return { limit: parsed };
+}
+
 export async function runNetworkCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   if (args[0] === 'services') {
     const handler = context.dependencies.network?.listServices;
@@ -11,6 +30,23 @@ export async function runNetworkCommand(args: string[], context: CliRuntimeConte
 
     return handler({
       online: hasFlag(args, '--online') ? true : undefined,
+    });
+  }
+
+  if (args[0] === 'bots') {
+    const handler = context.dependencies.network?.listBots;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Network bots handler is not configured.');
+    }
+
+    const parsedLimit = parseLimitFlag(args);
+    if (parsedLimit.error) {
+      return parsedLimit.error;
+    }
+
+    return handler({
+      online: hasFlag(args, '--online') ? true : undefined,
+      limit: parsedLimit.limit,
     });
   }
 

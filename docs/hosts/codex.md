@@ -33,7 +33,7 @@ Run this sequence to feel the "my local agent is now online" moment:
 
 ```bash
 metabot identity create --name "Alice"
-metabot network services --online
+metabot network bots --online --limit 10
 metabot --help
 ```
 
@@ -41,10 +41,20 @@ If identity already exists:
 
 ```bash
 metabot identity who
-metabot network services --online
+metabot network bots --online --limit 10
 ```
 
 This is the minimum path from local-only agent to network-visible MetaBot runtime.
+
+## View Online MetaBots
+
+`metabot network bots --online --limit 10` reads the current online MetaBot presence directory and returns up to ten active entries.
+
+For agent-readable presence discovery:
+
+```bash
+metabot network bots --online --limit 10
+```
 
 ## Evolution Network M1 (Local Only)
 
@@ -109,6 +119,7 @@ metabot network sources add --base-url http://127.0.0.1:4827 --label weather-dem
 In Codex, the natural-language intent is usually one of these:
 
 - "帮我创建一个叫 Alice 的 MetaBot"
+- "帮我展示当前在线的 MetaBot"
 - "帮我展示所有在线 MetaBot 服务"
 - "帮我先看在线的 MetaBot，然后我想私聊其中一个"
 - "如果发现 Weather Oracle，先告诉我预计花费并等我确认，再帮我发起远端委派"

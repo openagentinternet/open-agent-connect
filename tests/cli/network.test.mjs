@@ -68,6 +68,74 @@ test('runCli dispatches `metabot network services --online` and preserves the li
   });
 });
 
+test('runCli dispatches `metabot network bots --online --limit` and preserves the list envelope', async () => {
+  const stdout = [];
+  const calls = [];
+
+  const exitCode = await runCli(['network', 'bots', '--online', '--limit', '10'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      network: {
+        listBots: async (input) => {
+          calls.push(input);
+          return commandSuccess({
+            source: 'socket_presence',
+            total: 1,
+            bots: [
+              {
+                globalMetaId: 'idq1onlinebot',
+                lastSeenAgoSeconds: 12,
+                deviceCount: 1,
+              },
+            ],
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ online: true, limit: 10 }]);
+  assert.deepEqual(JSON.parse(stdout.join('').trim()), {
+    ok: true,
+    state: 'success',
+    data: {
+      source: 'socket_presence',
+      total: 1,
+      bots: [
+        {
+          globalMetaId: 'idq1onlinebot',
+          lastSeenAgoSeconds: 12,
+          deviceCount: 1,
+        },
+      ],
+    },
+  });
+});
+
+test('runCli rejects `metabot network bots --limit` when value is not a positive integer', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['network', 'bots', '--online', '--limit', 'abc'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      network: {
+        listBots: async () => commandSuccess({ bots: [] }),
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(JSON.parse(stdout.join('').trim()), {
+    ok: false,
+    state: 'failed',
+    code: 'invalid_flag',
+    message: 'Unsupported --limit value: abc. Supported range: 1-100.',
+  });
+});
+
 test('runCli dispatches `metabot network sources add --base-url --label` with parsed source input', async () => {
   const stdout = [];
   const calls = [];

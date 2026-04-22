@@ -603,6 +603,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot network <subcommand>',
     subcommands: [
       { name: 'services', summary: 'List MetaBot services from chain discovery and local fallbacks.' },
+      { name: 'bots', summary: 'List online MetaBots from socket presence with service-directory fallback.' },
       { name: 'sources', summary: 'Manage local seeded directory sources.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
@@ -623,6 +624,30 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot network services --online',
+    ],
+  },
+  {
+    commandPath: ['network', 'bots'],
+    summary: 'List online MetaBots from socket presence, with service-directory fallback when presence API is unavailable.',
+    usage: 'metabot network bots [--online] [--limit <n>]',
+    optionalFlags: [
+      { flag: '--online', description: 'Prefer online-only rows. Defaults to true for current public behavior.' },
+      { flag: '--limit', value: '<n>', description: 'Maximum rows to return. Supported range: 1-100. Default: 10.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'source',
+      'fallbackUsed',
+      'total',
+      'onlineWindowSeconds',
+      'bots',
+    ],
+    failureSemantics: [
+      'Fails when --limit is outside 1-100.',
+      'Socket presence read errors auto-fallback to service-directory-based online bot projection.',
+    ],
+    examples: [
+      'metabot network bots --online --limit 10',
     ],
   },
   {

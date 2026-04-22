@@ -21,7 +21,7 @@ test('Codex install runbook includes first-run handoff and response contract', a
 
   assert.match(runbook, /## First-Run Handoff \(Required\)/);
   assert.match(runbook, /metabot identity create --name "Alice"/);
-  assert.match(runbook, /metabot network services --online/);
+  assert.match(runbook, /metabot network bots --online --limit 10/);
   assert.match(runbook, /## Agent Response Contract \(Required\)/);
   assert.match(runbook, /what `Open Agent Connect` now enables/i);
   assert.match(runbook, /Do not return only raw command output/i);

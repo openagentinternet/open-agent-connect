@@ -10,6 +10,17 @@ function parseBoolean(value: string | null): boolean | undefined {
   return undefined;
 }
 
+function parseLimit(value: string | null): number | undefined {
+  if (value == null) return undefined;
+  const normalized = value.trim();
+  if (!normalized) return undefined;
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+    return undefined;
+  }
+  return parsed;
+}
+
 export const handleNetworkRoutes: RouteHandler = async (context) => {
   const { req, url, handlers } = context;
 
@@ -24,6 +35,22 @@ export const handleNetworkRoutes: RouteHandler = async (context) => {
           online: parseBoolean(url.searchParams.get('online')),
         })
       : commandFailed('not_implemented', 'Network services handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
+  if (url.pathname === '/api/network/bots') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+
+    const result = handlers.network?.listBots
+      ? await handlers.network.listBots({
+          online: parseBoolean(url.searchParams.get('online')),
+          limit: parseLimit(url.searchParams.get('limit')),
+        })
+      : commandFailed('not_implemented', 'Network bots handler is not configured.');
     context.sendJson(200, result);
     return true;
   }

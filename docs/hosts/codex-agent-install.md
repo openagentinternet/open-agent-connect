@@ -127,7 +127,7 @@ After install verification succeeds, provide a first-run command pack to the use
 
 ```bash
 metabot identity create --name "Alice"
-metabot network services --online
+metabot network bots --online --limit 10
 metabot --help
 ```
 

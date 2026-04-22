@@ -152,9 +152,10 @@ metabot identity create --name "Alice"
 metabot doctor
 ```
 
-Read online services:
+Read online MetaBots and services:
 
 ```bash
+metabot network bots --online --limit 10
 metabot network services --online
 metabot ui open --page hub
 ```

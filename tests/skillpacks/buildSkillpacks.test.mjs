@@ -283,14 +283,18 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow acros
       'utf8'
     );
     assert.match(content, /^name:\s*metabot-network-manage$/m);
+    assert.match(content, /network bots --online --limit 10/);
     assert.match(content, /network services --online/);
     assert.match(content, /ui open --page hub/);
     assert.match(content, /network sources add/);
     assert.match(content, /network sources list/);
     assert.match(content, /network sources remove/);
+    assert.match(content, /Markdown table \(max 10 rows\)/i);
+    assert.match(content, /metabot chat private --request-file/);
     assert.match(content, /## In Scope/);
     assert.match(content, /## Out of Scope/);
     assert.match(content, /## Handoff To/);
+    assert.match(content, /metabot-chat-privatechat/);
     assert.match(content, /metabot-call-remote-service/);
     assert.doesNotMatch(content, /runtime-resolve shim/i);
   }
@@ -425,7 +429,7 @@ test('repository keeps no deprecated skill aliases after migration', async () =>
   }
 });
 
-test('codex install runbook documents the post-install Ask Master smoke contract', async () => {
+test('codex install runbook documents install verification and first-run handoff contract', async () => {
   const installRunbook = await readFile(
     path.join(REPO_ROOT, 'docs', 'hosts', 'codex-agent-install.md'),
     'utf8'
@@ -433,22 +437,12 @@ test('codex install runbook documents the post-install Ask Master smoke contract
 
   assert.match(installRunbook, /npm run build:skillpacks/);
   assert.match(installRunbook, /\$\{CODEX_HOME:-\$HOME\/\.codex\}\/skills\/metabot-ask-master\/SKILL\.md/);
-  assert.match(installRunbook, /metabot skills resolve --skill metabot-ask-master --host codex --format markdown/);
-  assert.match(installRunbook, /if rg -n "metabot advisor" "\$INSTALLED_SKILL"; then/);
-  assert.match(installRunbook, /stale advisor semantics found in installed Ask Master skill/);
-  assert.match(installRunbook, /exit 1/);
-  assert.match(installRunbook, /metabot master trace --id <real-trace-id>/);
-  assert.match(installRunbook, /manual.*suggest/i);
-  assert.match(installRunbook, /single-machine two-terminal|single machine dual terminal/i);
-  assert.match(installRunbook, /preview\/confirm|preview and confirm/i);
-  assert.match(installRunbook, /metabot config get askMaster.enabled/);
-  assert.match(installRunbook, /metabot config set askMaster.triggerMode suggest/);
-  assert.match(installRunbook, /keep `askMaster.enabled = true`/);
-  assert.match(installRunbook, /keep `askMaster.triggerMode = suggest`/);
-  assert.doesNotMatch(installRunbook, /metabot master trace --id trace-123/);
-  assert.match(installRunbook, /post-flow check, not part of the zero-state fresh install smoke/i);
-  assert.match(installRunbook, /restart Codex session/i);
-  assert.match(installRunbook, /fresh install smoke/i);
-  assert.doesNotMatch(installRunbook, /only trusted plus non-sensitive `auto` payloads may direct send/i);
-  assert.doesNotMatch(installRunbook, /metabot advisor (list|ask|trace)/);
+  assert.match(installRunbook, /\$\{CODEX_HOME:-\$HOME\/\.codex\}\/skills\/metabot-network-manage\/SKILL\.md/);
+  assert.match(installRunbook, /\$\{CODEX_HOME:-\$HOME\/\.codex\}\/skills\/metabot-chat-privatechat\/SKILL\.md/);
+  assert.match(installRunbook, /metabot doctor/);
+  assert.match(installRunbook, /metabot identity create --name "Alice"/);
+  assert.match(installRunbook, /metabot network bots --online --limit 10/);
+  assert.match(installRunbook, /## Agent Response Contract \(Required\)/);
+  assert.match(installRunbook, /what `Open Agent Connect` now enables/i);
+  assert.match(installRunbook, /Do not return only raw command output/i);
 });

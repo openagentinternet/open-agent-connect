@@ -40,6 +40,7 @@ import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
 import { readChainDirectoryWithFallback } from '../core/discovery/chainDirectoryReader';
 import { HEARTBEAT_ONLINE_WINDOW_SEC } from '../core/discovery/chainHeartbeatDirectory';
+import { readOnlineMetaBotsFromSocketPresence } from '../core/discovery/socketPresenceDirectory';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
 import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/sessionEngine';
 import { resolvePublicStatus } from '../core/a2a/publicStatus';
@@ -117,6 +118,8 @@ const DEFAULT_TRACE_WATCH_WAIT_MS = 75_000;
 const TRACE_WATCH_POLL_INTERVAL_MS = 500;
 const PROVIDER_RATING_SYNC_STALE_MS = 30_000;
 const DEFAULT_MASTER_HOST_MODE = 'codex';
+const DEFAULT_NETWORK_BOT_LIST_LIMIT = 10;
+const MAX_NETWORK_BOT_LIST_LIMIT = 100;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -947,6 +950,71 @@ function dedupeServices(services: Array<Record<string, unknown>>): Array<Record<
     const rightUpdatedAt = Number(right.updatedAt ?? 0);
     return rightUpdatedAt - leftUpdatedAt;
   });
+}
+
+function normalizeEpochSeconds(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  // Accept either second-based or millisecond-based timestamps.
+  if (value > 1e12) {
+    return Math.floor(value / 1000);
+  }
+  return Math.floor(value);
+}
+
+function dedupeOnlineBotsFromServices(
+  services: Array<Record<string, unknown>>,
+  limit: number,
+  nowMs: number = Date.now(),
+): Array<Record<string, unknown>> {
+  const byGlobalMetaId = new Map<string, { lastSeenSec: number | null }>();
+
+  for (const service of services) {
+    const globalMetaId = normalizeText(service.providerGlobalMetaId);
+    if (!globalMetaId) {
+      continue;
+    }
+
+    const online = service.online !== false;
+    if (!online) {
+      continue;
+    }
+
+    const lastSeenSec = normalizeEpochSeconds(
+      Number.isFinite(Number(service.lastSeenSec))
+        ? Number(service.lastSeenSec)
+        : Number(service.updatedAt),
+    );
+    const existing = byGlobalMetaId.get(globalMetaId);
+    if (!existing) {
+      byGlobalMetaId.set(globalMetaId, { lastSeenSec });
+      continue;
+    }
+    if ((lastSeenSec ?? -Infinity) > (existing.lastSeenSec ?? -Infinity)) {
+      byGlobalMetaId.set(globalMetaId, { lastSeenSec });
+    }
+  }
+
+  const nowSec = Math.floor(nowMs / 1000);
+  return [...byGlobalMetaId.entries()]
+    .sort((left, right) => {
+      const leftSeen = left[1].lastSeenSec ?? -Infinity;
+      const rightSeen = right[1].lastSeenSec ?? -Infinity;
+      if (leftSeen !== rightSeen) {
+        return rightSeen - leftSeen;
+      }
+      return left[0].localeCompare(right[0]);
+    })
+    .slice(0, limit)
+    .map(([globalMetaId, entry]) => ({
+      globalMetaId,
+      lastSeenAt: entry.lastSeenSec ? entry.lastSeenSec * 1000 : 0,
+      lastSeenAgoSeconds: entry.lastSeenSec ? Math.max(0, nowSec - entry.lastSeenSec) : 0,
+      deviceCount: 1,
+      online: true,
+    }));
 }
 
 async function fetchSeededDirectoryServices(hotRoot: string): Promise<Array<Record<string, unknown>>> {
@@ -5227,6 +5295,50 @@ export function createDefaultMetabotDaemonHandlers(input: {
           discoverySource: directory.source,
           fallbackUsed: directory.fallbackUsed,
         });
+      },
+      listBots: async ({ online, limit }) => {
+        const normalizedLimit = Number.isFinite(limit)
+          ? Math.min(MAX_NETWORK_BOT_LIST_LIMIT, Math.max(1, Math.floor(limit as number)))
+          : DEFAULT_NETWORK_BOT_LIST_LIMIT;
+        const onlineOnly = online !== false;
+
+        try {
+          const presence = await readOnlineMetaBotsFromSocketPresence({
+            limit: normalizedLimit,
+          });
+          return commandSuccess({
+            source: presence.source,
+            fallbackUsed: false,
+            total: presence.total,
+            onlineWindowSeconds: presence.onlineWindowSeconds,
+            bots: onlineOnly
+              ? presence.bots
+              : presence.bots.map((entry) => ({ ...entry })),
+          });
+        } catch {
+          const state = await runtimeStateStore.readState();
+          const localServices = state.services
+            .filter((service) => service.available === 1)
+            .map((service) => summarizeService(service));
+          const directory = await readChainDirectoryWithFallback({
+            chainApiBaseUrl: input.chainApiBaseUrl,
+            onlineOnly: onlineOnly,
+            fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(runtimeStateStore.paths.hotRoot),
+          });
+          const services = dedupeServices([
+            ...directory.services,
+            ...localServices,
+          ]);
+          const bots = dedupeOnlineBotsFromServices(services, normalizedLimit);
+
+          return commandSuccess({
+            source: 'service_directory_fallback',
+            fallbackUsed: true,
+            total: bots.length,
+            onlineWindowSeconds: HEARTBEAT_ONLINE_WINDOW_SEC,
+            bots,
+          });
+        }
       },
       listSources: async () => {
         const sources = sortDirectorySeeds(await readDirectorySeeds(runtimeStateStore.paths.hotRoot));
