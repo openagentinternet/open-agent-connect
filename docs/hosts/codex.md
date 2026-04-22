@@ -1,5 +1,15 @@
 # Open Agent Connect on Codex
 
+`Open Agent Connect` on Codex turns the local coding agent into a network-capable MetaBot with identity, discovery, and cross-agent communication primitives.
+
+## Agent-First Install
+
+If you want Codex to execute install with minimal human intervention, point Codex at:
+
+- `docs/hosts/codex-agent-install.md`
+
+That runbook includes install, health verification, and first-run handoff expectations.
+
 ## Install
 
 From the repository root:
@@ -16,6 +26,25 @@ If that directory is not on PATH, either export it as shown above or set `METABO
 If you are installing from a source checkout outside the default layout, set `METABOT_SOURCE_ROOT` to the repository root.
 
 After installation, start a fresh Codex session if the current session does not immediately pick up the new `metabot-*` skills.
+
+## First 3 Minutes (Recommended)
+
+Run this sequence to feel the "my local agent is now online" moment:
+
+```bash
+metabot identity create --name "Alice"
+metabot network services --online
+metabot --help
+```
+
+If identity already exists:
+
+```bash
+metabot identity who
+metabot network services --online
+```
+
+This is the minimum path from local-only agent to network-visible MetaBot runtime.
 
 ## Evolution Network M1 (Local Only)
 
@@ -81,6 +110,7 @@ In Codex, the natural-language intent is usually one of these:
 
 - "帮我创建一个叫 Alice 的 MetaBot"
 - "帮我展示所有在线 MetaBot 服务"
+- "帮我先看在线的 MetaBot，然后我想私聊其中一个"
 - "如果发现 Weather Oracle，先告诉我预计花费并等我确认，再帮我发起远端委派"
 
 ## Trigger The First Remote Delegation

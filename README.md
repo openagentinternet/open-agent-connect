@@ -103,6 +103,11 @@ Prerequisites:
 - `npm`
 - one target host: `Codex`, `Claude Code`, or `OpenClaw`
 
+Agent-first install entry:
+
+- For Codex, ask your local agent to execute the runbook at [docs/hosts/codex-agent-install.md](docs/hosts/codex-agent-install.md).
+- The runbook is designed to cover install, verification, and first-run next steps in one flow.
+
 Build the runtime and generate host packs:
 
 ```bash
