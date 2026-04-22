@@ -81,7 +81,8 @@ Then call:
   - delivery proof (`pinId`, `txids`)
   - who the message was sent to (`to`)
   - one concrete next step (for example keep chatting or move to service/master workflow)
-  - natural-language next prompts (for example `Reply to that MetaBot` or `Show online MetaBots`)
+  - natural-language next prompts in the same language as the user
+  - intent-equivalent wording guidance (do not lock to one fixed phrase template)
 - do not reply with one rigid fixed sentence.
 - keep language natural while preserving exact delivery identifiers.
 

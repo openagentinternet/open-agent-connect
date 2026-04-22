@@ -295,7 +295,9 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow acros
     assert.match(content, /metabot chat private --request-file/);
     assert.match(content, /offer natural-language follow-up prompts/i);
     assert.match(content, /Do not ask the human to type CLI commands directly/i);
-    assert.match(content, /Show online MetaBots/i);
+    assert.match(content, /same language the human is currently using/i);
+    assert.match(content, /Do not lock follow-up prompts to fixed wording/i);
+    assert.match(content, /intent is equivalent and triggers the same skills/i);
     assert.match(content, /## In Scope/);
     assert.match(content, /## Out of Scope/);
     assert.match(content, /## Handoff To/);
@@ -358,6 +360,8 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
     assert.match(chatContent, /do not reply with one rigid fixed sentence/i);
     assert.match(chatContent, /delivery proof/i);
     assert.match(chatContent, /natural-language next prompts/i);
+    assert.match(chatContent, /same language as the user/i);
+    assert.match(chatContent, /do not lock to one fixed phrase template/i);
 
     const buzzContent = await readFile(
       path.join(outputRoot, host, 'skills', 'metabot-post-buzz', 'SKILL.md'),
@@ -462,9 +466,9 @@ test('codex install runbook documents install verification and first-run handoff
   assert.match(installRunbook, /## Agent Response Contract \(Required\)/);
   assert.match(installRunbook, /do not ask the user to type raw CLI commands/i);
   assert.match(installRunbook, /natural-language prompts/i);
-  assert.match(installRunbook, /Show my current MetaBot identity/i);
-  assert.match(installRunbook, /Show online MetaBots/i);
-  assert.match(installRunbook, /Create a MetaBot named/i);
+  assert.match(installRunbook, /same language the user is currently using/i);
+  assert.match(installRunbook, /Do not lock prompts to fixed English phrases/i);
+  assert.match(installRunbook, /Prompt wording can vary as long as intent is equivalent/i);
   assert.match(installRunbook, /if identity already exists, report current name and globalMetaId/i);
   assert.match(installRunbook, /what `Open Agent Connect` now enables/i);
   assert.match(installRunbook, /Do not return only raw command output/i);

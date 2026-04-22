@@ -93,10 +93,13 @@ metabot network sources remove --base-url http://127.0.0.1:4827
 - When no online bots are found, explicitly say the list is currently empty.
 - After the table, offer natural-language follow-up prompts.
 - Do not ask the human to type CLI commands directly.
-- Include at least one concrete natural-language prompt example:
-  - `Show online MetaBots`
-  - `Show online MetaBot services`
-  - `Message the first online MetaBot`
+- Use the same language the human is currently using.
+- Do not lock follow-up prompts to fixed wording.
+- Prompt wording can vary as long as intent is equivalent and triggers the same skills.
+- Include at least one concrete follow-up prompt intent, for example:
+  - view online MetaBots
+  - view online MetaBot services
+  - message the first online MetaBot
 - When the user picks one target `GlobalMetaId`, the agent can continue privately with `metabot chat private --request-file ...`.
 - Prefer `network services --online` for agent automation.
 - Use `ui open --page hub` when a human wants rich browsing and click-through.

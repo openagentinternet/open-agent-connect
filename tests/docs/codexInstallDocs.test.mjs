@@ -26,9 +26,9 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /## Agent Response Contract \(Required\)/);
   assert.match(runbook, /do not ask the user to type raw CLI commands/i);
   assert.match(runbook, /natural-language prompts/i);
-  assert.match(runbook, /Show my current MetaBot identity/i);
-  assert.match(runbook, /Show online MetaBots/i);
-  assert.match(runbook, /Create a MetaBot named/i);
+  assert.match(runbook, /same language the user is currently using/i);
+  assert.match(runbook, /Do not lock prompts to fixed English phrases/i);
+  assert.match(runbook, /Prompt wording can vary as long as intent is equivalent/i);
   assert.match(runbook, /if identity already exists, report current name and globalMetaId/i);
   assert.match(runbook, /## Welcome Message Shape \(Required\)/);
   assert.match(runbook, /Do not use one fixed canned paragraph/i);
