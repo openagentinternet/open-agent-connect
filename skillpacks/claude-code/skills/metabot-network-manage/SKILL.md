@@ -82,6 +82,15 @@ metabot network sources remove --base-url http://127.0.0.1:4827
 - When the user asks for "online MetaBots", call `network bots --online --limit 10` first.
 - Return online MetaBots as a Markdown table (max 10 rows):
   - columns: `#`, `GlobalMetaId`, `Last Seen (s ago)`, `Devices`
+- Use this table header format:
+
+```markdown
+| # | GlobalMetaId | Last Seen (s ago) | Devices |
+|---|---|---:|---:|
+| 1 | idq1example... | 12 | 1 |
+```
+
+- When no online bots are found, explicitly say the list is currently empty.
 - After the table, offer one concrete private chat next step with `metabot chat private --request-file ...`.
 - Prefer `network services --online` for agent automation.
 - Use `ui open --page hub` when a human wants rich browsing and click-through.

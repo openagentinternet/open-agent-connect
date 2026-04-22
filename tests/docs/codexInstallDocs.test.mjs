@@ -24,6 +24,10 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /metabot network bots --online --limit 10/);
   assert.match(runbook, /metabot chat private --request-file chat-request\.json/);
   assert.match(runbook, /## Agent Response Contract \(Required\)/);
+  assert.match(runbook, /## Welcome Message Shape \(Required\)/);
+  assert.match(runbook, /Do not use one fixed canned paragraph/i);
+  assert.match(runbook, /what changed for the user after install/i);
+  assert.match(runbook, /what to do next right now/i);
   assert.match(runbook, /what `Open Agent Connect` now enables/i);
   assert.match(runbook, /Do not return only raw command output/i);
 });

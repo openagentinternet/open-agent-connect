@@ -290,6 +290,8 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow acros
     assert.match(content, /network sources list/);
     assert.match(content, /network sources remove/);
     assert.match(content, /Markdown table \(max 10 rows\)/i);
+    assert.match(content, /\|\s*#\s*\|\s*GlobalMetaId\s*\|\s*Last Seen \(s ago\)\s*\|\s*Devices\s*\|/);
+    assert.match(content, /When no online bots are found, explicitly say the list is currently empty/i);
     assert.match(content, /metabot chat private --request-file/);
     assert.match(content, /## In Scope/);
     assert.match(content, /## Out of Scope/);
@@ -349,6 +351,9 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
     assert.match(chatContent, /\/protocols\/simplemsg/);
     assert.match(chatContent, /pinId/);
     assert.match(chatContent, /txids/);
+    assert.match(chatContent, /## Response Shape/);
+    assert.match(chatContent, /do not reply with one rigid fixed sentence/i);
+    assert.match(chatContent, /delivery proof/i);
 
     const buzzContent = await readFile(
       path.join(outputRoot, host, 'skills', 'metabot-post-buzz', 'SKILL.md'),

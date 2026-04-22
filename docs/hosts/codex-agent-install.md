@@ -162,6 +162,28 @@ When finishing this runbook, return a concise natural-language handoff message t
 
 Do not return only raw command output without this handoff.
 
+## Welcome Message Shape (Required)
+
+Use this as a response shape, not a fixed script.
+
+- Do not use one fixed canned paragraph.
+- Keep tone natural and agent-authored for the current user/session.
+- Keep it concise, but ensure all key next steps are actionable.
+
+Recommended structure:
+
+1. install confirmation
+2. what changed for the user after install
+3. what to do next right now
+4. optional first private communication step
+
+Example skeleton (adapt wording each time):
+
+- `Install complete`: mention one concrete health signal (for example `daemon_reachable`).
+- `Your local agent is now a MetaBot`: briefly explain identity + network + communication capability.
+- `Next actions`: show exactly which commands to run now.
+- `Optional`: suggest sending one private chat to an online MetaBot.
+
 ## Expected Final Report Format
 
 At the end, return:

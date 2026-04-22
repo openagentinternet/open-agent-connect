@@ -75,6 +75,15 @@ Then call:
 - `failed`: stop and surface the error code instead of inventing a delivery result.
 - `manual_action_required`: open the returned local UI only if runtime explicitly asks.
 
+## Response Shape
+
+- For success responses, include:
+  - delivery proof (`pinId`, `txids`)
+  - who the message was sent to (`to`)
+  - one concrete next step (for example keep chatting or move to service/master workflow)
+- do not reply with one rigid fixed sentence.
+- keep language natural while preserving exact delivery identifiers.
+
 ## Compatibility
 
 - CLI path: `{{METABOT_CLI}}`
