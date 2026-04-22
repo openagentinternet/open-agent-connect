@@ -123,7 +123,12 @@ metabot identity assign --name "<existing-metabot-name>"
 
 ## First-Run Handoff (Required)
 
-After install verification succeeds, provide a first-run command pack to the user so they immediately feel "my agent is online now":
+After install verification succeeds, run CLI actions internally as needed, then hand off using user-facing natural-language prompts so the user immediately feels "my agent is online now".
+
+Do not ask the user to type raw CLI commands.
+The user should continue by chatting with natural-language prompts.
+
+Agent-side internal commands (not shown as required user input):
 
 ```bash
 metabot identity create --name "Alice"
@@ -136,6 +141,18 @@ If identity already exists, replace the create step with:
 ```bash
 metabot identity who
 ```
+
+User-facing prompt examples:
+
+- `Show my current MetaBot identity`
+- `Show online MetaBots`
+- `Create a MetaBot named Alice`
+- `Send a private hello to the first online MetaBot`
+
+Identity-state handoff contract:
+
+- if identity already exists, report current name and globalMetaId
+- if identity is missing, ask the user for one natural-language create prompt (for example `Create a MetaBot named Alice`) and then complete the create flow
 
 Optional first communication step after user picks one online `globalMetaId`:
 
@@ -156,11 +173,13 @@ When finishing this runbook, return a concise natural-language handoff message t
 
 - install success state
 - what `Open Agent Connect` now enables for the user's local agent
-- one clear next action to create or confirm MetaBot identity
-- one clear next action to view online MetaBot network entries
-- one clear next action to discover available commands (`metabot --help`)
+- one clear next action to create or confirm MetaBot identity (as a natural-language prompt)
+- one clear next action to view online MetaBot network entries (as a natural-language prompt)
+- one clear next action to discover available capabilities (as a natural-language prompt)
+- if identity already exists, report current name and globalMetaId
 
 Do not return only raw command output without this handoff.
+Use natural-language prompts in the handoff, not raw CLI commands.
 
 ## Welcome Message Shape (Required)
 
@@ -174,15 +193,16 @@ Recommended structure:
 
 1. install confirmation
 2. what changed for the user after install
-3. what to do next right now
+3. what to do next right now with natural-language prompts
 4. optional first private communication step
 
 Example skeleton (adapt wording each time):
 
 - `Install complete`: mention one concrete health signal (for example `daemon_reachable`).
 - `Your local agent is now a MetaBot`: briefly explain identity + network + communication capability.
-- `Next actions`: show exactly which commands to run now.
-- `Optional`: suggest sending one private chat to an online MetaBot.
+- `Next actions`: provide natural-language prompts (for example `Show my current MetaBot identity`, `Show online MetaBots`, `Create a MetaBot named Alice`).
+- `Identity branch`: if identity already exists, report current name and globalMetaId; if missing, ask for one create prompt.
+- `Optional`: suggest one natural-language private chat prompt to reach an online MetaBot.
 
 ## Expected Final Report Format
 

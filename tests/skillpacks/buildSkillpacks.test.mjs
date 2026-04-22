@@ -293,6 +293,9 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow acros
     assert.match(content, /\|\s*#\s*\|\s*GlobalMetaId\s*\|\s*Last Seen \(s ago\)\s*\|\s*Devices\s*\|/);
     assert.match(content, /When no online bots are found, explicitly say the list is currently empty/i);
     assert.match(content, /metabot chat private --request-file/);
+    assert.match(content, /offer natural-language follow-up prompts/i);
+    assert.match(content, /Do not ask the human to type CLI commands directly/i);
+    assert.match(content, /Show online MetaBots/i);
     assert.match(content, /## In Scope/);
     assert.match(content, /## Out of Scope/);
     assert.match(content, /## Handoff To/);
@@ -354,6 +357,7 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
     assert.match(chatContent, /## Response Shape/);
     assert.match(chatContent, /do not reply with one rigid fixed sentence/i);
     assert.match(chatContent, /delivery proof/i);
+    assert.match(chatContent, /natural-language next prompts/i);
 
     const buzzContent = await readFile(
       path.join(outputRoot, host, 'skills', 'metabot-post-buzz', 'SKILL.md'),
@@ -456,6 +460,12 @@ test('codex install runbook documents install verification and first-run handoff
   assert.match(installRunbook, /metabot identity create --name "Alice"/);
   assert.match(installRunbook, /metabot network bots --online --limit 10/);
   assert.match(installRunbook, /## Agent Response Contract \(Required\)/);
+  assert.match(installRunbook, /do not ask the user to type raw CLI commands/i);
+  assert.match(installRunbook, /natural-language prompts/i);
+  assert.match(installRunbook, /Show my current MetaBot identity/i);
+  assert.match(installRunbook, /Show online MetaBots/i);
+  assert.match(installRunbook, /Create a MetaBot named/i);
+  assert.match(installRunbook, /if identity already exists, report current name and globalMetaId/i);
   assert.match(installRunbook, /what `Open Agent Connect` now enables/i);
   assert.match(installRunbook, /Do not return only raw command output/i);
 });

@@ -82,7 +82,13 @@ Remove one source:
 ```
 
 - When no online bots are found, explicitly say the list is currently empty.
-- After the table, offer one concrete private chat next step with `metabot chat private --request-file ...`.
+- After the table, offer natural-language follow-up prompts.
+- Do not ask the human to type CLI commands directly.
+- Include at least one concrete natural-language prompt example:
+  - `Show online MetaBots`
+  - `Show online MetaBot services`
+  - `Message the first online MetaBot`
+- When the user picks one target `GlobalMetaId`, the agent can continue privately with `metabot chat private --request-file ...`.
 - Prefer `network services --online` for agent automation.
 - Use `ui open --page hub` when a human wants rich browsing and click-through.
 - Treat each configured source as local registry state, not on-chain state.
