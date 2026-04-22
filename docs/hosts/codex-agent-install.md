@@ -137,6 +137,19 @@ If identity already exists, replace the create step with:
 metabot identity who
 ```
 
+Optional first communication step after user picks one online `globalMetaId`:
+
+```bash
+cat > chat-request.json <<'JSON'
+{
+  "to": "idq1target...",
+  "content": "hello from my local MetaBot",
+  "replyPin": ""
+}
+JSON
+metabot chat private --request-file chat-request.json
+```
+
 ## Agent Response Contract (Required)
 
 When finishing this runbook, return a concise natural-language handoff message that includes all of the following:

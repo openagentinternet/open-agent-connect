@@ -6401,6 +6401,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
           content: request.content,
           replyPinId: request.replyPin,
         });
+        let chatWrite;
+        try {
+          chatWrite = await signer.writePin({
+            operation: 'create',
+            path: sent.path,
+            encryption: sent.encryption,
+            version: sent.version,
+            contentType: sent.contentType,
+            payload: sent.payload,
+            encoding: 'utf-8',
+            network: 'mvc',
+          });
+        } catch (error) {
+          return commandFailed(
+            'chat_broadcast_failed',
+            error instanceof Error ? error.message : 'Failed to broadcast private chat to chain.'
+          );
+        }
         const structuredContent = describeStructuredPrivateChatContent(request.content);
 
         const traceId = `trace-private-${Date.now().toString(36)}`;
@@ -6438,6 +6456,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 content: `Encrypted private message prepared for ${request.to}.`,
                 metadata: {
                   path: sent.path,
+                  pinId: normalizeText(chatWrite.pinId) || null,
+                  txids: Array.isArray(chatWrite.txids) ? chatWrite.txids : [],
                   replyPin: request.replyPin || null,
                   messageType: structuredContent.messageType,
                   requestId: structuredContent.requestId,
@@ -6462,7 +6482,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
           payload: sent.payload,
           encryptedContent: sent.encryptedContent,
           secretVariant: sent.secretVariant,
-          deliveryMode: 'local_runtime',
+          pinId: normalizeText(chatWrite.pinId) || null,
+          txids: Array.isArray(chatWrite.txids) ? chatWrite.txids : [],
+          totalCost: Number.isFinite(Number(chatWrite.totalCost))
+            ? Number(chatWrite.totalCost)
+            : null,
+          network: normalizeText(chatWrite.network) || 'mvc',
+          deliveryMode: 'onchain_simplemsg',
           peerChatPublicKey,
           messageType: structuredContent.messageType,
           requestId: structuredContent.requestId,

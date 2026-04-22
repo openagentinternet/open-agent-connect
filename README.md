@@ -160,6 +160,12 @@ metabot network services --online
 metabot ui open --page hub
 ```
 
+Send one first private MetaBot message:
+
+```bash
+metabot chat private --request-file chat-request.json
+```
+
 Delegate one remote task and inspect the trace:
 
 ```bash

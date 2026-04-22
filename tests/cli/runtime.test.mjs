@@ -2269,7 +2269,7 @@ test('services rate publishes one buyer-side skill-service-rate record from a co
   assert.match(transcriptMarkdown, /\/protocols\/skill-service-rate-pin-/);
 });
 
-test('chat private encrypts a loopback message and stores a chat trace in the local runtime', async (t) => {
+test('chat private writes encrypted simplemsg on chain and stores a chat trace in the local runtime', async (t) => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
   t.after(async () => stopDaemon(homeDir));
 
@@ -2289,7 +2289,9 @@ test('chat private encrypts a loopback message and stores a chat trace in the lo
   assert.equal(sent.payload.ok, true);
   assert.equal(sent.payload.data.to, created.payload.data.globalMetaId);
   assert.equal(sent.payload.data.path, '/protocols/simplemsg');
-  assert.equal(sent.payload.data.deliveryMode, 'local_runtime');
+  assert.equal(sent.payload.data.deliveryMode, 'onchain_simplemsg');
+  assert.match(sent.payload.data.pinId, /^\/protocols\/simplemsg-pin-/);
+  assert.match(sent.payload.data.txids[0], /^\/protocols\/simplemsg-tx-/);
   assert.match(sent.payload.data.traceId, /^trace-private-/);
   assert.match(sent.payload.data.payload, /"encrypt":"ecdh"/);
   assert.match(sent.payload.data.traceJsonPath, /\/\.metabot\/exports\/traces\/.*\.json$/);

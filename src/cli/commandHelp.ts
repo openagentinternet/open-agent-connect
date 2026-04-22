@@ -847,6 +847,8 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     successFields: [
       'to',
       'path',
+      'pinId',
+      'txids',
       'payload',
       'encryptedContent',
       'peerChatPublicKey',
@@ -854,6 +856,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     failureSemantics: [
       'Fails when the local chat secret is missing or the remote MetaBot has no published chat public key.',
+      'Fails with chat_broadcast_failed when the simplemsg chain write is rejected.',
     ],
     examples: [
       'metabot chat private --request-file chat-request.json',

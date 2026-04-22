@@ -65,7 +65,7 @@ metabot chat private --request-file request.json
 ## In Scope
 
 - One private message send with optional reply pin context.
-- Protocol-safe encryption and delivery reporting.
+- Protocol-safe encryption and on-chain delivery reporting (`pinId`, `txids`).
 
 ## Out of Scope
 
@@ -80,7 +80,7 @@ metabot chat private --request-file request.json
 
 ## Result Handling
 
-- `success`: report returned pin or tx identifiers and continue conversation.
+- `success`: report returned `pinId` and `txids`, then continue conversation.
 - `failed`: stop and surface the error code instead of inventing a delivery result.
 - `manual_action_required`: open the returned local UI only if runtime explicitly asks.
 

@@ -342,6 +342,14 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
   });
 
   for (const host of HOSTS) {
+    const chatContent = await readFile(
+      path.join(outputRoot, host, 'skills', 'metabot-chat-privatechat', 'SKILL.md'),
+      'utf8'
+    );
+    assert.match(chatContent, /\/protocols\/simplemsg/);
+    assert.match(chatContent, /pinId/);
+    assert.match(chatContent, /txids/);
+
     const buzzContent = await readFile(
       path.join(outputRoot, host, 'skills', 'metabot-post-buzz', 'SKILL.md'),
       'utf8'
