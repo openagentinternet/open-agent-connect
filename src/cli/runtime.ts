@@ -20,8 +20,8 @@ import {
   listIdentityProfiles,
   readActiveMetabotHome,
   setActiveMetabotHome,
-  upsertIdentityProfile,
 } from '../core/identity/identityProfiles';
+import { resolveIdentityCreateProfileHome } from '../core/identity/profileWorkspace';
 import { resolveProfileNameMatch } from '../core/identity/profileNameResolution';
 import { renderResolvedSkillContract } from '../core/skills/skillResolver';
 import type { SkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
@@ -558,6 +558,28 @@ function normalizeHomeDir(
 
 function normalizeSystemHomeDir(env: NodeJS.ProcessEnv, cwd: string): string {
   return normalizeSelectedSystemHomeDir(env, cwd);
+}
+
+function cloneContextWithHomeDir(context: CliRuntimeContext, homeDir: string): CliRuntimeContext {
+  return {
+    ...context,
+    env: {
+      ...context.env,
+      METABOT_HOME: homeDir,
+    },
+  };
+}
+
+function tryNormalizeHomeDir(
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+  options: { allowUnindexedExplicitHome?: boolean } = {},
+): string | null {
+  try {
+    return normalizeHomeDir(env, cwd, options);
+  } catch {
+    return null;
+  }
 }
 
 function resolveCliEntrypoint(): string {
@@ -1270,58 +1292,83 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       run: async () => requestJson(context, 'GET', '/api/doctor'),
     },
     identity: {
-      create: async (input) => requestJson(context, 'POST', '/api/identity/create', input, {
-        allowUnindexedExplicitHome: true,
-      }),
-      who: async () => {
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
+      create: async (input) => {
+        const normalizedName = normalizeEnvText(input.name);
+        if (!normalizedName) {
+          return commandFailed('missing_name', 'MetaBot identity name is required.');
+        }
+
         const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-        const runtimeStateStore = createRuntimeStateStore(homeDir);
-        const state = await runtimeStateStore.readState();
-        if (!state.identity) {
+        const explicitHomeDir = normalizeEnvText(context.env.METABOT_HOME)
+          ? tryNormalizeHomeDir(context.env, context.cwd, {
+            allowUnindexedExplicitHome: true,
+          })
+          : null;
+        const activeHomeDir = await readActiveMetabotHome(systemHomeDir);
+        let targetHomeDir: string | null = null;
+        if (explicitHomeDir) {
+          const explicitState = await createRuntimeStateStore(explicitHomeDir).readState();
+          if (explicitState.identity || explicitHomeDir === activeHomeDir) {
+            targetHomeDir = explicitHomeDir;
+          }
+        }
+
+        if (!targetHomeDir) {
+          const profiles = await listIdentityProfiles(systemHomeDir);
+          const resolvedHome = resolveIdentityCreateProfileHome({
+            systemHomeDir,
+            requestedName: normalizedName,
+            profiles,
+          });
+          if (resolvedHome.status === 'duplicate') {
+            return commandFailed('identity_name_taken', resolvedHome.message);
+          }
+          targetHomeDir = resolvedHome.homeDir;
+        }
+
+        return requestJson(
+          cloneContextWithHomeDir(context, targetHomeDir),
+          'POST',
+          '/api/identity/create',
+          input,
+          {
+            allowUnindexedExplicitHome: true,
+          },
+        );
+      },
+      who: async () => {
+        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+        const activeHomeDir = await readActiveMetabotHome(systemHomeDir);
+        if (!activeHomeDir) {
           return commandFailed(
-            'identity_missing',
-            'No local MetaBot identity is loaded for the current active home.'
+            'identity_profile_not_initialized',
+            'No active profile initialized.'
           );
         }
 
-        await upsertIdentityProfile({
-          systemHomeDir,
-          name: state.identity.name,
-          homeDir,
-          globalMetaId: state.identity.globalMetaId,
-          mvcAddress: state.identity.mvcAddress,
-        });
-        await setActiveMetabotHome({
-          systemHomeDir,
-          homeDir,
-        });
+        const profiles = await listIdentityProfiles(systemHomeDir);
+        const activeProfile = profiles.find((profile) => profile.homeDir === activeHomeDir);
+        if (!activeProfile) {
+          return commandFailed(
+            'identity_profile_not_initialized',
+            'No active profile initialized.'
+          );
+        }
 
         return commandSuccess({
-          activeHomeDir: homeDir,
+          activeHomeDir,
           systemHomeDir,
-          identity: state.identity,
+          identity: {
+            name: activeProfile.name,
+            slug: activeProfile.slug,
+            aliases: activeProfile.aliases,
+            globalMetaId: activeProfile.globalMetaId,
+            mvcAddress: activeProfile.mvcAddress,
+          },
         });
       },
       list: async () => {
         const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
-        const runtimeStateStore = createRuntimeStateStore(homeDir);
-        const state = await runtimeStateStore.readState();
-        if (state.identity) {
-          await upsertIdentityProfile({
-            systemHomeDir,
-            name: state.identity.name,
-            homeDir,
-            globalMetaId: state.identity.globalMetaId,
-            mvcAddress: state.identity.mvcAddress,
-          });
-          await setActiveMetabotHome({
-            systemHomeDir,
-            homeDir,
-          });
-        }
-
         const profiles = await listIdentityProfiles(systemHomeDir);
         const activeHomeDir = await readActiveMetabotHome(systemHomeDir);
         return commandSuccess({

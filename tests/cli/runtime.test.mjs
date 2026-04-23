@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -644,11 +644,14 @@ test('runtime home selection reports no active profile initialized instead of fa
   );
 });
 
-test('identity create autostarts the local daemon and doctor reports the identity as loaded', async (t) => {
-  const homeDir = await createProfileHomeTemp('');
+test('identity create auto-creates the slugged profile workspace and doctor reports the identity as loaded', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', 'alice');
   t.after(async () => stopDaemon(homeDir));
 
-  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  const created = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Alice'], {
+    HOME: systemHome,
+  });
 
   assert.equal(created.exitCode, 0);
   assert.equal(created.payload.ok, true);
@@ -659,7 +662,29 @@ test('identity create autostarts the local daemon and doctor reports the identit
   assert.match(created.payload.data.namePinId, /^\/info\/name-pin-/);
   assert.match(created.payload.data.chatPublicKeyPinId, /^\/info\/chatpubkey-pin-/);
 
-  const doctor = await runCommand(homeDir, ['doctor']);
+  for (const relativePath of [
+    'AGENTS.md',
+    'SOUL.md',
+    'IDENTITY.md',
+    'USER.md',
+    'MEMORY.md',
+    'memory',
+    '.runtime',
+    '.runtime/sessions',
+    '.runtime/evolution',
+    '.runtime/exports',
+    '.runtime/state',
+    '.runtime/locks',
+    '.runtime/config.json',
+    '.runtime/identity-secrets.json',
+  ]) {
+    const targetStat = await stat(path.join(homeDir, relativePath));
+    assert.equal(Boolean(targetStat), true, `${relativePath} should exist inside the profile workspace`);
+  }
+
+  const doctor = await runCommandWithEnv(systemHome, ['doctor'], {
+    HOME: systemHome,
+  });
 
   assert.equal(doctor.exitCode, 0);
   assert.equal(doctor.payload.ok, true);
@@ -674,15 +699,21 @@ test('identity create autostarts the local daemon and doctor reports the identit
 });
 
 test('identity create returns identity_name_conflict when an active identity with a different name already exists', async (t) => {
-  const homeDir = await createProfileHomeTemp('');
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', 'bob');
   t.after(async () => stopDaemon(homeDir));
 
-  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Bob']);
+  const created = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Bob'], {
+    HOME: systemHome,
+  });
   assert.equal(created.exitCode, 0);
   assert.equal(created.payload.ok, true);
   assert.equal(created.payload.data.name, 'Bob');
 
-  const conflict = await runCommand(homeDir, ['identity', 'create', '--name', 'Charles']);
+  const conflict = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Charles'], {
+    HOME: systemHome,
+    METABOT_HOME: homeDir,
+  });
   assert.equal(conflict.exitCode, 1);
   assert.equal(conflict.payload.ok, false);
   assert.equal(conflict.payload.code, 'identity_name_conflict');
@@ -695,10 +726,8 @@ test('identity create returns identity_name_conflict when an active identity wit
 
 test('identity list/assign/who supports switching active local bot home across registered profiles', async (t) => {
   const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
-  const bobHome = path.join(systemHome, '.metabot', 'profiles', 'bob-home');
-  const charlesHome = path.join(systemHome, '.metabot', 'profiles', 'charles-home');
-  await mkdir(bobHome, { recursive: true });
-  await mkdir(charlesHome, { recursive: true });
+  const bobHome = path.join(systemHome, '.metabot', 'profiles', 'bob');
+  const charlesHome = path.join(systemHome, '.metabot', 'profiles', 'charles');
 
   t.after(async () => stopDaemon(bobHome));
   t.after(async () => stopDaemon(charlesHome));
@@ -707,18 +736,12 @@ test('identity list/assign/who supports switching active local bot home across r
     HOME: systemHome,
   };
 
-  const createdBob = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Bob'], {
-    ...commonEnv,
-    METABOT_HOME: bobHome,
-  });
+  const createdBob = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Bob'], commonEnv);
   assert.equal(createdBob.exitCode, 0);
   assert.equal(createdBob.payload.ok, true);
   assert.equal(createdBob.payload.data.name, 'Bob');
 
-  const createdCharles = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Charles'], {
-    ...commonEnv,
-    METABOT_HOME: charlesHome,
-  });
+  const createdCharles = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Charles'], commonEnv);
   assert.equal(createdCharles.exitCode, 0);
   assert.equal(createdCharles.payload.ok, true);
   assert.equal(createdCharles.payload.data.name, 'Charles');
@@ -829,41 +852,155 @@ test('identity assign rejects ambiguous near-tied profile matches', async () => 
 
 test('identity create rejects duplicate names across different local homes on the same machine', async (t) => {
   const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
-  const firstHome = path.join(systemHome, '.metabot', 'profiles', 'david-home-a');
-  const secondHome = path.join(systemHome, '.metabot', 'profiles', 'david-home-b');
-  await mkdir(firstHome, { recursive: true });
-  await mkdir(secondHome, { recursive: true });
+  const firstHome = path.join(systemHome, '.metabot', 'profiles', 'david');
+  const secondHome = path.join(systemHome, '.metabot', 'profiles', 'david-2');
 
   t.after(async () => stopDaemon(firstHome));
-  t.after(async () => stopDaemon(secondHome));
 
   const commonEnv = {
     HOME: systemHome,
   };
 
-  const createdFirst = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'David'], {
-    ...commonEnv,
-    METABOT_HOME: firstHome,
-  });
+  const createdFirst = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'David'], commonEnv);
   assert.equal(createdFirst.exitCode, 0);
   assert.equal(createdFirst.payload.ok, true);
   assert.equal(createdFirst.payload.data.name, 'David');
 
-  const duplicateAttempt = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'David'], {
-    ...commonEnv,
-    METABOT_HOME: secondHome,
-  });
+  const duplicateAttempt = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'David'], commonEnv);
   assert.equal(duplicateAttempt.exitCode, 1);
   assert.equal(duplicateAttempt.payload.ok, false);
   assert.equal(duplicateAttempt.payload.code, 'identity_name_taken');
 
-  const whoSecondHome = await runCommandWithEnv(systemHome, ['identity', 'who'], {
+  await assert.rejects(
+    readFile(runtimePath(secondHome, 'runtime-state.json'), 'utf8'),
+    /ENOENT/,
+  );
+
+  const who = await runCommandWithEnv(systemHome, ['identity', 'who'], commonEnv);
+  assert.equal(who.exitCode, 0);
+  assert.equal(who.payload.ok, true);
+  assert.equal(who.payload.data.activeHomeDir, firstHome);
+  assert.equal(who.payload.data.identity.name, 'David');
+});
+
+test('identity create rejects a ready explicit home when another indexed profile already owns the same name', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const indexedHome = path.join(systemHome, '.metabot', 'profiles', 'bob');
+  const explicitHome = path.join(systemHome, '.metabot', 'profiles', 'bob-shadow');
+  t.after(async () => stopDaemon(indexedHome));
+  t.after(async () => stopDaemon(explicitHome));
+
+  const commonEnv = {
+    HOME: systemHome,
+  };
+
+  const created = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Bob'], commonEnv);
+  assert.equal(created.exitCode, 0);
+  assert.equal(created.payload.ok, true);
+
+  await mkdir(path.join(explicitHome, '.runtime'), { recursive: true });
+  await writeFile(
+    runtimePath(explicitHome, 'runtime-state.json'),
+    `${JSON.stringify({
+      identity: created.payload.data,
+      services: [],
+      traces: [],
+    }, null, 2)}\n`,
+    'utf8',
+  );
+
+  const duplicateAttempt = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Bob'], {
     ...commonEnv,
-    METABOT_HOME: secondHome,
+    METABOT_HOME: explicitHome,
   });
-  assert.equal(whoSecondHome.exitCode, 1);
-  assert.equal(whoSecondHome.payload.code, 'cli_execution_failed');
-  assert.match(whoSecondHome.payload.message, /manager-indexed profile|unindexed profile/i);
+  assert.equal(duplicateAttempt.exitCode, 1);
+  assert.equal(duplicateAttempt.payload.ok, false);
+  assert.equal(duplicateAttempt.payload.code, 'identity_name_taken');
+});
+
+test('identity create ignores a fresh explicit noncanonical home and activates the canonical slugged profile', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const explicitHome = path.join(systemHome, '.metabot', 'profiles', 'custom-home');
+  const canonicalHome = path.join(systemHome, '.metabot', 'profiles', 'alice');
+  t.after(async () => stopDaemon(canonicalHome));
+
+  const created = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Alice'], {
+    HOME: systemHome,
+    METABOT_HOME: explicitHome,
+  });
+  assert.equal(created.exitCode, 0);
+  assert.equal(created.payload.ok, true);
+
+  const who = await runCommandWithEnv(systemHome, ['identity', 'who'], {
+    HOME: systemHome,
+  });
+  assert.equal(who.exitCode, 0);
+  assert.equal(who.payload.ok, true);
+  assert.equal(who.payload.data.activeHomeDir, canonicalHome);
+  assert.equal(who.payload.data.identity.name, 'Alice');
+
+  const activeHome = JSON.parse(
+    await readFile(path.join(systemHome, '.metabot', 'manager', 'active-home.json'), 'utf8')
+  );
+  assert.equal(activeHome.homeDir, canonicalHome);
+});
+
+test('identity list reads only from manager/identity-profiles.json and does not rewrite it from runtime state', async () => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
+  const bobHome = path.join(systemHome, '.metabot', 'profiles', 'bob');
+  await mkdir(path.join(bobHome, '.runtime'), { recursive: true });
+  await mkdir(managerRoot, { recursive: true });
+
+  const profilesPath = path.join(managerRoot, 'identity-profiles.json');
+  const activeHomePath = path.join(managerRoot, 'active-home.json');
+  const originalState = {
+    profiles: [{
+      name: 'Bob',
+      slug: 'bob',
+      aliases: ['Bob', 'bob'],
+      homeDir: bobHome,
+      globalMetaId: 'gm-bob',
+      mvcAddress: 'mvc-bob',
+      createdAt: 1,
+      updatedAt: 1,
+    }],
+  };
+
+  await writeFile(profilesPath, `${JSON.stringify(originalState, null, 2)}\n`, 'utf8');
+  await writeFile(activeHomePath, `${JSON.stringify({ homeDir: bobHome, updatedAt: 1 }, null, 2)}\n`, 'utf8');
+  await writeFile(
+    runtimePath(bobHome, 'runtime-state.json'),
+    `${JSON.stringify({ identity: { name: 'Mallory', globalMetaId: 'gm-mallory', mvcAddress: 'mvc-mallory' }, services: [], traces: [] }, null, 2)}\n`,
+    'utf8',
+  );
+
+  const listed = await runCommandWithEnv(systemHome, ['identity', 'list'], {
+    HOME: systemHome,
+  });
+
+  assert.equal(listed.exitCode, 0);
+  assert.equal(listed.payload.ok, true);
+  assert.deepEqual(
+    listed.payload.data.profiles.map((profile) => profile.name),
+    ['Bob'],
+  );
+
+  const persisted = JSON.parse(await readFile(profilesPath, 'utf8'));
+  assert.deepEqual(persisted, originalState);
+});
+
+test('identity who returns an explicit error when no active profile is initialized', async () => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+
+  const who = await runCommandWithEnv(systemHome, ['identity', 'who'], {
+    HOME: systemHome,
+  });
+
+  assert.equal(who.exitCode, 1);
+  assert.equal(who.payload.ok, false);
+  assert.equal(who.payload.code, 'identity_profile_not_initialized');
+  assert.match(who.payload.message, /no active profile initialized/i);
 });
 
 test('daemon config restarts keep the previous port so local inspector URLs stay stable', async (t) => {
