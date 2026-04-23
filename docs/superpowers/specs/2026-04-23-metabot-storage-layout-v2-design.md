@@ -57,6 +57,18 @@ This round intentionally chooses a full cut-over strategy:
 
 That is acceptable because the project has not shipped yet.
 
+### Legacy layout detection rule
+
+V2 must never silently reuse, partially overwrite, or merge data from the legacy layout.
+
+If the target MetaBot root contains legacy-only artifacts such as `.metabot/hot` without a valid v2 manager/profile structure, the runtime must fail closed with an actionable error explaining that:
+
+- this is a pre-release breaking layout change
+- legacy data is not migrated automatically
+- the local root must be cleaned or reinitialized before using v2
+
+If legacy artifacts coexist with a valid v2 layout, the runtime may ignore them, but it must not read from them and must not merge them into v2 state.
+
 ## Definitions
 
 ### System home
@@ -293,6 +305,11 @@ Examples:
 - chat key material
 - secret identity derivation inputs
 
+Security rule:
+
+- this file must be created with owner-only permissions where the host platform supports it
+- implementations must not rely on a permissive default `umask`
+
 #### `provider-secrets.json`
 
 Purpose:
@@ -300,6 +317,11 @@ Purpose:
 - secrets for model providers, APIs, and third-party services
 
 This file is separate from `identity-secrets.json` to keep account identity secrets and external provider secrets distinct.
+
+Security rule:
+
+- this file must be created with owner-only permissions where the host platform supports it
+- implementations must not rely on a permissive default `umask`
 
 #### `runtime-state.json`
 
@@ -398,6 +420,39 @@ V2 standard file:
 
 Additional lock files should also be placed here instead of polluting the runtime root.
 
+## Materialization Rules
+
+V2 distinguishes between eagerly created directories, eagerly created required files, and lazily created runtime artifacts.
+
+### Eagerly created during `identity create`
+
+The create flow should eagerly create:
+
+- the profile root
+- required workspace files
+- the `memory/` directory
+- the `.runtime/` root
+- `.runtime/sessions/`
+- `.runtime/evolution/`
+- `.runtime/exports/`
+- `.runtime/state/`
+- `.runtime/locks/`
+- `.runtime/config.json`
+- `.runtime/identity-secrets.json`
+
+### Lazily materialized on first real use
+
+Unless a command explicitly initializes them earlier, the following should be created lazily when first written:
+
+- `provider-secrets.json`
+- `runtime-state.json`
+- `daemon.json`
+- `runtime.sqlite`
+- `sessions/a2a-session-state.json`
+- files under `.runtime/state/`
+- files under `.runtime/exports/`
+- lock files under `.runtime/locks/`
+
 ## Profile Metadata Model
 
 `manager/identity-profiles.json` is the global machine-readable profile index.
@@ -408,10 +463,13 @@ Each profile record must contain at least:
 - `slug`
 - `aliases`
 - `homeDir`
-- `globalMetaId`
-- `mvcAddress`
 - `createdAt`
 - `updatedAt`
+
+When the local identity has already been deterministically derived during creation, the profile record should also contain:
+
+- `globalMetaId`
+- `mvcAddress`
 
 ### Recommended record shape
 
@@ -519,6 +577,11 @@ The runtime may auto-select only when one candidate has a clearly dominant score
 
 If multiple candidates are similarly strong, resolution must stop and ask for disambiguation rather than silently picking one.
 
+Implementation rule:
+
+- the scoring algorithm and auto-select threshold must be deterministic and test-covered
+- tie and near-tie behavior must produce disambiguation, not silent selection
+
 ## Profile Lifecycle Rules
 
 ### `identity create --name <name>`
@@ -527,13 +590,15 @@ The create flow should:
 
 1. resolve `systemHomeDir` from `HOME`
 2. generate a candidate slug
-3. reject or surface likely duplicates using the profile index
-4. create `~/.metabot/profiles/<slug>/`
-5. create the required workspace files and `memory/`
-6. create the `.runtime/` skeleton
-7. generate and store identity secrets in `.runtime/identity-secrets.json`
-8. write the profile record to `manager/identity-profiles.json`
-9. set `manager/active-home.json` to the new profile home
+3. check for likely duplicates using the profile index
+4. if the requested identity appears to be an actual duplicate by normalized name, alias, or deterministically known identity fields, stop and require confirmation instead of auto-creating a suffixed slug
+5. if the identity is not a likely duplicate but the candidate slug is already taken, append a numeric suffix such as `-2`, `-3`, and continue
+6. create `~/.metabot/profiles/<slug>/`
+7. create the required workspace files and runtime directories
+8. generate and store identity secrets in `.runtime/identity-secrets.json`
+9. deterministically derive the initial identity fields needed for the manager index, including `globalMetaId` and `mvcAddress`, before writing the profile record
+10. write the profile record to `manager/identity-profiles.json`
+11. set `manager/active-home.json` to the new profile home
 
 ### `identity list`
 
@@ -561,6 +626,44 @@ The who flow should:
 
 If the active pointer is invalid, the command should report an explicit error instead of silently falling back to the system home.
 
+## Consistency And Repair Rules
+
+The manager index is the primary source of truth for profile discovery.
+
+### Write ordering
+
+Profile creation and assignment should follow this durability order:
+
+1. write profile-local files
+2. atomically write the updated profile index
+3. atomically write the active profile pointer
+
+The active pointer must never be updated before the corresponding index entry is durably written.
+
+### Crash behavior
+
+If a crash happens after profile-local files are created but before the manager index is updated:
+
+- the partially created profile directory must not be auto-discovered as a valid profile
+- `identity list` should continue to use the manager index only
+- follow-up tooling may report the orphaned directory and offer repair or cleanup
+
+If a crash leaves `active-home.json` pointing at a missing or non-indexed profile:
+
+- runtime commands must report an explicit error
+- the runtime must not silently fall back to the system home
+- the runtime must not silently pick another profile
+
+### Repair stance
+
+V2 should prefer explicit repair over implicit recovery.
+
+That means:
+
+- no silent adoption of stray directories
+- no hidden rebuild of the manager index by scanning `profiles/`
+- no silent rewrite of the active pointer to a guessed profile
+
 ## Path Resolution Rules
 
 ### System vs profile home
@@ -576,9 +679,24 @@ They are not the same concept and must not be conflated.
 
 When resolving the active profile home:
 
-1. explicit `METABOT_HOME`
+1. explicit validated `METABOT_HOME`
 2. `manager/active-home.json`
 3. otherwise: report that no profile is initialized and require `identity create` or `identity assign`
+
+### `METABOT_HOME` validation rule
+
+`METABOT_HOME` is an explicit override, not an escape hatch back to arbitrary-path profile selection.
+
+If set, it must:
+
+- resolve to a path under `~/.metabot/profiles/<slug>/`
+- point to a path that matches a manager-indexed profile for commands operating on an existing profile
+
+The runtime must reject:
+
+- arbitrary paths outside `profiles/`
+- legacy layout paths
+- paths that do not correspond to a valid indexed profile in normal runtime operation
 
 ### Forbidden fallback
 
