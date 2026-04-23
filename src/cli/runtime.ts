@@ -22,6 +22,7 @@ import {
   setActiveMetabotHome,
   upsertIdentityProfile,
 } from '../core/identity/identityProfiles';
+import { resolveProfileNameMatch } from '../core/identity/profileNameResolution';
 import { renderResolvedSkillContract } from '../core/skills/skillResolver';
 import type { SkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
 import type { SkillActiveVariantRef } from '../core/evolution/types';
@@ -1337,31 +1338,22 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
 
         const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
         const profiles = await listIdentityProfiles(systemHomeDir);
-        const normalizedTarget = targetName.toLowerCase();
-        const matched = profiles.filter((profile) => profile.name.toLowerCase() === normalizedTarget);
+        const resolved = resolveProfileNameMatch(targetName, profiles);
 
-        if (matched.length === 0) {
+        if (resolved.status === 'not_found') {
           return commandFailed(
             'identity_profile_not_found',
-            `No local MetaBot profile named "${targetName}" was found.`
+            resolved.message
           );
         }
-        if (matched.length > 1) {
+        if (resolved.status === 'ambiguous') {
           return commandFailed(
             'identity_profile_ambiguous',
-            `Multiple local MetaBot profiles named "${targetName}" were found. Rename one profile before assigning.`
+            resolved.message
           );
         }
 
-        const selected = matched[0];
-        const selectedState = await createRuntimeStateStore(selected.homeDir).readState();
-        if (!selectedState.identity) {
-          return commandFailed(
-            'identity_profile_invalid',
-            `The selected profile "${selected.name}" has no local identity state in ${selected.homeDir}.`
-          );
-        }
-
+        const selected = resolved.match;
         await setActiveMetabotHome({
           systemHomeDir,
           homeDir: selected.homeDir,

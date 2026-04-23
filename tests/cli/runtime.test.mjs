@@ -743,6 +743,90 @@ test('identity list/assign/who supports switching active local bot home across r
   assert.equal(who.payload.data.activeHomeDir, bobHome);
 });
 
+test('identity assign resolves a slugged profile from a human display name', async () => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
+  const canonicalHome = path.join(systemHome, '.metabot', 'profiles', 'charles-zhang');
+  await mkdir(canonicalHome, { recursive: true });
+  await mkdir(managerRoot, { recursive: true });
+
+  await writeFile(
+    path.join(managerRoot, 'identity-profiles.json'),
+    `${JSON.stringify({
+      profiles: [{
+        name: 'Charles Zhang',
+        slug: 'charles-zhang',
+        aliases: ['Charles Zhang', 'charles zhang', 'charles-zhang'],
+        homeDir: canonicalHome,
+        globalMetaId: '',
+        mvcAddress: '',
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    }, null, 2)}\n`,
+    'utf8',
+  );
+
+  const assigned = await runCommandWithEnv(systemHome, ['identity', 'assign', '--name', 'Charles Zhang'], {
+    HOME: systemHome,
+  });
+
+  assert.equal(assigned.exitCode, 0);
+  assert.equal(assigned.payload.ok, true);
+  assert.equal(assigned.payload.data.activeHomeDir, canonicalHome);
+  assert.equal(assigned.payload.data.assignedProfile.slug, 'charles-zhang');
+});
+
+test('identity assign rejects ambiguous near-tied profile matches', async () => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
+  const zhangHome = path.join(systemHome, '.metabot', 'profiles', 'charles-zhang');
+  const zhaoHome = path.join(systemHome, '.metabot', 'profiles', 'charles-zhao');
+  await mkdir(zhangHome, { recursive: true });
+  await mkdir(zhaoHome, { recursive: true });
+  await mkdir(managerRoot, { recursive: true });
+
+  await writeFile(
+    path.join(managerRoot, 'identity-profiles.json'),
+    `${JSON.stringify({
+      profiles: [
+        {
+          name: 'Charles Zhang',
+          slug: 'charles-zhang',
+          aliases: ['Charles Zhang', 'charles zhang', 'charles-zhang'],
+          homeDir: zhangHome,
+          globalMetaId: '',
+          mvcAddress: '',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          name: 'Charles Zhao',
+          slug: 'charles-zhao',
+          aliases: ['Charles Zhao', 'charles zhao', 'charles-zhao'],
+          homeDir: zhaoHome,
+          globalMetaId: '',
+          mvcAddress: '',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    }, null, 2)}\n`,
+    'utf8',
+  );
+
+  const assigned = await runCommandWithEnv(systemHome, ['identity', 'assign', '--name', 'Charles Zh'], {
+    HOME: systemHome,
+  });
+
+  assert.equal(assigned.exitCode, 1);
+  assert.equal(assigned.payload.ok, false);
+  assert.equal(assigned.payload.code, 'identity_profile_ambiguous');
+  assert.match(assigned.payload.message, /ambiguous/i);
+  assert.match(assigned.payload.message, /Charles Zhang/i);
+  assert.match(assigned.payload.message, /Charles Zhao/i);
+});
+
 test('identity create rejects duplicate names across different local homes on the same machine', async (t) => {
   const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
   const firstHome = path.join(systemHome, '.metabot', 'profiles', 'david-home-a');
