@@ -9,15 +9,14 @@ import {
   type ChainServiceDirectoryItem,
 } from './chainServiceDirectory';
 import {
-  CHAIN_HEARTBEAT_PROTOCOL_PATH,
-  filterOnlineChainServices,
-  isChainHeartbeatSemanticMiss,
-  parseHeartbeatTimestamp,
-  type ChainHeartbeatEntry,
-} from './chainHeartbeatDirectory';
+  readOnlineMetaBotsFromSocketPresence,
+  type OnlineMetaBotDirectoryItem,
+} from './socketPresenceDirectory';
+import { normalizeComparableGlobalMetaId } from './serviceDirectory';
 
 const DEFAULT_CHAIN_API_BASE_URL = 'https://manapi.metaid.io';
-const DEFAULT_HEARTBEAT_FETCH_CONCURRENCY = 6;
+const DEFAULT_SOCKET_PRESENCE_LIMIT = 100;
+export type SocketPresenceFailureMode = 'throw' | 'assume_service_providers_online';
 
 export interface ReadChainDirectoryResult {
   services: Array<Record<string, unknown>>;
@@ -28,11 +27,12 @@ export interface ReadChainDirectoryResult {
 export interface ReadChainDirectoryOptions {
   chainApiBaseUrl?: string;
   fetchImpl?: typeof fetch;
-  now?: () => number;
   onlineOnly?: boolean;
   servicePageSize?: number;
   serviceMaxPages?: number;
-  heartbeatFetchConcurrency?: number;
+  socketPresenceApiBaseUrl?: string;
+  socketPresenceLimit?: number;
+  socketPresenceFailureMode?: SocketPresenceFailureMode;
   fetchSeededDirectoryServices: () => Promise<Array<Record<string, unknown>>>;
 }
 
@@ -85,98 +85,122 @@ async function fetchServicePages(input: {
   return resolveCurrentChainServices(rows);
 }
 
-async function fetchLatestHeartbeat(input: {
-  fetchImpl: typeof fetch;
-  chainApiBaseUrl: string;
-  address: string;
-}): Promise<ChainHeartbeatEntry> {
-  const url = new URL(`${input.chainApiBaseUrl}/address/pin/list/${encodeURIComponent(input.address)}`);
-  url.searchParams.set('cursor', '0');
-  url.searchParams.set('size', '1');
-  url.searchParams.set('path', CHAIN_HEARTBEAT_PROTOCOL_PATH);
-
-  try {
-    const response = await input.fetchImpl(url.toString());
-    if (!response.ok) {
-      return {
-        address: input.address,
-        timestamp: null,
-        source: 'chain',
-        error: `status_${response.status}`,
-      };
-    }
-    const payload = await response.json() as unknown;
-    if (isChainHeartbeatSemanticMiss(payload)) {
-      return {
-        address: input.address,
-        timestamp: null,
-        source: 'chain',
-        error: 'semantic_miss',
-      };
-    }
-    return {
-      address: input.address,
-      timestamp: parseHeartbeatTimestamp(payload),
-      source: 'chain',
-      error: null,
-    };
-  } catch (error) {
-    return {
-      address: input.address,
-      timestamp: null,
-      source: 'chain',
-      error: error instanceof Error ? error.message : String(error),
-    };
+function normalizeSocketPresenceLimit(value: number | undefined): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_SOCKET_PRESENCE_LIMIT;
   }
+  return Math.min(DEFAULT_SOCKET_PRESENCE_LIMIT, Math.max(1, Math.floor(value as number)));
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  worker: (item: T) => Promise<R>
-): Promise<R[]> {
-  if (items.length === 0) return [];
-  const results = new Array<R>(items.length);
-  const concurrency = Math.max(1, Math.min(limit, items.length));
-  let nextIndex = 0;
-
-  await Promise.all(
-    Array.from({ length: concurrency }, async () => {
-      while (true) {
-        const index = nextIndex;
-        nextIndex += 1;
-        if (index >= items.length) {
-          return;
-        }
-        results[index] = await worker(items[index]);
-      }
-    })
-  );
-
-  return results;
+function normalizeLastSeenSec(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  if (value > 1e12) {
+    return Math.floor(value / 1000);
+  }
+  return Math.floor(value);
 }
 
-async function fetchHeartbeatsForServices(input: {
-  services: ChainServiceDirectoryItem[];
+function buildOnlineMetaBotIndex(
+  bots: OnlineMetaBotDirectoryItem[],
+): Map<string, OnlineMetaBotDirectoryItem> {
+  const index = new Map<string, OnlineMetaBotDirectoryItem>();
+  for (const bot of bots) {
+    const globalMetaId = normalizeComparableGlobalMetaId(bot.globalMetaId);
+    if (!globalMetaId || index.has(globalMetaId)) {
+      continue;
+    }
+    index.set(globalMetaId, bot);
+  }
+  return index;
+}
+
+function buildSyntheticOnlineBotsFromServices(
+  services: Array<Record<string, unknown>>,
+): OnlineMetaBotDirectoryItem[] {
+  const nowMs = Date.now();
+  const seen = new Set<string>();
+  const bots: OnlineMetaBotDirectoryItem[] = [];
+  for (const service of services) {
+    const globalMetaId = normalizeComparableGlobalMetaId(
+      service.providerGlobalMetaId ?? service.globalMetaId,
+    );
+    if (!globalMetaId || seen.has(globalMetaId)) {
+      continue;
+    }
+    seen.add(globalMetaId);
+    bots.push({
+      globalMetaId,
+      lastSeenAt: nowMs,
+      lastSeenAgoSeconds: 0,
+      deviceCount: 1,
+      online: true,
+    });
+  }
+  return bots;
+}
+
+function decorateServicesWithSocketPresence<T extends object>(input: {
+  services: T[];
+  onlineBots: OnlineMetaBotDirectoryItem[];
+  onlineOnly: boolean;
+}): Array<T & { online: boolean; lastSeenSec: number | null; lastSeenAt: number | null }> {
+  const onlineIndex = buildOnlineMetaBotIndex(input.onlineBots);
+  const decorated = input.services.map((service) => {
+    const serviceRecord = service as Record<string, unknown>;
+    const globalMetaId = normalizeComparableGlobalMetaId(
+      serviceRecord.providerGlobalMetaId ?? serviceRecord.globalMetaId,
+    );
+    const onlineBot = globalMetaId ? onlineIndex.get(globalMetaId) : undefined;
+    const lastSeenAt = typeof onlineBot?.lastSeenAt === 'number' && Number.isFinite(onlineBot.lastSeenAt)
+      ? Math.max(0, Math.floor(onlineBot.lastSeenAt))
+      : null;
+    return {
+      ...service,
+      online: Boolean(onlineBot),
+      lastSeenSec: normalizeLastSeenSec(lastSeenAt),
+      lastSeenAt,
+    };
+  });
+
+  if (input.onlineOnly) {
+    return decorated.filter((service) => service.online);
+  }
+  return decorated;
+}
+
+async function applySocketPresenceToServices<T extends object>(input: {
+  services: T[];
   fetchImpl: typeof fetch;
-  chainApiBaseUrl: string;
-  heartbeatFetchConcurrency: number;
-}): Promise<ChainHeartbeatEntry[]> {
-  const addresses = [...new Set(
-    input.services
-      .map((service) => service.providerAddress?.trim())
-      .filter((address): address is string => Boolean(address))
-  )];
-
-  return mapWithConcurrency(
-    addresses,
-    input.heartbeatFetchConcurrency,
-    async (address) => fetchLatestHeartbeat({
+  socketPresenceApiBaseUrl?: string;
+  socketPresenceLimit: number;
+  socketPresenceFailureMode?: SocketPresenceFailureMode;
+  onlineOnly: boolean;
+}): Promise<Array<T & { online: boolean; lastSeenSec: number | null; lastSeenAt: number | null }>> {
+  let onlineBots: OnlineMetaBotDirectoryItem[] = [];
+  try {
+    const onlineDirectory = await readOnlineMetaBotsFromSocketPresence({
       fetchImpl: input.fetchImpl,
-      chainApiBaseUrl: input.chainApiBaseUrl,
-      address,
-    })
-  );
+      apiBaseUrl: input.socketPresenceApiBaseUrl,
+      limit: input.socketPresenceLimit,
+    });
+    onlineBots = onlineDirectory.bots;
+  } catch (error) {
+    if (input.socketPresenceFailureMode === 'assume_service_providers_online') {
+      onlineBots = buildSyntheticOnlineBotsFromServices(
+        input.services.map((service) => ({ ...(service as Record<string, unknown>) })),
+      );
+    } else if (input.onlineOnly) {
+      throw error;
+    }
+  }
+
+  return decorateServicesWithSocketPresence({
+    services: input.services,
+    onlineBots,
+    onlineOnly: input.onlineOnly,
+  });
 }
 
 export async function readChainDirectoryWithFallback(
@@ -190,49 +214,36 @@ export async function readChainDirectoryWithFallback(
   const serviceMaxPages = Number.isFinite(options.serviceMaxPages)
     ? Math.max(1, Math.floor(options.serviceMaxPages as number))
     : DEFAULT_CHAIN_SERVICE_MAX_PAGES;
-  const heartbeatFetchConcurrency = Number.isFinite(options.heartbeatFetchConcurrency)
-    ? Math.max(1, Math.floor(options.heartbeatFetchConcurrency as number))
-    : DEFAULT_HEARTBEAT_FETCH_CONCURRENCY;
+  const socketPresenceLimit = normalizeSocketPresenceLimit(options.socketPresenceLimit);
 
+  let source: 'chain' | 'seeded' = 'chain';
+  let fallbackUsed = false;
+  let services: Array<ChainServiceDirectoryItem | Record<string, unknown>>;
   try {
-    const services = await fetchServicePages({
+    services = await fetchServicePages({
       fetchImpl,
       chainApiBaseUrl,
       servicePageSize,
       serviceMaxPages,
     });
-    const heartbeats = await fetchHeartbeatsForServices({
-      services,
-      fetchImpl,
-      chainApiBaseUrl,
-      heartbeatFetchConcurrency,
-    });
-    const decoratedServices = options.onlineOnly === true
-      ? filterOnlineChainServices(services, heartbeats, { now: options.now })
-      : services.map((service) => ({
-          ...service,
-          ...filterOnlineChainServices([service], heartbeats, { now: options.now })[0],
-        }));
-
-    return {
-      services: options.onlineOnly === true
-        ? decoratedServices
-        : services.map((service) => {
-            const onlineService = decoratedServices.find((entry) => entry.servicePinId === service.servicePinId);
-            return {
-              ...service,
-              online: Boolean(onlineService?.online),
-              lastSeenSec: typeof onlineService?.lastSeenSec === 'number' ? onlineService.lastSeenSec : null,
-            };
-          }),
-      source: 'chain',
-      fallbackUsed: false,
-    };
   } catch {
-    return {
-      services: await options.fetchSeededDirectoryServices(),
-      source: 'seeded',
-      fallbackUsed: true,
-    };
+    source = 'seeded';
+    fallbackUsed = true;
+    services = await options.fetchSeededDirectoryServices();
   }
+
+  const decoratedServices = await applySocketPresenceToServices({
+    services: services.map((service) => ({ ...(service as Record<string, unknown>) })),
+    fetchImpl,
+    socketPresenceApiBaseUrl: options.socketPresenceApiBaseUrl,
+    socketPresenceLimit,
+    socketPresenceFailureMode: options.socketPresenceFailureMode,
+    onlineOnly: options.onlineOnly === true,
+  });
+
+  return {
+    services: decoratedServices,
+    source,
+    fallbackUsed,
+  };
 }

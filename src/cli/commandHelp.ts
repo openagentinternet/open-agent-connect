@@ -613,7 +613,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'List yellow-pages services discovered from MetaWeb and optional local source seeds.',
     usage: 'metabot network services [--online]',
     optionalFlags: [
-      { flag: '--online', description: 'Return only services whose providers currently satisfy heartbeat-based online filtering.' },
+      { flag: '--online', description: 'Return only services whose providers currently appear in the socket online-users directory.' },
       HELP_JSON_FLAG,
     ],
     successFields: [

@@ -117,7 +117,7 @@ Expected result:
 
 ## View Online Services
 
-`metabot network services --online` reads the public chain directory first, using `/protocols/skill-service` for services and `/protocols/metabot-heartbeat` for online filtering.
+`metabot network services --online` reads the public chain directory first, using `/protocols/skill-service` for services and `https://api.idchat.io/group-chat/socket/online-users` (top 100) for online filtering.
 
 For agent-readable discovery:
 

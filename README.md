@@ -248,7 +248,7 @@ It covers the end-to-end loop where a local MetaBot:
 What is already implemented inside the DACT module:
 
 - chain-backed service discovery through `/protocols/skill-service`
-- online filtering through `/protocols/metabot-heartbeat`
+- online filtering through `https://api.idchat.io/group-chat/socket/online-users` (top 100 online users)
 - local fallback `network sources`
 - caller-side `services call`
 - caller-side `trace watch` and `trace get`

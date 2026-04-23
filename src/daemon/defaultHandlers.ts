@@ -205,9 +205,100 @@ function summarizeService(record: ReturnType<typeof buildPublishedService>['reco
     endpoint: record.endpoint,
     paymentAddress: record.paymentAddress,
     available: Boolean(record.available),
-    online: true,
+    online: false,
+    lastSeenSec: null,
+    lastSeenAt: null,
     updatedAt: record.updatedAt,
   };
+}
+
+function normalizeComparableGlobalMetaId(value: unknown): string {
+  return normalizeText(value).toLowerCase();
+}
+
+function buildSocketPresenceLastSeenIndex(
+  bots: Array<{ globalMetaId?: unknown; lastSeenAt?: unknown }>
+): Map<string, number | null> {
+  const index = new Map<string, number | null>();
+  for (const bot of bots) {
+    const globalMetaId = normalizeComparableGlobalMetaId(bot.globalMetaId);
+    if (!globalMetaId || index.has(globalMetaId)) {
+      continue;
+    }
+    const lastSeenAt = typeof bot.lastSeenAt === 'number' && Number.isFinite(bot.lastSeenAt) && bot.lastSeenAt > 0
+      ? Math.floor(bot.lastSeenAt)
+      : null;
+    index.set(globalMetaId, lastSeenAt);
+  }
+  return index;
+}
+
+function markServicesOnlineForFallback(
+  services: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  const nowMs = Date.now();
+  const nowSec = Math.floor(nowMs / 1000);
+  return services.map((service) => ({
+    ...service,
+    online: true,
+    lastSeenAt: nowMs,
+    lastSeenSec: nowSec,
+  }));
+}
+
+function markServicesOfflineForPresenceUnavailable(
+  services: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  return services.map((service) => ({
+    ...service,
+    online: false,
+    lastSeenAt: null,
+    lastSeenSec: null,
+  }));
+}
+
+async function decorateServicesWithSocketPresence(input: {
+  services: Array<Record<string, unknown>>;
+  socketPresenceApiBaseUrl?: string;
+  socketPresenceFailureMode?: 'throw' | 'assume_service_providers_online';
+  onlineOnly: boolean;
+}): Promise<Array<Record<string, unknown>>> {
+  try {
+    const presence = await readOnlineMetaBotsFromSocketPresence({
+      apiBaseUrl: input.socketPresenceApiBaseUrl,
+      limit: MAX_NETWORK_BOT_LIST_LIMIT,
+    });
+    const lastSeenIndex = buildSocketPresenceLastSeenIndex(presence.bots);
+    const decorated = input.services.map((service) => {
+      const globalMetaId = normalizeComparableGlobalMetaId(
+        service.providerGlobalMetaId ?? service.globalMetaId,
+      );
+      const lastSeenAt = globalMetaId ? (lastSeenIndex.get(globalMetaId) ?? null) : null;
+      return {
+        ...service,
+        online: Boolean(globalMetaId && lastSeenIndex.has(globalMetaId)),
+        lastSeenAt,
+        lastSeenSec: normalizeEpochSeconds(lastSeenAt),
+      };
+    });
+
+    if (input.onlineOnly) {
+      return decorated.filter((service) => service.online === true);
+    }
+    return decorated;
+  } catch (error) {
+    if (input.socketPresenceFailureMode === 'assume_service_providers_online') {
+      const fallbackDecorated = markServicesOnlineForFallback(input.services);
+      if (input.onlineOnly) {
+        return fallbackDecorated.filter((service) => service.online === true);
+      }
+      return fallbackDecorated;
+    }
+    if (input.onlineOnly) {
+      throw error;
+    }
+    return markServicesOfflineForPresenceUnavailable(input.services);
+  }
 }
 
 function isProviderPresenceOnline(input: {
@@ -829,7 +920,9 @@ async function fetchRemoteAvailableServices(
     }
 
     const services = Array.isArray(payload.data.services)
-      ? payload.data.services.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'))
+      ? payload.data.services
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'))
+        .filter((entry) => entry.online === true)
       : [];
     return { services };
   } catch (error) {
@@ -1497,6 +1590,8 @@ async function listRuntimeDirectoryServices(input: {
   state: RuntimeState;
   hotRoot: string;
   chainApiBaseUrl?: string;
+  socketPresenceApiBaseUrl?: string;
+  socketPresenceFailureMode?: 'throw' | 'assume_service_providers_online';
   onlineOnly: boolean;
 }): Promise<{
   services: Array<Record<string, unknown>>;
@@ -1508,15 +1603,27 @@ async function listRuntimeDirectoryServices(input: {
     .map((service) => summarizeService(service));
   const directory = await readChainDirectoryWithFallback({
     chainApiBaseUrl: input.chainApiBaseUrl,
+    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+    socketPresenceFailureMode: input.socketPresenceFailureMode,
     onlineOnly: input.onlineOnly,
     fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(input.hotRoot),
   });
+  const decoratedLocalServices = await decorateServicesWithSocketPresence({
+    services: localServices,
+    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+    socketPresenceFailureMode: input.socketPresenceFailureMode,
+    onlineOnly: input.onlineOnly,
+  });
+  const mergedServices = dedupeServices([
+    ...directory.services,
+    ...decoratedLocalServices,
+  ]);
+  const services = input.onlineOnly
+    ? mergedServices.filter((service) => service.online === true)
+    : mergedServices;
 
   return {
-    services: dedupeServices([
-      ...directory.services,
-      ...localServices,
-    ]),
+    services,
     discoverySource: directory.source,
     fallbackUsed: directory.fallbackUsed,
   };
@@ -2749,6 +2856,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   signer?: Signer;
   identitySyncStepDelayMs?: number;
   chainApiBaseUrl?: string;
+  socketPresenceApiBaseUrl?: string;
+  socketPresenceFailureMode?: 'throw' | 'assume_service_providers_online';
   fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
   callerReplyWaiter?: MetaWebServiceReplyWaiter;
   masterReplyWaiter?: MetaWebMasterReplyWaiter;
@@ -5277,22 +5386,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
     network: {
       listServices: async ({ online }) => {
         const state = await runtimeStateStore.readState();
-        const localServices = state.services
-          .filter((service) => service.available === 1)
-          .map((service) => summarizeService(service));
-        const directory = await readChainDirectoryWithFallback({
+        const directory = await listRuntimeDirectoryServices({
+          state,
+          hotRoot: runtimeStateStore.paths.hotRoot,
           chainApiBaseUrl: input.chainApiBaseUrl,
+          socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+          socketPresenceFailureMode: input.socketPresenceFailureMode,
           onlineOnly: online === true,
-          fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(runtimeStateStore.paths.hotRoot),
         });
-        const services = dedupeServices([
-          ...directory.services,
-          ...localServices,
-        ]);
 
         return commandSuccess({
-          services,
-          discoverySource: directory.source,
+          services: directory.services,
+          discoverySource: directory.discoverySource,
           fallbackUsed: directory.fallbackUsed,
         });
       },
@@ -5304,6 +5409,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         try {
           const presence = await readOnlineMetaBotsFromSocketPresence({
+            apiBaseUrl: input.socketPresenceApiBaseUrl,
             limit: normalizedLimit,
           });
           return commandSuccess({
@@ -5315,29 +5421,32 @@ export function createDefaultMetabotDaemonHandlers(input: {
               ? presence.bots
               : presence.bots.map((entry) => ({ ...entry })),
           });
-        } catch {
-          const state = await runtimeStateStore.readState();
-          const localServices = state.services
-            .filter((service) => service.available === 1)
-            .map((service) => summarizeService(service));
-          const directory = await readChainDirectoryWithFallback({
-            chainApiBaseUrl: input.chainApiBaseUrl,
-            onlineOnly: onlineOnly,
-            fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(runtimeStateStore.paths.hotRoot),
-          });
-          const services = dedupeServices([
-            ...directory.services,
-            ...localServices,
-          ]);
-          const bots = dedupeOnlineBotsFromServices(services, normalizedLimit);
+        } catch (error) {
+          try {
+            const state = await runtimeStateStore.readState();
+            const directory = await listRuntimeDirectoryServices({
+              state,
+              hotRoot: runtimeStateStore.paths.hotRoot,
+              chainApiBaseUrl: input.chainApiBaseUrl,
+              socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+              socketPresenceFailureMode: input.socketPresenceFailureMode,
+              onlineOnly: false,
+            });
+            const bots = dedupeOnlineBotsFromServices(directory.services, normalizedLimit);
 
-          return commandSuccess({
-            source: 'service_directory_fallback',
-            fallbackUsed: true,
-            total: bots.length,
-            onlineWindowSeconds: HEARTBEAT_ONLINE_WINDOW_SEC,
-            bots,
-          });
+            return commandSuccess({
+              source: 'service_directory_fallback',
+              fallbackUsed: true,
+              total: bots.length,
+              onlineWindowSeconds: null,
+              bots,
+            });
+          } catch {
+            return commandFailed(
+              'socket_presence_unavailable',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
         }
       },
       listSources: async () => {
@@ -5586,6 +5695,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
             state,
             hotRoot: runtimeStateStore.paths.hotRoot,
             chainApiBaseUrl: input.chainApiBaseUrl,
+            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceFailureMode: input.socketPresenceFailureMode,
             onlineOnly: true,
           });
           availableServices = directory.services;
@@ -5971,6 +6082,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
           state,
           hotRoot: runtimeStateStore.paths.hotRoot,
           chainApiBaseUrl: input.chainApiBaseUrl,
+          socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+          socketPresenceFailureMode: input.socketPresenceFailureMode,
           onlineOnly: false,
         });
         const matchedService = directory.services.find((entry) => (

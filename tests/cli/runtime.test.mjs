@@ -382,6 +382,63 @@ async function startFakeChainApiServer(options = {}) {
   };
 }
 
+async function startFakeSocketPresenceApiServer(options = {}) {
+  const users = Array.isArray(options.users) ? options.users : [];
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (url.pathname !== '/group-chat/socket/online-users') {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ code: 404, message: 'not_found' }));
+      return;
+    }
+
+    const requestedSize = Number.parseInt(url.searchParams.get('size') ?? '', 10);
+    const size = Number.isFinite(requestedSize) && requestedSize > 0 ? requestedSize : 10;
+    const payload = {
+      code: 0,
+      data: {
+        total: users.length,
+        cursor: 0,
+        size,
+        onlineWindowSeconds: 1200,
+        list: users.slice(0, size),
+      },
+    };
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(payload));
+  });
+
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Expected TCP fake socket presence server');
+  }
+
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    async close() {
+      await new Promise((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    },
+  };
+}
+
 async function stopDaemon(homeDir) {
   const daemonStatePath = path.join(homeDir, '.metabot', 'hot', 'daemon.json');
 
@@ -781,6 +838,74 @@ test('services publish persists a local directory entry that network services --
   assert.equal(listed.payload.data.services[0].providerGlobalMetaId, created.payload.data.globalMetaId);
 });
 
+test('services call with providerDaemonBaseUrl rejects a provider that is offline in socket presence', async (t) => {
+  const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-offline-caller-'));
+  const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-offline-provider-'));
+  const socketPresenceApi = await startFakeSocketPresenceApiServer({ users: [] });
+  const providerEnv = { METABOT_SOCKET_PRESENCE_API_BASE_URL: socketPresenceApi.baseUrl };
+  t.after(async () => stopDaemon(callerHome));
+  t.after(async () => stopDaemon(providerHome));
+  t.after(async () => socketPresenceApi.close());
+
+  const providerIdentity = await runCommand(
+    providerHome,
+    ['identity', 'create', '--name', 'Tarot Provider'],
+    providerEnv
+  );
+  assert.equal(providerIdentity.exitCode, 0);
+
+  const publishFile = path.join(providerHome, 'provider-offline-payload.json');
+  await writeFile(publishFile, JSON.stringify({
+    serviceName: 'tarot-rws-service',
+    displayName: 'Tarot Reading',
+    description: 'Reads one tarot card.',
+    providerSkill: 'tarot-rws',
+    price: '0.00001',
+    currency: 'SPACE',
+    outputType: 'text',
+    skillDocument: '# Tarot Reading',
+  }), 'utf8');
+
+  const published = await runCommand(providerHome, ['services', 'publish', '--payload-file', publishFile], providerEnv);
+  assert.equal(published.exitCode, 0);
+  assert.equal(published.payload.ok, true);
+
+  const providerDaemon = await runCommand(
+    providerHome,
+    ['daemon', 'start'],
+    providerEnv
+  );
+  assert.equal(providerDaemon.exitCode, 0);
+  assert.equal(providerDaemon.payload.ok, true);
+
+  const providerOnlineDirectory = await fetchJson(
+    providerDaemon.payload.data.baseUrl,
+    '/api/network/services?online=true'
+  );
+  assert.equal(providerOnlineDirectory.status, 200);
+  assert.equal(providerOnlineDirectory.payload.ok, true);
+  assert.equal(providerOnlineDirectory.payload.data.services.length, 0);
+
+  const callerIdentity = await runCommand(callerHome, ['identity', 'create', '--name', 'Caller Bot']);
+  assert.equal(callerIdentity.exitCode, 0);
+
+  const requestFile = path.join(callerHome, 'provider-offline-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: published.payload.data.servicePinId,
+      providerGlobalMetaId: providerIdentity.payload.data.globalMetaId,
+      providerDaemonBaseUrl: providerDaemon.payload.data.baseUrl,
+      userTask: 'Do one tarot reading',
+      taskContext: 'Offline provider gate coverage',
+    },
+  }), 'utf8');
+
+  const called = await runCommand(callerHome, ['services', 'call', '--request-file', requestFile]);
+  assert.equal(called.exitCode, 1);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.code, 'service_offline');
+});
+
 test('provider closure runtime can publish, go online, receive a seller trace, and surface a manual refund queue item', async (t) => {
   const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-closure-caller-'));
   const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-closure-provider-'));
@@ -1029,6 +1154,31 @@ test('network services reads chain-backed online services without local director
   assert.equal(listed.payload.data.services[0].displayName, 'Weather Oracle');
   assert.equal(listed.payload.data.services[0].providerGlobalMetaId, 'idq1provider');
   assert.equal(listed.payload.data.services[0].online, true);
+});
+
+test('network bots --online falls back to service directory when socket presence is unavailable', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const chainApi = await startFakeChainApiServer();
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const listed = await runCommand(
+    homeDir,
+    ['network', 'bots', '--online', '--limit', '10'],
+    {
+      METABOT_TEST_FAKE_CHAIN_WRITE: '',
+      METABOT_TEST_FAKE_SUBSIDY: '',
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_SOCKET_PRESENCE_API_BASE_URL: 'http://127.0.0.1:9',
+    }
+  );
+
+  assert.equal(listed.exitCode, 0);
+  assert.equal(listed.payload.ok, true);
+  assert.equal(listed.payload.data.source, 'service_directory_fallback');
+  assert.equal(listed.payload.data.fallbackUsed, true);
+  assert.equal(Array.isArray(listed.payload.data.bots), true);
+  assert.equal(listed.payload.data.bots.length, 0);
 });
 
 test('evolution search/import read published artifact metadata + body via chain API and write remote artifact files', async (t) => {

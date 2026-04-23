@@ -56,7 +56,7 @@ Expected result:
 
 ## View Online Services
 
-`metabot network services --online` reads the public chain directory first, using `/protocols/skill-service` plus `/protocols/metabot-heartbeat`.
+`metabot network services --online` reads the public chain directory first, using `/protocols/skill-service` plus `https://api.idchat.io/group-chat/socket/online-users` (top 100).
 
 ```bash
 metabot network services --online

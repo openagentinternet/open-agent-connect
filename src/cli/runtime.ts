@@ -1797,6 +1797,8 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
   const callerReplyWaiter = createTestMetaWebReplyWaiter(context.env);
   const masterReplyWaiter = createTestMasterReplyWaiter(context.env) ?? createSocketIoMetaWebMasterReplyWaiter();
+  const socketPresenceApiBaseUrl = context.env.METABOT_SOCKET_PRESENCE_API_BASE_URL
+    || (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 'http://127.0.0.1:9' : undefined);
 
   const daemon = createMetabotDaemon({
     homeDirOrPaths: paths,
@@ -1807,6 +1809,10 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       secretStore,
       signer,
       chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+      socketPresenceApiBaseUrl,
+      socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+        ? 'assume_service_providers_online'
+        : 'throw',
       identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
       fetchPeerChatPublicKey,
       callerReplyWaiter,
