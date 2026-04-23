@@ -9,6 +9,8 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { getDefaultDaemonPort } = require('../../dist/cli/runtime.js');
+const { resolveMetabotHomeSelection } = require('../../dist/core/state/homeSelection.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
@@ -30,12 +32,79 @@ function parseLastJson(chunks) {
   return JSON.parse(chunks.join('').trim());
 }
 
+function deriveSystemHome(homeDir) {
+  const normalizedHomeDir = path.resolve(homeDir);
+  const profilesRoot = path.dirname(normalizedHomeDir);
+  const metabotRoot = path.dirname(profilesRoot);
+  if (path.basename(profilesRoot) === 'profiles' && path.basename(metabotRoot) === '.metabot') {
+    return path.dirname(metabotRoot);
+  }
+  return normalizedHomeDir;
+}
+
+async function createProfileHome(systemHome, slug = 'test-profile') {
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  await mkdir(homeDir, { recursive: true });
+  return homeDir;
+}
+
+async function createProfileHomeTemp(prefix, slug = 'test-profile') {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), prefix || 'metabot-cli-runtime-'));
+  return createProfileHome(systemHome, slug);
+}
+
+function runtimePath(homeDir, ...segments) {
+  return path.join(homeDir, '.runtime', ...segments);
+}
+
+function metabotPaths(homeDir) {
+  return resolveMetabotPaths(homeDir);
+}
+
+async function ensureIndexedProfileHome(homeDir) {
+  const systemHome = deriveSystemHome(homeDir);
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
+  const profilesPath = path.join(managerRoot, 'identity-profiles.json');
+  const activeHomePath = path.join(managerRoot, 'active-home.json');
+  await mkdir(managerRoot, { recursive: true });
+
+  let profilesState = { profiles: [] };
+  try {
+    profilesState = JSON.parse(await readFile(profilesPath, 'utf8'));
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  const normalizedHomeDir = path.resolve(homeDir);
+  const existingProfiles = Array.isArray(profilesState?.profiles) ? profilesState.profiles : [];
+  if (!existingProfiles.some((profile) => path.resolve(profile.homeDir) === normalizedHomeDir)) {
+    existingProfiles.push({
+      name: path.basename(normalizedHomeDir),
+      homeDir: normalizedHomeDir,
+      globalMetaId: '',
+      mvcAddress: '',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    await writeFile(profilesPath, `${JSON.stringify({ profiles: existingProfiles }, null, 2)}\n`, 'utf8');
+  }
+
+  await writeFile(
+    activeHomePath,
+    `${JSON.stringify({ homeDir: normalizedHomeDir, updatedAt: Date.now() }, null, 2)}\n`,
+    'utf8',
+  );
+}
+
 async function runCommand(homeDir, args, envOverrides = {}) {
+  await ensureIndexedProfileHome(homeDir);
   const stdout = [];
   const stderr = [];
   const env = {
     ...process.env,
-    HOME: homeDir,
+    HOME: deriveSystemHome(homeDir),
     METABOT_HOME: homeDir,
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
@@ -85,11 +154,12 @@ async function runCommandWithEnv(cwd, args, envOverrides = {}) {
 }
 
 async function runCommandText(homeDir, args, envOverrides = {}) {
+  await ensureIndexedProfileHome(homeDir);
   const stdout = [];
   const stderr = [];
   const env = {
     ...process.env,
-    HOME: homeDir,
+    HOME: deriveSystemHome(homeDir),
     METABOT_HOME: homeDir,
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
@@ -440,7 +510,7 @@ async function startFakeSocketPresenceApiServer(options = {}) {
 }
 
 async function stopDaemon(homeDir) {
-  const daemonStatePath = path.join(homeDir, '.metabot', 'hot', 'daemon.json');
+  const daemonStatePath = runtimePath(homeDir, 'daemon.json');
 
   let daemonState;
   try {
@@ -481,7 +551,7 @@ async function stopDaemon(homeDir) {
 }
 
 async function writeDirectorySeeds(homeDir, providers) {
-  const seedsPath = path.join(homeDir, '.metabot', 'hot', 'directory-seeds.json');
+  const seedsPath = metabotPaths(homeDir).directorySeedsPath;
   await mkdir(path.dirname(seedsPath), { recursive: true });
   await writeFile(seedsPath, JSON.stringify({ providers }, null, 2), 'utf8');
   return seedsPath;
@@ -499,8 +569,83 @@ async function fetchJson(baseUrl, routePath, options = {}) {
   };
 }
 
+test('runtime home selection rejects METABOT_HOME paths outside the v2 profiles root', async () => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+
+  assert.throws(
+    () => resolveMetabotHomeSelection({
+      env: {
+        HOME: systemHome,
+        METABOT_HOME: '/tmp/arbitrary-dir',
+      },
+      cwd: systemHome,
+    }),
+    /METABOT_HOME.*\.metabot\/profiles\//i
+  );
+});
+
+test('runtime home selection rejects METABOT_HOME pointed at the raw system home', async () => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+
+  assert.throws(
+    () => resolveMetabotHomeSelection({
+      env: {
+        HOME: systemHome,
+        METABOT_HOME: systemHome,
+      },
+      cwd: systemHome,
+    }),
+    /METABOT_HOME.*\.metabot\/profiles\//i
+  );
+});
+
+test('runtime home selection rejects an unindexed orphan METABOT_HOME for existing-profile operations', async () => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const orphanHome = await createProfileHome(systemHome, 'orphan-profile');
+
+  assert.throws(
+    () => resolveMetabotHomeSelection({
+      env: {
+        HOME: systemHome,
+        METABOT_HOME: orphanHome,
+      },
+      cwd: systemHome,
+    }),
+    /manager-indexed profile|unindexed profile/i
+  );
+});
+
+test('runtime home selection rejects a legacy-only .metabot hot layout', async () => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  await mkdir(path.join(systemHome, '.metabot', 'hot'), { recursive: true });
+
+  assert.throws(
+    () => resolveMetabotHomeSelection({
+      env: {
+        HOME: systemHome,
+      },
+      cwd: systemHome,
+    }),
+    /legacy.*\.metabot\/hot|clean.*reinitialized/i
+  );
+});
+
+test('runtime home selection reports no active profile initialized instead of falling back to raw HOME', async () => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+
+  assert.throws(
+    () => resolveMetabotHomeSelection({
+      env: {
+        HOME: systemHome,
+      },
+      cwd: systemHome,
+    }),
+    /no active profile initialized/i
+  );
+});
+
 test('identity create autostarts the local daemon and doctor reports the identity as loaded', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
 
   const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
@@ -523,13 +668,13 @@ test('identity create autostarts the local daemon and doctor reports the identit
     true
   );
 
-  const daemonState = JSON.parse(await readFile(path.join(homeDir, '.metabot', 'hot', 'daemon.json'), 'utf8'));
+  const daemonState = JSON.parse(await readFile(runtimePath(homeDir, 'daemon.json'), 'utf8'));
   assert.match(daemonState.baseUrl, /^http:\/\/127\.0\.0\.1:\d+$/);
   assert.equal(Number.isInteger(daemonState.pid), true);
 });
 
 test('identity create returns identity_name_conflict when an active identity with a different name already exists', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
 
   const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Bob']);
@@ -543,15 +688,15 @@ test('identity create returns identity_name_conflict when an active identity wit
   assert.equal(conflict.payload.code, 'identity_name_conflict');
 
   const state = JSON.parse(
-    await readFile(path.join(homeDir, '.metabot', 'hot', 'runtime-state.json'), 'utf8')
+    await readFile(runtimePath(homeDir, 'runtime-state.json'), 'utf8')
   );
   assert.equal(state.identity.name, 'Bob');
 });
 
 test('identity list/assign/who supports switching active local bot home across registered profiles', async (t) => {
   const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
-  const bobHome = path.join(systemHome, 'profiles', 'bob-home');
-  const charlesHome = path.join(systemHome, 'profiles', 'charles-home');
+  const bobHome = path.join(systemHome, '.metabot', 'profiles', 'bob-home');
+  const charlesHome = path.join(systemHome, '.metabot', 'profiles', 'charles-home');
   await mkdir(bobHome, { recursive: true });
   await mkdir(charlesHome, { recursive: true });
 
@@ -600,8 +745,8 @@ test('identity list/assign/who supports switching active local bot home across r
 
 test('identity create rejects duplicate names across different local homes on the same machine', async (t) => {
   const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
-  const firstHome = path.join(systemHome, 'profiles', 'david-home-a');
-  const secondHome = path.join(systemHome, 'profiles', 'david-home-b');
+  const firstHome = path.join(systemHome, '.metabot', 'profiles', 'david-home-a');
+  const secondHome = path.join(systemHome, '.metabot', 'profiles', 'david-home-b');
   await mkdir(firstHome, { recursive: true });
   await mkdir(secondHome, { recursive: true });
 
@@ -633,11 +778,12 @@ test('identity create rejects duplicate names across different local homes on th
     METABOT_HOME: secondHome,
   });
   assert.equal(whoSecondHome.exitCode, 1);
-  assert.equal(whoSecondHome.payload.code, 'identity_missing');
+  assert.equal(whoSecondHome.payload.code, 'cli_execution_failed');
+  assert.match(whoSecondHome.payload.message, /manager-indexed profile|unindexed profile/i);
 });
 
 test('daemon config restarts keep the previous port so local inspector URLs stay stable', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
 
   const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice'], {
@@ -646,7 +792,7 @@ test('daemon config restarts keep the previous port so local inspector URLs stay
   assert.equal(created.exitCode, 0);
 
   const firstDaemonState = JSON.parse(
-    await readFile(path.join(homeDir, '.metabot', 'hot', 'daemon.json'), 'utf8')
+    await readFile(runtimePath(homeDir, 'daemon.json'), 'utf8')
   );
   const firstPort = new URL(firstDaemonState.baseUrl).port;
 
@@ -657,7 +803,7 @@ test('daemon config restarts keep the previous port so local inspector URLs stay
   assert.equal(doctor.payload.ok, true);
 
   const secondDaemonState = JSON.parse(
-    await readFile(path.join(homeDir, '.metabot', 'hot', 'daemon.json'), 'utf8')
+    await readFile(runtimePath(homeDir, 'daemon.json'), 'utf8')
   );
   const secondPort = new URL(secondDaemonState.baseUrl).port;
 
@@ -680,8 +826,11 @@ test('getDefaultDaemonPort is stable per home and avoids a single shared default
 });
 
 test('fresh daemon starts for the same home reuse the home-derived port', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
 
   const firstStart = await runCommand(homeDir, ['daemon', 'start']);
   assert.equal(firstStart.exitCode, 0);
@@ -698,7 +847,7 @@ test('fresh daemon starts for the same home reuse the home-derived port', async 
 });
 
 test('daemon start writes a provider heartbeat when provider presence is enabled', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
 
   const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
@@ -730,8 +879,11 @@ test('daemon start writes a provider heartbeat when provider presence is enabled
 });
 
 test('ui open trace returns a local trace inspector url with the requested trace id', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
 
   const opened = await runCommand(homeDir, ['ui', 'open', '--page', 'trace', '--trace-id', 'trace-123']);
 
@@ -742,8 +894,11 @@ test('ui open trace returns a local trace inspector url with the requested trace
 });
 
 test('ui open buzz returns the bundled Buzz entry html url', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
 
   const opened = await runCommand(homeDir, ['ui', 'open', '--page', 'buzz']);
 
@@ -754,8 +909,11 @@ test('ui open buzz returns the bundled Buzz entry html url', async (t) => {
 });
 
 test('ui open chat returns the bundled Chat entry html url', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
 
   const opened = await runCommand(homeDir, ['ui', 'open', '--page', 'chat']);
 
@@ -766,7 +924,7 @@ test('ui open chat returns the bundled Chat entry html url', async (t) => {
 });
 
 test('buzz post succeeds immediately after bootstrap identity create', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
 
   const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
@@ -795,7 +953,7 @@ test('buzz post succeeds immediately after bootstrap identity create', async (t)
 });
 
 test('services publish persists a local directory entry that network services --online can read back', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
 
   const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
@@ -839,8 +997,8 @@ test('services publish persists a local directory entry that network services --
 });
 
 test('services call with providerDaemonBaseUrl rejects a provider that is offline in socket presence', async (t) => {
-  const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-offline-caller-'));
-  const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-offline-provider-'));
+  const callerHome = await createProfileHomeTemp('', 'caller-profile');
+  const providerHome = await createProfileHomeTemp('', 'provider-profile');
   const socketPresenceApi = await startFakeSocketPresenceApiServer({ users: [] });
   const providerEnv = { METABOT_SOCKET_PRESENCE_API_BASE_URL: socketPresenceApi.baseUrl };
   t.after(async () => stopDaemon(callerHome));
@@ -907,8 +1065,8 @@ test('services call with providerDaemonBaseUrl rejects a provider that is offlin
 });
 
 test('provider closure runtime can publish, go online, receive a seller trace, and surface a manual refund queue item', async (t) => {
-  const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-closure-caller-'));
-  const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-closure-provider-'));
+  const callerHome = await createProfileHomeTemp('', 'caller-profile');
+  const providerHome = await createProfileHomeTemp('', 'provider-profile');
   t.after(async () => stopDaemon(callerHome));
   t.after(async () => stopDaemon(providerHome));
 
@@ -1014,8 +1172,8 @@ test('provider closure runtime can publish, go online, receive a seller trace, a
 });
 
 test('provider summary refreshes rating detail from chain and exposes rated seller-order closure', async (t) => {
-  const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-provider-closure-'));
-  const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-caller-closure-'));
+  const providerHome = await createProfileHomeTemp('', 'provider-profile');
+  const callerHome = await createProfileHomeTemp('', 'caller-profile');
   const ratingPins = [];
   const chainApi = await startFakeChainApiServer({ ratingPins });
   t.after(async () => stopDaemon(providerHome));
@@ -1133,7 +1291,7 @@ test('provider summary refreshes rating detail from chain and exposes rated sell
 });
 
 test('network services reads chain-backed online services without local directory seeds', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
   t.after(async () => chainApi.close());
@@ -1157,7 +1315,7 @@ test('network services reads chain-backed online services without local director
 });
 
 test('network bots --online falls back to service directory when socket presence is unavailable', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
   t.after(async () => chainApi.close());
@@ -1182,7 +1340,7 @@ test('network bots --online falls back to service directory when socket presence
 });
 
 test('evolution search/import read published artifact metadata + body via chain API and write remote artifact files', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => chainApi.close());
 
@@ -1217,8 +1375,8 @@ test('evolution search/import read published artifact metadata + body via chain 
   assert.equal(imported.payload.ok, true);
   assert.equal(imported.payload.data.pinId, 'evolution-metadata-pin-1');
   assert.equal(imported.payload.data.variantId, 'variant-remote-1');
-  assert.equal(imported.payload.data.artifactPath.includes(`${path.sep}.metabot${path.sep}evolution${path.sep}remote${path.sep}artifacts${path.sep}`), true);
-  assert.equal(imported.payload.data.metadataPath.includes(`${path.sep}.metabot${path.sep}evolution${path.sep}remote${path.sep}artifacts${path.sep}`), true);
+  assert.equal(imported.payload.data.artifactPath.includes(`${path.sep}.runtime${path.sep}evolution${path.sep}remote${path.sep}artifacts${path.sep}`), true);
+  assert.equal(imported.payload.data.metadataPath.includes(`${path.sep}.runtime${path.sep}evolution${path.sep}remote${path.sep}artifacts${path.sep}`), true);
   assert.equal(imported.payload.data.artifactPath.endsWith(`${path.sep}variant-remote-1.json`), true);
   assert.equal(imported.payload.data.metadataPath.endsWith(`${path.sep}variant-remote-1.meta.json`), true);
 
@@ -1231,7 +1389,7 @@ test('evolution search/import read published artifact metadata + body via chain 
 });
 
 test('evolution search returns a search-level command failure when chain metadata fetch fails', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     if (url.pathname === '/pin/path/list') {
@@ -1287,7 +1445,7 @@ test('evolution search returns a search-level command failure when chain metadat
 });
 
 test('evolution search rejects unsupported skills in this round', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
 
   const searched = await runCommand(
     homeDir,
@@ -1308,7 +1466,7 @@ test('evolution search rejects unsupported skills in this round', async () => {
 });
 
 test('evolution search returns a stable invalid-result error when chain search payload is malformed', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     if (url.pathname === '/pin/path/list') {
@@ -1364,7 +1522,7 @@ test('evolution search returns a stable invalid-result error when chain search p
 });
 
 test('evolution import returns a stable import error when metadata pin lookup fails in transport', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     if (url.pathname === '/pin/evolution-metadata-pin-transport-error') {
@@ -1423,7 +1581,7 @@ test('evolution import returns a stable import error when metadata pin lookup fa
 });
 
 test('evolution status exposes activeVariantRefs and skills resolve reports remote activeVariantSource', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const localStore = createLocalEvolutionStore(homeDir);
   const remoteStore = createRemoteEvolutionStore(homeDir);
   const fixture = createImportedArtifactFixture();
@@ -1468,7 +1626,7 @@ test('evolution status exposes activeVariantRefs and skills resolve reports remo
 });
 
 test('evolution imported lists local imported artifacts without chain lookups', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const remoteStore = createRemoteEvolutionStore(homeDir);
   const fixture = createImportedArtifactFixture();
   await remoteStore.writeImport(fixture);
@@ -1490,7 +1648,7 @@ test('evolution imported lists local imported artifacts without chain lookups', 
 });
 
 test('skills resolve falls back to the base contract when the remote active artifact cache is malformed', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const localStore = createLocalEvolutionStore(homeDir);
   const remoteStore = createRemoteEvolutionStore(homeDir);
   const fixture = createImportedArtifactFixture();
@@ -1524,7 +1682,7 @@ test('skills resolve falls back to the base contract when the remote active arti
 });
 
 test('evolution adopt --source remote writes remote active refs and skills resolve uses imported artifact body', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const localStore = createLocalEvolutionStore(homeDir);
   const remoteStore = createRemoteEvolutionStore(homeDir);
   const fixture = createImportedArtifactFixture({
@@ -1578,7 +1736,7 @@ test('evolution adopt --source remote writes remote active refs and skills resol
 });
 
 test('evolution imported rejects unsupported skills', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
 
   const imported = await runCommand(homeDir, [
     'evolution',
@@ -1593,7 +1751,7 @@ test('evolution imported rejects unsupported skills', async () => {
 });
 
 test('evolution adopt --source remote rejects unsupported skills in this round', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
 
   const adopted = await runCommand(homeDir, [
     'evolution',
@@ -1612,7 +1770,7 @@ test('evolution adopt --source remote rejects unsupported skills in this round',
 });
 
 test('evolution adopt rejects unsupported source values in this round', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
 
   const adopted = await runCommand(homeDir, [
     'evolution',
@@ -1631,7 +1789,7 @@ test('evolution adopt rejects unsupported source values in this round', async ()
 });
 
 test('evolution imported and remote adopt return evolution_network_disabled when disabled', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const configStore = createConfigStore(homeDir);
   const config = await configStore.read();
   await configStore.set({
@@ -1668,8 +1826,8 @@ test('evolution imported and remote adopt return evolution_network_disabled when
 });
 
 test('network services merges remote demo directory seeds and returns provider daemon base urls for agent-side invocation', async (t) => {
-  const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-caller-'));
-  const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-'));
+  const callerHome = await createProfileHomeTemp('', 'caller-profile');
+  const providerHome = await createProfileHomeTemp('', 'provider-profile');
   t.after(async () => stopDaemon(callerHome));
   t.after(async () => stopDaemon(providerHome));
 
@@ -1713,8 +1871,8 @@ test('network services merges remote demo directory seeds and returns provider d
 });
 
 test('master list merges remote debug-master directory seeds and returns provider daemon base urls for caller-side invocation', async (t) => {
-  const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-caller-'));
-  const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-provider-'));
+  const callerHome = await createProfileHomeTemp('', 'caller-profile');
+  const providerHome = await createProfileHomeTemp('', 'provider-profile');
   t.after(async () => stopDaemon(callerHome));
   t.after(async () => stopDaemon(providerHome));
 
@@ -1776,7 +1934,7 @@ test('master list merges remote debug-master directory seeds and returns provide
 });
 
 test('network sources add/list/remove manages the local demo provider registry without manual file edits', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
 
   const added = await runCommand(homeDir, [
@@ -1802,7 +1960,7 @@ test('network sources add/list/remove manages the local demo provider registry w
   assert.equal(listed.payload.data.sources[0].baseUrl, 'http://127.0.0.1:4827');
   assert.equal(listed.payload.data.sources[0].label, 'weather-demo');
 
-  const seedsFile = JSON.parse(await readFile(path.join(homeDir, '.metabot', 'hot', 'directory-seeds.json'), 'utf8'));
+  const seedsFile = JSON.parse(await readFile(metabotPaths(homeDir).directorySeedsPath, 'utf8'));
   assert.equal(seedsFile.providers.length, 1);
   assert.equal(seedsFile.providers[0].baseUrl, 'http://127.0.0.1:4827');
 
@@ -1819,7 +1977,7 @@ test('network sources add/list/remove manages the local demo provider registry w
 });
 
 test('services call stores a trace that trace get can read back from the local runtime', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
 
   const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
@@ -1864,8 +2022,8 @@ test('services call stores a trace that trace get can read back from the local r
   assert.equal(called.payload.data.confirmation.policyMode, 'confirm_all');
   assert.equal(called.payload.data.confirmation.policyReason, 'confirm_all_requires_confirmation');
   assert.equal(called.payload.data.confirmation.requestedPolicyMode, 'confirm_all');
-  assert.match(called.payload.data.traceJsonPath, /\/\.metabot\/exports\/traces\/.*\.json$/);
-  assert.match(called.payload.data.traceMarkdownPath, /\/\.metabot\/exports\/traces\/.*\.md$/);
+  assert.match(called.payload.data.traceJsonPath, /\/\.runtime\/exports\/traces\/.*\.json$/);
+  assert.match(called.payload.data.traceMarkdownPath, /\/\.runtime\/exports\/traces\/.*\.md$/);
 
   const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId]);
 
@@ -1884,7 +2042,7 @@ test('services call stores a trace that trace get can read back from the local r
   assert.match(traceMarkdown, /timeout/i);
 
   const sessionState = JSON.parse(
-    await readFile(path.join(homeDir, '.metabot', 'hot', 'a2a-session-state.json'), 'utf8')
+    await readFile(metabotPaths(homeDir).sessionStatePath, 'utf8')
   );
   const callerSession = sessionState.sessions.find((entry) => entry.traceId === called.payload.data.traceId);
   const callerTaskRun = sessionState.taskRuns.find((entry) => entry.runId === called.payload.data.session.taskRunId);
@@ -1894,8 +2052,8 @@ test('services call stores a trace that trace get can read back from the local r
 });
 
 test('services call returns an A2A start contract while provider execution flows through provider session state', async (t) => {
-  const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-caller-'));
-  const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-'));
+  const callerHome = await createProfileHomeTemp('', 'caller-profile');
+  const providerHome = await createProfileHomeTemp('', 'provider-profile');
   t.after(async () => stopDaemon(callerHome));
   t.after(async () => stopDaemon(providerHome));
 
@@ -1967,7 +2125,7 @@ test('services call returns an A2A start contract while provider execution flows
   assert.equal(providerTrace.payload.data.session.peerGlobalMetaId, callerIdentity.payload.data.globalMetaId);
 
   const providerSessionState = JSON.parse(
-    await readFile(path.join(providerHome, '.metabot', 'hot', 'a2a-session-state.json'), 'utf8')
+    await readFile(metabotPaths(providerHome).sessionStatePath, 'utf8')
   );
   const providerSession = providerSessionState.sessions.find((entry) => entry.traceId === called.payload.data.traceId);
   const providerTaskRun = providerSessionState.taskRuns.find((entry) => entry.sessionId === providerSession.sessionId);
@@ -1977,7 +2135,7 @@ test('services call returns an A2A start contract while provider execution flows
 });
 
 test('services call resolves a chain-discovered online service into a real MetaWeb reply path without providerDaemonBaseUrl', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
   t.after(async () => chainApi.close());
@@ -2048,7 +2206,7 @@ test('services call resolves a chain-discovered online service into a real MetaW
 });
 
 test('services call persists timeout state when a chain-discovered service does not reply during the foreground wait', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
   t.after(async () => chainApi.close());
@@ -2103,7 +2261,7 @@ test('services call persists timeout state when a chain-discovered service does 
 });
 
 test('services call upgrades a timed-out chain-discovered caller trace when the remote reply arrives later', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
   t.after(async () => chainApi.close());
@@ -2185,7 +2343,7 @@ test('services call upgrades a timed-out chain-discovered caller trace when the 
 });
 
 test('trace watch waits through the timeout handoff so one follow-up can observe the eventual late completion', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
   t.after(async () => chainApi.close());
@@ -2263,7 +2421,7 @@ test('trace watch waits through the timeout handoff so one follow-up can observe
 });
 
 test('trace get exposes a remote rating request when the provider later asks for T-stage feedback', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
   t.after(async () => chainApi.close());
@@ -2318,7 +2476,7 @@ test('trace get exposes a remote rating request when the provider later asks for
 });
 
 test('services rate publishes one buyer-side skill-service-rate record from a completed remote trace', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
   t.after(async () => chainApi.close());
@@ -2420,7 +2578,7 @@ test('services rate publishes one buyer-side skill-service-rate record from a co
 });
 
 test('chat private writes encrypted simplemsg on chain and stores a chat trace in the local runtime', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
 
   const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
@@ -2444,7 +2602,7 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
   assert.match(sent.payload.data.txids[0], /^\/protocols\/simplemsg-tx-/);
   assert.match(sent.payload.data.traceId, /^trace-private-/);
   assert.match(sent.payload.data.payload, /"encrypt":"ecdh"/);
-  assert.match(sent.payload.data.traceJsonPath, /\/\.metabot\/exports\/traces\/.*\.json$/);
+  assert.match(sent.payload.data.traceJsonPath, /\/\.runtime\/exports\/traces\/.*\.json$/);
 
   const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', sent.payload.data.traceId]);
 

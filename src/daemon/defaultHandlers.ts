@@ -111,7 +111,6 @@ import {
 } from '../core/master/masterTriggerEngine';
 import type { MasterDirectoryItem, PublishedMasterRecord } from '../core/master/masterTypes';
 
-const DIRECTORY_SEEDS_FILE = 'directory-seeds.json';
 const DEFAULT_CALLER_FOREGROUND_WAIT_MS = 15_000;
 const DEFAULT_CALLER_BACKGROUND_WAIT_MS = 30 * 60 * 1000;
 const DEFAULT_TRACE_WATCH_WAIT_MS = 75_000;
@@ -569,7 +568,7 @@ async function hydrateMasterTriggerObservationDirectory(input: {
     onlineMasters: boolean;
   };
   masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
-  hotRoot: string;
+  directorySeedsPath: string;
   chainApiBaseUrl?: string;
   localProviderOnline: boolean;
   localLastSeenSec: number | null;
@@ -586,7 +585,7 @@ async function hydrateMasterTriggerObservationDirectory(input: {
 
   const directory = await listRuntimeDirectoryMasters({
     masterStateStore: input.masterStateStore,
-    hotRoot: input.hotRoot,
+    directorySeedsPath: input.directorySeedsPath,
     chainApiBaseUrl: input.chainApiBaseUrl,
     onlineOnly: false,
     host: input.observation.hostMode,
@@ -971,11 +970,10 @@ async function fetchRemoteAvailableMasters(
   }
 }
 
-async function readDirectorySeeds(hotRoot: string): Promise<Array<{ baseUrl: string; label: string | null }>> {
-  const seedsPath = path.join(hotRoot, DIRECTORY_SEEDS_FILE);
+async function readDirectorySeeds(directorySeedsPath: string): Promise<Array<{ baseUrl: string; label: string | null }>> {
   let payload: unknown;
   try {
-    payload = JSON.parse(await fs.readFile(seedsPath, 'utf8')) as unknown;
+    payload = JSON.parse(await fs.readFile(directorySeedsPath, 'utf8')) as unknown;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return [];
@@ -1007,12 +1005,12 @@ async function readDirectorySeeds(hotRoot: string): Promise<Array<{ baseUrl: str
 }
 
 async function writeDirectorySeeds(
-  hotRoot: string,
+  directorySeedsPath: string,
   providers: Array<{ baseUrl: string; label: string | null }>
 ): Promise<void> {
-  await fs.mkdir(hotRoot, { recursive: true });
+  await fs.mkdir(path.dirname(directorySeedsPath), { recursive: true });
   await fs.writeFile(
-    path.join(hotRoot, DIRECTORY_SEEDS_FILE),
+    directorySeedsPath,
     `${JSON.stringify({ providers }, null, 2)}\n`,
     'utf8'
   );
@@ -1110,8 +1108,8 @@ function dedupeOnlineBotsFromServices(
     }));
 }
 
-async function fetchSeededDirectoryServices(hotRoot: string): Promise<Array<Record<string, unknown>>> {
-  const seeds = await readDirectorySeeds(hotRoot);
+async function fetchSeededDirectoryServices(directorySeedsPath: string): Promise<Array<Record<string, unknown>>> {
+  const seeds = await readDirectorySeeds(directorySeedsPath);
   const mergedServices: Array<Record<string, unknown>> = [];
 
   for (const seed of seeds) {
@@ -1133,8 +1131,8 @@ async function fetchSeededDirectoryServices(hotRoot: string): Promise<Array<Reco
   return dedupeServices(mergedServices);
 }
 
-async function fetchSeededDirectoryMasters(hotRoot: string): Promise<MasterDirectoryItem[]> {
-  const seeds = await readDirectorySeeds(hotRoot);
+async function fetchSeededDirectoryMasters(directorySeedsPath: string): Promise<MasterDirectoryItem[]> {
+  const seeds = await readDirectorySeeds(directorySeedsPath);
   const mergedMasters: Array<Record<string, unknown>> = [];
 
   for (const seed of seeds) {
@@ -1588,7 +1586,7 @@ function buildSyntheticPaymentTxid(input: {
 
 async function listRuntimeDirectoryServices(input: {
   state: RuntimeState;
-  hotRoot: string;
+  directorySeedsPath: string;
   chainApiBaseUrl?: string;
   socketPresenceApiBaseUrl?: string;
   socketPresenceFailureMode?: 'throw' | 'assume_service_providers_online';
@@ -1606,7 +1604,7 @@ async function listRuntimeDirectoryServices(input: {
     socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
     socketPresenceFailureMode: input.socketPresenceFailureMode,
     onlineOnly: input.onlineOnly,
-    fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(input.hotRoot),
+    fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(input.directorySeedsPath),
   });
   const decoratedLocalServices = await decorateServicesWithSocketPresence({
     services: localServices,
@@ -1631,7 +1629,7 @@ async function listRuntimeDirectoryServices(input: {
 
 async function listRuntimeDirectoryMasters(input: {
   masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
-  hotRoot: string;
+  directorySeedsPath: string;
   chainApiBaseUrl?: string;
   onlineOnly: boolean;
   host: string;
@@ -1657,7 +1655,7 @@ async function listRuntimeDirectoryMasters(input: {
   const directory = await readChainMasterDirectoryWithFallback({
     chainApiBaseUrl: input.chainApiBaseUrl,
     onlineOnly: input.onlineOnly,
-    fetchSeededDirectoryMasters: async () => fetchSeededDirectoryMasters(input.hotRoot),
+    fetchSeededDirectoryMasters: async () => fetchSeededDirectoryMasters(input.directorySeedsPath),
   });
 
   return {
@@ -1678,7 +1676,7 @@ async function listRuntimeDirectoryMasters(input: {
 async function resolveExplicitMasterTarget(input: {
   draft: ReturnType<typeof readMasterAskDraft>;
   masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
-  hotRoot: string;
+  directorySeedsPath: string;
   chainApiBaseUrl?: string;
   host?: string | null;
   onlineOnly?: boolean;
@@ -1704,7 +1702,7 @@ async function resolveExplicitMasterTarget(input: {
 
   const directory = await listRuntimeDirectoryMasters({
     masterStateStore: input.masterStateStore,
-    hotRoot: input.hotRoot,
+    directorySeedsPath: input.directorySeedsPath,
     chainApiBaseUrl: input.chainApiBaseUrl,
     onlineOnly: false,
     host: '',
@@ -1730,7 +1728,7 @@ async function resolveSuggestedMasterTarget(input: {
   preferredMasterKind?: string | null;
   trustedMasters?: string[];
   masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
-  hotRoot: string;
+  directorySeedsPath: string;
   chainApiBaseUrl?: string;
   host?: string | null;
   providerGlobalMetaId?: string | null;
@@ -1741,7 +1739,7 @@ async function resolveSuggestedMasterTarget(input: {
   const explicit = await resolveExplicitMasterTarget({
     draft: input.draft,
     masterStateStore: input.masterStateStore,
-    hotRoot: input.hotRoot,
+    directorySeedsPath: input.directorySeedsPath,
     chainApiBaseUrl: input.chainApiBaseUrl,
     host: input.host,
     onlineOnly: true,
@@ -1757,7 +1755,7 @@ async function resolveSuggestedMasterTarget(input: {
   const preferredMasterKind = normalizeText(input.preferredMasterKind) || normalizeText(input.draft.target.masterKind);
   const directory = await listRuntimeDirectoryMasters({
     masterStateStore: input.masterStateStore,
-    hotRoot: input.hotRoot,
+    directorySeedsPath: input.directorySeedsPath,
     chainApiBaseUrl: input.chainApiBaseUrl,
     onlineOnly: true,
     host: normalizeText(input.host) || DEFAULT_MASTER_HOST_MODE,
@@ -3793,7 +3791,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           : null;
         const directory = await listRuntimeDirectoryMasters({
           masterStateStore,
-          hotRoot: runtimeStateStore.paths.hotRoot,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           onlineOnly: online === true,
           host: DEFAULT_MASTER_HOST_MODE,
@@ -3863,7 +3861,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const resolvedTarget = await resolveExplicitMasterTarget({
             draft: previewDraft,
             masterStateStore,
-            hotRoot: runtimeStateStore.paths.hotRoot,
+            directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
             chainApiBaseUrl: input.chainApiBaseUrl,
             host: suggestion.hostMode,
             onlineOnly: true,
@@ -4185,7 +4183,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         const directory = await listRuntimeDirectoryMasters({
           masterStateStore,
-          hotRoot: runtimeStateStore.paths.hotRoot,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           onlineOnly: false,
           host: hostMode,
@@ -4359,7 +4357,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               desiredOutput: null,
             },
             masterStateStore,
-            hotRoot: runtimeStateStore.paths.hotRoot,
+            directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
             chainApiBaseUrl: input.chainApiBaseUrl,
             host: normalizeText(pendingAsk.request.caller.host) || DEFAULT_MASTER_HOST_MODE,
             localProviderOnline,
@@ -4692,7 +4690,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const resolvedTarget = await resolveExplicitMasterTarget({
           draft,
           masterStateStore,
-          hotRoot: runtimeStateStore.paths.hotRoot,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           localProviderOnline,
           localLastSeenSec,
@@ -4763,7 +4761,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           trustedMasters: config.askMaster.trustedMasters,
           directoryPresence,
           masterStateStore,
-          hotRoot: runtimeStateStore.paths.hotRoot,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           localProviderOnline,
           localLastSeenSec,
@@ -4858,7 +4856,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             : null,
           trustedMasters: config.askMaster.trustedMasters,
           masterStateStore,
-          hotRoot: runtimeStateStore.paths.hotRoot,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           host: observation.hostMode,
           localProviderOnline,
@@ -5388,7 +5386,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const state = await runtimeStateStore.readState();
         const directory = await listRuntimeDirectoryServices({
           state,
-          hotRoot: runtimeStateStore.paths.hotRoot,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
           socketPresenceFailureMode: input.socketPresenceFailureMode,
@@ -5426,7 +5424,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             const state = await runtimeStateStore.readState();
             const directory = await listRuntimeDirectoryServices({
               state,
-              hotRoot: runtimeStateStore.paths.hotRoot,
+              directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
               chainApiBaseUrl: input.chainApiBaseUrl,
               socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
               socketPresenceFailureMode: input.socketPresenceFailureMode,
@@ -5450,7 +5448,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
       },
       listSources: async () => {
-        const sources = sortDirectorySeeds(await readDirectorySeeds(runtimeStateStore.paths.hotRoot));
+        const sources = sortDirectorySeeds(await readDirectorySeeds(runtimeStateStore.paths.directorySeedsPath));
         return commandSuccess({ sources });
       },
       addSource: async ({ baseUrl, label }) => {
@@ -5470,7 +5468,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const normalizedLabel = normalizeText(label) || null;
-        const currentSources = await readDirectorySeeds(runtimeStateStore.paths.hotRoot);
+        const currentSources = await readDirectorySeeds(runtimeStateStore.paths.directorySeedsPath);
         const nextSources = sortDirectorySeeds([
           ...currentSources.filter((entry) => entry.baseUrl !== parsed.toString().replace(/\/$/, '')),
           {
@@ -5478,7 +5476,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             label: normalizedLabel,
           },
         ]);
-        await writeDirectorySeeds(runtimeStateStore.paths.hotRoot, nextSources);
+        await writeDirectorySeeds(runtimeStateStore.paths.directorySeedsPath, nextSources);
 
         return commandSuccess({
           baseUrl: parsed.toString().replace(/\/$/, ''),
@@ -5492,12 +5490,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('missing_base_url', 'Network source baseUrl is required.');
         }
 
-        const currentSources = await readDirectorySeeds(runtimeStateStore.paths.hotRoot);
+        const currentSources = await readDirectorySeeds(runtimeStateStore.paths.directorySeedsPath);
         const nextSources = sortDirectorySeeds(
           currentSources.filter((entry) => entry.baseUrl !== normalizedBaseUrl)
         );
         const removed = nextSources.length !== currentSources.length;
-        await writeDirectorySeeds(runtimeStateStore.paths.hotRoot, nextSources);
+        await writeDirectorySeeds(runtimeStateStore.paths.directorySeedsPath, nextSources);
 
         return commandSuccess({
           removed,
@@ -5693,7 +5691,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         } else {
           const directory = await listRuntimeDirectoryServices({
             state,
-            hotRoot: runtimeStateStore.paths.hotRoot,
+            directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
             chainApiBaseUrl: input.chainApiBaseUrl,
             socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
             socketPresenceFailureMode: input.socketPresenceFailureMode,
@@ -6080,7 +6078,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         const directory = await listRuntimeDirectoryServices({
           state,
-          hotRoot: runtimeStateStore.paths.hotRoot,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
           socketPresenceFailureMode: input.socketPresenceFailureMode,

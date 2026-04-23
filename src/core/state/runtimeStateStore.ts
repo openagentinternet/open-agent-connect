@@ -64,7 +64,12 @@ function cloneEmptyState(): RuntimeState {
 }
 
 export async function ensureHotLayout(paths: MetabotPaths): Promise<void> {
-  await fs.mkdir(paths.hotRoot, { recursive: true });
+  await Promise.all([
+    fs.mkdir(paths.runtimeRoot, { recursive: true }),
+    fs.mkdir(paths.stateRoot, { recursive: true }),
+    fs.mkdir(paths.sessionsRoot, { recursive: true }),
+    fs.mkdir(paths.locksRoot, { recursive: true }),
+  ]);
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | null> {

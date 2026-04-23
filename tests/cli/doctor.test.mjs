@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
@@ -281,4 +284,59 @@ test('runCli dispatches `metabot ui open --page trace --trace-id` and returns th
       localUiUrl: '/ui/trace?traceId=trace-123',
     },
   });
+});
+
+test('runCli doctor fails closed when no active profile is initialized', async () => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const stdout = [];
+  const stderr = [];
+
+  const exitCode = await runCli(['doctor'], {
+    env: {
+      ...process.env,
+      HOME: systemHome,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+      METABOT_TEST_FAKE_SUBSIDY: '1',
+      METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+    },
+    cwd: systemHome,
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: (chunk) => { stderr.push(String(chunk)); return true; } },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.match(stderr.join(''), /^$/);
+  assert.deepEqual(parseLastJson(stdout), {
+    ok: false,
+    state: 'failed',
+    code: 'cli_execution_failed',
+    message: 'No active profile initialized.',
+  });
+});
+
+test('runCli doctor rejects an explicit orphan METABOT_HOME that is not manager-indexed', async () => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const orphanHome = path.join(systemHome, '.metabot', 'profiles', 'orphan-profile');
+  const stdout = [];
+  const stderr = [];
+
+  await mkdir(orphanHome, { recursive: true });
+
+  const exitCode = await runCli(['doctor'], {
+    env: {
+      ...process.env,
+      HOME: systemHome,
+      METABOT_HOME: orphanHome,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+      METABOT_TEST_FAKE_SUBSIDY: '1',
+      METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+    },
+    cwd: systemHome,
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: (chunk) => { stderr.push(String(chunk)); return true; } },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.match(stderr.join(''), /^$/);
+  assert.match(parseLastJson(stdout).message, /manager-indexed profile|unindexed profile/i);
 });

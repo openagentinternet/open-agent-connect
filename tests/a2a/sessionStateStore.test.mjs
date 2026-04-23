@@ -45,7 +45,7 @@ function createTaskRunRecord() {
   };
 }
 
-test('session state store persists sessions and task runs in a dedicated hot file', async () => {
+test('session state store persists sessions and task runs in its canonical session-state file', async () => {
   const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-session-store-'));
   const store = createSessionStateStore(homeDir);
 
@@ -58,7 +58,7 @@ test('session state store persists sessions and task runs in a dedicated hot fil
   assert.equal(state.sessions[0].sessionId, 'session-1');
   assert.equal(state.taskRuns.length, 1);
   assert.equal(state.taskRuns[0].runId, 'run-1');
-  assert.match(store.sessionStatePath, /\.metabot\/hot\/a2a-session-state\.json$/);
+  assert.equal(store.sessionStatePath, store.paths.sessionStatePath);
   assert.match(readFileSync(store.sessionStatePath, 'utf8'), /session-1/);
 });
 
@@ -372,7 +372,7 @@ test('session state store recovers from a stale lock without pid metadata', asyn
   assert.equal(state.taskRuns[0].runId, 'run-1');
 });
 
-test('session state store caps transcript and public status history in hot storage', async () => {
+test('session state store caps transcript and public status history in canonical storage', async () => {
   const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-caps-'));
   const store = createSessionStateStore(homeDir);
 

@@ -19,7 +19,6 @@ import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import {
   listIdentityProfiles,
   readActiveMetabotHome,
-  readActiveMetabotHomeSync,
   setActiveMetabotHome,
   upsertIdentityProfile,
 } from '../core/identity/identityProfiles';
@@ -27,6 +26,10 @@ import { renderResolvedSkillContract } from '../core/skills/skillResolver';
 import type { SkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
 import type { SkillActiveVariantRef } from '../core/evolution/types';
 import { resolveMetabotPaths } from '../core/state/paths';
+import {
+  normalizeSystemHomeDir as normalizeSelectedSystemHomeDir,
+  resolveMetabotHomeSelectionSync,
+} from '../core/state/homeSelection';
 import {
   createRuntimeStateStore,
   type RuntimeDaemonRecord,
@@ -57,6 +60,7 @@ const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
 const TEST_FAKE_MASTER_REPLY_ENV = 'METABOT_TEST_FAKE_MASTER_REPLY';
+const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
@@ -539,17 +543,20 @@ export function buildDaemonConfigHash(
     .digest('hex');
 }
 
-function normalizeHomeDir(env: NodeJS.ProcessEnv, cwd: string): string {
-  const explicit = typeof env.METABOT_HOME === 'string' ? env.METABOT_HOME.trim() : '';
-  if (explicit) return explicit;
-  const systemHomeDir = normalizeSystemHomeDir(env, cwd);
-  const activeHomeDir = readActiveMetabotHomeSync(systemHomeDir);
-  return activeHomeDir || systemHomeDir;
+function normalizeHomeDir(
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+  options: { allowUnindexedExplicitHome?: boolean } = {},
+): string {
+  return resolveMetabotHomeSelectionSync({
+    env,
+    cwd,
+    allowUnindexedExplicitHome: options.allowUnindexedExplicitHome,
+  }).homeDir;
 }
 
 function normalizeSystemHomeDir(env: NodeJS.ProcessEnv, cwd: string): string {
-  const home = typeof env.HOME === 'string' ? env.HOME.trim() : '';
-  return home || cwd;
+  return normalizeSelectedSystemHomeDir(env, cwd);
 }
 
 function resolveCliEntrypoint(): string {
@@ -607,8 +614,11 @@ async function isDaemonReachable(baseUrl: string): Promise<boolean> {
   }
 }
 
-async function resolveDaemonRecord(context: CliRuntimeContext): Promise<RuntimeDaemonRecord | null> {
-  const homeDir = normalizeHomeDir(context.env, context.cwd);
+async function resolveDaemonRecord(
+  context: CliRuntimeContext,
+  options: { allowUnindexedExplicitHome?: boolean } = {},
+): Promise<RuntimeDaemonRecord | null> {
+  const homeDir = normalizeHomeDir(context.env, context.cwd, options);
   const store = createRuntimeStateStore(homeDir);
   return store.readDaemon();
 }
@@ -651,7 +661,10 @@ async function stopRunningDaemon(daemonRecord: RuntimeDaemonRecord): Promise<voi
   throw new Error('Timed out while restarting the local MetaBot daemon with updated configuration.');
 }
 
-async function ensureDaemonBaseUrl(context: CliRuntimeContext): Promise<string> {
+async function ensureDaemonBaseUrl(
+  context: CliRuntimeContext,
+  options: { allowUnindexedExplicitHome?: boolean } = {},
+): Promise<string> {
   const explicitBaseUrl = typeof context.env.METABOT_DAEMON_BASE_URL === 'string'
     ? context.env.METABOT_DAEMON_BASE_URL.trim()
     : '';
@@ -659,23 +672,24 @@ async function ensureDaemonBaseUrl(context: CliRuntimeContext): Promise<string> 
     return normalizeBaseUrl(explicitBaseUrl);
   }
 
-  const daemonRecord = await resolveDaemonRecord(context);
+  const daemonRecord = await resolveDaemonRecord(context, options);
   if (daemonRecord?.baseUrl && await isDaemonReachable(daemonRecord.baseUrl)) {
     if (daemonConfigMatchesContext(daemonRecord, context)) {
       return daemonRecord.baseUrl;
     }
     await stopRunningDaemon(daemonRecord);
-    return startDetachedDaemon(context, daemonRecord);
+    return startDetachedDaemon(context, daemonRecord, options);
   }
 
-  return startDetachedDaemon(context);
+  return startDetachedDaemon(context, undefined, options);
 }
 
 async function startDetachedDaemon(
   context: CliRuntimeContext,
   preferredRecord?: RuntimeDaemonRecord | null,
+  options: { allowUnindexedExplicitHome?: boolean } = {},
 ): Promise<string> {
-  const homeDir = normalizeHomeDir(context.env, context.cwd);
+  const homeDir = normalizeHomeDir(context.env, context.cwd, options);
   const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
   const store = createRuntimeStateStore(homeDir);
   const expectedConfigHash = buildDaemonConfigHash(context.env);
@@ -700,6 +714,7 @@ async function startDetachedDaemon(
         ...context.env,
         HOME: systemHomeDir,
         METABOT_HOME: homeDir,
+        ...(options.allowUnindexedExplicitHome ? { [ALLOW_UNINDEXED_HOME_ENV]: '1' } : {}),
         [DAEMON_PREFERRED_PORT_ENV]: String(
           parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
           ?? staleRecord?.port
@@ -730,9 +745,10 @@ async function requestJson<T>(
   context: CliRuntimeContext,
   method: 'GET' | 'POST' | 'DELETE',
   routePath: string,
-  body?: Record<string, unknown>
+  body?: Record<string, unknown>,
+  options: { allowUnindexedExplicitHome?: boolean } = {},
 ): Promise<MetabotCommandResult<T>> {
-  const baseUrl = await ensureDaemonBaseUrl(context);
+  const baseUrl = await ensureDaemonBaseUrl(context, options);
   const response = await fetch(`${baseUrl}${routePath}`, {
     method,
     headers: body ? { 'content-type': 'application/json' } : undefined,
@@ -1253,7 +1269,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       run: async () => requestJson(context, 'GET', '/api/doctor'),
     },
     identity: {
-      create: async (input) => requestJson(context, 'POST', '/api/identity/create', input),
+      create: async (input) => requestJson(context, 'POST', '/api/identity/create', input, {
+        allowUnindexedExplicitHome: true,
+      }),
       who: async () => {
         const homeDir = normalizeHomeDir(context.env, context.cwd);
         const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
@@ -1783,7 +1801,9 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
 }
 
 export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'env' | 'cwd'>): Promise<never> {
-  const homeDir = normalizeHomeDir(context.env, context.cwd);
+  const homeDir = normalizeHomeDir(context.env, context.cwd, {
+    allowUnindexedExplicitHome: context.env[ALLOW_UNINDEXED_HOME_ENV] === '1',
+  });
   const paths = resolveMetabotPaths(homeDir);
   let daemonRecord: RuntimeDaemonRecord | null = null;
   const secretStore = createFileSecretStore(homeDir);

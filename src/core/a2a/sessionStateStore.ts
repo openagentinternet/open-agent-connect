@@ -6,7 +6,6 @@ import type { A2ASessionRecord, A2ASessionRole, A2ATaskRunRecord } from './sessi
 import type { PublicStatus } from './publicStatus';
 import { ensureHotLayout } from '../state/runtimeStateStore';
 
-const SESSION_STATE_FILENAME = 'a2a-session-state.json';
 const SESSION_STATE_SCHEMA_VERSION = 1;
 const MAX_TRANSCRIPT_ITEMS = 2_000;
 const MAX_PUBLIC_STATUS_SNAPSHOTS = 1_000;
@@ -258,7 +257,7 @@ function normalizeState(value: A2ASessionStoreState | null): A2ASessionStoreStat
 export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): A2ASessionStateStore {
   const paths =
     typeof homeDirOrPaths === 'string' ? resolveMetabotPaths(homeDirOrPaths) : homeDirOrPaths;
-  const sessionStatePath = path.join(paths.hotRoot, SESSION_STATE_FILENAME);
+  const sessionStatePath = paths.sessionStatePath;
   const lockPath = `${sessionStatePath}.lock`;
   let pendingWrite = Promise.resolve();
 
