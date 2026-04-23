@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { MasterTriggerMemoryState } from './masterTriggerEngine';
-import { ensureHotLayout } from '../state/runtimeStateStore';
+import { ensureRuntimeLayout } from '../state/runtimeStateStore';
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 
 export const MASTER_AUTO_FEEDBACK_MAX_ITEMS = 100;
@@ -217,11 +217,11 @@ export function createMasterAutoFeedbackStateStore(
     paths,
     statePath,
     async read() {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       return normalizeState(await readJsonFile<MasterAutoFeedbackState>(statePath));
     },
     async write(nextState) {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       const normalized = normalizeState(nextState);
       await writeJsonAtomic(statePath, normalized);
       return normalized;

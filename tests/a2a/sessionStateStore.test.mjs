@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -13,6 +13,13 @@ const {
 const {
   createRuntimeStateStore,
 } = require('../../dist/core/state/runtimeStateStore.js');
+
+function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  mkdirSync(homeDir, { recursive: true });
+  return homeDir;
+}
 
 function createSessionRecord() {
   return {
@@ -45,8 +52,8 @@ function createTaskRunRecord() {
   };
 }
 
-test('session state store persists sessions and task runs in its canonical session-state file', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-session-store-'));
+test('session state store persists sessions and task runs in .runtime/sessions/a2a-session-state.json', async () => {
+  const homeDir = createProfileHome('metabot-a2a-session-store-');
   const store = createSessionStateStore(homeDir);
 
   await store.writeSession(createSessionRecord());
@@ -60,10 +67,12 @@ test('session state store persists sessions and task runs in its canonical sessi
   assert.equal(state.taskRuns[0].runId, 'run-1');
   assert.equal(store.sessionStatePath, store.paths.sessionStatePath);
   assert.match(readFileSync(store.sessionStatePath, 'utf8'), /session-1/);
+  assert.equal(store.sessionStatePath.startsWith(store.paths.sessionsRoot), true);
+  assert.equal(store.sessionStatePath.startsWith(store.paths.runtimeRoot), true);
 });
 
 test('session state store persists caller and provider loop cursors', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-cursors-'));
+  const homeDir = createProfileHome('metabot-a2a-cursors-');
   const store = createSessionStateStore(homeDir);
 
   await store.setLoopCursor('caller', 'caller-cursor-1');
@@ -78,7 +87,7 @@ test('session state store persists caller and provider loop cursors', async () =
 });
 
 test('session state store appends transcript items and public status snapshots', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-transcript-'));
+  const homeDir = createProfileHome('metabot-a2a-transcript-');
   const store = createSessionStateStore(homeDir);
 
   const firstAppend = await store.appendTranscriptItems([
@@ -171,7 +180,7 @@ test('session state store appends transcript items and public status snapshots',
 });
 
 test('session state store does not mutate runtime-state identity/services/traces storage', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-runtime-separation-'));
+  const homeDir = createProfileHome('metabot-a2a-runtime-separation-');
   const runtimeStore = createRuntimeStateStore(homeDir);
   const sessionStore = createSessionStateStore(homeDir);
 
@@ -225,7 +234,7 @@ test('session state store does not mutate runtime-state identity/services/traces
 });
 
 test('session state store serializes concurrent updates without dropping data', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-concurrency-'));
+  const homeDir = createProfileHome('metabot-a2a-concurrency-');
   const store = createSessionStateStore(homeDir);
 
   await Promise.all([
@@ -267,7 +276,7 @@ test('session state store serializes concurrent updates without dropping data', 
 });
 
 test('session state store serializes concurrent updates across processes', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-multiprocess-'));
+  const homeDir = createProfileHome('metabot-a2a-multiprocess-');
   const distModulePath = path.join(process.cwd(), 'dist/core/a2a/sessionStateStore.js');
 
   const runWorker = (id) =>
@@ -322,7 +331,7 @@ test('session state store serializes concurrent updates across processes', async
 });
 
 test('session state store treats invalid json as empty state instead of bricking reads', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-corrupt-state-'));
+  const homeDir = createProfileHome('metabot-a2a-corrupt-state-');
   const store = createSessionStateStore(homeDir);
 
   await store.ensureLayout();
@@ -339,7 +348,7 @@ test('session state store treats invalid json as empty state instead of bricking
 });
 
 test('session state store recovers from a stale lock owned by a dead process', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-stale-lock-'));
+  const homeDir = createProfileHome('metabot-a2a-stale-lock-');
   const store = createSessionStateStore(homeDir);
 
   await store.ensureLayout();
@@ -356,7 +365,7 @@ test('session state store recovers from a stale lock owned by a dead process', a
 });
 
 test('session state store recovers from a stale lock without pid metadata', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-stale-lock-no-pid-'));
+  const homeDir = createProfileHome('metabot-a2a-stale-lock-no-pid-');
   const store = createSessionStateStore(homeDir);
 
   await store.ensureLayout();
@@ -373,7 +382,7 @@ test('session state store recovers from a stale lock without pid metadata', asyn
 });
 
 test('session state store caps transcript and public status history in canonical storage', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-caps-'));
+  const homeDir = createProfileHome('metabot-a2a-caps-');
   const store = createSessionStateStore(homeDir);
 
   await store.appendTranscriptItems(

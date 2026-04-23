@@ -63,11 +63,12 @@ function cloneEmptyState(): RuntimeState {
   };
 }
 
-export async function ensureHotLayout(paths: MetabotPaths): Promise<void> {
+export async function ensureRuntimeLayout(paths: MetabotPaths): Promise<void> {
   await Promise.all([
     fs.mkdir(paths.runtimeRoot, { recursive: true }),
     fs.mkdir(paths.stateRoot, { recursive: true }),
     fs.mkdir(paths.sessionsRoot, { recursive: true }),
+    fs.mkdir(paths.exportsRoot, { recursive: true }),
     fs.mkdir(paths.locksRoot, { recursive: true }),
   ]);
 }
@@ -103,15 +104,15 @@ export function createRuntimeStateStore(homeDirOrPaths: string | MetabotPaths): 
   return {
     paths,
     async ensureLayout() {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       return paths;
     },
     async readState() {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       return normalizeRuntimeState(await readJsonFile<RuntimeState>(paths.runtimeStatePath));
     },
     async writeState(nextState) {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       const normalized = normalizeRuntimeState(nextState);
       await fs.writeFile(paths.runtimeStatePath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
       return normalized;
@@ -122,16 +123,16 @@ export function createRuntimeStateStore(homeDirOrPaths: string | MetabotPaths): 
       return this.writeState(nextState);
     },
     async readDaemon() {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       return readJsonFile<RuntimeDaemonRecord>(paths.daemonStatePath);
     },
     async writeDaemon(record) {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       await fs.writeFile(paths.daemonStatePath, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
       return record;
     },
     async clearDaemon(pid) {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       const current = await readJsonFile<RuntimeDaemonRecord>(paths.daemonStatePath);
       if (pid && current && current.pid !== pid) {
         return;

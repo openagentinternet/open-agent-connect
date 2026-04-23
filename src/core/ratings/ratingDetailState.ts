@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs';
-import { ensureHotLayout } from '../state/runtimeStateStore';
+import { ensureRuntimeLayout } from '../state/runtimeStateStore';
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 
 export interface RatingDetailItem {
@@ -117,15 +117,15 @@ export function createRatingDetailStateStore(homeDirOrPaths: string | MetabotPat
   return {
     paths,
     async ensureLayout() {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       return paths;
     },
     async read() {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       return normalizeRatingDetailState(await readJsonFile<RatingDetailState>(paths.ratingDetailStatePath));
     },
     async write(nextState) {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       const normalized = normalizeRatingDetailState(nextState);
       await fs.writeFile(paths.ratingDetailStatePath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
       return normalized;

@@ -7,11 +7,55 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+
+function deriveSystemHome(homeDir) {
+  const normalizedHomeDir = path.resolve(homeDir);
+  const profilesRoot = path.dirname(normalizedHomeDir);
+  const metabotRoot = path.dirname(profilesRoot);
+  if (path.basename(profilesRoot) === 'profiles' && path.basename(metabotRoot) === '.metabot') {
+    return path.dirname(metabotRoot);
+  }
+  return normalizedHomeDir;
+}
+
+function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
+  mkdirSync(homeDir, { recursive: true });
+  mkdirSync(managerRoot, { recursive: true });
+  const now = Date.now();
+  writeFileSync(
+    path.join(managerRoot, 'identity-profiles.json'),
+    `${JSON.stringify({
+      profiles: [
+        {
+          name: slug,
+          slug,
+          aliases: [slug, slug.replace(/-/g, ' ')],
+          homeDir,
+          globalMetaId: '',
+          mvcAddress: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    }, null, 2)}\n`,
+    'utf8',
+  );
+  writeFileSync(
+    path.join(managerRoot, 'active-home.json'),
+    `${JSON.stringify({ homeDir, updatedAt: now }, null, 2)}\n`,
+    'utf8',
+  );
+  return homeDir;
+}
 
 function createRuntimeEnv(homeDir) {
   return {
     ...process.env,
-    HOME: homeDir,
+    HOME: deriveSystemHome(homeDir),
     METABOT_HOME: homeDir,
   };
 }
@@ -32,7 +76,7 @@ async function runConfigCli(homeDir, args) {
 }
 
 test('runCli supports `metabot config get evolution_network.enabled`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-config-get-'));
+  const homeDir = createProfileHome('metabot-cli-config-get-');
   const result = await runConfigCli(homeDir, ['config', 'get', 'evolution_network.enabled']);
 
   assert.equal(result.exitCode, 0);
@@ -44,7 +88,7 @@ test('runCli supports `metabot config get evolution_network.enabled`', async () 
 });
 
 test('runCli supports `metabot config set evolution_network.enabled false`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-config-set-'));
+  const homeDir = createProfileHome('metabot-cli-config-set-');
   const setResult = await runConfigCli(homeDir, ['config', 'set', 'evolution_network.enabled', 'false']);
 
   assert.equal(setResult.exitCode, 0);
@@ -59,13 +103,13 @@ test('runCli supports `metabot config set evolution_network.enabled false`', asy
   assert.equal(getResult.payload.ok, true);
   assert.equal(getResult.payload.data.value, false);
 
-  const configPath = path.join(homeDir, '.metabot', 'hot', 'config.json');
+  const configPath = resolveMetabotPaths(homeDir).configPath;
   const configFromDisk = JSON.parse(readFileSync(configPath, 'utf8'));
   assert.equal(configFromDisk.evolution_network.enabled, false);
 });
 
 test('runCli supports `metabot config get askMaster.enabled`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-config-get-ask-master-enabled-'));
+  const homeDir = createProfileHome('metabot-cli-config-get-ask-master-enabled-');
   const result = await runConfigCli(homeDir, ['config', 'get', 'askMaster.enabled']);
 
   assert.equal(result.exitCode, 0);
@@ -77,7 +121,7 @@ test('runCli supports `metabot config get askMaster.enabled`', async () => {
 });
 
 test('runCli supports `metabot config set askMaster.enabled false`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-config-set-ask-master-enabled-'));
+  const homeDir = createProfileHome('metabot-cli-config-set-ask-master-enabled-');
   const setResult = await runConfigCli(homeDir, ['config', 'set', 'askMaster.enabled', 'false']);
 
   assert.equal(setResult.exitCode, 0);
@@ -92,13 +136,13 @@ test('runCli supports `metabot config set askMaster.enabled false`', async () =>
   assert.equal(getResult.payload.ok, true);
   assert.equal(getResult.payload.data.value, false);
 
-  const configPath = path.join(homeDir, '.metabot', 'hot', 'config.json');
+  const configPath = resolveMetabotPaths(homeDir).configPath;
   const configFromDisk = JSON.parse(readFileSync(configPath, 'utf8'));
   assert.equal(configFromDisk.askMaster.enabled, false);
 });
 
 test('runCli supports `metabot config get askMaster.triggerMode`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-config-get-ask-master-trigger-'));
+  const homeDir = createProfileHome('metabot-cli-config-get-ask-master-trigger-');
   const result = await runConfigCli(homeDir, ['config', 'get', 'askMaster.triggerMode']);
 
   assert.equal(result.exitCode, 0);
@@ -110,10 +154,10 @@ test('runCli supports `metabot config get askMaster.triggerMode`', async () => {
 });
 
 test('runCli public config get migrates legacy askMaster.triggerMode auto back to suggest', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-config-get-ask-master-trigger-legacy-auto-'));
-  const configDir = path.join(homeDir, '.metabot', 'hot');
-  mkdirSync(configDir, { recursive: true });
-  writeFileSync(path.join(configDir, 'config.json'), `${JSON.stringify({
+  const homeDir = createProfileHome('metabot-cli-config-get-ask-master-trigger-legacy-auto-');
+  const configPath = resolveMetabotPaths(homeDir).configPath;
+  mkdirSync(path.dirname(configPath), { recursive: true });
+  writeFileSync(configPath, `${JSON.stringify({
     evolution_network: {
       enabled: true,
       autoAdoptSameSkillSameScope: false,
@@ -146,7 +190,7 @@ test('runCli public config get migrates legacy askMaster.triggerMode auto back t
 });
 
 test('runCli supports `metabot config set askMaster.triggerMode manual`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-config-set-ask-master-trigger-'));
+  const homeDir = createProfileHome('metabot-cli-config-set-ask-master-trigger-');
   const setResult = await runConfigCli(homeDir, ['config', 'set', 'askMaster.triggerMode', 'manual']);
 
   assert.equal(setResult.exitCode, 0);
@@ -161,13 +205,13 @@ test('runCli supports `metabot config set askMaster.triggerMode manual`', async 
   assert.equal(getResult.payload.ok, true);
   assert.equal(getResult.payload.data.value, 'manual');
 
-  const configPath = path.join(homeDir, '.metabot', 'hot', 'config.json');
+  const configPath = resolveMetabotPaths(homeDir).configPath;
   const configFromDisk = JSON.parse(readFileSync(configPath, 'utf8'));
   assert.equal(configFromDisk.askMaster.triggerMode, 'manual');
 });
 
 test('runCli rejects public `metabot config set askMaster.triggerMode auto`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-config-set-ask-master-trigger-auto-'));
+  const homeDir = createProfileHome('metabot-cli-config-set-ask-master-trigger-auto-');
   const result = await runConfigCli(homeDir, ['config', 'set', 'askMaster.triggerMode', 'auto']);
 
   assert.equal(result.exitCode, 1);
@@ -175,6 +219,6 @@ test('runCli rejects public `metabot config set askMaster.triggerMode auto`', as
   assert.equal(result.payload.code, 'invalid_argument');
   assert.match(result.payload.message, /must be one of `manual` or `suggest`/i);
 
-  const configPath = path.join(homeDir, '.metabot', 'hot', 'config.json');
+  const configPath = resolveMetabotPaths(homeDir).configPath;
   assert.throws(() => readFileSync(configPath, 'utf8'), /ENOENT/);
 });

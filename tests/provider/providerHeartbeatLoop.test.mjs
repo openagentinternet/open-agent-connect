@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -13,8 +13,16 @@ const {
   createProviderHeartbeatLoop,
 } = require('../../dist/core/provider/providerHeartbeatLoop.js');
 
-test('createProviderPresenceStateStore persists enabled and latest heartbeat metadata in a dedicated hot file', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-provider-presence-'));
+async function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  await mkdir(path.join(systemHome, '.metabot', 'manager'), { recursive: true });
+  await mkdir(homeDir, { recursive: true });
+  return homeDir;
+}
+
+test('createProviderPresenceStateStore persists enabled and latest heartbeat metadata in .runtime/state/provider-presence.json', async () => {
+  const homeDir = await createProfileHome('metabot-provider-presence-');
 
   try {
     const store = createProviderPresenceStateStore(homeDir);
@@ -31,6 +39,7 @@ test('createProviderPresenceStateStore persists enabled and latest heartbeat met
       lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-1',
       lastHeartbeatTxid: '/protocols/metabot-heartbeat-tx-1',
     });
+    assert.equal(store.paths.providerPresenceStatePath.startsWith(store.paths.stateRoot), true);
     assert.deepEqual(await store.read(), written);
   } finally {
     await rm(homeDir, { recursive: true, force: true });
@@ -38,7 +47,7 @@ test('createProviderPresenceStateStore persists enabled and latest heartbeat met
 });
 
 test('createProviderPresenceStateStore keeps reads parseable while writes race', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-provider-presence-race-'));
+  const homeDir = await createProfileHome('metabot-provider-presence-race-');
 
   try {
     const store = createProviderPresenceStateStore(homeDir);
@@ -73,7 +82,7 @@ test('createProviderPresenceStateStore keeps reads parseable while writes race',
 });
 
 test('ProviderHeartbeatLoop writes /protocols/metabot-heartbeat and records the latest heartbeat metadata', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-provider-heartbeat-'));
+  const homeDir = await createProfileHome('metabot-provider-heartbeat-');
   const writes = [];
 
   try {

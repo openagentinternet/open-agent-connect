@@ -8,35 +8,71 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 
-async function withTempHome(action, options = {}) {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-ask-master-config-'));
+async function withTempProfileHome(action, options = {}) {
+  const systemHome = await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-ask-master-config-'));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', 'test-profile');
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
   const previousHome = process.env.METABOT_HOME;
+  const previousSystemHome = process.env.HOME;
   const previousInternalAuto = process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
-  process.env.METABOT_HOME = tempDir;
+  await fs.mkdir(homeDir, { recursive: true });
+  await fs.mkdir(managerRoot, { recursive: true });
+  const now = Date.now();
+  await fs.writeFile(
+    path.join(managerRoot, 'identity-profiles.json'),
+    `${JSON.stringify({
+      profiles: [
+        {
+          name: 'Test Profile',
+          slug: 'test-profile',
+          aliases: ['test profile', 'test-profile'],
+          homeDir,
+          globalMetaId: '',
+          mvcAddress: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    }, null, 2)}\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(managerRoot, 'active-home.json'),
+    `${JSON.stringify({ homeDir, updatedAt: now }, null, 2)}\n`,
+    'utf8',
+  );
+
+  process.env.HOME = systemHome;
+  process.env.METABOT_HOME = homeDir;
   if (options.allowInternalAuto) {
     process.env.METABOT_INTERNAL_ASK_MASTER_AUTO = '1';
   } else {
     delete process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
   }
   try {
-    await action(tempDir);
+    await action(homeDir);
   } finally {
     if (previousHome === undefined) {
       delete process.env.METABOT_HOME;
     } else {
       process.env.METABOT_HOME = previousHome;
     }
+    if (previousSystemHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousSystemHome;
+    }
     if (previousInternalAuto === undefined) {
       delete process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
     } else {
       process.env.METABOT_INTERNAL_ASK_MASTER_AUTO = previousInternalAuto;
     }
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(systemHome, { recursive: true, force: true });
   }
 }
 
 test('createConfigStore exposes askMaster defaults', async () => {
-  await withTempHome(async () => {
+  await withTempProfileHome(async () => {
     const store = createConfigStore();
     const config = await store.read();
 
@@ -58,7 +94,7 @@ test('createConfigStore exposes askMaster defaults', async () => {
 });
 
 test('read merges askMaster defaults when fields are missing or malformed', async () => {
-  await withTempHome(async () => {
+  await withTempProfileHome(async () => {
     const store = createConfigStore();
     await store.ensureLayout();
     await fs.writeFile(store.paths.configPath, `${JSON.stringify({
@@ -88,7 +124,7 @@ test('read merges askMaster defaults when fields are missing or malformed', asyn
 });
 
 test('read migrates legacy public askMaster triggerMode auto back to suggest by default', async () => {
-  await withTempHome(async () => {
+  await withTempProfileHome(async () => {
     const store = createConfigStore();
     await store.ensureLayout();
     await fs.writeFile(store.paths.configPath, `${JSON.stringify({
@@ -127,7 +163,7 @@ test('read migrates legacy public askMaster triggerMode auto back to suggest by 
 });
 
 test('read preserves internal askMaster triggerMode auto when the internal override is enabled', async () => {
-  await withTempHome(async () => {
+  await withTempProfileHome(async () => {
     const store = createConfigStore();
     await store.ensureLayout();
     await fs.writeFile(store.paths.configPath, `${JSON.stringify({
@@ -153,7 +189,7 @@ test('read preserves internal askMaster triggerMode auto when the internal overr
 });
 
 test('read normalizes malformed nested autoPolicy fields and clamps unsafe values', async () => {
-  await withTempHome(async () => {
+  await withTempProfileHome(async () => {
     const store = createConfigStore();
     await store.ensureLayout();
     await fs.writeFile(store.paths.configPath, `${JSON.stringify({

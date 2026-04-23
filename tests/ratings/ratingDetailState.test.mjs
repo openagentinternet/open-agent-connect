@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,8 +10,16 @@ const {
   createRatingDetailStateStore,
 } = require('../../dist/core/ratings/ratingDetailState.js');
 
-test('createRatingDetailStateStore persists rating detail items in a dedicated hot file', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-rating-detail-state-'));
+async function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  await mkdir(path.join(systemHome, '.metabot', 'manager'), { recursive: true });
+  await mkdir(homeDir, { recursive: true });
+  return homeDir;
+}
+
+test('createRatingDetailStateStore persists rating detail items in .runtime/state/rating-detail.json', async () => {
+  const homeDir = await createProfileHome('metabot-rating-detail-state-');
 
   try {
     const store = createRatingDetailStateStore(homeDir);
@@ -35,7 +43,7 @@ test('createRatingDetailStateStore persists rating detail items in a dedicated h
 
     assert.equal(
       store.paths.ratingDetailStatePath,
-      path.join(homeDir, '.metabot', 'hot', 'rating-detail.json')
+      path.join(homeDir, '.runtime', 'state', 'rating-detail.json')
     );
     assert.deepEqual(written, {
       items: [
@@ -65,7 +73,7 @@ test('createRatingDetailStateStore persists rating detail items in a dedicated h
 });
 
 test('createRatingDetailStateStore persists sync cursors through update and normalizes a missing file to empty state', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-rating-detail-update-'));
+  const homeDir = await createProfileHome('metabot-rating-detail-update-');
 
   try {
     const store = createRatingDetailStateStore(homeDir);
@@ -97,7 +105,7 @@ test('createRatingDetailStateStore persists sync cursors through update and norm
 });
 
 test('createRatingDetailStateStore normalizes malformed files to an empty state', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-rating-detail-malformed-'));
+  const homeDir = await createProfileHome('metabot-rating-detail-malformed-');
 
   try {
     const store = createRatingDetailStateStore(homeDir);

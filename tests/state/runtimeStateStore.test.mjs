@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -8,8 +8,15 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 
-test('createRuntimeStateStore persists identity, services, and traces in hot runtime state', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-runtime-state-'));
+function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  mkdirSync(homeDir, { recursive: true });
+  return homeDir;
+}
+
+test('createRuntimeStateStore persists identity, services, and traces in .runtime/runtime-state.json', async () => {
+  const homeDir = createProfileHome('metabot-runtime-state-');
   const store = createRuntimeStateStore(homeDir);
 
   const written = await store.writeState({
@@ -58,10 +65,12 @@ test('createRuntimeStateStore persists identity, services, and traces in hot run
   assert.equal(written.services.length, 1);
   assert.deepEqual(await store.readState(), written);
   assert.match(readFileSync(store.paths.runtimeStatePath, 'utf8'), /Weather Oracle/);
+  assert.equal(store.paths.runtimeStatePath.startsWith(store.paths.runtimeRoot), true);
+  assert.equal(store.paths.runtimeStatePath.startsWith(store.paths.stateRoot), false);
 });
 
-test('createRuntimeStateStore keeps daemon state in a dedicated hot file', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-daemon-state-'));
+test('createRuntimeStateStore keeps daemon state in .runtime/daemon.json', async () => {
+  const homeDir = createProfileHome('metabot-daemon-state-');
   const store = createRuntimeStateStore(homeDir);
 
   await store.writeDaemon({
@@ -84,4 +93,6 @@ test('createRuntimeStateStore keeps daemon state in a dedicated hot file', async
 
   await store.clearDaemon(12345);
   assert.equal(await store.readDaemon(), null);
+  assert.equal(store.paths.daemonStatePath.startsWith(store.paths.runtimeRoot), true);
+  assert.equal(store.paths.daemonStatePath.startsWith(store.paths.locksRoot), false);
 });

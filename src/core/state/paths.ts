@@ -41,9 +41,7 @@ export interface MetabotPaths {
 
   // Temporary compatibility aliases for untouched later-task modules.
   baseRoot: string;
-  hotRoot: string;
   exportRoot: string;
-  secretsPath: string;
 }
 
 function normalizeInputHomeDir(homeDir: string): string {
@@ -158,9 +156,7 @@ function buildMetabotPaths(input: {
 
     // Temporary compatibility aliases for untouched later-task modules.
     baseRoot: input.metabotRoot,
-    hotRoot: input.runtimeRoot,
     exportRoot: input.exportsRoot,
-    secretsPath: input.identitySecretsPath,
   };
 }
 
