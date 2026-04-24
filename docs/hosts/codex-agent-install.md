@@ -98,6 +98,19 @@ test -f "$INSTALLED_CHAT_SKILL"
 
 If the installed skill files are correct but behavior looks stale, restart the Codex session and retry.
 
+## Storage Layout v2 Reference
+
+Active MetaBot storage is split between one global machine root and one profile root per MetaBot:
+
+- `~/.metabot/manager/identity-profiles.json`: global profile index
+- `~/.metabot/manager/active-home.json`: active profile pointer
+- `~/.metabot/profiles/<slug>/`: one MetaBot workspace and persona root
+- `~/.metabot/profiles/<slug>/.runtime/`: machine-managed runtime, secrets, daemon state, and SQLite files
+- `~/.metabot/skills/`: global MetaBot-managed skills shared across supported hosts
+
+The CLI resolves canonical profile homes inside `~/.metabot/profiles/<slug>/`.
+Do not manually edit `.runtime/` files. Use `metabot identity create --name`, `metabot identity list`, `metabot identity assign --name`, and `metabot identity who` instead.
+
 ## Optional First-Run Bootstrap
 
 Only if local identity is not initialized yet, run:
@@ -106,6 +119,8 @@ Only if local identity is not initialized yet, run:
 metabot identity create --name "Alice"
 metabot doctor
 ```
+
+The CLI resolves the canonical profile home automatically during create.
 
 Expected:
 

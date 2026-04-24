@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -15,16 +15,68 @@ const { loadIdentity } = require('../../dist/core/identity/loadIdentity.js');
 
 const FIXTURE_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
+function deriveSystemHome(homeDir) {
+  const normalizedHomeDir = path.resolve(homeDir);
+  const profilesRoot = path.dirname(normalizedHomeDir);
+  const metabotRoot = path.dirname(profilesRoot);
+  if (path.basename(profilesRoot) === 'profiles' && path.basename(metabotRoot) === '.metabot') {
+    return path.dirname(metabotRoot);
+  }
+  return normalizedHomeDir;
+}
+
+function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  mkdirSync(homeDir, { recursive: true });
+  return homeDir;
+}
+
+function ensureIndexedProfileHome(homeDir) {
+  const systemHome = deriveSystemHome(homeDir);
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
+  const profilesPath = path.join(managerRoot, 'identity-profiles.json');
+  const activeHomePath = path.join(managerRoot, 'active-home.json');
+  mkdirSync(managerRoot, { recursive: true });
+  const normalizedHomeDir = path.resolve(homeDir);
+  const slug = path.basename(normalizedHomeDir);
+  const now = Date.now();
+  writeFileSync(
+    profilesPath,
+    `${JSON.stringify({
+      profiles: [
+        {
+          name: slug,
+          slug,
+          aliases: [slug, slug.replace(/-/g, ' ')],
+          homeDir: normalizedHomeDir,
+          globalMetaId: '',
+          mvcAddress: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    }, null, 2)}\n`,
+    'utf8',
+  );
+  writeFileSync(
+    activeHomePath,
+    `${JSON.stringify({ homeDir: normalizedHomeDir, updatedAt: now }, null, 2)}\n`,
+    'utf8',
+  );
+}
+
 function createRuntimeEnv(homeDir, overrides = {}) {
   return {
     ...process.env,
-    HOME: homeDir,
+    HOME: deriveSystemHome(homeDir),
     METABOT_HOME: homeDir,
     ...overrides,
   };
 }
 
 async function runEvolutionCli(homeDir, args, envOverrides = {}, dependencies = undefined) {
+  ensureIndexedProfileHome(homeDir);
   const stdout = [];
   const exitCode = await runCli(args, {
     env: createRuntimeEnv(homeDir, envOverrides),
@@ -107,7 +159,7 @@ async function seedIdentitySecrets(homeDir) {
 }
 
 test('runCli supports `metabot evolution status`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-status-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-status-');
   const result = await runEvolutionCli(homeDir, ['evolution', 'status']);
 
   assert.equal(result.exitCode, 0);
@@ -119,7 +171,7 @@ test('runCli supports `metabot evolution status`', async () => {
 });
 
 test('runCli `metabot evolution status` projects active variant refs as skill->variantId strings', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-status-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-status-');
   const store = createLocalEvolutionStore(homeDir);
   await store.setActiveVariantRef('metabot-network-directory', {
     source: 'remote',
@@ -138,7 +190,7 @@ test('runCli `metabot evolution status` projects active variant refs as skill->v
 });
 
 test('runCli supports `metabot evolution adopt --skill --variant-id` and `metabot evolution rollback --skill`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-adopt-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-adopt-');
   const store = createLocalEvolutionStore(homeDir);
   const artifact = createArtifactRecord();
   await store.writeArtifact(artifact);
@@ -179,7 +231,7 @@ test('runCli supports `metabot evolution adopt --skill --variant-id` and `metabo
 });
 
 test('runCli adopt passes `--source remote` through CLI parsing', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-adopt-source-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-adopt-source-');
   let capturedInput = null;
   const result = await runEvolutionCli(
     homeDir,
@@ -214,7 +266,7 @@ test('runCli adopt passes `--source remote` through CLI parsing', async () => {
 });
 
 test('runCli adopt keeps local path when `--source local` is provided', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-adopt-source-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-adopt-source-');
   let capturedInput = null;
   const result = await runEvolutionCli(
     homeDir,
@@ -249,7 +301,7 @@ test('runCli adopt keeps local path when `--source local` is provided', async ()
 });
 
 test('runCli adopt defaults source to local when `--source` is omitted', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-adopt-source-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-adopt-source-');
   let capturedInput = null;
   const result = await runEvolutionCli(
     homeDir,
@@ -282,7 +334,7 @@ test('runCli adopt defaults source to local when `--source` is omitted', async (
 });
 
 test('runCli adopt rejects unsupported `--source` values', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-adopt-source-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-adopt-source-');
   const result = await runEvolutionCli(
     homeDir,
     [
@@ -309,7 +361,7 @@ test('runCli adopt rejects unsupported `--source` values', async () => {
 });
 
 test('runCli supports `metabot evolution publish --skill --variant-id` for a verified local artifact without mutating adoption state', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-publish-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-publish-');
   const store = createLocalEvolutionStore(homeDir);
   const identity = await seedIdentitySecrets(homeDir);
   const analysis = createAnalysisRecord();
@@ -353,7 +405,7 @@ test('runCli supports `metabot evolution publish --skill --variant-id` for a ver
 });
 
 test('runCli publish requires --skill', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-publish-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-publish-');
   const result = await runEvolutionCli(homeDir, ['evolution', 'publish', '--variant-id', 'variant-1']);
 
   assert.equal(result.exitCode, 1);
@@ -362,7 +414,7 @@ test('runCli publish requires --skill', async () => {
 });
 
 test('runCli publish requires --variant-id', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-publish-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-publish-');
   const result = await runEvolutionCli(homeDir, ['evolution', 'publish', '--skill', 'metabot-network-directory']);
 
   assert.equal(result.exitCode, 1);
@@ -371,7 +423,7 @@ test('runCli publish requires --variant-id', async () => {
 });
 
 test('runCli publish returns evolution_variant_skill_mismatch when artifact belongs to another skill', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-publish-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-publish-');
   const store = createLocalEvolutionStore(homeDir);
   await seedIdentitySecrets(homeDir);
   const artifact = createArtifactRecord({
@@ -409,7 +461,7 @@ test('runCli publish returns evolution_variant_skill_mismatch when artifact belo
 });
 
 test('runCli publish returns evolution_network_disabled when the evolution network is disabled', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-publish-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-publish-');
   const configStore = createConfigStore(homeDir);
   const config = await configStore.read();
   await configStore.set({
@@ -435,7 +487,7 @@ test('runCli publish returns evolution_network_disabled when the evolution netwo
 });
 
 test('runCli supports `metabot evolution search --skill` and returns JSON-only command result output', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-search-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-search-');
   const result = await runEvolutionCli(
     homeDir,
     ['evolution', 'search', '--skill', 'metabot-network-directory'],
@@ -461,7 +513,7 @@ test('runCli supports `metabot evolution search --skill` and returns JSON-only c
 });
 
 test('runCli search requires --skill', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-search-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-search-');
   const result = await runEvolutionCli(
     homeDir,
     ['evolution', 'search'],
@@ -479,9 +531,9 @@ test('runCli search requires --skill', async () => {
 });
 
 test('runCli supports `metabot evolution import --pin-id`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-import-'));
-  const expectedArtifactPath = path.join(homeDir, '.metabot', 'evolution', 'remote', 'artifacts', 'variant-1.json');
-  const expectedMetadataPath = path.join(homeDir, '.metabot', 'evolution', 'remote', 'artifacts', 'variant-1.meta.json');
+  const homeDir = createProfileHome('metabot-cli-evolution-import-');
+  const expectedArtifactPath = path.join(homeDir, '.runtime', 'evolution', 'remote', 'artifacts', 'variant-1.json');
+  const expectedMetadataPath = path.join(homeDir, '.runtime', 'evolution', 'remote', 'artifacts', 'variant-1.meta.json');
 
   const result = await runEvolutionCli(
     homeDir,
@@ -507,7 +559,7 @@ test('runCli supports `metabot evolution import --pin-id`', async () => {
 });
 
 test('runCli import requires --pin-id', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-import-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-import-');
   const result = await runEvolutionCli(
     homeDir,
     ['evolution', 'import'],
@@ -525,7 +577,7 @@ test('runCli import requires --pin-id', async () => {
 });
 
 test('runCli supports `metabot evolution imported --skill`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-imported-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-imported-');
   let capturedInput = null;
   const result = await runEvolutionCli(
     homeDir,
@@ -553,7 +605,7 @@ test('runCli supports `metabot evolution imported --skill`', async () => {
 });
 
 test('runCli imported requires --skill', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-imported-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-imported-');
   const result = await runEvolutionCli(
     homeDir,
     ['evolution', 'imported'],
@@ -571,7 +623,7 @@ test('runCli imported requires --skill', async () => {
 });
 
 test('runCli search/import return evolution_network_disabled when the evolution network is disabled', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-disabled-'));
+  const homeDir = createProfileHome('metabot-cli-evolution-disabled-');
   const configStore = createConfigStore(homeDir);
   const config = await configStore.read();
   await configStore.set({

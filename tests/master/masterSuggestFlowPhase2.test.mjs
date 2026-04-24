@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
@@ -85,7 +86,7 @@ function createDebugMasterRecord(overrides = {}) {
 }
 
 async function createSuggestHarness(options = {}) {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-suggest-phase2-'));
+  const homeDir = await createProfileHome('metabot-master-suggest-phase2-');
   const identityPair = options.identityPair ?? createIdentityPair();
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const masterStateStore = createPublishedMasterStateStore(homeDir);
@@ -230,7 +231,7 @@ function buildSuggestInput(traceId, overrides = {}) {
 test('master suggest materializes a suggested trace instead of jumping directly to preview', async (t) => {
   const harness = await createSuggestHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-1'));
@@ -256,7 +257,7 @@ test('master suggest can derive trigger observation from host context when expli
     ],
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest({
@@ -329,7 +330,7 @@ test('master suggest can derive trigger observation from host context when expli
 test('master suggest can derive directory availability from runtime state when host context omits directory counts', async (t) => {
   const harness = await createSuggestHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest({
@@ -396,7 +397,7 @@ test('master suggest can derive directory availability from runtime state when h
 test('master suggest preserves an explicit offline directory signal instead of overwriting it from runtime state', async (t) => {
   const harness = await createSuggestHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest({
@@ -464,7 +465,7 @@ test('master suggest preserves an explicit offline directory signal instead of o
 test('master suggest merges partial trigger observation with host context instead of dropping derived fields', async (t) => {
   const harness = await createSuggestHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest({
@@ -549,7 +550,7 @@ test('master suggest accepts a host observation frame directly under observation
     ],
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const hostContext = {
@@ -616,7 +617,7 @@ test('master suggest in auto mode hydrates missing trusted-master counts before 
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest({
@@ -712,7 +713,7 @@ test('master suggest honors explicitlyRejectedAutoAsk before surfacing the phase
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest({
@@ -844,7 +845,7 @@ test('master suggest honors explicitlyRejectedAutoAsk before surfacing the phase
 test('accept_suggest enters the same preview flow as manual ask and still requires confirmation', async (t) => {
   const harness = await createSuggestHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const suggestResult = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-accept'));
@@ -929,7 +930,7 @@ test('accept_suggest marks the suggestion accepted even when confirmationMode=ne
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const suggestResult = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-accept-direct-send'));
@@ -961,7 +962,7 @@ test('accept_suggest marks the suggestion accepted even when confirmationMode=ne
 test('reject_suggest records suppression so the same kind is not suggested again immediately', async (t) => {
   const harness = await createSuggestHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const firstSuggestion = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-reject-1'));
@@ -1000,7 +1001,7 @@ test('reject_suggest records suppression so the same kind is not suggested again
 test('reject_suggest updates the trace so it no longer looks like an active suggestion', async (t) => {
   const harness = await createSuggestHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const suggestion = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-reject-trace'));
@@ -1030,7 +1031,7 @@ test('reject_suggest updates the trace so it no longer looks like an active sugg
 test('accept_suggest fails once the suggested master is offline and the suggestion expires', async (t) => {
   const harness = await createSuggestHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const suggestion = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-offline'));
@@ -1059,7 +1060,7 @@ test('accept_suggest fails once the suggested master is offline and the suggesti
 test('master suggest does not surface a suggestion when no online matching master can be resolved', async (t) => {
   const harness = await createSuggestHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-no-target', {
@@ -1106,7 +1107,7 @@ test('master suggest resolves the target using the current host mode instead of 
     ],
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-host-mode', {
@@ -1132,7 +1133,7 @@ test('master suggest reports trigger_mode_disallows_suggest when runtime config 
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-manual-mode'));
@@ -1156,7 +1157,7 @@ test('manual hostAction reports ask_master_disabled when Ask Master is disabled 
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.hostAction({
@@ -1198,7 +1199,7 @@ test('manual hostAction reports ask_master_disabled when Ask Master is disabled 
 test('reject_suggest still succeeds after Ask Master is disabled locally', async (t) => {
   const harness = await createSuggestHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const suggestion = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-reject-disabled'));
@@ -1239,7 +1240,7 @@ test('master suggest surfaces auto_candidate when triggerMode is auto', async (t
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-suggest-phase2-auto-mode'));
@@ -1274,7 +1275,7 @@ test('master suggest enforces the global cooldown on repeated auto candidates ac
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const first = await harness.handlers.master.suggest(buildSuggestInput(

@@ -37,3 +37,34 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /what `Open Agent Connect` now enables/i);
   assert.match(runbook, /Do not return only raw command output/i);
 });
+
+test('active Codex host runbooks describe the v2 manager/profile layout and forbid patching runtime files', async () => {
+  const installRunbook = await readFile(
+    path.join(REPO_ROOT, 'docs', 'hosts', 'codex-agent-install.md'),
+    'utf8'
+  );
+  const identityRunbook = await readFile(
+    path.join(REPO_ROOT, 'docs', 'hosts', 'codex-agent-identity-runbook.md'),
+    'utf8'
+  );
+  const devRunbook = await readFile(
+    path.join(REPO_ROOT, 'docs', 'hosts', 'codex-dev-test-runbook.md'),
+    'utf8'
+  );
+
+  for (const content of [installRunbook, identityRunbook, devRunbook]) {
+    assert.doesNotMatch(content, /\.metabot\/hot/);
+    assert.doesNotMatch(content, /PROFILE_SLUG/);
+  }
+
+  assert.match(installRunbook, /~\/\.metabot\/manager\//);
+  assert.match(installRunbook, /~\/\.metabot\/profiles\/<slug>\//);
+  assert.match(installRunbook, /~\/\.metabot\/skills\//);
+  assert.match(identityRunbook, /~\/\.metabot\/manager\//);
+  assert.match(identityRunbook, /~\/\.metabot\/profiles\/<slug>\//);
+  assert.match(installRunbook, /do not manually edit `\.runtime\/` files/i);
+  assert.match(devRunbook, /do not manually edit `\.runtime\/` files/i);
+  assert.match(identityRunbook, /metabot identity create --name "\$TARGET_NAME"/);
+  assert.match(identityRunbook, /CLI resolves the canonical profile home/i);
+  assert.match(identityRunbook, /metabot identity assign --name "\$TARGET_NAME"/);
+});

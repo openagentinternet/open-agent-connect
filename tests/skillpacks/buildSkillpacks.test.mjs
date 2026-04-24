@@ -327,7 +327,9 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow acro
     assert.match(content, /identity assign --name/);
     assert.match(content, /identity who/);
     assert.match(content, /metabot doctor/);
-    assert.match(content, /METABOT_HOME="\$HOME\/\.metabot\/profiles\/\$PROFILE_SLUG"/);
+    assert.match(content, /CLI resolves the canonical profile home/i);
+    assert.match(content, /~\/\.metabot\/manager\//);
+    assert.match(content, /~\/\.metabot\/profiles\/<slug>\//);
     assert.match(content, /identity_name_taken/);
     assert.match(content, /identity_name_conflict/);
     assert.match(content, /\/info\/avatar/);
@@ -336,6 +338,8 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow acro
     assert.match(content, /## In Scope/);
     assert.match(content, /## Out of Scope/);
     assert.match(content, /## Handoff To/);
+    assert.doesNotMatch(content, /PROFILE_SLUG/);
+    assert.doesNotMatch(content, /\.metabot\/hot/);
   }
 });
 
@@ -472,4 +476,9 @@ test('codex install runbook documents install verification and first-run handoff
   assert.match(installRunbook, /if identity already exists, report current name and globalMetaId/i);
   assert.match(installRunbook, /what `Open Agent Connect` now enables/i);
   assert.match(installRunbook, /Do not return only raw command output/i);
+  assert.match(installRunbook, /~\/\.metabot\/manager\//);
+  assert.match(installRunbook, /~\/\.metabot\/profiles\/<slug>\//);
+  assert.match(installRunbook, /~\/\.metabot\/skills\//);
+  assert.match(installRunbook, /do not manually edit `\.runtime\/` files/i);
+  assert.doesNotMatch(installRunbook, /\.metabot\/hot/);
 });

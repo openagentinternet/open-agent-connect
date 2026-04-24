@@ -14,7 +14,7 @@ Use this runbook when you want Codex to execute a repeatable local development +
 - run in shell mode
 - fail fast on command errors
 - keep outputs machine-readable where available
-- do not manually edit `~/.metabot/hot/*.json` identity state files
+- do not manually edit `.runtime/` files
 - use identity profile commands (`who/list/assign`) instead of patching runtime files
 
 ## Preconditions
@@ -27,6 +27,16 @@ Before running the workflow, verify:
 - `node`, `npm`, and `git` are available
 
 If any precondition fails, stop and return a concise blocked report.
+
+## V2 Storage Reminder
+
+During local development and testing, keep the active storage contract in mind:
+
+- `~/.metabot/manager/` stores the manager index and active profile pointer
+- `~/.metabot/profiles/<slug>/` stores one MetaBot workspace
+- `~/.metabot/profiles/<slug>/.runtime/` stores machine-managed runtime files
+
+Do not manually edit `.runtime/` files during test setup or debugging.
 
 ## Loop A: Development Build And Targeted Tests
 

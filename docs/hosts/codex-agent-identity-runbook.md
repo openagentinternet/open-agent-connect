@@ -5,15 +5,15 @@ Use this runbook when you want Codex to reliably create or switch to a local Met
 ## Agent Goal
 
 - treat the MetaBot identity name as the canonical local reference
-- if the name already exists locally, switch to it
-- if the name does not exist, create it in its own dedicated local profile home
+- if the name already exists locally, switch to the indexed profile that best matches it
+- if the name does not exist, create it in its own canonical profile home
 - finish with an explicit `identity who` verification report
 
 ## Execution Policy
 
 - run in shell mode
 - fail fast on unexpected command errors
-- never manually edit `~/.metabot/hot/*.json`
+- never manually edit `.runtime/` files
 - never rename identities by patching runtime files
 
 ## Preconditions
@@ -25,6 +25,18 @@ Before running commands, verify:
 - target MetaBot identity name is provided and not empty
 
 If any precondition fails, stop and return a concise blocked report.
+
+## Canonical V2 Layout
+
+The active v2 layout separates global machine state from per-MetaBot profile state:
+
+- `~/.metabot/manager/identity-profiles.json` is the global profile index
+- `~/.metabot/manager/active-home.json` is the active profile pointer
+- `~/.metabot/profiles/<slug>/` is one MetaBot profile home
+- `~/.metabot/profiles/<slug>/.runtime/` is the machine-managed runtime layer
+
+CLI resolves the canonical profile home from the requested name and the manager index.
+Do not hand-compute the filesystem slug or inject `METABOT_HOME` for the normal create and switch flow.
 
 ## Deterministic Create/Switch Flow
 
@@ -40,12 +52,11 @@ metabot identity list
 metabot identity assign --name "$TARGET_NAME"
 ```
 
-If step 2 fails because the name does not exist, create a dedicated profile home and bootstrap there:
+If step 2 fails because the name does not exist, create the profile and let the CLI resolve the canonical profile home:
 
 ```bash
 TARGET_NAME="David"
-PROFILE_SLUG="$(printf '%s' "$TARGET_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
-METABOT_HOME="$HOME/.metabot/profiles/$PROFILE_SLUG" metabot identity create --name "$TARGET_NAME"
+metabot identity create --name "$TARGET_NAME"
 ```
 
 Then switch explicitly (idempotent and keeps final state clear):
@@ -64,7 +75,7 @@ If create returns `identity_name_taken`:
 
 If create returns `identity_name_conflict`:
 
-- do not patch runtime files
+- do not patch `.runtime/` files
 - run `metabot identity who` and `metabot identity list`
 - assign the intended existing profile with `metabot identity assign --name "$TARGET_NAME"` when available
 

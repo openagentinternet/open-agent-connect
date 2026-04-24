@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -18,7 +19,7 @@ const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretSto
 const FIXTURE_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
 test('createLocalMetabotStep persists the first local identity with pending bootstrap state', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-bootstrap-local-'));
+  const homeDir = await createProfileHome('metabot-bootstrap-local-');
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const secretStore = createFileSecretStore(homeDir);
 
@@ -46,7 +47,7 @@ test('createLocalMetabotStep persists the first local identity with pending boot
 });
 
 test('createMetabotSubsidyStep persists claimed subsidy state after a successful reward flow', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-bootstrap-subsidy-'));
+  const homeDir = await createProfileHome('metabot-bootstrap-subsidy-');
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const secretStore = createFileSecretStore(homeDir);
 
@@ -80,7 +81,7 @@ test('createMetabotSubsidyStep persists claimed subsidy state after a successful
 });
 
 test('createLocalIdentitySyncStep persists name first and retries chatpubkey without duplicating the name pin', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-bootstrap-sync-'));
+  const homeDir = await createProfileHome('metabot-bootstrap-sync-');
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const secretStore = createFileSecretStore(homeDir);
 

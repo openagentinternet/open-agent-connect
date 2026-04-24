@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createHttpServer } = require('../../dist/daemon/httpServer.js');
@@ -104,7 +105,7 @@ async function fetchJson(baseUrl, routePath, options = {}) {
 }
 
 async function startProviderServer() {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-provider-routes-'));
+  const homeDir = await createProfileHome('metabot-provider-routes-');
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(homeDir);
   const presenceChanges = [];
@@ -149,7 +150,7 @@ async function startProviderServer() {
           resolve();
         });
       });
-      await rm(homeDir, { recursive: true, force: true });
+      await cleanupProfileHome(homeDir);
     },
   };
 }

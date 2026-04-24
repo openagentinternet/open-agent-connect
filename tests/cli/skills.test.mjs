@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,10 +8,53 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 
+function deriveSystemHome(homeDir) {
+  const normalizedHomeDir = path.resolve(homeDir);
+  const profilesRoot = path.dirname(normalizedHomeDir);
+  const metabotRoot = path.dirname(profilesRoot);
+  if (path.basename(profilesRoot) === 'profiles' && path.basename(metabotRoot) === '.metabot') {
+    return path.dirname(metabotRoot);
+  }
+  return normalizedHomeDir;
+}
+
+function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
+  mkdirSync(homeDir, { recursive: true });
+  mkdirSync(managerRoot, { recursive: true });
+  const now = Date.now();
+  writeFileSync(
+    path.join(managerRoot, 'identity-profiles.json'),
+    `${JSON.stringify({
+      profiles: [
+        {
+          name: slug,
+          slug,
+          aliases: [slug, slug.replace(/-/g, ' ')],
+          homeDir,
+          globalMetaId: '',
+          mvcAddress: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    }, null, 2)}\n`,
+    'utf8',
+  );
+  writeFileSync(
+    path.join(managerRoot, 'active-home.json'),
+    `${JSON.stringify({ homeDir, updatedAt: now }, null, 2)}\n`,
+    'utf8',
+  );
+  return homeDir;
+}
+
 function createRuntimeEnv(homeDir) {
   return {
     ...process.env,
-    HOME: homeDir,
+    HOME: deriveSystemHome(homeDir),
     METABOT_HOME: homeDir,
   };
 }
@@ -32,7 +75,7 @@ async function runSkillsCli(homeDir, args) {
 }
 
 test('runCli supports `metabot skills resolve --skill metabot-network-directory --host codex --format markdown`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-skills-markdown-'));
+  const homeDir = createProfileHome('metabot-cli-skills-markdown-');
   const result = await runSkillsCli(homeDir, [
     'skills',
     'resolve',
@@ -51,7 +94,7 @@ test('runCli supports `metabot skills resolve --skill metabot-network-directory 
 });
 
 test('runCli supports `metabot skills resolve --skill metabot-network-directory --host codex --format json`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-skills-json-'));
+  const homeDir = createProfileHome('metabot-cli-skills-json-');
   const result = await runSkillsCli(homeDir, [
     'skills',
     'resolve',
@@ -71,7 +114,7 @@ test('runCli supports `metabot skills resolve --skill metabot-network-directory 
 });
 
 test('runCli supports `metabot skills resolve --skill metabot-ask-master --host codex --format markdown`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-skills-ask-master-markdown-'));
+  const homeDir = createProfileHome('metabot-cli-skills-ask-master-markdown-');
   const result = await runSkillsCli(homeDir, [
     'skills',
     'resolve',
@@ -95,7 +138,7 @@ test('runCli supports `metabot skills resolve --skill metabot-ask-master --host 
 });
 
 test('runCli supports `metabot skills resolve --skill metabot-ask-master --host codex --format json`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-skills-ask-master-json-'));
+  const homeDir = createProfileHome('metabot-cli-skills-ask-master-json-');
   const result = await runSkillsCli(homeDir, [
     'skills',
     'resolve',

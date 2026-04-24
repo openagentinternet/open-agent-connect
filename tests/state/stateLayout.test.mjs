@@ -88,3 +88,10 @@ test('resolveMetabotPaths returns the v2 manager and runtime graph for a profile
     }
   );
 });
+
+test('resolveMetabotPaths rejects direct workspace roots outside ~/.metabot/profiles/<slug>', () => {
+  assert.throws(
+    () => resolveMetabotPaths('/tmp/direct-workspace'),
+    /Profile home must live under ~\/\.metabot\/profiles\/<slug>/
+  );
+});

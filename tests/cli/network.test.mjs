@@ -14,10 +14,53 @@ const {
   commandWaiting,
 } = require('../../dist/core/contracts/commandResult.js');
 
+function deriveSystemHome(homeDir) {
+  const normalizedHomeDir = path.resolve(homeDir);
+  const profilesRoot = path.dirname(normalizedHomeDir);
+  const metabotRoot = path.dirname(profilesRoot);
+  if (path.basename(profilesRoot) === 'profiles' && path.basename(metabotRoot) === '.metabot') {
+    return path.dirname(metabotRoot);
+  }
+  return normalizedHomeDir;
+}
+
+function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
+  mkdirSync(homeDir, { recursive: true });
+  mkdirSync(managerRoot, { recursive: true });
+  const now = Date.now();
+  writeFileSync(
+    path.join(managerRoot, 'identity-profiles.json'),
+    `${JSON.stringify({
+      profiles: [
+        {
+          name: slug,
+          slug,
+          aliases: [slug, slug.replace(/-/g, ' ')],
+          homeDir,
+          globalMetaId: '',
+          mvcAddress: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    }, null, 2)}\n`,
+    'utf8',
+  );
+  writeFileSync(
+    path.join(managerRoot, 'active-home.json'),
+    `${JSON.stringify({ homeDir, updatedAt: now }, null, 2)}\n`,
+    'utf8',
+  );
+  return homeDir;
+}
+
 function createRuntimeEnv(homeDir) {
   return {
     ...process.env,
-    HOME: homeDir,
+    HOME: deriveSystemHome(homeDir),
     METABOT_HOME: homeDir,
   };
 }
@@ -27,7 +70,7 @@ function readJson(filePath) {
 }
 
 function writeEvolutionConfig(homeDir, config) {
-  const configPath = path.join(homeDir, '.metabot', 'hot', 'config.json');
+  const configPath = path.join(homeDir, '.runtime', 'config.json');
   mkdirSync(path.dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify({
     evolution_network: config,
@@ -240,7 +283,7 @@ test('runCli dispatches `metabot network sources remove --base-url` with parsed 
 });
 
 test('runCli records execution and analysis when network-services evolution is enabled and a triggering response occurs', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-network-evolution-'));
+  const homeDir = createProfileHome('metabot-cli-network-evolution-');
   writeEvolutionConfig(homeDir, {
     enabled: true,
     autoAdoptSameSkillSameScope: true,
@@ -263,7 +306,7 @@ test('runCli records execution and analysis when network-services evolution is e
   assert.equal(exitCode, 1);
   assert.equal(JSON.parse(stdout.join('').trim()).state, 'failed');
 
-  const evolutionRoot = path.join(homeDir, '.metabot', 'evolution');
+  const evolutionRoot = path.join(homeDir, '.runtime', 'evolution');
   const indexPath = path.join(evolutionRoot, 'index.json');
   assert.equal(existsSync(indexPath), true);
 
@@ -284,7 +327,7 @@ test('runCli records execution and analysis when network-services evolution is e
 });
 
 test('runCli records execution bookkeeping for default evolution config on success', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-network-evolution-default-'));
+  const homeDir = createProfileHome('metabot-cli-network-evolution-default-');
   const stdout = [];
 
   const exitCode = await runCli(['network', 'services', '--online'], {
@@ -309,7 +352,7 @@ test('runCli records execution bookkeeping for default evolution config on succe
 
   assert.equal(exitCode, 0);
 
-  const evolutionRoot = path.join(homeDir, '.metabot', 'evolution');
+  const evolutionRoot = path.join(homeDir, '.runtime', 'evolution');
   const indexPath = path.join(evolutionRoot, 'index.json');
   assert.equal(existsSync(indexPath), true);
 
@@ -330,7 +373,7 @@ test('runCli records execution bookkeeping for default evolution config on succe
 });
 
 test('runCli writes no evolution side effects when network-services evolution is disabled', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-network-evolution-disabled-'));
+  const homeDir = createProfileHome('metabot-cli-network-evolution-disabled-');
   writeEvolutionConfig(homeDir, {
     enabled: false,
     autoAdoptSameSkillSameScope: true,
@@ -350,14 +393,14 @@ test('runCli writes no evolution side effects when network-services evolution is
   });
 
   assert.equal(exitCode, 1);
-  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'index.json')), false);
-  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'executions')), false);
-  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'analyses')), false);
-  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'artifacts')), false);
+  assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'index.json')), false);
+  assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'executions')), false);
+  assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'analyses')), false);
+  assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'artifacts')), false);
 });
 
 test('runCli writes no evolution side effects when autoRecordExecutions is false', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-network-evolution-no-record-'));
+  const homeDir = createProfileHome('metabot-cli-network-evolution-no-record-');
   writeEvolutionConfig(homeDir, {
     enabled: true,
     autoAdoptSameSkillSameScope: true,
@@ -377,10 +420,10 @@ test('runCli writes no evolution side effects when autoRecordExecutions is false
   });
 
   assert.equal(exitCode, 1);
-  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'index.json')), false);
-  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'executions')), false);
-  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'analyses')), false);
-  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'artifacts')), false);
+  assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'index.json')), false);
+  assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'executions')), false);
+  assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'analyses')), false);
+  assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'artifacts')), false);
 });
 
 test('runCli does not treat waiting/manual_action_required network responses as hard failures for evolution', async () => {
@@ -398,7 +441,7 @@ test('runCli does not treat waiting/manual_action_required network responses as 
   ];
 
   for (const testCase of cases) {
-    const homeDir = mkdtempSync(path.join(tmpdir(), `metabot-cli-network-evolution-${testCase.name}-`));
+    const homeDir = createProfileHome(`metabot-cli-network-evolution-${testCase.name}-`);
     writeEvolutionConfig(homeDir, {
       enabled: true,
       autoAdoptSameSkillSameScope: true,
@@ -418,9 +461,9 @@ test('runCli does not treat waiting/manual_action_required network responses as 
     });
 
     assert.equal(exitCode, testCase.expectedExitCode);
-    assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'index.json')), false);
-    assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'executions')), false);
-    assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'analyses')), false);
-    assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'artifacts')), false);
+    assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'index.json')), false);
+    assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'executions')), false);
+    assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'analyses')), false);
+    assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'artifacts')), false);
   }
 });

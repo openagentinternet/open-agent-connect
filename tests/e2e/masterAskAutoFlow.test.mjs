@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
@@ -147,7 +148,7 @@ function parseOutput(chunks) {
 }
 
 async function createHarness(options = {}) {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-auto-flow-e2e-'));
+  const homeDir = await createProfileHome('metabot-master-auto-flow-e2e-');
   const identityPair = createIdentityPair();
   const configStore = createConfigStore(homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(homeDir);
@@ -261,7 +262,7 @@ async function createHarness(options = {}) {
 test('auto ask preview can be confirmed through the normal master ask continuation path', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const preview = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-e2e-preview'));
@@ -318,7 +319,7 @@ test('trusted non-sensitive auto flow can direct send and still return the previ
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-e2e-direct', {
@@ -356,7 +357,7 @@ test('auto flow can still force preview when confirmationMode is never but trust
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const preview = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-e2e-never-preview', {

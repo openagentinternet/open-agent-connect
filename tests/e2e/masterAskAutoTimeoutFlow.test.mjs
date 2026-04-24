@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
@@ -138,7 +139,7 @@ function buildSuggestInput(traceId) {
 }
 
 async function createHarness() {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-auto-timeout-'));
+  const homeDir = await createProfileHome('metabot-master-auto-timeout-');
   const identityPair = createIdentityPair();
   const configStore = createConfigStore(homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(homeDir);
@@ -254,7 +255,7 @@ async function createHarness() {
 test('auto flow keeps timeout semantics on the foreground result and later upgrades the trace when a reply arrives', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   harness.replies.push({ state: 'timeout' }, { state: 'completed' });

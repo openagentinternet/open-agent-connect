@@ -115,7 +115,7 @@ function assertNoLegacyOnlyLayout(systemHomeDir: string): void {
     return;
   }
   throw new Error(
-    'Legacy .metabot/hot layout detected. This pre-release layout change is not migrated automatically; clean or reinitialize the local MetaBot root before using v2.'
+    'Legacy pre-v2 MetaBot layout detected. This pre-release layout change is not migrated automatically; clean or reinitialize the local MetaBot root before using v2.'
   );
 }
 

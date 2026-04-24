@@ -626,7 +626,7 @@ test('runtime home selection rejects a legacy-only .metabot hot layout', async (
       },
       cwd: systemHome,
     }),
-    /legacy.*\.metabot\/hot|clean.*reinitialized/i
+    /legacy.*pre-v2|clean.*reinitialize/i
   );
 });
 
@@ -1400,8 +1400,8 @@ test('provider summary refreshes rating detail from chain and exposes rated sell
   t.after(async () => stopDaemon(providerHome));
   t.after(async () => stopDaemon(callerHome));
   t.after(async () => chainApi.close());
-  t.after(async () => rm(providerHome, { recursive: true, force: true }));
-  t.after(async () => rm(callerHome, { recursive: true, force: true }));
+  t.after(async () => rm(deriveSystemHome(providerHome), { recursive: true, force: true }));
+  t.after(async () => rm(deriveSystemHome(callerHome), { recursive: true, force: true }));
 
   const providerIdentity = await runCommand(providerHome, ['identity', 'create', '--name', 'Provider Bot']);
   assert.equal(providerIdentity.exitCode, 0);

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -7,6 +7,13 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
+
+function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  mkdirSync(homeDir, { recursive: true });
+  return homeDir;
+}
 
 function createScope() {
   return {
@@ -85,8 +92,8 @@ function createArtifactRecord() {
   };
 }
 
-test('local evolution store persists execution, analysis, artifact, and index under ~/.metabot/evolution', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+test('local evolution store persists execution, analysis, artifact, and index under profile .runtime/evolution', async () => {
+  const homeDir = createProfileHome('metabot-evolution-store-');
   const store = createLocalEvolutionStore(homeDir);
   const execution = createExecutionRecord();
   const analysis = createAnalysisRecord();
@@ -116,7 +123,7 @@ test('local evolution store persists execution, analysis, artifact, and index un
 });
 
 test('local evolution store reads stored artifact and analysis records and returns null for missing records', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const homeDir = createProfileHome('metabot-evolution-store-');
   const store = createLocalEvolutionStore(homeDir);
   const analysis = createAnalysisRecord();
   const artifact = createArtifactRecord();
@@ -131,7 +138,7 @@ test('local evolution store reads stored artifact and analysis records and retur
 });
 
 test('local evolution store keeps deterministic, append-safe index updates and active mapping', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const homeDir = createProfileHome('metabot-evolution-store-');
   const store = createLocalEvolutionStore(homeDir);
   const execution = createExecutionRecord();
   const analysis = createAnalysisRecord();
@@ -164,7 +171,7 @@ test('local evolution store keeps deterministic, append-safe index updates and a
 });
 
 test('local evolution store clears one active variant through the shared index update queue', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const homeDir = createProfileHome('metabot-evolution-store-');
   const store = createLocalEvolutionStore(homeDir);
 
   await Promise.all([
@@ -185,7 +192,7 @@ test('local evolution store clears one active variant through the shared index u
 });
 
 test('local evolution store normalizes legacy active variant strings into local refs', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const homeDir = createProfileHome('metabot-evolution-store-');
   const store = createLocalEvolutionStore(homeDir);
   await store.ensureLayout();
   writeFileSync(
@@ -212,7 +219,7 @@ test('local evolution store normalizes legacy active variant strings into local 
 });
 
 test('local evolution store drops malformed active variant refs during read', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const homeDir = createProfileHome('metabot-evolution-store-');
   const store = createLocalEvolutionStore(homeDir);
   await store.ensureLayout();
   writeFileSync(
@@ -241,7 +248,7 @@ test('local evolution store drops malformed active variant refs during read', as
 });
 
 test('local evolution store drops unsafe active variant identifiers during read', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const homeDir = createProfileHome('metabot-evolution-store-');
   const store = createLocalEvolutionStore(homeDir);
   await store.ensureLayout();
   writeFileSync(
@@ -277,7 +284,7 @@ test('local evolution store drops unsafe active variant identifiers during read'
 });
 
 test('local evolution store rejects unsafe identifiers used for filesystem paths', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const homeDir = createProfileHome('metabot-evolution-store-');
   const store = createLocalEvolutionStore(homeDir);
   const execution = createExecutionRecord();
   const analysis = createAnalysisRecord();
@@ -307,7 +314,7 @@ test('local evolution store rejects unsafe identifiers used for filesystem paths
 });
 
 test('local evolution store serializes concurrent index updates to avoid lost writes', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const homeDir = createProfileHome('metabot-evolution-store-');
   const store = createLocalEvolutionStore(homeDir);
 
   const executionWrites = Array.from({ length: 24 }, (_, index) => {
@@ -359,7 +366,7 @@ test('local evolution store serializes concurrent index updates to avoid lost wr
 });
 
 test('local evolution store serializes concurrent index updates across store instances sharing one index path', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const homeDir = createProfileHome('metabot-evolution-store-');
   const storeA = createLocalEvolutionStore(homeDir);
   const storeB = createLocalEvolutionStore(homeDir);
 
@@ -399,7 +406,7 @@ test('local evolution store serializes concurrent index updates across store ins
 });
 
 test('local evolution store preserves unknown index fields during updates', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const homeDir = createProfileHome('metabot-evolution-store-');
   const store = createLocalEvolutionStore(homeDir);
   await store.ensureLayout();
   writeFileSync(
@@ -427,7 +434,7 @@ test('local evolution store preserves unknown index fields during updates', asyn
 });
 
 test('local evolution store recovers from malformed index.json without bricking writes', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const homeDir = createProfileHome('metabot-evolution-store-');
   const store = createLocalEvolutionStore(homeDir);
   await store.ensureLayout();
   writeFileSync(store.paths.evolutionIndexPath, '{"broken": ', 'utf8');
@@ -438,7 +445,7 @@ test('local evolution store recovers from malformed index.json without bricking 
 });
 
 test('local evolution store can persist a remote active variant ref and keeps local helper behavior', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const homeDir = createProfileHome('metabot-evolution-store-');
   const store = createLocalEvolutionStore(homeDir);
 
   await store.setActiveVariantRef('metabot-network-directory', {

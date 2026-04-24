@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
@@ -45,9 +46,9 @@ function parseOutput(chunks) {
 }
 
 test('master ask returns awaiting_confirmation and confirm reuses the stored pending request snapshot', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-ask-flow-'));
+  const homeDir = await createProfileHome('metabot-master-ask-flow-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const identityPair = createIdentityPair();
@@ -238,9 +239,9 @@ test('master ask returns awaiting_confirmation and confirm reuses the stored pen
 });
 
 test('master ask sends immediately when confirmationMode is never', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-ask-no-confirm-'));
+  const homeDir = await createProfileHome('metabot-master-ask-no-confirm-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const identityPair = createIdentityPair();
@@ -368,9 +369,9 @@ test('master ask sends immediately when confirmationMode is never', async (t) =>
 });
 
 test('master ask does not resolve a target from providerDaemonBaseUrl alone without a complete explicit target', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-ask-direct-provider-hint-'));
+  const homeDir = await createProfileHome('metabot-master-ask-direct-provider-hint-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const identityPair = createIdentityPair();
@@ -437,9 +438,9 @@ test('master ask does not resolve a target from providerDaemonBaseUrl alone with
 });
 
 test('master ask reports master_host_mode_mismatch when the explicit target exists but does not support the current host', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-ask-host-mismatch-'));
+  const homeDir = await createProfileHome('metabot-master-ask-host-mismatch-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const identityPair = createIdentityPair();

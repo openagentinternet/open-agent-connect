@@ -162,83 +162,43 @@ function buildMetabotPaths(input: {
 
 export function resolveMetabotPaths(homeDir: string): MetabotPaths {
   const normalizedHomeDir = normalizeInputHomeDir(homeDir);
-
-  try {
-    const {
-      systemHomeDir,
-      metabotRoot,
-      profilesRoot,
-      profileRoot,
-    } = normalizeProfileHomeDir(normalizedHomeDir);
-
-    const managerRoot = path.join(metabotRoot, 'manager');
-    const skillsRoot = path.join(metabotRoot, 'skills');
-    const runtimeRoot = path.join(profileRoot, '.runtime');
-    const sessionsRoot = path.join(runtimeRoot, 'sessions');
-    const exportsRoot = path.join(runtimeRoot, 'exports');
-    const stateRoot = path.join(runtimeRoot, 'state');
-    const locksRoot = path.join(runtimeRoot, 'locks');
-
-    return buildMetabotPaths({
-      systemHomeDir,
-      metabotRoot,
-      managerRoot,
-      skillsRoot,
-      profilesRoot,
-      profileRoot,
-      workspaceRoot: profileRoot,
-      runtimeRoot,
-      sessionsRoot,
-      exportsRoot,
-      stateRoot,
-      locksRoot,
-      identitySecretsPath: path.join(runtimeRoot, 'identity-secrets.json'),
-      providerSecretsPath: path.join(runtimeRoot, 'provider-secrets.json'),
-      sessionStatePath: path.join(sessionsRoot, 'a2a-session-state.json'),
-      providerPresenceStatePath: path.join(stateRoot, 'provider-presence.json'),
-      ratingDetailStatePath: path.join(stateRoot, 'rating-detail.json'),
-      masterPendingAskStatePath: path.join(stateRoot, 'master-pending-asks.json'),
-      masterSuggestStatePath: path.join(stateRoot, 'master-suggest-state.json'),
-      masterAutoFeedbackStatePath: path.join(stateRoot, 'master-auto-feedback-state.json'),
-      masterPublishedStatePath: path.join(stateRoot, 'master-service-state.json'),
-      directorySeedsPath: path.join(stateRoot, 'directory-seeds.json'),
-      daemonLockPath: path.join(locksRoot, 'daemon.lock'),
-    });
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes('Profile home must live under')) {
-      throw error;
-    }
-  }
-
-  const workspaceRoot = normalizedHomeDir;
-  const metabotRoot = path.join(workspaceRoot, '.metabot');
+  const {
+    systemHomeDir,
+    metabotRoot,
+    profilesRoot,
+    profileRoot,
+  } = normalizeProfileHomeDir(normalizedHomeDir);
   const managerRoot = path.join(metabotRoot, 'manager');
-  const runtimeRoot = path.join(metabotRoot, 'hot');
-  const exportsRoot = path.join(metabotRoot, 'exports');
+  const skillsRoot = path.join(metabotRoot, 'skills');
+  const runtimeRoot = path.join(profileRoot, '.runtime');
+  const sessionsRoot = path.join(runtimeRoot, 'sessions');
+  const exportsRoot = path.join(runtimeRoot, 'exports');
+  const stateRoot = path.join(runtimeRoot, 'state');
+  const locksRoot = path.join(runtimeRoot, 'locks');
 
   return buildMetabotPaths({
-    systemHomeDir: workspaceRoot,
+    systemHomeDir,
     metabotRoot,
     managerRoot,
-    skillsRoot: path.join(metabotRoot, 'skills'),
-    profilesRoot: path.join(metabotRoot, 'profiles'),
-    profileRoot: workspaceRoot,
-    workspaceRoot,
+    skillsRoot,
+    profilesRoot,
+    profileRoot,
+    workspaceRoot: profileRoot,
     runtimeRoot,
-    sessionsRoot: runtimeRoot,
+    sessionsRoot,
     exportsRoot,
-    stateRoot: runtimeRoot,
-    locksRoot: runtimeRoot,
-    identitySecretsPath: path.join(runtimeRoot, 'secrets.json'),
+    stateRoot,
+    locksRoot,
+    identitySecretsPath: path.join(runtimeRoot, 'identity-secrets.json'),
     providerSecretsPath: path.join(runtimeRoot, 'provider-secrets.json'),
-    sessionStatePath: path.join(runtimeRoot, 'a2a-session-state.json'),
-    providerPresenceStatePath: path.join(runtimeRoot, 'provider-presence.json'),
-    ratingDetailStatePath: path.join(runtimeRoot, 'rating-detail.json'),
-    masterPendingAskStatePath: path.join(runtimeRoot, 'master-pending-asks.json'),
-    masterSuggestStatePath: path.join(runtimeRoot, 'master-suggest-state.json'),
-    masterAutoFeedbackStatePath: path.join(runtimeRoot, 'master-auto-feedback-state.json'),
-    masterPublishedStatePath: path.join(runtimeRoot, 'master-service-state.json'),
-    directorySeedsPath: path.join(runtimeRoot, 'directory-seeds.json'),
-    daemonLockPath: path.join(runtimeRoot, 'daemon.lock'),
+    sessionStatePath: path.join(sessionsRoot, 'a2a-session-state.json'),
+    providerPresenceStatePath: path.join(stateRoot, 'provider-presence.json'),
+    ratingDetailStatePath: path.join(stateRoot, 'rating-detail.json'),
+    masterPendingAskStatePath: path.join(stateRoot, 'master-pending-asks.json'),
+    masterSuggestStatePath: path.join(stateRoot, 'master-suggest-state.json'),
+    masterAutoFeedbackStatePath: path.join(stateRoot, 'master-auto-feedback-state.json'),
+    masterPublishedStatePath: path.join(stateRoot, 'master-service-state.json'),
+    directorySeedsPath: path.join(stateRoot, 'directory-seeds.json'),
+    daemonLockPath: path.join(locksRoot, 'daemon.lock'),
   });
 }
