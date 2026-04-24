@@ -15,6 +15,7 @@ import { importPublishedEvolutionArtifact } from '../core/evolution/import/impor
 import { listImportedEvolutionArtifacts } from '../core/evolution/import/listImportedArtifacts';
 import { deriveResolvedScopeHash, searchPublishedEvolutionArtifacts } from '../core/evolution/import/searchArtifacts';
 import { adoptRemoteEvolutionArtifact } from '../core/evolution/remoteAdoption';
+import { bindHostSkills, HostSkillBindingError } from '../core/host/hostSkillBinding';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import {
   listIdentityProfiles,
@@ -1550,6 +1551,32 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         return commandSuccess(rendered);
       },
     },
+    host: {
+      bindSkills: async (input) => {
+        try {
+          const result = await bindHostSkills({
+            systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+            host: input.host,
+            env: context.env,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          if (error instanceof HostSkillBindingError) {
+            return {
+              ok: false,
+              state: 'failed',
+              code: error.code,
+              message: error.message,
+              data: error.data,
+            } as MetabotCommandResult<unknown>;
+          }
+          return commandFailed(
+            'host_skill_bind_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+    },
     evolution: {
       status: async () => {
         const homeDir = normalizeHomeDir(context.env, context.cwd);
@@ -1835,6 +1862,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     trace: { ...defaults.trace, ...provided.trace },
     ui: { ...defaults.ui, ...provided.ui },
     skills: { ...defaults.skills, ...provided.skills },
+    host: { ...defaults.host, ...provided.host },
     evolution: { ...defaults.evolution, ...provided.evolution },
   };
 }

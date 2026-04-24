@@ -189,6 +189,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'master', summary: 'Publish, discover, ask, and inspect Ask Master flows.' },
     { name: 'services', summary: 'Publish, call, and rate remote MetaBot services.' },
     { name: 'chat', summary: 'Send encrypted private MetaWeb messages to another MetaBot.' },
+    { name: 'host', summary: 'Project shared MetaBot skills into one host-native skills root.' },
     { name: 'trace', summary: 'Watch or inspect structured remote delegation traces.' },
     { name: 'ui', summary: 'Open local human-only HTML pages backed by the MetaBot runtime.' },
     { name: 'skills', summary: 'Resolve shared-default or host-specific skill contracts for install/runtime use.' },
@@ -203,6 +204,48 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
 
 const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   ROOT_COMMAND_HELP,
+  {
+    commandPath: ['host'],
+    summary: 'Host projection commands for binding shared MetaBot skills into one host-native skills root.',
+    usage: 'metabot host <subcommand>',
+    subcommands: [
+      { name: 'bind-skills', summary: 'Project shared MetaBot skills into one host-native skills root.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+    examples: [
+      'metabot host bind-skills --host codex',
+      'metabot host bind-skills --host claude-code',
+      'metabot host bind-skills --host openclaw',
+    ],
+  },
+  {
+    commandPath: ['host', 'bind-skills'],
+    summary: 'Project shared MetaBot skills into one host-native skills root.',
+    usage: 'metabot host bind-skills --host <codex|claude-code|openclaw>',
+    requiredFlags: [
+      { flag: '--host', value: '<codex|claude-code|openclaw>', description: 'Target host whose native skills root should receive shared MetaBot symlinks.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+    successFields: [
+      'host',
+      'hostSkillRoot',
+      'sharedSkillRoot',
+      'boundSkills',
+      'replacedEntries',
+      'unchangedEntries',
+    ],
+    failureSemantics: [
+      'Fails with invalid_argument when --host is not one of codex, claude-code, or openclaw.',
+      'Fails with shared_skills_missing when ~/.metabot/skills has no shared metabot-* directories to bind.',
+      'Fails with host_skill_root_unresolved and returns host plus the attempted hostSkillRoot path.',
+      'Fails with host_skill_bind_failed and returns sourceSharedSkillPath plus destinationHostPath.',
+    ],
+    examples: [
+      'metabot host bind-skills --host codex',
+      'metabot host bind-skills --host claude-code',
+      'metabot host bind-skills --host openclaw',
+    ],
+  },
   {
     commandPath: ['skills'],
     summary: 'Skill contract commands for shared-default resolution and explicit host compatibility rendering.',

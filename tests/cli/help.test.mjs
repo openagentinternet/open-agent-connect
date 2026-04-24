@@ -22,8 +22,26 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^\s+config\s+/m);
   assert.match(output, /^\s+wallet\s+/m);
   assert.match(output, /^\s+services\s+/m);
+  assert.match(output, /^\s+host\s+/m);
   assert.match(output, /^\s+trace\s+/m);
   assert.equal(output.includes('"ok"'), false);
+});
+
+test('runCli prints machine-readable top-level help for `metabot --help --json`', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['--help', '--json'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = JSON.parse(stdout.join(''));
+  assert.deepEqual(output.commandPath, []);
+  assert.equal(output.command, 'metabot');
+  assert.ok(Array.isArray(output.subcommands));
+  assert.ok(output.subcommands.some((entry) => entry.name === 'host'));
 });
 
 test('runCli prints config group help with get and set subcommands', async () => {

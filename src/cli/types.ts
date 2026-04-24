@@ -67,6 +67,9 @@ export interface CliDependencies {
   skills?: {
     resolve?: (input: { skill: string; host?: ConcreteSkillHost; format: SkillRenderFormat }) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  host?: {
+    bindSkills?: (input: { host: ConcreteSkillHost }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   evolution?: {
     status?: () => Awaitable<MetabotCommandResult<unknown>>;
     adopt?: (input: {
