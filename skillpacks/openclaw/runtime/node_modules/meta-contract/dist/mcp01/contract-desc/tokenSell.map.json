@@ -1,0 +1,10 @@
+{
+    "mappings": "UC2BgD,CAAA,CAAiB,CAAA,CAAjB,CDtB3C,CACA,CAKwC,CAAA,CAAY,CAAA,CAAxC,ueAAA,CAAR,CAEoD,CAAA,CAA/B,oBAAA,CACY,CAAA,CAAc,CAAA,CAAhC,wNAAA,CAEC,CAAA,CAAR,CAAuC,CAAA,CAApB,yBAAA,CAAnB",
+    "sources": [
+        "stdin",
+        "../protoheader.scrypt"
+    ],
+    "names": [],
+    "version": 3,
+    "file": "stdin"
+}

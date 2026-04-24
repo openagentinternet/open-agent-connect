@@ -7,9 +7,7 @@ description: Use when a human asks to check wallet balances now, and route trans
 
 Handle wallet intents for balance checks now, with a transfer-ready command group for future extensions.
 
-## Host Adapter
-
-{{HOST_SKILLPACK_METADATA}}
+{{HOST_ADAPTER_SECTION}}
 
 ## Routing
 

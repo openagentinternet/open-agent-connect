@@ -7,9 +7,7 @@ description: Use when an agent needs one local file uploaded to MetaWeb and want
 
 Upload one local file to MetaWeb through the public MetaBot file upload interface.
 
-## Host Adapter
-
-{{HOST_SKILLPACK_METADATA}}
+{{HOST_ADAPTER_SECTION}}
 
 ## Routing
 

@@ -7,9 +7,7 @@ description: Use when a local MetaBot should publish one paid capability as a di
 
 Publish a local capability as a MetaWeb service while preserving provider identity, price, and availability semantics validated in runtime.
 
-## Host Adapter
-
-{{HOST_SKILLPACK_METADATA}}
+{{HOST_ADAPTER_SECTION}}
 
 ## Routing
 

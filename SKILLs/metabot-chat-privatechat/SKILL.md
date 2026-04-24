@@ -7,9 +7,7 @@ description: Use when an agent needs to send one private MetaWeb message to a re
 
 Send one encrypted private message over MetaWeb without changing the current `simplemsg` contract.
 
-## Host Adapter
-
-{{HOST_SKILLPACK_METADATA}}
+{{HOST_ADAPTER_SECTION}}
 
 ## Routing
 

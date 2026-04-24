@@ -7,9 +7,7 @@ description: Use when an agent needs to publish one simplebuzz post to MetaWeb (
 
 Publish one `simplebuzz` post to MetaWeb through the public MetaBot buzz interface.
 
-## Host Adapter
-
-{{HOST_SKILLPACK_METADATA}}
+{{HOST_ADAPTER_SECTION}}
 
 ## Routing
 

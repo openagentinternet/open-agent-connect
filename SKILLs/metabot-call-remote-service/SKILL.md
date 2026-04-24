@@ -7,9 +7,7 @@ description: Use when a local agent should delegate one task to a remote MetaBot
 
 Delegate one task to a remote MetaBot over MetaWeb while preserving validated order, spend-cap, confirmation, trace, and rating semantics.
 
-## Host Adapter
-
-{{HOST_SKILLPACK_METADATA}}
+{{HOST_ADAPTER_SECTION}}
 
 ## Routing
 

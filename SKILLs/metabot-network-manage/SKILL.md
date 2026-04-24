@@ -7,9 +7,7 @@ description: Use when a human or agent needs MetaWeb network discovery or local 
 
 Manage the local MetaWeb network surface: discover online services and maintain local directory sources.
 
-## Host Adapter
-
-{{HOST_SKILLPACK_METADATA}}
+{{HOST_ADAPTER_SECTION}}
 
 ## Routing
 

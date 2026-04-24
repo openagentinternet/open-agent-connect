@@ -7,9 +7,7 @@ description: Use when a human or agent needs local MetaBot identity create/list/
 
 Create or switch local MetaBot identities by name without manual runtime-state patching.
 
-## Host Adapter
-
-{{HOST_SKILLPACK_METADATA}}
+{{HOST_ADAPTER_SECTION}}
 
 ## Routing
 

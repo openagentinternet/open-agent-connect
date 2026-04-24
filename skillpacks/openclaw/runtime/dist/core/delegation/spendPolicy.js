@@ -1,0 +1,55 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.normalizeSpendCurrency = normalizeSpendCurrency;
+exports.evaluateSpendCap = evaluateSpendCap;
+function normalizeText(value) {
+    return typeof value === 'string' ? value.trim() : '';
+}
+function normalizeSpendCurrency(value) {
+    const normalized = normalizeText(value).toUpperCase();
+    if (normalized === 'MVC')
+        return 'SPACE';
+    if (normalized === 'SPACE' || normalized === 'BTC' || normalized === 'DOGE') {
+        return normalized;
+    }
+    return '';
+}
+function evaluateSpendCap(input) {
+    const normalizedPrice = normalizeText(input.price);
+    const normalizedCurrency = normalizeSpendCurrency(input.currency);
+    const numericPrice = Number(normalizedPrice);
+    if (!normalizedPrice || !Number.isFinite(numericPrice) || numericPrice < 0) {
+        return {
+            allowed: false,
+            code: 'invalid_price',
+            reason: 'Remote service price is invalid.',
+        };
+    }
+    if (!input.spendCap) {
+        return { allowed: true };
+    }
+    const capCurrency = normalizeSpendCurrency(input.spendCap.currency);
+    const capAmount = Number(normalizeText(input.spendCap.amount));
+    if (!capCurrency || !Number.isFinite(capAmount) || capAmount < 0) {
+        return {
+            allowed: false,
+            code: 'invalid_cap',
+            reason: 'Spend cap is invalid.',
+        };
+    }
+    if (capCurrency !== normalizedCurrency) {
+        return {
+            allowed: false,
+            code: 'currency_mismatch',
+            reason: `Spend cap currency ${capCurrency} does not match remote service currency ${normalizedCurrency || 'unknown'}.`,
+        };
+    }
+    if (numericPrice > capAmount) {
+        return {
+            allowed: false,
+            code: 'spend_cap_exceeded',
+            reason: `Remote service price ${normalizedPrice} ${normalizedCurrency} exceeds the spend cap ${input.spendCap.amount} ${capCurrency}.`,
+        };
+    }
+    return { allowed: true };
+}
