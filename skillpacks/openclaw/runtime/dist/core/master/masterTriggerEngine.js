@@ -1,0 +1,348 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.createMasterTriggerMemoryState = createMasterTriggerMemoryState;
+exports.mergeMasterTriggerMemoryStates = mergeMasterTriggerMemoryStates;
+exports.collectAndEvaluateMasterTrigger = collectAndEvaluateMasterTrigger;
+exports.evaluateMasterTrigger = evaluateMasterTrigger;
+exports.recordMasterTriggerOutcome = recordMasterTriggerOutcome;
+const configTypes_1 = require("../config/configTypes");
+function normalizeText(value) {
+    return typeof value === 'string' ? value.trim() : '';
+}
+function normalizeBoolean(value) {
+    return value === true;
+}
+function normalizeInteger(value, fallback = 0) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return Math.max(0, Math.trunc(value));
+    }
+    if (typeof value === 'string' && value.trim()) {
+        const parsed = Number.parseInt(value, 10);
+        if (Number.isFinite(parsed)) {
+            return Math.max(0, Math.trunc(parsed));
+        }
+    }
+    return fallback;
+}
+function normalizeNullableInteger(value) {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    const parsed = normalizeInteger(value, Number.NaN);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+function normalizeStringArray(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const seen = new Set();
+    const normalized = [];
+    for (const entry of value) {
+        const text = normalizeText(entry);
+        if (!text || seen.has(text)) {
+            continue;
+        }
+        seen.add(text);
+        normalized.push(text);
+    }
+    return normalized;
+}
+function normalizeObservation(input) {
+    return {
+        now: normalizeInteger(input.now, Date.now()),
+        traceId: normalizeText(input.traceId) || null,
+        hostMode: normalizeText(input.hostMode) || 'unknown',
+        workspaceId: normalizeText(input.workspaceId) || null,
+        userIntent: {
+            explicitlyAskedForMaster: normalizeBoolean(input.userIntent?.explicitlyAskedForMaster),
+            explicitlyRejectedSuggestion: normalizeBoolean(input.userIntent?.explicitlyRejectedSuggestion),
+            explicitlyRejectedAutoAsk: normalizeBoolean(input.userIntent?.explicitlyRejectedAutoAsk),
+        },
+        activity: {
+            recentUserMessages: normalizeInteger(input.activity?.recentUserMessages),
+            recentAssistantMessages: normalizeInteger(input.activity?.recentAssistantMessages),
+            recentToolCalls: normalizeInteger(input.activity?.recentToolCalls),
+            recentFailures: normalizeInteger(input.activity?.recentFailures),
+            repeatedFailureCount: normalizeInteger(input.activity?.repeatedFailureCount),
+            noProgressWindowMs: normalizeNullableInteger(input.activity?.noProgressWindowMs),
+        },
+        diagnostics: {
+            failingTests: normalizeInteger(input.diagnostics?.failingTests),
+            failingCommands: normalizeInteger(input.diagnostics?.failingCommands),
+            repeatedErrorSignatures: normalizeStringArray(input.diagnostics?.repeatedErrorSignatures),
+            uncertaintySignals: normalizeStringArray(input.diagnostics?.uncertaintySignals),
+        },
+        workState: {
+            hasPlan: normalizeBoolean(input.workState?.hasPlan),
+            todoBlocked: normalizeBoolean(input.workState?.todoBlocked),
+            diffChangedRecently: normalizeBoolean(input.workState?.diffChangedRecently),
+            onlyReadingWithoutConverging: normalizeBoolean(input.workState?.onlyReadingWithoutConverging),
+        },
+        directory: {
+            availableMasters: normalizeInteger(input.directory?.availableMasters),
+            trustedMasters: normalizeInteger(input.directory?.trustedMasters),
+            onlineMasters: normalizeInteger(input.directory?.onlineMasters),
+        },
+        candidateMasterKindHint: normalizeText(input.candidateMasterKindHint) || null,
+    };
+}
+function normalizeConfig(config) {
+    const defaults = (0, configTypes_1.createDefaultConfig)().askMaster;
+    return {
+        enabled: config?.enabled !== false,
+        triggerMode: config?.triggerMode === 'suggest' || config?.triggerMode === 'auto'
+            ? config.triggerMode
+            : 'manual',
+        trustedMasters: Array.isArray(config?.trustedMasters)
+            ? normalizeStringArray(config?.trustedMasters)
+            : [],
+        autoPolicy: {
+            minConfidence: typeof config?.autoPolicy?.minConfidence === 'number'
+                && Number.isFinite(config.autoPolicy.minConfidence)
+                ? Math.max(0, Math.min(0.99, config.autoPolicy.minConfidence))
+                : defaults.autoPolicy.minConfidence,
+            minNoProgressWindowMs: typeof config?.autoPolicy?.minNoProgressWindowMs === 'number'
+                && Number.isFinite(config.autoPolicy.minNoProgressWindowMs)
+                ? Math.max(0, Math.trunc(config.autoPolicy.minNoProgressWindowMs))
+                : defaults.autoPolicy.minNoProgressWindowMs,
+            perTraceLimit: typeof config?.autoPolicy?.perTraceLimit === 'number'
+                && Number.isFinite(config.autoPolicy.perTraceLimit)
+                ? Math.max(1, Math.trunc(config.autoPolicy.perTraceLimit))
+                : defaults.autoPolicy.perTraceLimit,
+            globalCooldownMs: typeof config?.autoPolicy?.globalCooldownMs === 'number'
+                && Number.isFinite(config.autoPolicy.globalCooldownMs)
+                ? Math.max(0, Math.trunc(config.autoPolicy.globalCooldownMs))
+                : defaults.autoPolicy.globalCooldownMs,
+            allowTrustedAutoSend: config?.autoPolicy?.allowTrustedAutoSend === true,
+        },
+    };
+}
+function normalizeMemoryState(state) {
+    return {
+        suggestedTraceIds: normalizeStringArray(state?.suggestedTraceIds).slice(-25),
+        rejectedMasterKinds: normalizeStringArray(state?.rejectedMasterKinds).slice(-25),
+        recentFailureSignatures: normalizeStringArray(state?.recentFailureSignatures).slice(-50),
+        manuallyRequestedMasterKinds: normalizeStringArray(state?.manuallyRequestedMasterKinds).slice(-25),
+    };
+}
+function determineCandidateMasterKind(observation) {
+    if (observation.candidateMasterKindHint) {
+        return observation.candidateMasterKindHint;
+    }
+    if (observation.activity.recentFailures > 0
+        || observation.activity.repeatedFailureCount > 0
+        || observation.diagnostics.failingTests > 0
+        || observation.diagnostics.failingCommands > 0
+        || observation.diagnostics.repeatedErrorSignatures.length > 0
+        || observation.diagnostics.uncertaintySignals.length > 0) {
+        return 'debug';
+    }
+    return null;
+}
+function hasSuggestSignals(observation, minNoProgressWindowMs) {
+    return observation.activity.repeatedFailureCount >= 2
+        || observation.activity.recentFailures >= 2
+        || observation.diagnostics.failingTests > 0
+        || observation.diagnostics.failingCommands > 0
+        || observation.diagnostics.repeatedErrorSignatures.length > 0
+        || observation.diagnostics.uncertaintySignals.length > 0
+        || observation.workState.todoBlocked
+        || (observation.workState.onlyReadingWithoutConverging
+            && (observation.activity.noProgressWindowMs ?? 0) >= minNoProgressWindowMs);
+}
+function intersects(left, right) {
+    if (left.length === 0 || right.length === 0) {
+        return false;
+    }
+    const rightSet = new Set(right);
+    return left.some((entry) => rightSet.has(entry));
+}
+function roundConfidence(value) {
+    return Math.round(Math.max(0.01, Math.min(0.99, value)) * 100) / 100;
+}
+function computeConfidence(config, observation) {
+    let score = 0.35;
+    if (observation.activity.repeatedFailureCount >= 2)
+        score += 0.2;
+    if (observation.activity.recentFailures >= 2)
+        score += 0.1;
+    if (observation.diagnostics.failingTests > 0)
+        score += 0.1;
+    if (observation.diagnostics.failingCommands > 0)
+        score += 0.1;
+    if (observation.diagnostics.repeatedErrorSignatures.length > 0)
+        score += 0.1;
+    if (observation.diagnostics.uncertaintySignals.length > 0)
+        score += 0.05;
+    if (observation.workState.todoBlocked)
+        score += 0.05;
+    if (observation.workState.onlyReadingWithoutConverging
+        && (observation.activity.noProgressWindowMs ?? 0) >= config.autoPolicy.minNoProgressWindowMs) {
+        score += 0.05;
+    }
+    if (observation.directory.trustedMasters > 0 || config.trustedMasters.length > 0) {
+        score += 0.05;
+    }
+    return roundConfidence(score);
+}
+function createMasterTriggerMemoryState() {
+    return {
+        suggestedTraceIds: [],
+        rejectedMasterKinds: [],
+        recentFailureSignatures: [],
+        manuallyRequestedMasterKinds: [],
+    };
+}
+function mergeMasterTriggerMemoryStates(...states) {
+    return normalizeMemoryState({
+        suggestedTraceIds: states.flatMap((state) => normalizeMemoryState(state).suggestedTraceIds),
+        rejectedMasterKinds: states.flatMap((state) => normalizeMemoryState(state).rejectedMasterKinds),
+        recentFailureSignatures: states.flatMap((state) => normalizeMemoryState(state).recentFailureSignatures),
+        manuallyRequestedMasterKinds: states.flatMap((state) => normalizeMemoryState(state).manuallyRequestedMasterKinds),
+    });
+}
+async function collectAndEvaluateMasterTrigger(input) {
+    const config = normalizeConfig(input.config);
+    if (!config.enabled) {
+        return {
+            collected: false,
+            observation: null,
+            decision: {
+                action: 'no_action',
+                reason: 'Ask Master is disabled by local config.',
+            },
+        };
+    }
+    const collectedObservation = await input.collectObservation();
+    const observation = normalizeObservation(collectedObservation);
+    return {
+        collected: true,
+        observation,
+        decision: evaluateMasterTrigger({
+            config,
+            observation,
+            suppression: input.suppression,
+        }),
+    };
+}
+function evaluateMasterTrigger(input) {
+    const config = normalizeConfig(input.config);
+    if (!config.enabled) {
+        return {
+            action: 'no_action',
+            reason: 'Ask Master is disabled by local config.',
+        };
+    }
+    const observation = normalizeObservation(input.observation);
+    const suppression = normalizeMemoryState(input.suppression);
+    if (observation.userIntent.explicitlyAskedForMaster) {
+        return {
+            action: 'manual_requested',
+            reason: 'User explicitly requested Ask Master.',
+        };
+    }
+    if (observation.userIntent.explicitlyRejectedSuggestion) {
+        return {
+            action: 'no_action',
+            reason: 'User explicitly rejected Ask Master suggestion.',
+        };
+    }
+    if (observation.userIntent.explicitlyRejectedAutoAsk && config.triggerMode === 'auto') {
+        return {
+            action: 'no_action',
+            reason: 'User explicitly rejected automatic Ask Master escalation.',
+        };
+    }
+    if (observation.directory.onlineMasters < 1 || observation.directory.availableMasters < 1) {
+        return {
+            action: 'no_action',
+            reason: 'No online Master is currently available.',
+        };
+    }
+    if (config.triggerMode === 'manual') {
+        return {
+            action: 'no_action',
+            reason: 'Ask Master trigger mode is manual.',
+        };
+    }
+    const candidateMasterKind = determineCandidateMasterKind(observation);
+    if (observation.traceId && suppression.suggestedTraceIds.includes(observation.traceId)) {
+        return {
+            action: 'no_action',
+            reason: 'This trace was already suggested for Ask Master.',
+        };
+    }
+    if (candidateMasterKind && suppression.rejectedMasterKinds.includes(candidateMasterKind)) {
+        return {
+            action: 'no_action',
+            reason: 'The same Master kind was rejected recently.',
+        };
+    }
+    if (candidateMasterKind && suppression.manuallyRequestedMasterKinds.includes(candidateMasterKind)) {
+        return {
+            action: 'no_action',
+            reason: 'A manual Ask Master was already requested for this Master kind.',
+        };
+    }
+    if (intersects(observation.diagnostics.repeatedErrorSignatures, suppression.recentFailureSignatures)) {
+        return {
+            action: 'no_action',
+            reason: 'This failure signature was already suggested recently.',
+        };
+    }
+    if (!hasSuggestSignals(observation, config.autoPolicy.minNoProgressWindowMs)) {
+        return {
+            action: 'no_action',
+            reason: 'Current signals do not justify Ask Master yet.',
+        };
+    }
+    const confidence = computeConfidence(config, observation);
+    if (config.triggerMode === 'auto'
+        && observation.directory.trustedMasters > 0
+        && confidence >= config.autoPolicy.minConfidence) {
+        return {
+            action: 'auto_candidate',
+            reason: 'Repeated failures and a trusted Master make automatic Ask Master entry viable.',
+            confidence,
+            candidateMasterKind,
+        };
+    }
+    return {
+        action: 'suggest',
+        reason: 'Repeated failures and low progress make Ask Master worthwhile.',
+        confidence,
+        candidateMasterKind,
+    };
+}
+function recordMasterTriggerOutcome(input) {
+    const state = normalizeMemoryState(input.state);
+    const observation = normalizeObservation(input.observation);
+    const candidateMasterKind = normalizeText(('candidateMasterKind' in input.decision ? input.decision.candidateMasterKind : '') || observation.candidateMasterKindHint) || determineCandidateMasterKind(observation);
+    const next = normalizeMemoryState(state);
+    if ((observation.userIntent.explicitlyRejectedSuggestion || observation.userIntent.explicitlyRejectedAutoAsk)
+        && candidateMasterKind) {
+        next.rejectedMasterKinds = normalizeStringArray([
+            ...next.rejectedMasterKinds,
+            candidateMasterKind,
+        ]).slice(-25);
+    }
+    if (input.decision.action === 'manual_requested' && candidateMasterKind) {
+        next.manuallyRequestedMasterKinds = normalizeStringArray([
+            ...next.manuallyRequestedMasterKinds,
+            candidateMasterKind,
+        ]).slice(-25);
+    }
+    if (input.decision.action === 'suggest' || input.decision.action === 'auto_candidate') {
+        if (observation.traceId) {
+            next.suggestedTraceIds = normalizeStringArray([
+                ...next.suggestedTraceIds,
+                observation.traceId,
+            ]).slice(-25);
+        }
+        next.recentFailureSignatures = normalizeStringArray([
+            ...next.recentFailureSignatures,
+            ...observation.diagnostics.repeatedErrorSignatures,
+        ]).slice(-50);
+    }
+    return next;
+}

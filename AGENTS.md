@@ -9,3 +9,5 @@
 - For every modification or newly added feature, create one commit.
 - Before committing, make sure the relevant local tests or verification steps pass for your changes.
 - When merging completed work into `main`, use `git merge --no-ff` to preserve the feature merge point.
+- MetaBot storage and directory layout changes must follow `docs/superpowers/specs/2026-04-23-metabot-storage-layout-v2-design.md`.
+- Do not introduce new code or documentation that depends on the legacy `.metabot/hot` layout unless you are explicitly documenting historical behavior.

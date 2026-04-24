@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -11,13 +12,14 @@ const {
   createMetabotSubsidyStep,
   createLocalIdentitySyncStep,
 } = require('../../dist/core/bootstrap/localIdentityBootstrap.js');
+const { ensureProfileWorkspace } = require('../../dist/core/identity/profileWorkspace.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretStore.js');
 
 const FIXTURE_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
 test('createLocalMetabotStep persists the first local identity with pending bootstrap state', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-bootstrap-local-'));
+  const homeDir = await createProfileHome('metabot-bootstrap-local-');
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const secretStore = createFileSecretStore(homeDir);
 
@@ -45,7 +47,7 @@ test('createLocalMetabotStep persists the first local identity with pending boot
 });
 
 test('createMetabotSubsidyStep persists claimed subsidy state after a successful reward flow', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-bootstrap-subsidy-'));
+  const homeDir = await createProfileHome('metabot-bootstrap-subsidy-');
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const secretStore = createFileSecretStore(homeDir);
 
@@ -79,7 +81,7 @@ test('createMetabotSubsidyStep persists claimed subsidy state after a successful
 });
 
 test('createLocalIdentitySyncStep persists name first and retries chatpubkey without duplicating the name pin', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-bootstrap-sync-'));
+  const homeDir = await createProfileHome('metabot-bootstrap-sync-');
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const secretStore = createFileSecretStore(homeDir);
 
@@ -148,4 +150,34 @@ test('createLocalIdentitySyncStep persists name first and retries chatpubkey wit
   assert.equal(stateAfterSecondAttempt.identity.chatPublicKeyPinId, '/info/chatpubkey-pin-3');
   assert.equal(stateAfterSecondAttempt.identity.syncState, 'synced');
   assert.equal(stateAfterSecondAttempt.identity.syncError, null);
+});
+
+test('ensureProfileWorkspace creates the required workspace files and eager runtime directories', async () => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-profile-workspace-'));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', 'alice');
+
+  await ensureProfileWorkspace({
+    homeDir,
+    name: 'Alice',
+  });
+
+  for (const relativePath of [
+    'AGENTS.md',
+    'SOUL.md',
+    'IDENTITY.md',
+    'USER.md',
+    'MEMORY.md',
+    'memory',
+    '.runtime',
+    '.runtime/sessions',
+    '.runtime/evolution',
+    '.runtime/exports',
+    '.runtime/state',
+    '.runtime/locks',
+    '.runtime/config.json',
+  ]) {
+    const targetPath = path.join(homeDir, relativePath);
+    const targetStat = await stat(targetPath);
+    assert.equal(Boolean(targetStat), true, `${relativePath} should exist`);
+  }
 });

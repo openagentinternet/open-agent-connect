@@ -179,6 +179,49 @@ test('resolver renders both json and markdown outputs for codex, claude-code, an
   }
 });
 
+test('resolver renders shared-default markdown when no explicit host override is provided', () => {
+  const markdownOutput = renderResolvedSkillContract({
+    skillName: 'metabot-network-directory',
+    format: 'markdown',
+    evolutionNetworkEnabled: true,
+  });
+
+  assert.equal(markdownOutput.host, 'shared');
+  assert.equal(markdownOutput.format, 'markdown');
+  assert.equal(markdownOutput.requestedHost, undefined);
+  assert.equal(markdownOutput.resolutionMode, 'shared_default');
+  assert.match(markdownOutput.markdown, /Host: `shared`/);
+});
+
+test('resolver json rendering uses shared-default metadata when no explicit host override is provided', () => {
+  const jsonOutput = renderResolvedSkillContract({
+    skillName: 'metabot-network-directory',
+    format: 'json',
+    evolutionNetworkEnabled: true,
+  });
+
+  assert.equal(jsonOutput.host, 'shared');
+  assert.equal(jsonOutput.format, 'json');
+  assert.equal(jsonOutput.requestedHost, undefined);
+  assert.equal(jsonOutput.resolutionMode, 'shared_default');
+  assert.equal(jsonOutput.contract.skillName, 'metabot-network-directory');
+});
+
+test('resolver json rendering reports host_override metadata for explicit hosts', () => {
+  const jsonOutput = renderResolvedSkillContract({
+    skillName: 'metabot-network-directory',
+    host: 'openclaw',
+    format: 'json',
+    evolutionNetworkEnabled: true,
+  });
+
+  assert.equal(jsonOutput.host, 'openclaw');
+  assert.equal(jsonOutput.format, 'json');
+  assert.equal(jsonOutput.requestedHost, 'openclaw');
+  assert.equal(jsonOutput.resolutionMode, 'host_override');
+  assert.equal(jsonOutput.contract.skillName, 'metabot-network-directory');
+});
+
 test('resolver markdown rendering preserves command templates with backticks and newlines', () => {
   const base = getBaseSkillContract('metabot-network-directory');
   const variant = createActiveVariantPatch(base.scope);

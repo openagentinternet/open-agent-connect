@@ -15,18 +15,23 @@ import { importPublishedEvolutionArtifact } from '../core/evolution/import/impor
 import { listImportedEvolutionArtifacts } from '../core/evolution/import/listImportedArtifacts';
 import { deriveResolvedScopeHash, searchPublishedEvolutionArtifacts } from '../core/evolution/import/searchArtifacts';
 import { adoptRemoteEvolutionArtifact } from '../core/evolution/remoteAdoption';
+import { bindHostSkills, HostSkillBindingError } from '../core/host/hostSkillBinding';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import {
   listIdentityProfiles,
   readActiveMetabotHome,
-  readActiveMetabotHomeSync,
   setActiveMetabotHome,
-  upsertIdentityProfile,
 } from '../core/identity/identityProfiles';
+import { resolveIdentityCreateProfileHome } from '../core/identity/profileWorkspace';
+import { resolveProfileNameMatch } from '../core/identity/profileNameResolution';
 import { renderResolvedSkillContract } from '../core/skills/skillResolver';
-import type { SkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
+import type { ConcreteSkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
 import type { SkillActiveVariantRef } from '../core/evolution/types';
 import { resolveMetabotPaths } from '../core/state/paths';
+import {
+  normalizeSystemHomeDir as normalizeSelectedSystemHomeDir,
+  resolveMetabotHomeSelectionSync,
+} from '../core/state/homeSelection';
 import {
   createRuntimeStateStore,
   type RuntimeDaemonRecord,
@@ -57,6 +62,7 @@ const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
 const TEST_FAKE_MASTER_REPLY_ENV = 'METABOT_TEST_FAKE_MASTER_REPLY';
+const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
@@ -539,17 +545,42 @@ export function buildDaemonConfigHash(
     .digest('hex');
 }
 
-function normalizeHomeDir(env: NodeJS.ProcessEnv, cwd: string): string {
-  const explicit = typeof env.METABOT_HOME === 'string' ? env.METABOT_HOME.trim() : '';
-  if (explicit) return explicit;
-  const systemHomeDir = normalizeSystemHomeDir(env, cwd);
-  const activeHomeDir = readActiveMetabotHomeSync(systemHomeDir);
-  return activeHomeDir || systemHomeDir;
+function normalizeHomeDir(
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+  options: { allowUnindexedExplicitHome?: boolean } = {},
+): string {
+  return resolveMetabotHomeSelectionSync({
+    env,
+    cwd,
+    allowUnindexedExplicitHome: options.allowUnindexedExplicitHome,
+  }).homeDir;
 }
 
 function normalizeSystemHomeDir(env: NodeJS.ProcessEnv, cwd: string): string {
-  const home = typeof env.HOME === 'string' ? env.HOME.trim() : '';
-  return home || cwd;
+  return normalizeSelectedSystemHomeDir(env, cwd);
+}
+
+function cloneContextWithHomeDir(context: CliRuntimeContext, homeDir: string): CliRuntimeContext {
+  return {
+    ...context,
+    env: {
+      ...context.env,
+      METABOT_HOME: homeDir,
+    },
+  };
+}
+
+function tryNormalizeHomeDir(
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+  options: { allowUnindexedExplicitHome?: boolean } = {},
+): string | null {
+  try {
+    return normalizeHomeDir(env, cwd, options);
+  } catch {
+    return null;
+  }
 }
 
 function resolveCliEntrypoint(): string {
@@ -607,8 +638,11 @@ async function isDaemonReachable(baseUrl: string): Promise<boolean> {
   }
 }
 
-async function resolveDaemonRecord(context: CliRuntimeContext): Promise<RuntimeDaemonRecord | null> {
-  const homeDir = normalizeHomeDir(context.env, context.cwd);
+async function resolveDaemonRecord(
+  context: CliRuntimeContext,
+  options: { allowUnindexedExplicitHome?: boolean } = {},
+): Promise<RuntimeDaemonRecord | null> {
+  const homeDir = normalizeHomeDir(context.env, context.cwd, options);
   const store = createRuntimeStateStore(homeDir);
   return store.readDaemon();
 }
@@ -651,7 +685,10 @@ async function stopRunningDaemon(daemonRecord: RuntimeDaemonRecord): Promise<voi
   throw new Error('Timed out while restarting the local MetaBot daemon with updated configuration.');
 }
 
-async function ensureDaemonBaseUrl(context: CliRuntimeContext): Promise<string> {
+async function ensureDaemonBaseUrl(
+  context: CliRuntimeContext,
+  options: { allowUnindexedExplicitHome?: boolean } = {},
+): Promise<string> {
   const explicitBaseUrl = typeof context.env.METABOT_DAEMON_BASE_URL === 'string'
     ? context.env.METABOT_DAEMON_BASE_URL.trim()
     : '';
@@ -659,23 +696,24 @@ async function ensureDaemonBaseUrl(context: CliRuntimeContext): Promise<string> 
     return normalizeBaseUrl(explicitBaseUrl);
   }
 
-  const daemonRecord = await resolveDaemonRecord(context);
+  const daemonRecord = await resolveDaemonRecord(context, options);
   if (daemonRecord?.baseUrl && await isDaemonReachable(daemonRecord.baseUrl)) {
     if (daemonConfigMatchesContext(daemonRecord, context)) {
       return daemonRecord.baseUrl;
     }
     await stopRunningDaemon(daemonRecord);
-    return startDetachedDaemon(context, daemonRecord);
+    return startDetachedDaemon(context, daemonRecord, options);
   }
 
-  return startDetachedDaemon(context);
+  return startDetachedDaemon(context, undefined, options);
 }
 
 async function startDetachedDaemon(
   context: CliRuntimeContext,
   preferredRecord?: RuntimeDaemonRecord | null,
+  options: { allowUnindexedExplicitHome?: boolean } = {},
 ): Promise<string> {
-  const homeDir = normalizeHomeDir(context.env, context.cwd);
+  const homeDir = normalizeHomeDir(context.env, context.cwd, options);
   const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
   const store = createRuntimeStateStore(homeDir);
   const expectedConfigHash = buildDaemonConfigHash(context.env);
@@ -700,6 +738,7 @@ async function startDetachedDaemon(
         ...context.env,
         HOME: systemHomeDir,
         METABOT_HOME: homeDir,
+        ...(options.allowUnindexedExplicitHome ? { [ALLOW_UNINDEXED_HOME_ENV]: '1' } : {}),
         [DAEMON_PREFERRED_PORT_ENV]: String(
           parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
           ?? staleRecord?.port
@@ -730,9 +769,10 @@ async function requestJson<T>(
   context: CliRuntimeContext,
   method: 'GET' | 'POST' | 'DELETE',
   routePath: string,
-  body?: Record<string, unknown>
+  body?: Record<string, unknown>,
+  options: { allowUnindexedExplicitHome?: boolean } = {},
 ): Promise<MetabotCommandResult<T>> {
-  const baseUrl = await ensureDaemonBaseUrl(context);
+  const baseUrl = await ensureDaemonBaseUrl(context, options);
   const response = await fetch(`${baseUrl}${routePath}`, {
     method,
     headers: body ? { 'content-type': 'application/json' } : undefined,
@@ -1253,56 +1293,83 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       run: async () => requestJson(context, 'GET', '/api/doctor'),
     },
     identity: {
-      create: async (input) => requestJson(context, 'POST', '/api/identity/create', input),
-      who: async () => {
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
+      create: async (input) => {
+        const normalizedName = normalizeEnvText(input.name);
+        if (!normalizedName) {
+          return commandFailed('missing_name', 'MetaBot identity name is required.');
+        }
+
         const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-        const runtimeStateStore = createRuntimeStateStore(homeDir);
-        const state = await runtimeStateStore.readState();
-        if (!state.identity) {
+        const explicitHomeDir = normalizeEnvText(context.env.METABOT_HOME)
+          ? tryNormalizeHomeDir(context.env, context.cwd, {
+            allowUnindexedExplicitHome: true,
+          })
+          : null;
+        const activeHomeDir = await readActiveMetabotHome(systemHomeDir);
+        let targetHomeDir: string | null = null;
+        if (explicitHomeDir) {
+          const explicitState = await createRuntimeStateStore(explicitHomeDir).readState();
+          if (explicitState.identity || explicitHomeDir === activeHomeDir) {
+            targetHomeDir = explicitHomeDir;
+          }
+        }
+
+        if (!targetHomeDir) {
+          const profiles = await listIdentityProfiles(systemHomeDir);
+          const resolvedHome = resolveIdentityCreateProfileHome({
+            systemHomeDir,
+            requestedName: normalizedName,
+            profiles,
+          });
+          if (resolvedHome.status === 'duplicate') {
+            return commandFailed('identity_name_taken', resolvedHome.message);
+          }
+          targetHomeDir = resolvedHome.homeDir;
+        }
+
+        return requestJson(
+          cloneContextWithHomeDir(context, targetHomeDir),
+          'POST',
+          '/api/identity/create',
+          input,
+          {
+            allowUnindexedExplicitHome: true,
+          },
+        );
+      },
+      who: async () => {
+        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+        const activeHomeDir = await readActiveMetabotHome(systemHomeDir);
+        if (!activeHomeDir) {
           return commandFailed(
-            'identity_missing',
-            'No local MetaBot identity is loaded for the current active home.'
+            'identity_profile_not_initialized',
+            'No active profile initialized.'
           );
         }
 
-        await upsertIdentityProfile({
-          systemHomeDir,
-          name: state.identity.name,
-          homeDir,
-          globalMetaId: state.identity.globalMetaId,
-          mvcAddress: state.identity.mvcAddress,
-        });
-        await setActiveMetabotHome({
-          systemHomeDir,
-          homeDir,
-        });
+        const profiles = await listIdentityProfiles(systemHomeDir);
+        const activeProfile = profiles.find((profile) => profile.homeDir === activeHomeDir);
+        if (!activeProfile) {
+          return commandFailed(
+            'identity_profile_not_initialized',
+            'No active profile initialized.'
+          );
+        }
 
         return commandSuccess({
-          activeHomeDir: homeDir,
+          activeHomeDir,
           systemHomeDir,
-          identity: state.identity,
+          identity: {
+            name: activeProfile.name,
+            slug: activeProfile.slug,
+            aliases: activeProfile.aliases,
+            globalMetaId: activeProfile.globalMetaId,
+            mvcAddress: activeProfile.mvcAddress,
+          },
         });
       },
       list: async () => {
         const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
-        const runtimeStateStore = createRuntimeStateStore(homeDir);
-        const state = await runtimeStateStore.readState();
-        if (state.identity) {
-          await upsertIdentityProfile({
-            systemHomeDir,
-            name: state.identity.name,
-            homeDir,
-            globalMetaId: state.identity.globalMetaId,
-            mvcAddress: state.identity.mvcAddress,
-          });
-          await setActiveMetabotHome({
-            systemHomeDir,
-            homeDir,
-          });
-        }
-
         const profiles = await listIdentityProfiles(systemHomeDir);
         const activeHomeDir = await readActiveMetabotHome(systemHomeDir);
         return commandSuccess({
@@ -1319,31 +1386,22 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
 
         const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
         const profiles = await listIdentityProfiles(systemHomeDir);
-        const normalizedTarget = targetName.toLowerCase();
-        const matched = profiles.filter((profile) => profile.name.toLowerCase() === normalizedTarget);
+        const resolved = resolveProfileNameMatch(targetName, profiles);
 
-        if (matched.length === 0) {
+        if (resolved.status === 'not_found') {
           return commandFailed(
             'identity_profile_not_found',
-            `No local MetaBot profile named "${targetName}" was found.`
+            resolved.message
           );
         }
-        if (matched.length > 1) {
+        if (resolved.status === 'ambiguous') {
           return commandFailed(
             'identity_profile_ambiguous',
-            `Multiple local MetaBot profiles named "${targetName}" were found. Rename one profile before assigning.`
+            resolved.message
           );
         }
 
-        const selected = matched[0];
-        const selectedState = await createRuntimeStateStore(selected.homeDir).readState();
-        if (!selectedState.identity) {
-          return commandFailed(
-            'identity_profile_invalid',
-            `The selected profile "${selected.name}" has no local identity state in ${selected.homeDir}.`
-          );
-        }
-
+        const selected = resolved.match;
         await setActiveMetabotHome({
           systemHomeDir,
           homeDir: selected.homeDir,
@@ -1378,6 +1436,17 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       listServices: async (input) => {
         const query = input.online === undefined ? '' : `?online=${input.online ? 'true' : 'false'}`;
         return requestJson(context, 'GET', `/api/network/services${query}`);
+      },
+      listBots: async (input) => {
+        const query = new URLSearchParams();
+        if (input.online !== undefined) {
+          query.set('online', input.online ? 'true' : 'false');
+        }
+        if (typeof input.limit === 'number' && Number.isFinite(input.limit)) {
+          query.set('limit', String(Math.max(1, Math.floor(input.limit))));
+        }
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/network/bots${suffix}`);
       },
       listSources: async () => requestJson(context, 'GET', '/api/network/sources'),
       addSource: async (input) => requestJson(context, 'POST', '/api/network/sources', input),
@@ -1470,7 +1539,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           : { activeVariant: null, activeVariantSource: null };
         const rendered = renderResolvedSkillContract({
           skillName: input.skill,
-          host: input.host as SkillHost,
+          host: input.host as ConcreteSkillHost | undefined,
           format: input.format as SkillRenderFormat,
           evolutionNetworkEnabled: config.evolution_network.enabled,
           activeVariant: resolvedActiveVariant.activeVariant,
@@ -1480,6 +1549,32 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           return commandSuccess(rendered.markdown);
         }
         return commandSuccess(rendered);
+      },
+    },
+    host: {
+      bindSkills: async (input) => {
+        try {
+          const result = await bindHostSkills({
+            systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+            host: input.host,
+            env: context.env,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          if (error instanceof HostSkillBindingError) {
+            return {
+              ok: false,
+              state: 'failed',
+              code: error.code,
+              message: error.message,
+              data: error.data,
+            } as MetabotCommandResult<unknown>;
+          }
+          return commandFailed(
+            'host_skill_bind_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
       },
     },
     evolution: {
@@ -1767,12 +1862,15 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     trace: { ...defaults.trace, ...provided.trace },
     ui: { ...defaults.ui, ...provided.ui },
     skills: { ...defaults.skills, ...provided.skills },
+    host: { ...defaults.host, ...provided.host },
     evolution: { ...defaults.evolution, ...provided.evolution },
   };
 }
 
 export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'env' | 'cwd'>): Promise<never> {
-  const homeDir = normalizeHomeDir(context.env, context.cwd);
+  const homeDir = normalizeHomeDir(context.env, context.cwd, {
+    allowUnindexedExplicitHome: context.env[ALLOW_UNINDEXED_HOME_ENV] === '1',
+  });
   const paths = resolveMetabotPaths(homeDir);
   let daemonRecord: RuntimeDaemonRecord | null = null;
   const secretStore = createFileSecretStore(homeDir);
@@ -1786,6 +1884,8 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
   const callerReplyWaiter = createTestMetaWebReplyWaiter(context.env);
   const masterReplyWaiter = createTestMasterReplyWaiter(context.env) ?? createSocketIoMetaWebMasterReplyWaiter();
+  const socketPresenceApiBaseUrl = context.env.METABOT_SOCKET_PRESENCE_API_BASE_URL
+    || (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 'http://127.0.0.1:9' : undefined);
 
   const daemon = createMetabotDaemon({
     homeDirOrPaths: paths,
@@ -1796,6 +1896,10 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       secretStore,
       signer,
       chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+      socketPresenceApiBaseUrl,
+      socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+        ? 'assume_service_providers_online'
+        : 'throw',
       identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
       fetchPeerChatPublicKey,
       callerReplyWaiter,

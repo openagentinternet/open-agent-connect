@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -60,7 +61,7 @@ test('parseRatingDetailItem normalizes one /protocols/skill-service-rate row wit
 });
 
 test('refreshRatingDetailCache skips invalid rows and persists initial latest pin plus backfill cursor', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-rating-detail-sync-'));
+  const homeDir = await createProfileHome('metabot-rating-detail-sync-');
   const fetchCalls = [];
 
   try {
@@ -105,12 +106,12 @@ test('refreshRatingDetailCache skips invalid rows and persists initial latest pi
       },
     ]);
   } finally {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   }
 });
 
 test('refreshRatingDetailCache ignores already-seen pin ids and finds rating detail by serviceID plus servicePaidTx', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-rating-detail-incremental-'));
+  const homeDir = await createProfileHome('metabot-rating-detail-incremental-');
 
   try {
     const store = createRatingDetailStateStore(homeDir);
@@ -178,6 +179,6 @@ test('refreshRatingDetailCache ignores already-seen pin ids and finds rating det
       createdAt: 1_775_000_000_000,
     });
   } finally {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   }
 });

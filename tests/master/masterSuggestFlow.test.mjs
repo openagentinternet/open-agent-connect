@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
@@ -59,9 +60,9 @@ function createDebugMasterRecord() {
 }
 
 test('master suggest materializes a suggestion first, then accept_suggest enters the existing preview flow', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-suggest-flow-'));
+  const homeDir = await createProfileHome('metabot-master-suggest-flow-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const runtimeStateStore = createRuntimeStateStore(homeDir);

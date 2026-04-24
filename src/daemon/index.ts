@@ -1,5 +1,4 @@
 import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import type http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createHttpServer } from './httpServer';
@@ -48,7 +47,7 @@ async function closeServer(server: http.Server | null): Promise<void> {
 export function createMetabotDaemon(options: CreateMetabotDaemonOptions): MetabotDaemonInstance {
   const paths = resolvePaths(options.homeDirOrPaths);
   const ownerId = options.ownerId?.trim() || `metabot-daemon-${randomUUID()}`;
-  const lockPath = path.join(paths.hotRoot, 'daemon.lock');
+  const lockPath = paths.daemonLockPath;
   const handlers = options.handlers ?? {};
 
   let server: http.Server | null = null;
@@ -56,7 +55,7 @@ export function createMetabotDaemon(options: CreateMetabotDaemonOptions): Metabo
   let lockHeld = false;
 
   async function acquireLock(): Promise<void> {
-    await fs.mkdir(paths.hotRoot, { recursive: true });
+    await fs.mkdir(paths.locksRoot, { recursive: true });
     await fs.writeFile(lockPath, `${JSON.stringify({ ownerId, acquiredAt: Date.now() }, null, 2)}\n`, {
       encoding: 'utf8',
       flag: 'wx',

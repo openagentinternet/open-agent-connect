@@ -1,0 +1,10 @@
+{
+    "mappings": "GAUsC,CAA+B,CAA/B,CAEO,CAAA,CAAgB,CAAhB",
+    "sources": [
+        "stdin",
+        "../protoHeader.scrypt"
+    ],
+    "names": [],
+    "version": 3,
+    "file": "stdin"
+}

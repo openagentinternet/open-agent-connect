@@ -189,8 +189,10 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'master', summary: 'Publish, discover, ask, and inspect Ask Master flows.' },
     { name: 'services', summary: 'Publish, call, and rate remote MetaBot services.' },
     { name: 'chat', summary: 'Send encrypted private MetaWeb messages to another MetaBot.' },
+    { name: 'host', summary: 'Project shared MetaBot skills into one host-native skills root.' },
     { name: 'trace', summary: 'Watch or inspect structured remote delegation traces.' },
     { name: 'ui', summary: 'Open local human-only HTML pages backed by the MetaBot runtime.' },
+    { name: 'skills', summary: 'Resolve shared-default or host-specific skill contracts for install/runtime use.' },
   ],
   optionalFlags: [HELP_JSON_FLAG],
   examples: [
@@ -202,6 +204,88 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
 
 const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   ROOT_COMMAND_HELP,
+  {
+    commandPath: ['host'],
+    summary: 'Host projection commands for binding shared MetaBot skills into one host-native skills root.',
+    usage: 'metabot host <subcommand>',
+    subcommands: [
+      { name: 'bind-skills', summary: 'Project shared MetaBot skills into one host-native skills root.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+    examples: [
+      'metabot host bind-skills --host codex',
+      'metabot host bind-skills --host claude-code',
+      'metabot host bind-skills --host openclaw',
+    ],
+  },
+  {
+    commandPath: ['host', 'bind-skills'],
+    summary: 'Project shared MetaBot skills into one host-native skills root.',
+    usage: 'metabot host bind-skills --host <codex|claude-code|openclaw>',
+    requiredFlags: [
+      { flag: '--host', value: '<codex|claude-code|openclaw>', description: 'Target host whose native skills root should receive shared MetaBot symlinks.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+    successFields: [
+      'host',
+      'hostSkillRoot',
+      'sharedSkillRoot',
+      'boundSkills',
+      'replacedEntries',
+      'unchangedEntries',
+    ],
+    failureSemantics: [
+      'Fails with invalid_argument when --host is not one of codex, claude-code, or openclaw.',
+      'Fails with shared_skills_missing when ~/.metabot/skills has no shared metabot-* directories to bind.',
+      'Fails with host_skill_root_unresolved and returns host plus the attempted hostSkillRoot path.',
+      'Fails with host_skill_bind_failed and returns sourceSharedSkillPath plus destinationHostPath.',
+    ],
+    examples: [
+      'metabot host bind-skills --host codex',
+      'metabot host bind-skills --host claude-code',
+      'metabot host bind-skills --host openclaw',
+    ],
+  },
+  {
+    commandPath: ['skills'],
+    summary: 'Skill contract commands for shared-default resolution and explicit host compatibility rendering.',
+    usage: 'metabot skills <subcommand>',
+    subcommands: [
+      { name: 'resolve', summary: 'Render one resolved skill contract in markdown or JSON.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+    examples: [
+      'metabot skills resolve --skill metabot-network-manage --format markdown',
+      'metabot skills resolve --skill metabot-network-manage --host codex --format json',
+    ],
+  },
+  {
+    commandPath: ['skills', 'resolve'],
+    summary: 'Render one resolved skill contract using the shared-default host or an explicit compatibility host override.',
+    usage: 'metabot skills resolve --skill <skill-name> --format <json|markdown> [--host <codex|claude-code|openclaw>]',
+    requiredFlags: [
+      { flag: '--skill', value: '<skill-name>', description: 'Base skill id to resolve, such as metabot-network-manage.' },
+      { flag: '--format', value: '<json|markdown>', description: 'Output shape to render.' },
+    ],
+    optionalFlags: [
+      { flag: '--host', value: '<codex|claude-code|openclaw>', description: 'Optional compatibility override. Omit to render the shared-default contract.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'Markdown mode returns the rendered contract string.',
+      'JSON mode returns host, optional requestedHost, resolutionMode, format, and contract.',
+    ],
+    failureSemantics: [
+      'Fails when --skill or --format is omitted.',
+      'Fails when --host is present but not one of codex, claude-code, or openclaw.',
+    ],
+    examples: [
+      'metabot skills resolve --skill metabot-network-manage --format markdown',
+      'metabot skills resolve --skill metabot-network-manage --format json',
+      'metabot skills resolve --skill metabot-network-manage --host codex --format markdown',
+      'metabot skills resolve --skill metabot-network-manage --host codex --format json',
+    ],
+  },
   {
     commandPath: ['config'],
     summary: 'Read or change supported public runtime switches such as Ask Master availability.',
@@ -603,6 +687,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot network <subcommand>',
     subcommands: [
       { name: 'services', summary: 'List MetaBot services from chain discovery and local fallbacks.' },
+      { name: 'bots', summary: 'List online MetaBots from socket presence with service-directory fallback.' },
       { name: 'sources', summary: 'Manage local seeded directory sources.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
@@ -612,7 +697,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'List yellow-pages services discovered from MetaWeb and optional local source seeds.',
     usage: 'metabot network services [--online]',
     optionalFlags: [
-      { flag: '--online', description: 'Return only services whose providers currently satisfy heartbeat-based online filtering.' },
+      { flag: '--online', description: 'Return only services whose providers currently appear in the socket online-users directory.' },
       HELP_JSON_FLAG,
     ],
     successFields: [
@@ -623,6 +708,30 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot network services --online',
+    ],
+  },
+  {
+    commandPath: ['network', 'bots'],
+    summary: 'List online MetaBots from socket presence, with service-directory fallback when presence API is unavailable.',
+    usage: 'metabot network bots [--online] [--limit <n>]',
+    optionalFlags: [
+      { flag: '--online', description: 'Prefer online-only rows. Defaults to true for current public behavior.' },
+      { flag: '--limit', value: '<n>', description: 'Maximum rows to return. Supported range: 1-100. Default: 10.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'source',
+      'fallbackUsed',
+      'total',
+      'onlineWindowSeconds',
+      'bots',
+    ],
+    failureSemantics: [
+      'Fails when --limit is outside 1-100.',
+      'Socket presence read errors auto-fallback to service-directory-based online bot projection.',
+    ],
+    examples: [
+      'metabot network bots --online --limit 10',
     ],
   },
   {
@@ -822,6 +931,8 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     successFields: [
       'to',
       'path',
+      'pinId',
+      'txids',
       'payload',
       'encryptedContent',
       'peerChatPublicKey',
@@ -829,6 +940,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     failureSemantics: [
       'Fails when the local chat secret is missing or the remote MetaBot has no published chat public key.',
+      'Fails with chat_broadcast_failed when the simplemsg chain write is rejected.',
     ],
     examples: [
       'metabot chat private --request-file chat-request.json',

@@ -4,9 +4,8 @@ import type { MetabotPaths } from '../state/paths';
 import { resolveMetabotPaths } from '../state/paths';
 import type { A2ASessionRecord, A2ASessionRole, A2ATaskRunRecord } from './sessionTypes';
 import type { PublicStatus } from './publicStatus';
-import { ensureHotLayout } from '../state/runtimeStateStore';
+import { ensureRuntimeLayout } from '../state/runtimeStateStore';
 
-const SESSION_STATE_FILENAME = 'a2a-session-state.json';
 const SESSION_STATE_SCHEMA_VERSION = 1;
 const MAX_TRANSCRIPT_ITEMS = 2_000;
 const MAX_PUBLIC_STATUS_SNAPSHOTS = 1_000;
@@ -99,7 +98,7 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
       try {
         await fs.rename(filePath, corruptPath);
       } catch {
-        // Best effort quarantine so malformed hot state does not brick future reads.
+        // Best effort quarantine so malformed runtime state does not brick future reads.
       }
       return null;
     }
@@ -258,18 +257,18 @@ function normalizeState(value: A2ASessionStoreState | null): A2ASessionStoreStat
 export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): A2ASessionStateStore {
   const paths =
     typeof homeDirOrPaths === 'string' ? resolveMetabotPaths(homeDirOrPaths) : homeDirOrPaths;
-  const sessionStatePath = path.join(paths.hotRoot, SESSION_STATE_FILENAME);
+  const sessionStatePath = paths.sessionStatePath;
   const lockPath = `${sessionStatePath}.lock`;
   let pendingWrite = Promise.resolve();
 
   const runExclusive = async <T>(operation: () => Promise<T>): Promise<T> => {
     const next = pendingWrite.then(
       async () => {
-        await ensureHotLayout(paths);
+        await ensureRuntimeLayout(paths);
         return withLock(lockPath, operation);
       },
       async () => {
-        await ensureHotLayout(paths);
+        await ensureRuntimeLayout(paths);
         return withLock(lockPath, operation);
       },
     );
@@ -284,16 +283,16 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
     paths,
     sessionStatePath,
     async ensureLayout() {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       return paths;
     },
     async readState() {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       return normalizeState(await readJsonFile<A2ASessionStoreState>(sessionStatePath));
     },
     async writeState(nextState) {
       return runExclusive(async () => {
-        await ensureHotLayout(paths);
+        await ensureRuntimeLayout(paths);
         const normalized = normalizeState(nextState);
         await writeJsonFileAtomically(sessionStatePath, normalized);
         return normalized;
@@ -301,7 +300,7 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
     },
     async updateState(updater) {
       return runExclusive(async () => {
-        await ensureHotLayout(paths);
+        await ensureRuntimeLayout(paths);
         const current = normalizeState(await readJsonFile<A2ASessionStoreState>(sessionStatePath));
         const nextState = await updater(current);
         const normalized = normalizeState(nextState);

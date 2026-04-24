@@ -1,0 +1,10 @@
+{
+    "mappings": "GC6B4C,CAAyB,CAAzB,CDNA,CAAA,CAAkC,CAAlC,CACA,CAAA,CAAsB,CAAtB,CACA,CAAA,CAAsB,CAAtB,CACC,CAAA,CAAsB,CAAtB,CACA,CAAA,CAAuB,CAAvB,CACD,CAAA,CAAuB,CAAvB,CACF,CAAA,CAAsB,CAAtB",
+    "sources": [
+        "stdin",
+        "../protoheader.scrypt"
+    ],
+    "names": [],
+    "version": 3,
+    "file": "stdin"
+}

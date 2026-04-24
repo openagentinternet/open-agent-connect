@@ -19,6 +19,13 @@ const {
   validateNetworkDirectoryFixCandidate,
 } = require('../../dist/core/evolution/skills/networkDirectory/validator.js');
 
+function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  mkdirSync(homeDir, { recursive: true });
+  return homeDir;
+}
+
 function createExecutionRecord(overrides = {}) {
   return {
     executionId: 'execution-1',
@@ -370,8 +377,8 @@ test('validator rejects malformed patch value types even when keys are allowed',
 });
 
 test('orchestration service auto-adopts valid same-skill same-scope candidates into active variants', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-network-evolution-service-'));
-  const configPath = path.join(homeDir, '.metabot', 'hot', 'config.json');
+  const homeDir = createProfileHome('metabot-network-evolution-service-');
+  const configPath = path.join(homeDir, '.runtime', 'config.json');
   mkdirSync(path.dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify({
     evolution_network: {
@@ -423,8 +430,8 @@ test('orchestration service auto-adopts valid same-skill same-scope candidates i
 });
 
 test('orchestration service skips all side effects when autoRecordExecutions is false', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-network-evolution-no-record-'));
-  const configPath = path.join(homeDir, '.metabot', 'hot', 'config.json');
+  const homeDir = createProfileHome('metabot-network-evolution-no-record-');
+  const configPath = path.join(homeDir, '.runtime', 'config.json');
   mkdirSync(path.dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify({
     evolution_network: {
@@ -457,15 +464,15 @@ test('orchestration service skips all side effects when autoRecordExecutions is 
   assert.equal(result.artifactId, null);
   assert.equal(result.adoptedVariantId, null);
 
-  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'index.json')), false);
-  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'executions')), false);
-  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'analyses')), false);
-  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'artifacts')), false);
+  assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'index.json')), false);
+  assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'executions')), false);
+  assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'analyses')), false);
+  assert.equal(existsSync(path.join(homeDir, '.runtime', 'evolution', 'artifacts')), false);
 });
 
 test('orchestration service generates unique execution IDs across fresh service instances in one process', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-network-evolution-id-uniqueness-'));
-  const configPath = path.join(homeDir, '.metabot', 'hot', 'config.json');
+  const homeDir = createProfileHome('metabot-network-evolution-id-uniqueness-');
+  const configPath = path.join(homeDir, '.runtime', 'config.json');
   mkdirSync(path.dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify({
     evolution_network: {

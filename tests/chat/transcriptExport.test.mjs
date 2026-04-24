@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -9,11 +9,20 @@ const require = createRequire(import.meta.url);
 const {
   buildSessionTrace,
 } = require('../../dist/core/chat/sessionTrace.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const {
   exportSessionArtifacts,
 } = require('../../dist/core/chat/transcriptExport.js');
 
+function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  mkdirSync(homeDir, { recursive: true });
+  return homeDir;
+}
+
 function createTimeoutTrace(homeDir) {
+  const paths = resolveMetabotPaths(homeDir);
   return buildSessionTrace({
     traceId: 'trace-a2a-timeout-2',
     channel: 'a2a',
@@ -48,12 +57,12 @@ function createTimeoutTrace(homeDir) {
       providerName: 'Weather Oracle',
       servicePinId: 'service-weather',
     },
-    exportRoot: path.join(homeDir, '.metabot', 'exports'),
+    exportRoot: paths.exportsRoot,
   });
 }
 
 test('exportSessionArtifacts renders caller/remote identity and timeout semantics without hiding pending clarification flow', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-chat-export-'));
+  const homeDir = createProfileHome('metabot-chat-export-');
   const trace = createTimeoutTrace(homeDir);
 
   const artifacts = await exportSessionArtifacts({

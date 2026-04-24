@@ -8,37 +8,75 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 
-async function withTempHome(action, options = {}) {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-config-'));
+async function withTempProfileHome(action, options = {}) {
+  const systemHome = await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-config-'));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', 'test-profile');
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
   const previousHome = process.env.METABOT_HOME;
+  const previousSystemHome = process.env.HOME;
   const previousInternalAuto = process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
-  process.env.METABOT_HOME = tempDir;
+  await fs.mkdir(homeDir, { recursive: true });
+  await fs.mkdir(managerRoot, { recursive: true });
+  const now = Date.now();
+  await fs.writeFile(
+    path.join(managerRoot, 'identity-profiles.json'),
+    `${JSON.stringify({
+      profiles: [
+        {
+          name: 'Test Profile',
+          slug: 'test-profile',
+          aliases: ['test profile', 'test-profile'],
+          homeDir,
+          globalMetaId: '',
+          mvcAddress: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    }, null, 2)}\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(managerRoot, 'active-home.json'),
+    `${JSON.stringify({ homeDir, updatedAt: now }, null, 2)}\n`,
+    'utf8',
+  );
+
+  process.env.HOME = systemHome;
+  process.env.METABOT_HOME = homeDir;
   if (options.allowInternalAuto) {
     process.env.METABOT_INTERNAL_ASK_MASTER_AUTO = '1';
   } else {
     delete process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
   }
   try {
-    await action(tempDir);
+    await action(homeDir);
   } finally {
     if (previousHome === undefined) {
       delete process.env.METABOT_HOME;
     } else {
       process.env.METABOT_HOME = previousHome;
     }
+    if (previousSystemHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousSystemHome;
+    }
     if (previousInternalAuto === undefined) {
       delete process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
     } else {
       process.env.METABOT_INTERNAL_ASK_MASTER_AUTO = previousInternalAuto;
     }
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(systemHome, { recursive: true, force: true });
   }
 }
 
 test('createConfigStore defaults to evolution_network enabled true and persists updates', async () => {
-  await withTempHome(async () => {
+  await withTempProfileHome(async (homeDir) => {
     const store = createConfigStore();
     const defaults = await store.read();
+    assert.equal(store.paths.configPath, path.join(homeDir, '.runtime', 'config.json'));
+    assert.deepEqual(JSON.parse(await fs.readFile(store.paths.configPath, 'utf8')), defaults);
     assert.strictEqual(defaults.evolution_network.enabled, true);
     assert.strictEqual(defaults.evolution_network.autoRecordExecutions, true);
     assert.deepEqual(defaults.askMaster, {
@@ -85,7 +123,7 @@ test('createConfigStore defaults to evolution_network enabled true and persists 
 });
 
 test('read merges defaults when config fields are missing', async () => {
-  await withTempHome(async () => {
+  await withTempProfileHome(async () => {
     const store = createConfigStore();
     await store.ensureLayout();
     const partial = {
@@ -121,7 +159,7 @@ test('read merges defaults when config fields are missing', async () => {
 });
 
 test('read ignores non-boolean config values and falls back to defaults', async () => {
-  await withTempHome(async () => {
+  await withTempProfileHome(async () => {
     const store = createConfigStore();
     await store.ensureLayout();
     const invalid = {
@@ -159,7 +197,7 @@ test('read ignores non-boolean config values and falls back to defaults', async 
 });
 
 test('read throws when config file contains malformed JSON', async () => {
-  await withTempHome(async () => {
+  await withTempProfileHome(async () => {
     const store = createConfigStore();
     await store.ensureLayout();
     await fs.writeFile(store.paths.configPath, '{ not json', 'utf8');
@@ -168,7 +206,7 @@ test('read throws when config file contains malformed JSON', async () => {
 });
 
 test('set normalizes partial askMaster autoPolicy when callers omit new phase-3 fields', async () => {
-  await withTempHome(async () => {
+  await withTempProfileHome(async () => {
     const store = createConfigStore();
     await store.set({
       evolution_network: {
@@ -201,7 +239,7 @@ test('set normalizes partial askMaster autoPolicy when callers omit new phase-3 
 });
 
 test('set preserves internal auto triggerMode when the internal override is enabled', async () => {
-  await withTempHome(async () => {
+  await withTempProfileHome(async () => {
     const store = createConfigStore();
     await store.set({
       evolution_network: {

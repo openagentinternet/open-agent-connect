@@ -4,3 +4,8 @@ dist/
 .DS_Store
 coverage/
 *.log
+
+!skillpacks/**/runtime/dist/
+!skillpacks/**/runtime/dist/**
+!skillpacks/**/runtime/node_modules/
+!skillpacks/**/runtime/node_modules/**

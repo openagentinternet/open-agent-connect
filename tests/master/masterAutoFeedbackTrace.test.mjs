@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
@@ -171,7 +172,7 @@ function buildSuggestInput(traceId, overrides = {}) {
 }
 
 async function createAutoHarness(options = {}) {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-auto-feedback-'));
+  const homeDir = await createProfileHome('metabot-master-auto-feedback-');
   const identityPair = createIdentityPair();
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const masterStateStore = createPublishedMasterStateStore(homeDir);
@@ -292,7 +293,7 @@ async function createAutoHarness(options = {}) {
 test('rejecting an auto preview updates feedback state, trace artifacts, and suppression consistently', async (t) => {
   const harness = await createAutoHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const preview = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-feedback-reject'));
@@ -351,7 +352,7 @@ test('rejecting an auto preview updates feedback state, trace artifacts, and sup
 test('prepared auto previews do not create persisted cross-trace suppression before feedback lands', async (t) => {
   const harness = await createAutoHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const preview = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-feedback-prepared-1'));
@@ -382,7 +383,7 @@ test('auto direct-send timeouts persist timed_out feedback and re-export trace a
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-feedback-timeout', {

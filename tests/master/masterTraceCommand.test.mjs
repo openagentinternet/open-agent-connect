@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,6 +17,13 @@ const {
 const { buildSessionTrace } = require('../../dist/core/chat/sessionTrace.js');
 const { buildMasterRequestJson, parseMasterRequest } = require('../../dist/core/master/masterMessageSchema.js');
 const { buildMasterTraceMetadata } = require('../../dist/core/master/masterTrace.js');
+
+async function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  await mkdir(homeDir, { recursive: true });
+  return homeDir;
+}
 
 function parseOutput(chunks) {
   return JSON.parse(chunks.join('').trim());
@@ -64,7 +71,7 @@ function buildRequest(traceId, requestId) {
 }
 
 test('master trace reads ask master semantics instead of private chat wording', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-trace-command-'));
+  const homeDir = await createProfileHome('metabot-master-trace-command-');
   t.after(async () => {
     await rm(homeDir, { recursive: true, force: true });
   });
@@ -94,7 +101,7 @@ test('master trace reads ask master semantics instead of private chat wording', 
       buildSessionTrace({
         traceId,
         channel: 'a2a',
-        exportRoot: runtimeStateStore.paths.exportRoot,
+        exportRoot: runtimeStateStore.paths.exportsRoot,
         session: {
           id: `master-${traceId}`,
           title: 'Official Debug Master Ask',
@@ -188,7 +195,7 @@ test('master trace reads ask master semantics instead of private chat wording', 
 });
 
 test('master trace renders suggested ask master traces before confirmation', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-trace-suggested-command-'));
+  const homeDir = await createProfileHome('metabot-master-trace-suggested-command-');
   t.after(async () => {
     await rm(homeDir, { recursive: true, force: true });
   });
@@ -215,7 +222,7 @@ test('master trace renders suggested ask master traces before confirmation', asy
       buildSessionTrace({
         traceId,
         channel: 'a2a',
-        exportRoot: runtimeStateStore.paths.exportRoot,
+        exportRoot: runtimeStateStore.paths.exportsRoot,
         session: {
           id: `master-${traceId}`,
           title: 'Official Debug Master Ask',
@@ -286,7 +293,7 @@ test('master trace renders suggested ask master traces before confirmation', asy
 });
 
 test('master trace retains ask master metadata after caller trace artifacts are rebuilt', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-trace-rebuild-'));
+  const homeDir = await createProfileHome('metabot-master-trace-rebuild-');
   t.after(async () => {
     await rm(homeDir, { recursive: true, force: true });
   });
@@ -299,7 +306,7 @@ test('master trace retains ask master metadata after caller trace artifacts are 
   const baseTrace = buildSessionTrace({
     traceId,
     channel: 'a2a',
-    exportRoot: runtimeStateStore.paths.exportRoot,
+    exportRoot: runtimeStateStore.paths.exportsRoot,
     createdAt: 1_776_000_000_000,
     session: {
       id: `master-${traceId}`,
@@ -465,7 +472,7 @@ test('master trace retains ask master metadata after caller trace artifacts are 
 });
 
 test('master trace renders completed ask master traces that originated from an accepted suggestion', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-trace-suggest-completed-command-'));
+  const homeDir = await createProfileHome('metabot-master-trace-suggest-completed-command-');
   t.after(async () => {
     await rm(homeDir, { recursive: true, force: true });
   });
@@ -493,7 +500,7 @@ test('master trace renders completed ask master traces that originated from an a
       buildSessionTrace({
         traceId,
         channel: 'a2a',
-        exportRoot: runtimeStateStore.paths.exportRoot,
+        exportRoot: runtimeStateStore.paths.exportsRoot,
         session: {
           id: `master-${traceId}`,
           title: 'Official Debug Master Ask',
@@ -572,7 +579,7 @@ test('master trace renders completed ask master traces that originated from an a
 });
 
 test('master trace exposes auto metadata and declined display state for rejected auto previews', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-trace-auto-command-'));
+  const homeDir = await createProfileHome('metabot-master-trace-auto-command-');
   t.after(async () => {
     await rm(homeDir, { recursive: true, force: true });
   });
@@ -599,7 +606,7 @@ test('master trace exposes auto metadata and declined display state for rejected
       buildSessionTrace({
         traceId,
         channel: 'a2a',
-        exportRoot: runtimeStateStore.paths.exportRoot,
+        exportRoot: runtimeStateStore.paths.exportsRoot,
         session: {
           id: `master-${traceId}`,
           title: 'Official Debug Master Ask',

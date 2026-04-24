@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { receivePrivateChat } = require('../../dist/core/chat/privateChat.js');
@@ -143,7 +144,7 @@ function buildReviewSuggestInput(traceId) {
 }
 
 async function createHarness(options = {}) {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-trusted-auto-review-e2e-'));
+  const homeDir = await createProfileHome('metabot-master-trusted-auto-review-e2e-');
   const identityPair = createIdentityPair();
   const configStore = createConfigStore(homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(homeDir);
@@ -271,7 +272,7 @@ async function createHarness(options = {}) {
 test('trusted non-sensitive auto flow selects the review master for review-checkpoint signals and sends directly', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildReviewSuggestInput('trace-master-auto-review-direct'));
@@ -317,7 +318,7 @@ test('configured trustedMasters can unlock direct send for a non-official review
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildReviewSuggestInput('trace-master-auto-review-trusted-list'));

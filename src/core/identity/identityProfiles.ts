@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
+import {
+  buildProfileAliases,
+  generateProfileSlug,
+} from './profileNameResolution';
 
 const MANAGER_DIR = 'manager';
 const PROFILES_FILE = 'identity-profiles.json';
@@ -14,6 +18,8 @@ export interface IdentityManagerPaths {
 
 export interface IdentityProfileRecord {
   name: string;
+  slug: string;
+  aliases: string[];
   homeDir: string;
   globalMetaId: string;
   mvcAddress: string;
@@ -43,7 +49,37 @@ function normalizeRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-function normalizeProfileRecord(value: unknown): IdentityProfileRecord | null {
+function resolveProfilesRoot(systemHomeDir: string): string {
+  return path.join(path.resolve(systemHomeDir), '.metabot', 'profiles');
+}
+
+function resolveCanonicalProfileHome(systemHomeDir: string, slug: string): string {
+  return path.join(resolveProfilesRoot(systemHomeDir), slug);
+}
+
+function isCanonicalProfileHome(systemHomeDir: string, homeDir: string): boolean {
+  return path.dirname(homeDir) === resolveProfilesRoot(systemHomeDir);
+}
+
+function normalizeAliases(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+      .map((entry) => normalizeText(entry))
+      .filter(Boolean)
+    : [];
+}
+
+function resolveStableProfileSlug(
+  systemHomeDir: string,
+  profile: { name: string; slug?: string; homeDir: string },
+): string {
+  if (isCanonicalProfileHome(systemHomeDir, profile.homeDir)) {
+    return path.basename(profile.homeDir);
+  }
+  return normalizeText(profile.slug) || generateProfileSlug(profile.name);
+}
+
+function normalizeProfileRecord(systemHomeDir: string, value: unknown): IdentityProfileRecord | null {
   const record = normalizeRecord(value);
   if (!record) {
     return null;
@@ -51,18 +87,30 @@ function normalizeProfileRecord(value: unknown): IdentityProfileRecord | null {
 
   const name = normalizeText(record.name);
   const homeDirRaw = normalizeText(record.homeDir);
-  const homeDir = homeDirRaw ? path.resolve(homeDirRaw) : '';
+  const resolvedHomeDir = homeDirRaw ? path.resolve(homeDirRaw) : '';
+  const recordSlug = normalizeText(record.slug);
   const globalMetaId = normalizeText(record.globalMetaId);
   const mvcAddress = normalizeText(record.mvcAddress);
+  const existingAliases = normalizeAliases(record.aliases);
   const createdAt = toFiniteNumber(record.createdAt) ?? Date.now();
   const updatedAt = toFiniteNumber(record.updatedAt) ?? createdAt;
 
-  if (!name || !homeDir) {
+  if (!name || !resolvedHomeDir) {
     return null;
   }
 
+  const slug = resolveStableProfileSlug(systemHomeDir, {
+    name,
+    slug: recordSlug,
+    homeDir: resolvedHomeDir,
+  });
+  const aliases = buildProfileAliases(name, slug, existingAliases);
+  const homeDir = resolveCanonicalProfileHome(systemHomeDir, slug);
+
   return {
     name,
+    slug,
+    aliases,
     homeDir,
     globalMetaId,
     mvcAddress,
@@ -80,7 +128,25 @@ function sortProfiles(profiles: IdentityProfileRecord[]): IdentityProfileRecord[
   });
 }
 
-function normalizeProfilesState(value: unknown): IdentityProfilesState {
+function reserveUniqueProfileSlug(slug: string, usedSlugs: Set<string>): string {
+  if (!usedSlugs.has(slug)) {
+    usedSlugs.add(slug);
+    return slug;
+  }
+
+  const match = slug.match(/^(.*?)-(\d+)$/);
+  const baseSlug = match?.[1] || slug;
+  let suffix = 2;
+  while (usedSlugs.has(`${baseSlug}-${suffix}`)) {
+    suffix += 1;
+  }
+
+  const uniqueSlug = `${baseSlug}-${suffix}`;
+  usedSlugs.add(uniqueSlug);
+  return uniqueSlug;
+}
+
+function normalizeProfilesState(systemHomeDir: string, value: unknown): IdentityProfilesState {
   const record = normalizeRecord(value);
   if (!record) {
     return { profiles: [] };
@@ -88,20 +154,23 @@ function normalizeProfilesState(value: unknown): IdentityProfilesState {
 
   const profiles = Array.isArray(record.profiles)
     ? record.profiles
-      .map((entry) => normalizeProfileRecord(entry))
+      .map((entry) => normalizeProfileRecord(systemHomeDir, entry))
       .filter((entry): entry is IdentityProfileRecord => Boolean(entry))
     : [];
 
-  const dedupedByHome = new Map<string, IdentityProfileRecord>();
-  for (const profile of profiles) {
-    const current = dedupedByHome.get(profile.homeDir);
-    if (!current || profile.updatedAt >= current.updatedAt) {
-      dedupedByHome.set(profile.homeDir, profile);
-    }
-  }
+  const usedSlugs = new Set<string>();
+  const normalizedProfiles = sortProfiles(profiles).map((profile) => {
+    const uniqueSlug = reserveUniqueProfileSlug(profile.slug, usedSlugs);
+    return {
+      ...profile,
+      slug: uniqueSlug,
+      aliases: buildProfileAliases(profile.name, uniqueSlug, profile.aliases),
+      homeDir: resolveCanonicalProfileHome(systemHomeDir, uniqueSlug),
+    };
+  });
 
   return {
-    profiles: sortProfiles([...dedupedByHome.values()]),
+    profiles: sortProfiles(normalizedProfiles),
   };
 }
 
@@ -122,6 +191,10 @@ async function ensureManagerRoot(paths: IdentityManagerPaths): Promise<void> {
   await fsp.mkdir(paths.managerRoot, { recursive: true });
 }
 
+function serializeProfilesState(state: IdentityProfilesState): string {
+  return `${JSON.stringify(state, null, 2)}\n`;
+}
+
 export function resolveIdentityManagerPaths(systemHomeDir: string): IdentityManagerPaths {
   const normalizedSystemHome = normalizeText(systemHomeDir);
   if (!normalizedSystemHome) {
@@ -140,7 +213,11 @@ export async function readIdentityProfilesState(systemHomeDir: string): Promise<
   const paths = resolveIdentityManagerPaths(systemHomeDir);
   await ensureManagerRoot(paths);
   const parsed = await readJsonFile<unknown>(paths.profilesPath);
-  return normalizeProfilesState(parsed);
+  const normalized = normalizeProfilesState(systemHomeDir, parsed);
+  if (parsed !== null && JSON.stringify(parsed) !== JSON.stringify(normalized)) {
+    await fsp.writeFile(paths.profilesPath, serializeProfilesState(normalized), 'utf8');
+  }
+  return normalized;
 }
 
 async function writeIdentityProfilesState(
@@ -149,8 +226,8 @@ async function writeIdentityProfilesState(
 ): Promise<IdentityProfilesState> {
   const paths = resolveIdentityManagerPaths(systemHomeDir);
   await ensureManagerRoot(paths);
-  const normalized = normalizeProfilesState(state);
-  await fsp.writeFile(paths.profilesPath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
+  const normalized = normalizeProfilesState(systemHomeDir, state);
+  await fsp.writeFile(paths.profilesPath, serializeProfilesState(normalized), 'utf8');
   return normalized;
 }
 
@@ -169,10 +246,11 @@ export async function upsertIdentityProfile(input: {
 }): Promise<IdentityProfileRecord> {
   const now = input.now ?? Date.now;
   const name = normalizeText(input.name);
-  const homeDir = path.resolve(normalizeText(input.homeDir));
+  const nextSlug = generateProfileSlug(name);
+  const inputHomeDir = path.resolve(normalizeText(input.homeDir));
   const globalMetaId = normalizeText(input.globalMetaId);
   const mvcAddress = normalizeText(input.mvcAddress);
-  if (!name || !homeDir) {
+  if (!name || !inputHomeDir) {
     throw new Error('Identity profile upsert requires both name and homeDir.');
   }
 
@@ -182,13 +260,17 @@ export async function upsertIdentityProfile(input: {
 
   const nextProfiles = current.profiles.map((profile) => {
     if (
-      profile.homeDir === homeDir
+      profile.homeDir === inputHomeDir
       || (globalMetaId && profile.globalMetaId && profile.globalMetaId === globalMetaId)
     ) {
+      const stableSlug = resolveStableProfileSlug(input.systemHomeDir, profile);
+      const stableHomeDir = resolveCanonicalProfileHome(input.systemHomeDir, stableSlug);
       updated = {
         ...profile,
         name,
-        homeDir,
+        slug: stableSlug,
+        aliases: buildProfileAliases(name, stableSlug, profile.aliases),
+        homeDir: stableHomeDir,
         globalMetaId: globalMetaId || profile.globalMetaId,
         mvcAddress: mvcAddress || profile.mvcAddress,
         updatedAt: timestamp,
@@ -199,9 +281,15 @@ export async function upsertIdentityProfile(input: {
   });
 
   if (!updated) {
+    const stableHomeDir = isCanonicalProfileHome(input.systemHomeDir, inputHomeDir)
+      ? inputHomeDir
+      : resolveCanonicalProfileHome(input.systemHomeDir, nextSlug);
+    const stableSlug = path.basename(stableHomeDir);
     updated = {
       name,
-      homeDir,
+      slug: stableSlug,
+      aliases: buildProfileAliases(name, stableSlug),
+      homeDir: stableHomeDir,
       globalMetaId,
       mvcAddress,
       createdAt: timestamp,
@@ -229,12 +317,32 @@ function parseActiveHomePayload(value: unknown): string | null {
   return path.resolve(homeDirRaw);
 }
 
+function readJsonFileSync<T>(filePath: string): T | null {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(raw) as T;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || error instanceof SyntaxError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function validateActiveHome(systemHomeDir: string, homeDir: string | null, profilesState: IdentityProfilesState): string | null {
+  if (!homeDir || !isCanonicalProfileHome(systemHomeDir, homeDir)) {
+    return null;
+  }
+  return profilesState.profiles.some((profile) => profile.homeDir === homeDir) ? homeDir : null;
+}
+
 export function readActiveMetabotHomeSync(systemHomeDir: string): string | null {
   const paths = resolveIdentityManagerPaths(systemHomeDir);
   try {
-    const raw = fs.readFileSync(paths.activeHomePath, 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    return parseActiveHomePayload(parsed);
+    const parsed = readJsonFileSync<unknown>(paths.activeHomePath);
+    const profilesState = normalizeProfilesState(systemHomeDir, readJsonFileSync<unknown>(paths.profilesPath));
+    return validateActiveHome(systemHomeDir, parseActiveHomePayload(parsed), profilesState);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT' || error instanceof SyntaxError) {
@@ -247,8 +355,11 @@ export function readActiveMetabotHomeSync(systemHomeDir: string): string | null 
 export async function readActiveMetabotHome(systemHomeDir: string): Promise<string | null> {
   const paths = resolveIdentityManagerPaths(systemHomeDir);
   await ensureManagerRoot(paths);
-  const parsed = await readJsonFile<unknown>(paths.activeHomePath);
-  return parseActiveHomePayload(parsed);
+  const [parsed, profilesState] = await Promise.all([
+    readJsonFile<unknown>(paths.activeHomePath),
+    readIdentityProfilesState(systemHomeDir),
+  ]);
+  return validateActiveHome(systemHomeDir, parseActiveHomePayload(parsed), profilesState);
 }
 
 export async function setActiveMetabotHome(input: {

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -18,12 +18,29 @@ function parseLastJson(chunks) {
   return JSON.parse(chunks.join('').trim());
 }
 
+function deriveSystemHome(homeDir) {
+  const normalizedHomeDir = path.resolve(homeDir);
+  const profilesRoot = path.dirname(normalizedHomeDir);
+  const metabotRoot = path.dirname(profilesRoot);
+  if (path.basename(profilesRoot) === 'profiles' && path.basename(metabotRoot) === '.metabot') {
+    return path.dirname(metabotRoot);
+  }
+  return normalizedHomeDir;
+}
+
+async function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  await mkdir(homeDir, { recursive: true });
+  return homeDir;
+}
+
 async function runCommand(homeDir, args) {
   const stdout = [];
   const stderr = [];
   const env = {
     ...process.env,
-    HOME: homeDir,
+    HOME: deriveSystemHome(homeDir),
     METABOT_HOME: homeDir,
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
@@ -60,7 +77,7 @@ function assertCommandSucceeded(result, args) {
 }
 
 async function stopDaemon(homeDir) {
-  const daemonStatePath = path.join(homeDir, '.metabot', 'hot', 'daemon.json');
+  const daemonStatePath = path.join(homeDir, '.runtime', 'daemon.json');
 
   let daemonState;
   try {
@@ -157,10 +174,16 @@ export async function runLocalCrossHostDemo({
   task = 'Tell me tomorrow weather.',
   taskContext = '',
 } = {}) {
-  const callerHome = await mkdtemp(path.join(os.tmpdir(), `metabot-${callerHost}-`));
-  const providerHome = await mkdtemp(path.join(os.tmpdir(), `metabot-${providerHost}-`));
+  const callerHome = await createProfileHome(`metabot-${callerHost}-`, `${callerHost}-caller`);
+  const providerHome = await createProfileHome(`metabot-${providerHost}-`, `${providerHost}-provider`);
   const callerStore = createRuntimeStateStore(callerHome);
   const sessionEngine = createA2ASessionEngine();
+  const cleanup = async () => {
+    await Promise.all([
+      rm(deriveSystemHome(callerHome), { recursive: true, force: true }),
+      rm(deriveSystemHome(providerHome), { recursive: true, force: true }),
+    ]);
+  };
 
   try {
     const providerIdentity = assertCommandSucceeded(
@@ -389,17 +412,15 @@ export async function runLocalCrossHostDemo({
       remoteExecution,
       trace,
       artifacts,
-      cleanup: async () => {
-        await Promise.all([
-          rm(callerHome, { recursive: true, force: true }),
-          rm(providerHome, { recursive: true, force: true }),
-        ]);
-      },
+      cleanup,
     };
   } catch (error) {
     await Promise.allSettled([
       stopDaemon(callerHome),
       stopDaemon(providerHome),
+    ]);
+    await Promise.allSettled([
+      cleanup(),
     ]);
     throw error;
   }

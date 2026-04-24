@@ -19,7 +19,7 @@ function sanitizeExportName(name: string): string {
 }
 
 async function ensureExportLayout(paths: MetabotPaths): Promise<void> {
-  await fs.mkdir(paths.exportRoot, { recursive: true });
+  await fs.mkdir(paths.exportsRoot, { recursive: true });
 }
 
 async function writeExportFile(filePath: string, content: string): Promise<string> {
@@ -38,12 +38,12 @@ export function createExportStore(homeDirOrPaths: string | MetabotPaths): Export
     },
     async writeJson(name, value) {
       await ensureExportLayout(paths);
-      const filePath = path.join(paths.exportRoot, `${sanitizeExportName(name)}.json`);
+      const filePath = path.join(paths.exportsRoot, `${sanitizeExportName(name)}.json`);
       return writeExportFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
     },
     async writeMarkdown(name, content) {
       await ensureExportLayout(paths);
-      const filePath = path.join(paths.exportRoot, `${sanitizeExportName(name)}.md`);
+      const filePath = path.join(paths.exportsRoot, `${sanitizeExportName(name)}.md`);
       return writeExportFile(filePath, content.endsWith('\n') ? content : `${content}\n`);
     }
   };

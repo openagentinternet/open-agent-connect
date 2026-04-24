@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { createProfileHomeSync } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
@@ -84,7 +85,7 @@ function assertFailureCode(error, expectedCode) {
 }
 
 test('successful remote adopt stores a remote active variant ref for the requested skill', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-remote-adopt-'));
+  const homeDir = createProfileHomeSync('metabot-remote-adopt-');
   const remoteStore = createRemoteEvolutionStore(homeDir);
   const evolutionStore = createLocalEvolutionStore(homeDir);
 
@@ -652,7 +653,7 @@ test('missing metadata object returns evolution_remote_variant_invalid', async (
 });
 
 test('remote adopt does not write into local self-evolution artifact files', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-remote-adopt-'));
+  const homeDir = createProfileHomeSync('metabot-remote-adopt-');
   const remoteStore = createRemoteEvolutionStore(homeDir);
   const evolutionStore = createLocalEvolutionStore(homeDir);
   const variantId = 'variant-remote-only-active-ref';

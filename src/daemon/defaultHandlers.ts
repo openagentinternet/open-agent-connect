@@ -15,6 +15,11 @@ import {
   upsertIdentityProfile,
 } from '../core/identity/identityProfiles';
 import {
+  ensureProfileWorkspace,
+  resolveIdentityCreateProfileHome,
+} from '../core/identity/profileWorkspace';
+import { resolveProfileNameMatch } from '../core/identity/profileNameResolution';
+import {
   createRuntimeStateStore,
   type RuntimeDaemonRecord,
   type RuntimeIdentityRecord,
@@ -40,6 +45,7 @@ import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
 import { readChainDirectoryWithFallback } from '../core/discovery/chainDirectoryReader';
 import { HEARTBEAT_ONLINE_WINDOW_SEC } from '../core/discovery/chainHeartbeatDirectory';
+import { readOnlineMetaBotsFromSocketPresence } from '../core/discovery/socketPresenceDirectory';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
 import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/sessionEngine';
 import { resolvePublicStatus } from '../core/a2a/publicStatus';
@@ -110,13 +116,14 @@ import {
 } from '../core/master/masterTriggerEngine';
 import type { MasterDirectoryItem, PublishedMasterRecord } from '../core/master/masterTypes';
 
-const DIRECTORY_SEEDS_FILE = 'directory-seeds.json';
 const DEFAULT_CALLER_FOREGROUND_WAIT_MS = 15_000;
 const DEFAULT_CALLER_BACKGROUND_WAIT_MS = 30 * 60 * 1000;
 const DEFAULT_TRACE_WATCH_WAIT_MS = 75_000;
 const TRACE_WATCH_POLL_INTERVAL_MS = 500;
 const PROVIDER_RATING_SYNC_STALE_MS = 30_000;
 const DEFAULT_MASTER_HOST_MODE = 'codex';
+const DEFAULT_NETWORK_BOT_LIST_LIMIT = 10;
+const MAX_NETWORK_BOT_LIST_LIMIT = 100;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -202,9 +209,100 @@ function summarizeService(record: ReturnType<typeof buildPublishedService>['reco
     endpoint: record.endpoint,
     paymentAddress: record.paymentAddress,
     available: Boolean(record.available),
-    online: true,
+    online: false,
+    lastSeenSec: null,
+    lastSeenAt: null,
     updatedAt: record.updatedAt,
   };
+}
+
+function normalizeComparableGlobalMetaId(value: unknown): string {
+  return normalizeText(value).toLowerCase();
+}
+
+function buildSocketPresenceLastSeenIndex(
+  bots: Array<{ globalMetaId?: unknown; lastSeenAt?: unknown }>
+): Map<string, number | null> {
+  const index = new Map<string, number | null>();
+  for (const bot of bots) {
+    const globalMetaId = normalizeComparableGlobalMetaId(bot.globalMetaId);
+    if (!globalMetaId || index.has(globalMetaId)) {
+      continue;
+    }
+    const lastSeenAt = typeof bot.lastSeenAt === 'number' && Number.isFinite(bot.lastSeenAt) && bot.lastSeenAt > 0
+      ? Math.floor(bot.lastSeenAt)
+      : null;
+    index.set(globalMetaId, lastSeenAt);
+  }
+  return index;
+}
+
+function markServicesOnlineForFallback(
+  services: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  const nowMs = Date.now();
+  const nowSec = Math.floor(nowMs / 1000);
+  return services.map((service) => ({
+    ...service,
+    online: true,
+    lastSeenAt: nowMs,
+    lastSeenSec: nowSec,
+  }));
+}
+
+function markServicesOfflineForPresenceUnavailable(
+  services: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  return services.map((service) => ({
+    ...service,
+    online: false,
+    lastSeenAt: null,
+    lastSeenSec: null,
+  }));
+}
+
+async function decorateServicesWithSocketPresence(input: {
+  services: Array<Record<string, unknown>>;
+  socketPresenceApiBaseUrl?: string;
+  socketPresenceFailureMode?: 'throw' | 'assume_service_providers_online';
+  onlineOnly: boolean;
+}): Promise<Array<Record<string, unknown>>> {
+  try {
+    const presence = await readOnlineMetaBotsFromSocketPresence({
+      apiBaseUrl: input.socketPresenceApiBaseUrl,
+      limit: MAX_NETWORK_BOT_LIST_LIMIT,
+    });
+    const lastSeenIndex = buildSocketPresenceLastSeenIndex(presence.bots);
+    const decorated = input.services.map((service) => {
+      const globalMetaId = normalizeComparableGlobalMetaId(
+        service.providerGlobalMetaId ?? service.globalMetaId,
+      );
+      const lastSeenAt = globalMetaId ? (lastSeenIndex.get(globalMetaId) ?? null) : null;
+      return {
+        ...service,
+        online: Boolean(globalMetaId && lastSeenIndex.has(globalMetaId)),
+        lastSeenAt,
+        lastSeenSec: normalizeEpochSeconds(lastSeenAt),
+      };
+    });
+
+    if (input.onlineOnly) {
+      return decorated.filter((service) => service.online === true);
+    }
+    return decorated;
+  } catch (error) {
+    if (input.socketPresenceFailureMode === 'assume_service_providers_online') {
+      const fallbackDecorated = markServicesOnlineForFallback(input.services);
+      if (input.onlineOnly) {
+        return fallbackDecorated.filter((service) => service.online === true);
+      }
+      return fallbackDecorated;
+    }
+    if (input.onlineOnly) {
+      throw error;
+    }
+    return markServicesOfflineForPresenceUnavailable(input.services);
+  }
 }
 
 function isProviderPresenceOnline(input: {
@@ -475,7 +573,7 @@ async function hydrateMasterTriggerObservationDirectory(input: {
     onlineMasters: boolean;
   };
   masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
-  hotRoot: string;
+  directorySeedsPath: string;
   chainApiBaseUrl?: string;
   localProviderOnline: boolean;
   localLastSeenSec: number | null;
@@ -492,7 +590,7 @@ async function hydrateMasterTriggerObservationDirectory(input: {
 
   const directory = await listRuntimeDirectoryMasters({
     masterStateStore: input.masterStateStore,
-    hotRoot: input.hotRoot,
+    directorySeedsPath: input.directorySeedsPath,
     chainApiBaseUrl: input.chainApiBaseUrl,
     onlineOnly: false,
     host: input.observation.hostMode,
@@ -826,7 +924,9 @@ async function fetchRemoteAvailableServices(
     }
 
     const services = Array.isArray(payload.data.services)
-      ? payload.data.services.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'))
+      ? payload.data.services
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'))
+        .filter((entry) => entry.online === true)
       : [];
     return { services };
   } catch (error) {
@@ -875,11 +975,10 @@ async function fetchRemoteAvailableMasters(
   }
 }
 
-async function readDirectorySeeds(hotRoot: string): Promise<Array<{ baseUrl: string; label: string | null }>> {
-  const seedsPath = path.join(hotRoot, DIRECTORY_SEEDS_FILE);
+async function readDirectorySeeds(directorySeedsPath: string): Promise<Array<{ baseUrl: string; label: string | null }>> {
   let payload: unknown;
   try {
-    payload = JSON.parse(await fs.readFile(seedsPath, 'utf8')) as unknown;
+    payload = JSON.parse(await fs.readFile(directorySeedsPath, 'utf8')) as unknown;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return [];
@@ -911,12 +1010,12 @@ async function readDirectorySeeds(hotRoot: string): Promise<Array<{ baseUrl: str
 }
 
 async function writeDirectorySeeds(
-  hotRoot: string,
+  directorySeedsPath: string,
   providers: Array<{ baseUrl: string; label: string | null }>
 ): Promise<void> {
-  await fs.mkdir(hotRoot, { recursive: true });
+  await fs.mkdir(path.dirname(directorySeedsPath), { recursive: true });
   await fs.writeFile(
-    path.join(hotRoot, DIRECTORY_SEEDS_FILE),
+    directorySeedsPath,
     `${JSON.stringify({ providers }, null, 2)}\n`,
     'utf8'
   );
@@ -949,8 +1048,73 @@ function dedupeServices(services: Array<Record<string, unknown>>): Array<Record<
   });
 }
 
-async function fetchSeededDirectoryServices(hotRoot: string): Promise<Array<Record<string, unknown>>> {
-  const seeds = await readDirectorySeeds(hotRoot);
+function normalizeEpochSeconds(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  // Accept either second-based or millisecond-based timestamps.
+  if (value > 1e12) {
+    return Math.floor(value / 1000);
+  }
+  return Math.floor(value);
+}
+
+function dedupeOnlineBotsFromServices(
+  services: Array<Record<string, unknown>>,
+  limit: number,
+  nowMs: number = Date.now(),
+): Array<Record<string, unknown>> {
+  const byGlobalMetaId = new Map<string, { lastSeenSec: number | null }>();
+
+  for (const service of services) {
+    const globalMetaId = normalizeText(service.providerGlobalMetaId);
+    if (!globalMetaId) {
+      continue;
+    }
+
+    const online = service.online !== false;
+    if (!online) {
+      continue;
+    }
+
+    const lastSeenSec = normalizeEpochSeconds(
+      Number.isFinite(Number(service.lastSeenSec))
+        ? Number(service.lastSeenSec)
+        : Number(service.updatedAt),
+    );
+    const existing = byGlobalMetaId.get(globalMetaId);
+    if (!existing) {
+      byGlobalMetaId.set(globalMetaId, { lastSeenSec });
+      continue;
+    }
+    if ((lastSeenSec ?? -Infinity) > (existing.lastSeenSec ?? -Infinity)) {
+      byGlobalMetaId.set(globalMetaId, { lastSeenSec });
+    }
+  }
+
+  const nowSec = Math.floor(nowMs / 1000);
+  return [...byGlobalMetaId.entries()]
+    .sort((left, right) => {
+      const leftSeen = left[1].lastSeenSec ?? -Infinity;
+      const rightSeen = right[1].lastSeenSec ?? -Infinity;
+      if (leftSeen !== rightSeen) {
+        return rightSeen - leftSeen;
+      }
+      return left[0].localeCompare(right[0]);
+    })
+    .slice(0, limit)
+    .map(([globalMetaId, entry]) => ({
+      globalMetaId,
+      lastSeenAt: entry.lastSeenSec ? entry.lastSeenSec * 1000 : 0,
+      lastSeenAgoSeconds: entry.lastSeenSec ? Math.max(0, nowSec - entry.lastSeenSec) : 0,
+      deviceCount: 1,
+      online: true,
+    }));
+}
+
+async function fetchSeededDirectoryServices(directorySeedsPath: string): Promise<Array<Record<string, unknown>>> {
+  const seeds = await readDirectorySeeds(directorySeedsPath);
   const mergedServices: Array<Record<string, unknown>> = [];
 
   for (const seed of seeds) {
@@ -972,8 +1136,8 @@ async function fetchSeededDirectoryServices(hotRoot: string): Promise<Array<Reco
   return dedupeServices(mergedServices);
 }
 
-async function fetchSeededDirectoryMasters(hotRoot: string): Promise<MasterDirectoryItem[]> {
-  const seeds = await readDirectorySeeds(hotRoot);
+async function fetchSeededDirectoryMasters(directorySeedsPath: string): Promise<MasterDirectoryItem[]> {
+  const seeds = await readDirectorySeeds(directorySeedsPath);
   const mergedMasters: Array<Record<string, unknown>> = [];
 
   for (const seed of seeds) {
@@ -1427,8 +1591,10 @@ function buildSyntheticPaymentTxid(input: {
 
 async function listRuntimeDirectoryServices(input: {
   state: RuntimeState;
-  hotRoot: string;
+  directorySeedsPath: string;
   chainApiBaseUrl?: string;
+  socketPresenceApiBaseUrl?: string;
+  socketPresenceFailureMode?: 'throw' | 'assume_service_providers_online';
   onlineOnly: boolean;
 }): Promise<{
   services: Array<Record<string, unknown>>;
@@ -1440,15 +1606,27 @@ async function listRuntimeDirectoryServices(input: {
     .map((service) => summarizeService(service));
   const directory = await readChainDirectoryWithFallback({
     chainApiBaseUrl: input.chainApiBaseUrl,
+    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+    socketPresenceFailureMode: input.socketPresenceFailureMode,
     onlineOnly: input.onlineOnly,
-    fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(input.hotRoot),
+    fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(input.directorySeedsPath),
   });
+  const decoratedLocalServices = await decorateServicesWithSocketPresence({
+    services: localServices,
+    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+    socketPresenceFailureMode: input.socketPresenceFailureMode,
+    onlineOnly: input.onlineOnly,
+  });
+  const mergedServices = dedupeServices([
+    ...directory.services,
+    ...decoratedLocalServices,
+  ]);
+  const services = input.onlineOnly
+    ? mergedServices.filter((service) => service.online === true)
+    : mergedServices;
 
   return {
-    services: dedupeServices([
-      ...directory.services,
-      ...localServices,
-    ]),
+    services,
     discoverySource: directory.source,
     fallbackUsed: directory.fallbackUsed,
   };
@@ -1456,7 +1634,7 @@ async function listRuntimeDirectoryServices(input: {
 
 async function listRuntimeDirectoryMasters(input: {
   masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
-  hotRoot: string;
+  directorySeedsPath: string;
   chainApiBaseUrl?: string;
   onlineOnly: boolean;
   host: string;
@@ -1482,7 +1660,7 @@ async function listRuntimeDirectoryMasters(input: {
   const directory = await readChainMasterDirectoryWithFallback({
     chainApiBaseUrl: input.chainApiBaseUrl,
     onlineOnly: input.onlineOnly,
-    fetchSeededDirectoryMasters: async () => fetchSeededDirectoryMasters(input.hotRoot),
+    fetchSeededDirectoryMasters: async () => fetchSeededDirectoryMasters(input.directorySeedsPath),
   });
 
   return {
@@ -1503,7 +1681,7 @@ async function listRuntimeDirectoryMasters(input: {
 async function resolveExplicitMasterTarget(input: {
   draft: ReturnType<typeof readMasterAskDraft>;
   masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
-  hotRoot: string;
+  directorySeedsPath: string;
   chainApiBaseUrl?: string;
   host?: string | null;
   onlineOnly?: boolean;
@@ -1529,7 +1707,7 @@ async function resolveExplicitMasterTarget(input: {
 
   const directory = await listRuntimeDirectoryMasters({
     masterStateStore: input.masterStateStore,
-    hotRoot: input.hotRoot,
+    directorySeedsPath: input.directorySeedsPath,
     chainApiBaseUrl: input.chainApiBaseUrl,
     onlineOnly: false,
     host: '',
@@ -1555,7 +1733,7 @@ async function resolveSuggestedMasterTarget(input: {
   preferredMasterKind?: string | null;
   trustedMasters?: string[];
   masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
-  hotRoot: string;
+  directorySeedsPath: string;
   chainApiBaseUrl?: string;
   host?: string | null;
   providerGlobalMetaId?: string | null;
@@ -1566,7 +1744,7 @@ async function resolveSuggestedMasterTarget(input: {
   const explicit = await resolveExplicitMasterTarget({
     draft: input.draft,
     masterStateStore: input.masterStateStore,
-    hotRoot: input.hotRoot,
+    directorySeedsPath: input.directorySeedsPath,
     chainApiBaseUrl: input.chainApiBaseUrl,
     host: input.host,
     onlineOnly: true,
@@ -1582,7 +1760,7 @@ async function resolveSuggestedMasterTarget(input: {
   const preferredMasterKind = normalizeText(input.preferredMasterKind) || normalizeText(input.draft.target.masterKind);
   const directory = await listRuntimeDirectoryMasters({
     masterStateStore: input.masterStateStore,
-    hotRoot: input.hotRoot,
+    directorySeedsPath: input.directorySeedsPath,
     chainApiBaseUrl: input.chainApiBaseUrl,
     onlineOnly: true,
     host: normalizeText(input.host) || DEFAULT_MASTER_HOST_MODE,
@@ -1722,7 +1900,7 @@ async function createMasterAskPreviewResult(input: {
   const trace = buildSessionTrace({
     traceId,
     channel: 'a2a',
-    exportRoot: input.runtimeStateStore.paths.exportRoot,
+    exportRoot: input.runtimeStateStore.paths.exportsRoot,
     session: {
       id: `master-${traceId}`,
       title: `${input.resolvedTarget.displayName} Ask`,
@@ -1945,7 +2123,7 @@ async function createMasterSuggestResult(input: {
   const trace = buildSessionTrace({
     traceId,
     channel: 'a2a',
-    exportRoot: input.runtimeStateStore.paths.exportRoot,
+    exportRoot: input.runtimeStateStore.paths.exportsRoot,
     createdAt: now,
     session: {
       id: `master-${traceId}`,
@@ -2425,7 +2603,7 @@ export async function rebuildTraceArtifactsFromSessionState(input: {
   const nextTrace = buildSessionTrace({
     traceId: input.baseTrace.traceId,
     channel: input.baseTrace.channel,
-    exportRoot: input.runtimeStateStore.paths.exportRoot,
+    exportRoot: input.runtimeStateStore.paths.exportsRoot,
     createdAt: input.baseTrace.createdAt,
     session: {
       ...input.baseTrace.session,
@@ -2681,6 +2859,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   signer?: Signer;
   identitySyncStepDelayMs?: number;
   chainApiBaseUrl?: string;
+  socketPresenceApiBaseUrl?: string;
+  socketPresenceFailureMode?: 'throw' | 'assume_service_providers_online';
   fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
   callerReplyWaiter?: MetaWebServiceReplyWaiter;
   masterReplyWaiter?: MetaWebMasterReplyWaiter;
@@ -2833,22 +3013,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
-  async function trackActiveIdentityProfile(identity: RuntimeIdentityRecord): Promise<void> {
-    try {
-      await upsertIdentityProfile({
-        systemHomeDir: normalizedSystemHomeDir,
-        name: identity.name,
-        homeDir: input.homeDir,
-        globalMetaId: identity.globalMetaId,
-        mvcAddress: identity.mvcAddress,
-      });
-      await setActiveMetabotHome({
-        systemHomeDir: normalizedSystemHomeDir,
-        homeDir: input.homeDir,
-      });
-    } catch {
-      // Profile indexing is best-effort and should not block core identity bootstrap.
-    }
+  async function registerActiveIdentityProfile(identity: RuntimeIdentityRecord): Promise<void> {
+    const profile = await upsertIdentityProfile({
+      systemHomeDir: normalizedSystemHomeDir,
+      name: identity.name,
+      homeDir: input.homeDir,
+      globalMetaId: identity.globalMetaId,
+      mvcAddress: identity.mvcAddress,
+    });
+    await setActiveMetabotHome({
+      systemHomeDir: normalizedSystemHomeDir,
+      homeDir: profile.homeDir,
+    });
   }
 
   function scheduleCallerReplyContinuation(input: {
@@ -3210,7 +3386,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       : buildSessionTrace({
           traceId: input.traceId,
           channel: 'a2a',
-          exportRoot: runtimeStateStore.paths.exportRoot,
+          exportRoot: runtimeStateStore.paths.exportsRoot,
           session: {
             id: `master-${input.traceId}`,
             title: `${input.resolvedTarget.displayName} Ask`,
@@ -3489,21 +3665,30 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('missing_name', 'MetaBot identity name is required.');
         }
 
+        const state = await runtimeStateStore.readState();
+        const existingName = normalizeText(state.identity?.name);
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir);
-        const normalizedTargetName = normalizedName.toLowerCase();
-        const duplicateByName = profiles.find((profile) => (
-          profile.name.toLowerCase() === normalizedTargetName
-          && path.resolve(profile.homeDir) !== path.resolve(input.homeDir)
-        ));
-        if (duplicateByName) {
+        const duplicateMatch = resolveProfileNameMatch(normalizedName, profiles);
+        if (
+          duplicateMatch.status === 'matched'
+          && duplicateMatch.matchType !== 'ranked'
+          && path.resolve(duplicateMatch.match.homeDir) !== path.resolve(input.homeDir)
+        ) {
           return commandFailed(
             'identity_name_taken',
-            `Local MetaBot name "${normalizedName}" already exists. Use metabot identity assign --name "${duplicateByName.name}".`
+            `Local MetaBot name "${normalizedName}" already exists. Use metabot identity assign --name "${duplicateMatch.match.name}".`
+          );
+        }
+        if (
+          duplicateMatch.status === 'ambiguous'
+          && duplicateMatch.candidates.some((profile) => path.resolve(profile.homeDir) !== path.resolve(input.homeDir))
+        ) {
+          return commandFailed(
+            'identity_name_taken',
+            duplicateMatch.message
           );
         }
 
-        const state = await runtimeStateStore.readState();
-        const existingName = normalizeText(state.identity?.name);
         if (state.identity && existingName && existingName !== normalizedName) {
           return commandFailed(
             'identity_name_conflict',
@@ -3512,11 +3697,31 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
         const existingIdentity = state.identity;
         if (existingIdentity && isIdentityBootstrapReady(existingIdentity)) {
-          await trackActiveIdentityProfile(existingIdentity);
+          await ensureProfileWorkspace({
+            homeDir: input.homeDir,
+            name: existingIdentity.name,
+          });
+          await registerActiveIdentityProfile(existingIdentity);
           return commandSuccess(existingIdentity);
         }
 
+        const resolvedHome = resolveIdentityCreateProfileHome({
+          systemHomeDir: normalizedSystemHomeDir,
+          requestedName: normalizedName,
+          profiles,
+        });
+        if (resolvedHome.status === 'duplicate') {
+          return commandFailed(
+            'identity_name_taken',
+            resolvedHome.message
+          );
+        }
+
         const requestName = state.identity?.name || normalizedName;
+        await ensureProfileWorkspace({
+          homeDir: input.homeDir,
+          name: requestName,
+        });
         const bootstrap = await runBootstrapFlow({
           request: {
             name: requestName,
@@ -3538,7 +3743,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         const nextState = await runtimeStateStore.readState();
         if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
-          await trackActiveIdentityProfile(nextState.identity);
+          await registerActiveIdentityProfile(nextState.identity);
           return commandSuccess(nextState.identity);
         }
 
@@ -3616,7 +3821,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           : null;
         const directory = await listRuntimeDirectoryMasters({
           masterStateStore,
-          hotRoot: runtimeStateStore.paths.hotRoot,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           onlineOnly: online === true,
           host: DEFAULT_MASTER_HOST_MODE,
@@ -3686,7 +3891,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const resolvedTarget = await resolveExplicitMasterTarget({
             draft: previewDraft,
             masterStateStore,
-            hotRoot: runtimeStateStore.paths.hotRoot,
+            directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
             chainApiBaseUrl: input.chainApiBaseUrl,
             host: suggestion.hostMode,
             onlineOnly: true,
@@ -4008,7 +4213,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         const directory = await listRuntimeDirectoryMasters({
           masterStateStore,
-          hotRoot: runtimeStateStore.paths.hotRoot,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           onlineOnly: false,
           host: hostMode,
@@ -4182,7 +4387,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               desiredOutput: null,
             },
             masterStateStore,
-            hotRoot: runtimeStateStore.paths.hotRoot,
+            directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
             chainApiBaseUrl: input.chainApiBaseUrl,
             host: normalizeText(pendingAsk.request.caller.host) || DEFAULT_MASTER_HOST_MODE,
             localProviderOnline,
@@ -4320,7 +4525,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             : buildSessionTrace({
                 traceId,
                 channel: 'a2a',
-                exportRoot: runtimeStateStore.paths.exportRoot,
+                exportRoot: runtimeStateStore.paths.exportsRoot,
                 session: {
                   id: `master-${traceId}`,
                   title: `${selectedTarget.displayName} Ask`,
@@ -4515,7 +4720,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const resolvedTarget = await resolveExplicitMasterTarget({
           draft,
           masterStateStore,
-          hotRoot: runtimeStateStore.paths.hotRoot,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           localProviderOnline,
           localLastSeenSec,
@@ -4586,7 +4791,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           trustedMasters: config.askMaster.trustedMasters,
           directoryPresence,
           masterStateStore,
-          hotRoot: runtimeStateStore.paths.hotRoot,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           localProviderOnline,
           localLastSeenSec,
@@ -4681,7 +4886,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             : null,
           trustedMasters: config.askMaster.trustedMasters,
           masterStateStore,
-          hotRoot: runtimeStateStore.paths.hotRoot,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           host: observation.hostMode,
           localProviderOnline,
@@ -4980,7 +5185,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const trace = buildSessionTrace({
           traceId: handled.request.traceId,
           channel: 'a2a',
-          exportRoot: runtimeStateStore.paths.exportRoot,
+          exportRoot: runtimeStateStore.paths.exportsRoot,
           session: {
             id: `master-provider-${handled.request.traceId}`,
             title: `${handled.publishedMaster.displayName} Ask`,
@@ -5209,27 +5414,71 @@ export function createDefaultMetabotDaemonHandlers(input: {
     network: {
       listServices: async ({ online }) => {
         const state = await runtimeStateStore.readState();
-        const localServices = state.services
-          .filter((service) => service.available === 1)
-          .map((service) => summarizeService(service));
-        const directory = await readChainDirectoryWithFallback({
+        const directory = await listRuntimeDirectoryServices({
+          state,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
+          socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+          socketPresenceFailureMode: input.socketPresenceFailureMode,
           onlineOnly: online === true,
-          fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(runtimeStateStore.paths.hotRoot),
         });
-        const services = dedupeServices([
-          ...directory.services,
-          ...localServices,
-        ]);
 
         return commandSuccess({
-          services,
-          discoverySource: directory.source,
+          services: directory.services,
+          discoverySource: directory.discoverySource,
           fallbackUsed: directory.fallbackUsed,
         });
       },
+      listBots: async ({ online, limit }) => {
+        const normalizedLimit = Number.isFinite(limit)
+          ? Math.min(MAX_NETWORK_BOT_LIST_LIMIT, Math.max(1, Math.floor(limit as number)))
+          : DEFAULT_NETWORK_BOT_LIST_LIMIT;
+        const onlineOnly = online !== false;
+
+        try {
+          const presence = await readOnlineMetaBotsFromSocketPresence({
+            apiBaseUrl: input.socketPresenceApiBaseUrl,
+            limit: normalizedLimit,
+          });
+          return commandSuccess({
+            source: presence.source,
+            fallbackUsed: false,
+            total: presence.total,
+            onlineWindowSeconds: presence.onlineWindowSeconds,
+            bots: onlineOnly
+              ? presence.bots
+              : presence.bots.map((entry) => ({ ...entry })),
+          });
+        } catch (error) {
+          try {
+            const state = await runtimeStateStore.readState();
+            const directory = await listRuntimeDirectoryServices({
+              state,
+              directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+              chainApiBaseUrl: input.chainApiBaseUrl,
+              socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+              socketPresenceFailureMode: input.socketPresenceFailureMode,
+              onlineOnly: false,
+            });
+            const bots = dedupeOnlineBotsFromServices(directory.services, normalizedLimit);
+
+            return commandSuccess({
+              source: 'service_directory_fallback',
+              fallbackUsed: true,
+              total: bots.length,
+              onlineWindowSeconds: null,
+              bots,
+            });
+          } catch {
+            return commandFailed(
+              'socket_presence_unavailable',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
+        }
+      },
       listSources: async () => {
-        const sources = sortDirectorySeeds(await readDirectorySeeds(runtimeStateStore.paths.hotRoot));
+        const sources = sortDirectorySeeds(await readDirectorySeeds(runtimeStateStore.paths.directorySeedsPath));
         return commandSuccess({ sources });
       },
       addSource: async ({ baseUrl, label }) => {
@@ -5249,7 +5498,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const normalizedLabel = normalizeText(label) || null;
-        const currentSources = await readDirectorySeeds(runtimeStateStore.paths.hotRoot);
+        const currentSources = await readDirectorySeeds(runtimeStateStore.paths.directorySeedsPath);
         const nextSources = sortDirectorySeeds([
           ...currentSources.filter((entry) => entry.baseUrl !== parsed.toString().replace(/\/$/, '')),
           {
@@ -5257,7 +5506,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             label: normalizedLabel,
           },
         ]);
-        await writeDirectorySeeds(runtimeStateStore.paths.hotRoot, nextSources);
+        await writeDirectorySeeds(runtimeStateStore.paths.directorySeedsPath, nextSources);
 
         return commandSuccess({
           baseUrl: parsed.toString().replace(/\/$/, ''),
@@ -5271,12 +5520,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('missing_base_url', 'Network source baseUrl is required.');
         }
 
-        const currentSources = await readDirectorySeeds(runtimeStateStore.paths.hotRoot);
+        const currentSources = await readDirectorySeeds(runtimeStateStore.paths.directorySeedsPath);
         const nextSources = sortDirectorySeeds(
           currentSources.filter((entry) => entry.baseUrl !== normalizedBaseUrl)
         );
         const removed = nextSources.length !== currentSources.length;
-        await writeDirectorySeeds(runtimeStateStore.paths.hotRoot, nextSources);
+        await writeDirectorySeeds(runtimeStateStore.paths.directorySeedsPath, nextSources);
 
         return commandSuccess({
           removed,
@@ -5472,8 +5721,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
         } else {
           const directory = await listRuntimeDirectoryServices({
             state,
-            hotRoot: runtimeStateStore.paths.hotRoot,
+            directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
             chainApiBaseUrl: input.chainApiBaseUrl,
+            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceFailureMode: input.socketPresenceFailureMode,
             onlineOnly: true,
           });
           availableServices = directory.services;
@@ -5654,7 +5905,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const trace = buildSessionTrace({
           traceId: plan.traceId,
           channel: 'a2a',
-          exportRoot: runtimeStateStore.paths.exportRoot,
+          exportRoot: runtimeStateStore.paths.exportsRoot,
           session: {
             id: `session-${plan.traceId}`,
             title: `${serviceDisplayName} Call`,
@@ -5857,8 +6108,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         const directory = await listRuntimeDirectoryServices({
           state,
-          hotRoot: runtimeStateStore.paths.hotRoot,
+          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
+          socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+          socketPresenceFailureMode: input.socketPresenceFailureMode,
           onlineOnly: false,
         });
         const matchedService = directory.services.find((entry) => (
@@ -6144,7 +6397,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const trace = buildSessionTrace({
           traceId,
           channel: 'a2a',
-          exportRoot: runtimeStateStore.paths.exportRoot,
+          exportRoot: runtimeStateStore.paths.exportsRoot,
           session: {
             id: `session-${traceId}`,
             title: `${service.displayName} Execution`,
@@ -6289,13 +6542,31 @@ export function createDefaultMetabotDaemonHandlers(input: {
           content: request.content,
           replyPinId: request.replyPin,
         });
+        let chatWrite;
+        try {
+          chatWrite = await signer.writePin({
+            operation: 'create',
+            path: sent.path,
+            encryption: sent.encryption,
+            version: sent.version,
+            contentType: sent.contentType,
+            payload: sent.payload,
+            encoding: 'utf-8',
+            network: 'mvc',
+          });
+        } catch (error) {
+          return commandFailed(
+            'chat_broadcast_failed',
+            error instanceof Error ? error.message : 'Failed to broadcast private chat to chain.'
+          );
+        }
         const structuredContent = describeStructuredPrivateChatContent(request.content);
 
         const traceId = `trace-private-${Date.now().toString(36)}`;
         const trace = buildSessionTrace({
           traceId,
           channel: 'simplemsg',
-          exportRoot: runtimeStateStore.paths.exportRoot,
+          exportRoot: runtimeStateStore.paths.exportsRoot,
           session: {
             id: `chat-${traceId}`,
             title: 'Private Chat',
@@ -6326,6 +6597,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 content: `Encrypted private message prepared for ${request.to}.`,
                 metadata: {
                   path: sent.path,
+                  pinId: normalizeText(chatWrite.pinId) || null,
+                  txids: Array.isArray(chatWrite.txids) ? chatWrite.txids : [],
                   replyPin: request.replyPin || null,
                   messageType: structuredContent.messageType,
                   requestId: structuredContent.requestId,
@@ -6350,7 +6623,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
           payload: sent.payload,
           encryptedContent: sent.encryptedContent,
           secretVariant: sent.secretVariant,
-          deliveryMode: 'local_runtime',
+          pinId: normalizeText(chatWrite.pinId) || null,
+          txids: Array.isArray(chatWrite.txids) ? chatWrite.txids : [],
+          totalCost: Number.isFinite(Number(chatWrite.totalCost))
+            ? Number(chatWrite.totalCost)
+            : null,
+          network: normalizeText(chatWrite.network) || 'mvc',
+          deliveryMode: 'onchain_simplemsg',
           peerChatPublicKey,
           messageType: structuredContent.messageType,
           requestId: structuredContent.requestId,

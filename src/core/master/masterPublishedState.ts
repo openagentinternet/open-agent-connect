@@ -1,6 +1,5 @@
 import { promises as fs } from 'node:fs';
-import path from 'node:path';
-import { ensureHotLayout } from '../state/runtimeStateStore';
+import { ensureRuntimeLayout } from '../state/runtimeStateStore';
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 import type { PublishedMasterRecord } from './masterTypes';
 
@@ -49,17 +48,17 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
 
 export function createPublishedMasterStateStore(homeDirOrPaths: string | MetabotPaths): PublishedMasterStateStore {
   const paths = typeof homeDirOrPaths === 'string' ? resolveMetabotPaths(homeDirOrPaths) : homeDirOrPaths;
-  const statePath = path.join(paths.hotRoot, 'master-service-state.json');
+  const statePath = paths.masterPublishedStatePath;
 
   return {
     paths,
     statePath,
     async read() {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       return normalizePublishedMasterState(await readJsonFile<PublishedMasterState>(statePath));
     },
     async write(nextState) {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       const normalized = normalizePublishedMasterState(nextState);
       await fs.writeFile(statePath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
       return normalized;

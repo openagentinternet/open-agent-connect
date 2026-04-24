@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { ensureHotLayout } from '../state/runtimeStateStore';
+import { ensureRuntimeLayout } from '../state/runtimeStateStore';
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 
 export interface ProviderPresenceState {
@@ -88,12 +88,12 @@ export function createProviderPresenceStateStore(homeDirOrPaths: string | Metabo
   return {
     paths,
     async read() {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       const current = await readJsonFile<ProviderPresenceState>(paths.providerPresenceStatePath);
       return normalizeProviderPresenceState(current);
     },
     async write(nextState) {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       const normalized = normalizeProviderPresenceState(nextState);
       await writeJsonAtomic(paths.providerPresenceStatePath, normalized);
       return normalized;

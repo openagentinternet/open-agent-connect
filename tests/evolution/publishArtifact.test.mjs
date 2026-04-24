@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { createProfileHomeSync } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
@@ -94,7 +95,7 @@ function snapshotLocalEvolutionFiles(store, artifact, analysis) {
 }
 
 test('publish artifact uploads body before metadata pin write and does not mutate local store files', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-publish-'));
+  const homeDir = createProfileHomeSync('metabot-evolution-publish-');
   const store = createLocalEvolutionStore(homeDir);
   const analysis = createAnalysisRecord();
   const artifact = createArtifactRecord();

@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
@@ -29,9 +30,9 @@ function createIdentity() {
 }
 
 test('provider summary projects recent master requests alongside existing provider presence data', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-provider-master-summary-'));
+  const homeDir = await createProfileHome('metabot-provider-master-summary-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const runtimeStateStore = createRuntimeStateStore(homeDir);

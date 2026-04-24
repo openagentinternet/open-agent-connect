@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,8 +8,16 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { createPendingMasterAskStateStore } = require('../../dist/core/master/masterPendingAskState.js');
 
+async function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  await mkdir(path.join(systemHome, '.metabot', 'manager'), { recursive: true });
+  await mkdir(homeDir, { recursive: true });
+  return homeDir;
+}
+
 test('pending ask store persists and reloads preview snapshots by traceId', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-pending-master-ask-'));
+  const homeDir = await createProfileHome('metabot-pending-master-ask-');
   t.after(async () => {
     await rm(homeDir, { recursive: true, force: true });
   });
@@ -76,6 +84,7 @@ test('pending ask store persists and reloads preview snapshots by traceId', asyn
   });
 
   const record = await store.get('trace-master-1');
+  assert.equal(store.statePath.startsWith(store.paths.stateRoot), true);
   assert.equal(record.traceId, 'trace-master-1');
   assert.equal(record.request.task.question, 'What should I inspect first?');
   assert.equal(record.target.displayName, 'Official Debug Master');

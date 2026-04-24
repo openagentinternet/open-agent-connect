@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -8,6 +8,8 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+const { generateProfileSlug } = require('../../dist/core/identity/profileNameResolution.js');
 const { buildMasterResponseJson } = require('../../dist/core/master/masterMessageSchema.js');
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
@@ -19,12 +21,34 @@ function parseLastJson(chunks) {
   return JSON.parse(chunks.join('').trim());
 }
 
+function deriveSystemHome(homeDir) {
+  const normalizedHomeDir = path.resolve(homeDir);
+  const profilesRoot = path.dirname(normalizedHomeDir);
+  const metabotRoot = path.dirname(profilesRoot);
+  if (path.basename(profilesRoot) === 'profiles' && path.basename(metabotRoot) === '.metabot') {
+    return path.dirname(metabotRoot);
+  }
+  return normalizedHomeDir;
+}
+
+async function createCanonicalProfile(prefix, displayNamePrefix) {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const displayName = `${displayNamePrefix} ${path.basename(systemHome)}`;
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', generateProfileSlug(displayName));
+  await mkdir(homeDir, { recursive: true });
+  return {
+    systemHome,
+    homeDir,
+    displayName,
+  };
+}
+
 async function runCommand(homeDir, args, envOverrides = {}) {
   const stdout = [];
   const stderr = [];
   const env = {
     ...process.env,
-    HOME: homeDir,
+    HOME: deriveSystemHome(homeDir),
     METABOT_HOME: homeDir,
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
@@ -48,7 +72,7 @@ async function runCommand(homeDir, args, envOverrides = {}) {
 }
 
 async function stopDaemon(homeDir) {
-  const daemonStatePath = path.join(homeDir, '.metabot', 'hot', 'daemon.json');
+  const daemonStatePath = resolveMetabotPaths(homeDir).daemonStatePath;
 
   let daemonState;
   try {
@@ -97,14 +121,16 @@ async function fetchJson(baseUrl, routePath, options = {}) {
 }
 
 async function prepareMasterHomes(t) {
-  const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-e2e-caller-'));
-  const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-e2e-provider-'));
-  const providerName = `Debug Master Provider ${path.basename(providerHome)}`;
-  const callerName = `Caller Bot ${path.basename(callerHome)}`;
+  const callerProfile = await createCanonicalProfile('metabot-master-e2e-caller-', 'Caller Bot');
+  const providerProfile = await createCanonicalProfile('metabot-master-e2e-provider-', 'Debug Master Provider');
+  const callerHome = callerProfile.homeDir;
+  const providerHome = providerProfile.homeDir;
+  const providerName = providerProfile.displayName;
+  const callerName = callerProfile.displayName;
   t.after(async () => stopDaemon(callerHome));
   t.after(async () => stopDaemon(providerHome));
-  t.after(async () => rm(callerHome, { recursive: true, force: true }));
-  t.after(async () => rm(providerHome, { recursive: true, force: true }));
+  t.after(async () => rm(callerProfile.systemHome, { recursive: true, force: true }));
+  t.after(async () => rm(providerProfile.systemHome, { recursive: true, force: true }));
 
   const providerIdentity = await runCommand(providerHome, ['identity', 'create', '--name', providerName]);
   assert.equal(providerIdentity.exitCode, 0);

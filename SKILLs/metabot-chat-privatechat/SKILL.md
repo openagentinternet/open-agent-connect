@@ -7,9 +7,7 @@ description: Use when an agent needs to send one private MetaWeb message to a re
 
 Send one encrypted private message over MetaWeb without changing the current `simplemsg` contract.
 
-## Host Adapter
-
-{{HOST_SKILLPACK_METADATA}}
+{{HOST_ADAPTER_SECTION}}
 
 ## Routing
 
@@ -56,7 +54,7 @@ Then call:
 ## In Scope
 
 - One private message send with optional reply pin context.
-- Protocol-safe encryption and delivery reporting.
+- Protocol-safe encryption and on-chain delivery reporting (`pinId`, `txids`).
 
 ## Out of Scope
 
@@ -71,9 +69,20 @@ Then call:
 
 ## Result Handling
 
-- `success`: report returned pin or tx identifiers and continue conversation.
+- `success`: report returned `pinId` and `txids`, then continue conversation.
 - `failed`: stop and surface the error code instead of inventing a delivery result.
 - `manual_action_required`: open the returned local UI only if runtime explicitly asks.
+
+## Response Shape
+
+- For success responses, include:
+  - delivery proof (`pinId`, `txids`)
+  - who the message was sent to (`to`)
+  - one concrete next step (for example keep chatting or move to service/master workflow)
+  - natural-language next prompts in the same language as the user
+  - intent-equivalent wording guidance (do not lock to one fixed phrase template)
+- do not reply with one rigid fixed sentence.
+- keep language natural while preserving exact delivery identifiers.
 
 ## Compatibility
 

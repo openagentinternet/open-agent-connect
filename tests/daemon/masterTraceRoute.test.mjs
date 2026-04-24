@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createHttpServer } = require('../../dist/daemon/httpServer.js');
@@ -47,7 +48,7 @@ async function startServer(handlers) {
 }
 
 test('GET /api/master/trace/:id returns ask master semantics for provider-side traces', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-trace-route-'));
+  const homeDir = await createProfileHome('metabot-master-trace-route-');
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const traceId = 'trace-master-provider-1';
 
@@ -70,7 +71,7 @@ test('GET /api/master/trace/:id returns ask master semantics for provider-side t
       buildSessionTrace({
         traceId,
         channel: 'a2a',
-        exportRoot: runtimeStateStore.paths.exportRoot,
+        exportRoot: runtimeStateStore.paths.exportsRoot,
         session: {
           id: `master-provider-${traceId}`,
           title: 'Official Debug Master Ask',
@@ -118,7 +119,7 @@ test('GET /api/master/trace/:id returns ask master semantics for provider-side t
 
   t.after(async () => {
     await server.close();
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const response = await fetch(`${server.baseUrl}/api/master/trace/${traceId}`);

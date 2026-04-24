@@ -1,10 +1,6 @@
 # Open Agent Connect Skill Pack for OpenClaw
 
-Thin host adapter for Open Agent Connect, the host-facing runtime for Open Agent Internet. These skills keep business logic in the shared `metabot` CLI and MetaWeb runtime instead of the host adapter.
-
-This host pack installs:
-
-- primary MetaBot skill names under the `metabot-*` prefix
+Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent Internet. This wrapper installs the shared MetaBot skills into `~/.metabot/skills`, installs the primary `metabot` CLI shim, and then binds host-native `metabot-*` entries into the OpenClaw skills root.
 
 ## Included MetaBot Skills
 
@@ -30,10 +26,12 @@ metabot doctor
 Compatibility note:
 
 - only the `metabot` CLI name is installed
+- shared skills land in `~/.metabot/skills`
+- host-native bindings land in `${OPENCLAW_HOME:-$HOME/.openclaw}/skills`
 
-Override the destination with `METABOT_SKILL_DEST` if this host uses a custom skill root.
 Override the CLI shim directory with `METABOT_BIN_DIR` if `$HOME/.metabot/bin` is not on PATH.
 If you are installing from a source checkout, set `METABOT_SOURCE_ROOT` to the repository root.
+If the current host uses a custom home, export the matching host home variable before install.
 
 If the current host session does not immediately detect the new skills, start a fresh session.
 
@@ -78,5 +76,6 @@ For a single machine dual terminal smoke, keep one provider terminal online with
 - Primary CLI path: `metabot`
 - Compatibility manifest: `release/compatibility.json`
 - Bundled compatibility copy: `runtime/compatibility.json`
-- Package version: `0.1.0`
+- Bundled shared installer: `runtime/shared-install.sh`
 - Host pack id: `openclaw`
+- Package version: `0.1.0`

@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
+import { resolveMetabotHomeSelection } from '../state/homeSelection';
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 import {
   createDefaultConfig,
@@ -14,6 +14,15 @@ import {
 
 async function ensureLayout(paths: MetabotPaths): Promise<void> {
   await fs.mkdir(path.dirname(paths.configPath), { recursive: true });
+  try {
+    await fs.access(paths.configPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      throw error;
+    }
+    await fs.writeFile(paths.configPath, `${JSON.stringify(createDefaultConfig(), null, 2)}\n`, 'utf8');
+  }
 }
 
 async function readJsonFile(filePath: string): Promise<unknown | null> {
@@ -120,8 +129,11 @@ function resolvePaths(homeDirOrPaths?: string | MetabotPaths): MetabotPaths {
     return homeDirOrPaths;
   }
 
-  const homeDir = process.env.METABOT_HOME ?? os.homedir();
-  return resolveMetabotPaths(homeDir);
+  const selection = resolveMetabotHomeSelection({
+    env: process.env,
+    cwd: process.cwd(),
+  });
+  return selection.paths ?? resolveMetabotPaths(selection.homeDir);
 }
 
 export interface ConfigStore {

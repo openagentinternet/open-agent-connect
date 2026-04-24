@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,10 +8,53 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 
+function deriveSystemHome(homeDir) {
+  const normalizedHomeDir = path.resolve(homeDir);
+  const profilesRoot = path.dirname(normalizedHomeDir);
+  const metabotRoot = path.dirname(profilesRoot);
+  if (path.basename(profilesRoot) === 'profiles' && path.basename(metabotRoot) === '.metabot') {
+    return path.dirname(metabotRoot);
+  }
+  return normalizedHomeDir;
+}
+
+function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
+  mkdirSync(homeDir, { recursive: true });
+  mkdirSync(managerRoot, { recursive: true });
+  const now = Date.now();
+  writeFileSync(
+    path.join(managerRoot, 'identity-profiles.json'),
+    `${JSON.stringify({
+      profiles: [
+        {
+          name: slug,
+          slug,
+          aliases: [slug, slug.replace(/-/g, ' ')],
+          homeDir,
+          globalMetaId: '',
+          mvcAddress: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    }, null, 2)}\n`,
+    'utf8',
+  );
+  writeFileSync(
+    path.join(managerRoot, 'active-home.json'),
+    `${JSON.stringify({ homeDir, updatedAt: now }, null, 2)}\n`,
+    'utf8',
+  );
+  return homeDir;
+}
+
 function createRuntimeEnv(homeDir) {
   return {
     ...process.env,
-    HOME: homeDir,
+    HOME: deriveSystemHome(homeDir),
     METABOT_HOME: homeDir,
   };
 }
@@ -32,7 +75,7 @@ async function runSkillsCli(homeDir, args) {
 }
 
 test('runCli supports `metabot skills resolve --skill metabot-network-directory --host codex --format markdown`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-skills-markdown-'));
+  const homeDir = createProfileHome('metabot-cli-skills-markdown-');
   const result = await runSkillsCli(homeDir, [
     'skills',
     'resolve',
@@ -50,8 +93,46 @@ test('runCli supports `metabot skills resolve --skill metabot-network-directory 
   assert.equal(result.payload.data.includes('# Resolved Skill Contract: metabot-network-directory'), true);
 });
 
+test('runCli supports `metabot skills resolve --skill metabot-network-manage --format markdown`', async () => {
+  const homeDir = createProfileHome('metabot-cli-skills-no-host-markdown-');
+  const result = await runSkillsCli(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-manage',
+    '--format',
+    'markdown',
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(typeof result.payload.data, 'string');
+  assert.equal(result.payload.data.includes('# Resolved Skill Contract: metabot-network-manage'), true);
+  assert.equal(result.payload.data.includes('Host: `shared`'), true);
+});
+
+test('runCli supports no-host shared-default resolution for existing public skill `metabot-network-directory` in json mode', async () => {
+  const homeDir = createProfileHome('metabot-cli-skills-directory-no-host-json-');
+  const result = await runSkillsCli(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-directory',
+    '--format',
+    'json',
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.format, 'json');
+  assert.equal(result.payload.data.host, 'shared');
+  assert.equal(result.payload.data.requestedHost, undefined);
+  assert.equal(result.payload.data.resolutionMode, 'shared_default');
+  assert.equal(result.payload.data.contract.skillName, 'metabot-network-directory');
+});
+
 test('runCli supports `metabot skills resolve --skill metabot-network-directory --host codex --format json`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-skills-json-'));
+  const homeDir = createProfileHome('metabot-cli-skills-json-');
   const result = await runSkillsCli(homeDir, [
     'skills',
     'resolve',
@@ -70,8 +151,64 @@ test('runCli supports `metabot skills resolve --skill metabot-network-directory 
   assert.equal(result.payload.data.contract.skillName, 'metabot-network-directory');
 });
 
+test('runCli supports `metabot skills resolve --skill metabot-network-manage --format json`', async () => {
+  const homeDir = createProfileHome('metabot-cli-skills-no-host-json-');
+  const result = await runSkillsCli(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-manage',
+    '--format',
+    'json',
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.format, 'json');
+  assert.equal(result.payload.data.contract.skillName, 'metabot-network-manage');
+});
+
+test('runCli no-host json shape keeps top-level host and marks shared-default resolution', async () => {
+  const homeDir = createProfileHome('metabot-cli-skills-no-host-json-shape-');
+  const result = await runSkillsCli(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-manage',
+    '--format',
+    'json',
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.host, 'shared');
+  assert.equal(result.payload.data.requestedHost, undefined);
+  assert.equal(result.payload.data.resolutionMode, 'shared_default');
+  assert.equal(result.payload.data.contract.skillName, 'metabot-network-manage');
+});
+
+test('runCli rejects unsupported explicit hosts for `metabot skills resolve`', async () => {
+  const homeDir = createProfileHome('metabot-cli-skills-invalid-host-');
+  const result = await runSkillsCli(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-directory',
+    '--host',
+    'shared',
+    '--format',
+    'json',
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.code, 'invalid_argument');
+  assert.match(result.payload.message, /Unsupported --host value: shared/);
+  assert.match(result.payload.message, /codex, claude-code, openclaw/);
+});
+
 test('runCli supports `metabot skills resolve --skill metabot-ask-master --host codex --format markdown`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-skills-ask-master-markdown-'));
+  const homeDir = createProfileHome('metabot-cli-skills-ask-master-markdown-');
   const result = await runSkillsCli(homeDir, [
     'skills',
     'resolve',
@@ -95,7 +232,7 @@ test('runCli supports `metabot skills resolve --skill metabot-ask-master --host 
 });
 
 test('runCli supports `metabot skills resolve --skill metabot-ask-master --host codex --format json`', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-skills-ask-master-json-'));
+  const homeDir = createProfileHome('metabot-cli-skills-ask-master-json-');
   const result = await runSkillsCli(homeDir, [
     'skills',
     'resolve',

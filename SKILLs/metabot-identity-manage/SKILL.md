@@ -7,9 +7,7 @@ description: Use when a human or agent needs local MetaBot identity create/list/
 
 Create or switch local MetaBot identities by name without manual runtime-state patching.
 
-## Host Adapter
-
-{{HOST_SKILLPACK_METADATA}}
+{{HOST_ADAPTER_SECTION}}
 
 ## Routing
 
@@ -32,6 +30,17 @@ Should not trigger when:
 
 ## Workflow
 
+The canonical v2 storage layout is:
+
+- `~/.metabot/manager/identity-profiles.json` stores the global profile index.
+- `~/.metabot/manager/active-home.json` stores the active profile pointer.
+- `~/.metabot/profiles/<slug>/` stores one MetaBot workspace.
+- `~/.metabot/profiles/<slug>/.runtime/` stores machine-managed runtime, secrets, and state.
+- `~/.metabot/skills/` stores the shared MetaBot-managed skills root.
+
+The CLI resolves the canonical profile home under `~/.metabot/profiles/<slug>/` from the requested name and manager index.
+Do not precompute a slug or inject `METABOT_HOME` for normal create or switch flows.
+
 List local profiles first:
 
 ```bash
@@ -44,12 +53,11 @@ If target name already exists, switch directly:
 {{METABOT_CLI}} identity assign --name "David"
 ```
 
-If target name does not exist, create it under a dedicated profile home:
+If target name does not exist, create it and let the CLI resolve the canonical profile home:
 
 ```bash
 TARGET_NAME="David"
-PROFILE_SLUG="$(printf '%s' "$TARGET_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
-METABOT_HOME="$HOME/.metabot/profiles/$PROFILE_SLUG" {{METABOT_CLI}} identity create --name "$TARGET_NAME"
+{{METABOT_CLI}} identity create --name "$TARGET_NAME"
 ```
 
 After first-create bootstrap, run health checks:
@@ -143,7 +151,7 @@ If the human explicitly asks to write avatar on BTC (for example: `btc`, `比特
 - If create returns `identity_name_conflict`, do not edit runtime files; run `identity who` and `identity list`, then assign explicitly.
 - For avatar updates, do not call `file upload` and then write `metafile://...` into `/info/avatar`.
 - Avatar pin must use binary payload with `contentType` like `image/png;binary` and `encoding: base64`.
-- Never manually edit `~/.metabot/hot/runtime-state.json`.
+- Never manually edit `~/.metabot/profiles/<slug>/.runtime/` files.
 
 ## Compatibility
 

@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
@@ -36,9 +37,9 @@ function createIdentity(chatPublicKey) {
 }
 
 test('default chat.private stringifies master_request objects and exposes structured metadata', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-chat-handler-'));
+  const homeDir = await createProfileHome('metabot-master-chat-handler-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const identityPair = createIdentityPair();
@@ -57,6 +58,14 @@ test('default chat.private stringifies master_request objects and exposes struct
         return {
           globalMetaId: 'idq1alice',
           privateKeyHex: identityPair.privateKeyHex,
+        };
+      },
+      async writePin() {
+        return {
+          pinId: '/protocols/simplemsg-pin-1',
+          txids: ['tx-simplemsg-1'],
+          network: 'mvc',
+          totalCost: 1,
         };
       },
     },

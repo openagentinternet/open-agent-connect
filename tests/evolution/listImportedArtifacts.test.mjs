@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { createProfileHomeSync } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createRemoteEvolutionStore } = require('../../dist/core/evolution/remoteEvolutionStore.js');
@@ -85,7 +86,7 @@ function assertFailureCode(error, expectedCode) {
 }
 
 test('lists imported remote artifacts from local files with stable sort and active annotation', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-list-imported-'));
+  const homeDir = createProfileHomeSync('metabot-list-imported-');
   const remoteStore = createRemoteEvolutionStore(homeDir);
 
   const variants = [
@@ -212,7 +213,7 @@ test('listing imported artifacts is currently supported only for metabot-network
 });
 
 test('index pinId mismatch with sidecar pinId returns evolution_imported_artifact_invalid', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-list-imported-'));
+  const homeDir = createProfileHomeSync('metabot-list-imported-');
   const remoteStore = createRemoteEvolutionStore(homeDir);
   await remoteStore.writeImport({
     artifact: createArtifactRecord({
@@ -241,7 +242,7 @@ test('index pinId mismatch with sidecar pinId returns evolution_imported_artifac
 });
 
 test('missing imported files are skipped when other valid imported variants remain', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-list-imported-'));
+  const homeDir = createProfileHomeSync('metabot-list-imported-');
   const remoteStore = createRemoteEvolutionStore(homeDir);
   await remoteStore.writeImport({
     artifact: createArtifactRecord({
@@ -285,7 +286,7 @@ test('missing imported files are skipped when other valid imported variants rema
 });
 
 test('malformed sidecar returns evolution_imported_artifact_invalid', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-list-imported-'));
+  const homeDir = createProfileHomeSync('metabot-list-imported-');
   const remoteStore = createRemoteEvolutionStore(homeDir);
   await remoteStore.writeImport({
     artifact: createArtifactRecord({
@@ -312,7 +313,7 @@ test('malformed sidecar returns evolution_imported_artifact_invalid', async () =
 });
 
 test('malformed artifact body returns evolution_imported_artifact_invalid', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-list-imported-'));
+  const homeDir = createProfileHomeSync('metabot-list-imported-');
   const remoteStore = createRemoteEvolutionStore(homeDir);
   await remoteStore.writeImport({
     artifact: createArtifactRecord({

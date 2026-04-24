@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { createProfileHomeSync } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
@@ -102,7 +103,7 @@ function snapshotLocalStoreFiles(store, analysisId, variantId) {
 }
 
 test('successful import by pinId writes artifact + sidecar + index entry', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-import-'));
+  const homeDir = createProfileHomeSync('metabot-evolution-import-');
   const remoteStore = createRemoteEvolutionStore(homeDir);
   const metadata = createMetadata();
   const body = createArtifactBody();
@@ -469,7 +470,7 @@ test('duplicate local variantId returns evolution_import_variant_conflict', asyn
 });
 
 test('import leaves local self-evolution artifact store and activeVariants untouched', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-import-local-'));
+  const homeDir = createProfileHomeSync('metabot-evolution-import-local-');
   const localStore = createLocalEvolutionStore(homeDir);
   const remoteStore = createRemoteEvolutionStore(homeDir);
 

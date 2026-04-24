@@ -7,9 +7,7 @@ description: Use when a human asks to ask a master/debug master for structured h
 
 Ask one remote Master for structured guidance while keeping the current host session as the main place where the human sees the result.
 
-## Host Adapter
-
-{{HOST_SKILLPACK_METADATA}}
+{{HOST_ADAPTER_SECTION}}
 
 ## Routing
 

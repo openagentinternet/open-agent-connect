@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
@@ -60,9 +61,9 @@ function jsonResponse(payload, status = 200) {
 }
 
 test('default master handlers publish a validated master-service and surface it in master.list', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-default-handlers-'));
+  const homeDir = await createProfileHome('metabot-master-default-handlers-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const runtimeStateStore = createRuntimeStateStore(homeDir);
@@ -135,9 +136,9 @@ test('default master handlers publish a validated master-service and surface it 
 });
 
 test('default master handlers receive a provider-side master_request and project it into provider summary', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-provider-handler-'));
+  const homeDir = await createProfileHome('metabot-master-provider-handler-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const runtimeStateStore = createRuntimeStateStore(homeDir);
@@ -255,9 +256,9 @@ test('default master handlers receive a provider-side master_request and project
 });
 
 test('default master handlers send the generated master_response over simplemsg when reply delivery metadata is available', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-provider-delivery-'));
+  const homeDir = await createProfileHome('metabot-master-provider-delivery-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const providerPair = createIdentityPair();
@@ -403,9 +404,9 @@ test('default master handlers send the generated master_response over simplemsg 
 });
 
 test('default master handlers regenerate exported trace artifacts when provider response delivery fails', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-provider-delivery-failure-'));
+  const homeDir = await createProfileHome('metabot-master-provider-delivery-failure-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const providerPair = createIdentityPair();

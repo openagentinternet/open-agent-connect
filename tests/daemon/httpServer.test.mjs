@@ -22,7 +22,8 @@ async function startServer(options = {}) {
     services: [],
     serviceExecutions: [],
     trace: [],
-    network: [],
+    networkServices: [],
+    networkBots: [],
   };
 
   const server = createHttpServer({
@@ -79,13 +80,30 @@ async function startServer(options = {}) {
     },
     network: {
       listServices: async (input) => {
-        calls.network.push(input);
+        calls.networkServices.push(input);
         return commandSuccess({
           services: [
             {
               servicePinId: 'service-weather',
               providerGlobalMetaId: 'gm-weather-seller',
               displayName: 'Weather Oracle',
+              online: true,
+            },
+          ],
+        });
+      },
+      listBots: async (input) => {
+        calls.networkBots.push(input);
+        return commandSuccess({
+          source: 'socket_presence',
+          total: 1,
+          onlineWindowSeconds: 1200,
+          bots: [
+            {
+              globalMetaId: 'idq1onlinebot',
+              lastSeenAt: 1776836184230,
+              lastSeenAgoSeconds: 13,
+              deviceCount: 1,
               online: true,
             },
           ],
@@ -406,10 +424,25 @@ test('GET /api/network/services forwards query filters to network.listServices',
   const payload = await response.json();
 
   assert.equal(response.status, 200);
-  assert.deepEqual(server.calls.network, [{ online: true }]);
+  assert.deepEqual(server.calls.networkServices, [{ online: true }]);
   assert.equal(payload.ok, true);
   assert.equal(payload.data.services.length, 1);
   assert.equal(payload.data.services[0].servicePinId, 'service-weather');
+});
+
+test('GET /api/network/bots forwards query filters to network.listBots', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/network/bots?online=true&limit=10`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.networkBots, [{ online: true, limit: 10 }]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.source, 'socket_presence');
+  assert.equal(payload.data.total, 1);
+  assert.equal(payload.data.bots[0].globalMetaId, 'idq1onlinebot');
 });
 
 test('POST /api/services/call returns a delegation, session, and trace start contract', async (t) => {

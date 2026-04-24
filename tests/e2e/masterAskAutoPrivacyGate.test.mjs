@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { receivePrivateChat } = require('../../dist/core/chat/privateChat.js');
@@ -155,7 +156,7 @@ function buildSuggestInput(traceId) {
 }
 
 test('auto direct send still persists and sends a sanitized payload without secret-bearing files or artifacts', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-auto-privacy-'));
+  const homeDir = await createProfileHome('metabot-master-auto-privacy-');
   const identityPair = createIdentityPair();
   const configStore = createConfigStore(homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(homeDir);
@@ -165,7 +166,7 @@ test('auto direct send still persists and sends a sanitized payload without secr
   const writes = [];
 
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   await runtimeStateStore.writeState({

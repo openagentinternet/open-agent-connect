@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs';
-import { ensureHotLayout } from '../state/runtimeStateStore';
+import { ensureRuntimeLayout } from '../state/runtimeStateStore';
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 import type { MasterRequestMessage } from './masterMessageSchema';
 
@@ -70,11 +70,11 @@ export function createPendingMasterAskStateStore(homeDirOrPaths: string | Metabo
     paths,
     statePath,
     async read() {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       return normalizeState(await readJsonFile<PendingMasterAskState>(statePath));
     },
     async write(nextState) {
-      await ensureHotLayout(paths);
+      await ensureRuntimeLayout(paths);
       const normalized = normalizeState(nextState);
       await fs.writeFile(statePath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
       return normalized;

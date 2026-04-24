@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
@@ -171,7 +172,7 @@ function buildSuggestInput(traceId, overrides = {}) {
 }
 
 async function createAutoHarness(options = {}) {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-auto-flow-'));
+  const homeDir = await createProfileHome('metabot-master-auto-flow-');
   const identityPair = createIdentityPair();
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const masterStateStore = createPublishedMasterStateStore(homeDir);
@@ -295,7 +296,7 @@ async function createAutoHarness(options = {}) {
 test('master suggest in auto mode materializes a preview instead of returning bare auto_candidate metadata', async (t) => {
   const harness = await createAutoHarness();
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-preview-1'));
@@ -329,7 +330,7 @@ test('master suggest in auto mode can direct send for trusted non-sensitive payl
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-direct-send-1', {
@@ -395,7 +396,7 @@ test('master suggest in auto mode falls back to preview when the packaged payloa
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-sensitive-1', {
@@ -433,7 +434,7 @@ test('master suggest in auto mode falls back to plain suggest when confidence ne
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-low-confidence', {
@@ -495,7 +496,7 @@ test('master suggest in auto mode does not persist preview state when throttling
   for (const entry of cases) {
     const harness = await createAutoHarness(entry.harnessOptions);
     t.after(async () => {
-      await rm(harness.homeDir, { recursive: true, force: true });
+      await cleanupProfileHome(harness.homeDir);
     });
     const beforeState = await harness.pendingMasterAskStateStore.read();
     if (entry.beforeSuggest) {
@@ -535,7 +536,7 @@ test('direct-send transport failures update the trace out of awaiting_confirmati
     },
   });
   t.after(async () => {
-    await rm(harness.homeDir, { recursive: true, force: true });
+    await cleanupProfileHome(harness.homeDir);
   });
 
   const result = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-send-failure', {

@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import type { MetabotCommandResult } from '../core/contracts/commandResult';
-import type { SkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
+import type { ConcreteSkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
 
 export type Awaitable<T> = T | Promise<T>;
 
@@ -37,6 +37,7 @@ export interface CliDependencies {
   };
   network?: {
     listServices?: (input: { online?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    listBots?: (input: { online?: boolean; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
     listSources?: () => Awaitable<MetabotCommandResult<unknown>>;
     addSource?: (input: { baseUrl: string; label?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     removeSource?: (input: { baseUrl: string }) => Awaitable<MetabotCommandResult<unknown>>;
@@ -64,7 +65,10 @@ export interface CliDependencies {
     open?: (input: { page: string; traceId?: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   skills?: {
-    resolve?: (input: { skill: string; host: SkillHost; format: SkillRenderFormat }) => Awaitable<MetabotCommandResult<unknown>>;
+    resolve?: (input: { skill: string; host?: ConcreteSkillHost; format: SkillRenderFormat }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
+  host?: {
+    bindSkills?: (input: { host: ConcreteSkillHost }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   evolution?: {
     status?: () => Awaitable<MetabotCommandResult<unknown>>;
