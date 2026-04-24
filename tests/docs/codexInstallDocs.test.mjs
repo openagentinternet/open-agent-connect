@@ -26,7 +26,8 @@ test('unified install guide defines the shared install and host bind flow', asyn
   assert.match(guide, /metabot host bind-skills --host openclaw/);
   assert.match(guide, /~\/\.metabot\/skills\//);
   assert.match(guide, /~\/\.metabot\/bin/);
-  assert.match(guide, /manual host acceptance checklist/i);
+  assert.match(guide, /docs\/acceptance\/open-agent-connect-host-bind-checklist\.md/);
+  assert.doesNotMatch(guide, /manual host acceptance checklist/i);
 });
 
 test('Codex install runbook includes first-run handoff and response contract', async () => {

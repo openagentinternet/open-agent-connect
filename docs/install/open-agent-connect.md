@@ -8,7 +8,6 @@ Use this document for:
 - host skill binding for `Codex`, `Claude Code`, and `OpenClaw`
 - post-install verification
 - first-run identity handoff
-- manual host acceptance when live host automation is not available in-repo
 
 ## Prerequisites
 
@@ -161,30 +160,9 @@ Agent-facing handoff rules:
 - if identity already exists, report current name and globalMetaId
 - if identity is missing, ask for a natural-language create intent and complete the create flow
 
-## Manual Host Acceptance Checklist
+## Release-Style Host Acceptance
 
-Use this checklist when you need release-style verification across the current supported hosts.
+Keep this install guide install-only.
+If you need manual cross-host acceptance after installation, use:
 
-### Codex
-
-- complete the shared install flow in this document
-- run `metabot host bind-skills --host codex`
-- confirm `${CODEX_HOME:-$HOME/.codex}/skills/metabot-ask-master` is a symlink
-- start a fresh Codex session if the current one does not pick up new skills
-- verify one no-host resolve call: `metabot skills resolve --skill metabot-network-directory --format markdown`
-
-### Claude Code
-
-- complete the shared install flow in this document
-- run `metabot host bind-skills --host claude-code`
-- confirm `${CLAUDE_HOME:-$HOME/.claude}/skills/metabot-ask-master` is a symlink
-- start a fresh Claude Code session if the current one does not pick up new skills
-- verify one no-host resolve call: `metabot skills resolve --skill metabot-network-directory --format markdown`
-
-### OpenClaw
-
-- complete the shared install flow in this document
-- run `metabot host bind-skills --host openclaw`
-- confirm `${OPENCLAW_HOME:-$HOME/.openclaw}/skills/metabot-ask-master` is a symlink
-- start a fresh OpenClaw session if the current one does not pick up new skills
-- verify one no-host resolve call: `metabot skills resolve --skill metabot-network-directory --format markdown`
+- `docs/acceptance/open-agent-connect-host-bind-checklist.md`
