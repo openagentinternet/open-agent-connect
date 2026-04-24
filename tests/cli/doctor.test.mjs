@@ -30,6 +30,11 @@ function createHarness() {
     stdout,
     stderr,
     context: {
+      env: {
+        ...process.env,
+        HOME: '/tmp/metabot-cli-doctor-test-home',
+      },
+      cwd: '/tmp/metabot-cli-doctor-test-home',
       stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
       stderr: { write: (chunk) => { stderr.push(String(chunk)); return true; } },
       dependencies: {
@@ -156,6 +161,13 @@ test('runCli dispatches `metabot doctor` and preserves the doctor envelope', asy
       checks: [
         { code: 'daemon_reachable', ok: true },
         { code: 'identity_loaded', ok: false },
+        {
+          code: 'canonical_cli_shim_preferred',
+          ok: true,
+          canonicalShimPath: null,
+          legacyShimPath: null,
+          legacyCompatibilityForwarder: false,
+        },
       ],
     },
   });

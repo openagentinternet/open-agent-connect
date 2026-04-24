@@ -698,6 +698,140 @@ test('identity create auto-creates the slugged profile workspace and doctor repo
   assert.equal(Number.isInteger(daemonState.pid), true);
 });
 
+test('doctor reports a legacy ~/.agent-connect/bin/metabot shim when it shadows the canonical ~/.metabot/bin/metabot shim on PATH', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', 'alice');
+  const canonicalBinDir = path.join(systemHome, '.metabot', 'bin');
+  const legacyBinDir = path.join(systemHome, '.agent-connect', 'bin');
+  t.after(async () => stopDaemon(homeDir));
+
+  await mkdir(canonicalBinDir, { recursive: true });
+  await mkdir(legacyBinDir, { recursive: true });
+  await writeFile(path.join(canonicalBinDir, 'metabot'), '#!/usr/bin/env bash\n', 'utf8');
+  await writeFile(path.join(legacyBinDir, 'metabot'), '#!/usr/bin/env bash\n', 'utf8');
+
+  const created = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Alice'], {
+    HOME: systemHome,
+  });
+  assert.equal(created.exitCode, 0);
+  assert.equal(created.payload.ok, true);
+
+  const doctor = await runCommandWithEnv(systemHome, ['doctor'], {
+    HOME: systemHome,
+    PATH: `${legacyBinDir}${path.delimiter}${canonicalBinDir}${path.delimiter}${process.env.PATH || ''}`,
+  });
+
+  assert.equal(doctor.exitCode, 0);
+  assert.equal(doctor.payload.ok, true);
+  assert.equal(
+    doctor.payload.data.checks.some(
+      (check) => check.code === 'canonical_cli_shim_preferred' && check.ok === false
+    ),
+    true
+  );
+});
+
+test('doctor accepts a legacy ~/.agent-connect/bin/metabot compatibility forwarder even when it appears first on PATH', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', 'alice');
+  const canonicalBinDir = path.join(systemHome, '.metabot', 'bin');
+  const legacyBinDir = path.join(systemHome, '.agent-connect', 'bin');
+  const canonicalMetabotPath = path.join(canonicalBinDir, 'metabot');
+  const legacyMetabotPath = path.join(legacyBinDir, 'metabot');
+  t.after(async () => stopDaemon(homeDir));
+
+  await mkdir(canonicalBinDir, { recursive: true });
+  await mkdir(legacyBinDir, { recursive: true });
+  await writeFile(canonicalMetabotPath, '#!/usr/bin/env bash\n', 'utf8');
+  await writeFile(
+    legacyMetabotPath,
+    [
+      '#!/usr/bin/env bash',
+      'set -euo pipefail',
+      `CANONICAL_METABOT_BIN="${canonicalMetabotPath}"`,
+      '[ -x "$CANONICAL_METABOT_BIN" ] || exit 1',
+      'exec "$CANONICAL_METABOT_BIN" "$@"',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const created = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Alice'], {
+    HOME: systemHome,
+  });
+  assert.equal(created.exitCode, 0);
+  assert.equal(created.payload.ok, true);
+
+  const doctor = await runCommandWithEnv(systemHome, ['doctor'], {
+    HOME: systemHome,
+    PATH: `${legacyBinDir}${path.delimiter}${canonicalBinDir}${path.delimiter}${process.env.PATH || ''}`,
+  });
+
+  assert.equal(doctor.exitCode, 0);
+  assert.equal(doctor.payload.ok, true);
+  assert.equal(
+    doctor.payload.data.checks.some(
+      (check) =>
+        check.code === 'canonical_cli_shim_preferred'
+        && check.ok === true
+        && check.legacyCompatibilityForwarder === true
+    ),
+    true
+  );
+});
+
+test('doctor respects METABOT_BIN_DIR and METABOT_LEGACY_BIN_DIR overrides when evaluating shim precedence', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', 'alice');
+  const canonicalBinDir = path.join(systemHome, 'custom-bin');
+  const legacyBinDir = path.join(systemHome, 'legacy-bin');
+  const canonicalMetabotPath = path.join(canonicalBinDir, 'metabot');
+  const legacyMetabotPath = path.join(legacyBinDir, 'metabot');
+  t.after(async () => stopDaemon(homeDir));
+
+  await mkdir(canonicalBinDir, { recursive: true });
+  await mkdir(legacyBinDir, { recursive: true });
+  await writeFile(canonicalMetabotPath, '#!/usr/bin/env bash\n', 'utf8');
+  await writeFile(
+    legacyMetabotPath,
+    [
+      '#!/usr/bin/env bash',
+      'set -euo pipefail',
+      `CANONICAL_METABOT_BIN="${canonicalMetabotPath}"`,
+      '[ -x "$CANONICAL_METABOT_BIN" ] || exit 1',
+      'exec "$CANONICAL_METABOT_BIN" "$@"',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const created = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Alice'], {
+    HOME: systemHome,
+  });
+  assert.equal(created.exitCode, 0);
+  assert.equal(created.payload.ok, true);
+
+  const doctor = await runCommandWithEnv(systemHome, ['doctor'], {
+    HOME: systemHome,
+    METABOT_BIN_DIR: canonicalBinDir,
+    METABOT_LEGACY_BIN_DIR: legacyBinDir,
+    PATH: `${legacyBinDir}${path.delimiter}${canonicalBinDir}${path.delimiter}${process.env.PATH || ''}`,
+  });
+
+  assert.equal(doctor.exitCode, 0);
+  assert.equal(doctor.payload.ok, true);
+  assert.deepEqual(
+    doctor.payload.data.checks.find((check) => check.code === 'canonical_cli_shim_preferred'),
+    {
+      code: 'canonical_cli_shim_preferred',
+      ok: true,
+      canonicalShimPath: canonicalMetabotPath,
+      legacyShimPath: legacyMetabotPath,
+      legacyCompatibilityForwarder: true,
+    },
+  );
+});
+
 test('identity create returns identity_name_conflict when an active identity with a different name already exists', async (t) => {
   const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
   const homeDir = path.join(systemHome, '.metabot', 'profiles', 'bob');

@@ -123,6 +123,8 @@ metabot doctor
 
 The shared MetaBot skill source of truth lives under `~/.metabot/skills/`.
 Host-native `metabot-*` entries are projected into each host with `metabot host bind-skills --host <host>`.
+The canonical CLI shim lives at `~/.metabot/bin/metabot`.
+If this machine still has a legacy `~/.agent-connect/bin/metabot` earlier on `PATH`, rerun `./install.sh` to refresh that legacy shim into a compatibility forwarder.
 If the host does not immediately pick up the new bindings, start a fresh host session after installation.
 
 Host-specific guides:

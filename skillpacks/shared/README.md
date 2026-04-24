@@ -1,6 +1,7 @@
 # Shared MetaBot Skills for Open Agent Connect
 
 This shared pack installs the host-neutral MetaBot skills into `~/.metabot/skills` and installs the primary `metabot` shim into `~/.metabot/bin`.
+When a legacy `~/.agent-connect/bin/metabot` shim already exists, install also refreshes it into a compatibility forwarder so stale PATH ordering does not keep an old wrapper active.
 
 ## Included MetaBot Skills
 

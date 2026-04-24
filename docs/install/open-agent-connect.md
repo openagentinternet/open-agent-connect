@@ -47,6 +47,9 @@ This installs:
 
 If the CLI is not on `PATH`, either export `PATH` as shown above or set `METABOT_BIN_DIR` before running `./install.sh`.
 
+If this machine still has a legacy `~/.agent-connect/bin/metabot` shim or that legacy bin directory still appears earlier on `PATH`, rerun `./install.sh`.
+The installer refreshes that legacy shim into a compatibility forwarder, but the canonical v2 CLI remains `~/.metabot/bin/metabot`.
+
 ## Bind One Host
 
 Choose the host you want to expose immediately after the shared install:
@@ -91,6 +94,7 @@ Success criteria:
 
 - `metabot doctor` exits with code `0`
 - `metabot doctor` output includes `daemon_reachable`
+- `metabot doctor` output includes `canonical_cli_shim_preferred`
 - `metabot` and `metabot identity` help commands run successfully
 
 Then verify the shared skill files exist:

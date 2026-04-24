@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback } from 'node:child_process';
-import { cp, lstat, mkdtemp, readFile, readlink, stat } from 'node:fs/promises';
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -80,6 +80,12 @@ async function assertFileMissing(filePath) {
     /ENOENT/,
     `${filePath} should not exist`
   );
+}
+
+async function assertRepoFileTracked(repoRelativePath) {
+  await execFile('git', ['ls-files', '--error-unmatch', repoRelativePath], {
+    cwd: REPO_ROOT,
+  });
 }
 
 let builtSkillpacksPromise;
@@ -185,6 +191,34 @@ test('repository tracked shared and host-wrapper skillpack artifacts stay in syn
   );
   assert.equal(trackedSharedCli, freshSharedCli, 'tracked shared bundled CLI should match a fresh build');
 
+  const freshSharedCliShimDoctor = await readFile(
+    path.join(sharedPackRoot(outputRoot), 'runtime', 'dist', 'core', 'state', 'cliShimDoctor.js'),
+    'utf8',
+  );
+  const trackedSharedCliShimDoctor = await readFile(
+    path.join(REPO_ROOT, 'skillpacks', SHARED_PACK, 'runtime', 'dist', 'core', 'state', 'cliShimDoctor.js'),
+    'utf8',
+  );
+  assert.equal(
+    trackedSharedCliShimDoctor,
+    freshSharedCliShimDoctor,
+    'tracked shared cliShimDoctor.js should match a fresh build',
+  );
+
+  const freshSharedCliShimDoctorTypes = await readFile(
+    path.join(sharedPackRoot(outputRoot), 'runtime', 'dist', 'core', 'state', 'cliShimDoctor.d.ts'),
+    'utf8',
+  );
+  const trackedSharedCliShimDoctorTypes = await readFile(
+    path.join(REPO_ROOT, 'skillpacks', SHARED_PACK, 'runtime', 'dist', 'core', 'state', 'cliShimDoctor.d.ts'),
+    'utf8',
+  );
+  assert.equal(
+    trackedSharedCliShimDoctorTypes,
+    freshSharedCliShimDoctorTypes,
+    'tracked shared cliShimDoctor.d.ts should match a fresh build',
+  );
+
   const freshSharedDependency = await readFile(
     path.join(sharedPackRoot(outputRoot), 'runtime', 'node_modules', 'meta-contract', 'package.json'),
     'utf8',
@@ -238,6 +272,34 @@ test('repository tracked shared and host-wrapper skillpack artifacts stay in syn
     );
     assert.equal(trackedWrapperCli, freshWrapperCli, `tracked ${host} bundled CLI should match a fresh build`);
 
+    const freshWrapperCliShimDoctor = await readFile(
+      path.join(outputRoot, host, 'runtime', 'dist', 'core', 'state', 'cliShimDoctor.js'),
+      'utf8',
+    );
+    const trackedWrapperCliShimDoctor = await readFile(
+      path.join(REPO_ROOT, 'skillpacks', host, 'runtime', 'dist', 'core', 'state', 'cliShimDoctor.js'),
+      'utf8',
+    );
+    assert.equal(
+      trackedWrapperCliShimDoctor,
+      freshWrapperCliShimDoctor,
+      `tracked ${host} cliShimDoctor.js should match a fresh build`,
+    );
+
+    const freshWrapperCliShimDoctorTypes = await readFile(
+      path.join(outputRoot, host, 'runtime', 'dist', 'core', 'state', 'cliShimDoctor.d.ts'),
+      'utf8',
+    );
+    const trackedWrapperCliShimDoctorTypes = await readFile(
+      path.join(REPO_ROOT, 'skillpacks', host, 'runtime', 'dist', 'core', 'state', 'cliShimDoctor.d.ts'),
+      'utf8',
+    );
+    assert.equal(
+      trackedWrapperCliShimDoctorTypes,
+      freshWrapperCliShimDoctorTypes,
+      `tracked ${host} cliShimDoctor.d.ts should match a fresh build`,
+    );
+
     const freshWrapperDependency = await readFile(
       path.join(outputRoot, host, 'runtime', 'node_modules', 'meta-contract', 'package.json'),
       'utf8',
@@ -264,6 +326,17 @@ test('repository tracked shared and host-wrapper skillpack artifacts stay in syn
         `tracked ${host} wrapper ${skillName} should match a fresh build`,
       );
     }
+  }
+});
+
+test('cliShimDoctor source and bundled runtime artifacts are tracked in git', async () => {
+  await assertRepoFileTracked(path.join('src', 'core', 'state', 'cliShimDoctor.ts'));
+  await assertRepoFileTracked(path.join('skillpacks', SHARED_PACK, 'runtime', 'dist', 'core', 'state', 'cliShimDoctor.js'));
+  await assertRepoFileTracked(path.join('skillpacks', SHARED_PACK, 'runtime', 'dist', 'core', 'state', 'cliShimDoctor.d.ts'));
+
+  for (const host of HOSTS) {
+    await assertRepoFileTracked(path.join('skillpacks', host, 'runtime', 'dist', 'core', 'state', 'cliShimDoctor.js'));
+    await assertRepoFileTracked(path.join('skillpacks', host, 'runtime', 'dist', 'core', 'state', 'cliShimDoctor.d.ts'));
   }
 });
 
@@ -306,7 +379,7 @@ test('buildAgentConnectSkillpacks embeds one shared CLI path and one shared comp
   for (const host of HOSTS) {
     const readme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
     assert.match(readme, new RegExp(`\\b${EXPECTED_CLI_PATH}\\b`));
-    assert.doesNotMatch(readme, /\bagent-connect\b/);
+    assert.doesNotMatch(readme, /`agent-connect`|\bagent-connect\s+(?:identity|network|services|chat|ui|doctor|skills|master)\b/);
     assert.match(readme, new RegExp(escapeForRegex(EXPECTED_COMPATIBILITY_MANIFEST)));
   }
 });
@@ -485,6 +558,111 @@ test('shared install.sh copies shared skills and installs a runnable metabot shi
     code: 'missing_command',
     message: 'No command provided.',
   });
+});
+
+test('shared install.sh refreshes a legacy ~/.agent-connect/bin/metabot shim to forward into the canonical ~/.metabot/bin/metabot shim', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+  const fakeHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-install-legacy-home-'));
+
+  const sharedRoot = sharedPackRoot(outputRoot);
+  const legacyBinDir = path.join(fakeHome, '.agent-connect', 'bin');
+  const legacyMetabotPath = path.join(legacyBinDir, 'metabot');
+  await mkdir(legacyBinDir, { recursive: true });
+  await writeFile(
+    legacyMetabotPath,
+    '#!/usr/bin/env bash\nset -euo pipefail\nexec node /tmp/missing-metabot-cli.js "$@"\n',
+    'utf8',
+  );
+  await chmod(legacyMetabotPath, 0o755);
+
+  await execFile('/bin/bash', [path.join(sharedRoot, 'install.sh')], {
+    cwd: sharedRoot,
+    env: {
+      ...process.env,
+      HOME: fakeHome,
+      PATH: `${legacyBinDir}${path.delimiter}${process.env.PATH || ''}`,
+    },
+  });
+
+  const legacyShimContent = await readFile(legacyMetabotPath, 'utf8');
+  assert.doesNotMatch(legacyShimContent, /missing-metabot-cli\.js/);
+  assert.match(legacyShimContent, /\.metabot\/bin\/metabot/);
+
+  let commandFailure = null;
+  try {
+    await execFile(legacyMetabotPath, [], {
+      env: {
+        ...process.env,
+        HOME: fakeHome,
+      },
+    });
+  } catch (error) {
+    commandFailure = error;
+  }
+
+  assert.ok(commandFailure, 'legacy metabot shim should forward into the canonical CLI and return the CLI envelope');
+  assert.equal(commandFailure.code, 1);
+  assert.deepEqual(JSON.parse(String(commandFailure.stdout).trim()), {
+    ok: false,
+    state: 'failed',
+    code: 'missing_command',
+    message: 'No command provided.',
+  });
+
+  const identityCreate = await execFile(legacyMetabotPath, ['identity', 'create', '--name', 'Alice'], {
+    env: {
+      ...process.env,
+      HOME: fakeHome,
+      PATH: `${legacyBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+      METABOT_TEST_FAKE_SUBSIDY: '1',
+      METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+    },
+  });
+  const createdPayload = JSON.parse(String(identityCreate.stdout).trim());
+  assert.equal(createdPayload.ok, true);
+
+  const doctorRun = await execFile(legacyMetabotPath, ['doctor'], {
+    env: {
+      ...process.env,
+      HOME: fakeHome,
+      PATH: `${legacyBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+      METABOT_TEST_FAKE_SUBSIDY: '1',
+      METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+    },
+  });
+  const doctorPayload = JSON.parse(String(doctorRun.stdout).trim());
+  assert.equal(doctorPayload.ok, true);
+  assert.equal(
+    doctorPayload.data.checks.some(
+      (check) =>
+        check.code === 'canonical_cli_shim_preferred'
+        && check.ok === true
+        && check.legacyCompatibilityForwarder === true
+    ),
+    true
+  );
+});
+
+test('shared install.sh treats a trailing-slash ~/.agent-connect/bin PATH entry as the same legacy bin directory', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+  const fakeHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-install-legacy-path-home-'));
+
+  const sharedRoot = sharedPackRoot(outputRoot);
+  const legacyBinDir = path.join(fakeHome, '.agent-connect', 'bin');
+  await execFile('/bin/bash', [path.join(sharedRoot, 'install.sh')], {
+    cwd: sharedRoot,
+    env: {
+      ...process.env,
+      HOME: fakeHome,
+      PATH: `${legacyBinDir}/${path.delimiter}${process.env.PATH || ''}`,
+    },
+  });
+
+  await assertFileExists(path.join(legacyBinDir, 'metabot'));
+  const legacyShimContent = await readFile(path.join(legacyBinDir, 'metabot'), 'utf8');
+  assert.match(legacyShimContent, /\.metabot\/bin\/metabot/);
 });
 
 test('host wrapper install.sh runs the packaged shared install flow and binds host skills without relying on an adjacent shared pack directory', async () => {

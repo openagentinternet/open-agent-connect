@@ -1,6 +1,7 @@
 # Open Agent Connect Skill Pack for Claude Code
 
 Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent Internet. This wrapper installs the shared MetaBot skills into `~/.metabot/skills`, installs the primary `metabot` CLI shim, and then binds host-native `metabot-*` entries into the Claude Code skills root.
+If a legacy `~/.agent-connect/bin/metabot` shim is already present, install also refreshes it into a compatibility forwarder to keep the canonical v2 shim authoritative.
 
 ## Included MetaBot Skills
 
