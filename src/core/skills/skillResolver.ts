@@ -1,11 +1,13 @@
 import { getBaseSkillContract } from './baseSkillRegistry';
 import type {
   ActiveVariantSource,
+  ConcreteSkillHost,
   RenderResolvedSkillContractInput,
   RenderedSkillContract,
   ResolvedSkillContract,
   ResolveSkillContractInput,
   SkillHost,
+  SkillResolutionMode,
   SkillPermissionScope,
   SkillVariantArtifact,
   SkillVariantScopeMetadata,
@@ -267,18 +269,25 @@ export function resolveSkillContract(input: ResolveSkillContractInput): Resolved
 export function renderResolvedSkillContract(
   input: RenderResolvedSkillContractInput
 ): RenderedSkillContract {
+  const resolvedHost: SkillHost = input.host ?? 'shared';
+  const requestedHost: ConcreteSkillHost | undefined = input.host;
+  const resolutionMode: SkillResolutionMode = input.host ? 'host_override' : 'shared_default';
   const resolved = resolveSkillContract(input);
   if (input.format === 'json') {
     return {
-      host: input.host,
+      host: resolvedHost,
+      requestedHost,
+      resolutionMode,
       format: 'json',
       contract: resolved,
     };
   }
   return {
-    host: input.host,
+    host: resolvedHost,
+    requestedHost,
+    resolutionMode,
     format: 'markdown',
-    markdown: renderMarkdownContract(input.host, resolved),
+    markdown: renderMarkdownContract(resolvedHost, resolved),
     contract: resolved,
   };
 }

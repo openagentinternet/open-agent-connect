@@ -93,6 +93,44 @@ test('runCli supports `metabot skills resolve --skill metabot-network-directory 
   assert.equal(result.payload.data.includes('# Resolved Skill Contract: metabot-network-directory'), true);
 });
 
+test('runCli supports `metabot skills resolve --skill metabot-network-manage --format markdown`', async () => {
+  const homeDir = createProfileHome('metabot-cli-skills-no-host-markdown-');
+  const result = await runSkillsCli(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-manage',
+    '--format',
+    'markdown',
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(typeof result.payload.data, 'string');
+  assert.equal(result.payload.data.includes('# Resolved Skill Contract: metabot-network-manage'), true);
+  assert.equal(result.payload.data.includes('Host: `shared`'), true);
+});
+
+test('runCli supports no-host shared-default resolution for existing public skill `metabot-network-directory` in json mode', async () => {
+  const homeDir = createProfileHome('metabot-cli-skills-directory-no-host-json-');
+  const result = await runSkillsCli(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-directory',
+    '--format',
+    'json',
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.format, 'json');
+  assert.equal(result.payload.data.host, 'shared');
+  assert.equal(result.payload.data.requestedHost, undefined);
+  assert.equal(result.payload.data.resolutionMode, 'shared_default');
+  assert.equal(result.payload.data.contract.skillName, 'metabot-network-directory');
+});
+
 test('runCli supports `metabot skills resolve --skill metabot-network-directory --host codex --format json`', async () => {
   const homeDir = createProfileHome('metabot-cli-skills-json-');
   const result = await runSkillsCli(homeDir, [
@@ -111,6 +149,62 @@ test('runCli supports `metabot skills resolve --skill metabot-network-directory 
   assert.equal(result.payload.data.format, 'json');
   assert.equal(result.payload.data.host, 'codex');
   assert.equal(result.payload.data.contract.skillName, 'metabot-network-directory');
+});
+
+test('runCli supports `metabot skills resolve --skill metabot-network-manage --format json`', async () => {
+  const homeDir = createProfileHome('metabot-cli-skills-no-host-json-');
+  const result = await runSkillsCli(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-manage',
+    '--format',
+    'json',
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.format, 'json');
+  assert.equal(result.payload.data.contract.skillName, 'metabot-network-manage');
+});
+
+test('runCli no-host json shape keeps top-level host and marks shared-default resolution', async () => {
+  const homeDir = createProfileHome('metabot-cli-skills-no-host-json-shape-');
+  const result = await runSkillsCli(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-manage',
+    '--format',
+    'json',
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.host, 'shared');
+  assert.equal(result.payload.data.requestedHost, undefined);
+  assert.equal(result.payload.data.resolutionMode, 'shared_default');
+  assert.equal(result.payload.data.contract.skillName, 'metabot-network-manage');
+});
+
+test('runCli rejects unsupported explicit hosts for `metabot skills resolve`', async () => {
+  const homeDir = createProfileHome('metabot-cli-skills-invalid-host-');
+  const result = await runSkillsCli(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-directory',
+    '--host',
+    'shared',
+    '--format',
+    'json',
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.code, 'invalid_argument');
+  assert.match(result.payload.message, /Unsupported --host value: shared/);
+  assert.match(result.payload.message, /codex, claude-code, openclaw/);
 });
 
 test('runCli supports `metabot skills resolve --skill metabot-ask-master --host codex --format markdown`', async () => {

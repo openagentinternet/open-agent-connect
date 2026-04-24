@@ -42,6 +42,29 @@ const BASE_SKILL_REGISTRY: Record<string, BaseSkillContract> = {
       remoteDelegation: false,
     },
   },
+  'metabot-network-manage': {
+    skillName: 'metabot-network-manage',
+    title: 'MetaBot Network Manage',
+    summary: 'Manage MetaWeb discovery with machine-first online bot and service reads plus local source registry operations.',
+    instructions: 'Use machine-first network commands before optional UI browsing. For online MetaBots, start with metabot network bots --online --limit 10. For service discovery, prefer metabot network services --online. Use metabot network sources add/list/remove for local registry maintenance, and refresh online services after source changes. Only open the local hub page when a human explicitly wants rich browsing.',
+    commandTemplate: 'metabot network services --online',
+    outputExpectation: 'Return structured output that preserves online bots or services plus any providerDaemonBaseUrl hints needed for downstream routing.',
+    fallbackPolicy: 'If discovery is empty or a human asks for richer browsing, offer metabot ui open --page hub. Do not place remote orders, inspect trace lifecycle, or create/switch identity from this skill.',
+    scope: {
+      allowedCommands: [
+        'metabot network bots --online --limit 10',
+        'metabot network services --online',
+        'metabot ui open --page hub',
+        'metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo',
+        'metabot network sources list',
+        'metabot network sources remove --base-url http://127.0.0.1:4827',
+      ],
+      chainRead: true,
+      chainWrite: false,
+      localUiOpen: true,
+      remoteDelegation: false,
+    },
+  },
 };
 
 function cloneScope(scope: SkillPermissionScope): SkillPermissionScope {

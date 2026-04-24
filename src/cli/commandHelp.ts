@@ -191,6 +191,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'chat', summary: 'Send encrypted private MetaWeb messages to another MetaBot.' },
     { name: 'trace', summary: 'Watch or inspect structured remote delegation traces.' },
     { name: 'ui', summary: 'Open local human-only HTML pages backed by the MetaBot runtime.' },
+    { name: 'skills', summary: 'Resolve shared-default or host-specific skill contracts for install/runtime use.' },
   ],
   optionalFlags: [HELP_JSON_FLAG],
   examples: [
@@ -202,6 +203,46 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
 
 const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   ROOT_COMMAND_HELP,
+  {
+    commandPath: ['skills'],
+    summary: 'Skill contract commands for shared-default resolution and explicit host compatibility rendering.',
+    usage: 'metabot skills <subcommand>',
+    subcommands: [
+      { name: 'resolve', summary: 'Render one resolved skill contract in markdown or JSON.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+    examples: [
+      'metabot skills resolve --skill metabot-network-manage --format markdown',
+      'metabot skills resolve --skill metabot-network-manage --host codex --format json',
+    ],
+  },
+  {
+    commandPath: ['skills', 'resolve'],
+    summary: 'Render one resolved skill contract using the shared-default host or an explicit compatibility host override.',
+    usage: 'metabot skills resolve --skill <skill-name> --format <json|markdown> [--host <codex|claude-code|openclaw>]',
+    requiredFlags: [
+      { flag: '--skill', value: '<skill-name>', description: 'Base skill id to resolve, such as metabot-network-manage.' },
+      { flag: '--format', value: '<json|markdown>', description: 'Output shape to render.' },
+    ],
+    optionalFlags: [
+      { flag: '--host', value: '<codex|claude-code|openclaw>', description: 'Optional compatibility override. Omit to render the shared-default contract.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'Markdown mode returns the rendered contract string.',
+      'JSON mode returns host, optional requestedHost, resolutionMode, format, and contract.',
+    ],
+    failureSemantics: [
+      'Fails when --skill or --format is omitted.',
+      'Fails when --host is present but not one of codex, claude-code, or openclaw.',
+    ],
+    examples: [
+      'metabot skills resolve --skill metabot-network-manage --format markdown',
+      'metabot skills resolve --skill metabot-network-manage --format json',
+      'metabot skills resolve --skill metabot-network-manage --host codex --format markdown',
+      'metabot skills resolve --skill metabot-network-manage --host codex --format json',
+    ],
+  },
   {
     commandPath: ['config'],
     summary: 'Read or change supported public runtime switches such as Ask Master availability.',

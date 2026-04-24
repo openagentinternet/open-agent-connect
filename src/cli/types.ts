@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import type { MetabotCommandResult } from '../core/contracts/commandResult';
-import type { SkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
+import type { ConcreteSkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
 
 export type Awaitable<T> = T | Promise<T>;
 
@@ -65,7 +65,7 @@ export interface CliDependencies {
     open?: (input: { page: string; traceId?: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   skills?: {
-    resolve?: (input: { skill: string; host: SkillHost; format: SkillRenderFormat }) => Awaitable<MetabotCommandResult<unknown>>;
+    resolve?: (input: { skill: string; host?: ConcreteSkillHost; format: SkillRenderFormat }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   evolution?: {
     status?: () => Awaitable<MetabotCommandResult<unknown>>;

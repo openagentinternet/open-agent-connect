@@ -183,6 +183,88 @@ test('runCli prints nested group help for `metabot network sources --help`', asy
   assert.match(output, /^\s+remove\s+/m);
 });
 
+test('runCli prints skills group help for `metabot skills --help`', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['skills', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot skills <subcommand>/m);
+  assert.match(output, /^Commands:/m);
+  assert.match(output, /^\s+resolve\s+/m);
+  assert.match(output, /shared-default resolution/i);
+  assert.match(output, /metabot skills resolve --skill metabot-network-manage --format markdown/);
+});
+
+test('runCli prints skills resolve help for `metabot skills resolve --help`', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['skills', 'resolve', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot skills resolve --skill <skill-name> --format <json\|markdown> \[--host <codex\|claude-code\|openclaw>\]/m);
+  assert.match(output, /^Required flags:/m);
+  assert.match(output, /--skill <skill-name>\s+Base skill id to resolve, such as metabot-network-manage\./m);
+  assert.match(output, /--format <json\|markdown>\s+Output shape to render\./m);
+  assert.match(output, /^Optional flags:/m);
+  assert.match(output, /--host <codex\|claude-code\|openclaw>\s+Optional compatibility override\./m);
+  assert.match(output, /^Success shape:/m);
+  assert.match(output, /requestedHost/);
+  assert.match(output, /resolutionMode/);
+});
+
+test('runCli prints machine-readable skills resolve help for `metabot skills resolve --help --json`', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['skills', 'resolve', '--help', '--json'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = JSON.parse(stdout.join(''));
+  assert.deepEqual(output.commandPath, ['skills', 'resolve']);
+  assert.equal(output.command, 'metabot skills resolve');
+  assert.equal(output.summary, 'Render one resolved skill contract using the shared-default host or an explicit compatibility host override.');
+  assert.equal(output.usage, 'metabot skills resolve --skill <skill-name> --format <json|markdown> [--host <codex|claude-code|openclaw>]');
+  assert.deepEqual(output.requiredFlags, [
+    {
+      flag: '--skill',
+      value: '<skill-name>',
+      description: 'Base skill id to resolve, such as metabot-network-manage.',
+    },
+    {
+      flag: '--format',
+      value: '<json|markdown>',
+      description: 'Output shape to render.',
+    },
+  ]);
+  assert.deepEqual(output.optionalFlags, [
+    {
+      flag: '--host',
+      value: '<codex|claude-code|openclaw>',
+      description: 'Optional compatibility override. Omit to render the shared-default contract.',
+    },
+    {
+      flag: '--json',
+      description: 'Emit machine-readable help JSON instead of text.',
+    },
+  ]);
+  assert.ok(Array.isArray(output.examples));
+  assert.ok(output.examples.includes('metabot skills resolve --skill metabot-network-manage --format json'));
+});
+
 test('runCli prints identity group help with create/who/list/assign subcommands', async () => {
   const stdout = [];
 

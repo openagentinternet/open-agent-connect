@@ -1,8 +1,10 @@
-export type SkillHost = 'codex' | 'claude-code' | 'openclaw';
+export type SkillHost = 'shared' | 'codex' | 'claude-code' | 'openclaw';
+export type ConcreteSkillHost = Exclude<SkillHost, 'shared'>;
 export type SkillRenderFormat = 'json' | 'markdown';
 export type SkillResolutionSource = 'base' | 'merged';
 export type ActiveVariantSource = 'local' | 'remote' | null;
 export type SkillVariantStatus = 'active' | 'inactive';
+export type SkillResolutionMode = 'shared_default' | 'host_override';
 
 export interface SkillPermissionScope {
   allowedCommands: string[];
@@ -60,18 +62,22 @@ export interface ResolvedSkillContract extends BaseSkillContract {
 }
 
 export interface RenderResolvedSkillContractInput extends ResolveSkillContractInput {
-  host: SkillHost;
+  host?: ConcreteSkillHost;
   format: SkillRenderFormat;
 }
 
 export interface RenderedSkillContractJson {
   host: SkillHost;
+  requestedHost?: ConcreteSkillHost;
+  resolutionMode: SkillResolutionMode;
   format: 'json';
   contract: ResolvedSkillContract;
 }
 
 export interface RenderedSkillContractMarkdown {
   host: SkillHost;
+  requestedHost?: ConcreteSkillHost;
+  resolutionMode: SkillResolutionMode;
   format: 'markdown';
   markdown: string;
   contract: ResolvedSkillContract;

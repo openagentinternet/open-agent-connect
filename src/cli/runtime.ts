@@ -24,7 +24,7 @@ import {
 import { resolveIdentityCreateProfileHome } from '../core/identity/profileWorkspace';
 import { resolveProfileNameMatch } from '../core/identity/profileNameResolution';
 import { renderResolvedSkillContract } from '../core/skills/skillResolver';
-import type { SkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
+import type { ConcreteSkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
 import type { SkillActiveVariantRef } from '../core/evolution/types';
 import { resolveMetabotPaths } from '../core/state/paths';
 import {
@@ -1538,7 +1538,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           : { activeVariant: null, activeVariantSource: null };
         const rendered = renderResolvedSkillContract({
           skillName: input.skill,
-          host: input.host as SkillHost,
+          host: input.host as ConcreteSkillHost | undefined,
           format: input.format as SkillRenderFormat,
           evolutionNetworkEnabled: config.evolution_network.enabled,
           activeVariant: resolvedActiveVariant.activeVariant,
