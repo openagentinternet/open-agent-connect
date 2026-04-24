@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback } from 'node:child_process';
-import { lstat, mkdtemp, readFile, readlink, stat } from 'node:fs/promises';
+import { cp, lstat, mkdtemp, readFile, readlink, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -82,14 +82,25 @@ async function assertFileMissing(filePath) {
   );
 }
 
-test('buildAgentConnectSkillpacks renders one shared pack plus self-contained host wrapper packs', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
+let builtSkillpacksPromise;
 
-  const result = await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
+async function getBuiltSkillpacks() {
+  if (!builtSkillpacksPromise) {
+    builtSkillpacksPromise = (async () => {
+      const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
+      const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
+      const result = await buildAgentConnectSkillpacks({
+        repoRoot: REPO_ROOT,
+        outputRoot,
+      });
+      return { outputRoot, result };
+    })();
+  }
+  return builtSkillpacksPromise;
+}
+
+test('buildAgentConnectSkillpacks renders one shared pack plus self-contained host wrapper packs', async () => {
+  const { outputRoot, result } = await getBuiltSkillpacks();
 
   assert.deepEqual([...result.hosts].sort(), [...HOSTS].sort());
 
@@ -123,13 +134,7 @@ test('buildAgentConnectSkillpacks renders one shared pack plus self-contained ho
 });
 
 test('buildAgentConnectSkillpacks includes the Ask Master skill with only master command semantics in the shared pack', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
+  const { outputRoot } = await getBuiltSkillpacks();
 
   const content = await readFile(sharedSkillFile(outputRoot, 'metabot-ask-master'), 'utf8');
   assert.match(content, /^name:\s*metabot-ask-master$/m);
@@ -147,13 +152,7 @@ test('buildAgentConnectSkillpacks includes the Ask Master skill with only master
 });
 
 test('buildAgentConnectSkillpacks renders shared skills without host-specific adapter sections or host override flags', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
+  const { outputRoot } = await getBuiltSkillpacks();
 
   const askMaster = await readFile(sharedSkillFile(outputRoot, 'metabot-ask-master'), 'utf8');
   assert.doesNotMatch(askMaster, /## Host Adapter/);
@@ -166,13 +165,7 @@ test('buildAgentConnectSkillpacks renders shared skills without host-specific ad
 });
 
 test('repository tracked shared and host-wrapper skillpack artifacts stay in sync with a fresh build', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
+  const { outputRoot } = await getBuiltSkillpacks();
 
   const freshSharedReadme = await readFile(path.join(sharedPackRoot(outputRoot), 'README.md'), 'utf8');
   const trackedSharedReadme = await readFile(path.join(REPO_ROOT, 'skillpacks', SHARED_PACK, 'README.md'), 'utf8');
@@ -275,13 +268,7 @@ test('repository tracked shared and host-wrapper skillpack artifacts stay in syn
 });
 
 test('buildAgentConnectSkillpacks host README lists the active metabot skills including Ask Master', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
+  const { outputRoot } = await getBuiltSkillpacks();
 
   for (const host of HOSTS) {
     const readme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
@@ -297,13 +284,7 @@ test('buildAgentConnectSkillpacks host README lists the active metabot skills in
 });
 
 test('buildAgentConnectSkillpacks host README advertises the phase-3 Ask Master smoke contract', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
+  const { outputRoot } = await getBuiltSkillpacks();
 
   for (const host of HOSTS) {
     const readme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
@@ -320,13 +301,7 @@ test('buildAgentConnectSkillpacks host README advertises the phase-3 Ask Master 
 });
 
 test('buildAgentConnectSkillpacks embeds one shared CLI path and one shared compatibility manifest across hosts', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
+  const { outputRoot } = await getBuiltSkillpacks();
 
   for (const host of HOSTS) {
     const readme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
@@ -337,14 +312,8 @@ test('buildAgentConnectSkillpacks embeds one shared CLI path and one shared comp
 });
 
 test('buildAgentConnectSkillpacks copies the compatibility manifest into the shared pack and every host runtime bundle', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
+  const { outputRoot } = await getBuiltSkillpacks();
   const expectedManifest = JSON.parse(await readFile(path.join(REPO_ROOT, 'release', 'compatibility.json'), 'utf8'));
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
 
   const sharedBundledManifest = JSON.parse(await readFile(
     path.join(sharedPackRoot(outputRoot), EXPECTED_BUNDLED_COMPATIBILITY_COPY),
@@ -362,13 +331,7 @@ test('buildAgentConnectSkillpacks copies the compatibility manifest into the sha
 });
 
 test('buildAgentConnectSkillpacks preserves one confirmation contract in shared skills and bundles the same shared copy into host wrappers', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
+  const { outputRoot } = await getBuiltSkillpacks();
 
   const sharedContract = await readFile(sharedSkillFile(outputRoot, 'metabot-call-remote-service'), 'utf8');
   assert.match(sharedContract, /## Confirmation Contract/);
@@ -384,13 +347,7 @@ test('buildAgentConnectSkillpacks preserves one confirmation contract in shared 
 });
 
 test('buildAgentConnectSkillpacks publishes shared remote-call plus trace-inspection workflow in the shared pack', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
+  const { outputRoot } = await getBuiltSkillpacks();
 
   const content = await readFile(sharedSkillFile(outputRoot, 'metabot-call-remote-service'), 'utf8');
   assert.match(content, /services call --request-file/);
@@ -405,13 +362,7 @@ test('buildAgentConnectSkillpacks publishes shared remote-call plus trace-inspec
 });
 
 test('buildAgentConnectSkillpacks publishes merged network-manage workflow in the shared pack', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
+  const { outputRoot } = await getBuiltSkillpacks();
 
   const content = await readFile(sharedSkillFile(outputRoot, 'metabot-network-manage'), 'utf8');
   assert.match(content, /^name:\s*metabot-network-manage$/m);
@@ -439,13 +390,7 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow in th
 });
 
 test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in the shared pack', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
+  const { outputRoot } = await getBuiltSkillpacks();
 
   const content = await readFile(sharedSkillFile(outputRoot, 'metabot-identity-manage'), 'utf8');
   assert.match(content, /^name:\s*metabot-identity-manage$/m);
@@ -470,13 +415,7 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
 });
 
 test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skills in the shared pack', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
+  const { outputRoot } = await getBuiltSkillpacks();
 
   const chatContent = await readFile(sharedSkillFile(outputRoot, 'metabot-chat-privatechat'), 'utf8');
   assert.match(chatContent, /\/protocols\/simplemsg/);
@@ -501,14 +440,8 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
 });
 
 test('shared install.sh copies shared skills and installs a runnable metabot shim from the bundled runtime', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
+  const { outputRoot } = await getBuiltSkillpacks();
   const fakeHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-install-home-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
 
   const sharedRoot = sharedPackRoot(outputRoot);
   await execFile('/bin/bash', [path.join(sharedRoot, 'install.sh')], {
@@ -554,18 +487,14 @@ test('shared install.sh copies shared skills and installs a runnable metabot shi
   });
 });
 
-test('host wrapper install.sh runs the packaged shared install flow and binds host skills', async () => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
-  const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
-
-  await buildAgentConnectSkillpacks({
-    repoRoot: REPO_ROOT,
-    outputRoot,
-  });
+test('host wrapper install.sh runs the packaged shared install flow and binds host skills without relying on an adjacent shared pack directory', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
 
   for (const host of HOSTS) {
     const fakeHome = await mkdtemp(path.join(os.tmpdir(), `metabot-${host}-wrapper-home-`));
-    const hostRoot = path.join(outputRoot, host);
+    const isolatedPackRoot = await mkdtemp(path.join(os.tmpdir(), `metabot-${host}-wrapper-pack-`));
+    const hostRoot = path.join(isolatedPackRoot, host);
+    await cp(path.join(outputRoot, host), hostRoot, { recursive: true });
 
     await execFile('/bin/bash', [path.join(hostRoot, 'install.sh')], {
       cwd: hostRoot,
@@ -575,17 +504,20 @@ test('host wrapper install.sh runs the packaged shared install flow and binds ho
       },
     });
 
-    await assertFileExists(path.join(fakeHome, '.metabot', 'skills', 'metabot-ask-master', 'SKILL.md'));
+    const sharedSkillRoot = path.join(fakeHome, '.metabot', 'skills');
+    await assertFileExists(path.join(sharedSkillRoot, 'metabot-ask-master', 'SKILL.md'));
 
-    const boundSkillPath = path.join(expectedHostSkillRoot(fakeHome, host), 'metabot-ask-master');
-    const boundSkillStat = await lstat(boundSkillPath);
-    assert.equal(boundSkillStat.isSymbolicLink(), true, `${boundSkillPath} should be a symlink`);
+    for (const skillName of EXPECTED_METABOT_SKILLS) {
+      const boundSkillPath = path.join(expectedHostSkillRoot(fakeHome, host), skillName);
+      const boundSkillStat = await lstat(boundSkillPath);
+      assert.equal(boundSkillStat.isSymbolicLink(), true, `${boundSkillPath} should be a symlink`);
 
-    const boundSkillTarget = await readlink(boundSkillPath);
-    assert.equal(
-      path.resolve(path.dirname(boundSkillPath), boundSkillTarget),
-      path.join(fakeHome, '.metabot', 'skills', 'metabot-ask-master'),
-    );
+      const boundSkillTarget = await readlink(boundSkillPath);
+      assert.equal(
+        path.resolve(path.dirname(boundSkillPath), boundSkillTarget),
+        path.join(sharedSkillRoot, skillName),
+      );
+    }
   }
 });
 
