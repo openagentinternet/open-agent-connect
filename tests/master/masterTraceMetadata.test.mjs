@@ -1,18 +1,27 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { buildSessionTrace } = require('../../dist/core/chat/sessionTrace.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const {
   buildMasterTraceMetadata,
 } = require('../../dist/core/master/masterTrace.js');
 
+function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  mkdirSync(homeDir, { recursive: true });
+  return homeDir;
+}
+
 test('ask master traces include askMaster.flow and askMaster.canonicalStatus', () => {
-  const exportRoot = path.join(mkdtempSync(path.join(tmpdir(), 'metabot-master-trace-')), '.metabot', 'exports');
+  const homeDir = createProfileHome('metabot-master-trace-');
+  const exportRoot = resolveMetabotPaths(homeDir).exportsRoot;
   const askMaster = buildMasterTraceMetadata({
     role: 'caller',
     latestEvent: 'master_preview_ready',
@@ -71,7 +80,8 @@ test('ask master traces include askMaster.flow and askMaster.canonicalStatus', (
 });
 
 test('suggested ask master traces keep the suggested canonical status and preview summary', () => {
-  const exportRoot = path.join(mkdtempSync(path.join(tmpdir(), 'metabot-master-trace-suggested-')), '.metabot', 'exports');
+  const homeDir = createProfileHome('metabot-master-trace-suggested-');
+  const exportRoot = resolveMetabotPaths(homeDir).exportsRoot;
   const askMaster = buildMasterTraceMetadata({
     role: 'caller',
     canonicalStatus: 'suggested',
@@ -129,7 +139,8 @@ test('suggested ask master traces keep the suggested canonical status and previe
 });
 
 test('completed ask master traces preserve suggest trigger metadata after suggestion acceptance', () => {
-  const exportRoot = path.join(mkdtempSync(path.join(tmpdir(), 'metabot-master-trace-completed-suggest-')), '.metabot', 'exports');
+  const homeDir = createProfileHome('metabot-master-trace-completed-suggest-');
+  const exportRoot = resolveMetabotPaths(homeDir).exportsRoot;
   const askMaster = buildMasterTraceMetadata({
     role: 'caller',
     latestEvent: 'provider_completed',
@@ -191,7 +202,8 @@ test('completed ask master traces preserve suggest trigger metadata after sugges
 });
 
 test('auto ask master traces preserve auto metadata on the trace record', () => {
-  const exportRoot = path.join(mkdtempSync(path.join(tmpdir(), 'metabot-master-trace-auto-')), '.metabot', 'exports');
+  const homeDir = createProfileHome('metabot-master-trace-auto-');
+  const exportRoot = resolveMetabotPaths(homeDir).exportsRoot;
   const askMaster = buildMasterTraceMetadata({
     role: 'caller',
     latestEvent: 'auto_preview_prepared',

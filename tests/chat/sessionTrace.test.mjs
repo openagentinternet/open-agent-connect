@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -9,11 +9,20 @@ const require = createRequire(import.meta.url);
 const {
   buildSessionTrace,
 } = require('../../dist/core/chat/sessionTrace.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const {
   exportSessionArtifacts,
 } = require('../../dist/core/chat/transcriptExport.js');
 
+function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  mkdirSync(homeDir, { recursive: true });
+  return homeDir;
+}
+
 function createFixtureTrace(homeDir) {
+  const paths = resolveMetabotPaths(homeDir);
   return buildSessionTrace({
     traceId: 'trace-weather-order-1',
     channel: 'metaweb_order',
@@ -35,12 +44,13 @@ function createFixtureTrace(homeDir) {
       paymentCurrency: 'SPACE',
       paymentAmount: '0.0001',
     },
-    exportRoot: path.join(homeDir, '.metabot', 'exports'),
+    exportRoot: paths.exportsRoot,
   });
 }
 
 test('buildSessionTrace keeps explicit a2a session and task-run identity separate from chat session identity', () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-chat-trace-'));
+  const homeDir = createProfileHome('metabot-chat-trace-');
+  const paths = resolveMetabotPaths(homeDir);
   const trace = buildSessionTrace({
     traceId: 'trace-a2a-timeout-1',
     channel: 'a2a',
@@ -75,7 +85,7 @@ test('buildSessionTrace keeps explicit a2a session and task-run identity separat
       providerName: 'Weather Oracle',
       servicePinId: 'service-weather',
     },
-    exportRoot: path.join(homeDir, '.metabot', 'exports'),
+    exportRoot: paths.exportsRoot,
   });
 
   assert.equal(trace.session.id, 'chat-session-timeout-1');
@@ -91,7 +101,8 @@ test('buildSessionTrace keeps explicit a2a session and task-run identity separat
 });
 
 test('exportSessionArtifacts writes transcript markdown under exports/chats', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-chat-trace-'));
+  const homeDir = createProfileHome('metabot-chat-trace-');
+  const paths = resolveMetabotPaths(homeDir);
   const trace = createFixtureTrace(homeDir);
 
   const artifacts = await exportSessionArtifacts({
@@ -120,7 +131,7 @@ test('exportSessionArtifacts writes transcript markdown under exports/chats', as
 
   assert.equal(
     artifacts.transcriptMarkdownPath,
-    path.join(homeDir, '.metabot', 'exports', 'chats', 'session-weather-1.md')
+    path.join(paths.exportsRoot, 'chats', 'session-weather-1.md')
   );
 
   const markdown = readFileSync(artifacts.transcriptMarkdownPath, 'utf8');
@@ -132,7 +143,8 @@ test('exportSessionArtifacts writes transcript markdown under exports/chats', as
 });
 
 test('exportSessionArtifacts writes linked trace json and markdown with order, session, and transcript paths', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-chat-trace-'));
+  const homeDir = createProfileHome('metabot-chat-trace-');
+  const paths = resolveMetabotPaths(homeDir);
   const trace = createFixtureTrace(homeDir);
 
   const artifacts = await exportSessionArtifacts({
@@ -153,11 +165,11 @@ test('exportSessionArtifacts writes linked trace json and markdown with order, s
 
   assert.equal(
     artifacts.traceJsonPath,
-    path.join(homeDir, '.metabot', 'exports', 'traces', 'trace-weather-order-1.json')
+    path.join(paths.exportsRoot, 'traces', 'trace-weather-order-1.json')
   );
   assert.equal(
     artifacts.traceMarkdownPath,
-    path.join(homeDir, '.metabot', 'exports', 'traces', 'trace-weather-order-1.md')
+    path.join(paths.exportsRoot, 'traces', 'trace-weather-order-1.md')
   );
 
   const traceJson = JSON.parse(readFileSync(artifacts.traceJsonPath, 'utf8'));

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createECDH } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,6 +15,13 @@ const { createProviderPresenceStateStore } = require('../../dist/core/provider/p
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { createPublishedMasterStateStore } = require('../../dist/core/master/masterPublishedState.js');
 const { buildMasterResponseJson, parseMasterRequest } = require('../../dist/core/master/masterMessageSchema.js');
+
+async function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  await mkdir(homeDir, { recursive: true });
+  return { systemHome, homeDir };
+}
 
 function createIdentityPair() {
   const ecdh = createECDH('prime256v1');
@@ -46,9 +53,9 @@ function parseOutput(chunks) {
 }
 
 test('manual host-action can preview Ask Master from host-visible context and confirm into the normal caller flow', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-host-flow-'));
+  const { systemHome, homeDir } = await createProfileHome('metabot-master-host-flow-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await rm(systemHome, { recursive: true, force: true });
   });
 
   const identityPair = createIdentityPair();
@@ -287,9 +294,9 @@ test('manual host-action can preview Ask Master from host-visible context and co
 });
 
 test('accepted suggestion can preview, confirm, complete, and keep suggest metadata in master trace', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-host-suggest-flow-'));
+  const { systemHome, homeDir } = await createProfileHome('metabot-master-host-suggest-flow-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await rm(systemHome, { recursive: true, force: true });
   });
 
   const identityPair = createIdentityPair();
@@ -519,9 +526,9 @@ test('accepted suggestion can preview, confirm, complete, and keep suggest metad
 });
 
 test('suggest host flow can run through CLI entrypoints before accept, preview, confirm, and trace', async (t) => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-master-host-suggest-cli-flow-'));
+  const { systemHome, homeDir } = await createProfileHome('metabot-master-host-suggest-cli-flow-');
   t.after(async () => {
-    await rm(homeDir, { recursive: true, force: true });
+    await rm(systemHome, { recursive: true, force: true });
   });
 
   const identityPair = createIdentityPair();

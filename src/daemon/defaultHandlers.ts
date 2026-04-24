@@ -1900,7 +1900,7 @@ async function createMasterAskPreviewResult(input: {
   const trace = buildSessionTrace({
     traceId,
     channel: 'a2a',
-    exportRoot: input.runtimeStateStore.paths.exportRoot,
+    exportRoot: input.runtimeStateStore.paths.exportsRoot,
     session: {
       id: `master-${traceId}`,
       title: `${input.resolvedTarget.displayName} Ask`,
@@ -2123,7 +2123,7 @@ async function createMasterSuggestResult(input: {
   const trace = buildSessionTrace({
     traceId,
     channel: 'a2a',
-    exportRoot: input.runtimeStateStore.paths.exportRoot,
+    exportRoot: input.runtimeStateStore.paths.exportsRoot,
     createdAt: now,
     session: {
       id: `master-${traceId}`,
@@ -2603,7 +2603,7 @@ export async function rebuildTraceArtifactsFromSessionState(input: {
   const nextTrace = buildSessionTrace({
     traceId: input.baseTrace.traceId,
     channel: input.baseTrace.channel,
-    exportRoot: input.runtimeStateStore.paths.exportRoot,
+    exportRoot: input.runtimeStateStore.paths.exportsRoot,
     createdAt: input.baseTrace.createdAt,
     session: {
       ...input.baseTrace.session,
@@ -3386,7 +3386,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       : buildSessionTrace({
           traceId: input.traceId,
           channel: 'a2a',
-          exportRoot: runtimeStateStore.paths.exportRoot,
+          exportRoot: runtimeStateStore.paths.exportsRoot,
           session: {
             id: `master-${input.traceId}`,
             title: `${input.resolvedTarget.displayName} Ask`,
@@ -4525,7 +4525,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             : buildSessionTrace({
                 traceId,
                 channel: 'a2a',
-                exportRoot: runtimeStateStore.paths.exportRoot,
+                exportRoot: runtimeStateStore.paths.exportsRoot,
                 session: {
                   id: `master-${traceId}`,
                   title: `${selectedTarget.displayName} Ask`,
@@ -5185,7 +5185,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const trace = buildSessionTrace({
           traceId: handled.request.traceId,
           channel: 'a2a',
-          exportRoot: runtimeStateStore.paths.exportRoot,
+          exportRoot: runtimeStateStore.paths.exportsRoot,
           session: {
             id: `master-provider-${handled.request.traceId}`,
             title: `${handled.publishedMaster.displayName} Ask`,
@@ -5905,7 +5905,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const trace = buildSessionTrace({
           traceId: plan.traceId,
           channel: 'a2a',
-          exportRoot: runtimeStateStore.paths.exportRoot,
+          exportRoot: runtimeStateStore.paths.exportsRoot,
           session: {
             id: `session-${plan.traceId}`,
             title: `${serviceDisplayName} Call`,
@@ -6397,7 +6397,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const trace = buildSessionTrace({
           traceId,
           channel: 'a2a',
-          exportRoot: runtimeStateStore.paths.exportRoot,
+          exportRoot: runtimeStateStore.paths.exportsRoot,
           session: {
             id: `session-${traceId}`,
             title: `${service.displayName} Execution`,
@@ -6566,7 +6566,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const trace = buildSessionTrace({
           traceId,
           channel: 'simplemsg',
-          exportRoot: runtimeStateStore.paths.exportRoot,
+          exportRoot: runtimeStateStore.paths.exportsRoot,
           session: {
             id: `chat-${traceId}`,
             title: 'Private Chat',

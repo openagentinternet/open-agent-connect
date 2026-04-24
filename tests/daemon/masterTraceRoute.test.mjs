@@ -70,7 +70,7 @@ test('GET /api/master/trace/:id returns ask master semantics for provider-side t
       buildSessionTrace({
         traceId,
         channel: 'a2a',
-        exportRoot: runtimeStateStore.paths.exportRoot,
+        exportRoot: runtimeStateStore.paths.exportsRoot,
         session: {
           id: `master-provider-${traceId}`,
           title: 'Official Debug Master Ask',

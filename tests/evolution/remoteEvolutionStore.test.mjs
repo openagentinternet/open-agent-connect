@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -8,6 +8,13 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createRemoteEvolutionStore } = require('../../dist/core/evolution/remoteEvolutionStore.js');
+
+function createProfileHome(prefix, slug = 'test-profile') {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
+  mkdirSync(homeDir, { recursive: true });
+  return homeDir;
+}
 
 function createScope() {
   return {
@@ -68,21 +75,24 @@ function createSidecarRecord() {
   };
 }
 
-test('resolveMetabotPaths includes remote evolution roots and index file under ~/.metabot/evolution/remote', () => {
-  const paths = resolveMetabotPaths('/tmp/home');
-  assert.equal(paths.evolutionRemoteRoot, path.join('/tmp/home', '.metabot', 'evolution', 'remote'));
+test('resolveMetabotPaths includes remote evolution roots and index file under profile .runtime/evolution/remote', () => {
+  const paths = resolveMetabotPaths('/tmp/system-home/.metabot/profiles/test-profile');
+  assert.equal(
+    paths.evolutionRemoteRoot,
+    path.join('/tmp/system-home/.metabot/profiles/test-profile', '.runtime', 'evolution', 'remote')
+  );
   assert.equal(
     paths.evolutionRemoteArtifactsRoot,
-    path.join('/tmp/home', '.metabot', 'evolution', 'remote', 'artifacts')
+    path.join('/tmp/system-home/.metabot/profiles/test-profile', '.runtime', 'evolution', 'remote', 'artifacts')
   );
   assert.equal(
     paths.evolutionRemoteIndexPath,
-    path.join('/tmp/home', '.metabot', 'evolution', 'remote', 'index.json')
+    path.join('/tmp/system-home/.metabot/profiles/test-profile', '.runtime', 'evolution', 'remote', 'index.json')
   );
 });
 
 test('remote evolution store bootstraps an empty index for a new layout', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-remote-evolution-store-'));
+  const homeDir = createProfileHome('metabot-remote-evolution-store-');
   const store = createRemoteEvolutionStore(homeDir);
 
   const index = await store.readIndex();
@@ -94,7 +104,7 @@ test('remote evolution store bootstraps an empty index for a new layout', async 
 });
 
 test('remote evolution store writes artifact, sidecar, and canonical remote index', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-remote-evolution-store-'));
+  const homeDir = createProfileHome('metabot-remote-evolution-store-');
   const store = createRemoteEvolutionStore(homeDir);
   const artifact = createArtifactRecord();
   const sidecar = createSidecarRecord();
@@ -125,7 +135,7 @@ test('remote evolution store writes artifact, sidecar, and canonical remote inde
 });
 
 test('remote evolution store rejects duplicate variantId without overwriting existing files', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-remote-evolution-store-'));
+  const homeDir = createProfileHome('metabot-remote-evolution-store-');
   const store = createRemoteEvolutionStore(homeDir);
   const originalArtifact = createArtifactRecord();
   const originalSidecar = createSidecarRecord();
@@ -162,7 +172,7 @@ test('remote evolution store rejects duplicate variantId without overwriting exi
 });
 
 test('remote evolution store repairs imports list from byVariantId when index disagrees', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-remote-evolution-store-'));
+  const homeDir = createProfileHome('metabot-remote-evolution-store-');
   const store = createRemoteEvolutionStore(homeDir);
   await store.ensureLayout();
 
@@ -191,7 +201,7 @@ test('remote evolution store repairs imports list from byVariantId when index di
 });
 
 test('remote evolution store rejects filename-unsafe variant identifiers', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-remote-evolution-store-'));
+  const homeDir = createProfileHome('metabot-remote-evolution-store-');
   const store = createRemoteEvolutionStore(homeDir);
   const artifact = createArtifactRecord();
   const sidecar = createSidecarRecord();
@@ -212,7 +222,7 @@ test('remote evolution store rejects filename-unsafe variant identifiers', async
 });
 
 test('remote evolution store rejects duplicate imports when files exist but index is missing', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-remote-evolution-store-'));
+  const homeDir = createProfileHome('metabot-remote-evolution-store-');
   const store = createRemoteEvolutionStore(homeDir);
   const artifact = createArtifactRecord();
   const sidecar = createSidecarRecord();
@@ -244,7 +254,7 @@ test('remote evolution store rejects duplicate imports when files exist but inde
 });
 
 test('remote evolution store rejects duplicate imports when files exist and index is corrupt', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-remote-evolution-store-'));
+  const homeDir = createProfileHome('metabot-remote-evolution-store-');
   const store = createRemoteEvolutionStore(homeDir);
   const artifact = createArtifactRecord();
   const sidecar = createSidecarRecord();
@@ -266,7 +276,7 @@ test('remote evolution store rejects duplicate imports when files exist and inde
 });
 
 test('remote evolution store explains artifact and sidecar mismatches before write', async () => {
-  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-remote-evolution-store-'));
+  const homeDir = createProfileHome('metabot-remote-evolution-store-');
   const store = createRemoteEvolutionStore(homeDir);
   const artifact = createArtifactRecord();
   const sidecar = createSidecarRecord();
