@@ -5,12 +5,28 @@ import test from 'node:test';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 
-test('README exposes agent-first Codex install runbook entry', async () => {
+test('README exposes the unified install guide as the primary install entrypoint', async () => {
   const readme = await readFile(path.join(REPO_ROOT, 'README.md'), 'utf8');
 
-  assert.match(readme, /Agent-first install entry/i);
-  assert.match(readme, /docs\/hosts\/codex-agent-install\.md/);
-  assert.match(readme, /install, verification, and first-run next steps/i);
+  assert.match(readme, /Unified install guide/i);
+  assert.match(readme, /docs\/install\/open-agent-connect\.md/);
+  assert.match(readme, /shared install, host bind, verification, and first-run guidance/i);
+});
+
+test('unified install guide defines the shared install and host bind flow', async () => {
+  const guide = await readFile(
+    path.join(REPO_ROOT, 'docs', 'install', 'open-agent-connect.md'),
+    'utf8'
+  );
+
+  assert.match(guide, /cd skillpacks\/shared/);
+  assert.match(guide, /\.\/install\.sh/);
+  assert.match(guide, /metabot host bind-skills --host codex/);
+  assert.match(guide, /metabot host bind-skills --host claude-code/);
+  assert.match(guide, /metabot host bind-skills --host openclaw/);
+  assert.match(guide, /~\/\.metabot\/skills\//);
+  assert.match(guide, /~\/\.metabot\/bin/);
+  assert.match(guide, /manual host acceptance checklist/i);
 });
 
 test('Codex install runbook includes first-run handoff and response contract', async () => {
@@ -36,6 +52,41 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /what to do next right now/i);
   assert.match(runbook, /what `Open Agent Connect` now enables/i);
   assert.match(runbook, /Do not return only raw command output/i);
+});
+
+test('host docs thinly wrap the unified install guide and use shared-install language', async () => {
+  const codex = await readFile(path.join(REPO_ROOT, 'docs', 'hosts', 'codex.md'), 'utf8');
+  const claude = await readFile(path.join(REPO_ROOT, 'docs', 'hosts', 'claude-code.md'), 'utf8');
+  const openclaw = await readFile(path.join(REPO_ROOT, 'docs', 'hosts', 'openclaw.md'), 'utf8');
+
+  for (const content of [codex, claude, openclaw]) {
+    assert.match(content, /docs\/install\/open-agent-connect\.md/);
+    assert.match(content, /~\/\.metabot\/skills\//);
+    assert.match(content, /bind/i);
+    assert.match(content, /metabot skills resolve --skill metabot-network-directory --format markdown/);
+  }
+
+  assert.doesNotMatch(codex, /metabot skills resolve --skill metabot-network-directory --host codex --format markdown/);
+  assert.doesNotMatch(claude, /metabot skills resolve --skill metabot-network-directory --host claude-code --format markdown/);
+  assert.doesNotMatch(openclaw, /metabot skills resolve --skill metabot-network-directory --host openclaw --format markdown/);
+});
+
+test('Codex update and dev runbooks point back to the unified install guide', async () => {
+  const updateRunbook = await readFile(
+    path.join(REPO_ROOT, 'docs', 'hosts', 'codex-agent-update.md'),
+    'utf8'
+  );
+  const devRunbook = await readFile(
+    path.join(REPO_ROOT, 'docs', 'hosts', 'codex-dev-test-runbook.md'),
+    'utf8'
+  );
+
+  for (const content of [updateRunbook, devRunbook]) {
+    assert.match(content, /docs\/install\/open-agent-connect\.md/);
+  }
+
+  assert.doesNotMatch(updateRunbook, /cd skillpacks\/codex/);
+  assert.doesNotMatch(devRunbook, /cd skillpacks\/codex/);
 });
 
 test('active Codex host runbooks describe the v2 manager/profile layout and forbid patching runtime files', async () => {

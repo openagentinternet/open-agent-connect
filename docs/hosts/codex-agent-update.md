@@ -2,12 +2,15 @@
 
 Use this document when you want Codex to check for `Open Agent Connect` updates and apply them safely.
 
+The shared install truth lives in `docs/install/open-agent-connect.md`.
+This runbook keeps the Codex-specific update policy and reuses the unified shared install plus bind flow.
+
 ## Agent Goal
 
 - detect whether a newer upstream version exists on GitHub
 - report the version delta clearly
 - apply update only after explicit user confirmation
-- reinstall Codex host pack and verify health after update
+- refresh the shared runtime and re-bind Codex exposure after update
 
 ## Update Policy
 
@@ -27,6 +30,7 @@ Use this document when you want Codex to check for `Open Agent Connect` updates 
 Before running update steps, verify:
 
 - repository root contains `.git`, `package.json`, `release/compatibility.json`
+- repository root contains `docs/install/open-agent-connect.md`
 - `git`, `node`, `npm`, and `curl` are available
 - local branch has no uncommitted changes for apply mode
 
@@ -111,10 +115,10 @@ git pull --ff-only origin main
 npm install
 npm run build
 npm run build:skillpacks
-cd skillpacks/codex
+cd skillpacks/shared
 ./install.sh
-cd ../..
 export PATH="$HOME/.metabot/bin:$PATH"
+metabot host bind-skills --host codex
 metabot doctor
 ```
 
@@ -122,8 +126,13 @@ Apply mode acceptance criteria:
 
 - `git pull --ff-only` succeeds
 - build and skillpack generation succeed
-- Codex host pack install succeeds
+- shared install succeeds
+- Codex bind succeeds
 - `metabot doctor` exits `0` and returns machine-readable JSON
+
+## Shared Install Reference
+
+For the full shared install, multi-host bind flow, and shared skill verification rules, refer back to `docs/install/open-agent-connect.md`.
 
 ## Daily Agent Cron Pattern
 

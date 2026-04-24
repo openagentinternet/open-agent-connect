@@ -103,10 +103,10 @@ Prerequisites:
 - `npm`
 - one target host: `Codex`, `Claude Code`, or `OpenClaw`
 
-Agent-first install entry:
+Unified install guide:
 
-- For Codex, ask your local agent to execute the runbook at [docs/hosts/codex-agent-install.md](docs/hosts/codex-agent-install.md).
-- The runbook is designed to cover install, verification, and first-run next steps in one flow.
+- [docs/install/open-agent-connect.md](docs/install/open-agent-connect.md) is the single install truth for shared install, host bind, verification, and first-run guidance.
+- For an agent-run Codex wrapper with handoff rules, use [docs/hosts/codex-agent-install.md](docs/hosts/codex-agent-install.md).
 
 Build the runtime and generate host packs:
 
@@ -114,26 +114,20 @@ Build the runtime and generate host packs:
 npm install
 npm run build
 npm run build:skillpacks
-```
-
-Then install one host pack:
-
-```bash
-cd skillpacks/codex
+cd skillpacks/shared
 ./install.sh
-```
-
-Make sure the CLI shim is on `PATH`:
-
-```bash
 export PATH="$HOME/.metabot/bin:$PATH"
+metabot host bind-skills --host codex
 metabot doctor
 ```
 
-If the host does not immediately pick up the new skills, start a fresh host session after installation.
+The shared MetaBot skill source of truth lives under `~/.metabot/skills/`.
+Host-native `metabot-*` entries are projected into each host with `metabot host bind-skills --host <host>`.
+If the host does not immediately pick up the new bindings, start a fresh host session after installation.
 
 Host-specific guides:
 
+- [Unified Install Guide](docs/install/open-agent-connect.md)
 - [Codex](docs/hosts/codex.md)
 - [Codex Agent Install Runbook](docs/hosts/codex-agent-install.md)
 - [Codex Agent Update Runbook](docs/hosts/codex-agent-update.md)

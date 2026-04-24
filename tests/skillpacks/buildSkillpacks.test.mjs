@@ -543,10 +543,14 @@ test('codex install runbook documents install verification and first-run handoff
     'utf8'
   );
 
+  assert.match(installRunbook, /docs\/install\/open-agent-connect\.md/);
   assert.match(installRunbook, /npm run build:skillpacks/);
-  assert.match(installRunbook, /\$\{CODEX_HOME:-\$HOME\/\.codex\}\/skills\/metabot-ask-master\/SKILL\.md/);
-  assert.match(installRunbook, /\$\{CODEX_HOME:-\$HOME\/\.codex\}\/skills\/metabot-network-manage\/SKILL\.md/);
-  assert.match(installRunbook, /\$\{CODEX_HOME:-\$HOME\/\.codex\}\/skills\/metabot-chat-privatechat\/SKILL\.md/);
+  assert.match(installRunbook, /cd skillpacks\/shared/);
+  assert.match(installRunbook, /metabot host bind-skills --host codex/);
+  assert.match(installRunbook, /\$HOME\/\.metabot\/skills\/metabot-ask-master\/SKILL\.md/);
+  assert.match(installRunbook, /\$HOME\/\.metabot\/skills\/metabot-network-manage\/SKILL\.md/);
+  assert.match(installRunbook, /\$HOME\/\.metabot\/skills\/metabot-chat-privatechat\/SKILL\.md/);
+  assert.doesNotMatch(installRunbook, /\$\{CODEX_HOME:-\$HOME\/\.codex\}\/skills\/metabot-ask-master\/SKILL\.md/);
   assert.match(installRunbook, /metabot doctor/);
   assert.match(installRunbook, /metabot identity create --name "Alice"/);
   assert.match(installRunbook, /metabot network bots --online --limit 10/);

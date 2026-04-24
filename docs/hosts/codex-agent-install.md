@@ -2,11 +2,13 @@
 
 Use this document when you want Codex to install and configure `Open Agent Connect` for end users with minimal human intervention.
 
-This runbook covers install plus first-run handoff. It is not a development test or release acceptance runbook.
+The normative install source is `docs/install/open-agent-connect.md`.
+This runbook is the Codex-specific wrapper around that shared install flow plus first-run handoff.
+It is not a development test or release acceptance runbook.
 
 ## Agent Goal
 
-Install the Codex host pack, make `metabot` runnable in the current environment, verify health, and hand the user into the first MetaBot steps.
+Install the shared MetaBot runtime, bind Codex exposure, make `metabot` runnable in the current environment, verify health, and hand the user into the first MetaBot steps.
 
 `Open Agent Connect` should be presented as:
 
@@ -26,7 +28,8 @@ Install the Codex host pack, make `metabot` runnable in the current environment,
 Before running install commands, verify:
 
 - repository root contains `package.json`
-- repository root contains `skillpacks/codex/install.sh`
+- repository root contains `docs/install/open-agent-connect.md`
+- repository root contains `skillpacks/shared/install.sh`
 - `node` exists and version is `>=20 <25`
 - `npm` exists
 
@@ -40,8 +43,10 @@ Run these commands from the repository root:
 npm install
 npm run build
 npm run build:skillpacks
-cd skillpacks/codex
+cd skillpacks/shared
 ./install.sh
+export PATH="$HOME/.metabot/bin:$PATH"
+metabot host bind-skills --host codex
 ```
 
 ## Configure PATH For Current Session
@@ -76,10 +81,10 @@ Success criteria:
 - `metabot doctor` output includes `daemon_reachable`
 - `metabot` and `metabot identity` help commands run successfully
 
-Then verify the installed Ask Master skill file exists:
+Then verify the installed Ask Master skill file exists in the shared root:
 
 ```bash
-INSTALLED_SKILL="${CODEX_HOME:-$HOME/.codex}/skills/metabot-ask-master/SKILL.md"
+INSTALLED_SKILL="$HOME/.metabot/skills/metabot-ask-master/SKILL.md"
 test -f "$INSTALLED_SKILL"
 ```
 
@@ -87,16 +92,26 @@ Success criteria:
 
 - `"$INSTALLED_SKILL"` exists
 
-Also verify the network and private chat skills are installed:
+Also verify the network and private chat skills are installed in the shared root:
 
 ```bash
-INSTALLED_NETWORK_SKILL="${CODEX_HOME:-$HOME/.codex}/skills/metabot-network-manage/SKILL.md"
-INSTALLED_CHAT_SKILL="${CODEX_HOME:-$HOME/.codex}/skills/metabot-chat-privatechat/SKILL.md"
+INSTALLED_NETWORK_SKILL="$HOME/.metabot/skills/metabot-network-manage/SKILL.md"
+INSTALLED_CHAT_SKILL="$HOME/.metabot/skills/metabot-chat-privatechat/SKILL.md"
 test -f "$INSTALLED_NETWORK_SKILL"
 test -f "$INSTALLED_CHAT_SKILL"
 ```
 
+Then confirm Codex exposure is bound from the host-native skill root:
+
+```bash
+test -L "${CODEX_HOME:-$HOME/.codex}/skills/metabot-ask-master"
+```
+
 If the installed skill files are correct but behavior looks stale, restart the Codex session and retry.
+
+## Shared Install Reference
+
+For the full shared install and multi-host binding flow, refer back to `docs/install/open-agent-connect.md`.
 
 ## Storage Layout v2 Reference
 
@@ -235,5 +250,5 @@ At the end, return:
 ## Idempotency Notes
 
 - It is safe to re-run this runbook.
-- Re-running `./install.sh` overwrites installed skill folders with the latest generated copies.
-- Re-running build steps refreshes `dist/` and skillpacks without requiring manual cleanup.
+- Re-running `skillpacks/shared/install.sh` refreshes the shared skill copies under `~/.metabot/skills/`.
+- Re-running `metabot host bind-skills --host codex` refreshes Codex symlinks without requiring manual cleanup.

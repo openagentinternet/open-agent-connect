@@ -2,11 +2,15 @@
 
 Use this runbook when you want Codex to execute a repeatable local development + testing cycle for `Open Agent Connect`.
 
+The shared install truth lives in `docs/install/open-agent-connect.md`.
+This runbook keeps the local development loops and reuses the shared install plus Codex bind flow.
+
 ## Agent Goal
 
 - implement or verify local changes in this repository
 - run deterministic test and verification steps
-- reinstall Codex host pack from local source
+- refresh the shared runtime from local source
+- re-bind Codex exposure from the same local build
 - validate behavior from the same Codex environment
 
 ## Execution Policy
@@ -22,6 +26,7 @@ Use this runbook when you want Codex to execute a repeatable local development +
 Before running the workflow, verify:
 
 - repository root contains `package.json`
+- repository root contains `docs/install/open-agent-connect.md`
 - repository root contains `docs/hosts/codex-agent-install.md`
 - repository root contains `docs/hosts/codex-agent-update.md`
 - `node`, `npm`, and `git` are available
@@ -53,11 +58,11 @@ If this loop fails, stop and return:
 - top failure reason
 - first failing test name (if available)
 
-## Loop B: Reinstall Into Current Codex Environment
+## Loop B: Refresh Shared Install And Codex Binding
 
-Use the install runbook:
+Use the install guide:
 
-- `docs/hosts/codex-agent-install.md`
+- `docs/install/open-agent-connect.md`
 
 Equivalent command sequence:
 
@@ -65,10 +70,10 @@ Equivalent command sequence:
 npm install
 npm run build
 npm run build:skillpacks
-cd skillpacks/codex
+cd skillpacks/shared
 ./install.sh
-cd ../..
 export PATH="$HOME/.metabot/bin:$PATH"
+metabot host bind-skills --host codex
 metabot doctor
 ```
 
@@ -88,7 +93,7 @@ metabot identity assign --name "<metabot-name>"
 metabot identity who
 ```
 
-If `metabot identity create --name ...` returns `identity_name_conflict`, do not patch runtime files.  
+If `metabot identity create --name ...` returns `identity_name_conflict`, do not patch runtime files.
 Use `identity list` + `identity assign` first.
 
 ## Loop D: Runtime Smoke Checks
@@ -99,6 +104,7 @@ Run:
 metabot doctor
 metabot --help
 metabot identity --help
+metabot skills resolve --skill metabot-network-directory --format markdown
 ```
 
 Optional functional smoke:
@@ -123,7 +129,7 @@ This is the release-grade gate. Do not claim release-ready if this fails.
 For daily coding in Codex:
 
 1. run Loop A after each meaningful code change
-2. run Loop B to refresh local host pack behavior
+2. run Loop B to refresh shared install plus Codex bind behavior
 3. run Loop C + Loop D for session correctness
 4. run Loop E before merge/release
 
