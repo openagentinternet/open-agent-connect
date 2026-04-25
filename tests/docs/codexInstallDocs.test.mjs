@@ -13,6 +13,7 @@ test('README exposes the unified install guide as the primary install entrypoint
   assert.match(readme, /Read https:\/\/github\.com\/openagentinternet\/open-agent-connect\/blob\/main\/docs\/install\/open-agent-connect\.md/i);
   assert.match(readme, /End users do not need to clone this repository or build it\s+locally/i);
   assert.match(readme, /Claude Code-compatible install path/i);
+  assert.match(readme, /docs\/install\/uninstall-open-agent-connect\.md/);
 });
 
 test('unified install guide defines the remote GitHub install and host bind flow', async () => {
@@ -43,7 +44,28 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.match(guide, /Do not single out one installed skill/i);
   assert.match(guide, /unless\s+you are diagnosing a specific binding failure/i);
   assert.match(guide, /docs\/acceptance\/open-agent-connect-host-bind-checklist\.md/);
+  assert.match(guide, /docs\/install\/uninstall-open-agent-connect\.md/);
+  assert.match(guide, /preserve MetaBot identities, mnemonics, private keys, profile names, and\s+wallet-related local data/i);
   assert.doesNotMatch(guide, /manual host acceptance checklist/i);
+});
+
+test('uninstall guide defines safe, test cleanup, and danger-zone tiers', async () => {
+  const guide = await readFile(
+    path.join(REPO_ROOT, 'docs', 'install', 'uninstall-open-agent-connect.md'),
+    'utf8'
+  );
+
+  assert.match(guide, /# Open Agent Connect Uninstall Guide/);
+  assert.match(guide, /## Tier 1: Safe Uninstall \(Default\)/);
+  assert.match(guide, /## Tier 2: Clean Reinstall \/ Test Cleanup/);
+  assert.match(guide, /## Tier 3: Danger Zone Full Erase/);
+  assert.match(guide, /Default uninstall must preserve MetaBot identities, mnemonics, private keys/i);
+  assert.match(guide, /A MetaBot mnemonic can\s+control funds/i);
+  assert.match(guide, /~\/\.metabot\/profiles\/<slug>\/\.runtime\/identity-secrets\.json/);
+  assert.match(guide, /~\/\.metabot\/profiles\/<slug>\/\.runtime\/provider-secrets\.json/);
+  assert.match(guide, /DELETE_OPEN_AGENT_CONNECT_IDENTITY_AND_SECRETS/);
+  assert.match(guide, /For Tier 1 or Tier 2, explicitly state that MetaBot identities, mnemonics,\s+private keys, profile names, and wallet-related local data were preserved/i);
+  assert.doesNotMatch(guide, /\.metabot\/hot/);
 });
 
 test('Codex install runbook includes first-run handoff and response contract', async () => {

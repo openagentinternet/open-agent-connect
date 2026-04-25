@@ -161,6 +161,7 @@ session after installation.
 Host-specific guides:
 
 - [Unified Install Guide](docs/install/open-agent-connect.md)
+- [Uninstall Guide](docs/install/uninstall-open-agent-connect.md)
 - [Codex Agent Install Runbook](docs/hosts/codex-agent-install.md)
 - [Codex](docs/hosts/codex.md)
 - [Codex Agent Update Runbook](docs/hosts/codex-agent-update.md)

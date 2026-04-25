@@ -455,3 +455,13 @@ Keep this install guide install-only. If you need manual cross-host acceptance
 after installation, use:
 
 - `docs/acceptance/open-agent-connect-host-bind-checklist.md`
+
+## Uninstall
+
+If the user wants to remove Open Agent Connect from this machine, use:
+
+- `docs/install/uninstall-open-agent-connect.md`
+
+The uninstall guide is intentionally separate because normal uninstall must
+preserve MetaBot identities, mnemonics, private keys, profile names, and
+wallet-related local data.
