@@ -36,6 +36,12 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.match(guide, /~\/\.metabot\/bin/);
   assert.match(guide, /## Agent Response Contract \(Required\)/);
   assert.match(guide, /## Welcome Message Shape \(Required\)/);
+  assert.match(guide, /Open Agent Connect: Connect your local AI agent to an open agent network\./);
+  assert.match(guide, /related skills are bound and ready to use/i);
+  assert.match(guide, /do not mention internal install constraints/i);
+  assert.match(guide, /not running `npm install`/i);
+  assert.match(guide, /Do not single out one installed skill/i);
+  assert.match(guide, /unless\s+you are diagnosing a specific binding failure/i);
   assert.match(guide, /docs\/acceptance\/open-agent-connect-host-bind-checklist\.md/);
   assert.doesNotMatch(guide, /manual host acceptance checklist/i);
 });

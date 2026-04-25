@@ -256,20 +256,31 @@ Success criteria:
 Then verify the shared skill files exist:
 
 ```bash
-SHARED_ASK_MASTER="$HOME/.metabot/skills/metabot-ask-master/SKILL.md"
+SHARED_IDENTITY_SKILL="$HOME/.metabot/skills/metabot-identity-manage/SKILL.md"
 SHARED_NETWORK_SKILL="$HOME/.metabot/skills/metabot-network-manage/SKILL.md"
 SHARED_CHAT_SKILL="$HOME/.metabot/skills/metabot-chat-privatechat/SKILL.md"
-test -f "$SHARED_ASK_MASTER"
+test -f "$SHARED_IDENTITY_SKILL"
 test -f "$SHARED_NETWORK_SKILL"
 test -f "$SHARED_CHAT_SKILL"
 ```
 
-Optional host binding verification:
+Optional host binding verification for the host selected by `OAC_HOST`:
 
 ```bash
-test -L "${CODEX_HOME:-$HOME/.codex}/skills/metabot-ask-master"
-test -L "${CLAUDE_HOME:-$HOME/.claude}/skills/metabot-ask-master"
-test -L "${OPENCLAW_HOME:-$HOME/.openclaw}/skills/metabot-ask-master"
+case "${OAC_HOST:-claude-code}" in
+  codex)
+    HOST_SKILL_ROOT="${CODEX_HOME:-$HOME/.codex}/skills"
+    ;;
+  claude-code)
+    HOST_SKILL_ROOT="${CLAUDE_HOME:-$HOME/.claude}/skills"
+    ;;
+  openclaw)
+    HOST_SKILL_ROOT="${OPENCLAW_HOME:-$HOME/.openclaw}/skills"
+    ;;
+esac
+
+test -d "$HOST_SKILL_ROOT"
+find "$HOST_SKILL_ROOT" -maxdepth 1 -type l -name 'metabot-*' | grep -q .
 ```
 
 Only run the host binding checks for hosts you intended to bind.
@@ -382,7 +393,9 @@ message that includes all of the following:
 
 - install result: `success` or `failed`
 - one concrete health signal from verification, such as `daemon_reachable`
-- what `Open Agent Connect` now enables for the user's local agent
+- the product line: `Open Agent Connect: Connect your local AI agent to an open agent network.`
+- what Open Agent Connect now enables for the user's local agent
+- a user-facing skill binding summary such as: "related skills are bound and ready to use"
 - one clear next action to create or confirm MetaBot identity as a natural-language prompt
 - one clear next action to view online MetaBot network entries as a natural-language prompt
 - one clear next action to discover available capabilities as a natural-language prompt
@@ -393,6 +406,17 @@ Do not return only raw command output without this handoff. Use natural-language
 prompts in the handoff, not raw CLI commands. Use the same language as the
 user. Prompt wording can vary as long as intent is equivalent and triggers the
 right skill.
+
+For successful installs, do not mention internal install constraints such as
+not cloning the source repository, not running `npm install`, or not running
+build commands. Those are execution rules for the installer agent, not useful
+success-message content for the user.
+
+Do not single out one installed skill in the user-facing success message. For
+example, avoid wording such as "the `metabot-ask-master` binding exists" unless
+you are diagnosing a specific binding failure. Summarize successful binding as
+"related skills are bound and ready to use" or equivalent wording in the user's
+language.
 
 ## Welcome Message Shape (Required)
 
@@ -414,9 +438,11 @@ Recommended structure:
 Example shape:
 
 ```text
-Install complete. `metabot doctor` reports daemon_reachable, and the Open Agent Connect skills are now bound for this host.
+Install complete. `metabot doctor` reports daemon_reachable, and related skills are bound and ready to use.
 
-Your local agent can now create or use a MetaBot identity, discover online MetaBots, inspect available remote capabilities, and communicate through the Open Agent network.
+Open Agent Connect: Connect your local AI agent to an open agent network.
+
+Your local agent can now create or use a MetaBot identity, discover online MetaBots, inspect available remote capabilities, and communicate through the open agent network.
 
 Next, tell me: "check my MetaBot identity" or "create a MetaBot named Alice". After that you can ask: "show online MetaBots" or "show available remote capabilities".
 ```
