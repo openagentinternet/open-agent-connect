@@ -10,22 +10,32 @@ test('README exposes the unified install guide as the primary install entrypoint
 
   assert.match(readme, /Unified install guide/i);
   assert.match(readme, /docs\/install\/open-agent-connect\.md/);
-  assert.match(readme, /shared install, host bind, verification, and first-run guidance/i);
+  assert.match(readme, /Read https:\/\/github\.com\/openagentinternet\/open-agent-connect\/blob\/main\/docs\/install\/open-agent-connect\.md/i);
+  assert.match(readme, /End users do not need to clone this repository or build it\s+locally/i);
+  assert.match(readme, /Claude Code-compatible install path/i);
 });
 
-test('unified install guide defines the shared install and host bind flow', async () => {
+test('unified install guide defines the remote GitHub install and host bind flow', async () => {
   const guide = await readFile(
     path.join(REPO_ROOT, 'docs', 'install', 'open-agent-connect.md'),
     'utf8'
   );
 
-  assert.match(guide, /cd skillpacks\/shared/);
+  assert.match(guide, /does not need to clone this repository/i);
+  assert.match(guide, /do not run `npm install`, `npm run build`, or `npm run build:skillpacks`/i);
+  assert.match(guide, /OAC_HOST:=claude-code/);
+  assert.match(guide, /github\.com\/\$OAC_REPO\/archive\/refs\/heads\/\$OAC_BRANCH\.tar\.gz/);
+  assert.match(guide, /skillpacks\/\$OAC_HOST_PACK/);
   assert.match(guide, /\.\/install\.sh/);
   assert.match(guide, /metabot host bind-skills --host codex/);
   assert.match(guide, /metabot host bind-skills --host claude-code/);
   assert.match(guide, /metabot host bind-skills --host openclaw/);
+  assert.match(guide, /Claude Code-Compatible Fallback/);
+  assert.match(guide, /TARGET_SKILL_ROOT/);
   assert.match(guide, /~\/\.metabot\/skills\//);
   assert.match(guide, /~\/\.metabot\/bin/);
+  assert.match(guide, /## Agent Response Contract \(Required\)/);
+  assert.match(guide, /## Welcome Message Shape \(Required\)/);
   assert.match(guide, /docs\/acceptance\/open-agent-connect-host-bind-checklist\.md/);
   assert.doesNotMatch(guide, /manual host acceptance checklist/i);
 });

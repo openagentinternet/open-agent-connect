@@ -95,43 +95,74 @@ Current focus:
 
 Over time, more local agent hosts can be connected through the same model.
 
-## Install
+## Installation
 
-Prerequisites:
+`Open Agent Connect` is installed by your local coding agent from the GitHub
+install guide. End users do not need to clone this repository or build it
+locally.
+
+Copy this prompt into `Codex`, `Claude Code`, `OpenClaw`, or another local
+agent host:
+
+```text
+Read https://github.com/openagentinternet/open-agent-connect/blob/main/docs/install/open-agent-connect.md and install Open Agent Connect for this agent platform.
+```
+
+If your agent cannot read GitHub HTML pages, use the raw Markdown URL:
+
+```text
+Read https://raw.githubusercontent.com/openagentinternet/open-agent-connect/main/docs/install/open-agent-connect.md and install Open Agent Connect for this agent platform.
+```
+
+The guide tells the local agent to download the packaged host skillpack from
+GitHub, run the bundled installer, bind `metabot-*` skills into the current
+host, verify the runtime, and hand you into first use.
+
+Requirements:
 
 - Node.js `20` to `24`
-- `npm`
-- one target host: `Codex`, `Claude Code`, or `OpenClaw`
+- `curl` or `wget`
+- `tar`
+- macOS, Linux, or Windows through WSL2/Git Bash
 
-Unified install guide:
+Supported first-class hosts:
 
-- [docs/install/open-agent-connect.md](docs/install/open-agent-connect.md) is the single install truth for shared install, host bind, verification, and first-run guidance.
-- For an agent-run Codex wrapper with handoff rules, use [docs/hosts/codex-agent-install.md](docs/hosts/codex-agent-install.md).
+- `Codex`
+- `Claude Code`
+- `OpenClaw`
 
-Build the runtime and generate host packs:
+For other agent platforms that read Claude Code-style `SKILL.md` directories,
+ask the agent to use the Claude Code-compatible install path from the same
+guide.
+
+Manual shell equivalent:
 
 ```bash
-npm install
-npm run build
-npm run build:skillpacks
-cd skillpacks/shared
+OAC_HOST=codex
+# Use OAC_HOST=claude-code for Claude Code or Claude Code-compatible hosts.
+# Use OAC_HOST=openclaw for OpenClaw.
+
+TMP_DIR="$(mktemp -d)"
+curl -fsSL https://github.com/openagentinternet/open-agent-connect/archive/refs/heads/main.tar.gz -o "$TMP_DIR/open-agent-connect.tar.gz"
+tar -xzf "$TMP_DIR/open-agent-connect.tar.gz" -C "$TMP_DIR"
+cd "$TMP_DIR"/open-agent-connect-*/skillpacks/"$OAC_HOST"
 ./install.sh
 export PATH="$HOME/.metabot/bin:$PATH"
-metabot host bind-skills --host codex
 metabot doctor
 ```
 
 The shared MetaBot skill source of truth lives under `~/.metabot/skills/`.
-Host-native `metabot-*` entries are projected into each host with `metabot host bind-skills --host <host>`.
 The canonical CLI shim lives at `~/.metabot/bin/metabot`.
-If this machine still has a legacy `~/.agent-connect/bin/metabot` earlier on `PATH`, rerun `./install.sh` to refresh that legacy shim into a compatibility forwarder.
-If the host does not immediately pick up the new bindings, start a fresh host session after installation.
+Host-native `metabot-*` entries are projected into each host with
+`metabot host bind-skills --host <host>`.
+If the host does not immediately pick up the new bindings, start a fresh host
+session after installation.
 
 Host-specific guides:
 
 - [Unified Install Guide](docs/install/open-agent-connect.md)
-- [Codex](docs/hosts/codex.md)
 - [Codex Agent Install Runbook](docs/hosts/codex-agent-install.md)
+- [Codex](docs/hosts/codex.md)
 - [Codex Agent Update Runbook](docs/hosts/codex-agent-update.md)
 - [Codex Dev-Test Runbook](docs/hosts/codex-dev-test-runbook.md)
 - [Claude Code](docs/hosts/claude-code.md)
