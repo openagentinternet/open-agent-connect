@@ -23,6 +23,7 @@ const remoteCall_1 = require("../core/delegation/remoteCall");
 const sessionTrace_1 = require("../core/chat/sessionTrace");
 const transcriptExport_1 = require("../core/chat/transcriptExport");
 const privateChat_1 = require("../core/chat/privateChat");
+const privateConversation_1 = require("../core/chat/privateConversation");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const uploadFile_1 = require("../core/files/uploadFile");
 const postBuzz_1 = require("../core/buzz/postBuzz");
@@ -552,6 +553,13 @@ function readPrivateChatRequest(rawInput) {
         content,
         replyPin: normalizeText(rawInput.replyPin),
         peerChatPublicKey: normalizeText(rawInput.peerChatPublicKey),
+    };
+}
+function readPrivateConversationRequest(rawInput) {
+    return {
+        peer: normalizeText(rawInput.peer),
+        afterIndex: (0, privateConversation_1.normalizeConversationAfterIndex)(rawInput.afterIndex),
+        limit: (0, privateConversation_1.normalizeConversationLimit)(rawInput.limit),
     };
 }
 function describeStructuredPrivateChatContent(content) {
@@ -5433,6 +5441,48 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
         },
         chat: {
+            privateConversation: async (rawInput) => {
+                const state = await runtimeStateStore.readState();
+                if (!state.identity) {
+                    return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before viewing private chat.');
+                }
+                const request = readPrivateConversationRequest(rawInput);
+                if (!request.peer) {
+                    return (0, commandResult_1.commandFailed)('missing_peer', 'peer query parameter is required.');
+                }
+                let privateChatIdentity;
+                try {
+                    privateChatIdentity = await signer.getPrivateChatIdentity();
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('identity_secret_missing', error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.');
+                }
+                let peerChatPublicKey = request.peer === state.identity.globalMetaId
+                    ? normalizeText(state.identity.chatPublicKey) || privateChatIdentity.chatPublicKey
+                    : '';
+                if (!peerChatPublicKey) {
+                    peerChatPublicKey = await resolvePeerChatPublicKey(request.peer) ?? '';
+                }
+                if (!peerChatPublicKey) {
+                    return (0, commandResult_1.commandFailed)('peer_chat_public_key_missing', 'Target has no chat public key on chain.');
+                }
+                try {
+                    const response = await (0, privateConversation_1.buildPrivateConversationResponse)({
+                        selfGlobalMetaId: state.identity.globalMetaId,
+                        peerGlobalMetaId: request.peer,
+                        localPrivateKeyHex: privateChatIdentity.privateKeyHex,
+                        peerChatPublicKey,
+                        afterIndex: request.afterIndex,
+                        limit: request.limit,
+                        fetchHistory: input.fetchPrivateChatHistory,
+                        idChatApiBaseUrl: input.idChatApiBaseUrl,
+                    });
+                    return (0, commandResult_1.commandSuccess)(response);
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('history_fetch_failed', error instanceof Error ? error.message : 'Failed to fetch private chat history.');
+                }
+            },
             private: async (rawInput) => {
                 const state = await runtimeStateStore.readState();
                 if (!state.identity) {
@@ -5541,9 +5591,6 @@ function createDefaultMetabotDaemonHandlers(input) {
                 return (0, commandResult_1.commandSuccess)({
                     to: request.to,
                     path: sent.path,
-                    payload: sent.payload,
-                    encryptedContent: sent.encryptedContent,
-                    secretVariant: sent.secretVariant,
                     pinId: normalizeText(chatWrite.pinId) || null,
                     txids: Array.isArray(chatWrite.txids) ? chatWrite.txids : [],
                     totalCost: Number.isFinite(Number(chatWrite.totalCost))
@@ -5551,11 +5598,11 @@ function createDefaultMetabotDaemonHandlers(input) {
                         : null,
                     network: normalizeText(chatWrite.network) || 'mvc',
                     deliveryMode: 'onchain_simplemsg',
-                    peerChatPublicKey,
                     messageType: structuredContent.messageType,
                     requestId: structuredContent.requestId,
                     correlatedTraceId: structuredContent.traceId,
                     traceId: trace.traceId,
+                    localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/chat-viewer', { peer: request.to }),
                     transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
                     traceMarkdownPath: artifacts.traceMarkdownPath,
                     traceJsonPath: artifacts.traceJsonPath,

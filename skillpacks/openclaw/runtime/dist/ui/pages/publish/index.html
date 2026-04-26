@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PAGE_TITLE__</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f3ec;
+        --panel: #fffdf7;
+        --ink: #1f2933;
+        --muted: #5b6773;
+        --line: #d8d1c2;
+        --accent: #0f766e;
+        --accent-soft: #d6f3ef;
+        --warm: #b45309;
+        --error: #b42318;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Helvetica Neue", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(15, 118, 110, 0.09), transparent 30%),
+          linear-gradient(180deg, #faf7f0 0%, var(--bg) 100%);
+        color: var(--ink);
+      }
+
+      .page {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 32px 24px 64px;
+      }
+
+      .hero, .panels, .page-rich-content {
+        margin-bottom: 24px;
+      }
+
+      .nav {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .nav a {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      .panels {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .panel,
+      .publish-form,
+      .publish-card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 12px 40px rgba(31, 41, 51, 0.06);
+      }
+
+      .panel {
+        padding: 18px;
+      }
+
+      .publish-shell {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.95fr);
+        gap: 20px;
+        align-items: start;
+      }
+
+      .publish-form {
+        padding: 22px;
+      }
+
+      .publish-form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .publish-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .publish-field-wide {
+        grid-column: span 2;
+      }
+
+      .publish-field span {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .publish-field input,
+      .publish-field textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 14px;
+        background: #fff;
+        color: var(--ink);
+        font: inherit;
+      }
+
+      .publish-actions {
+        margin-top: 18px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .publish-actions button {
+        border: none;
+        border-radius: 999px;
+        padding: 12px 18px;
+        background: var(--accent);
+        color: #fff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .publish-actions button:disabled {
+        opacity: 0.6;
+        cursor: progress;
+      }
+
+      .publish-status {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .publish-status[data-tone="success"] { color: var(--accent); }
+      .publish-status[data-tone="error"] { color: var(--error); }
+      .publish-status[data-tone="busy"] { color: var(--warm); }
+
+      .publish-cards {
+        display: grid;
+        gap: 16px;
+      }
+
+      .publish-card {
+        padding: 20px;
+      }
+
+      .publish-card h2 {
+        margin: 0 0 8px;
+        font-size: 1rem;
+      }
+
+      .publish-card-summary,
+      .publish-card-empty {
+        margin: 0 0 14px;
+        color: var(--muted);
+      }
+
+      .publish-card-rows {
+        display: grid;
+        gap: 10px;
+        margin: 0;
+      }
+
+      .publish-card-row {
+        display: grid;
+        grid-template-columns: 132px minmax(0, 1fr);
+        gap: 12px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(216, 209, 194, 0.7);
+      }
+
+      .publish-card-row dt {
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .publish-card-row dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+
+      @media (max-width: 900px) {
+        .panels,
+        .publish-shell,
+        .publish-form-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .publish-field-wide {
+          grid-column: span 1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    __PAGE_CONTENT__
+    <script>__PAGE_SCRIPT__</script>
+  </body>
+</html>

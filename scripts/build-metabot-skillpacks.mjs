@@ -458,6 +458,42 @@ async function copyBundledRuntimeDependencies(repoRoot, runtimeRoot, dependencyN
   }
 }
 
+async function copyIfPresent(sourcePath, targetPath) {
+  try {
+    await fs.access(sourcePath);
+  } catch {
+    return false;
+  }
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await fs.cp(sourcePath, targetPath, { recursive: true });
+  return true;
+}
+
+async function copyRuntimeUiAssets(repoRoot, runtimeRoot) {
+  const sourcePagesRoot = path.join(repoRoot, 'src', 'ui', 'pages');
+  const runtimePagesRoot = path.join(runtimeRoot, 'dist', 'ui', 'pages');
+  const pageEntries = await fs.readdir(sourcePagesRoot, { withFileTypes: true });
+  for (const entry of pageEntries) {
+    if (!entry.isDirectory()) continue;
+    await copyIfPresent(
+      path.join(sourcePagesRoot, entry.name, 'index.html'),
+      path.join(runtimePagesRoot, entry.name, 'index.html'),
+    );
+  }
+
+  const viewerChatAssetPaths = [
+    ['components', 'id-chat-msg-list.js'],
+    ['components', 'id-chat-bubble.js'],
+    ['stores', 'chat', 'simple-talk.js'],
+  ];
+  for (const assetPath of viewerChatAssetPaths) {
+    await copyIfPresent(
+      path.join(repoRoot, 'src', 'ui', 'metaapps', 'chat', 'idframework', ...assetPath),
+      path.join(runtimeRoot, 'dist', 'ui', 'metaapps', 'chat', 'idframework', ...assetPath),
+    );
+  }
+}
+
 async function ensureBundledRuntime(repoRoot, runtimeRoot, compatibilityManifest, dependencyNames) {
   const builtCliEntry = path.join(repoRoot, 'dist', 'cli', 'main.js');
   try {
@@ -471,6 +507,7 @@ async function ensureBundledRuntime(repoRoot, runtimeRoot, compatibilityManifest
   await fs.rm(path.join(runtimeRoot, 'dist'), { recursive: true, force: true });
   await fs.mkdir(runtimeRoot, { recursive: true });
   await fs.cp(path.join(repoRoot, 'dist'), path.join(runtimeRoot, 'dist'), { recursive: true });
+  await copyRuntimeUiAssets(repoRoot, runtimeRoot);
   await writeFile(path.join(runtimeRoot, 'compatibility.json'), compatibilityManifest);
   await copyBundledRuntimeDependencies(repoRoot, runtimeRoot, dependencyNames);
 }

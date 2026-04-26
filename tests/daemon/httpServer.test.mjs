@@ -24,6 +24,7 @@ async function startServer(options = {}) {
     trace: [],
     networkServices: [],
     networkBots: [],
+    chatConversation: [],
   };
 
   const server = createHttpServer({
@@ -216,6 +217,30 @@ async function startServer(options = {}) {
         }),
         '',
       ].join('\n'),
+    },
+    chat: {
+      privateConversation: async (input) => {
+        calls.chatConversation.push(input);
+        return commandSuccess({
+          selfGlobalMetaId: 'gm-local-alice',
+          peerGlobalMetaId: input.peer,
+          messages: [
+            {
+              id: 'pin-chat-1',
+              pinId: 'pin-chat-1',
+              protocol: '/protocols/simplemsg',
+              type: '2',
+              content: 'hello bob',
+              timestamp: 1776836184,
+              index: 8,
+              fromGlobalMetaId: 'gm-local-alice',
+              toGlobalMetaId: input.peer,
+            },
+          ],
+          nextPollAfterIndex: 8,
+          serverTime: 1776836184230,
+        });
+      },
     },
     ui: useBuiltInUiPages
       ? undefined
@@ -710,6 +735,59 @@ test('GET /api/trace/:traceId/watch returns newline-delimited public status even
   ]);
 });
 
+test('GET /api/chat/private/conversation returns the read-only viewer API shape', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/chat/private/conversation?peer=gm-remote-bob&afterIndex=7&limit=20`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.chatConversation, [
+    {
+      peer: 'gm-remote-bob',
+      afterIndex: 7,
+      limit: 20,
+    },
+  ]);
+  assert.deepEqual(payload, {
+    ok: true,
+    selfGlobalMetaId: 'gm-local-alice',
+    peerGlobalMetaId: 'gm-remote-bob',
+    messages: [
+      {
+        id: 'pin-chat-1',
+        pinId: 'pin-chat-1',
+        protocol: '/protocols/simplemsg',
+        type: '2',
+        content: 'hello bob',
+        timestamp: 1776836184,
+        index: 8,
+        fromGlobalMetaId: 'gm-local-alice',
+        toGlobalMetaId: 'gm-remote-bob',
+      },
+    ],
+    nextPollAfterIndex: 8,
+    serverTime: 1776836184230,
+  });
+});
+
+test('GET /api/chat/private/conversation rejects requests without a peer', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/chat/private/conversation`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(server.calls.chatConversation, []);
+  assert.deepEqual(payload, {
+    ok: false,
+    code: 'missing_peer',
+    message: 'peer query parameter is required.',
+  });
+});
+
 test('GET /api/trace/:traceId/events returns server-sent trace status events for the local inspector', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
@@ -773,6 +851,42 @@ test('GET /ui/trace gives verbose cards more room and allows long participant va
   assert.match(html, /participant-item/);
   assert.match(html, /overflow-wrap:\s*anywhere/);
   assert.match(html, /grid-column:\s*span 6/);
+});
+
+test('GET /ui/chat-viewer serves the built-in private chat viewer shell', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/chat-viewer?peer=gm-remote-bob`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /Private Chat Viewer/);
+  assert.match(html, /id-chat-msg-list/);
+  assert.match(html, /viewer-mode="standalone"/);
+  assert.match(html, /\/api\/chat\/private\/conversation/);
+  assert.match(html, /\/ui\/chat\/idframework\/components\/id-chat-msg-list\.js/);
+  assert.match(html, /afterIndex/);
+  assert.match(html, /poll/);
+});
+
+test('GET /ui/chat/idframework/components/id-chat-msg-list.js serves the standalone-capable IDFramework component', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/chat/idframework/components/id-chat-msg-list.js`);
+  const javascript = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /javascript/i);
+  assert.match(javascript, /customElements\.define\('id-chat-msg-list'/);
+  assert.match(javascript, /viewer-mode/);
+  assert.match(javascript, /standalone/);
+  assert.doesNotMatch(javascript, /import\s+\{\s*getSimpleTalkStore\s*\}\s+from/);
+  assert.match(javascript, /this\._isStandaloneViewer\(\)\)\s+return/);
+  assert.match(javascript, /await import\('\.\.\/stores\/chat\/simple-talk\.js'\)/);
+  assert.match(javascript, /snapshot\.viewerMode === 'standalone'\s*\?\s*null/);
 });
 
 test('GET /ui/publish serves the built-in provider publish console wired to provider summary and publish APIs', async (t) => {

@@ -167,6 +167,7 @@ function tryParsePlaintextJson(value) {
         return null;
     }
 }
+/** @internal */
 function sendPrivateChat(input) {
     const peerPublicKey = requirePeerChatPublicKey(input.peerChatPublicKey);
     const toGlobalMetaId = normalizeText(input.toGlobalMetaId);
@@ -199,6 +200,7 @@ function sendPrivateChat(input) {
         secretVariant,
     };
 }
+/** @internal */
 function receivePrivateChat(input) {
     const localPrivateKey = requirePrivateKeyBuffer(input.localIdentity, 'Local private key');
     const peerPublicKey = requirePeerChatPublicKey(input.peerChatPublicKey);

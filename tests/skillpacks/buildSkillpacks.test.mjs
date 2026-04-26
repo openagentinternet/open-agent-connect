@@ -500,6 +500,25 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
   assert.match(chatContent, /natural-language next prompts/i);
   assert.match(chatContent, /same language as the user/i);
   assert.match(chatContent, /do not lock to one fixed phrase template/i);
+  assert.match(chatContent, /localUiUrl/);
+  assert.match(chatContent, /private chat viewer/i);
+
+  const privateChatDeclarations = await readFile(
+    path.join(sharedPackRoot(outputRoot), 'runtime', 'dist', 'core', 'chat', 'privateChat.d.ts'),
+    'utf8'
+  );
+  assert.doesNotMatch(privateChatDeclarations, /privateKeyHex/);
+  assert.doesNotMatch(privateChatDeclarations, /peerChatPublicKey/);
+  assert.doesNotMatch(privateChatDeclarations, /encryptedContent/);
+  assert.doesNotMatch(privateChatDeclarations, /sharedSecret/);
+
+  for (const host of HOSTS) {
+    const hostPrivateChatDeclarations = await readFile(
+      path.join(outputRoot, host, 'runtime', 'dist', 'core', 'chat', 'privateChat.d.ts'),
+      'utf8'
+    );
+    assert.equal(hostPrivateChatDeclarations, privateChatDeclarations);
+  }
 
   const buzzContent = await readFile(sharedSkillFile(outputRoot, 'metabot-post-buzz'), 'utf8');
   assert.match(buzzContent, /buzz post/);

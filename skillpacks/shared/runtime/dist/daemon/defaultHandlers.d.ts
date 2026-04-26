@@ -2,6 +2,7 @@ import { createRuntimeStateStore, type RuntimeDaemonRecord } from '../core/state
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 import type { SessionTraceRecord } from '../core/chat/sessionTrace';
 import { exportSessionArtifacts } from '../core/chat/transcriptExport';
+import { type FetchPrivateHistory } from '../core/chat/privateConversation';
 import type { SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
@@ -24,9 +25,11 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     signer?: Signer;
     identitySyncStepDelayMs?: number;
     chainApiBaseUrl?: string;
+    idChatApiBaseUrl?: string;
     socketPresenceApiBaseUrl?: string;
     socketPresenceFailureMode?: 'throw' | 'assume_service_providers_online';
     fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
+    fetchPrivateChatHistory?: FetchPrivateHistory;
     callerReplyWaiter?: MetaWebServiceReplyWaiter;
     masterReplyWaiter?: MetaWebMasterReplyWaiter;
     onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;

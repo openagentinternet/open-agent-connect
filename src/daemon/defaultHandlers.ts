@@ -37,6 +37,12 @@ import { buildSessionTrace } from '../core/chat/sessionTrace';
 import type { SessionTraceRecord } from '../core/chat/sessionTrace';
 import { exportSessionArtifacts } from '../core/chat/transcriptExport';
 import { sendPrivateChat } from '../core/chat/privateChat';
+import {
+  buildPrivateConversationResponse,
+  normalizeConversationAfterIndex,
+  normalizeConversationLimit,
+  type FetchPrivateHistory,
+} from '../core/chat/privateConversation';
 import { createLocalMnemonicSigner } from '../core/signing/localMnemonicSigner';
 import type { SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
@@ -726,6 +732,14 @@ function readPrivateChatRequest(rawInput: Record<string, unknown>) {
     content,
     replyPin: normalizeText(rawInput.replyPin),
     peerChatPublicKey: normalizeText(rawInput.peerChatPublicKey),
+  };
+}
+
+function readPrivateConversationRequest(rawInput: Record<string, unknown>) {
+  return {
+    peer: normalizeText(rawInput.peer),
+    afterIndex: normalizeConversationAfterIndex(rawInput.afterIndex),
+    limit: normalizeConversationLimit(rawInput.limit),
   };
 }
 
@@ -2859,9 +2873,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
   signer?: Signer;
   identitySyncStepDelayMs?: number;
   chainApiBaseUrl?: string;
+  idChatApiBaseUrl?: string;
   socketPresenceApiBaseUrl?: string;
   socketPresenceFailureMode?: 'throw' | 'assume_service_providers_online';
   fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
+  fetchPrivateChatHistory?: FetchPrivateHistory;
   callerReplyWaiter?: MetaWebServiceReplyWaiter;
   masterReplyWaiter?: MetaWebMasterReplyWaiter;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
@@ -6497,6 +6513,59 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     },
     chat: {
+      privateConversation: async (rawInput) => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before viewing private chat.');
+        }
+
+        const request = readPrivateConversationRequest(rawInput);
+        if (!request.peer) {
+          return commandFailed('missing_peer', 'peer query parameter is required.');
+        }
+
+        let privateChatIdentity;
+        try {
+          privateChatIdentity = await signer.getPrivateChatIdentity();
+        } catch (error) {
+          return commandFailed(
+            'identity_secret_missing',
+            error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.'
+          );
+        }
+
+        let peerChatPublicKey = request.peer === state.identity.globalMetaId
+          ? normalizeText(state.identity.chatPublicKey) || privateChatIdentity.chatPublicKey
+          : '';
+        if (!peerChatPublicKey) {
+          peerChatPublicKey = await resolvePeerChatPublicKey(request.peer) ?? '';
+        }
+        if (!peerChatPublicKey) {
+          return commandFailed(
+            'peer_chat_public_key_missing',
+            'Target has no chat public key on chain.'
+          );
+        }
+
+        try {
+          const response = await buildPrivateConversationResponse({
+            selfGlobalMetaId: state.identity.globalMetaId,
+            peerGlobalMetaId: request.peer,
+            localPrivateKeyHex: privateChatIdentity.privateKeyHex,
+            peerChatPublicKey,
+            afterIndex: request.afterIndex,
+            limit: request.limit,
+            fetchHistory: input.fetchPrivateChatHistory,
+            idChatApiBaseUrl: input.idChatApiBaseUrl,
+          });
+          return commandSuccess(response);
+        } catch (error) {
+          return commandFailed(
+            'history_fetch_failed',
+            error instanceof Error ? error.message : 'Failed to fetch private chat history.'
+          );
+        }
+      },
       private: async (rawInput) => {
         const state = await runtimeStateStore.readState();
         if (!state.identity) {
@@ -6620,9 +6689,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
         return commandSuccess({
           to: request.to,
           path: sent.path,
-          payload: sent.payload,
-          encryptedContent: sent.encryptedContent,
-          secretVariant: sent.secretVariant,
           pinId: normalizeText(chatWrite.pinId) || null,
           txids: Array.isArray(chatWrite.txids) ? chatWrite.txids : [],
           totalCost: Number.isFinite(Number(chatWrite.totalCost))
@@ -6630,11 +6696,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
             : null,
           network: normalizeText(chatWrite.network) || 'mvc',
           deliveryMode: 'onchain_simplemsg',
-          peerChatPublicKey,
           messageType: structuredContent.messageType,
           requestId: structuredContent.requestId,
           correlatedTraceId: structuredContent.traceId,
           traceId: trace.traceId,
+          localUiUrl: buildDaemonLocalUiUrl(
+            input.getDaemonRecord(),
+            '/ui/chat-viewer',
+            { peer: request.to },
+          ),
           transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
           traceMarkdownPath: artifacts.traceMarkdownPath,
           traceJsonPath: artifacts.traceJsonPath,
