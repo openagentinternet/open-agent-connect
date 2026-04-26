@@ -50,6 +50,7 @@ test('default chat.private stringifies master_request objects and exposes struct
     traces: [],
   });
 
+  const writeCalls = [];
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     getDaemonRecord: () => null,
@@ -60,7 +61,8 @@ test('default chat.private stringifies master_request objects and exposes struct
           privateKeyHex: identityPair.privateKeyHex,
         };
       },
-      async writePin() {
+      async writePin(input) {
+        writeCalls.push(input);
         return {
           pinId: '/protocols/simplemsg-pin-1',
           txids: ['tx-simplemsg-1'],
@@ -108,5 +110,10 @@ test('default chat.private stringifies master_request objects and exposes struct
   assert.equal(result.data.requestId, 'request-chat-1');
   assert.equal(result.data.correlatedTraceId, 'trace-chat-1');
   assert.equal(result.data.path, '/protocols/simplemsg');
-  assert.match(result.data.payload, /"encrypt":"ecdh"/);
+  assert.equal(Object.hasOwn(result.data, 'payload'), false);
+  assert.equal(Object.hasOwn(result.data, 'encryptedContent'), false);
+  assert.equal(Object.hasOwn(result.data, 'secretVariant'), false);
+  assert.equal(Object.hasOwn(result.data, 'peerChatPublicKey'), false);
+  assert.equal(writeCalls.length, 1);
+  assert.match(writeCalls[0].payload, /"encrypt":"ecdh"/);
 });

@@ -2956,8 +2956,19 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
   assert.match(sent.payload.data.pinId, /^\/protocols\/simplemsg-pin-/);
   assert.match(sent.payload.data.txids[0], /^\/protocols\/simplemsg-tx-/);
   assert.match(sent.payload.data.traceId, /^trace-private-/);
-  assert.match(sent.payload.data.payload, /"encrypt":"ecdh"/);
+  assert.equal(Object.hasOwn(sent.payload.data, 'payload'), false);
+  assert.equal(Object.hasOwn(sent.payload.data, 'encryptedContent'), false);
+  assert.equal(Object.hasOwn(sent.payload.data, 'secretVariant'), false);
+  assert.equal(Object.hasOwn(sent.payload.data, 'peerChatPublicKey'), false);
+  assert.doesNotMatch(JSON.stringify(sent.payload.data), /"encrypt":"ecdh"/);
   assert.match(sent.payload.data.traceJsonPath, /\/\.runtime\/exports\/traces\/.*\.json$/);
+  assert.match(
+    sent.payload.data.localUiUrl,
+    /\/ui\/chat-viewer\?peer=/
+  );
+  const viewerUrl = new URL(sent.payload.data.localUiUrl);
+  assert.equal(viewerUrl.pathname, '/ui/chat-viewer');
+  assert.equal(viewerUrl.searchParams.get('peer'), created.payload.data.globalMetaId);
 
   const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', sent.payload.data.traceId]);
 

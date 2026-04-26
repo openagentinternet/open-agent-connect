@@ -1,11 +1,13 @@
 import { createECDH, createHash } from 'node:crypto';
 import CryptoJS, { AES, enc, mode, pad } from 'crypto-js';
 
+/** @internal */
 export interface PrivateChatIdentity {
   globalMetaId?: string | null;
   privateKeyHex?: string | Buffer | null;
 }
 
+/** @internal */
 export interface SendPrivateChatInput {
   fromIdentity: PrivateChatIdentity;
   toGlobalMetaId: string;
@@ -17,6 +19,7 @@ export interface SendPrivateChatInput {
   sharedSecretOverride?: string | null;
 }
 
+/** @internal */
 export interface SendPrivateChatResult {
   path: '/protocols/simplemsg';
   encryption: '0';
@@ -28,6 +31,7 @@ export interface SendPrivateChatResult {
   secretVariant: 'sha256' | 'raw';
 }
 
+/** @internal */
 export interface ReceivePrivateChatPayload {
   fromGlobalMetaId?: string | null;
   content?: string | null;
@@ -35,12 +39,14 @@ export interface ReceivePrivateChatPayload {
   replyPinId?: string | null;
 }
 
+/** @internal */
 export interface ReceivePrivateChatInput {
   localIdentity: PrivateChatIdentity;
   peerChatPublicKey: string;
   payload: ReceivePrivateChatPayload;
 }
 
+/** @internal */
 export interface ReceivePrivateChatResult {
   fromGlobalMetaId: string;
   replyPinId: string;
@@ -209,6 +215,7 @@ function tryParsePlaintextJson(value: string): unknown | null {
   }
 }
 
+/** @internal */
 export function sendPrivateChat(input: SendPrivateChatInput): SendPrivateChatResult {
   const peerPublicKey = requirePeerChatPublicKey(input.peerChatPublicKey);
   const toGlobalMetaId = normalizeText(input.toGlobalMetaId);
@@ -251,6 +258,7 @@ export function sendPrivateChat(input: SendPrivateChatInput): SendPrivateChatRes
   };
 }
 
+/** @internal */
 export function receivePrivateChat(input: ReceivePrivateChatInput): ReceivePrivateChatResult {
   const localPrivateKey = requirePrivateKeyBuffer(input.localIdentity, 'Local private key');
   const peerPublicKey = requirePeerChatPublicKey(input.peerChatPublicKey);

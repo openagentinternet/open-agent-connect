@@ -181,6 +181,10 @@ test('runCli prints machine-readable help for `metabot chat private --help --jso
   assert.ok(output.successFields.includes('traceId'));
   assert.ok(output.successFields.includes('pinId'));
   assert.ok(output.successFields.includes('txids'));
+  assert.ok(output.successFields.includes('localUiUrl'));
+  assert.equal(output.successFields.includes('payload'), false);
+  assert.equal(output.successFields.includes('encryptedContent'), false);
+  assert.equal(output.successFields.includes('peerChatPublicKey'), false);
 });
 
 test('runCli prints nested group help for `metabot network sources --help`', async () => {

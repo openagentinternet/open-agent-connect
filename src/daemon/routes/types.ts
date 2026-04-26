@@ -4,7 +4,7 @@ import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 
 export type Awaitable<T> = T | Promise<T>;
 
-export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund';
+export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'chat-viewer';
 
 export interface MetabotDaemonHttpHandlers {
   buzz?: {
@@ -49,6 +49,11 @@ export interface MetabotDaemonHttpHandlers {
   };
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    privateConversation?: (input: {
+      peer: string;
+      afterIndex?: number;
+      limit?: number;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   file?: {
     upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

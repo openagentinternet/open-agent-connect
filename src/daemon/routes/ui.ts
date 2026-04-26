@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { buildHubPageDefinition } from '../../ui/pages/hub/app';
+import { buildChatViewerPageDefinition } from '../../ui/pages/chat-viewer/app';
 import { buildMyServicesPageDefinition } from '../../ui/pages/my-services/app';
 import { buildPublishPageDefinition } from '../../ui/pages/publish/app';
 import { buildRefundPageDefinition } from '../../ui/pages/refund/app';
@@ -17,6 +18,7 @@ const PAGE_BUILDERS: Record<MetabotUiPageName, () => LocalUiPageDefinition> = {
   'my-services': buildMyServicesPageDefinition,
   'trace': buildTracePageDefinition,
   'refund': buildRefundPageDefinition,
+  'chat-viewer': buildChatViewerPageDefinition,
 };
 
 const NAV_ITEMS: Array<{ page: MetabotUiPageName; label: string }> = [
@@ -25,6 +27,7 @@ const NAV_ITEMS: Array<{ page: MetabotUiPageName; label: string }> = [
   { page: 'my-services', label: 'My Services' },
   { page: 'trace', label: 'Trace' },
   { page: 'refund', label: 'Refund' },
+  { page: 'chat-viewer', label: 'Chat Viewer' },
 ];
 
 function escapeHtml(value: string): string {

@@ -933,10 +933,8 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'path',
       'pinId',
       'txids',
-      'payload',
-      'encryptedContent',
-      'peerChatPublicKey',
       'traceId',
+      'localUiUrl',
     ],
     failureSemantics: [
       'Fails when the local chat secret is missing or the remote MetaBot has no published chat public key.',

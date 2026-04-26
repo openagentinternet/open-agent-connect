@@ -7,18 +7,20 @@ exports.handleUiRoutes = void 0;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const app_1 = require("../../ui/pages/hub/app");
-const app_2 = require("../../ui/pages/my-services/app");
-const app_3 = require("../../ui/pages/publish/app");
-const app_4 = require("../../ui/pages/refund/app");
-const app_5 = require("../../ui/pages/trace/app");
+const app_2 = require("../../ui/pages/chat-viewer/app");
+const app_3 = require("../../ui/pages/my-services/app");
+const app_4 = require("../../ui/pages/publish/app");
+const app_5 = require("../../ui/pages/refund/app");
+const app_6 = require("../../ui/pages/trace/app");
 const uiMetaApps_1 = require("./uiMetaApps");
 const UI_ROUTE_PREFIX = '/ui/';
 const PAGE_BUILDERS = {
     'hub': app_1.buildHubPageDefinition,
-    'publish': app_3.buildPublishPageDefinition,
-    'my-services': app_2.buildMyServicesPageDefinition,
-    'trace': app_5.buildTracePageDefinition,
-    'refund': app_4.buildRefundPageDefinition,
+    'publish': app_4.buildPublishPageDefinition,
+    'my-services': app_3.buildMyServicesPageDefinition,
+    'trace': app_6.buildTracePageDefinition,
+    'refund': app_5.buildRefundPageDefinition,
+    'chat-viewer': app_2.buildChatViewerPageDefinition,
 };
 const NAV_ITEMS = [
     { page: 'hub', label: 'Hub' },
@@ -26,6 +28,7 @@ const NAV_ITEMS = [
     { page: 'my-services', label: 'My Services' },
     { page: 'trace', label: 'Trace' },
     { page: 'refund', label: 'Refund' },
+    { page: 'chat-viewer', label: 'Chat Viewer' },
 ];
 function escapeHtml(value) {
     return value
