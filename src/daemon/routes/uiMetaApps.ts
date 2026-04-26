@@ -131,13 +131,22 @@ function decodePathSegments(rawPath: string): string[] | null {
 }
 
 async function resolveBundledMetaAppRoot(appId: BundledMetaAppId): Promise<string> {
-  const copiedAssetPath = path.resolve(__dirname, `../../ui/metaapps/${appId}`);
-  try {
-    await fs.access(copiedAssetPath);
-    return copiedAssetPath;
-  } catch {
-    return path.resolve(__dirname, `../../../src/ui/metaapps/${appId}`);
+  const candidateRoots = [
+    path.resolve(__dirname, `../../ui/metaapps/${appId}`),
+    path.resolve(__dirname, `../../../src/ui/metaapps/${appId}`),
+    path.resolve(__dirname, `../../../../../../src/ui/metaapps/${appId}`),
+  ];
+
+  for (const candidateRoot of candidateRoots) {
+    try {
+      await fs.access(candidateRoot);
+      return candidateRoot;
+    } catch {
+      // Try the next supported runtime layout.
+    }
   }
+
+  return candidateRoots[0];
 }
 
 async function readBundledMetaAppFile(appId: BundledMetaAppId, relativePath: string): Promise<{ absolutePath: string; body: Buffer }> {

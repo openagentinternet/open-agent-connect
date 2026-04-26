@@ -403,6 +403,40 @@ test('buildAgentConnectSkillpacks copies the compatibility manifest into the sha
   }
 });
 
+test('tracked bundled MetaApp route serves Buzz entry from the repository source fallback', async () => {
+  const routeModule = await import(pathToFileURL(
+    path.join(REPO_ROOT, 'skillpacks', SHARED_PACK, 'runtime', 'dist', 'daemon', 'routes', 'uiMetaApps.js')
+  ).href);
+  const handleBundledMetaAppRoutes =
+    routeModule.handleBundledMetaAppRoutes ?? routeModule.default.handleBundledMetaAppRoutes;
+  let response = null;
+
+  const handled = await handleBundledMetaAppRoutes({
+    url: new URL('http://127.0.0.1:62860/ui/buzz/app/index.html?pinId=test-pin'),
+    req: { method: 'GET' },
+    sendMethodNotAllowed: (methods) => {
+      response = { type: 'method_not_allowed', methods };
+    },
+    sendJson: (status, body) => {
+      response = { type: 'json', status, body };
+    },
+    sendHtml: (status, html) => {
+      response = { type: 'html', status, html };
+    },
+    sendText: (status, body, contentType) => {
+      response = { type: 'text', status, body, contentType };
+    },
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response?.type, 'html');
+  assert.equal(response.status, 200);
+  assert.match(response.html, /IDFramework - Buzz Feed Demo/);
+  assert.match(response.html, /<base href="\/ui\/buzz\/app\/">/);
+  assert.match(response.html, /data-oac-buzz-context-banner/);
+  assert.match(response.html, /params\.get\('pinId'\)/);
+});
+
 test('buildAgentConnectSkillpacks preserves one confirmation contract in shared skills and bundles the same shared copy into host wrappers', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
 

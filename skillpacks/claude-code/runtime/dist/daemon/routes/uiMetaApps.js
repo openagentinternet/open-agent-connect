@@ -121,14 +121,21 @@ function decodePathSegments(rawPath) {
     return segments;
 }
 async function resolveBundledMetaAppRoot(appId) {
-    const copiedAssetPath = node_path_1.default.resolve(__dirname, `../../ui/metaapps/${appId}`);
-    try {
-        await node_fs_1.promises.access(copiedAssetPath);
-        return copiedAssetPath;
+    const candidateRoots = [
+        node_path_1.default.resolve(__dirname, `../../ui/metaapps/${appId}`),
+        node_path_1.default.resolve(__dirname, `../../../src/ui/metaapps/${appId}`),
+        node_path_1.default.resolve(__dirname, `../../../../../../src/ui/metaapps/${appId}`),
+    ];
+    for (const candidateRoot of candidateRoots) {
+        try {
+            await node_fs_1.promises.access(candidateRoot);
+            return candidateRoot;
+        }
+        catch {
+            // Try the next supported runtime layout.
+        }
     }
-    catch {
-        return node_path_1.default.resolve(__dirname, `../../../src/ui/metaapps/${appId}`);
-    }
+    return candidateRoots[0];
 }
 async function readBundledMetaAppFile(appId, relativePath) {
     const root = await resolveBundledMetaAppRoot(appId);
