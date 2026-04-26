@@ -21,7 +21,8 @@ When a legacy `~/.agent-connect/bin/metabot` shim already exists, install also r
 ```bash
 ./install.sh
 export PATH="$HOME/.metabot/bin:$PATH"
-metabot doctor
+metabot --help
+metabot identity --help
 ```
 
 Override the shared skill destination with `METABOT_SHARED_SKILL_DEST` if you need a non-default shared root.

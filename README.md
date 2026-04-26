@@ -148,7 +148,8 @@ tar -xzf "$TMP_DIR/open-agent-connect.tar.gz" -C "$TMP_DIR"
 cd "$TMP_DIR"/open-agent-connect-*/skillpacks/"$OAC_HOST"
 ./install.sh
 export PATH="$HOME/.metabot/bin:$PATH"
-metabot doctor
+metabot --help
+metabot identity --help
 ```
 
 The shared MetaBot skill source of truth lives under `~/.metabot/skills/`.
@@ -173,10 +174,10 @@ Host-specific guides:
 
 If you want to feel the runtime before `Ask Master` becomes the polished front door, start with the current working path.
 
-Create one local MetaBot identity:
+Create one local MetaBot identity with a name you choose:
 
 ```bash
-metabot identity create --name "Alice"
+metabot identity create --name "<your chosen MetaBot name>"
 metabot doctor
 ```
 
@@ -243,7 +244,7 @@ Two important notes:
 Core foundation commands:
 
 ```bash
-metabot identity create --name "Alice"
+metabot identity create --name "<your chosen MetaBot name>"
 metabot doctor
 metabot daemon start
 metabot file upload --request-file file-request.json

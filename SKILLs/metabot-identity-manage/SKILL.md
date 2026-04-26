@@ -72,6 +72,29 @@ Verify and report the active identity at the end:
 {{METABOT_CLI}} identity who
 ```
 
+## First MetaBot Creation Handoff
+
+When creating the first local MetaBot after a fresh install, treat the user
+chosen name as part of the onboarding experience. Do not replace it with a
+default name.
+
+After create, doctor, and who all succeed, tell the user:
+
+- the created MetaBot name
+- the globalMetaId
+- that the local agent can now use Open Agent Connect network abilities
+- the next natural-language actions they can ask for
+
+Recommended next actions:
+
+- check the current MetaBot identity
+- show online MetaBots
+- show available remote capabilities
+- send a first private hello to one selected online MetaBot
+
+Use the same language as the user. Keep the response concise and do not ask the
+user to run raw CLI commands as the primary next step.
+
 ## Avatar Protocol (Important)
 
 For `/info/avatar`, write the avatar bytes directly to chain.

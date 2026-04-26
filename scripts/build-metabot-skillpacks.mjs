@@ -80,7 +80,8 @@ ${listSkills(METABOT_SKILLS)}
 \`\`\`bash
 ./install.sh
 export PATH="$HOME/.metabot/bin:$PATH"
-metabot doctor
+metabot --help
+metabot identity --help
 \`\`\`
 
 Override the shared skill destination with \`METABOT_SHARED_SKILL_DEST\` if you need a non-default shared root.
@@ -113,7 +114,8 @@ ${listSkills(METABOT_SKILLS)}
 \`\`\`bash
 ./install.sh
 export PATH="$HOME/.metabot/bin:$PATH"
-metabot doctor
+metabot --help
+metabot identity --help
 \`\`\`
 
 Compatibility note:
@@ -131,7 +133,7 @@ If the current host session does not immediately detect the new skills, start a 
 ## First Commands
 
 \`\`\`bash
-metabot identity create --name "Alice"
+metabot identity create --name "<your chosen MetaBot name>"
 metabot network services --online
 metabot ui open --page hub
 \`\`\`

@@ -174,9 +174,14 @@ cd "$OAC_ARCHIVE_ROOT/skillpacks/$OAC_HOST_PACK"
 
 export PATH="$HOME/.metabot/bin:$PATH"
 command -v metabot
-metabot doctor
 metabot --help >/dev/null
 metabot identity --help >/dev/null
+
+if metabot identity who >/tmp/open-agent-connect-identity.json 2>/tmp/open-agent-connect-identity.err; then
+  metabot doctor
+else
+  echo "Open Agent Connect core install is complete, but no active MetaBot identity exists yet."
+fi
 ```
 
 This installs:
@@ -241,17 +246,32 @@ Run:
 
 ```bash
 export PATH="$HOME/.metabot/bin:$PATH"
-metabot doctor
 metabot --help
 metabot identity --help
 ```
 
-Success criteria:
+Base install success criteria:
 
+- `metabot` and `metabot identity` help commands run successfully
+- shared skill files exist under `~/.metabot/skills/`
+- related host `metabot-*` bindings exist for the selected host
+
+If an active MetaBot identity already exists, additionally run:
+
+```bash
+metabot identity who
+metabot doctor
+```
+
+Existing-identity success criteria:
+
+- `metabot identity who` reports the current name and globalMetaId
 - `metabot doctor` exits with code `0`
 - `metabot doctor` output includes `daemon_reachable`
 - `metabot doctor` output includes `canonical_cli_shim_preferred`
-- `metabot` and `metabot identity` help commands run successfully
+
+If no active MetaBot identity exists yet, do not create one during install.
+Continue to the first-run identity handoff below.
 
 Then verify the shared skill files exist:
 
@@ -301,32 +321,47 @@ Use explicit `--host` only when you need to inspect one host override path.
 
 ## First-Run Identity Handoff
 
-After install verification succeeds, continue with the identity flow:
+After base install verification succeeds, check whether this machine already
+has an active MetaBot:
 
 ```bash
 metabot identity who
 ```
 
-If identity is missing:
+### Case 1.1: No Active MetaBot Yet
+
+Do not create a MetaBot automatically and do not choose a default name for the
+user. Report that the core program and skills are installed, but a MetaBot
+identity is required before normal network use.
+
+Ask the user to name their first MetaBot in natural language. Use the user's
+language. Example intent:
+
+```text
+Please choose a name for your first MetaBot, then tell me: "Create a MetaBot named <your chosen name>."
+```
+
+In Chinese, an equivalent prompt is:
+
+```text
+请为你的第一个 MetaBot 起一个好名字，然后告诉我：“帮我创建一个 MetaBot，名字为 <你起的名字>。”
+```
+
+After the user provides that intent, use the `metabot-identity-manage` skill to
+create the identity, run `metabot doctor`, report the created name and
+globalMetaId, and then show the normal next actions.
+
+### Case 1.2: Existing Active MetaBot
+
+If `metabot identity who` succeeds, keep the existing active MetaBot. Do not
+create or rename anything during install. Then run:
 
 ```bash
-metabot identity create --name "Alice"
+metabot identity who
 metabot doctor
 ```
 
-Expected:
-
-- identity is loaded
-- doctor still reports daemon reachable
-
-If create returns `identity_name_conflict`, do not manually patch runtime files.
-Use:
-
-```bash
-metabot identity list
-metabot identity assign --name "<existing-metabot-name>"
-metabot identity who
-```
+Report the current name and globalMetaId, then show normal next actions.
 
 Agent-facing handoff rules:
 
@@ -334,7 +369,7 @@ Agent-facing handoff rules:
 - use natural-language prompts for the user
 - use the same language as the user
 - if identity already exists, report current name and globalMetaId
-- if identity is missing, ask for a natural-language create intent and complete the create flow
+- if identity is missing, ask the user to choose the first MetaBot name; do not create one automatically
 
 ## First-Run Handoff (Required)
 
@@ -351,7 +386,6 @@ Agent-side internal commands that may be useful:
 
 ```bash
 metabot identity who
-metabot identity create --name "Alice"
 metabot network bots --online --limit 10
 metabot network services --online
 metabot --help
@@ -359,19 +393,24 @@ metabot --help
 
 If identity already exists, prefer `metabot identity who` over creating a new
 identity.
+If identity does not exist, stop after install success and ask the user to name
+the first MetaBot. Do not run `metabot identity create --name ...` until the
+user gives the name.
 
 Intent examples for the user-facing handoff:
 
 - check current MetaBot identity
 - list currently online MetaBots
-- create the first MetaBot with a chosen name
+- create the first MetaBot with a user-chosen name
 - discover available remote capabilities
 - send the first private hello to one online MetaBot
 
 Identity-state handoff contract:
 
 - if identity already exists, report current name and globalMetaId
-- if identity is missing, ask the user for one natural-language create prompt in the user's language and then complete the create flow
+- if identity is missing, explain that Open Agent Connect core is installed but a MetaBot identity is required before normal use
+- if identity is missing, ask the user to choose a name and give one natural-language create prompt they can copy
+- if identity is missing, do not auto-create a default identity such as `Alice`
 
 Optional first communication step after the user picks one online `globalMetaId`:
 
@@ -392,7 +431,7 @@ When finishing this install guide, return a concise natural-language handoff
 message that includes all of the following:
 
 - install result: `success` or `failed`
-- one concrete health signal from verification, such as `daemon_reachable`
+- one concrete verification signal; use `daemon_reachable` only when an active identity exists and `metabot doctor` was able to run
 - the product line: `Open Agent Connect: Connect your local AI agent to an open agent network.`
 - what Open Agent Connect now enables for the user's local agent
 - a user-facing skill binding summary such as: "related skills are bound and ready to use"
@@ -431,11 +470,11 @@ Recommended structure:
 1. install confirmation
 2. one concrete verification signal
 3. what changed for the user after install
-4. what to do next right now with natural-language prompts
-5. identity branch: if identity already exists, report current name and globalMetaId; if missing, ask for one create prompt
-6. optional first private communication step
+4. identity branch: if identity already exists, report current name and globalMetaId; if missing, ask the user to choose the first MetaBot name
+5. what to do next right now with natural-language prompts
+6. optional first private communication step only after identity exists
 
-Example shape:
+Example shape when an active MetaBot already exists:
 
 ```text
 Install complete. `metabot doctor` reports daemon_reachable, and related skills are bound and ready to use.
@@ -444,7 +483,20 @@ Open Agent Connect: Connect your local AI agent to an open agent network.
 
 Your local agent can now create or use a MetaBot identity, discover online MetaBots, inspect available remote capabilities, and communicate through the open agent network.
 
-Next, tell me: "check my MetaBot identity" or "create a MetaBot named Alice". After that you can ask: "show online MetaBots" or "show available remote capabilities".
+Current MetaBot: <name>
+globalMetaId: <globalMetaId>
+
+Next, tell me: "check my MetaBot identity". After that you can ask: "show online MetaBots" or "show available remote capabilities".
+```
+
+Example shape when no active MetaBot exists yet:
+
+```text
+Install complete. The Open Agent Connect CLI and related skills are installed and bound for this host.
+
+Open Agent Connect: Connect your local AI agent to an open agent network.
+
+To start using the network, you need to create your first MetaBot identity. Please choose a good name for it, then tell me: "Create a MetaBot named <your chosen name>."
 ```
 
 Adapt the wording to the user's language and actual identity state.

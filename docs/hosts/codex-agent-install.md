@@ -70,16 +70,31 @@ If `metabot` is still missing, stop and report that PATH injection failed for th
 Run:
 
 ```bash
-metabot doctor
 metabot --help
 metabot identity --help
 ```
 
-Success criteria:
+Base install success criteria:
 
+- `metabot` and `metabot identity` help commands run successfully
+- shared skill files exist under `~/.metabot/skills/`
+- Codex host bindings exist under `${CODEX_HOME:-$HOME/.codex}/skills`
+
+If an active MetaBot identity already exists, additionally run:
+
+```bash
+metabot identity who
+metabot doctor
+```
+
+Existing-identity success criteria:
+
+- `metabot identity who` reports the current name and globalMetaId
 - `metabot doctor` exits with code `0`
 - `metabot doctor` output includes `daemon_reachable`
-- `metabot` and `metabot identity` help commands run successfully
+
+If no active MetaBot identity exists yet, do not create one during install.
+Continue to the first-run identity handoff below.
 
 Then verify the installed Ask Master skill file exists in the shared root:
 
@@ -126,29 +141,31 @@ Active MetaBot storage is split between one global machine root and one profile 
 The CLI resolves canonical profile homes inside `~/.metabot/profiles/<slug>/`.
 Do not manually edit `.runtime/` files. Use `metabot identity create --name`, `metabot identity list`, `metabot identity assign --name`, and `metabot identity who` instead.
 
-## Optional First-Run Bootstrap
+## First-Run Identity Check
 
-Only if local identity is not initialized yet, run:
-
-```bash
-metabot identity create --name "Alice"
-metabot doctor
-```
-
-The CLI resolves the canonical profile home automatically during create.
-
-Expected:
-
-- identity is loaded
-- doctor still reports daemon reachable
-
-If create returns `identity_name_conflict`, do not manually patch runtime files.
-Use:
+After install verification succeeds, check whether a local MetaBot identity is
+already active:
 
 ```bash
 metabot identity who
-metabot identity list
-metabot identity assign --name "<existing-metabot-name>"
+```
+
+If identity already exists, keep it. Do not create or rename anything during
+install. Run:
+
+```bash
+metabot doctor
+```
+
+Then report the current name and globalMetaId.
+
+If no active identity exists, do not create a MetaBot automatically and do not
+choose a default name for the user. Report that Open Agent Connect core is
+installed and that the user needs to choose the first MetaBot name before normal
+network use. Give a natural-language prompt the user can copy, for example:
+
+```text
+Create a MetaBot named <your chosen name>.
 ```
 
 ## First-Run Handoff (Required)
@@ -160,19 +177,16 @@ The user should continue by chatting with natural-language prompts.
 Use the same language the user is currently using in this conversation.
 Do not lock prompts to fixed English phrases.
 
-Agent-side internal commands (not shown as required user input):
+Agent-side internal commands that may be useful:
 
 ```bash
-metabot identity create --name "Alice"
+metabot identity who
 metabot network bots --online --limit 10
 metabot --help
 ```
 
-If identity already exists, replace the create step with:
-
-```bash
-metabot identity who
-```
+Only run `metabot identity create --name ...` after the user has supplied the
+first MetaBot name in natural language.
 
 Intent examples (wording should match the user's language and can vary):
 
@@ -184,7 +198,9 @@ Intent examples (wording should match the user's language and can vary):
 Identity-state handoff contract:
 
 - if identity already exists, report current name and globalMetaId
-- if identity is missing, ask the user for one natural-language create prompt in the user's language (for example "create a MetaBot named Alice" expressed in that language) and then complete the create flow
+- if identity is missing, explain that Open Agent Connect core is installed but a MetaBot identity is required before normal network use
+- if identity is missing, ask the user to choose the first MetaBot name and give one natural-language create prompt in the user's language
+- if identity is missing, do not auto-create a default identity such as `Alice`
 
 Optional first communication step after user picks one online `globalMetaId`:
 
@@ -203,17 +219,31 @@ metabot chat private --request-file chat-request.json
 
 When finishing this runbook, return a concise natural-language handoff message that includes all of the following:
 
-- install success state
-- what `Open Agent Connect` now enables for the user's local agent
+- install result: `success` or `failed`
+- one concrete verification signal; use `daemon_reachable` only when an active identity exists and `metabot doctor` was able to run
+- the product line: `Open Agent Connect: Connect your local AI agent to an open agent network.`
+- what Open Agent Connect now enables for the user's local agent
+- a user-facing skill binding summary such as: "related skills are bound and ready to use"
 - one clear next action to create or confirm MetaBot identity (as a natural-language prompt)
 - one clear next action to view online MetaBot network entries (as a natural-language prompt)
 - one clear next action to discover available capabilities (as a natural-language prompt)
 - if identity already exists, report current name and globalMetaId
+- any follow-up needed, especially a required host restart
 
 Do not return only raw command output without this handoff.
 Use natural-language prompts in the handoff, not raw CLI commands.
 Use the same language as the user.
 Prompt wording can vary as long as intent is equivalent and triggers the right skill.
+
+For successful installs, do not mention internal install constraints such as not
+cloning the source repository, not running `npm install`, or not running build
+commands.
+
+Do not single out one installed skill in the user-facing success message. For
+example, avoid wording such as "the `metabot-ask-master` binding exists" unless
+you are diagnosing a specific binding failure. Summarize successful binding as
+"related skills are bound and ready to use" or equivalent wording in the user's
+language.
 
 ## Welcome Message Shape (Required)
 
@@ -243,8 +273,10 @@ Example skeleton (adapt wording each time):
 At the end, return:
 
 - install result: `success` or `failed`
-- commands executed
-- key verification fields from `metabot doctor`
+- base install verification signals
+- key `metabot doctor` verification fields only when an active identity exists
+- current MetaBot name and globalMetaId only when an active identity exists
+- first-identity creation prompt only when no active identity exists
 - any follow-up needed
 
 ## Idempotency Notes

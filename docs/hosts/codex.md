@@ -48,7 +48,7 @@ metabot ui open --page hub
 If identity is missing:
 
 ```bash
-metabot identity create --name "Alice"
+metabot identity create --name "<your chosen MetaBot name>"
 metabot doctor
 ```
 

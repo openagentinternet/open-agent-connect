@@ -472,6 +472,10 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   assert.match(content, /identity assign --name/);
   assert.match(content, /identity who/);
   assert.match(content, /metabot doctor/);
+  assert.match(content, /## First MetaBot Creation Handoff/);
+  assert.match(content, /user\s+chosen name as part of the onboarding experience/i);
+  assert.match(content, /show online MetaBots/i);
+  assert.match(content, /show available remote capabilities/i);
   assert.match(content, /CLI resolves the canonical profile home/i);
   assert.match(content, /~\/\.metabot\/manager\//);
   assert.match(content, /~\/\.metabot\/profiles\/<slug>\//);
@@ -749,7 +753,9 @@ test('codex install runbook documents install verification and first-run handoff
   assert.match(installRunbook, /\$HOME\/\.metabot\/skills\/metabot-chat-privatechat\/SKILL\.md/);
   assert.doesNotMatch(installRunbook, /\$\{CODEX_HOME:-\$HOME\/\.codex\}\/skills\/metabot-ask-master\/SKILL\.md/);
   assert.match(installRunbook, /metabot doctor/);
-  assert.match(installRunbook, /metabot identity create --name "Alice"/);
+  assert.match(installRunbook, /Only run `metabot identity create --name \.\.\.` after the user has supplied/i);
+  assert.match(installRunbook, /Create a MetaBot named <your chosen name>/);
+  assert.match(installRunbook, /do not auto-create a default identity such as `Alice`/i);
   assert.match(installRunbook, /metabot network bots --online --limit 10/);
   assert.match(installRunbook, /## Agent Response Contract \(Required\)/);
   assert.match(installRunbook, /do not ask the user to type raw CLI commands/i);
@@ -758,11 +764,14 @@ test('codex install runbook documents install verification and first-run handoff
   assert.match(installRunbook, /Do not lock prompts to fixed English phrases/i);
   assert.match(installRunbook, /Prompt wording can vary as long as intent is equivalent/i);
   assert.match(installRunbook, /if identity already exists, report current name and globalMetaId/i);
-  assert.match(installRunbook, /what `Open Agent Connect` now enables/i);
+  assert.match(installRunbook, /Open Agent Connect: Connect your local AI agent to an open agent network/i);
+  assert.match(installRunbook, /what Open Agent Connect now enables/i);
   assert.match(installRunbook, /Do not return only raw command output/i);
+  assert.match(installRunbook, /key `metabot doctor` verification fields only when an active identity exists/i);
   assert.match(installRunbook, /~\/\.metabot\/manager\//);
   assert.match(installRunbook, /~\/\.metabot\/profiles\/<slug>\//);
   assert.match(installRunbook, /~\/\.metabot\/skills\//);
   assert.match(installRunbook, /do not manually edit `\.runtime\/` files/i);
+  assert.doesNotMatch(installRunbook, /metabot identity create --name "Alice"/);
   assert.doesNotMatch(installRunbook, /\.metabot\/hot/);
 });

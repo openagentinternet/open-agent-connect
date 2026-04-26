@@ -319,5 +319,7 @@ test('runCli prints identity create help with MetaBot terminology', async () => 
   const output = stdout.join('');
   assert.match(output, /Create one local MetaBot identity/i);
   assert.match(output, /Human-facing name for the new local MetaBot identity\./i);
+  assert.match(output, /metabot identity create --name "<your chosen MetaBot name>"/);
+  assert.doesNotMatch(output, /metabot identity create --name "Alice"/);
   assert.doesNotMatch(output, /connected-agent/i);
 });

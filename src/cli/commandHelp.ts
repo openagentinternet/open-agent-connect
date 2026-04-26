@@ -370,7 +370,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'Fails when the bootstrap flow cannot derive keys, claim subsidy, or persist identity state.',
     ],
     examples: [
-      'metabot identity create --name "Alice"',
+      'metabot identity create --name "<your chosen MetaBot name>"',
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },

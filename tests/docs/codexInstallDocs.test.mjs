@@ -43,10 +43,14 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.match(guide, /not running `npm install`/i);
   assert.match(guide, /Do not single out one installed skill/i);
   assert.match(guide, /unless\s+you are diagnosing a specific binding failure/i);
+  assert.match(guide, /Do not create a MetaBot automatically/i);
+  assert.match(guide, /Please choose a name for your first MetaBot/i);
+  assert.match(guide, /do not auto-create a default identity such as `Alice`/i);
   assert.match(guide, /docs\/acceptance\/open-agent-connect-host-bind-checklist\.md/);
   assert.match(guide, /docs\/install\/uninstall-open-agent-connect\.md/);
   assert.match(guide, /preserve MetaBot identities, mnemonics, private keys, profile names, and\s+wallet-related local data/i);
   assert.doesNotMatch(guide, /manual host acceptance checklist/i);
+  assert.doesNotMatch(guide, /metabot identity create --name "Alice"/);
 });
 
 test('uninstall guide defines safe, test cleanup, and danger-zone tiers', async () => {
@@ -75,7 +79,9 @@ test('Codex install runbook includes first-run handoff and response contract', a
   );
 
   assert.match(runbook, /## First-Run Handoff \(Required\)/);
-  assert.match(runbook, /metabot identity create --name "Alice"/);
+  assert.match(runbook, /Only run `metabot identity create --name \.\.\.` after the user has supplied/i);
+  assert.match(runbook, /Create a MetaBot named <your chosen name>/);
+  assert.match(runbook, /do not auto-create a default identity such as `Alice`/i);
   assert.match(runbook, /metabot network bots --online --limit 10/);
   assert.match(runbook, /metabot chat private --request-file chat-request\.json/);
   assert.match(runbook, /## Agent Response Contract \(Required\)/);
@@ -89,8 +95,11 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /Do not use one fixed canned paragraph/i);
   assert.match(runbook, /what changed for the user after install/i);
   assert.match(runbook, /what to do next right now/i);
-  assert.match(runbook, /what `Open Agent Connect` now enables/i);
+  assert.match(runbook, /Open Agent Connect: Connect your local AI agent to an open agent network/i);
+  assert.match(runbook, /what Open Agent Connect now enables/i);
   assert.match(runbook, /Do not return only raw command output/i);
+  assert.match(runbook, /key `metabot doctor` verification fields only when an active identity exists/i);
+  assert.doesNotMatch(runbook, /metabot identity create --name "Alice"/);
 });
 
 test('host docs thinly wrap the unified install guide and use shared-install language', async () => {
@@ -103,6 +112,8 @@ test('host docs thinly wrap the unified install guide and use shared-install lan
     assert.match(content, /~\/\.metabot\/skills\//);
     assert.match(content, /bind/i);
     assert.match(content, /metabot skills resolve --skill metabot-network-directory --format markdown/);
+    assert.match(content, /metabot identity create --name "<your chosen MetaBot name>"/);
+    assert.doesNotMatch(content, /metabot identity create --name "Alice"/);
   }
 
   assert.doesNotMatch(codex, /metabot skills resolve --skill metabot-network-directory --host codex --format markdown/);
