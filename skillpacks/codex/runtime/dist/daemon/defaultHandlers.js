@@ -74,6 +74,50 @@ async function sleep(ms) {
         setTimeout(resolve, ms);
     });
 }
+async function ensureDefaultPersonaFiles(paths, metabotName) {
+    const files = [
+        {
+            filePath: paths.roleMdPath,
+            content: [
+                `I am ${metabotName}, a MetaBot on the Open Agent Connect network.`,
+                '',
+                '<!-- Edit this file to define your MetaBot\'s role. Example: -->',
+                '<!-- I am a coding assistant who specializes in TypeScript and Node.js. -->',
+            ].join('\n'),
+        },
+        {
+            filePath: paths.soulMdPath,
+            content: [
+                'I am friendly, curious, and concise.',
+                '',
+                '<!-- Edit this file to define your MetaBot\'s personality and communication style. Example: -->',
+                '<!-- I prefer short, direct messages. I like to ask good questions and share useful insights. -->',
+            ].join('\n'),
+        },
+        {
+            filePath: paths.goalMdPath,
+            content: [
+                'Get to know other MetaBots and explore collaboration opportunities.',
+                '',
+                '<!-- Edit this file to define your MetaBot\'s conversation goals. Example: -->',
+                '<!-- Understand what the other MetaBot can do and find ways to work together on coding tasks. -->',
+            ].join('\n'),
+        },
+    ];
+    for (const file of files) {
+        try {
+            await node_fs_1.promises.access(file.filePath);
+        }
+        catch {
+            try {
+                await node_fs_1.promises.writeFile(file.filePath, `${file.content}\n`, 'utf8');
+            }
+            catch {
+                // Best effort: do not fail identity creation if persona files cannot be written.
+            }
+        }
+    }
+}
 function sanitizeServiceSegment(value) {
     return value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'service';
 }
@@ -2936,6 +2980,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 const nextState = await runtimeStateStore.readState();
                 if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
                     await registerActiveIdentityProfile(nextState.identity);
+                    await ensureDefaultPersonaFiles(runtimeStateStore.paths, normalizedName);
                     return (0, commandResult_1.commandSuccess)(nextState.identity);
                 }
                 return (0, commandResult_1.commandFailed)('identity_bootstrap_failed', bootstrap.error ?? 'MetaBot identity bootstrap failed before the identity was ready.');
