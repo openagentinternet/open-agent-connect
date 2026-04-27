@@ -30,42 +30,59 @@ Instead of blocking the daemon HTTP response for N seconds, the daemon returns i
 
 **File:** `src/core/contracts/commandResult.ts`
 
-Add `localUiUrl` and `data` fields to `CommandWaiting`:
+Add `localUiUrl` and `data` fields to `CommandWaiting`. Keep it non-generic — use `Record<string, unknown>` for `data` to avoid confusing it with the `T` in `CommandSuccess<T>`:
 
 ```typescript
-type CommandWaiting<T = unknown> = CommandBase & {
+type CommandWaiting = CommandBase & {
   ok: false;
   state: 'waiting';
   pollAfterMs: number;
   localUiUrl?: string;
-  data?: T;
+  data?: Record<string, unknown>;
 };
 ```
 
-Update `commandWaiting()` factory to accept optional `localUiUrl` and `data`.
+Update `commandWaiting()` factory signature:
 
-This is backward-compatible: existing consumers that ignore these fields continue to work.
+```typescript
+export const commandWaiting = (
+  code: string,
+  message: string,
+  pollAfterMs: number,
+  options?: { localUiUrl?: string; data?: Record<string, unknown> },
+): MetabotCommandResult<never> => ({
+  ok: false,
+  state: 'waiting',
+  code,
+  message,
+  pollAfterMs,
+  ...(options?.localUiUrl ? { localUiUrl: options.localUiUrl } : {}),
+  ...(options?.data ? { data: options.data } : {}),
+});
+```
+
+This is backward-compatible: existing callers pass only 3 args and existing consumers that ignore these fields continue to work.
 
 ### 2. Daemon `services.call` Handler Refactor
 
-**File:** `src/daemon/defaultHandlers.ts` (services.call handler, ~line 5768)
+**File:** `src/daemon/defaultHandlers.ts` (services.call handler starts ~line 5768, foreground wait at ~line 6059, return at ~line 6117)
 
 **Current flow:**
 ```
 validate → discover → plan → confirm → pay → send order
-→ awaitServiceReply(15s) → return success/waiting
+→ awaitServiceReply(15s) [line 6059] → return success/waiting
 ```
 
 **New flow:**
 ```
 validate → discover → plan → confirm → pay → send order
-→ scheduleCallerReplyContinuation(background, 30min)
+→ scheduleCallerReplyContinuation(background, 30min) [line 6101]
 → return commandWaiting with traceId + localUiUrl + session
 ```
 
 Changes:
-- Remove the inline `callerReplyWaiter.awaitServiceReply()` call (the 15s foreground wait).
-- Call `scheduleCallerReplyContinuation()` immediately after sending the order.
+- Remove the inline `callerReplyWaiter.awaitServiceReply()` call at line 6059 (the 15s foreground wait) and the entire `if (reply.state === 'completed')` / `else if (reply.state === 'timeout')` block (lines 6059–6114).
+- Call `scheduleCallerReplyContinuation()` immediately after sending the order (move it out of the timeout branch).
 - Return `commandWaiting(...)` instead of `commandSuccess(...)`, containing:
   - `code: 'order_sent_awaiting_provider'`
   - `message: 'Order sent to provider. Waiting for response...'`
@@ -73,15 +90,27 @@ Changes:
   - `localUiUrl`: trace page URL built via `buildDaemonLocalUiUrl(daemon, '/ui/trace', { traceId })`
   - `data`: `{ traceId, providerGlobalMetaId, serviceName, session, orderPinId, paymentTxid, traceJsonPath, traceMarkdownPath, transcriptMarkdownPath }`
 
+**Exception:** When `request.providerDaemonBaseUrl` is set (local provider call, line 6054), the handler bypasses the foreground wait already. This path should continue to return `commandSuccess` synchronously, but add `localUiUrl` to its return data.
+
 The background continuation (`scheduleCallerReplyContinuation`) continues to run for up to 30 minutes, updating the session/trace when the provider replies. This is the existing mechanism — it just runs from the start now instead of only on foreground timeout.
 
-**Delete constant:** `DEFAULT_CALLER_FOREGROUND_WAIT_MS` (no longer used).
+**Delete constant:** `DEFAULT_CALLER_FOREGROUND_WAIT_MS` (no longer used by any call site — see Section 3 for the other sites).
 
 ### 3. Daemon `master.ask` Handler Refactor
 
-**File:** `src/daemon/defaultHandlers.ts` (master.ask handler, ~line 4700)
+**File:** `src/daemon/defaultHandlers.ts`
 
-Apply the same pattern: remove the 15s foreground wait, schedule background continuation immediately, return `commandWaiting` with trace URL.
+There are **two** foreground wait sites in master flows that both use `DEFAULT_CALLER_FOREGROUND_WAIT_MS`:
+
+1. **`master.ask` main flow** (~line 4702): The primary ask path where the user sends a new master request.
+2. **`master.ask --confirm` flow** (~line 3565): The confirmation/re-ask path where a pending ask is sent after user confirmation.
+
+Both must be refactored to:
+- Remove the foreground `awaitMasterReply()` call.
+- Call `scheduleMasterReplyContinuation()` immediately.
+- Return `commandWaiting` with trace URL and request data.
+
+The `master.ask --confirm` flow only reaches the foreground wait after the user has already confirmed. The fast-return pattern applies to this confirmation step — the initial suggestion step (which returns `awaiting_confirmation`) is unaffected.
 
 ### 4. CLI `services call` Poll Loop
 
@@ -115,9 +144,9 @@ After receiving a `waiting` response from the daemon, the CLI enters a poll loop
 - `CLI_POLL_INTERVAL_MS = 3_000` (3 seconds)
 
 **Implementation notes:**
-- The poll loop needs access to the daemon HTTP client. The `services.call` handler in `runtime.ts` already has `requestJson`. Add a `requestJsonGet` or reuse `requestJson` with GET for `/api/trace/{traceId}`.
-- CLI output during polling should go to `context.stderr` (or a dedicated progress stream) so that the final JSON result on `context.stdout` remains machine-parseable.
-- If `--json` flag is passed (or when called by a host agent), skip the human-friendly progress messages and only output the final JSON result. The host agent sees the `waiting` state, reads `localUiUrl`, and can present it to the user.
+- The poll loop needs access to the daemon HTTP client. `requestJson` in `runtime.ts` (line 773) already supports `'GET'` as a method parameter — no new function needed.
+- CLI progress output goes to `context.stderr.write(...)` so the final JSON on `context.stdout` stays machine-parseable. The CLI `stderr` field (`Pick<NodeJS.WriteStream, 'write'>`) is sufficient for `.write()` calls.
+- **Host agent detection:** When called by a host agent (Codex, Claude Code, etc.), the CLI should skip the poll loop and return the `commandWaiting` result immediately. The host agent sees `localUiUrl` in the JSON and can present it. Detection: check if `context.stdout` is a TTY via `process.stdout.isTTY`. If not a TTY (piped output), skip polling and return the waiting result directly.
 
 ### 5. CLI `master ask` Poll Loop
 
@@ -134,13 +163,20 @@ export async function pollTraceUntilComplete(input: {
   traceId: string;
   localUiUrl: string;
   requestFn: (method: string, path: string) => Promise<unknown>;
-  stderr: NodeJS.WritableStream;
+  stderr: Pick<NodeJS.WriteStream, 'write'>;
   timeoutMs?: number;   // default 300_000
   intervalMs?: number;  // default 3_000
 }): Promise<{ completed: boolean; trace?: unknown }>
 ```
 
 Used by both `services call` and `master ask`.
+
+**Trace response shape:** The `GET /api/trace/{traceId}` endpoint returns `commandSuccess(buildTraceInspectorPayload(...))`. The poll helper extracts `publicStatus` from `result.data.sessions` (array of session objects, each with a `publicStatus` field). The trace is considered complete when the first session's `publicStatus === 'completed'`. The `responseText` is extracted from `result.data.sessions[0].transcript` or the trace's structured response fields.
+
+**Error handling:** On HTTP error (4xx/5xx) or network failure from the trace endpoint:
+- 404 (trace not found): Retry up to 3 times (trace may not be persisted yet), then abort with error message.
+- Network/connection error: Retry silently (daemon may be temporarily busy).
+- Other errors: Log to stderr and continue polling.
 
 ### 7. Return Value Enhancement for Success
 
@@ -160,7 +196,7 @@ When the daemon's `services.call` returns `commandSuccess` directly (e.g., for l
 | `src/cli/commands/services.ts` | Add poll loop after `waiting` response |
 | `src/cli/commands/master.ts` | Add poll loop after `waiting` response |
 | `src/cli/commands/pollTraceHelper.ts` | New: shared poll-until-complete helper |
-| `src/cli/runtime.ts` | Expose GET request capability for trace polling |
+| `src/cli/runtime.ts` | Expose trace poll dependency (reuse existing `requestJson` with GET) |
 
 ## Constants
 
@@ -175,12 +211,12 @@ When the daemon's `services.call` returns `commandSuccess` directly (e.g., for l
 
 - **Host agents reading JSON output:** The `waiting` state now includes `localUiUrl` and `data` — both are additive. Agents that only check `state === 'waiting'` continue to work. Agents that understand `localUiUrl` can present it.
 - **Daemon API:** The `/api/trace/{traceId}` endpoint is unchanged.
-- **MetabotCommandResult generic:** `CommandWaiting` gains a type parameter `T` for `data`, defaulting to `unknown`. Existing code that uses `MetabotCommandResult<X>` is unaffected because `CommandWaiting` was already part of the union with `ok: false`.
+- **MetabotCommandResult union:** `CommandWaiting` remains non-generic (uses `Record<string, unknown>` for `data`). The union type `MetabotCommandResult<T>` is unchanged structurally.
 
 ## Verification
 
 1. **Build:** `npm run build` — must pass with no type errors.
-2. **Unit tests:** `npm run test` — all existing tests must pass.
+2. **Unit tests:** `npm run test` — all existing tests must pass. Tests that reference `DEFAULT_CALLER_FOREGROUND_WAIT_MS` or mock the foreground wait behavior will need updating.
 3. **Manual test — services call:**
    - Run `metabot services call --request-file <file>` against a known online provider.
    - Verify: immediate response with trace URL, poll progress in terminal, final result with `responseText` and `localUiUrl`.
