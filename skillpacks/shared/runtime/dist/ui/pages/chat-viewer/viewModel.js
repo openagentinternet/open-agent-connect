@@ -5,6 +5,11 @@ function buildChatViewerScript() {
     return `
 (() => {
   const POLL_INTERVAL_MS = 4000;
+  const SOCKET_ENDPOINTS = [
+    { url: 'wss://api.idchat.io', path: '/socket/socket.io' },
+    { url: 'wss://www.show.now', path: '/socket/socket.io' },
+  ];
+
   const state = {
     peer: '',
     self: '',
@@ -12,15 +17,21 @@ function buildChatViewerScript() {
     nextPollAfterIndex: undefined,
     pollTimer: null,
     inFlight: false,
+    peerName: '',
+    peerAvatar: '',
+    conversationStopped: false,
+    sockets: [],
   };
 
   const list = document.querySelector('[data-chat-message-list]');
   const peerInput = document.querySelector('[data-chat-peer-input]');
   const selfLabel = document.querySelector('[data-chat-self]');
   const peerLabel = document.querySelector('[data-chat-peer]');
+  const peerContainer = document.querySelector('[data-chat-peer-container]');
   const statusLabel = document.querySelector('[data-chat-status]');
   const countLabel = document.querySelector('[data-chat-count]');
   const refreshButton = document.querySelector('[data-chat-refresh]');
+  const stopButton = document.querySelector('[data-chat-stop]');
 
   function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -108,6 +119,51 @@ function buildChatViewerScript() {
     }, 0);
   }
 
+  function updatePeerDisplay() {
+    if (!peerContainer) return;
+    if (state.peerName || state.peerAvatar) {
+      let html = '<div class="peer-info">';
+      if (state.peerAvatar) {
+        html += '<img class="peer-avatar" src="' + state.peerAvatar.replace(/"/g, '&quot;') + '" alt="" onerror="this.style.display=\\'none\\'" />';
+      }
+      html += '<span class="peer-name">' + (state.peerName || state.peer).replace(/</g, '&lt;') + '</span>';
+      html += '</div>';
+      peerContainer.innerHTML = html;
+    } else {
+      peerContainer.innerHTML = '<strong data-chat-peer>' + (state.peer || 'No peer selected').replace(/</g, '&lt;') + '</strong>';
+    }
+  }
+
+  function extractPeerInfo(messages) {
+    if (!Array.isArray(messages)) return;
+    for (const msg of messages) {
+      if (!msg || !msg.fromUserInfo) continue;
+      const fromGm = normalizeText(msg.fromGlobalMetaId);
+      if (fromGm && fromGm !== state.self) {
+        const info = msg.fromUserInfo;
+        const name = normalizeText(info.name) || normalizeText(info.nickname);
+        const avatar = normalizeText(info.avatarImage) || normalizeText(info.avatarUrl) || normalizeText(info.avatar) || normalizeText(info.avatarUri);
+        if (name && !state.peerName) {
+          state.peerName = name;
+        }
+        if (avatar && !state.peerAvatar) {
+          state.peerAvatar = avatar;
+        }
+        if (state.peerName) break;
+      }
+    }
+  }
+
+  function scrollToBottom() {
+    if (!list || !list.shadowRoot) return;
+    const container = list.shadowRoot.querySelector('[data-scroll-container]') || list.shadowRoot.querySelector('.messages-container');
+    if (container) {
+      requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight;
+      });
+    }
+  }
+
   async function loadConversation(options) {
     const incremental = !!(options && options.incremental);
     if (state.inFlight) return;
@@ -140,7 +196,7 @@ function buildChatViewerScript() {
 
     state.inFlight = true;
     setListState({ loading: !incremental, error: '' });
-    setStatus(incremental ? 'Checking for new messages...' : 'Loading conversation...', 'loading');
+    if (!incremental) setStatus('Loading conversation...', 'loading');
 
     try {
       const response = await fetch('/api/chat/private/conversation?' + query.toString(), {
@@ -153,12 +209,15 @@ function buildChatViewerScript() {
       }
 
       const incoming = Array.isArray(payload.messages) ? payload.messages : [];
+      const prevCount = state.messages.length;
       state.self = normalizeText(payload.selfGlobalMetaId);
       state.peer = normalizeText(payload.peerGlobalMetaId) || peer;
       state.messages = incremental ? mergeMessages(state.messages, incoming) : mergeMessages([], incoming);
       state.nextPollAfterIndex = Number.isFinite(Number(payload.nextPollAfterIndex))
         ? Number(payload.nextPollAfterIndex)
         : maxMessageIndex(state.messages);
+
+      extractPeerInfo(state.messages);
 
       if (list) {
         list.setAttribute('self-global-metaid', state.self);
@@ -168,9 +227,15 @@ function buildChatViewerScript() {
         list.error = '';
       }
       setText(selfLabel, state.self || 'Local MetaBot');
-      setText(peerLabel, state.peer || peer);
+      updatePeerDisplay();
       setText(countLabel, state.messages.length === 1 ? '1 message' : state.messages.length + ' messages');
-      setStatus('Live polling every 4 seconds.', 'ready');
+      const statusText = state.conversationStopped ? 'Conversation ended.' : 'Connected (real-time + polling).';
+      const statusTone = state.conversationStopped ? 'warning' : 'ready';
+      setStatus(statusText, statusTone);
+
+      if (state.messages.length > prevCount) {
+        scrollToBottom();
+      }
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
       setListState({ loading: false, error: message });
@@ -190,21 +255,99 @@ function buildChatViewerScript() {
     }, POLL_INTERVAL_MS);
   }
 
+  // Socket.io real-time listener
+  function connectSocket() {
+    if (!state.self) return;
+    disconnectSockets();
+
+    for (const endpoint of SOCKET_ENDPOINTS) {
+      try {
+        const socket = io(endpoint.url, {
+          path: endpoint.path,
+          query: { metaid: state.self, type: 'pc' },
+          reconnection: true,
+          reconnectionDelay: 5000,
+          reconnectionDelayMax: 30000,
+          transports: ['websocket'],
+        });
+
+        const handleData = (data) => {
+          if (!state.peer) return;
+          loadConversation({ incremental: true });
+        };
+
+        socket.on('message', handleData);
+        socket.on('WS_SERVER_NOTIFY_PRIVATE_CHAT', handleData);
+        state.sockets.push(socket);
+      } catch (e) {
+        // Socket connection failed, polling will continue.
+      }
+    }
+  }
+
+  function disconnectSockets() {
+    for (const socket of state.sockets) {
+      try {
+        socket.removeAllListeners();
+        socket.disconnect();
+      } catch (e) {
+        // Best effort.
+      }
+    }
+    state.sockets = [];
+  }
+
+  // Stop conversation handler
+  async function stopConversation() {
+    if (!state.peer) return;
+    if (stopButton) stopButton.disabled = true;
+    setStatus('Ending conversation...', 'loading');
+
+    try {
+      const response = await fetch('/api/chat/private/stop', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ peer: state.peer }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.message || 'Failed to end conversation.');
+      }
+      state.conversationStopped = true;
+      setStatus('Conversation ended. Your MetaBot will no longer auto-reply.', 'warning');
+    } catch (error) {
+      setStatus(error && error.message ? error.message : String(error), 'error');
+    } finally {
+      if (stopButton) stopButton.disabled = false;
+    }
+  }
+
   async function start() {
     if (!list) return;
     state.peer = readPeerFromLocation();
     if (peerInput) {
       peerInput.value = state.peer;
-      peerInput.addEventListener('change', () => loadConversation({ incremental: false }));
+      peerInput.addEventListener('change', () => {
+        state.conversationStopped = false;
+        state.peerName = '';
+        state.peerAvatar = '';
+        loadConversation({ incremental: false });
+      });
       peerInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
           event.preventDefault();
+          state.conversationStopped = false;
+          state.peerName = '';
+          state.peerAvatar = '';
           loadConversation({ incremental: false });
         }
       });
     }
     if (refreshButton) {
       refreshButton.addEventListener('click', () => loadConversation({ incremental: false }));
+    }
+    if (stopButton) {
+      stopButton.addEventListener('click', stopConversation);
     }
 
     try {
@@ -217,6 +360,16 @@ function buildChatViewerScript() {
 
     await loadConversation({ incremental: false });
     schedulePolling();
+
+    // Load socket.io client and connect for real-time updates
+    try {
+      const socketScript = document.createElement('script');
+      socketScript.src = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
+      socketScript.onload = () => connectSocket();
+      document.head.appendChild(socketScript);
+    } catch (e) {
+      // Socket.io client failed to load, polling will continue.
+    }
   }
 
   if (document.readyState === 'loading') {

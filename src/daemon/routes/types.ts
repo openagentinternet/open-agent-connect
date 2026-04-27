@@ -64,6 +64,9 @@ export interface MetabotDaemonHttpHandlers {
       enabled: boolean;
       defaultStrategyId?: string;
     }) => Awaitable<MetabotCommandResult<unknown>>;
+    stopConversation?: (input: {
+      peer: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   file?: {
     upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

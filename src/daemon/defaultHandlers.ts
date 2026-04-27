@@ -6799,6 +6799,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
           defaultStrategyId: autoReplyConfig.defaultStrategyId,
         });
       },
+
+      stopConversation: async ({ peer }) => {
+        const normalizedPeer = normalizeText(peer);
+        if (!normalizedPeer) {
+          return commandFailed('missing_peer', 'Peer globalMetaId is required.');
+        }
+        const conversation = await privateChatStateStore.getConversationByPeer(normalizedPeer);
+        if (!conversation) {
+          return commandFailed('conversation_not_found', 'No conversation found for this peer.');
+        }
+        await privateChatStateStore.upsertConversation({
+          ...conversation,
+          state: 'closed',
+          updatedAt: Date.now(),
+        });
+        return commandSuccess({ conversationId: conversation.conversationId, state: 'closed' });
+      },
     },
     file: {
       upload: async (rawInput) => {

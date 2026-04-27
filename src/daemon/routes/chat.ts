@@ -144,6 +144,27 @@ export const handleChatRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  if (url.pathname === '/api/chat/private/stop') {
+    if (req.method !== 'POST') {
+      context.sendMethodNotAllowed(['POST']);
+      return true;
+    }
+    const handler = handlers.chat?.stopConversation;
+    if (!handler) {
+      context.sendJson(501, { ok: false, code: 'not_implemented', message: 'Stop conversation handler is not configured.' });
+      return true;
+    }
+    const body = await context.readJsonBody();
+    const peer = normalizeText(body.peer);
+    if (!peer) {
+      context.sendJson(400, { ok: false, code: 'missing_peer', message: 'peer is required.' });
+      return true;
+    }
+    const result = await handler({ peer });
+    context.sendJson(200, result);
+    return true;
+  }
+
   if (url.pathname !== '/api/chat/private') {
     return false;
   }

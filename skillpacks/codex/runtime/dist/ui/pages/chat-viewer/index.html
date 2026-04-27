@@ -16,6 +16,7 @@
         --accent: #0f766e;
         --accent-strong: #0b5e59;
         --danger: #b42318;
+        --danger-hover: #a01c15;
         --warning: #b45309;
       }
 
@@ -91,7 +92,7 @@
         min-width: min(360px, calc(100vw - 32px));
       }
 
-      .peer-control span {
+      .peer-control > span:first-child {
         color: var(--muted);
         font-size: 0.78rem;
         font-weight: 700;
@@ -133,6 +134,19 @@
         background: var(--accent-strong);
       }
 
+      button[data-chat-stop] {
+        background: var(--danger);
+      }
+
+      button[data-chat-stop]:hover {
+        background: var(--danger-hover);
+      }
+
+      button[data-chat-stop]:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
       .viewer-main {
         max-width: 1180px;
         width: 100%;
@@ -172,6 +186,28 @@
         margin-top: 5px;
         overflow-wrap: anywhere;
         font-size: 0.92rem;
+      }
+
+      .peer-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 5px;
+      }
+
+      .peer-avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        object-fit: cover;
+        flex-shrink: 0;
+        background: var(--surface-soft);
+      }
+
+      .peer-name {
+        font-weight: 700;
+        font-size: 0.92rem;
+        overflow-wrap: anywhere;
       }
 
       [data-chat-status][data-tone="ready"] {
@@ -267,6 +303,7 @@
               <span class="peer-row">
                 <input data-chat-peer-input type="text" autocomplete="off" spellcheck="false" placeholder="gm-target" />
                 <button data-chat-refresh type="button">Refresh</button>
+                <button data-chat-stop type="button">End Chat</button>
               </span>
             </label>
           </div>
@@ -281,7 +318,9 @@
           </div>
           <div class="meta-item">
             <span>Peer MetaBot</span>
-            <strong data-chat-peer>No peer selected</strong>
+            <div data-chat-peer-container>
+              <strong data-chat-peer>No peer selected</strong>
+            </div>
           </div>
           <div class="meta-item">
             <span>Messages</span>
