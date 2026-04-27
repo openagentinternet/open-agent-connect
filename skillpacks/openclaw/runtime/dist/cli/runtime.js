@@ -1599,7 +1599,7 @@ async function serveCliDaemonProcess(context) {
     }
     const chatStateStore = (0, privateChatStateStore_1.createPrivateChatStateStore)(paths);
     const chatStrategyStore = (0, chatStrategyStore_1.createChatStrategyStore)(paths);
-    const resolvePeerChatPublicKeyForChat = fetchPeerChatPublicKey ?? (async (_id) => null);
+    const resolvePeerChatPublicKeyForChat = fetchPeerChatPublicKey ?? defaultHandlers_1.fetchPeerChatPublicKey;
     const chatAutoReplyOrchestrator = (0, privateChatAutoReply_1.createPrivateChatAutoReplyOrchestrator)({
         stateStore: chatStateStore,
         strategyStore: chatStrategyStore,

@@ -10,6 +10,7 @@ import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import { type MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
+export declare function fetchPeerChatPublicKey(globalMetaId: string): Promise<string | null>;
 export declare function rebuildTraceArtifactsFromSessionState(input: {
     baseTrace: SessionTraceRecord;
     runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;

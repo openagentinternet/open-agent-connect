@@ -1605,7 +1605,7 @@ async function buildTraceInspectorPayload(input: {
   };
 }
 
-async function fetchPeerChatPublicKey(globalMetaId: string): Promise<string | null> {
+export async function fetchPeerChatPublicKey(globalMetaId: string): Promise<string | null> {
   const normalized = normalizeText(globalMetaId);
   if (!normalized) return null;
 

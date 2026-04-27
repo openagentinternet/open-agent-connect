@@ -43,7 +43,7 @@ import { createLocalMnemonicSigner } from '../core/signing/localMnemonicSigner';
 import { normalizeChainWriteRequest } from '../core/chain/writePin';
 import type { Signer } from '../core/signing/signer';
 import { createMetabotDaemon } from '../daemon';
-import { createDefaultMetabotDaemonHandlers } from '../daemon/defaultHandlers';
+import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain } from '../daemon/defaultHandlers';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { createSocketIoMetaWebMasterReplyWaiter, type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
@@ -1976,7 +1976,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
 
   const chatStateStore = createPrivateChatStateStore(paths);
   const chatStrategyStore = createChatStrategyStore(paths);
-  const resolvePeerChatPublicKeyForChat = fetchPeerChatPublicKey ?? (async (_id: string) => null as string | null);
+  const resolvePeerChatPublicKeyForChat = fetchPeerChatPublicKey ?? fetchPeerChatPublicKeyFromChain;
   const chatAutoReplyOrchestrator = createPrivateChatAutoReplyOrchestrator({
     stateStore: chatStateStore,
     strategyStore: chatStrategyStore,
