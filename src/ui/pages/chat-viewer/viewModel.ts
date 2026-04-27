@@ -1,7 +1,6 @@
 export function buildChatViewerScript(): string {
   return `
 (() => {
-  const POLL_INTERVAL_MS = 4000;
   const SOCKET_ENDPOINTS = [
     { url: 'wss://api.idchat.io', path: '/socket/socket.io' },
     { url: 'wss://www.show.now', path: '/socket/socket.io' },
@@ -12,18 +11,19 @@ export function buildChatViewerScript(): string {
     self: '',
     messages: [],
     nextPollAfterIndex: undefined,
-    pollTimer: null,
     inFlight: false,
     peerName: '',
     peerAvatar: '',
     conversationStopped: false,
-    sockets: [],
+    socket: null,
+    socketConnected: false,
+    socketEndpointIndex: 0,
+    initialLoadDone: false,
   };
 
   const list = document.querySelector('[data-chat-message-list]');
   const peerInput = document.querySelector('[data-chat-peer-input]');
   const selfLabel = document.querySelector('[data-chat-self]');
-  const peerLabel = document.querySelector('[data-chat-peer]');
   const peerContainer = document.querySelector('[data-chat-peer-container]');
   const statusLabel = document.querySelector('[data-chat-status]');
   const countLabel = document.querySelector('[data-chat-count]');
@@ -40,19 +40,13 @@ export function buildChatViewerScript(): string {
 
   function setStatus(message, tone) {
     setText(statusLabel, message);
-    if (statusLabel) {
-      statusLabel.dataset.tone = tone || 'neutral';
-    }
+    if (statusLabel) statusLabel.dataset.tone = tone || 'neutral';
   }
 
   function setListState(patch) {
     if (!list) return;
-    if (Object.prototype.hasOwnProperty.call(patch, 'loading')) {
-      list.loading = !!patch.loading;
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, 'error')) {
-      list.error = String(patch.error || '');
-    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'loading')) list.loading = !!patch.loading;
+    if (Object.prototype.hasOwnProperty.call(patch, 'error')) list.error = String(patch.error || '');
   }
 
   function messageKey(message) {
@@ -61,14 +55,7 @@ export function buildChatViewerScript(): string {
     if (pinId) return 'pin:' + pinId;
     const txId = normalizeText(row.txId);
     if (txId) return 'tx:' + txId;
-    return [
-      'fallback',
-      normalizeText(row.fromGlobalMetaId),
-      normalizeText(row.toGlobalMetaId),
-      String(row.index || ''),
-      String(row.timestamp || ''),
-      normalizeText(row.protocol),
-    ].join('|');
+    return ['fallback', normalizeText(row.fromGlobalMetaId), normalizeText(row.toGlobalMetaId), String(row.index || ''), String(row.timestamp || ''), normalizeText(row.protocol)].join('|');
   }
 
   function sortMessages(messages) {
@@ -127,7 +114,7 @@ export function buildChatViewerScript(): string {
       html += '</div>';
       peerContainer.innerHTML = html;
     } else {
-      peerContainer.innerHTML = '<strong data-chat-peer>' + (state.peer || 'No peer selected').replace(/</g, '&lt;') + '</strong>';
+      peerContainer.innerHTML = '<strong>' + (state.peer || 'No peer selected').replace(/</g, '&lt;') + '</strong>';
     }
   }
 
@@ -140,25 +127,21 @@ export function buildChatViewerScript(): string {
         const info = msg.fromUserInfo;
         const name = normalizeText(info.name) || normalizeText(info.nickname);
         const avatar = normalizeText(info.avatarImage) || normalizeText(info.avatarUrl) || normalizeText(info.avatar) || normalizeText(info.avatarUri);
-        if (name && !state.peerName) {
-          state.peerName = name;
-        }
-        if (avatar && !state.peerAvatar) {
-          state.peerAvatar = avatar;
-        }
+        if (name && !state.peerName) state.peerName = name;
+        if (avatar && !state.peerAvatar) state.peerAvatar = avatar;
         if (state.peerName) break;
       }
     }
   }
 
-  function scrollToBottom() {
-    if (!list || !list.shadowRoot) return;
-    const container = list.shadowRoot.querySelector('[data-scroll-container]') || list.shadowRoot.querySelector('.messages-container');
-    if (container) {
-      requestAnimationFrame(() => {
-        container.scrollTop = container.scrollHeight;
-      });
+  function forceScrollToBottom() {
+    if (!list) return;
+    if (typeof list._scrollToBottom === 'function') {
+      list._scrollToBottom();
+      return;
     }
+    // Fallback: dispatch the chat updated event to trigger the component's scroll logic
+    document.dispatchEvent(new CustomEvent('id:chat:updated'));
   }
 
   async function loadConversation(options) {
@@ -167,7 +150,7 @@ export function buildChatViewerScript(): string {
     const peer = normalizeText(peerInput && peerInput.value ? peerInput.value : state.peer);
     if (!peer) {
       state.peer = '';
-      setText(peerLabel, 'No peer selected');
+      updatePeerDisplay();
       setText(selfLabel, 'Waiting for local identity');
       setText(countLabel, '0 messages');
       setStatus('Add a peer globalMetaId to view a private conversation.', 'warning');
@@ -183,17 +166,16 @@ export function buildChatViewerScript(): string {
       if (list) list.messages = [];
     }
 
-    const query = new URLSearchParams({
-      peer,
-      limit: incremental ? '200' : '50',
-    });
+    const query = new URLSearchParams({ peer, limit: incremental ? '200' : '50' });
     if (incremental && Number.isFinite(Number(state.nextPollAfterIndex))) {
       query.set('afterIndex', String(state.nextPollAfterIndex));
     }
 
     state.inFlight = true;
-    setListState({ loading: !incremental, error: '' });
-    if (!incremental) setStatus('Loading conversation...', 'loading');
+    if (!incremental) {
+      setListState({ loading: true, error: '' });
+      setStatus('Loading conversation...', 'loading');
+    }
 
     try {
       const response = await fetch('/api/chat/private/conversation?' + query.toString(), {
@@ -226,12 +208,21 @@ export function buildChatViewerScript(): string {
       setText(selfLabel, state.self || 'Local MetaBot');
       updatePeerDisplay();
       setText(countLabel, state.messages.length === 1 ? '1 message' : state.messages.length + ' messages');
-      const statusText = state.conversationStopped ? 'Conversation ended.' : 'Connected (real-time + polling).';
-      const statusTone = state.conversationStopped ? 'warning' : 'ready';
-      setStatus(statusText, statusTone);
 
-      if (state.messages.length > prevCount) {
-        scrollToBottom();
+      const statusText = state.conversationStopped
+        ? 'Conversation ended.'
+        : (state.socketConnected ? 'Connected (real-time).' : 'Connected.');
+      setStatus(statusText, state.conversationStopped ? 'warning' : 'ready');
+
+      // Scroll to bottom on initial load or when new messages arrive
+      if (!incremental || state.messages.length > prevCount) {
+        requestAnimationFrame(() => forceScrollToBottom());
+      }
+
+      // Connect socket after first successful load (we need state.self)
+      if (!state.initialLoadDone && state.self) {
+        state.initialLoadDone = true;
+        connectSocket();
       }
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
@@ -242,59 +233,65 @@ export function buildChatViewerScript(): string {
     }
   }
 
-  function schedulePolling() {
-    if (state.pollTimer) {
-      clearInterval(state.pollTimer);
-    }
-    state.pollTimer = setInterval(() => {
-      if (!state.peer) return;
-      loadConversation({ incremental: true });
-    }, POLL_INTERVAL_MS);
-  }
-
-  // Socket.io real-time listener
+  // Socket.io: single endpoint, fallback to secondary
   function connectSocket() {
     if (!state.self) return;
-    disconnectSockets();
+    disconnectSocket();
 
-    for (const endpoint of SOCKET_ENDPOINTS) {
-      try {
-        const socket = io(endpoint.url, {
-          path: endpoint.path,
-          query: { metaid: state.self, type: 'pc' },
-          reconnection: true,
-          reconnectionDelay: 5000,
-          reconnectionDelayMax: 30000,
-          transports: ['websocket'],
-        });
+    const endpoint = SOCKET_ENDPOINTS[state.socketEndpointIndex] || SOCKET_ENDPOINTS[0];
+    try {
+      const socket = io(endpoint.url, {
+        path: endpoint.path,
+        query: { metaid: state.self, type: 'pc' },
+        reconnection: true,
+        reconnectionDelay: 3000,
+        reconnectionDelayMax: 15000,
+        transports: ['websocket'],
+      });
 
-        const handleData = (data) => {
-          if (!state.peer) return;
-          loadConversation({ incremental: true });
-        };
+      socket.on('connect', () => {
+        state.socketConnected = true;
+        setStatus('Connected (real-time).', 'ready');
+      });
 
-        socket.on('message', handleData);
-        socket.on('WS_SERVER_NOTIFY_PRIVATE_CHAT', handleData);
-        state.sockets.push(socket);
-      } catch (e) {
-        // Socket connection failed, polling will continue.
-      }
+      socket.on('disconnect', () => {
+        state.socketConnected = false;
+        setStatus('Reconnecting...', 'warning');
+      });
+
+      socket.on('connect_error', () => {
+        // Try fallback endpoint
+        if (state.socketEndpointIndex === 0 && SOCKET_ENDPOINTS.length > 1) {
+          state.socketEndpointIndex = 1;
+          disconnectSocket();
+          setTimeout(() => connectSocket(), 1000);
+        }
+      });
+
+      const onNewMessage = () => {
+        if (!state.peer || state.inFlight) return;
+        loadConversation({ incremental: true });
+      };
+
+      socket.on('message', onNewMessage);
+      socket.on('WS_SERVER_NOTIFY_PRIVATE_CHAT', onNewMessage);
+      state.socket = socket;
+    } catch (e) {
+      // Socket failed, user can manually refresh
     }
   }
 
-  function disconnectSockets() {
-    for (const socket of state.sockets) {
+  function disconnectSocket() {
+    if (state.socket) {
       try {
-        socket.removeAllListeners();
-        socket.disconnect();
-      } catch (e) {
-        // Best effort.
-      }
+        state.socket.removeAllListeners();
+        state.socket.disconnect();
+      } catch (e) {}
+      state.socket = null;
+      state.socketConnected = false;
     }
-    state.sockets = [];
   }
 
-  // Stop conversation handler
   async function stopConversation() {
     if (!state.peer) return;
     if (stopButton) stopButton.disabled = true;
@@ -340,12 +337,8 @@ export function buildChatViewerScript(): string {
         }
       });
     }
-    if (refreshButton) {
-      refreshButton.addEventListener('click', () => loadConversation({ incremental: false }));
-    }
-    if (stopButton) {
-      stopButton.addEventListener('click', stopConversation);
-    }
+    if (refreshButton) refreshButton.addEventListener('click', () => loadConversation({ incremental: false }));
+    if (stopButton) stopButton.addEventListener('click', stopConversation);
 
     try {
       await import('/ui/chat/idframework/components/id-chat-msg-list.js');
@@ -355,17 +348,19 @@ export function buildChatViewerScript(): string {
       return;
     }
 
+    // Initial load via API
     await loadConversation({ incremental: false });
-    schedulePolling();
 
-    // Load socket.io client and connect for real-time updates
+    // Load socket.io client from CDN, then connect
     try {
-      const socketScript = document.createElement('script');
-      socketScript.src = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
-      socketScript.onload = () => connectSocket();
-      document.head.appendChild(socketScript);
+      const script = document.createElement('script');
+      script.src = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
+      script.onload = () => {
+        if (state.self) connectSocket();
+      };
+      document.head.appendChild(script);
     } catch (e) {
-      // Socket.io client failed to load, polling will continue.
+      // Socket.io unavailable, user can refresh manually
     }
   }
 
