@@ -136,12 +136,17 @@ export function buildChatViewerScript(): string {
 
   function forceScrollToBottom() {
     if (!list) return;
-    if (typeof list._scrollToBottom === 'function') {
-      list._scrollToBottom();
-      return;
-    }
-    // Fallback: dispatch the chat updated event to trigger the component's scroll logic
-    document.dispatchEvent(new CustomEvent('id:chat:updated'));
+    // Set the component's internal pending-force flag so that the NEXT
+    // _postRenderScrollAdjust cycle scrolls to bottom unconditionally.
+    // This mirrors the conversation-switch path inside the component.
+    const convId = state.peer ? 'private:' + state.self + ':' + state.peer : '__force__';
+    list._pendingForceBottomConversation = convId;
+    // Also schedule a delayed direct scroll as a safety net after render completes.
+    setTimeout(() => {
+      if (typeof list._scrollToBottom === 'function') {
+        list._scrollToBottom();
+      }
+    }, 150);
   }
 
   async function loadConversation(options) {
