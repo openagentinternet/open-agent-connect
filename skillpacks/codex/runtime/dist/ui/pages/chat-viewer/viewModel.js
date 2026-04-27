@@ -139,12 +139,23 @@ function buildChatViewerScript() {
 
   function forceScrollToBottom() {
     if (!list) return;
-    // The component's _postRenderScrollAdjust checks _pendingForceBottomConversation
-    // against snapshot.currentConversation (which equals the peer-global-metaid attribute).
-    // Setting this flag makes the component scroll to bottom on next render cycle.
+    // Set the component's internal force-bottom flag before render.
     if (state.peer) {
       list._pendingForceBottomConversation = state.peer;
     }
+    // Also schedule direct DOM scrolls at multiple delays as safety net,
+    // because the component re-creates its shadow DOM innerHTML on every
+    // render and the browser may not have laid out content by the first rAF.
+    const doScroll = () => {
+      if (!list || !list.shadowRoot) return;
+      const c = list.shadowRoot.querySelector('.messages-container');
+      if (c && c.scrollHeight > c.clientHeight) {
+        c.scrollTop = c.scrollHeight;
+      }
+    };
+    setTimeout(doScroll, 50);
+    setTimeout(doScroll, 200);
+    setTimeout(doScroll, 500);
   }
 
   async function loadConversation(options) {
