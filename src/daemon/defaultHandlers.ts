@@ -2573,50 +2573,6 @@ async function applyMasterCallerReplyResult(input: {
   };
 }
 
-async function applyMasterCallerForegroundTimeout(input: {
-  trace: SessionTraceRecord;
-  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
-  pendingAsk: PendingMasterAskRecord;
-  requestPath: string;
-  messagePinId: string | null;
-}): Promise<{
-  trace: SessionTraceRecord;
-  artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>>;
-  session: {
-    state: 'timeout';
-    publicStatus: 'timeout';
-    event: 'timeout';
-  };
-}> {
-  const trace = buildMasterCallerTraceAfterReply({
-    baseTrace: input.trace,
-    pendingAsk: input.pendingAsk,
-    latestEvent: 'timeout',
-    publicStatus: 'timeout',
-    taskRunState: 'timeout',
-  });
-  const artifacts = await exportAndPersistMasterCallerTrace({
-    trace,
-    runtimeStateStore: input.runtimeStateStore,
-    pendingAsk: input.pendingAsk,
-    requestPath: input.requestPath,
-    messagePinId: input.messagePinId,
-    outcome: {
-      type: 'timeout',
-      timestamp: Date.now(),
-    },
-  });
-
-  return {
-    trace,
-    artifacts,
-    session: {
-      state: 'timeout',
-      publicStatus: 'timeout',
-      event: 'timeout',
-    },
-  };
-}
 
 async function loadMasterContinuationTrace(input: {
   traceId: string;
@@ -2861,56 +2817,6 @@ async function applyCallerReplyResult(input: {
   };
 }
 
-async function applyCallerForegroundTimeout(input: {
-  session: A2ASessionRecord;
-  taskRun: A2ATaskRunRecord;
-  sessionEngine: ReturnType<typeof createA2ASessionEngine>;
-  sessionStateStore: ReturnType<typeof createSessionStateStore>;
-  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
-  trace: SessionTraceRecord;
-}): Promise<{
-  trace: SessionTraceRecord;
-  artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>>;
-  mutation: {
-    session: A2ASessionRecord;
-    taskRun: A2ATaskRunRecord;
-    event: A2ASessionEngineEvent;
-    runnerResult: ProviderServiceRunnerResult | null;
-  };
-}> {
-  const mutation = input.sessionEngine.markForegroundTimeout({
-    session: input.session,
-    taskRun: input.taskRun,
-  });
-  const publicStatus = await persistSessionMutation(input.sessionStateStore, mutation);
-  await appendA2ATranscriptItems(input.sessionStateStore, [
-    {
-      id: `${input.trace.traceId}-caller-timeout`,
-      sessionId: input.session.sessionId,
-      taskRunId: mutation.taskRun.runId,
-      timestamp: mutation.session.updatedAt,
-      type: 'status_note',
-      sender: 'system',
-      content: 'Foreground wait ended before the remote MetaBot returned. The task may still continue remotely.',
-      metadata: {
-        publicStatus: publicStatus.status,
-        event: mutation.event,
-      },
-    },
-  ]);
-
-  const rebuilt = await rebuildTraceArtifactsFromSessionState({
-    baseTrace: input.trace,
-    runtimeStateStore: input.runtimeStateStore,
-    sessionStateStore: input.sessionStateStore,
-  });
-
-  return {
-    trace: rebuilt.trace,
-    artifacts: rebuilt.artifacts,
-    mutation,
-  };
-}
 
 export function createDefaultMetabotDaemonHandlers(input: {
   homeDir: string;
