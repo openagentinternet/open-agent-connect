@@ -89,7 +89,7 @@ There is no separate lint command — the project relies on TypeScript strict mo
 - All docs, SKILL documents, and code comments must be in English.
 - Do not introduce code depending on the legacy `.metabot/hot` layout.
 - Storage layout changes must follow `docs/superpowers/specs/2026-04-23-metabot-storage-layout-v2-design.md`.
-- When spawning review or test subagents, default to model `gpt-5.4` (not `gpt-5.1-codex-mini` unless user requests it).
+
 
 ## Key Design Docs
 
