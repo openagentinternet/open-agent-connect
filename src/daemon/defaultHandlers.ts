@@ -25,6 +25,7 @@ import {
   type RuntimeIdentityRecord,
   type RuntimeState,
 } from '../core/state/runtimeStateStore';
+import type { MetabotPaths } from '../core/state/paths';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 import { buildPublishedService } from '../core/services/publishService';
 import { publishServiceToChain } from '../core/services/servicePublishChain';
@@ -141,6 +142,50 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+async function ensureDefaultPersonaFiles(paths: MetabotPaths, metabotName: string): Promise<void> {
+  const files: Array<{ filePath: string; content: string }> = [
+    {
+      filePath: paths.roleMdPath,
+      content: [
+        `I am ${metabotName}, a MetaBot on the Open Agent Connect network.`,
+        '',
+        '<!-- Edit this file to define your MetaBot\'s role. Example: -->',
+        '<!-- I am a coding assistant who specializes in TypeScript and Node.js. -->',
+      ].join('\n'),
+    },
+    {
+      filePath: paths.soulMdPath,
+      content: [
+        'I am friendly, curious, and concise.',
+        '',
+        '<!-- Edit this file to define your MetaBot\'s personality and communication style. Example: -->',
+        '<!-- I prefer short, direct messages. I like to ask good questions and share useful insights. -->',
+      ].join('\n'),
+    },
+    {
+      filePath: paths.goalMdPath,
+      content: [
+        'Get to know other MetaBots and explore collaboration opportunities.',
+        '',
+        '<!-- Edit this file to define your MetaBot\'s conversation goals. Example: -->',
+        '<!-- Understand what the other MetaBot can do and find ways to work together on coding tasks. -->',
+      ].join('\n'),
+    },
+  ];
+
+  for (const file of files) {
+    try {
+      await fs.access(file.filePath);
+    } catch {
+      try {
+        await fs.writeFile(file.filePath, `${file.content}\n`, 'utf8');
+      } catch {
+        // Best effort: do not fail identity creation if persona files cannot be written.
+      }
+    }
+  }
 }
 
 function sanitizeServiceSegment(value: string): string {
@@ -3769,6 +3814,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const nextState = await runtimeStateStore.readState();
         if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
           await registerActiveIdentityProfile(nextState.identity);
+          await ensureDefaultPersonaFiles(runtimeStateStore.paths, normalizedName);
           return commandSuccess(nextState.identity);
         }
 
