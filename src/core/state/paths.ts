@@ -37,6 +37,11 @@ export interface MetabotPaths {
   masterAutoFeedbackStatePath: string;
   masterPublishedStatePath: string;
   directorySeedsPath: string;
+  privateChatStatePath: string;
+  chatStrategiesPath: string;
+  soulMdPath: string;
+  goalMdPath: string;
+  roleMdPath: string;
   daemonLockPath: string;
 
   // Temporary compatibility aliases for untouched later-task modules.
@@ -104,6 +109,11 @@ function buildMetabotPaths(input: {
   masterAutoFeedbackStatePath: string;
   masterPublishedStatePath: string;
   directorySeedsPath: string;
+  privateChatStatePath: string;
+  chatStrategiesPath: string;
+  soulMdPath: string;
+  goalMdPath: string;
+  roleMdPath: string;
   daemonLockPath: string;
 }): MetabotPaths {
   const evolutionRoot = path.join(input.runtimeRoot, 'evolution');
@@ -152,6 +162,11 @@ function buildMetabotPaths(input: {
     masterAutoFeedbackStatePath: input.masterAutoFeedbackStatePath,
     masterPublishedStatePath: input.masterPublishedStatePath,
     directorySeedsPath: input.directorySeedsPath,
+    privateChatStatePath: input.privateChatStatePath,
+    chatStrategiesPath: input.chatStrategiesPath,
+    soulMdPath: input.soulMdPath,
+    goalMdPath: input.goalMdPath,
+    roleMdPath: input.roleMdPath,
     daemonLockPath: input.daemonLockPath,
 
     // Temporary compatibility aliases for untouched later-task modules.
@@ -199,6 +214,11 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     masterAutoFeedbackStatePath: path.join(stateRoot, 'master-auto-feedback-state.json'),
     masterPublishedStatePath: path.join(stateRoot, 'master-service-state.json'),
     directorySeedsPath: path.join(stateRoot, 'directory-seeds.json'),
+    privateChatStatePath: path.join(stateRoot, 'private-chat-state.json'),
+    chatStrategiesPath: path.join(stateRoot, 'chat-strategies.json'),
+    soulMdPath: path.join(profileRoot, 'SOUL.md'),
+    goalMdPath: path.join(profileRoot, 'GOAL.md'),
+    roleMdPath: path.join(profileRoot, 'ROLE.md'),
     daemonLockPath: path.join(locksRoot, 'daemon.lock'),
   });
 }

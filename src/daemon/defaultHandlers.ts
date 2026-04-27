@@ -53,6 +53,8 @@ import { readChainDirectoryWithFallback } from '../core/discovery/chainDirectory
 import { HEARTBEAT_ONLINE_WINDOW_SEC } from '../core/discovery/chainHeartbeatDirectory';
 import { readOnlineMetaBotsFromSocketPresence } from '../core/discovery/socketPresenceDirectory';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
+import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
+import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/sessionEngine';
 import { resolvePublicStatus } from '../core/a2a/publicStatus';
 import { createServiceRunnerRegistry } from '../core/a2a/provider/serviceRunnerRegistry';
@@ -2884,6 +2886,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   requestMvcGasSubsidy?: (
     options: RequestMvcGasSubsidyOptions
   ) => Promise<RequestMvcGasSubsidyResult>;
+  autoReplyConfig?: PrivateChatAutoReplyConfig;
 }): MetabotDaemonHttpHandlers {
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   const signer = input.signer ?? createLocalMnemonicSigner({ secretStore });
@@ -2896,6 +2899,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const providerPresenceStore = createProviderPresenceStateStore(input.homeDir);
   const ratingDetailStateStore = createRatingDetailStateStore(input.homeDir);
   const sessionStateStore = createSessionStateStore(input.homeDir);
+  const privateChatStateStore = createPrivateChatStateStore(input.homeDir);
+  const autoReplyConfig: PrivateChatAutoReplyConfig = input.autoReplyConfig ?? {
+    enabled: false,
+    acceptPolicy: 'accept_all',
+    defaultStrategyId: null,
+  };
   const sessionEngine = createA2ASessionEngine();
   const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey ?? fetchPeerChatPublicKey;
   const callerReplyWaiter = input.callerReplyWaiter ?? createSocketIoMetaWebReplyWaiter();
@@ -6708,6 +6717,40 @@ export function createDefaultMetabotDaemonHandlers(input: {
           transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
           traceMarkdownPath: artifacts.traceMarkdownPath,
           traceJsonPath: artifacts.traceJsonPath,
+        });
+      },
+
+      privateChatConversations: async () => {
+        const state = await privateChatStateStore.readState();
+        return commandSuccess({ conversations: state.conversations });
+      },
+
+      privateChatMessages: async (msgInput) => {
+        const messages = await privateChatStateStore.getRecentMessages(
+          normalizeText(msgInput.conversationId),
+          typeof msgInput.limit === 'number' && Number.isFinite(msgInput.limit)
+            ? Math.max(1, Math.trunc(msgInput.limit))
+            : 50,
+        );
+        return commandSuccess({ messages });
+      },
+
+      autoReplyStatus: async () => {
+        return commandSuccess({
+          enabled: autoReplyConfig.enabled,
+          acceptPolicy: autoReplyConfig.acceptPolicy,
+          defaultStrategyId: autoReplyConfig.defaultStrategyId,
+        });
+      },
+
+      setAutoReply: async (autoReplyInput) => {
+        autoReplyConfig.enabled = autoReplyInput.enabled === true;
+        if (autoReplyInput.defaultStrategyId !== undefined) {
+          autoReplyConfig.defaultStrategyId = normalizeText(autoReplyInput.defaultStrategyId) || null;
+        }
+        return commandSuccess({
+          enabled: autoReplyConfig.enabled,
+          defaultStrategyId: autoReplyConfig.defaultStrategyId,
         });
       },
     },

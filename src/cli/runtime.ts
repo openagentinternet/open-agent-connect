@@ -48,6 +48,11 @@ import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '..
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { createSocketIoMetaWebMasterReplyWaiter, type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
 import { parseMasterResponse } from '../core/master/masterMessageSchema';
+import { createPrivateChatListener } from '../core/chat/privateChatListener';
+import { createPrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
+import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
+import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
+import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
 import type { CliDependencies, CliRuntimeContext } from './types';
 
 const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
@@ -1459,6 +1464,14 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     },
     chat: {
       private: async (input) => requestJson(context, 'POST', '/api/chat/private', input),
+      conversations: async () => requestJson(context, 'GET', '/api/chat/private/conversations'),
+      messages: async (input) => {
+        const params = new URLSearchParams({ conversationId: input.conversationId });
+        if (input.limit != null) params.set('limit', String(input.limit));
+        return requestJson(context, 'GET', `/api/chat/private/messages?${params.toString()}`);
+      },
+      autoReplyStatus: async () => requestJson(context, 'GET', '/api/chat/auto-reply/status'),
+      setAutoReply: async (input) => requestJson(context, 'POST', '/api/chat/auto-reply/config', input),
     },
     file: {
       upload: async (input) => requestJson(context, 'POST', '/api/file/upload', input),
@@ -1887,6 +1900,12 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const socketPresenceApiBaseUrl = context.env.METABOT_SOCKET_PRESENCE_API_BASE_URL
     || (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 'http://127.0.0.1:9' : undefined);
 
+  const sharedAutoReplyConfig = {
+    enabled: false,
+    acceptPolicy: 'accept_all' as const,
+    defaultStrategyId: null as string | null,
+  };
+
   const daemon = createMetabotDaemon({
     homeDirOrPaths: paths,
     handlers: createDefaultMetabotDaemonHandlers({
@@ -1905,6 +1924,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       callerReplyWaiter,
       masterReplyWaiter,
       requestMvcGasSubsidy,
+      autoReplyConfig: sharedAutoReplyConfig,
     }),
   });
 
@@ -1954,10 +1974,49 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     await providerHeartbeatLoop.start();
   }
 
+  const chatStateStore = createPrivateChatStateStore(paths);
+  const chatStrategyStore = createChatStrategyStore(paths);
+  const resolvePeerChatPublicKeyForChat = fetchPeerChatPublicKey ?? (async (_id: string) => null as string | null);
+  const chatAutoReplyOrchestrator = createPrivateChatAutoReplyOrchestrator({
+    stateStore: chatStateStore,
+    strategyStore: chatStrategyStore,
+    paths,
+    signer,
+    selfGlobalMetaId: async () => {
+      const state = await runtimeStore.readState();
+      return state.identity?.globalMetaId ?? null;
+    },
+    resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+    replyRunner: createHostLlmChatReplyRunner(),
+  }, sharedAutoReplyConfig);
+
+  const privateChatListener = createPrivateChatListener({
+    getIdentity: async () => {
+      const state = await runtimeStore.readState();
+      if (!state.identity) return null;
+      try {
+        const chatIdentity = await signer.getPrivateChatIdentity();
+        return {
+          globalMetaId: chatIdentity.globalMetaId,
+          privateKeyHex: chatIdentity.privateKeyHex,
+          chatPublicKey: chatIdentity.chatPublicKey,
+        };
+      } catch {
+        return null;
+      }
+    },
+    callbacks: {
+      onMessage: (message) => { void chatAutoReplyOrchestrator.handleInboundMessage(message); },
+    },
+    resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+  });
+  privateChatListener.start();
+
   let shuttingDown = false;
   const shutdown = async (exitCode: number) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    privateChatListener.stop();
     providerHeartbeatLoop.stop();
     await runtimeStore.clearDaemon(process.pid);
     await daemon.close();
