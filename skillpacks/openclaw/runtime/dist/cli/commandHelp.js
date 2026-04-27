@@ -132,7 +132,7 @@ exports.ROOT_COMMAND_HELP = {
         { name: 'identity', summary: 'Create the local MetaBot identity and bootstrap chain state.' },
         { name: 'config', summary: 'Read or change supported public runtime switches.' },
         { name: 'doctor', summary: 'Check daemon health, identity state, and local runtime readiness.' },
-        { name: 'daemon', summary: 'Start the local MetaBot daemon process.' },
+        { name: 'daemon', summary: 'Start or stop the local MetaBot daemon process.' },
         { name: 'file', summary: 'Upload local files to MetaWeb.' },
         { name: 'buzz', summary: 'Publish simplebuzz posts to MetaWeb.' },
         { name: 'chain', summary: 'Write arbitrary MetaID tuples and protocol payloads on-chain.' },
@@ -393,6 +393,7 @@ const COMMAND_HELP_SPECS = [
         usage: 'metabot daemon <subcommand>',
         subcommands: [
             { name: 'start', summary: 'Start or reuse the local daemon process.' },
+            { name: 'stop', summary: 'Stop the currently running local daemon process.' },
         ],
         optionalFlags: [HELP_JSON_FLAG],
     },
@@ -407,6 +408,20 @@ const COMMAND_HELP_SPECS = [
         ],
         failureSemantics: [
             'Fails when the daemon cannot bind its local port or initialize runtime dependencies.',
+        ],
+        optionalFlags: [HELP_JSON_FLAG],
+    },
+    {
+        commandPath: ['daemon', 'stop'],
+        summary: 'Stop the currently running local MetaBot daemon process.',
+        usage: 'metabot daemon stop',
+        successFields: [
+            'pid',
+            'stopped',
+        ],
+        failureSemantics: [
+            'Fails with daemon_not_running when no daemon process is tracked.',
+            'Fails with daemon_stop_failed when the process cannot be signaled.',
         ],
         optionalFlags: [HELP_JSON_FLAG],
     },
@@ -864,6 +879,9 @@ const COMMAND_HELP_SPECS = [
         usage: 'metabot chat <subcommand>',
         subcommands: [
             { name: 'private', summary: 'Send one encrypted private MetaWeb message to another MetaBot.' },
+            { name: 'conversations', summary: 'List local private chat conversations.' },
+            { name: 'messages', summary: 'Show messages for one local conversation.' },
+            { name: 'auto-reply', summary: 'Manage auto-reply settings (status, enable, disable).' },
         ],
         optionalFlags: [HELP_JSON_FLAG],
     },

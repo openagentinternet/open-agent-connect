@@ -153,15 +153,54 @@
         margin: 0 auto;
         padding: 18px clamp(16px, 4vw, 42px) 28px;
         display: grid;
-        grid-template-rows: auto minmax(360px, 1fr);
+        grid-template-rows: auto auto minmax(360px, 1fr);
         gap: 14px;
         min-height: 0;
+      }
+
+      .meta-toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        border: 0;
+        background: none;
+        color: var(--muted);
+        font: inherit;
+        font-size: 0.78rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        cursor: pointer;
+        padding: 0 0 6px;
+        height: auto;
+        width: auto;
+      }
+
+      .meta-toggle:hover {
+        color: var(--text);
+        background: none;
+      }
+
+      .meta-toggle-arrow {
+        display: inline-block;
+        transition: transform 200ms ease;
+        font-size: 0.7rem;
+      }
+
+      .meta-toggle-arrow.collapsed {
+        transform: rotate(-90deg);
       }
 
       .conversation-meta {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 10px;
+        overflow: hidden;
+        transition: grid-template-rows 200ms ease, opacity 200ms ease;
+      }
+
+      .conversation-meta.collapsed {
+        display: none;
       }
 
       .meta-item {
@@ -312,7 +351,12 @@
       </header>
 
       <main class="viewer-main">
-        <section class="conversation-meta" aria-label="Conversation status">
+        <div>
+          <button class="meta-toggle" data-meta-toggle type="button">
+            <span class="meta-toggle-arrow" data-meta-arrow>&#9660;</span> Info
+          </button>
+        </div>
+        <section class="conversation-meta" data-meta-section aria-label="Conversation status">
           <div class="meta-item">
             <span>Local MetaBot</span>
             <strong data-chat-self>Waiting for local identity</strong>

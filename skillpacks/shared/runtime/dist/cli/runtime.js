@@ -994,6 +994,26 @@ function createDefaultCliDependencies(context) {
                     pid: daemonRecord?.pid ?? null,
                 });
             },
+            stop: async () => {
+                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const runtimeStore = (0, runtimeStateStore_1.createRuntimeStateStore)(homeDir);
+                const daemonRecord = await runtimeStore.readDaemon();
+                if (!daemonRecord || !daemonRecord.pid) {
+                    return (0, commandResult_1.commandFailed)('daemon_not_running', 'No local daemon process is currently tracked.');
+                }
+                const pid = daemonRecord.pid;
+                try {
+                    process.kill(pid, 'SIGTERM');
+                }
+                catch (error) {
+                    const code = error.code;
+                    if (code !== 'ESRCH') {
+                        return (0, commandResult_1.commandFailed)('daemon_stop_failed', `Failed to stop daemon process ${pid}: ${code || error}`);
+                    }
+                }
+                await runtimeStore.clearDaemon(pid);
+                return (0, commandResult_1.commandSuccess)({ pid, stopped: true });
+            },
         },
         doctor: {
             run: async () => requestJson(context, 'GET', '/api/doctor'),
