@@ -6,6 +6,7 @@ import {
   commandFailed,
   commandManualActionRequired,
   commandSuccess,
+  commandWaiting,
   type MetabotCommandResult,
 } from '../core/contracts/commandResult';
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
@@ -6056,62 +6057,55 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const peerChatPublicKey = plan.service.providerGlobalMetaId === state.identity.globalMetaId
             ? state.identity.chatPublicKey
             : await resolvePeerChatPublicKey(plan.service.providerGlobalMetaId) ?? '';
-          const reply = await callerReplyWaiter.awaitServiceReply({
-            callerGlobalMetaId: privateChatIdentity.globalMetaId,
-            callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
-            providerGlobalMetaId: plan.service.providerGlobalMetaId,
-            providerChatPublicKey: peerChatPublicKey,
-            servicePinId: plan.service.servicePinId,
-            paymentTxid,
-            timeoutMs: DEFAULT_CALLER_FOREGROUND_WAIT_MS,
+
+          // Schedule background continuation immediately (was previously only on timeout)
+          scheduleCallerReplyContinuation({
+            trace,
+            sessionId: started.session.sessionId,
+            waiterInput: {
+              callerGlobalMetaId: privateChatIdentity.globalMetaId,
+              callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+              providerGlobalMetaId: plan.service.providerGlobalMetaId,
+              providerChatPublicKey: peerChatPublicKey,
+              servicePinId: plan.service.servicePinId,
+              paymentTxid,
+              timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+            },
           });
-          if (reply.state === 'completed') {
-            const applied = await applyCallerReplyResult({
-              reply,
-              session: started.session,
-              taskRun: started.taskRun,
-              sessionEngine,
-              sessionStateStore,
-              runtimeStateStore,
-              trace,
-            });
-            responseTrace = applied.trace;
-            responseArtifacts = applied.artifacts;
-            responseSession = applied.mutation.session;
-            responseTaskRun = applied.mutation.taskRun;
-            responseEvent = applied.mutation.event;
-            responsePublicStatus = 'completed';
-            providerReplyText = reply.responseText;
-            deliveryPinId = reply.deliveryPinId;
-          } else if (reply.state === 'timeout') {
-            const timedOut = await applyCallerForegroundTimeout({
-              session: started.session,
-              taskRun: started.taskRun,
-              sessionEngine,
-              sessionStateStore,
-              runtimeStateStore,
-              trace,
-            });
-            responseTrace = timedOut.trace;
-            responseArtifacts = timedOut.artifacts;
-            responseSession = timedOut.mutation.session;
-            responseTaskRun = timedOut.mutation.taskRun;
-            responseEvent = timedOut.mutation.event;
-            responsePublicStatus = 'timeout';
-            scheduleCallerReplyContinuation({
-              trace: timedOut.trace,
-              sessionId: timedOut.mutation.session.sessionId,
-              waiterInput: {
-                callerGlobalMetaId: privateChatIdentity.globalMetaId,
-                callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+
+          // Return immediately — CLI will poll trace API for completion
+          const daemon = input.getDaemonRecord();
+          return commandWaiting(
+            'order_sent_awaiting_provider',
+            'Order sent to provider. Waiting for response...',
+            3000,
+            {
+              localUiUrl: buildDaemonLocalUiUrl(daemon, '/ui/trace', { traceId: trace.traceId }),
+              data: {
+                traceId: trace.traceId,
                 providerGlobalMetaId: plan.service.providerGlobalMetaId,
-                providerChatPublicKey: peerChatPublicKey,
-                servicePinId: plan.service.servicePinId,
+                serviceName: serviceDisplayName,
+                service: plan.service,
+                payment: plan.payment,
+                confirmation: plan.confirmation,
                 paymentTxid,
-                timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+                orderPinId,
+                session: {
+                  sessionId: started.session.sessionId,
+                  taskRunId: started.taskRun.runId,
+                  role: started.session.role,
+                  state: started.session.state,
+                  publicStatus: publicStatus.status,
+                  event: started.event,
+                  coworkSessionId: started.linkage.coworkSessionId,
+                  externalConversationId: started.linkage.externalConversationId,
+                },
+                traceJsonPath: artifacts.traceJsonPath,
+                traceMarkdownPath: artifacts.traceMarkdownPath,
+                transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
               },
-            });
-          }
+            },
+          );
         }
 
         return commandSuccess({
@@ -6138,6 +6132,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           traceJsonPath: responseArtifacts.traceJsonPath,
           traceMarkdownPath: responseArtifacts.traceMarkdownPath,
           transcriptMarkdownPath: responseArtifacts.transcriptMarkdownPath,
+          localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', { traceId: responseTrace.traceId }),
         });
       },
       rate: async (rawInput) => {
