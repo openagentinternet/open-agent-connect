@@ -2946,7 +2946,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const sessionStateStore = createSessionStateStore(input.homeDir);
   const privateChatStateStore = createPrivateChatStateStore(input.homeDir);
   const autoReplyConfig: PrivateChatAutoReplyConfig = input.autoReplyConfig ?? {
-    enabled: false,
+    enabled: true,
     acceptPolicy: 'accept_all',
     defaultStrategyId: null,
   };

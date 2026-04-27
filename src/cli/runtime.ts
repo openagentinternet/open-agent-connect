@@ -1901,7 +1901,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     || (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 'http://127.0.0.1:9' : undefined);
 
   const sharedAutoReplyConfig = {
-    enabled: false,
+    enabled: true,
     acceptPolicy: 'accept_all' as const,
     defaultStrategyId: null as string | null,
   };

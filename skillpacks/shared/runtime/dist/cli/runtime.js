@@ -1528,7 +1528,7 @@ async function serveCliDaemonProcess(context) {
     const socketPresenceApiBaseUrl = context.env.METABOT_SOCKET_PRESENCE_API_BASE_URL
         || (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 'http://127.0.0.1:9' : undefined);
     const sharedAutoReplyConfig = {
-        enabled: false,
+        enabled: true,
         acceptPolicy: 'accept_all',
         defaultStrategyId: null,
     };

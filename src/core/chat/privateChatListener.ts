@@ -172,7 +172,15 @@ export function createPrivateChatListener(input: {
     const fromGlobalMetaId = normalizeText(message.fromGlobalMetaId);
     if (!fromGlobalMetaId) return;
 
-    if (normalizeText(message.toGlobalMetaId) !== normalizeText(identity.globalMetaId)) {
+    // Filter out messages not addressed to us, but allow messages with no toGlobalMetaId
+    // (some socket push formats omit the recipient field).
+    const toGlobalMetaId = normalizeText(message.toGlobalMetaId);
+    if (toGlobalMetaId && toGlobalMetaId !== normalizeText(identity.globalMetaId)) {
+      return;
+    }
+
+    // Skip messages sent by ourselves (echo from our own outbound messages).
+    if (normalizeText(fromGlobalMetaId) === normalizeText(identity.globalMetaId)) {
       return;
     }
 
