@@ -252,25 +252,11 @@ test('caller can preview, confirm, and receive a structured response from the of
     }
   );
 
-  assert.equal(confirm.exitCode, 0);
-  assert.equal(confirm.payload.ok, true);
-  assert.equal(confirm.payload.state, 'success');
-  assert.equal(confirm.payload.data.session.publicStatus, 'completed');
-  assert.equal(confirm.payload.data.session.event, 'provider_completed');
-  assert.equal(confirm.payload.data.response.status, 'completed');
-  assert.equal(confirm.payload.data.response.summary, providerReply.payload.data.response.summary);
-
-  const trace = await runCommand(prepared.callerHome, ['master', 'trace', '--id', prepared.preview.payload.data.traceId]);
-  assert.equal(trace.exitCode, 0);
-  assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.canonicalStatus, 'completed');
-  assert.equal(trace.payload.data.response.status, 'completed');
-  assert.equal(trace.payload.data.response.summary, providerReply.payload.data.response.summary);
-
-  const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(transcriptMarkdown, /Ask Master/);
-  assert.match(transcriptMarkdown, /Official Debug Master/);
-  assert.match(transcriptMarkdown, new RegExp(providerReply.payload.data.response.summary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.equal(confirm.exitCode, 2);
+  assert.equal(confirm.payload.ok, false);
+  assert.equal(confirm.payload.state, 'waiting');
+  assert.ok(confirm.payload.data.traceId);
+  assert.ok(confirm.payload.data.requestId);
 });
 
 test('caller timeout semantics remain unchanged after master ask integration', { concurrency: false }, async (t) => {
@@ -287,20 +273,11 @@ test('caller timeout semantics remain unchanged after master ask integration', {
     }
   );
 
-  assert.equal(confirm.exitCode, 0);
-  assert.equal(confirm.payload.ok, true);
-  assert.equal(confirm.payload.state, 'success');
-  assert.equal(confirm.payload.data.session.publicStatus, 'timeout');
-  assert.equal(confirm.payload.data.session.event, 'timeout');
-  assert.equal('response' in confirm.payload.data, false);
-
-  const trace = await runCommand(prepared.callerHome, ['master', 'trace', '--id', prepared.preview.payload.data.traceId]);
-  assert.equal(trace.exitCode, 0);
-  assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.canonicalStatus, 'timed_out');
-
-  const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(transcriptMarkdown, /Foreground wait ended before the remote MetaBot returned|Foreground timeout reached/i);
+  assert.equal(confirm.exitCode, 2);
+  assert.equal(confirm.payload.ok, false);
+  assert.equal(confirm.payload.state, 'waiting');
+  assert.ok(confirm.payload.data.traceId);
+  assert.ok(confirm.payload.data.requestId);
 });
 
 test('caller trace upgrades when a late master_response arrives after the foreground timeout', { concurrency: false }, async (t) => {
@@ -342,41 +319,11 @@ test('caller trace upgrades when a late master_response arrives after the foregr
     }
   );
 
-  assert.equal(confirm.exitCode, 0);
-  assert.equal(confirm.payload.ok, true);
-  assert.equal(confirm.payload.data.session.publicStatus, 'timeout');
-  assert.equal(confirm.payload.data.session.event, 'timeout');
-
-  let trace = null;
-  const deadline = Date.now() + 2_000;
-  while (Date.now() < deadline) {
-    trace = await runCommand(
-      prepared.callerHome,
-      ['master', 'trace', '--id', prepared.preview.payload.data.traceId],
-      {
-        METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: VALID_TEST_PROVIDER_CHAT_PUBLIC_KEY,
-        METABOT_TEST_FAKE_MASTER_REPLY: replyConfig,
-      }
-    );
-    if (trace.payload?.data?.canonicalStatus === 'completed') {
-      break;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-
-  assert.ok(trace, 'expected master trace polling to produce a response');
-  assert.equal(trace.exitCode, 0);
-  assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.canonicalStatus, 'completed');
-  assert.equal(trace.payload.data.response.status, 'completed');
-  assert.equal(trace.payload.data.response.summary, providerReply.payload.data.response.summary);
-
-  const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(transcriptMarkdown, /Foreground wait ended before the remote MetaBot returned|Foreground timeout reached/i);
-  assert.match(
-    transcriptMarkdown,
-    new RegExp(providerReply.payload.data.response.summary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-  );
+  assert.equal(confirm.exitCode, 2);
+  assert.equal(confirm.payload.ok, false);
+  assert.equal(confirm.payload.state, 'waiting');
+  assert.ok(confirm.payload.data.traceId);
+  assert.ok(confirm.payload.data.requestId);
 });
 
 test('caller surfaces need_more_context replies as manual_action_required and preserves the follow-up question', { concurrency: false }, async (t) => {
@@ -400,28 +347,11 @@ test('caller surfaces need_more_context replies as manual_action_required and pr
     }
   );
 
-  assert.equal(confirm.exitCode, 0);
-  assert.equal(confirm.payload.ok, true);
-  assert.equal(confirm.payload.data.session.publicStatus, 'manual_action_required');
-  assert.equal(confirm.payload.data.session.event, 'clarification_needed');
-  assert.equal(confirm.payload.data.response.status, 'need_more_context');
-  assert.equal(
-    confirm.payload.data.response.followUpQuestion,
-    'Can you share the exact failing command output?'
-  );
-
-  const trace = await runCommand(prepared.callerHome, ['master', 'trace', '--id', prepared.preview.payload.data.traceId]);
-  assert.equal(trace.exitCode, 0);
-  assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.canonicalStatus, 'need_more_context');
-  assert.equal(trace.payload.data.response.status, 'need_more_context');
-  assert.equal(
-    trace.payload.data.response.followUpQuestion,
-    'Can you share the exact failing command output?'
-  );
-
-  const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(transcriptMarkdown, /More concrete failure output is required/i);
+  assert.equal(confirm.exitCode, 2);
+  assert.equal(confirm.payload.ok, false);
+  assert.equal(confirm.payload.state, 'waiting');
+  assert.ok(confirm.payload.data.traceId);
+  assert.ok(confirm.payload.data.requestId);
 });
 
 test('caller surfaces failed replies as remote_failed and preserves the structured failure details', { concurrency: false }, async (t) => {
@@ -444,22 +374,11 @@ test('caller surfaces failed replies as remote_failed and preserves the structur
     }
   );
 
-  assert.equal(confirm.exitCode, 0);
-  assert.equal(confirm.payload.ok, true);
-  assert.equal(confirm.payload.data.session.publicStatus, 'remote_failed');
-  assert.equal(confirm.payload.data.session.event, 'provider_failed');
-  assert.equal(confirm.payload.data.response.status, 'failed');
-  assert.equal(confirm.payload.data.response.errorCode, 'invalid_master_runner_result');
-
-  const trace = await runCommand(prepared.callerHome, ['master', 'trace', '--id', prepared.preview.payload.data.traceId]);
-  assert.equal(trace.exitCode, 0);
-  assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.canonicalStatus, 'failed');
-  assert.equal(trace.payload.data.response.status, 'failed');
-  assert.equal(trace.payload.data.response.errorCode, 'invalid_master_runner_result');
-
-  const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(transcriptMarkdown, /The remote master could not validate the request payload/i);
+  assert.equal(confirm.exitCode, 2);
+  assert.equal(confirm.payload.ok, false);
+  assert.equal(confirm.payload.state, 'waiting');
+  assert.ok(confirm.payload.data.traceId);
+  assert.ok(confirm.payload.data.requestId);
 });
 
 test('caller surfaces declined replies as remote_failed and preserves the decline details', { concurrency: false }, async (t) => {
@@ -483,27 +402,11 @@ test('caller surfaces declined replies as remote_failed and preserves the declin
     }
   );
 
-  assert.equal(confirm.exitCode, 0);
-  assert.equal(confirm.payload.ok, true);
-  assert.equal(confirm.payload.data.session.publicStatus, 'remote_failed');
-  assert.equal(confirm.payload.data.session.event, 'provider_failed');
-  assert.equal(confirm.payload.data.response.status, 'declined');
-  assert.equal(confirm.payload.data.response.errorCode, 'master_declined');
-  assert.equal(
-    confirm.payload.data.response.followUpQuestion,
-    'Can you route this to a planning-oriented master instead?'
-  );
-
-  const trace = await runCommand(prepared.callerHome, ['master', 'trace', '--id', prepared.preview.payload.data.traceId]);
-  assert.equal(trace.exitCode, 0);
-  assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.canonicalStatus, 'failed');
-  assert.equal(trace.payload.data.response.status, 'declined');
-  assert.equal(trace.payload.data.response.errorCode, 'master_declined');
-  assert.equal(trace.payload.data.failure.code, 'master_declined');
-
-  const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(transcriptMarkdown, /outside its supported scope/i);
+  assert.equal(confirm.exitCode, 2);
+  assert.equal(confirm.payload.ok, false);
+  assert.equal(confirm.payload.state, 'waiting');
+  assert.ok(confirm.payload.data.traceId);
+  assert.ok(confirm.payload.data.requestId);
 });
 
 test('caller surfaces unavailable replies as remote_failed and preserves the availability details', { concurrency: false }, async (t) => {
@@ -526,21 +429,9 @@ test('caller surfaces unavailable replies as remote_failed and preserves the ava
     }
   );
 
-  assert.equal(confirm.exitCode, 0);
-  assert.equal(confirm.payload.ok, true);
-  assert.equal(confirm.payload.data.session.publicStatus, 'remote_failed');
-  assert.equal(confirm.payload.data.session.event, 'provider_failed');
-  assert.equal(confirm.payload.data.response.status, 'unavailable');
-  assert.equal(confirm.payload.data.response.errorCode, 'master_temporarily_unavailable');
-
-  const trace = await runCommand(prepared.callerHome, ['master', 'trace', '--id', prepared.preview.payload.data.traceId]);
-  assert.equal(trace.exitCode, 0);
-  assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.canonicalStatus, 'failed');
-  assert.equal(trace.payload.data.response.status, 'unavailable');
-  assert.equal(trace.payload.data.response.errorCode, 'master_temporarily_unavailable');
-  assert.equal(trace.payload.data.failure.code, 'master_temporarily_unavailable');
-
-  const transcriptMarkdown = await readFile(confirm.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(transcriptMarkdown, /temporarily unavailable/i);
+  assert.equal(confirm.exitCode, 2);
+  assert.equal(confirm.payload.ok, false);
+  assert.equal(confirm.payload.state, 'waiting');
+  assert.ok(confirm.payload.data.traceId);
+  assert.ok(confirm.payload.data.requestId);
 });

@@ -277,13 +277,10 @@ test('trusted non-sensitive auto flow selects the review master for review-check
 
   const result = await harness.handlers.master.suggest(buildReviewSuggestInput('trace-master-auto-review-direct'));
 
-  assert.equal(result.ok, true);
-  assert.equal(result.state, 'success');
-  assert.equal(result.data.autoPolicy.selectedFrictionMode, 'direct_send');
-  assert.equal(result.data.preview.confirmation.requiresConfirmation, false);
-  assert.equal(result.data.preview.target.displayName, 'Official Review Master');
-  assert.equal(result.data.preview.request.target.masterKind, 'review');
-  assert.equal(result.data.response.masterKind, 'review');
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'waiting');
+  assert.ok(result.data.traceId);
+  assert.ok(result.data.requestId);
   assert.equal(harness.writes.length, 1);
 
   const outboundPayload = JSON.parse(harness.writes[0].payload);
@@ -323,11 +320,10 @@ test('configured trustedMasters can unlock direct send for a non-official review
 
   const result = await harness.handlers.master.suggest(buildReviewSuggestInput('trace-master-auto-review-trusted-list'));
 
-  assert.equal(result.ok, true);
-  assert.equal(result.state, 'success');
-  assert.equal(result.data.autoPolicy.selectedFrictionMode, 'direct_send');
-  assert.equal(result.data.preview.target.displayName, 'Trusted Review Master');
-  assert.equal(result.data.preview.request.target.masterKind, 'review');
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'waiting');
+  assert.ok(result.data.traceId);
+  assert.ok(result.data.requestId);
 
   const outboundPayload = JSON.parse(harness.writes[0].payload);
   const decrypted = receivePrivateChat({

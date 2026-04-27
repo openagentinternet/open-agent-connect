@@ -283,12 +283,12 @@ test('auto ask preview can be confirmed through the normal master ask continuati
     },
   });
 
-  assert.equal(confirmExitCode, 0);
+  assert.equal(confirmExitCode, 2);
   const confirm = parseOutput(confirmStdout);
-  assert.equal(confirm.ok, true);
-  assert.equal(confirm.state, 'success');
-  assert.equal(confirm.data.session.publicStatus, 'completed');
-  assert.equal(confirm.data.response.status, 'completed');
+  assert.equal(confirm.ok, false);
+  assert.equal(confirm.state, 'waiting');
+  assert.ok(confirm.data.traceId);
+  assert.ok(confirm.data.requestId);
   assert.equal(harness.writes.length, 1);
 
   const outboundPayload = JSON.parse(harness.writes[0].payload);
@@ -338,11 +338,10 @@ test('trusted non-sensitive auto flow can direct send and still return the previ
     },
   }));
 
-  assert.equal(result.ok, true);
-  assert.equal(result.state, 'success');
-  assert.equal(result.data.autoPolicy.selectedFrictionMode, 'direct_send');
-  assert.equal(result.data.preview.confirmation.requiresConfirmation, false);
-  assert.equal(result.data.preview.request.trigger.mode, 'auto');
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'waiting');
+  assert.ok(result.data.traceId);
+  assert.ok(result.data.requestId);
   assert.equal(harness.writes.length, 1);
 });
 

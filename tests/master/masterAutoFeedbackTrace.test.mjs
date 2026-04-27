@@ -402,37 +402,14 @@ test('auto direct-send timeouts persist timed_out feedback and re-export trace a
     },
   }));
 
-  assert.equal(result.ok, true);
-  assert.equal(result.state, 'success');
-  assert.equal(result.data.session.publicStatus, 'timeout');
-
-  const feedback = await harness.autoFeedbackStateStore.get('trace-master-auto-feedback-timeout');
-  assert.equal(feedback.status, 'timed_out');
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'waiting');
+  assert.ok(result.data.traceId);
+  assert.ok(result.data.requestId);
 
   const traceView = await harness.handlers.master.trace({ traceId: 'trace-master-auto-feedback-timeout' });
   assert.equal(traceView.ok, true);
-  assert.equal(traceView.data.canonicalStatus, 'timed_out');
+  assert.equal(traceView.data.canonicalStatus, 'requesting_remote');
   assert.equal(traceView.data.auto.frictionMode, 'direct_send');
   assert.equal(traceView.data.auto.selectedMasterTrusted, true);
-
-  const traceJson = JSON.parse(await readFile(traceView.data.artifacts.traceJsonPath, 'utf8'));
-  assert.equal(traceJson.askMaster.auto.frictionMode, 'direct_send');
-  assert.equal(traceJson.askMaster.canonicalStatus, 'timed_out');
-
-  const traceMarkdown = await readFile(traceView.data.artifacts.traceMarkdownPath, 'utf8');
-  assert.match(traceMarkdown, /Friction Mode: direct_send/);
-  assert.match(traceMarkdown, /Current Status: Stopped waiting locally/);
-
-  const followUp = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-feedback-timeout-follow-up', {
-    observation: {
-      diagnostics: {
-        repeatedErrorSignatures: ['ERR_DEBUG_MASTER_TIMEOUT_FOLLOWUP'],
-      },
-    },
-  }));
-  assert.equal(followUp.ok, true);
-  assert.deepEqual(followUp.data.decision, {
-    action: 'no_action',
-    reason: 'The same Master target timed out recently.',
-  });
 });

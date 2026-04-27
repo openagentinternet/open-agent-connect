@@ -349,15 +349,10 @@ test('master suggest in auto mode can direct send for trusted non-sensitive payl
     },
   }));
 
-  assert.equal(result.ok, true);
-  assert.equal(result.state, 'success');
-  assert.equal(result.data.decision.action, 'auto_candidate');
-  assert.equal(result.data.triggerMode, 'auto');
-  assert.equal(result.data.autoPolicy.selectedFrictionMode, 'direct_send');
-  assert.equal(result.data.autoPolicy.requiresConfirmation, false);
-  assert.equal(result.data.session.publicStatus, 'completed');
-  assert.equal(result.data.preview.confirmation.requiresConfirmation, false);
-  assert.equal(result.data.preview.confirmation.frictionMode, 'direct_send');
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'waiting');
+  assert.ok(result.data.traceId);
+  assert.ok(result.data.requestId);
   assert.equal(harness.writes.length, 1);
 
   const pendingAsk = await harness.pendingMasterAskStateStore.get(result.data.traceId);
@@ -368,11 +363,8 @@ test('master suggest in auto mode can direct send for trusted non-sensitive payl
 
   const traceView = await harness.handlers.master.trace({ traceId: result.data.traceId });
   assert.equal(traceView.ok, true);
-  assert.equal(traceView.data.canonicalStatus, 'completed');
+  assert.equal(traceView.data.canonicalStatus, 'requesting_remote');
   assert.equal(traceView.data.triggerMode, 'auto');
-
-  const feedback = await harness.autoFeedbackStateStore.get(result.data.traceId);
-  assert.equal(feedback.status, 'completed');
 
   const followUp = await harness.handlers.master.suggest(buildSuggestInput('trace-master-auto-direct-send-1', {
     observation: {

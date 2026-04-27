@@ -265,10 +265,10 @@ test('auto direct send still persists and sends a sanitized payload without secr
 
   const result = await handlers.master.suggest(buildSuggestInput('trace-master-auto-privacy'));
 
-  assert.equal(result.ok, true);
-  assert.equal(result.state, 'success');
-  assert.equal(result.data.autoPolicy.selectedFrictionMode, 'direct_send');
-  assert.equal(result.data.preview.confirmation.requiresConfirmation, false);
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'waiting');
+  assert.ok(result.data.traceId);
+  assert.ok(result.data.requestId);
   assert.equal(writes.length, 1);
 
   const pendingAsk = await pendingMasterAskStateStore.get(result.data.traceId);

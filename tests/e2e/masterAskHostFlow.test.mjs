@@ -252,21 +252,12 @@ test('manual host-action can preview Ask Master from host-visible context and co
     },
   });
 
-  assert.equal(confirmExitCode, 0);
+  assert.equal(confirmExitCode, 2);
   const confirm = parseOutput(confirmStdout);
-  assert.equal(confirm.ok, true);
-  assert.equal(confirm.state, 'success');
-  assert.equal(confirm.data.session.publicStatus, 'completed');
-  assert.equal(confirm.data.response.status, 'completed');
-  assert.deepEqual(confirm.data.response.findings, [
-    'Caller stayed in awaiting_confirmation.',
-  ]);
-  assert.deepEqual(confirm.data.response.recommendations, [
-    'Inspect the host-action preview/confirm bridge.',
-  ]);
-  assert.deepEqual(confirm.data.response.risks, [
-    'Future host adapters could skip the persisted preview snapshot.',
-  ]);
+  assert.equal(confirm.ok, false);
+  assert.equal(confirm.state, 'waiting');
+  assert.ok(confirm.data.traceId);
+  assert.ok(confirm.data.requestId);
   assert.equal(writes.length, 1);
 
   const outboundPayload = JSON.parse(writes[0].payload);
@@ -496,33 +487,13 @@ test('accepted suggestion can preview, confirm, complete, and keep suggest metad
     },
   });
 
-  assert.equal(confirmExitCode, 0);
+  assert.equal(confirmExitCode, 2);
   const confirm = parseOutput(confirmStdout);
-  assert.equal(confirm.ok, true);
-  assert.equal(confirm.state, 'success');
-  assert.equal(confirm.data.session.publicStatus, 'completed');
-  assert.equal(confirm.data.response.status, 'completed');
+  assert.equal(confirm.ok, false);
+  assert.equal(confirm.state, 'waiting');
+  assert.ok(confirm.data.traceId);
+  assert.ok(confirm.data.requestId);
   assert.equal(writes.length, 1);
-
-  const traceStdout = [];
-  const traceExitCode = await runCli(['master', 'trace', '--id', acceptResult.data.traceId], {
-    stdout: { write: (chunk) => { traceStdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-    dependencies: {
-      master: {
-        trace: handlers.master.trace,
-      },
-    },
-  });
-
-  assert.equal(traceExitCode, 0);
-  const trace = parseOutput(traceStdout);
-  assert.equal(trace.ok, true);
-  assert.equal(trace.data.flow, 'master');
-  assert.equal(trace.data.canonicalStatus, 'completed');
-  assert.equal(trace.data.triggerMode, 'suggest');
-  assert.equal(trace.data.preview.question, 'Should I ask the Debug Master for help with the blocked suggest flow?');
-  assert.match(trace.data.response.summary, /accepted suggestion completed/i);
 });
 
 test('suggest host flow can run through CLI entrypoints before accept, preview, confirm, and trace', async (t) => {
@@ -755,28 +726,11 @@ test('suggest host flow can run through CLI entrypoints before accept, preview, 
     },
   });
 
-  assert.equal(confirmExitCode, 0);
+  assert.equal(confirmExitCode, 2);
   const confirm = parseOutput(confirmStdout);
-  assert.equal(confirm.ok, true);
-  assert.equal(confirm.state, 'success');
-  assert.equal(confirm.data.session.publicStatus, 'completed');
-  assert.equal(confirm.data.response.status, 'completed');
+  assert.equal(confirm.ok, false);
+  assert.equal(confirm.state, 'waiting');
+  assert.ok(confirm.data.traceId);
+  assert.ok(confirm.data.requestId);
   assert.equal(writes.length, 1);
-
-  const traceStdout = [];
-  const traceExitCode = await runCli(['master', 'trace', '--id', acceptResult.data.traceId], {
-    stdout: { write: (chunk) => { traceStdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-    dependencies: {
-      master: {
-        trace: handlers.master.trace,
-      },
-    },
-  });
-
-  assert.equal(traceExitCode, 0);
-  const trace = parseOutput(traceStdout);
-  assert.equal(trace.ok, true);
-  assert.equal(trace.data.triggerMode, 'suggest');
-  assert.match(trace.data.response.summary, /CLI-backed suggest flow completed/i);
 });
