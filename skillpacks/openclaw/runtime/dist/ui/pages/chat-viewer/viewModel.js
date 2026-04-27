@@ -139,17 +139,12 @@ function buildChatViewerScript() {
 
   function forceScrollToBottom() {
     if (!list) return;
-    // Set the component's internal pending-force flag so that the NEXT
-    // _postRenderScrollAdjust cycle scrolls to bottom unconditionally.
-    // This mirrors the conversation-switch path inside the component.
-    const convId = state.peer ? 'private:' + state.self + ':' + state.peer : '__force__';
-    list._pendingForceBottomConversation = convId;
-    // Also schedule a delayed direct scroll as a safety net after render completes.
-    setTimeout(() => {
-      if (typeof list._scrollToBottom === 'function') {
-        list._scrollToBottom();
-      }
-    }, 150);
+    // The component's _postRenderScrollAdjust checks _pendingForceBottomConversation
+    // against snapshot.currentConversation (which equals the peer-global-metaid attribute).
+    // Setting this flag makes the component scroll to bottom on next render cycle.
+    if (state.peer) {
+      list._pendingForceBottomConversation = state.peer;
+    }
   }
 
   async function loadConversation(options) {
@@ -209,6 +204,14 @@ function buildChatViewerScript() {
       if (list) {
         list.setAttribute('self-global-metaid', state.self);
         list.setAttribute('peer-global-metaid', state.peer);
+
+        // Set the force-bottom flag BEFORE setting messages, so that the
+        // component's _postRenderScrollAdjust (triggered synchronously by the
+        // messages setter) sees the flag and scrolls to the newest messages.
+        if (!incremental || state.messages.length > prevCount) {
+          forceScrollToBottom();
+        }
+
         list.messages = state.messages;
         list.loading = false;
         list.error = '';
@@ -221,11 +224,6 @@ function buildChatViewerScript() {
         ? 'Conversation ended.'
         : (state.socketConnected ? 'Connected (real-time).' : 'Connected.');
       setStatus(statusText, state.conversationStopped ? 'warning' : 'ready');
-
-      // Scroll to bottom on initial load or when new messages arrive
-      if (!incremental || state.messages.length > prevCount) {
-        requestAnimationFrame(() => forceScrollToBottom());
-      }
 
       // Connect socket after first successful load (we need state.self)
       if (!state.initialLoadDone && state.self) {
