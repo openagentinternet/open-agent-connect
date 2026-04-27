@@ -26,6 +26,24 @@ test('waiting returns ok: false with pollAfterMs', () => {
   assert.equal(result.pollAfterMs, 3000);
 });
 
+test('waiting can carry localUiUrl and data', () => {
+  const result = commandWaiting('ORDER_SENT', 'waiting for provider', 3000, {
+    localUiUrl: 'http://127.0.0.1:5555/ui/trace?traceId=t1',
+    data: { traceId: 't1', serviceName: 'test-service' },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'waiting');
+  assert.equal(result.pollAfterMs, 3000);
+  assert.equal(result.localUiUrl, 'http://127.0.0.1:5555/ui/trace?traceId=t1');
+  assert.deepEqual(result.data, { traceId: 't1', serviceName: 'test-service' });
+});
+
+test('waiting without options omits localUiUrl and data', () => {
+  const result = commandWaiting('SOME_CODE', 'msg', 1000);
+  assert.equal(result.localUiUrl, undefined);
+  assert.equal(result.data, undefined);
+});
+
 test('manual_action_required can carry a local UI URL', () => {
   const result = commandManualActionRequired(
     'REQUIRES_LOCAL_APPROVAL',

@@ -22,6 +22,8 @@ type CommandWaiting = CommandBase & {
   ok: false;
   state: 'waiting';
   pollAfterMs: number;
+  localUiUrl?: string;
+  data?: Record<string, unknown>;
 };
 
 type CommandManualActionRequired = CommandBase & {
@@ -54,12 +56,19 @@ export const commandAwaitingConfirmation = <T>(data: T): MetabotCommandResult<T>
   data,
 });
 
-export const commandWaiting = (code: string, message: string, pollAfterMs: number): MetabotCommandResult<never> => ({
+export const commandWaiting = (
+  code: string,
+  message: string,
+  pollAfterMs: number,
+  options?: { localUiUrl?: string; data?: Record<string, unknown> },
+): MetabotCommandResult<never> => ({
   ok: false,
   state: 'waiting',
   code,
   message,
-  pollAfterMs
+  pollAfterMs,
+  ...(options?.localUiUrl ? { localUiUrl: options.localUiUrl } : {}),
+  ...(options?.data ? { data: options.data } : {}),
 });
 
 export const commandManualActionRequired = (code: string, message: string, localUiUrl?: string): MetabotCommandResult<never> => ({
