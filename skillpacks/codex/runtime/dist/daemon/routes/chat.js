@@ -63,6 +63,74 @@ const handleChatRoutes = async (context) => {
         sendConversationResult(context, result);
         return true;
     }
+    if (url.pathname === '/api/chat/private/conversations') {
+        if (req.method !== 'GET') {
+            context.sendMethodNotAllowed(['GET']);
+            return true;
+        }
+        const handler = handlers.chat?.privateChatConversations;
+        if (!handler) {
+            context.sendJson(501, { ok: false, code: 'not_implemented', message: 'Private chat conversations handler is not configured.' });
+            return true;
+        }
+        const result = await handler();
+        context.sendJson(200, result);
+        return true;
+    }
+    if (url.pathname === '/api/chat/private/messages') {
+        if (req.method !== 'GET') {
+            context.sendMethodNotAllowed(['GET']);
+            return true;
+        }
+        const conversationId = normalizeText(url.searchParams.get('conversationId'));
+        if (!conversationId) {
+            context.sendJson(400, { ok: false, code: 'missing_conversation_id', message: 'conversationId query parameter is required.' });
+            return true;
+        }
+        const handler = handlers.chat?.privateChatMessages;
+        if (!handler) {
+            context.sendJson(501, { ok: false, code: 'not_implemented', message: 'Private chat messages handler is not configured.' });
+            return true;
+        }
+        const result = await handler({
+            conversationId,
+            limit: readOptionalNumber(url.searchParams.get('limit')),
+        });
+        context.sendJson(200, result);
+        return true;
+    }
+    if (url.pathname === '/api/chat/auto-reply/status') {
+        if (req.method !== 'GET') {
+            context.sendMethodNotAllowed(['GET']);
+            return true;
+        }
+        const handler = handlers.chat?.autoReplyStatus;
+        if (!handler) {
+            context.sendJson(501, { ok: false, code: 'not_implemented', message: 'Auto-reply status handler is not configured.' });
+            return true;
+        }
+        const result = await handler();
+        context.sendJson(200, result);
+        return true;
+    }
+    if (url.pathname === '/api/chat/auto-reply/config') {
+        if (req.method !== 'POST') {
+            context.sendMethodNotAllowed(['POST']);
+            return true;
+        }
+        const handler = handlers.chat?.setAutoReply;
+        if (!handler) {
+            context.sendJson(501, { ok: false, code: 'not_implemented', message: 'Auto-reply config handler is not configured.' });
+            return true;
+        }
+        const body = await context.readJsonBody();
+        const result = await handler({
+            enabled: body.enabled === true,
+            defaultStrategyId: normalizeText(body.defaultStrategyId) || undefined,
+        });
+        context.sendJson(200, result);
+        return true;
+    }
     if (url.pathname !== '/api/chat/private') {
         return false;
     }

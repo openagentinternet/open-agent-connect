@@ -6,6 +6,7 @@ import { type FetchPrivateHistory } from '../core/chat/privateConversation';
 import type { SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
+import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import { type MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
@@ -34,4 +35,5 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     masterReplyWaiter?: MetaWebMasterReplyWaiter;
     onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
     requestMvcGasSubsidy?: (options: RequestMvcGasSubsidyOptions) => Promise<RequestMvcGasSubsidyResult>;
+    autoReplyConfig?: PrivateChatAutoReplyConfig;
 }): MetabotDaemonHttpHandlers;

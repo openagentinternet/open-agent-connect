@@ -43,6 +43,11 @@ const daemon_1 = require("../daemon");
 const defaultHandlers_1 = require("../daemon/defaultHandlers");
 const metawebMasterReplyWaiter_1 = require("../core/master/metawebMasterReplyWaiter");
 const masterMessageSchema_1 = require("../core/master/masterMessageSchema");
+const privateChatListener_1 = require("../core/chat/privateChatListener");
+const privateChatAutoReply_1 = require("../core/chat/privateChatAutoReply");
+const privateChatStateStore_1 = require("../core/chat/privateChatStateStore");
+const chatStrategyStore_1 = require("../core/chat/chatStrategyStore");
+const hostLlmChatReplyRunner_1 = require("../core/chat/hostLlmChatReplyRunner");
 const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
 const DEFAULT_DAEMON_HOST = '127.0.0.1';
 const DEFAULT_DAEMON_START_TIMEOUT_MS = 5_000;
@@ -1132,6 +1137,15 @@ function createDefaultCliDependencies(context) {
         },
         chat: {
             private: async (input) => requestJson(context, 'POST', '/api/chat/private', input),
+            conversations: async () => requestJson(context, 'GET', '/api/chat/private/conversations'),
+            messages: async (input) => {
+                const params = new URLSearchParams({ conversationId: input.conversationId });
+                if (input.limit != null)
+                    params.set('limit', String(input.limit));
+                return requestJson(context, 'GET', `/api/chat/private/messages?${params.toString()}`);
+            },
+            autoReplyStatus: async () => requestJson(context, 'GET', '/api/chat/auto-reply/status'),
+            setAutoReply: async (input) => requestJson(context, 'POST', '/api/chat/auto-reply/config', input),
         },
         file: {
             upload: async (input) => requestJson(context, 'POST', '/api/file/upload', input),
@@ -1513,6 +1527,11 @@ async function serveCliDaemonProcess(context) {
     const masterReplyWaiter = createTestMasterReplyWaiter(context.env) ?? (0, metawebMasterReplyWaiter_1.createSocketIoMetaWebMasterReplyWaiter)();
     const socketPresenceApiBaseUrl = context.env.METABOT_SOCKET_PRESENCE_API_BASE_URL
         || (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 'http://127.0.0.1:9' : undefined);
+    const sharedAutoReplyConfig = {
+        enabled: false,
+        acceptPolicy: 'accept_all',
+        defaultStrategyId: null,
+    };
     const daemon = (0, daemon_1.createMetabotDaemon)({
         homeDirOrPaths: paths,
         handlers: (0, defaultHandlers_1.createDefaultMetabotDaemonHandlers)({
@@ -1531,6 +1550,7 @@ async function serveCliDaemonProcess(context) {
             callerReplyWaiter,
             masterReplyWaiter,
             requestMvcGasSubsidy,
+            autoReplyConfig: sharedAutoReplyConfig,
         }),
     });
     const host = DEFAULT_DAEMON_HOST;
@@ -1577,11 +1597,50 @@ async function serveCliDaemonProcess(context) {
     if (providerPresence.enabled) {
         await providerHeartbeatLoop.start();
     }
+    const chatStateStore = (0, privateChatStateStore_1.createPrivateChatStateStore)(paths);
+    const chatStrategyStore = (0, chatStrategyStore_1.createChatStrategyStore)(paths);
+    const resolvePeerChatPublicKeyForChat = fetchPeerChatPublicKey ?? (async (_id) => null);
+    const chatAutoReplyOrchestrator = (0, privateChatAutoReply_1.createPrivateChatAutoReplyOrchestrator)({
+        stateStore: chatStateStore,
+        strategyStore: chatStrategyStore,
+        paths,
+        signer,
+        selfGlobalMetaId: async () => {
+            const state = await runtimeStore.readState();
+            return state.identity?.globalMetaId ?? null;
+        },
+        resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+        replyRunner: (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)(),
+    }, sharedAutoReplyConfig);
+    const privateChatListener = (0, privateChatListener_1.createPrivateChatListener)({
+        getIdentity: async () => {
+            const state = await runtimeStore.readState();
+            if (!state.identity)
+                return null;
+            try {
+                const chatIdentity = await signer.getPrivateChatIdentity();
+                return {
+                    globalMetaId: chatIdentity.globalMetaId,
+                    privateKeyHex: chatIdentity.privateKeyHex,
+                    chatPublicKey: chatIdentity.chatPublicKey,
+                };
+            }
+            catch {
+                return null;
+            }
+        },
+        callbacks: {
+            onMessage: (message) => { void chatAutoReplyOrchestrator.handleInboundMessage(message); },
+        },
+        resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+    });
+    privateChatListener.start();
     let shuttingDown = false;
     const shutdown = async (exitCode) => {
         if (shuttingDown)
             return;
         shuttingDown = true;
+        privateChatListener.stop();
         providerHeartbeatLoop.stop();
         await runtimeStore.clearDaemon(process.pid);
         await daemon.close();

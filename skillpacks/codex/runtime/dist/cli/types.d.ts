@@ -70,6 +70,16 @@ export interface CliDependencies {
     };
     chat?: {
         private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        conversations?: () => Awaitable<MetabotCommandResult<unknown>>;
+        messages?: (input: {
+            conversationId: string;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        autoReplyStatus?: () => Awaitable<MetabotCommandResult<unknown>>;
+        setAutoReply?: (input: {
+            enabled: boolean;
+            defaultStrategyId?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     file?: {
         upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

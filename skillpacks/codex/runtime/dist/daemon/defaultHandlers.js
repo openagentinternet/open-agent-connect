@@ -32,6 +32,7 @@ const chainDirectoryReader_1 = require("../core/discovery/chainDirectoryReader")
 const chainHeartbeatDirectory_1 = require("../core/discovery/chainHeartbeatDirectory");
 const socketPresenceDirectory_1 = require("../core/discovery/socketPresenceDirectory");
 const sessionStateStore_1 = require("../core/a2a/sessionStateStore");
+const privateChatStateStore_1 = require("../core/chat/privateChatStateStore");
 const sessionEngine_1 = require("../core/a2a/sessionEngine");
 const publicStatus_1 = require("../core/a2a/publicStatus");
 const serviceRunnerRegistry_1 = require("../core/a2a/provider/serviceRunnerRegistry");
@@ -2180,6 +2181,12 @@ function createDefaultMetabotDaemonHandlers(input) {
     const providerPresenceStore = (0, providerPresenceState_1.createProviderPresenceStateStore)(input.homeDir);
     const ratingDetailStateStore = (0, ratingDetailState_1.createRatingDetailStateStore)(input.homeDir);
     const sessionStateStore = (0, sessionStateStore_1.createSessionStateStore)(input.homeDir);
+    const privateChatStateStore = (0, privateChatStateStore_1.createPrivateChatStateStore)(input.homeDir);
+    const autoReplyConfig = input.autoReplyConfig ?? {
+        enabled: false,
+        acceptPolicy: 'accept_all',
+        defaultStrategyId: null,
+    };
     const sessionEngine = (0, sessionEngine_1.createA2ASessionEngine)();
     const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey ?? fetchPeerChatPublicKey;
     const callerReplyWaiter = input.callerReplyWaiter ?? (0, metawebReplyWaiter_1.createSocketIoMetaWebReplyWaiter)();
@@ -5606,6 +5613,33 @@ function createDefaultMetabotDaemonHandlers(input) {
                     transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
                     traceMarkdownPath: artifacts.traceMarkdownPath,
                     traceJsonPath: artifacts.traceJsonPath,
+                });
+            },
+            privateChatConversations: async () => {
+                const state = await privateChatStateStore.readState();
+                return (0, commandResult_1.commandSuccess)({ conversations: state.conversations });
+            },
+            privateChatMessages: async (msgInput) => {
+                const messages = await privateChatStateStore.getRecentMessages(normalizeText(msgInput.conversationId), typeof msgInput.limit === 'number' && Number.isFinite(msgInput.limit)
+                    ? Math.max(1, Math.trunc(msgInput.limit))
+                    : 50);
+                return (0, commandResult_1.commandSuccess)({ messages });
+            },
+            autoReplyStatus: async () => {
+                return (0, commandResult_1.commandSuccess)({
+                    enabled: autoReplyConfig.enabled,
+                    acceptPolicy: autoReplyConfig.acceptPolicy,
+                    defaultStrategyId: autoReplyConfig.defaultStrategyId,
+                });
+            },
+            setAutoReply: async (autoReplyInput) => {
+                autoReplyConfig.enabled = autoReplyInput.enabled === true;
+                if (autoReplyInput.defaultStrategyId !== undefined) {
+                    autoReplyConfig.defaultStrategyId = normalizeText(autoReplyInput.defaultStrategyId) || null;
+                }
+                return (0, commandResult_1.commandSuccess)({
+                    enabled: autoReplyConfig.enabled,
+                    defaultStrategyId: autoReplyConfig.defaultStrategyId,
                 });
             },
         },

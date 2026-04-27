@@ -74,6 +74,11 @@ function buildMetabotPaths(input) {
         masterAutoFeedbackStatePath: input.masterAutoFeedbackStatePath,
         masterPublishedStatePath: input.masterPublishedStatePath,
         directorySeedsPath: input.directorySeedsPath,
+        privateChatStatePath: input.privateChatStatePath,
+        chatStrategiesPath: input.chatStrategiesPath,
+        soulMdPath: input.soulMdPath,
+        goalMdPath: input.goalMdPath,
+        roleMdPath: input.roleMdPath,
         daemonLockPath: input.daemonLockPath,
         // Temporary compatibility aliases for untouched later-task modules.
         baseRoot: input.metabotRoot,
@@ -113,6 +118,11 @@ function resolveMetabotPaths(homeDir) {
         masterAutoFeedbackStatePath: node_path_1.default.join(stateRoot, 'master-auto-feedback-state.json'),
         masterPublishedStatePath: node_path_1.default.join(stateRoot, 'master-service-state.json'),
         directorySeedsPath: node_path_1.default.join(stateRoot, 'directory-seeds.json'),
+        privateChatStatePath: node_path_1.default.join(stateRoot, 'private-chat-state.json'),
+        chatStrategiesPath: node_path_1.default.join(stateRoot, 'chat-strategies.json'),
+        soulMdPath: node_path_1.default.join(profileRoot, 'SOUL.md'),
+        goalMdPath: node_path_1.default.join(profileRoot, 'GOAL.md'),
+        roleMdPath: node_path_1.default.join(profileRoot, 'ROLE.md'),
         daemonLockPath: node_path_1.default.join(locksRoot, 'daemon.lock'),
     });
 }

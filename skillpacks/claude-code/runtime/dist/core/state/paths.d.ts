@@ -35,6 +35,11 @@ export interface MetabotPaths {
     masterAutoFeedbackStatePath: string;
     masterPublishedStatePath: string;
     directorySeedsPath: string;
+    privateChatStatePath: string;
+    chatStrategiesPath: string;
+    soulMdPath: string;
+    goalMdPath: string;
+    roleMdPath: string;
     daemonLockPath: string;
     baseRoot: string;
     exportRoot: string;
