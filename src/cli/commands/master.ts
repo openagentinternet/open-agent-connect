@@ -55,29 +55,60 @@ export async function runMasterCommand(
 
     const confirm = hasFlag(args, '--confirm');
     const traceId = readFlagValue(args, '--trace-id');
+
+    let result: MetabotCommandResult<unknown>;
     if (traceId) {
-      return handler({
-        traceId,
-        confirm,
-      });
+      result = await handler({ traceId, confirm });
+    } else {
+      const requestFile = readFlagValue(args, '--request-file');
+      if (!requestFile) {
+        return commandMissingFlag('--request-file');
+      }
+      if (confirm) {
+        return commandFailed(
+          'invalid_argument',
+          '`metabot master ask --confirm` requires `--trace-id <trace-id>` and cannot be combined with `--request-file`.',
+        );
+      }
+      const payload = await readJsonFile(context, requestFile);
+      result = await handler({ ...payload, confirm });
     }
 
-    const requestFile = readFlagValue(args, '--request-file');
-    if (!requestFile) {
-      return commandMissingFlag('--request-file');
-    }
-    if (confirm) {
-      return commandFailed(
-        'invalid_argument',
-        '`metabot master ask --confirm` requires `--trace-id <trace-id>` and cannot be combined with `--request-file`.',
-      );
+    if (
+      result.state === 'waiting' &&
+      'data' in result &&
+      result.data &&
+      typeof result.data === 'object' &&
+      'traceId' in result.data &&
+      result.localUiUrl &&
+      process.stdout.isTTY
+    ) {
+      const { pollTraceUntilComplete } = await import('./pollTraceHelper');
+      const traceGet = context.dependencies.trace?.get;
+      if (traceGet) {
+        const poll = await pollTraceUntilComplete({
+          traceId: String((result.data as Record<string, unknown>).traceId),
+          localUiUrl: result.localUiUrl,
+          requestFn: async (_method, path) => {
+            const id = path.split('/').pop() || '';
+            return traceGet({ traceId: decodeURIComponent(id) });
+          },
+          stderr: context.stderr,
+        });
+        if (poll.completed && poll.trace) {
+          const { commandSuccess } = await import('../../core/contracts/commandResult');
+          const sessions = Array.isArray(poll.trace.sessions) ? poll.trace.sessions : [];
+          const firstSession = sessions[0] as Record<string, unknown> | undefined;
+          return commandSuccess({
+            ...(result.data as Record<string, unknown>),
+            ...(firstSession?.responseText ? { responseText: firstSession.responseText } : {}),
+            localUiUrl: result.localUiUrl,
+          });
+        }
+      }
     }
 
-    const payload = await readJsonFile(context, requestFile);
-    return handler({
-      ...payload,
-      confirm,
-    });
+    return result;
   }
 
   if (subcommand === 'suggest') {
