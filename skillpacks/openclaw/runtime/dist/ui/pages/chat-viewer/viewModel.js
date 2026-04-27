@@ -147,31 +147,47 @@ function buildChatViewerScript() {
     }
   }
 
+  let scrollObserver = null;
+  let scrollObserverTimer = null;
+
+  function doDirectScroll() {
+    if (!list) return;
+    list._postRestoreStabilizer = null;
+    if (list.shadowRoot) {
+      const c = list.shadowRoot.querySelector('.messages-container');
+      if (c) c.scrollTop = c.scrollHeight;
+    }
+  }
+
+  function stopScrollObserver() {
+    if (scrollObserver) { scrollObserver.disconnect(); scrollObserver = null; }
+    if (scrollObserverTimer) { clearTimeout(scrollObserverTimer); scrollObserverTimer = null; }
+  }
+
   function forceScrollToBottom() {
     if (!list) return;
-    // Set the component's internal force-bottom flag.
     if (state.peer) {
       list._pendingForceBottomConversation = state.peer;
     }
-    // Disable the component's scroll-position stabilizer so it does not
-    // fight back against our scroll-to-bottom attempts.
     list._postRestoreStabilizer = null;
-    // Use the component's own scroll method (rAF-based).
-    if (typeof list._scrollToBottom === 'function') {
-      list._scrollToBottom();
+
+    // Immediate scroll attempts.
+    doDirectScroll();
+    requestAnimationFrame(doDirectScroll);
+
+    // Watch for any DOM mutations inside the shadow root (bubble hydration,
+    // crypto decryption, async component imports) and scroll on each change.
+    stopScrollObserver();
+    if (list.shadowRoot && typeof MutationObserver !== 'undefined') {
+      scrollObserver = new MutationObserver(() => {
+        doDirectScroll();
+      });
+      scrollObserver.observe(list.shadowRoot, {
+        childList: true, subtree: true, characterData: true,
+      });
+      // Stop observing after 3 seconds — by then all async rendering is done.
+      scrollObserverTimer = setTimeout(stopScrollObserver, 3000);
     }
-    // Direct DOM scrolls at multiple delays as additional safety net.
-    const doScroll = () => {
-      if (!list || !list.shadowRoot) return;
-      list._postRestoreStabilizer = null;
-      const c = list.shadowRoot.querySelector('.messages-container');
-      if (c && c.scrollHeight > c.clientHeight) {
-        c.scrollTop = c.scrollHeight;
-      }
-    };
-    setTimeout(doScroll, 50);
-    setTimeout(doScroll, 200);
-    setTimeout(doScroll, 500);
   }
 
   async function loadConversation(options) {

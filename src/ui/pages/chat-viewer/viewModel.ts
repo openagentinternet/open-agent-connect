@@ -29,6 +29,16 @@ export function buildChatViewerScript(): string {
   const countLabel = document.querySelector('[data-chat-count]');
   const refreshButton = document.querySelector('[data-chat-refresh]');
   const stopButton = document.querySelector('[data-chat-stop]');
+  const metaToggle = document.querySelector('[data-meta-toggle]');
+  const metaSection = document.querySelector('[data-meta-section]');
+  const metaArrow = document.querySelector('[data-meta-arrow]');
+
+  if (metaToggle && metaSection) {
+    metaToggle.addEventListener('click', () => {
+      const collapsed = metaSection.classList.toggle('collapsed');
+      if (metaArrow) metaArrow.classList.toggle('collapsed', collapsed);
+    });
+  }
 
   function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -134,25 +144,47 @@ export function buildChatViewerScript(): string {
     }
   }
 
+  let scrollObserver = null;
+  let scrollObserverTimer = null;
+
+  function doDirectScroll() {
+    if (!list) return;
+    list._postRestoreStabilizer = null;
+    if (list.shadowRoot) {
+      const c = list.shadowRoot.querySelector('.messages-container');
+      if (c) c.scrollTop = c.scrollHeight;
+    }
+  }
+
+  function stopScrollObserver() {
+    if (scrollObserver) { scrollObserver.disconnect(); scrollObserver = null; }
+    if (scrollObserverTimer) { clearTimeout(scrollObserverTimer); scrollObserverTimer = null; }
+  }
+
   function forceScrollToBottom() {
     if (!list) return;
-    // Set the component's internal force-bottom flag before render.
     if (state.peer) {
       list._pendingForceBottomConversation = state.peer;
     }
-    // Also schedule direct DOM scrolls at multiple delays as safety net,
-    // because the component re-creates its shadow DOM innerHTML on every
-    // render and the browser may not have laid out content by the first rAF.
-    const doScroll = () => {
-      if (!list || !list.shadowRoot) return;
-      const c = list.shadowRoot.querySelector('.messages-container');
-      if (c && c.scrollHeight > c.clientHeight) {
-        c.scrollTop = c.scrollHeight;
-      }
-    };
-    setTimeout(doScroll, 50);
-    setTimeout(doScroll, 200);
-    setTimeout(doScroll, 500);
+    list._postRestoreStabilizer = null;
+
+    // Immediate scroll attempts.
+    doDirectScroll();
+    requestAnimationFrame(doDirectScroll);
+
+    // Watch for any DOM mutations inside the shadow root (bubble hydration,
+    // crypto decryption, async component imports) and scroll on each change.
+    stopScrollObserver();
+    if (list.shadowRoot && typeof MutationObserver !== 'undefined') {
+      scrollObserver = new MutationObserver(() => {
+        doDirectScroll();
+      });
+      scrollObserver.observe(list.shadowRoot, {
+        childList: true, subtree: true, characterData: true,
+      });
+      // Stop observing after 3 seconds — by then all async rendering is done.
+      scrollObserverTimer = setTimeout(stopScrollObserver, 3000);
+    }
   }
 
   async function loadConversation(options) {
@@ -213,16 +245,23 @@ export function buildChatViewerScript(): string {
         list.setAttribute('self-global-metaid', state.self);
         list.setAttribute('peer-global-metaid', state.peer);
 
-        // Set the force-bottom flag BEFORE setting messages, so that the
-        // component's _postRenderScrollAdjust (triggered synchronously by the
-        // messages setter) sees the flag and scrolls to the newest messages.
-        if (!incremental || state.messages.length > prevCount) {
+        const shouldScrollBottom = !incremental || state.messages.length > prevCount;
+
+        // Set the force-bottom flag BEFORE setting messages.
+        if (shouldScrollBottom) {
           forceScrollToBottom();
         }
 
         list.messages = state.messages;
         list.loading = false;
         list.error = '';
+
+        // Also force scroll AFTER the setter, because the component's
+        // synchronous render clears the flag and arms a stabilizer that
+        // would otherwise fight back against our scroll attempts.
+        if (shouldScrollBottom) {
+          forceScrollToBottom();
+        }
       }
       setText(selfLabel, state.self || 'Local MetaBot');
       updatePeerDisplay();
