@@ -52,12 +52,13 @@ export async function runNetworkCommand(args: string[], context: CliRuntimeConte
     if (result.ok && result.state === 'success') {
       const data = result.data as { bots?: Array<{ globalMetaId: string; name?: string; goal?: string; lastSeenAgoSeconds?: number }> };
       const bots = Array.isArray(data?.bots) ? data.bots : [];
+      const truncate = (s: string, max: number) => s.length > max ? s.slice(0, max) + '...' : s;
       const rows = ['| # | name | globalmetaid | bio | Last Seen |', '|---|------|-------------|-----|-----------|'];
       for (let i = 0; i < bots.length; i++) {
         const bot = bots[i];
-        const name = bot.name ?? '';
+        const name = truncate(bot.name ?? '', 20);
         const gmid = bot.globalMetaId;
-        const bio = bot.goal ?? '';
+        const bio = truncate(bot.goal ?? '', 30);
         const lastSeen = `${bot.lastSeenAgoSeconds ?? 0}s 🟢`;
         rows.push(`| ${i + 1} | ${name} | ${gmid} | ${bio} | ${lastSeen} |`);
       }
