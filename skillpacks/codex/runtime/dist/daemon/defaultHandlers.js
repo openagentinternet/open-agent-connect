@@ -64,7 +64,7 @@ const DEFAULT_TRACE_WATCH_WAIT_MS = 75_000;
 const TRACE_WATCH_POLL_INTERVAL_MS = 500;
 const PROVIDER_RATING_SYNC_STALE_MS = 30_000;
 const DEFAULT_MASTER_HOST_MODE = 'codex';
-const DEFAULT_NETWORK_BOT_LIST_LIMIT = 10;
+const DEFAULT_NETWORK_BOT_LIST_LIMIT = 20;
 const MAX_NETWORK_BOT_LIST_LIMIT = 100;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -198,7 +198,11 @@ function buildSocketPresenceLastSeenIndex(bots) {
         const lastSeenAt = typeof bot.lastSeenAt === 'number' && Number.isFinite(bot.lastSeenAt) && bot.lastSeenAt > 0
             ? Math.floor(bot.lastSeenAt)
             : null;
-        index.set(globalMetaId, lastSeenAt);
+        const lastSeenAgoSeconds = typeof bot.lastSeenAgoSeconds === 'number' && Number.isFinite(bot.lastSeenAgoSeconds)
+            ? Math.max(0, Math.floor(bot.lastSeenAgoSeconds))
+            : 0;
+        const name = typeof bot.name === 'string' ? bot.name.trim() : '';
+        index.set(globalMetaId, { lastSeenAt, lastSeenAgoSeconds, name });
     }
     return index;
 }
@@ -229,12 +233,15 @@ async function decorateServicesWithSocketPresence(input) {
         const lastSeenIndex = buildSocketPresenceLastSeenIndex(presence.bots);
         const decorated = input.services.map((service) => {
             const globalMetaId = normalizeComparableGlobalMetaId(service.providerGlobalMetaId ?? service.globalMetaId);
-            const lastSeenAt = globalMetaId ? (lastSeenIndex.get(globalMetaId) ?? null) : null;
+            const botEntry = globalMetaId ? lastSeenIndex.get(globalMetaId) : undefined;
+            const lastSeenAt = botEntry?.lastSeenAt ?? null;
             return {
                 ...service,
-                online: Boolean(globalMetaId && lastSeenIndex.has(globalMetaId)),
+                online: Boolean(botEntry),
                 lastSeenAt,
                 lastSeenSec: normalizeEpochSeconds(lastSeenAt),
+                lastSeenAgoSeconds: botEntry?.lastSeenAgoSeconds ?? null,
+                providerName: botEntry?.name ?? '',
             };
         });
         if (input.onlineOnly) {

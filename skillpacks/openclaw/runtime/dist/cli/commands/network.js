@@ -22,9 +22,35 @@ async function runNetworkCommand(args, context) {
         if (!handler) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'Network services handler is not configured.');
         }
-        return handler({
+        const parsedLimit = parseLimitFlag(args);
+        if (parsedLimit.error) {
+            return parsedLimit.error;
+        }
+        const limit = parsedLimit.limit ?? 20;
+        const result = await handler({
             online: (0, helpers_1.hasFlag)(args, '--online') ? true : undefined,
         });
+        if (result.ok && result.state === 'success') {
+            const data = result.data;
+            const allServices = Array.isArray(data?.services) ? data.services : [];
+            const services = allServices.slice(0, limit);
+            const truncate = (s, max) => s.length > max ? s.slice(0, max) + '...' : s;
+            const rows = ['| # | service | provider | name | Last Seen |', '|---|---------|----------|------|-----------|'];
+            for (let i = 0; i < services.length; i++) {
+                const svc = services[i];
+                const service = truncate(String(svc['displayName'] || svc['serviceName'] || ''), 30);
+                const provider = truncate(String(svc['providerGlobalMetaId'] || ''), 20);
+                const name = truncate(String(svc['providerName'] || ''), 20);
+                const agoSec = typeof svc['lastSeenAgoSeconds'] === 'number' ? svc['lastSeenAgoSeconds'] : null;
+                const lastSeen = agoSec != null ? `${agoSec}s 🟢` : '-';
+                rows.push(`| ${i + 1} | ${service} | ${provider} | ${name} | ${lastSeen} |`);
+            }
+            context.stdout.write(rows.join('\n') + '\n');
+            const rendered = (0, commandResult_1.commandSuccess)(data);
+            rendered.__rawStdoutHandled = true;
+            return rendered;
+        }
+        return result;
     }
     if (args[0] === 'bots') {
         const handler = context.dependencies.network?.listBots;
@@ -35,10 +61,29 @@ async function runNetworkCommand(args, context) {
         if (parsedLimit.error) {
             return parsedLimit.error;
         }
-        return handler({
+        const result = await handler({
             online: (0, helpers_1.hasFlag)(args, '--online') ? true : undefined,
             limit: parsedLimit.limit,
         });
+        if (result.ok && result.state === 'success') {
+            const data = result.data;
+            const bots = Array.isArray(data?.bots) ? data.bots : [];
+            const truncate = (s, max) => s.length > max ? s.slice(0, max) + '...' : s;
+            const rows = ['| # | name | globalmetaid | bio | Last Seen |', '|---|------|-------------|-----|-----------|'];
+            for (let i = 0; i < bots.length; i++) {
+                const bot = bots[i];
+                const name = truncate(bot.name ?? '', 20);
+                const gmid = bot.globalMetaId;
+                const bio = truncate(bot.goal ?? '', 40);
+                const lastSeen = `${bot.lastSeenAgoSeconds ?? 0}s 🟢`;
+                rows.push(`| ${i + 1} | ${name} | ${gmid} | ${bio} | ${lastSeen} |`);
+            }
+            context.stdout.write(rows.join('\n') + '\n');
+            const rendered = (0, commandResult_1.commandSuccess)(data);
+            rendered.__rawStdoutHandled = true;
+            return rendered;
+        }
+        return result;
     }
     if (args[0] !== 'sources') {
         return (0, helpers_1.commandUnknownSubcommand)(`network ${args.join(' ')}`.trim());

@@ -84,6 +84,8 @@ function buildSyntheticOnlineBotsFromServices(services) {
             lastSeenAgoSeconds: 0,
             deviceCount: 1,
             online: true,
+            name: '',
+            goal: '',
         });
     }
     return bots;

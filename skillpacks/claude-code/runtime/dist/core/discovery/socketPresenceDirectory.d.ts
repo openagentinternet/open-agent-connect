@@ -4,6 +4,8 @@ export interface OnlineMetaBotDirectoryItem {
     lastSeenAgoSeconds: number;
     deviceCount: number;
     online: true;
+    name: string;
+    goal: string;
 }
 export interface ReadOnlineMetaBotsFromSocketPresenceOptions {
     fetchImpl?: typeof fetch;

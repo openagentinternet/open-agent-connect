@@ -511,6 +511,7 @@ async function ensureBundledRuntime(repoRoot, runtimeRoot, compatibilityManifest
   await fs.cp(path.join(repoRoot, 'dist'), path.join(runtimeRoot, 'dist'), { recursive: true });
   await copyRuntimeUiAssets(repoRoot, runtimeRoot);
   await writeFile(path.join(runtimeRoot, 'compatibility.json'), compatibilityManifest);
+  await fs.cp(path.join(repoRoot, 'package.json'), path.join(runtimeRoot, 'package.json'));
   await copyBundledRuntimeDependencies(repoRoot, runtimeRoot, dependencyNames);
 }
 
