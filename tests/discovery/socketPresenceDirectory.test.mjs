@@ -46,7 +46,7 @@ test('readOnlineMetaBotsFromSocketPresence returns normalized bot rows from onli
   });
 
   assert.equal(calls.length, 1);
-  assert.match(calls[0], /group-chat\/socket\/online-users\?cursor=0&size=10$/);
+  assert.match(calls[0], /group-chat\/socket\/online-users\?cursor=0&size=10&withUserInfo=true$/);
   assert.deepEqual(result, {
     source: 'socket_presence',
     total: 2,
@@ -58,6 +58,8 @@ test('readOnlineMetaBotsFromSocketPresence returns normalized bot rows from onli
         lastSeenAgoSeconds: 13,
         deviceCount: 1,
         online: true,
+        name: '',
+        goal: '',
       },
       {
         globalMetaId: 'idq1bot-b',
@@ -65,6 +67,8 @@ test('readOnlineMetaBotsFromSocketPresence returns normalized bot rows from onli
         lastSeenAgoSeconds: 16,
         deviceCount: 2,
         online: true,
+        name: '',
+        goal: '',
       },
     ],
   });
@@ -95,7 +99,7 @@ test('readOnlineMetaBotsFromSocketPresence clamps limit to API maximum size 100'
     limit: 999,
   });
 
-  assert.match(calls[0], /group-chat\/socket\/online-users\?cursor=0&size=100$/);
+  assert.match(calls[0], /group-chat\/socket\/online-users\?cursor=0&size=100&withUserInfo=true$/);
 });
 
 test('readOnlineMetaBotsFromSocketPresence throws when API envelope is not successful', async () => {

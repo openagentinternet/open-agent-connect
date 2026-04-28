@@ -1,5 +1,5 @@
 const DEFAULT_SOCKET_PRESENCE_API_BASE = 'https://api.idchat.io';
-const DEFAULT_SOCKET_PRESENCE_SIZE = 10;
+const DEFAULT_SOCKET_PRESENCE_SIZE = 20;
 const MAX_SOCKET_PRESENCE_SIZE = 100;
 
 interface SocketPresenceEnvelope {
@@ -8,11 +8,17 @@ interface SocketPresenceEnvelope {
   data?: unknown;
 }
 
+interface SocketPresenceUserInfo {
+  name?: unknown;
+  bio?: unknown;
+}
+
 interface SocketPresenceUserRow {
   globalMetaId?: unknown;
   lastSeenAt?: unknown;
   lastSeenAgoSeconds?: unknown;
   deviceCount?: unknown;
+  userInfo?: unknown;
 }
 
 export interface OnlineMetaBotDirectoryItem {
@@ -21,6 +27,8 @@ export interface OnlineMetaBotDirectoryItem {
   lastSeenAgoSeconds: number;
   deviceCount: number;
   online: true;
+  name: string;
+  goal: string;
 }
 
 export interface ReadOnlineMetaBotsFromSocketPresenceOptions {
@@ -66,11 +74,26 @@ function normalizeListSize(value: number | undefined): number {
   );
 }
 
+function normalizeBioGoal(bio: unknown): string {
+  const bioStr = normalizeText(bio);
+  if (!bioStr) return '';
+  try {
+    const parsed = JSON.parse(bioStr) as Record<string, unknown>;
+    return normalizeText(parsed.goal);
+  } catch {
+    return bioStr;
+  }
+}
+
 function normalizeUserRow(row: SocketPresenceUserRow): OnlineMetaBotDirectoryItem | null {
   const globalMetaId = normalizeText(row.globalMetaId);
   if (!globalMetaId) {
     return null;
   }
+
+  const userInfo = row.userInfo && typeof row.userInfo === 'object'
+    ? row.userInfo as SocketPresenceUserInfo
+    : {} as SocketPresenceUserInfo;
 
   return {
     globalMetaId,
@@ -78,6 +101,8 @@ function normalizeUserRow(row: SocketPresenceUserRow): OnlineMetaBotDirectoryIte
     lastSeenAgoSeconds: normalizeInteger(row.lastSeenAgoSeconds),
     deviceCount: normalizeInteger(row.deviceCount),
     online: true,
+    name: normalizeText(userInfo.name),
+    goal: normalizeBioGoal(userInfo.bio),
   };
 }
 
@@ -119,6 +144,7 @@ export async function readOnlineMetaBotsFromSocketPresence(
   const url = new URL(`${normalizeApiBaseUrl(options.apiBaseUrl)}/group-chat/socket/online-users`);
   url.searchParams.set('cursor', '0');
   url.searchParams.set('size', String(size));
+  url.searchParams.set('withUserInfo', 'true');
 
   const response = await fetchImpl(url.toString());
   if (!response.ok) {

@@ -111,7 +111,7 @@ test('runCli dispatches `metabot network services --online` and preserves the li
   });
 });
 
-test('runCli dispatches `metabot network bots --online --limit` and preserves the list envelope', async () => {
+test('runCli dispatches `metabot network bots --online --limit` and renders a markdown table', async () => {
   const stdout = [];
   const calls = [];
 
@@ -128,6 +128,8 @@ test('runCli dispatches `metabot network bots --online --limit` and preserves th
             bots: [
               {
                 globalMetaId: 'idq1onlinebot',
+                name: 'TestBot',
+                goal: 'help users',
                 lastSeenAgoSeconds: 12,
                 deviceCount: 1,
               },
@@ -140,21 +142,9 @@ test('runCli dispatches `metabot network bots --online --limit` and preserves th
 
   assert.equal(exitCode, 0);
   assert.deepEqual(calls, [{ online: true, limit: 10 }]);
-  assert.deepEqual(JSON.parse(stdout.join('').trim()), {
-    ok: true,
-    state: 'success',
-    data: {
-      source: 'socket_presence',
-      total: 1,
-      bots: [
-        {
-          globalMetaId: 'idq1onlinebot',
-          lastSeenAgoSeconds: 12,
-          deviceCount: 1,
-        },
-      ],
-    },
-  });
+  const output = stdout.join('');
+  assert.ok(output.includes('| # | name | globalmetaid | bio | Last Seen |'), 'has table header');
+  assert.ok(output.includes('| 1 | TestBot | idq1onlinebot | help users | 12s 🟢 |'), 'has bot row');
 });
 
 test('runCli rejects `metabot network bots --limit` when value is not a positive integer', async () => {

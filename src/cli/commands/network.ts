@@ -1,4 +1,4 @@
-import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
+import { commandFailed, commandSuccess, type MetabotCommandResult } from '../../core/contracts/commandResult';
 import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFlagValue } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
@@ -44,10 +44,30 @@ export async function runNetworkCommand(args: string[], context: CliRuntimeConte
       return parsedLimit.error;
     }
 
-    return handler({
+    const result = await handler({
       online: hasFlag(args, '--online') ? true : undefined,
       limit: parsedLimit.limit,
     });
+
+    if (result.ok && result.state === 'success') {
+      const data = result.data as { bots?: Array<{ globalMetaId: string; name?: string; goal?: string; lastSeenAgoSeconds?: number }> };
+      const bots = Array.isArray(data?.bots) ? data.bots : [];
+      const rows = ['| # | name | globalmetaid | bio | Last Seen |', '|---|------|-------------|-----|-----------|'];
+      for (let i = 0; i < bots.length; i++) {
+        const bot = bots[i];
+        const name = bot.name ?? '';
+        const gmid = bot.globalMetaId;
+        const bio = bot.goal ?? '';
+        const lastSeen = `${bot.lastSeenAgoSeconds ?? 0}s 🟢`;
+        rows.push(`| ${i + 1} | ${name} | ${gmid} | ${bio} | ${lastSeen} |`);
+      }
+      context.stdout.write(rows.join('\n') + '\n');
+      const rendered = commandSuccess(data) as MetabotCommandResult<unknown> & { __rawStdoutHandled?: boolean };
+      rendered.__rawStdoutHandled = true;
+      return rendered;
+    }
+
+    return result;
   }
 
   if (args[0] !== 'sources') {
