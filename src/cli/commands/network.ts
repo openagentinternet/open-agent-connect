@@ -58,7 +58,7 @@ export async function runNetworkCommand(args: string[], context: CliRuntimeConte
         const bot = bots[i];
         const name = truncate(bot.name ?? '', 20);
         const gmid = bot.globalMetaId;
-        const bio = truncate(bot.goal ?? '', 30);
+        const bio = truncate(bot.goal ?? '', 40);
         const lastSeen = `${bot.lastSeenAgoSeconds ?? 0}s 🟢`;
         rows.push(`| ${i + 1} | ${name} | ${gmid} | ${bio} | ${lastSeen} |`);
       }
