@@ -4,12 +4,15 @@ export interface HubServiceDirectoryEntry {
   displayName: string;
   description: string;
   providerLabel: string;
+  providerName: string;
+  providerGmid: string;
   priceLabel: string;
   capabilityLabel: string;
   statusLabel: string;
   statusTone: 'online' | 'recent' | 'offline';
   updatedAtMs: number | null;
   lastSeenAtMs: number | null;
+  lastSeenAgoSeconds: number | null;
 }
 
 export interface HubServiceDirectoryViewModel {
@@ -50,7 +53,11 @@ export function buildHubServiceDirectoryViewModel(input: {
     const displayName = normalizeText(service.displayName)
       || normalizeText(service.serviceName)
       || 'Unnamed MetaBot service';
-    const providerLabel = normalizeText(service.providerGlobalMetaId) || 'Unknown provider';
+    const providerName = normalizeText(service.providerName);
+    const providerGmid = normalizeText(service.providerGlobalMetaId);
+    const providerLabel = providerName && providerGmid
+      ? `${providerName}(${providerGmid})`
+      : providerGmid || providerName || 'Unknown provider';
     const description = normalizeText(service.description) || 'No service description published yet.';
     const priceAmount = normalizeText(service.price);
     const priceCurrency = normalizeText(service.currency);
@@ -61,18 +68,23 @@ export function buildHubServiceDirectoryViewModel(input: {
     const updatedAtMs = normalizeTimestamp(service.updatedAt);
     const lastSeenAtMs = normalizeTimestamp(service.lastSeenSec ?? service.lastSeenAt ?? service.lastSeen);
 
+    const lastSeenAgoSeconds = typeof service.lastSeenAgoSeconds === 'number' ? service.lastSeenAgoSeconds as number : null;
+
     entries.push({
       key,
       servicePinId,
       displayName,
       description,
       providerLabel,
+      providerName,
+      providerGmid,
       priceLabel: [priceAmount, priceCurrency].filter(Boolean).join(' ') || 'Free / unknown',
       capabilityLabel,
       statusLabel: online ? 'Online now' : lastSeenAtMs ? 'Recently seen' : 'Offline',
       statusTone: online ? 'online' : lastSeenAtMs ? 'recent' : 'offline',
       updatedAtMs,
       lastSeenAtMs,
+      lastSeenAgoSeconds,
     });
   }
 
