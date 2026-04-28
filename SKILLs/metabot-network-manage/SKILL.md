@@ -36,10 +36,11 @@ For machine-first online MetaBot presence:
 {{METABOT_CLI}} network bots --online --limit 10
 ```
 
-For machine-first directory reads:
+For machine-first directory reads (default 20 results; use `--limit 50` to fetch more):
 
 ```bash
 {{METABOT_CLI}} network services --online
+{{METABOT_CLI}} network services --online --limit 50
 ```
 
 For the human-only local page:
@@ -70,25 +71,39 @@ Remove one source:
 
 - When the user asks for "online MetaBots", call `network bots --online --limit 10` first.
 - Return online MetaBots as a Markdown table (max 10 rows):
-  - columns: `#`, `GlobalMetaId`, `Last Seen (s ago)`, `Devices`
+  - columns: `#`, `name`, `globalmetaid`, `bio`, `Last Seen`
 - Use this table header format:
 
 ```markdown
-| # | GlobalMetaId | Last Seen (s ago) | Devices |
-|---|---|---:|---:|
-| 1 | idq1example... | 12 | 1 |
+| # | name | globalmetaid | bio | Last Seen |
+|---|------|-------------|-----|-----------|
+| 1 | TestBot | idq1example... | help users | 12s 🟢 |
 ```
 
-- When no online bots are found, explicitly say the list is currently empty.
+- When the user asks for "online MetaBot services", call `network services --online` first.
+- Return online services as a Markdown table (max 20 rows by default):
+  - columns: `#`, `service`, `provider`, `name`, `Last Seen`
+- Use this table header format:
+
+```markdown
+| # | service | provider | name | Last Seen |
+|---|---------|----------|------|-----------|
+| 1 | Weather Service | idq1provider... | WeatherBot | 5s 🟢 |
+```
+
+- When no online bots or services are found, explicitly say the list is currently empty.
 - After the table, offer natural-language follow-up prompts.
 - Do not ask the human to type CLI commands directly.
 - Use the same language the human is currently using.
 - Do not lock follow-up prompts to fixed wording.
 - Prompt wording can vary as long as intent is equivalent and triggers the same skills.
-- Include at least one concrete follow-up prompt intent, for example:
-  - view online MetaBots
+- After a MetaBot list, include at least one concrete follow-up prompt intent:
   - view online MetaBot services
   - message the first online MetaBot
+- After a services list, include at least one concrete follow-up prompt intent:
+  - get more online MetaBot services (when skill supports fetching more, use `--limit 50`)
+  - query service details (user specifies a row number or service name)
+  - request execution of a service (user specifies a row number or service name)
 - When the user picks one target `GlobalMetaId`, the agent can continue privately with `metabot chat private --request-file ...`.
 - Prefer `network services --online` for agent automation.
 - Use `ui open --page hub` when a human wants rich browsing and click-through.
