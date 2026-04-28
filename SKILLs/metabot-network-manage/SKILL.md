@@ -70,9 +70,8 @@ Remove one source:
 ## Expectations
 
 - When the user asks for "online MetaBots", call `network bots --online --limit 10` first.
-- Return online MetaBots as a Markdown table (max 10 rows):
-  - columns: `#`, `name`, `globalmetaid`, `bio`, `Last Seen`
-- Use this table header format:
+- Return a Markdown table (max 10 rows): copy the **exact** rows from CLI stdout — do not reformat, summarise, or re-order.
+- The CLI always produces this exact header; preserve it verbatim (including the `bio` and `🟢` columns even when bio cells are empty):
 
 ```markdown
 | # | name | globalmetaid | bio | Last Seen |
@@ -81,9 +80,8 @@ Remove one source:
 ```
 
 - When the user asks for "online MetaBot services", call `network services --online` first.
-- Return online services as a Markdown table (max 20 rows by default):
-  - columns: `#`, `service`, `provider`, `name`, `Last Seen`
-- Use this table header format:
+- Return a Markdown table (max 20 rows by default): copy the **exact** rows from CLI stdout — do not reformat, summarise, or re-order.
+- The CLI always produces this exact header; preserve it verbatim (including the `🟢` column):
 
 ```markdown
 | # | service | provider | name | Last Seen |
