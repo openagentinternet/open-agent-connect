@@ -124,7 +124,6 @@ set -euo pipefail
 
 : "${OAC_HOST:=claude-code}"
 OAC_REPO="${OAC_REPO:-openagentinternet/open-agent-connect}"
-OAC_BRANCH="${OAC_BRANCH:-main}"
 
 case "$OAC_HOST" in
   codex|claude-code|openclaw)
@@ -149,11 +148,16 @@ command -v tar >/dev/null 2>&1 || {
 }
 
 OAC_TMP_DIR="$(mktemp -d)"
-OAC_ARCHIVE="$OAC_TMP_DIR/open-agent-connect.tar.gz"
-OAC_ARCHIVE_URL="https://github.com/$OAC_REPO/archive/refs/heads/$OAC_BRANCH.tar.gz"
+OAC_ARCHIVE="$OAC_TMP_DIR/oac-${OAC_HOST_PACK}.tar.gz"
+
+if [ -n "${OAC_VERSION:-}" ]; then
+  OAC_ARCHIVE_URL="https://github.com/$OAC_REPO/releases/download/$OAC_VERSION/oac-${OAC_HOST_PACK}.tar.gz"
+else
+  OAC_ARCHIVE_URL="https://github.com/$OAC_REPO/releases/latest/download/oac-${OAC_HOST_PACK}.tar.gz"
+fi
 
 if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$OAC_ARCHIVE_URL" -o "$OAC_ARCHIVE"
+  curl -fsSL --retry 3 --retry-delay 2 "$OAC_ARCHIVE_URL" -o "$OAC_ARCHIVE"
 elif command -v wget >/dev/null 2>&1; then
   wget -qO "$OAC_ARCHIVE" "$OAC_ARCHIVE_URL"
 else
@@ -162,14 +166,13 @@ else
 fi
 
 tar -xzf "$OAC_ARCHIVE" -C "$OAC_TMP_DIR"
-OAC_ARCHIVE_ROOT="$(find "$OAC_TMP_DIR" -mindepth 1 -maxdepth 1 -type d -name 'open-agent-connect-*' | head -n 1)"
 
-[ -n "$OAC_ARCHIVE_ROOT" ] && [ -d "$OAC_ARCHIVE_ROOT/skillpacks/$OAC_HOST_PACK" ] || {
-  echo "Packaged host skillpack not found in GitHub archive." >&2
+[ -d "$OAC_TMP_DIR/$OAC_HOST_PACK" ] || {
+  echo "Host pack directory not found after extraction." >&2
   exit 1
 }
 
-cd "$OAC_ARCHIVE_ROOT/skillpacks/$OAC_HOST_PACK"
+cd "$OAC_TMP_DIR/$OAC_HOST_PACK"
 ./install.sh
 
 export PATH="$HOME/.metabot/bin:$PATH"
