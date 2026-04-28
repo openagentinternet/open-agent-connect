@@ -58,7 +58,7 @@ test('readChainDirectoryWithFallback returns chain-backed online services withou
           },
         });
       }
-      if (value === 'https://api.idchat.io/group-chat/socket/online-users?cursor=0&size=100') {
+      if (value === 'https://api.idchat.io/group-chat/socket/online-users?cursor=0&size=100&withUserInfo=true') {
         return jsonResponse({
           code: 0,
           data: {
@@ -109,7 +109,7 @@ test('readChainDirectoryWithFallback falls back to seeded services when chain di
     },
     fetchImpl: async (url) => {
       const value = String(url);
-      if (value === 'https://api.idchat.io/group-chat/socket/online-users?cursor=0&size=100') {
+      if (value === 'https://api.idchat.io/group-chat/socket/online-users?cursor=0&size=100&withUserInfo=true') {
         return jsonResponse({
           code: 0,
           data: {
@@ -183,7 +183,7 @@ test('readChainDirectoryWithFallback keeps visible services and marks them offli
           },
         });
       }
-      if (value === 'https://api.idchat.io/group-chat/socket/online-users?cursor=0&size=100') {
+      if (value === 'https://api.idchat.io/group-chat/socket/online-users?cursor=0&size=100&withUserInfo=true') {
         throw new Error('socket presence unavailable');
       }
       throw new Error(`Unexpected URL ${value}`);
@@ -240,7 +240,7 @@ test('readChainDirectoryWithFallback throws when onlineOnly is requested and soc
             },
           });
         }
-        if (value === 'https://api.idchat.io/group-chat/socket/online-users?cursor=0&size=100') {
+        if (value === 'https://api.idchat.io/group-chat/socket/online-users?cursor=0&size=100&withUserInfo=true') {
           throw new Error('socket presence unavailable');
         }
         throw new Error(`Unexpected URL ${value}`);
