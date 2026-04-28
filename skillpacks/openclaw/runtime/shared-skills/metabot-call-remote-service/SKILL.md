@@ -119,7 +119,9 @@ Before any paid remote call, show the provider, service, price, currency, and wa
 - `trace watch` can legally show `timeout` and later `remote_received` / `completed` in the same follow-up. Do not stop at the first `timeout` line if the command is still running.
 - When `trace watch` ends with `completed`, immediately call `metabot trace get --trace-id ...`.
 - If `trace get` returns `resultText`, surface that remote result verbatim. Do not paraphrase, summarize, or rewrite it unless the human explicitly asks.
-- Recommend `metabot ui open --page trace --trace-id ...` when timeout appears, clarification is requested, manual action is required, or the user asks for deeper details.
+- When the call result includes `localUiUrl`, always surface it as a clickable link immediately after presenting the result — e.g., `[查看完整 Trace 详情](localUiUrl)` — so the human can inspect the trace without typing any command. Do not hide this link behind a "do you want to view?" question.
+- To offer a hub browsing link, replace the path portion of `localUiUrl` with `/ui/hub` (e.g., `http://127.0.0.1:52488/ui/hub`).
+- Recommend `metabot ui open --page trace --trace-id ...` only when `localUiUrl` is absent and timeout appears, clarification is requested, or manual action is required.
 - If `trace get` returns `ratingRequestText`, treat it as the remote MetaBot explicitly asking for DACT T-stage closure.
 - Unless the human asked to skip follow-up, publish one concise buyer-side rating with `metabot services rate --request-file ...`.
 - If the human names BTC (`btc`, `比特币`, `bitcoin`) for that rating write, use `metabot services rate --request-file ... --chain btc`; otherwise keep default `mvc`.
@@ -127,6 +129,19 @@ Before any paid remote call, show the provider, service, price, currency, and wa
 - If the rating command returns `ratingMessageSent: false`, do not claim full closure. Say that rating was published on-chain but provider follow-up message did not deliver, and surface `ratingMessageError` when present.
 - `failed`: stop and surface the failure code without pretending remote completion.
 - `manual_action_required`: pause automation, surface the returned local UI URL, and suggest trace page follow-up.
+
+## After Delivery
+
+- After surfacing the remote result, always offer natural-language follow-up prompts.
+- Do not ask the human to type CLI commands directly.
+- Use the same language the human is currently using.
+- Do not lock follow-up prompts to fixed wording; vary phrasing naturally.
+- Include at least one context-aware follow-up based on the service just called — for example:
+  - If the service returned weather, suggest querying another city.
+  - If the service returned a document analysis, suggest analysing another file.
+- Include at least one structural follow-up pointing to broader discovery — for example:
+  - Browse the hub page for more available services (link to `localUiUrl` base + `/ui/hub`).
+  - View online MetaBot services (`network services --online`).
 
 ## In Scope
 
