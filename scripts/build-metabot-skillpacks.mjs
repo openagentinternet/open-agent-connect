@@ -483,23 +483,16 @@ async function copyRuntimeUiAssets(repoRoot, runtimeRoot) {
     );
   }
 
-  const viewerChatAssetPaths = [
-    ['components', 'id-chat-msg-list.js'],
-    ['components', 'id-chat-bubble.js'],
-    ['stores', 'chat', 'simple-talk.js'],
-  ];
-  for (const assetPath of viewerChatAssetPaths) {
+  // Copy all metaapps (static files not compiled by tsc)
+  const sourceMetaappsRoot = path.join(repoRoot, 'src', 'ui', 'metaapps');
+  const metaappEntries = await fs.readdir(sourceMetaappsRoot, { withFileTypes: true });
+  for (const entry of metaappEntries) {
+    if (!entry.isDirectory()) continue;
     await copyIfPresent(
-      path.join(repoRoot, 'src', 'ui', 'metaapps', 'chat', 'idframework', ...assetPath),
-      path.join(runtimeRoot, 'dist', 'ui', 'metaapps', 'chat', 'idframework', ...assetPath),
+      path.join(sourceMetaappsRoot, entry.name),
+      path.join(runtimeRoot, 'dist', 'ui', 'metaapps', entry.name),
     );
   }
-
-  // Copy full buzz metaapp (static files not compiled by tsc)
-  await copyIfPresent(
-    path.join(repoRoot, 'src', 'ui', 'metaapps', 'buzz'),
-    path.join(runtimeRoot, 'dist', 'ui', 'metaapps', 'buzz'),
-  );
 }
 
 async function ensureBundledRuntime(repoRoot, runtimeRoot, compatibilityManifest, dependencyNames) {
