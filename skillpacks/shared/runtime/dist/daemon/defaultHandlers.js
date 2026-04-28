@@ -59,7 +59,6 @@ const masterServicePublish_1 = require("../core/master/masterServicePublish");
 const masterServiceSchema_1 = require("../core/master/masterServiceSchema");
 const masterSuggestState_1 = require("../core/master/masterSuggestState");
 const masterTriggerEngine_1 = require("../core/master/masterTriggerEngine");
-const DEFAULT_CALLER_FOREGROUND_WAIT_MS = 15_000;
 const DEFAULT_CALLER_BACKGROUND_WAIT_MS = 30 * 60 * 1000;
 const DEFAULT_TRACE_WATCH_WAIT_MS = 75_000;
 const TRACE_WATCH_POLL_INTERVAL_MS = 500;
@@ -1962,35 +1961,6 @@ async function applyMasterCallerReplyResult(input) {
         session,
     };
 }
-async function applyMasterCallerForegroundTimeout(input) {
-    const trace = buildMasterCallerTraceAfterReply({
-        baseTrace: input.trace,
-        pendingAsk: input.pendingAsk,
-        latestEvent: 'timeout',
-        publicStatus: 'timeout',
-        taskRunState: 'timeout',
-    });
-    const artifacts = await exportAndPersistMasterCallerTrace({
-        trace,
-        runtimeStateStore: input.runtimeStateStore,
-        pendingAsk: input.pendingAsk,
-        requestPath: input.requestPath,
-        messagePinId: input.messagePinId,
-        outcome: {
-            type: 'timeout',
-            timestamp: Date.now(),
-        },
-    });
-    return {
-        trace,
-        artifacts,
-        session: {
-            state: 'timeout',
-            publicStatus: 'timeout',
-            event: 'timeout',
-        },
-    };
-}
 async function loadMasterContinuationTrace(input) {
     const runtimeState = await input.runtimeStateStore.readState();
     return runtimeState.traces.find((entry) => entry.traceId === input.traceId) ?? input.fallbackTrace;
@@ -2182,38 +2152,6 @@ async function applyCallerReplyResult(input) {
         mutation,
     };
 }
-async function applyCallerForegroundTimeout(input) {
-    const mutation = input.sessionEngine.markForegroundTimeout({
-        session: input.session,
-        taskRun: input.taskRun,
-    });
-    const publicStatus = await persistSessionMutation(input.sessionStateStore, mutation);
-    await appendA2ATranscriptItems(input.sessionStateStore, [
-        {
-            id: `${input.trace.traceId}-caller-timeout`,
-            sessionId: input.session.sessionId,
-            taskRunId: mutation.taskRun.runId,
-            timestamp: mutation.session.updatedAt,
-            type: 'status_note',
-            sender: 'system',
-            content: 'Foreground wait ended before the remote MetaBot returned. The task may still continue remotely.',
-            metadata: {
-                publicStatus: publicStatus.status,
-                event: mutation.event,
-            },
-        },
-    ]);
-    const rebuilt = await rebuildTraceArtifactsFromSessionState({
-        baseTrace: input.trace,
-        runtimeStateStore: input.runtimeStateStore,
-        sessionStateStore: input.sessionStateStore,
-    });
-    return {
-        trace: rebuilt.trace,
-        artifacts: rebuilt.artifacts,
-        mutation,
-    };
-}
 function createDefaultMetabotDaemonHandlers(input) {
     const secretStore = input.secretStore ?? (0, fileSecretStore_1.createFileSecretStore)(input.homeDir);
     const signer = input.signer ?? (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore });
@@ -2237,6 +2175,7 @@ function createDefaultMetabotDaemonHandlers(input) {
     const callerReplyWaiter = input.callerReplyWaiter ?? (0, metawebReplyWaiter_1.createSocketIoMetaWebReplyWaiter)();
     const masterReplyWaiter = input.masterReplyWaiter ?? null;
     const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
+    const getDaemonRecord = input.getDaemonRecord;
     // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
     const pendingCallerReplyContinuations = new Map();
     const pendingMasterReplyContinuations = new Map();
@@ -2753,80 +2692,42 @@ function createDefaultMetabotDaemonHandlers(input) {
         let deliveryPinId = null;
         let structuredResponse = null;
         if (masterReplyWaiter) {
-            const reply = await masterReplyWaiter.awaitMasterReply({
-                callerGlobalMetaId: privateChatIdentity.globalMetaId,
-                callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
-                providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
-                providerChatPublicKey: peerChatPublicKey,
-                masterServicePinId: input.resolvedTarget.masterPinId,
-                requestId: input.pendingAsk.requestId,
-                traceId: input.traceId,
-                timeoutMs: DEFAULT_CALLER_FOREGROUND_WAIT_MS,
+            scheduleMasterReplyContinuation({
+                trace: updatedTrace,
+                pendingAsk: sentPendingAsk,
+                requestPath: outboundRequest.path,
+                messagePinId: messagePinId || null,
+                waiterInput: {
+                    callerGlobalMetaId: privateChatIdentity.globalMetaId,
+                    callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+                    providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
+                    providerChatPublicKey: peerChatPublicKey,
+                    masterServicePinId: input.resolvedTarget.masterPinId,
+                    requestId: input.pendingAsk.requestId,
+                    traceId: input.traceId,
+                    timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+                },
             });
-            if (reply.state === 'completed') {
-                const applied = await applyMasterCallerReplyResult({
-                    reply,
-                    trace: updatedTrace,
-                    runtimeStateStore,
-                    pendingAsk: sentPendingAsk,
-                    requestPath: outboundRequest.path,
+            const daemon = getDaemonRecord();
+            return (0, commandResult_1.commandWaiting)('ask_sent_awaiting_master', 'Request sent to master. Waiting for response...', 3000, {
+                localUiUrl: buildDaemonLocalUiUrl(daemon, '/ui/trace', { traceId: input.traceId }),
+                data: {
+                    traceId: input.traceId,
+                    requestId: input.pendingAsk.requestId,
                     messagePinId: messagePinId || null,
-                });
-                finalTrace = applied.trace;
-                finalArtifacts = applied.artifacts;
-                finalSession = applied.session;
-                structuredResponse = reply.response;
-                responseJson = reply.responseJson;
-                deliveryPinId = reply.deliveryPinId;
-                if (isAutoAsk) {
-                    await putMasterAutoFeedback({
-                        traceId: input.traceId,
-                        status: 'completed',
-                        masterKind: input.resolvedTarget.masterKind,
-                        masterServicePinId: input.resolvedTarget.masterPinId,
-                        updatedAt: reply.observedAt ?? Date.now(),
-                    });
-                }
-            }
-            else {
-                const timedOut = await applyMasterCallerForegroundTimeout({
-                    trace: updatedTrace,
-                    runtimeStateStore,
-                    pendingAsk: sentPendingAsk,
-                    requestPath: outboundRequest.path,
-                    messagePinId: messagePinId || null,
-                });
-                finalTrace = timedOut.trace;
-                finalArtifacts = timedOut.artifacts;
-                finalSession = timedOut.session;
-                if (isAutoAsk) {
-                    await putMasterAutoFeedback({
-                        traceId: input.traceId,
-                        status: 'timed_out',
-                        masterKind: input.resolvedTarget.masterKind,
-                        masterServicePinId: input.resolvedTarget.masterPinId,
-                        updatedAt: Date.now(),
-                    });
-                }
-                scheduleMasterReplyContinuation({
-                    trace: timedOut.trace,
-                    pendingAsk: sentPendingAsk,
-                    requestPath: outboundRequest.path,
-                    messagePinId: messagePinId || null,
-                    waiterInput: {
-                        callerGlobalMetaId: privateChatIdentity.globalMetaId,
-                        callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
-                        providerGlobalMetaId: input.resolvedTarget.providerGlobalMetaId,
-                        providerChatPublicKey: peerChatPublicKey,
-                        masterServicePinId: input.resolvedTarget.masterPinId,
-                        requestId: input.pendingAsk.requestId,
-                        traceId: input.traceId,
-                        timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+                    session: {
+                        state: 'requesting_remote',
+                        publicStatus: 'requesting_remote',
+                        event: 'request_sent',
                     },
-                });
-            }
+                    traceJsonPath: artifacts.traceJsonPath,
+                    traceMarkdownPath: artifacts.traceMarkdownPath,
+                    transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
+                },
+            });
         }
         return (0, commandResult_1.commandSuccess)({
+            localUiUrl: buildDaemonLocalUiUrl(getDaemonRecord(), '/ui/trace', { traceId: input.traceId }),
             traceId: input.traceId,
             requestId: input.pendingAsk.requestId,
             messagePinId: messagePinId || null,
@@ -3754,86 +3655,48 @@ function createDefaultMetabotDaemonHandlers(input) {
                     let deliveryPinId = null;
                     let structuredResponse = null;
                     if (masterReplyWaiter) {
-                        const reply = await masterReplyWaiter.awaitMasterReply({
-                            callerGlobalMetaId: privateChatIdentity.globalMetaId,
-                            callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
-                            providerGlobalMetaId: selectedTarget.providerGlobalMetaId,
-                            providerChatPublicKey: peerChatPublicKey,
-                            masterServicePinId: selectedTarget.masterPinId,
-                            requestId: pendingAsk.requestId,
-                            traceId,
-                            timeoutMs: DEFAULT_CALLER_FOREGROUND_WAIT_MS,
+                        scheduleMasterReplyContinuation({
+                            trace: updatedTrace,
+                            pendingAsk: {
+                                ...pendingAsk,
+                                confirmationState: 'sent',
+                                updatedAt: Date.now(),
+                                sentAt: Number.isFinite(pendingAsk.sentAt) ? pendingAsk.sentAt : Date.now(),
+                                messagePinId: messagePinId || null,
+                            },
+                            requestPath: outboundRequest.path,
+                            messagePinId: messagePinId || null,
+                            waiterInput: {
+                                callerGlobalMetaId: privateChatIdentity.globalMetaId,
+                                callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+                                providerGlobalMetaId: selectedTarget.providerGlobalMetaId,
+                                providerChatPublicKey: peerChatPublicKey,
+                                masterServicePinId: selectedTarget.masterPinId,
+                                requestId: pendingAsk.requestId,
+                                traceId,
+                                timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+                            },
                         });
-                        if (reply.state === 'completed') {
-                            const applied = await applyMasterCallerReplyResult({
-                                reply,
-                                trace: updatedTrace,
-                                runtimeStateStore,
-                                pendingAsk,
-                                requestPath: outboundRequest.path,
+                        const daemon = input.getDaemonRecord();
+                        return (0, commandResult_1.commandWaiting)('ask_sent_awaiting_master', 'Request sent to master. Waiting for response...', 3000, {
+                            localUiUrl: buildDaemonLocalUiUrl(daemon, '/ui/trace', { traceId }),
+                            data: {
+                                traceId,
+                                requestId: pendingAsk.requestId,
                                 messagePinId: messagePinId || null,
-                            });
-                            finalTrace = applied.trace;
-                            finalArtifacts = applied.artifacts;
-                            finalSession = applied.session;
-                            structuredResponse = reply.response;
-                            responseJson = reply.responseJson;
-                            deliveryPinId = reply.deliveryPinId;
-                            if (isAutoPreview) {
-                                await putMasterAutoFeedback({
-                                    traceId,
-                                    status: 'completed',
-                                    masterKind: pendingAsk.request.target.masterKind,
-                                    masterServicePinId: pendingAsk.request.target.masterServicePinId,
-                                    updatedAt: reply.observedAt ?? Date.now(),
-                                });
-                            }
-                        }
-                        else {
-                            const timedOut = await applyMasterCallerForegroundTimeout({
-                                trace: updatedTrace,
-                                runtimeStateStore,
-                                pendingAsk,
-                                requestPath: outboundRequest.path,
-                                messagePinId: messagePinId || null,
-                            });
-                            finalTrace = timedOut.trace;
-                            finalArtifacts = timedOut.artifacts;
-                            finalSession = timedOut.session;
-                            if (isAutoPreview) {
-                                await putMasterAutoFeedback({
-                                    traceId,
-                                    status: 'timed_out',
-                                    masterKind: pendingAsk.request.target.masterKind,
-                                    masterServicePinId: pendingAsk.request.target.masterServicePinId,
-                                    updatedAt: Date.now(),
-                                });
-                            }
-                            scheduleMasterReplyContinuation({
-                                trace: timedOut.trace,
-                                pendingAsk: {
-                                    ...pendingAsk,
-                                    confirmationState: 'sent',
-                                    updatedAt: Date.now(),
-                                    sentAt: Number.isFinite(pendingAsk.sentAt) ? pendingAsk.sentAt : Date.now(),
-                                    messagePinId: messagePinId || null,
+                                session: {
+                                    state: 'requesting_remote',
+                                    publicStatus: 'requesting_remote',
+                                    event: 'request_sent',
                                 },
-                                requestPath: outboundRequest.path,
-                                messagePinId: messagePinId || null,
-                                waiterInput: {
-                                    callerGlobalMetaId: privateChatIdentity.globalMetaId,
-                                    callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
-                                    providerGlobalMetaId: selectedTarget.providerGlobalMetaId,
-                                    providerChatPublicKey: peerChatPublicKey,
-                                    masterServicePinId: selectedTarget.masterPinId,
-                                    requestId: pendingAsk.requestId,
-                                    traceId,
-                                    timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
-                                },
-                            });
-                        }
+                                traceJsonPath: artifacts.traceJsonPath,
+                                traceMarkdownPath: artifacts.traceMarkdownPath,
+                                transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
+                            },
+                        });
                     }
                     return (0, commandResult_1.commandSuccess)({
+                        localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', { traceId }),
                         traceId,
                         requestId: pendingAsk.requestId,
                         messagePinId: messagePinId || null,
@@ -5021,63 +4884,48 @@ function createDefaultMetabotDaemonHandlers(input) {
                     const peerChatPublicKey = plan.service.providerGlobalMetaId === state.identity.globalMetaId
                         ? state.identity.chatPublicKey
                         : await resolvePeerChatPublicKey(plan.service.providerGlobalMetaId) ?? '';
-                    const reply = await callerReplyWaiter.awaitServiceReply({
-                        callerGlobalMetaId: privateChatIdentity.globalMetaId,
-                        callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
-                        providerGlobalMetaId: plan.service.providerGlobalMetaId,
-                        providerChatPublicKey: peerChatPublicKey,
-                        servicePinId: plan.service.servicePinId,
-                        paymentTxid,
-                        timeoutMs: DEFAULT_CALLER_FOREGROUND_WAIT_MS,
+                    // Schedule background continuation immediately (was previously only on timeout)
+                    scheduleCallerReplyContinuation({
+                        trace,
+                        sessionId: started.session.sessionId,
+                        waiterInput: {
+                            callerGlobalMetaId: privateChatIdentity.globalMetaId,
+                            callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+                            providerGlobalMetaId: plan.service.providerGlobalMetaId,
+                            providerChatPublicKey: peerChatPublicKey,
+                            servicePinId: plan.service.servicePinId,
+                            paymentTxid,
+                            timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+                        },
                     });
-                    if (reply.state === 'completed') {
-                        const applied = await applyCallerReplyResult({
-                            reply,
-                            session: started.session,
-                            taskRun: started.taskRun,
-                            sessionEngine,
-                            sessionStateStore,
-                            runtimeStateStore,
-                            trace,
-                        });
-                        responseTrace = applied.trace;
-                        responseArtifacts = applied.artifacts;
-                        responseSession = applied.mutation.session;
-                        responseTaskRun = applied.mutation.taskRun;
-                        responseEvent = applied.mutation.event;
-                        responsePublicStatus = 'completed';
-                        providerReplyText = reply.responseText;
-                        deliveryPinId = reply.deliveryPinId;
-                    }
-                    else if (reply.state === 'timeout') {
-                        const timedOut = await applyCallerForegroundTimeout({
-                            session: started.session,
-                            taskRun: started.taskRun,
-                            sessionEngine,
-                            sessionStateStore,
-                            runtimeStateStore,
-                            trace,
-                        });
-                        responseTrace = timedOut.trace;
-                        responseArtifacts = timedOut.artifacts;
-                        responseSession = timedOut.mutation.session;
-                        responseTaskRun = timedOut.mutation.taskRun;
-                        responseEvent = timedOut.mutation.event;
-                        responsePublicStatus = 'timeout';
-                        scheduleCallerReplyContinuation({
-                            trace: timedOut.trace,
-                            sessionId: timedOut.mutation.session.sessionId,
-                            waiterInput: {
-                                callerGlobalMetaId: privateChatIdentity.globalMetaId,
-                                callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
-                                providerGlobalMetaId: plan.service.providerGlobalMetaId,
-                                providerChatPublicKey: peerChatPublicKey,
-                                servicePinId: plan.service.servicePinId,
-                                paymentTxid,
-                                timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+                    // Return immediately — CLI will poll trace API for completion
+                    const daemon = input.getDaemonRecord();
+                    return (0, commandResult_1.commandWaiting)('order_sent_awaiting_provider', 'Order sent to provider. Waiting for response...', 3000, {
+                        localUiUrl: buildDaemonLocalUiUrl(daemon, '/ui/trace', { traceId: trace.traceId }),
+                        data: {
+                            traceId: trace.traceId,
+                            providerGlobalMetaId: plan.service.providerGlobalMetaId,
+                            serviceName: serviceDisplayName,
+                            service: plan.service,
+                            payment: plan.payment,
+                            confirmation: plan.confirmation,
+                            paymentTxid,
+                            orderPinId,
+                            session: {
+                                sessionId: started.session.sessionId,
+                                taskRunId: started.taskRun.runId,
+                                role: started.session.role,
+                                state: started.session.state,
+                                publicStatus: publicStatus.status,
+                                event: started.event,
+                                coworkSessionId: started.linkage.coworkSessionId,
+                                externalConversationId: started.linkage.externalConversationId,
                             },
-                        });
-                    }
+                            traceJsonPath: artifacts.traceJsonPath,
+                            traceMarkdownPath: artifacts.traceMarkdownPath,
+                            transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
+                        },
+                    });
                 }
                 return (0, commandResult_1.commandSuccess)({
                     traceId: responseTrace.traceId,
@@ -5103,6 +4951,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     traceJsonPath: responseArtifacts.traceJsonPath,
                     traceMarkdownPath: responseArtifacts.traceMarkdownPath,
                     transcriptMarkdownPath: responseArtifacts.transcriptMarkdownPath,
+                    localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', { traceId: responseTrace.traceId }),
                 });
             },
             rate: async (rawInput) => {

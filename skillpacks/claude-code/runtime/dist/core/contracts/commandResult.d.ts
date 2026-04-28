@@ -18,6 +18,8 @@ type CommandWaiting = CommandBase & {
     ok: false;
     state: 'waiting';
     pollAfterMs: number;
+    localUiUrl?: string;
+    data?: Record<string, unknown>;
 };
 type CommandManualActionRequired = CommandBase & {
     ok: false;
@@ -31,7 +33,10 @@ type CommandFailed = CommandBase & {
 export type MetabotCommandResult<T> = CommandSuccess<T> | CommandAwaitingConfirmation<T> | CommandWaiting | CommandManualActionRequired | CommandFailed;
 export declare const commandSuccess: <T>(data: T) => MetabotCommandResult<T>;
 export declare const commandAwaitingConfirmation: <T>(data: T) => MetabotCommandResult<T>;
-export declare const commandWaiting: (code: string, message: string, pollAfterMs: number) => MetabotCommandResult<never>;
+export declare const commandWaiting: (code: string, message: string, pollAfterMs: number, options?: {
+    localUiUrl?: string;
+    data?: Record<string, unknown>;
+}) => MetabotCommandResult<never>;
 export declare const commandManualActionRequired: (code: string, message: string, localUiUrl?: string) => MetabotCommandResult<never>;
 export declare const commandFailed: (code: string, message: string) => MetabotCommandResult<never>;
 export {};

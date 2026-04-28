@@ -13,12 +13,14 @@ const commandAwaitingConfirmation = (data) => ({
     data,
 });
 exports.commandAwaitingConfirmation = commandAwaitingConfirmation;
-const commandWaiting = (code, message, pollAfterMs) => ({
+const commandWaiting = (code, message, pollAfterMs, options) => ({
     ok: false,
     state: 'waiting',
     code,
     message,
-    pollAfterMs
+    pollAfterMs,
+    ...(options?.localUiUrl ? { localUiUrl: options.localUiUrl } : {}),
+    ...(options?.data ? { data: options.data } : {}),
 });
 exports.commandWaiting = commandWaiting;
 const commandManualActionRequired = (code, message, localUiUrl) => ({
