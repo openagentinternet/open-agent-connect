@@ -172,6 +172,11 @@ const WALLET_CHAIN_ALL_BTC_MVC_FLAG: CommandHelpFlag = {
   description: 'Select wallet balance scope. Defaults to all.',
 };
 
+const VERSION_FLAG: CommandHelpFlag = {
+  flag: '--version, -v',
+  description: 'Print the metabot CLI version and exit. Combine with --json for machine-readable output.',
+};
+
 export const ROOT_COMMAND_HELP: CommandHelpSpec = {
   commandPath: [],
   summary: 'Machine-first MetaBot CLI for local runtime, chain write, remote delegation, and local inspection.',
@@ -194,8 +199,9 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'ui', summary: 'Open local human-only HTML pages backed by the MetaBot runtime.' },
     { name: 'skills', summary: 'Resolve shared-default or host-specific skill contracts for install/runtime use.' },
   ],
-  optionalFlags: [HELP_JSON_FLAG],
+  optionalFlags: [VERSION_FLAG, HELP_JSON_FLAG],
   examples: [
+    'metabot --version',
     'metabot config get askMaster.enabled',
     'metabot services call --help',
     'metabot chat private --help --json',
@@ -427,6 +433,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'Check local daemon reachability, loaded identity state, and directory readiness.',
     usage: 'metabot doctor',
     successFields: [
+      'version',
       'checks',
       'daemon.baseUrl',
       'daemon.pid',

@@ -10,6 +10,7 @@ const { runCli } = require('../../dist/cli/main.js');
 const {
   commandSuccess,
 } = require('../../dist/core/contracts/commandResult.js');
+const pkg = require('../../package.json');
 
 function createHarness() {
   const stdout = [];
@@ -158,6 +159,7 @@ test('runCli dispatches `metabot doctor` and preserves the doctor envelope', asy
     ok: true,
     state: 'success',
     data: {
+      version: pkg.version,
       checks: [
         { code: 'daemon_reachable', ok: true },
         { code: 'identity_loaded', ok: false },
