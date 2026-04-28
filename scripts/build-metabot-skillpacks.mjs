@@ -494,6 +494,12 @@ async function copyRuntimeUiAssets(repoRoot, runtimeRoot) {
       path.join(runtimeRoot, 'dist', 'ui', 'metaapps', 'chat', 'idframework', ...assetPath),
     );
   }
+
+  // Copy full buzz metaapp (static files not compiled by tsc)
+  await copyIfPresent(
+    path.join(repoRoot, 'src', 'ui', 'metaapps', 'buzz'),
+    path.join(runtimeRoot, 'dist', 'ui', 'metaapps', 'buzz'),
+  );
 }
 
 async function ensureBundledRuntime(repoRoot, runtimeRoot, compatibilityManifest, dependencyNames) {
