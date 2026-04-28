@@ -4,6 +4,7 @@ dist/
 .DS_Store
 coverage/
 *.log
+.worktrees/
 
 !skillpacks/**/runtime/dist/
 !skillpacks/**/runtime/dist/**
