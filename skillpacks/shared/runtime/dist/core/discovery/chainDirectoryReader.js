@@ -104,6 +104,8 @@ function decorateServicesWithSocketPresence(input) {
             online: Boolean(onlineBot),
             lastSeenSec: normalizeLastSeenSec(lastSeenAt),
             lastSeenAt,
+            lastSeenAgoSeconds: typeof onlineBot?.lastSeenAgoSeconds === 'number' ? onlineBot.lastSeenAgoSeconds : null,
+            providerName: onlineBot?.name ?? '',
         };
     });
     if (input.onlineOnly) {

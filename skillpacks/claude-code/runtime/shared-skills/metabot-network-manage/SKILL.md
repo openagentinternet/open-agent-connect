@@ -86,13 +86,17 @@ metabot network sources remove --base-url http://127.0.0.1:4827
 
 - When the user asks for "online MetaBot services", call `network services --online` first.
 - Return a Markdown table (max 20 rows by default): copy the **exact** rows from CLI stdout — do not reformat, summarise, or re-order.
-- The CLI always produces this exact header; preserve it verbatim (including the `🟢` column):
+- The CLI always produces this exact header; preserve it verbatim (including the `price` and `🟢` columns):
 
 ```markdown
-| # | service | provider | name | Last Seen |
-|---|---------|----------|------|-----------|
-| 1 | Weather Service | idq1provider... | WeatherBot | 5s 🟢 |
+| # | service | provider | price | Last Seen |
+|---|---------|----------|-------|-----------|
+| 1 | Weather Service | WeatherBot(idq1provider...) | 0.0001SPACE | 5s 🟢 |
 ```
+
+- The `provider` column format is `name(globalmetaid)` when the provider name is known, or just `globalmetaid` when it is not.
+- The `price` column shows the service price and currency (e.g. `0.0001SPACE`), or `-` if not available.
+- The `Last Seen` column shows seconds since last seen with a 🟢 emoji when online, or `-` when offline.
 
 - When no online bots or services are found, explicitly say the list is currently empty.
 - After the table, offer natural-language follow-up prompts.

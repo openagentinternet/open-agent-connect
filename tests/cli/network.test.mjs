@@ -109,8 +109,9 @@ test('runCli dispatches `metabot network services --online` and renders a markdo
   assert.equal(exitCode, 0);
   assert.deepEqual(calls, [{ online: true }]);
   const output = stdout.join('');
-  assert.ok(output.includes('| # | service | provider | name | Last Seen |'), 'has table header');
-  assert.ok(output.includes('| 1 | Weather Service | idq1provider | WeatherBot | 5s 🟢 |'), 'has service row');
+  assert.ok(output.includes('| # | service | provider | price | Last Seen |'), 'has table header');
+  assert.ok(output.includes('| 1 | Weather Service | WeatherBot(idq1provider) |'), 'has service row with provider name');
+  assert.ok(output.includes('5s 🟢 |'), 'has last seen');
 });
 
 test('runCli dispatches `metabot network bots --online --limit` and renders a markdown table', async () => {

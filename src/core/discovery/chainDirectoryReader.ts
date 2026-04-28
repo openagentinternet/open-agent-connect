@@ -147,7 +147,7 @@ function decorateServicesWithSocketPresence<T extends object>(input: {
   services: T[];
   onlineBots: OnlineMetaBotDirectoryItem[];
   onlineOnly: boolean;
-}): Array<T & { online: boolean; lastSeenSec: number | null; lastSeenAt: number | null }> {
+}): Array<T & { online: boolean; lastSeenSec: number | null; lastSeenAt: number | null; lastSeenAgoSeconds: number | null; providerName: string }> {
   const onlineIndex = buildOnlineMetaBotIndex(input.onlineBots);
   const decorated = input.services.map((service) => {
     const serviceRecord = service as Record<string, unknown>;
@@ -163,6 +163,8 @@ function decorateServicesWithSocketPresence<T extends object>(input: {
       online: Boolean(onlineBot),
       lastSeenSec: normalizeLastSeenSec(lastSeenAt),
       lastSeenAt,
+      lastSeenAgoSeconds: typeof onlineBot?.lastSeenAgoSeconds === 'number' ? onlineBot.lastSeenAgoSeconds : null,
+      providerName: onlineBot?.name ?? '',
     };
   });
 
@@ -179,7 +181,7 @@ async function applySocketPresenceToServices<T extends object>(input: {
   socketPresenceLimit: number;
   socketPresenceFailureMode?: SocketPresenceFailureMode;
   onlineOnly: boolean;
-}): Promise<Array<T & { online: boolean; lastSeenSec: number | null; lastSeenAt: number | null }>> {
+}): Promise<Array<T & { online: boolean; lastSeenSec: number | null; lastSeenAt: number | null; lastSeenAgoSeconds: number | null; providerName: string }>> {
   let onlineBots: OnlineMetaBotDirectoryItem[] = [];
   try {
     const onlineDirectory = await readOnlineMetaBotsFromSocketPresence({

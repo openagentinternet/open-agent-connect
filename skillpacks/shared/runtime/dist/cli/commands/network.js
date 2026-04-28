@@ -35,15 +35,19 @@ async function runNetworkCommand(args, context) {
             const allServices = Array.isArray(data?.services) ? data.services : [];
             const services = allServices.slice(0, limit);
             const truncate = (s, max) => s.length > max ? s.slice(0, max) + '...' : s;
-            const rows = ['| # | service | provider | name | Last Seen |', '|---|---------|----------|------|-----------|'];
+            const rows = ['| # | service | provider | price | Last Seen |', '|---|---------|----------|-------|-----------|'];
             for (let i = 0; i < services.length; i++) {
                 const svc = services[i];
                 const service = truncate(String(svc['displayName'] || svc['serviceName'] || ''), 30);
-                const provider = truncate(String(svc['providerGlobalMetaId'] || ''), 20);
-                const name = truncate(String(svc['providerName'] || ''), 20);
+                const gmid = String(svc['providerGlobalMetaId'] || '');
+                const name = String(svc['providerName'] || '');
+                const provider = name ? `${truncate(name, 20)}(${truncate(gmid, 20)})` : truncate(gmid, 30);
+                const priceVal = String(svc['price'] || '');
+                const currencyVal = String(svc['currency'] || '');
+                const price = priceVal ? `${priceVal}${currencyVal ? currencyVal : ''}` : '-';
                 const agoSec = typeof svc['lastSeenAgoSeconds'] === 'number' ? svc['lastSeenAgoSeconds'] : null;
                 const lastSeen = agoSec != null ? `${agoSec}s 🟢` : '-';
-                rows.push(`| ${i + 1} | ${service} | ${provider} | ${name} | ${lastSeen} |`);
+                rows.push(`| ${i + 1} | ${service} | ${provider} | ${price} | ${lastSeen} |`);
             }
             context.stdout.write(rows.join('\n') + '\n');
             const rendered = (0, commandResult_1.commandSuccess)(data);
