@@ -539,6 +539,91 @@ async function runDefaultBtcCreatePin(input: {
   };
 }
 
+export interface WalletTransferExecuteInput {
+  mnemonic: string;
+  path: string;
+  toAddress: string;
+  amountSatoshis: number;
+  feeRate?: number;
+}
+
+export interface WalletTransferExecuteResult {
+  txid: string;
+}
+
+export async function executeMvcTransfer(input: WalletTransferExecuteInput): Promise<WalletTransferExecuteResult> {
+  const feeRate = Number.isFinite(input.feeRate) && Number(input.feeRate) > 0 ? input.feeRate! : 1;
+  const { privateKey, address } = buildMvcPrivateKey(input.mnemonic, input.path);
+
+  const rawUtxos = await fetchMvcUtxos(address);
+  const utxos: SelectedMvcUtxo[] = rawUtxos.map((utxo) => ({
+    txId: utxo.txid,
+    outputIndex: utxo.outIndex,
+    satoshis: utxo.value,
+    address,
+    height: utxo.height,
+  }));
+
+  const SIMPLE_P2PKH_TX_BASE_SIZE = 96;
+  const picked = pickMvcUtxos(utxos, input.amountSatoshis, feeRate, SIMPLE_P2PKH_TX_BASE_SIZE);
+
+  const senderAddress = new mvc.Address(address, mvc.Networks.livenet as never);
+  const recipientAddress = new mvc.Address(input.toAddress, mvc.Networks.livenet as never);
+
+  const txComposer = new TxComposer();
+  txComposer.appendP2PKHOutput({ address: recipientAddress, satoshis: input.amountSatoshis });
+
+  for (const utxo of picked) {
+    txComposer.appendP2PKHInput({
+      address: senderAddress,
+      txId: utxo.txId,
+      outputIndex: utxo.outputIndex,
+      satoshis: utxo.satoshis,
+    });
+  }
+  txComposer.appendChangeOutput(senderAddress, feeRate);
+
+  for (let i = 0; i < txComposer.tx.inputs.length; i += 1) {
+    txComposer.unlockP2PKHInput(privateKey as never, i);
+  }
+
+  const txid = await broadcastMvcTx(txComposer.getRawHex());
+  return { txid };
+}
+
+export async function executeBtcTransfer(input: WalletTransferExecuteInput): Promise<WalletTransferExecuteResult> {
+  const feeRate = Number.isFinite(input.feeRate) && Number(input.feeRate) > 0 ? input.feeRate! : DEFAULT_BTC_WRITE_FEE_RATE;
+  const wallet = buildBtcWallet(input.mnemonic, input.path);
+  const address = wallet.getAddress();
+  const scriptType = (wallet as { getScriptType?: () => string }).getScriptType?.() ?? 'P2PKH';
+  const needRawTx = scriptType === 'P2PKH';
+  const utxos = await fetchBtcUtxos(address, needRawTx);
+
+  const signResult = wallet.signTx(SignType.SEND, {
+    utxos: utxos.map((utxo) => ({
+      txId: utxo.txId,
+      outputIndex: utxo.outputIndex,
+      satoshis: utxo.satoshis,
+      address: utxo.address,
+      rawTx: utxo.rawTx,
+      confirmed: utxo.confirmed,
+    })),
+    toInfo: {
+      address: input.toAddress,
+      satoshis: input.amountSatoshis,
+    },
+    feeRate,
+  } as never) as unknown as { rawTx?: string };
+
+  const rawTx = normalizeText(signResult?.rawTx);
+  if (!rawTx) {
+    throw new Error('BTC signTx(SEND) returned no raw transaction.');
+  }
+
+  const txid = await broadcastBtcTx(rawTx);
+  return { txid };
+}
+
 export function createLocalMnemonicSigner(input: {
   secretStore: SecretStore;
   mvcTransport?: LocalMnemonicSignerMvcTransport;

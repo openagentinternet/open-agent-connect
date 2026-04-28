@@ -172,6 +172,11 @@ const WALLET_CHAIN_ALL_BTC_MVC_FLAG: CommandHelpFlag = {
   description: 'Select wallet balance scope. Defaults to all.',
 };
 
+const VERSION_FLAG: CommandHelpFlag = {
+  flag: '--version, -v',
+  description: 'Print the metabot CLI version and exit. Combine with --json for machine-readable output.',
+};
+
 export const ROOT_COMMAND_HELP: CommandHelpSpec = {
   commandPath: [],
   summary: 'Machine-first MetaBot CLI for local runtime, chain write, remote delegation, and local inspection.',
@@ -194,8 +199,9 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'ui', summary: 'Open local human-only HTML pages backed by the MetaBot runtime.' },
     { name: 'skills', summary: 'Resolve shared-default or host-specific skill contracts for install/runtime use.' },
   ],
-  optionalFlags: [HELP_JSON_FLAG],
+  optionalFlags: [VERSION_FLAG, HELP_JSON_FLAG],
   examples: [
+    'metabot --version',
     'metabot config get askMaster.enabled',
     'metabot services call --help',
     'metabot chat private --help --json',
@@ -427,6 +433,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'Check local daemon reachability, loaded identity state, and directory readiness.',
     usage: 'metabot doctor',
     successFields: [
+      'version',
       'checks',
       'daemon.baseUrl',
       'daemon.pid',
@@ -582,12 +589,43 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['wallet'],
-    summary: 'Wallet commands for querying local identity balances and upcoming transfer actions.',
+    summary: 'Wallet commands for querying local identity balances and sending transfers.',
     usage: 'metabot wallet <subcommand>',
     subcommands: [
       { name: 'balance', summary: 'Query local wallet balances on supported chains.' },
+      { name: 'transfer', summary: 'Preview or execute a BTC or SPACE transfer to a target address.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['wallet', 'transfer'],
+    summary: 'Preview or execute a BTC or SPACE transfer to a target address. Without --confirm, returns a preview for confirmation. With --confirm, executes the transfer.',
+    usage: 'metabot wallet transfer --to <address> --amount <amount><UNIT> [--confirm]',
+    requiredFlags: [
+      { flag: '--to', value: '<address>', description: 'Recipient address.' },
+      { flag: '--amount', value: '<amount><UNIT>', description: 'Amount with currency unit: BTC or SPACE (case-insensitive). Example: 0.00001BTC, 1SPACE.' },
+    ],
+    optionalFlags: [
+      { flag: '--confirm', description: 'Execute the transfer. Omit to preview only.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'txid',
+      'explorerUrl',
+      'amount',
+      'toAddress',
+    ],
+    failureSemantics: [
+      'Returns awaiting_confirmation with preview data (fromAddress, currentBalance, toAddress, amount, estimatedFee) when --confirm is omitted.',
+      'Fails with invalid_argument when --to or --amount is missing, or the currency unit is not BTC or SPACE.',
+      'Fails with insufficient_balance when confirmed balance is below amount + estimated fee.',
+      'Fails with transfer_broadcast_failed when the network rejects the transaction.',
+    ],
+    examples: [
+      'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC',
+      'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC --confirm',
+      'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 1SPACE --confirm',
+    ],
   },
   {
     commandPath: ['wallet', 'balance'],

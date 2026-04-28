@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { commandFailed, type MetabotCommandResult } from '../core/contracts/commandResult';
+import { commandFailed, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
+import { CLI_VERSION } from './version';
 import { runDaemonCommand } from './commands/daemon';
 import { runDoctorCommand } from './commands/doctor';
 import { runIdentityCommand } from './commands/identity';
@@ -33,6 +34,25 @@ function writeJsonLine(context: ReturnType<typeof createCliRuntimeContext>, payl
   context.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
+function versionRequested(args: string[]): boolean {
+  return args.includes('--version') || args.includes('-v');
+}
+
+function writeResolvedVersion(
+  context: ReturnType<typeof createCliRuntimeContext>,
+  args: string[]
+): MetabotCommandResult<unknown> & { __rawStdoutHandled?: boolean } {
+  const output = args.includes('--json')
+    ? `${JSON.stringify({ version: CLI_VERSION }, null, 2)}\n`
+    : `metabot ${CLI_VERSION}\n`;
+  context.stdout.write(output);
+  const result = commandSuccess({ version: CLI_VERSION }) as MetabotCommandResult<unknown> & {
+    __rawStdoutHandled?: boolean;
+  };
+  result.__rawStdoutHandled = true;
+  return result;
+}
+
 export async function runCli(argv: string[], cliContext: CliContext = {}): Promise<number> {
   const context = createCliRuntimeContext(cliContext);
   context.dependencies = mergeCliDependencies(context);
@@ -41,7 +61,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
   let result: MetabotCommandResult<unknown>;
 
   try {
-    if (helpRequested(argv)) {
+    if (versionRequested(argv)) {
+      result = writeResolvedVersion(context, argv);
+    } else if (helpRequested(argv)) {
       result = writeResolvedHelp(context, argv);
     } else {
       switch (command) {

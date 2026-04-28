@@ -60,7 +60,7 @@ export interface CliDependencies {
   };
   wallet?: {
     balance?: (input: { chain: 'all' | 'mvc' | 'btc' }) => Awaitable<MetabotCommandResult<unknown>>;
-    transfer?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    transfer?: (input: { toAddress: string; amountRaw: string; confirm: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   trace?: {
     get?: (input: { traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;

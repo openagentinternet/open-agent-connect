@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
-import { commandFailed, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
+import { commandAwaitingConfirmation, commandFailed, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
 import type { AskMasterTriggerMode } from '../core/config/configTypes';
 import { createNetworkDirectoryEvolutionService } from '../core/evolution/service';
@@ -39,7 +39,11 @@ import {
 import { createProviderHeartbeatLoop } from '../core/provider/providerHeartbeatLoop';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
-import { createLocalMnemonicSigner } from '../core/signing/localMnemonicSigner';
+import {
+  createLocalMnemonicSigner,
+  executeMvcTransfer,
+  executeBtcTransfer,
+} from '../core/signing/localMnemonicSigner';
 import { normalizeChainWriteRequest } from '../core/chain/writePin';
 import type { Signer } from '../core/signing/signer';
 import { createMetabotDaemon } from '../daemon';
@@ -236,6 +240,51 @@ async function fetchBtcBalanceSnapshot(address: string): Promise<WalletBtcBalanc
     confirmedBtc,
     unconfirmedBtc,
   };
+}
+
+interface ParsedTransferAmount {
+  chain: 'mvc' | 'btc';
+  currency: 'BTC' | 'SPACE';
+  satoshis: number;
+}
+
+function parseTransferAmount(raw: string): ParsedTransferAmount {
+  const match = raw.trim().match(/^([\d.]+)\s*(btc|space)$/i);
+  if (!match) {
+    const hasUnit = /[a-z]/i.test(raw.trim());
+    if (!hasUnit) {
+      throw new Error('Missing currency unit. Append BTC or SPACE to the amount. Example: 0.00001BTC or 1SPACE.');
+    }
+    throw new Error(`Unsupported currency unit in "${raw}". Supported units: BTC, SPACE.`);
+  }
+  const amount = parseFloat(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error(`Invalid amount "${match[1]}". Must be a positive number.`);
+  }
+  const unit = match[2].toUpperCase() as 'BTC' | 'SPACE';
+  return {
+    chain: unit === 'BTC' ? 'btc' : 'mvc',
+    currency: unit,
+    satoshis: Math.round(amount * 1e8),
+  };
+}
+
+async function fetchTransferFeeRate(chain: 'mvc' | 'btc'): Promise<number> {
+  const defaultRate = chain === 'btc' ? 2 : 1;
+  try {
+    const url = chain === 'btc'
+      ? `${METALET_HOST}/wallet-api/v3/btc/fee/summary?net=${CHAIN_NET}`
+      : `${METALET_HOST}/wallet-api/v4/mvc/fee/summary?net=${CHAIN_NET}`;
+    const response = await fetch(url);
+    const json = await response.json() as { code?: number; data?: { list?: Array<{ title?: string; feeRate?: number }> } };
+    if (json?.code !== 0) return defaultRate;
+    const list = json?.data?.list ?? [];
+    const avg = list.find((t) => /avg/i.test(String(t?.title ?? '')));
+    const rate = toFiniteNumber(avg?.feeRate ?? list[0]?.feeRate);
+    return rate > 0 ? rate : defaultRate;
+  } catch {
+    return defaultRate;
+  }
 }
 
 function parseDaemonPort(value: string | undefined): number | null {
@@ -1541,6 +1590,106 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           return commandFailed(
             'wallet_balance_query_failed',
             error instanceof Error ? error.message : String(error)
+          );
+        }
+      },
+      transfer: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const runtimeStateStore = createRuntimeStateStore(homeDir);
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
+        }
+
+        let parsed: ParsedTransferAmount;
+        try {
+          parsed = parseTransferAmount(input.amountRaw);
+        } catch (error) {
+          return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
+        }
+
+        const minSatoshis = parsed.chain === 'btc' ? 546 : 600;
+        if (parsed.satoshis < minSatoshis) {
+          return commandFailed('invalid_argument', `Amount is below the minimum of ${minSatoshis} satoshis for ${parsed.currency}.`);
+        }
+
+        const fromAddress = parsed.chain === 'btc'
+          ? normalizeEnvText(state.identity.btcAddress)
+          : normalizeEnvText(state.identity.mvcAddress);
+        if (!fromAddress) {
+          return commandFailed('identity_address_missing', `Current identity has no ${parsed.chain === 'btc' ? 'btcAddress' : 'mvcAddress'}.`);
+        }
+
+        const feeRate = await fetchTransferFeeRate(parsed.chain);
+        const estimatedFeeSatoshis = Math.ceil(392 * feeRate);
+        const totalRequired = parsed.satoshis + estimatedFeeSatoshis;
+
+        const balanceSnap = parsed.chain === 'btc'
+          ? await fetchBtcBalanceSnapshot(fromAddress)
+          : await fetchMvcBalanceSnapshot(fromAddress);
+
+        if (balanceSnap.confirmedSatoshis < totalRequired) {
+          const balanceDisplay = `${balanceSnap.confirmedSatoshis} sats (${(balanceSnap.confirmedSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
+          return commandFailed(
+            'insufficient_balance',
+            `Confirmed balance ${balanceDisplay} is below the required ${totalRequired} sats (${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency} + estimated fee ${estimatedFeeSatoshis} sats).`
+          );
+        }
+
+        if (!input.confirm) {
+          const currentBalanceDisplay = `${(balanceSnap.confirmedSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
+          return commandAwaitingConfirmation({
+            fromAddress,
+            currentBalance: currentBalanceDisplay,
+            currentBalanceSatoshis: balanceSnap.confirmedSatoshis,
+            toAddress: input.toAddress,
+            amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
+            amountSatoshis: parsed.satoshis,
+            estimatedFee: `${(estimatedFeeSatoshis / 1e8).toFixed(8)} ${parsed.currency}`,
+            estimatedFeeSatoshis,
+            feeRateSatPerVb: feeRate,
+            currency: parsed.currency,
+            chain: parsed.chain,
+          });
+        }
+
+        const secretStore = createFileSecretStore(homeDir);
+        const secrets = await secretStore.readIdentitySecrets();
+        if (!secrets?.mnemonic) {
+          return commandFailed('identity_secrets_missing', 'Identity mnemonic not found in the secret store.');
+        }
+
+        try {
+          const transferInput = {
+            mnemonic: secrets.mnemonic,
+            path: secrets.path ?? state.identity.path ?? "m/44'/10001'/0'/0/0",
+            toAddress: input.toAddress,
+            amountSatoshis: parsed.satoshis,
+            feeRate,
+          };
+          const result = parsed.chain === 'btc'
+            ? await executeBtcTransfer(transferInput)
+            : await executeMvcTransfer(transferInput);
+
+          const explorerUrl = parsed.chain === 'btc'
+            ? `https://mempool.space/tx/${result.txid}`
+            : `https://www.mvcscan.com/tx/${result.txid}`;
+
+          return commandSuccess({
+            txid: result.txid,
+            explorerUrl,
+            amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
+            toAddress: input.toAddress,
+          });
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          const lower = msg.toLowerCase();
+          if (lower.includes('insufficient') || lower.includes('not enough') || lower.includes('余额不足')) {
+            return commandFailed('insufficient_balance', `Balance is insufficient: ${msg}`);
+          }
+          return commandFailed(
+            'transfer_broadcast_failed',
+            `Transfer failed: ${msg}. Verify the recipient address is correct and your balance is confirmed. If UTXO inputs appear stale, wait a few minutes and retry.`
           );
         }
       },

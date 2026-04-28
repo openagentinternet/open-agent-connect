@@ -3,6 +3,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runCli = runCli;
 const commandResult_1 = require("../core/contracts/commandResult");
+const version_1 = require("./version");
 const daemon_1 = require("./commands/daemon");
 const doctor_1 = require("./commands/doctor");
 const identity_1 = require("./commands/identity");
@@ -34,13 +35,28 @@ function resolveExitCode(result) {
 function writeJsonLine(context, payload) {
     context.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
 }
+function versionRequested(args) {
+    return args.includes('--version') || args.includes('-v');
+}
+function writeResolvedVersion(context, args) {
+    const output = args.includes('--json')
+        ? `${JSON.stringify({ version: version_1.CLI_VERSION }, null, 2)}\n`
+        : `metabot ${version_1.CLI_VERSION}\n`;
+    context.stdout.write(output);
+    const result = (0, commandResult_1.commandSuccess)({ version: version_1.CLI_VERSION });
+    result.__rawStdoutHandled = true;
+    return result;
+}
 async function runCli(argv, cliContext = {}) {
     const context = (0, types_1.createCliRuntimeContext)(cliContext);
     context.dependencies = (0, runtime_1.mergeCliDependencies)(context);
     const [command, ...rest] = argv;
     let result;
     try {
-        if ((0, commandHelp_1.helpRequested)(argv)) {
+        if (versionRequested(argv)) {
+            result = writeResolvedVersion(context, argv);
+        }
+        else if ((0, commandHelp_1.helpRequested)(argv)) {
             result = (0, commandHelp_1.writeResolvedHelp)(context, argv);
         }
         else {

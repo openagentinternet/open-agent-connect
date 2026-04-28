@@ -1,5 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.executeMvcTransfer = executeMvcTransfer;
+exports.executeBtcTransfer = executeBtcTransfer;
 exports.createLocalMnemonicSigner = createLocalMnemonicSigner;
 const meta_contract_1 = require("meta-contract");
 const utxo_wallet_service_1 = require("@metalet/utxo-wallet-service");
@@ -372,6 +374,67 @@ async function runDefaultBtcCreatePin(input) {
         pinId: `${txids[0]}i0`,
         totalCost: Number.isFinite(totalCost) ? totalCost : 0,
     };
+}
+async function executeMvcTransfer(input) {
+    const feeRate = Number.isFinite(input.feeRate) && Number(input.feeRate) > 0 ? input.feeRate : 1;
+    const { privateKey, address } = buildMvcPrivateKey(input.mnemonic, input.path);
+    const rawUtxos = await fetchMvcUtxos(address);
+    const utxos = rawUtxos.map((utxo) => ({
+        txId: utxo.txid,
+        outputIndex: utxo.outIndex,
+        satoshis: utxo.value,
+        address,
+        height: utxo.height,
+    }));
+    const SIMPLE_P2PKH_TX_BASE_SIZE = 96;
+    const picked = pickMvcUtxos(utxos, input.amountSatoshis, feeRate, SIMPLE_P2PKH_TX_BASE_SIZE);
+    const senderAddress = new meta_contract_1.mvc.Address(address, meta_contract_1.mvc.Networks.livenet);
+    const recipientAddress = new meta_contract_1.mvc.Address(input.toAddress, meta_contract_1.mvc.Networks.livenet);
+    const txComposer = new meta_contract_1.TxComposer();
+    txComposer.appendP2PKHOutput({ address: recipientAddress, satoshis: input.amountSatoshis });
+    for (const utxo of picked) {
+        txComposer.appendP2PKHInput({
+            address: senderAddress,
+            txId: utxo.txId,
+            outputIndex: utxo.outputIndex,
+            satoshis: utxo.satoshis,
+        });
+    }
+    txComposer.appendChangeOutput(senderAddress, feeRate);
+    for (let i = 0; i < txComposer.tx.inputs.length; i += 1) {
+        txComposer.unlockP2PKHInput(privateKey, i);
+    }
+    const txid = await broadcastMvcTx(txComposer.getRawHex());
+    return { txid };
+}
+async function executeBtcTransfer(input) {
+    const feeRate = Number.isFinite(input.feeRate) && Number(input.feeRate) > 0 ? input.feeRate : DEFAULT_BTC_WRITE_FEE_RATE;
+    const wallet = buildBtcWallet(input.mnemonic, input.path);
+    const address = wallet.getAddress();
+    const scriptType = wallet.getScriptType?.() ?? 'P2PKH';
+    const needRawTx = scriptType === 'P2PKH';
+    const utxos = await fetchBtcUtxos(address, needRawTx);
+    const signResult = wallet.signTx(utxo_wallet_service_1.SignType.SEND, {
+        utxos: utxos.map((utxo) => ({
+            txId: utxo.txId,
+            outputIndex: utxo.outputIndex,
+            satoshis: utxo.satoshis,
+            address: utxo.address,
+            rawTx: utxo.rawTx,
+            confirmed: utxo.confirmed,
+        })),
+        toInfo: {
+            address: input.toAddress,
+            satoshis: input.amountSatoshis,
+        },
+        feeRate,
+    });
+    const rawTx = normalizeText(signResult?.rawTx);
+    if (!rawTx) {
+        throw new Error('BTC signTx(SEND) returned no raw transaction.');
+    }
+    const txid = await broadcastBtcTx(rawTx);
+    return { txid };
 }
 function createLocalMnemonicSigner(input) {
     const mvcTransport = input.mvcTransport ?? {

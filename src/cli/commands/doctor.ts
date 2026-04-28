@@ -1,6 +1,7 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
 import { normalizeSystemHomeDir } from '../../core/state/homeSelection';
 import { buildCliShimDoctorCheck } from '../../core/state/cliShimDoctor';
+import { CLI_VERSION } from '../version';
 import type { CliRuntimeContext } from '../types';
 
 function hasDoctorChecks(data: unknown): data is { checks: unknown[]; [key: string]: unknown } {
@@ -29,6 +30,7 @@ export async function runDoctorCommand(_args: string[], context: CliRuntimeConte
     ...result,
     data: {
       ...result.data,
+      version: CLI_VERSION,
       checks: [...result.data.checks, cliShimCheck],
     },
   };

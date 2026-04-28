@@ -33,6 +33,18 @@ export interface LocalMnemonicSignerBtcCreatePinResult {
     pinId: string;
     totalCost: number;
 }
+export interface WalletTransferExecuteInput {
+    mnemonic: string;
+    path: string;
+    toAddress: string;
+    amountSatoshis: number;
+    feeRate?: number;
+}
+export interface WalletTransferExecuteResult {
+    txid: string;
+}
+export declare function executeMvcTransfer(input: WalletTransferExecuteInput): Promise<WalletTransferExecuteResult>;
+export declare function executeBtcTransfer(input: WalletTransferExecuteInput): Promise<WalletTransferExecuteResult>;
 export declare function createLocalMnemonicSigner(input: {
     secretStore: SecretStore;
     mvcTransport?: LocalMnemonicSignerMvcTransport;

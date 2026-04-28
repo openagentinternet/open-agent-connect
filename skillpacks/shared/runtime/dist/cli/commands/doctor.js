@@ -4,6 +4,7 @@ exports.runDoctorCommand = runDoctorCommand;
 const commandResult_1 = require("../../core/contracts/commandResult");
 const homeSelection_1 = require("../../core/state/homeSelection");
 const cliShimDoctor_1 = require("../../core/state/cliShimDoctor");
+const version_1 = require("../version");
 function hasDoctorChecks(data) {
     return Boolean(data)
         && typeof data === 'object'
@@ -23,6 +24,7 @@ async function runDoctorCommand(_args, context) {
         ...result,
         data: {
             ...result.data,
+            version: version_1.CLI_VERSION,
             checks: [...result.data.checks, cliShimCheck],
         },
     };
