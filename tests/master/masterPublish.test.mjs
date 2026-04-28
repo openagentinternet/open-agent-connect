@@ -49,7 +49,7 @@ test('buildPublishedMaster preserves payload content and provider identity seman
     style: 'direct_and_structured',
     pricingMode: 'free',
     price: '0',
-    currency: 'MVC',
+    currency: 'SPACE',
     responseMode: 'structured',
     contextPolicy: 'standard',
     official: true,

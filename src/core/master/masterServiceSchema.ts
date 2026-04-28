@@ -27,7 +27,7 @@ function normalizeStringArray(value: unknown): string[] {
 
 function normalizeCurrency(value: unknown): string {
   const normalized = normalizeText(value).toUpperCase();
-  return normalized === 'SPACE' ? 'MVC' : normalized;
+  return normalized === 'MVC' ? 'SPACE' : normalized;
 }
 
 function readObject(value: unknown): Record<string, unknown> | null {

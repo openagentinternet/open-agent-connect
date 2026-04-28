@@ -22,7 +22,7 @@ function normalizeStringArray(value) {
 }
 function normalizeCurrency(value) {
     const normalized = normalizeText(value).toUpperCase();
-    return normalized === 'SPACE' ? 'MVC' : normalized;
+    return normalized === 'MVC' ? 'SPACE' : normalized;
 }
 function readObject(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {

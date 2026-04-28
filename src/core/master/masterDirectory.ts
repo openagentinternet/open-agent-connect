@@ -230,7 +230,7 @@ function parseModelInfo(value: unknown): Record<string, unknown> | null {
 
 function normalizeCurrency(value: unknown): string {
   const normalized = toSafeString(value).toUpperCase();
-  return normalized === 'SPACE' ? 'MVC' : normalized;
+  return normalized === 'MVC' ? 'SPACE' : normalized;
 }
 
 export function parseChainMasterItem(item: Record<string, unknown>): ParsedChainMasterRow | null {

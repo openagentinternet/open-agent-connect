@@ -480,8 +480,8 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow in th
   assert.match(content, /network sources list/);
   assert.match(content, /network sources remove/);
   assert.match(content, /Markdown table \(max 10 rows\)/i);
-  assert.match(content, /\|\s*#\s*\|\s*GlobalMetaId\s*\|\s*Last Seen \(s ago\)\s*\|\s*Devices\s*\|/);
-  assert.match(content, /When no online bots are found, explicitly say the list is currently empty/i);
+  assert.match(content, /\|\s*#\s*\|\s*name\s*\|\s*globalmetaid\s*\|\s*bio\s*\|\s*Last Seen\s*\|/);
+  assert.match(content, /When no online bots or services are found, explicitly say the list is currently empty/i);
   assert.match(content, /metabot chat private --request-file/);
   assert.match(content, /offer natural-language follow-up prompts/i);
   assert.match(content, /Do not ask the human to type CLI commands directly/i);

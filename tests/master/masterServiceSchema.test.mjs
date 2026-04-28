@@ -24,7 +24,7 @@ test('validateMasterServicePayload accepts the official debug master template', 
   assert.equal(result.value.serviceName, 'official-debug-master');
   assert.equal(result.value.masterKind, 'debug');
   assert.deepEqual(result.value.hostModes, ['codex']);
-  assert.equal(result.value.currency, 'MVC');
+  assert.equal(result.value.currency, 'SPACE');
   assert.equal(result.value.official, true);
 });
 

@@ -172,7 +172,7 @@ function parseModelInfo(value) {
 }
 function normalizeCurrency(value) {
     const normalized = toSafeString(value).toUpperCase();
-    return normalized === 'SPACE' ? 'MVC' : normalized;
+    return normalized === 'MVC' ? 'SPACE' : normalized;
 }
 function parseChainMasterItem(item) {
     const pinId = toSafeString(item.id);
