@@ -32,31 +32,45 @@ Should not trigger when:
 - The user asks to delegate paid remote services.
 - The user asks to manage network sources or identities.
 
+## Network and Currency Mapping
+
+**This is the authoritative mapping. Do not query any other API or chain for these currencies.**
+
+| User says | Network | CLI flag | Notes |
+|---|---|---|---|
+| SPACE / space / 太空币 | MVC | `--chain mvc` | SPACE is the native currency of the MVC network. Querying SPACE balance = querying MVC balance. |
+| MVC / mvc | MVC | `--chain mvc` | Same network as SPACE. |
+| BTC / btc / Bitcoin / 比特币 | Bitcoin | `--chain btc` | |
+
+**Never** search for a separate SPACE API, SPACE contract, or FT token endpoint. SPACE is not a token — it is the base currency of the MVC network and is always returned by `wallet balance --chain mvc`.
+
 ## Balance Command
 
-For default multi-chain balance (mvc + btc):
+For default multi-chain balance (MVC/SPACE + BTC):
 
 ```bash
 metabot wallet balance
 ```
 
-When the human explicitly asks BTC-only (for example: `btc`, `比特币`, `bitcoin`):
+When the human asks for BTC, Bitcoin, or 比特币:
 
 ```bash
 metabot wallet balance --chain btc
 ```
 
-When the human explicitly asks MVC-only (for example: `mvc`, `space`, `SPACE`, `太空币`):
+When the human asks for SPACE, MVC, 太空币, or any MVC-network currency:
 
 ```bash
 metabot wallet balance --chain mvc
 ```
 
+The `mvc` balance response includes `balances.mvc.totalMvc` (the SPACE amount) and `balances.mvc.address` (the MVC/SPACE receiving address).
+
 ## Transfer Command
 
-**Currency mapping:**
-- `BTC` → Bitcoin network
-- `SPACE` → MVC network (also recognised as: `mvc`, `space`, `太空币`)
+**Currency mapping (same as balance — see Network and Currency Mapping above):**
+- `BTC` → Bitcoin network (`--amount 0.00001BTC`)
+- `SPACE` → MVC network (`--amount 1SPACE`). SPACE is the native currency of MVC; use `SPACE` as the unit, not `MVC`.
 
 **Amount format:** append the currency unit directly to the number, no space required.
 - `0.00001BTC` — send 0.00001 BTC
