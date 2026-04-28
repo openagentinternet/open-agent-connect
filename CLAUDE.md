@@ -26,6 +26,29 @@ npm run build && node --test tests/<dir>/<name>.test.mjs
 
 There is no separate lint command — the project relies on TypeScript strict mode (`strict: true`, target ES2022, CommonJS output).
 
+## Release Process
+
+Releases are published automatically by GitHub Actions when a version tag is pushed. The workflow builds per-host release tarballs and creates a GitHub Release with them.
+
+**Steps to cut a release:**
+
+1. Bump `"version"` in `package.json` and all fields in `release/compatibility.json` to the new version (e.g. `0.3.0`).
+2. Rebuild and regenerate all artifacts:
+   ```bash
+   npm run build && npm run build:skillpacks
+   ```
+3. Run the full test suite and confirm it passes:
+   ```bash
+   npm test
+   ```
+4. Commit the version bump and regenerated artifacts, then push to `main`.
+5. Push the version tag — this triggers CI to build release tarballs and publish the GitHub Release automatically:
+   ```bash
+   git tag v0.3.0 && git push origin v0.3.0
+   ```
+
+**Do not** run `npm run build:packs` or `gh release create` manually. CI handles that. Release tarballs (`release/packs/`) are gitignored and only exist as GitHub Release assets.
+
 ## Architecture
 
 ### Layers

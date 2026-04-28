@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build release packs
+        run: node scripts/build-release-packs.mjs
+
+      - name: Publish GitHub Release
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            release/packs/oac-codex.tar.gz \
+            release/packs/oac-claude-code.tar.gz \
+            release/packs/oac-openclaw.tar.gz \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

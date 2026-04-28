@@ -11,3 +11,16 @@
 - When merging completed work into `main`, use `git merge --no-ff` to preserve the feature merge point.
 - MetaBot storage and directory layout changes must follow `docs/superpowers/specs/2026-04-23-metabot-storage-layout-v2-design.md`.
 - Do not introduce new code or documentation that depends on the legacy `.metabot/hot` layout unless you are explicitly documenting historical behavior.
+
+## Releasing a New Version
+
+Releases are automated via GitHub Actions. Do not run `npm run build:packs` or `gh release create` manually.
+
+To cut a release:
+1. Bump `"version"` in `package.json` and all fields in `release/compatibility.json` to the new version.
+2. Run `npm run build && npm run build:skillpacks` to rebuild all artifacts.
+3. Run `npm test` and confirm it passes.
+4. Commit the version bump and regenerated artifacts, push to `main`.
+5. Push the version tag: `git tag v{version} && git push origin v{version}`.
+
+Pushing the tag triggers CI (`.github/workflows/release.yml`) which builds `release/packs/oac-{host}.tar.gz` and publishes the GitHub Release automatically. The install guide at `docs/install/open-agent-connect.md` always points to `releases/latest/download/`, so no doc update is needed for version bumps.
