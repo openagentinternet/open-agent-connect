@@ -274,9 +274,9 @@ function normalizeComparableGlobalMetaId(value: unknown): string {
 }
 
 function buildSocketPresenceLastSeenIndex(
-  bots: Array<{ globalMetaId?: unknown; lastSeenAt?: unknown }>
-): Map<string, number | null> {
-  const index = new Map<string, number | null>();
+  bots: Array<{ globalMetaId?: unknown; lastSeenAt?: unknown; lastSeenAgoSeconds?: unknown; name?: unknown }>
+): Map<string, { lastSeenAt: number | null; lastSeenAgoSeconds: number; name: string }> {
+  const index = new Map<string, { lastSeenAt: number | null; lastSeenAgoSeconds: number; name: string }>();
   for (const bot of bots) {
     const globalMetaId = normalizeComparableGlobalMetaId(bot.globalMetaId);
     if (!globalMetaId || index.has(globalMetaId)) {
@@ -285,7 +285,11 @@ function buildSocketPresenceLastSeenIndex(
     const lastSeenAt = typeof bot.lastSeenAt === 'number' && Number.isFinite(bot.lastSeenAt) && bot.lastSeenAt > 0
       ? Math.floor(bot.lastSeenAt)
       : null;
-    index.set(globalMetaId, lastSeenAt);
+    const lastSeenAgoSeconds = typeof bot.lastSeenAgoSeconds === 'number' && Number.isFinite(bot.lastSeenAgoSeconds)
+      ? Math.max(0, Math.floor(bot.lastSeenAgoSeconds))
+      : 0;
+    const name = typeof bot.name === 'string' ? bot.name.trim() : '';
+    index.set(globalMetaId, { lastSeenAt, lastSeenAgoSeconds, name });
   }
   return index;
 }
@@ -330,12 +334,15 @@ async function decorateServicesWithSocketPresence(input: {
       const globalMetaId = normalizeComparableGlobalMetaId(
         service.providerGlobalMetaId ?? service.globalMetaId,
       );
-      const lastSeenAt = globalMetaId ? (lastSeenIndex.get(globalMetaId) ?? null) : null;
+      const botEntry = globalMetaId ? lastSeenIndex.get(globalMetaId) : undefined;
+      const lastSeenAt = botEntry?.lastSeenAt ?? null;
       return {
         ...service,
-        online: Boolean(globalMetaId && lastSeenIndex.has(globalMetaId)),
+        online: Boolean(botEntry),
         lastSeenAt,
         lastSeenSec: normalizeEpochSeconds(lastSeenAt),
+        lastSeenAgoSeconds: botEntry?.lastSeenAgoSeconds ?? null,
+        providerName: botEntry?.name ?? '',
       };
     });
 

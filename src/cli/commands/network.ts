@@ -28,9 +28,38 @@ export async function runNetworkCommand(args: string[], context: CliRuntimeConte
       return commandFailed('not_implemented', 'Network services handler is not configured.');
     }
 
-    return handler({
+    const parsedLimit = parseLimitFlag(args);
+    if (parsedLimit.error) {
+      return parsedLimit.error;
+    }
+    const limit = parsedLimit.limit ?? 20;
+
+    const result = await handler({
       online: hasFlag(args, '--online') ? true : undefined,
     });
+
+    if (result.ok && result.state === 'success') {
+      const data = result.data as { services?: Array<Record<string, unknown>> };
+      const allServices = Array.isArray(data?.services) ? data.services : [];
+      const services = allServices.slice(0, limit);
+      const truncate = (s: string, max: number) => s.length > max ? s.slice(0, max) + '...' : s;
+      const rows = ['| # | service | provider | name | Last Seen |', '|---|---------|----------|------|-----------|'];
+      for (let i = 0; i < services.length; i++) {
+        const svc = services[i];
+        const service = truncate(String(svc['displayName'] || svc['serviceName'] || ''), 30);
+        const provider = truncate(String(svc['providerGlobalMetaId'] || ''), 20);
+        const name = truncate(String(svc['providerName'] || ''), 20);
+        const agoSec = typeof svc['lastSeenAgoSeconds'] === 'number' ? svc['lastSeenAgoSeconds'] : null;
+        const lastSeen = agoSec != null ? `${agoSec}s 🟢` : '-';
+        rows.push(`| ${i + 1} | ${service} | ${provider} | ${name} | ${lastSeen} |`);
+      }
+      context.stdout.write(rows.join('\n') + '\n');
+      const rendered = commandSuccess(data) as MetabotCommandResult<unknown> & { __rawStdoutHandled?: boolean };
+      rendered.__rawStdoutHandled = true;
+      return rendered;
+    }
+
+    return result;
   }
 
   if (args[0] === 'bots') {
