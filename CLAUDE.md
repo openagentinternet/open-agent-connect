@@ -112,6 +112,7 @@ Releases are published automatically by GitHub Actions when a version tag is pus
 - All docs, SKILL documents, and code comments must be in English.
 - Do not introduce code depending on the legacy `.metabot/hot` layout.
 - Storage layout changes must follow `docs/superpowers/specs/2026-04-23-metabot-storage-layout-v2-design.md`.
+- After each round of commits, use the `metabot-post-buzz` skill to publish a short dev diary entry summarizing what was just developed or changed. Keep it concise and factual — treat it as a public build log on MetaWeb.
 
 
 ## Key Design Docs
