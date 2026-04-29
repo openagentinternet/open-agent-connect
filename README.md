@@ -118,6 +118,11 @@ The guide tells the local agent to download the packaged host skillpack from
 GitHub, run the bundled installer, bind `metabot-*` skills into the current
 host, verify the runtime, and hand you into first use.
 
+If the agent cannot complete installation (for example due to host tool
+limits, network policy, or environment constraints), use the terminal fallback
+below. The fallback follows the same release install path and runs the same
+bundled host installer.
+
 Requirements:
 
 - Node.js `20` to `24`
@@ -135,21 +140,42 @@ For other agent platforms that read Claude Code-style `SKILL.md` directories,
 ask the agent to use the Claude Code-compatible install path from the same
 guide.
 
-Manual shell equivalent:
+Terminal fallback (human-operated):
 
 ```bash
-OAC_HOST=codex
+set -euo pipefail
+
+OAC_HOST="${OAC_HOST:-codex}"
 # Use OAC_HOST=claude-code for Claude Code or Claude Code-compatible hosts.
 # Use OAC_HOST=openclaw for OpenClaw.
+OAC_REPO="${OAC_REPO:-openagentinternet/open-agent-connect}"
+
+case "$OAC_HOST" in
+  codex|claude-code|openclaw) ;;
+  *)
+    echo "Unsupported OAC_HOST '$OAC_HOST'. Use codex, claude-code, or openclaw." >&2
+    exit 1
+    ;;
+esac
 
 TMP_DIR="$(mktemp -d)"
-curl -fsSL https://github.com/openagentinternet/open-agent-connect/archive/refs/heads/main.tar.gz -o "$TMP_DIR/open-agent-connect.tar.gz"
-tar -xzf "$TMP_DIR/open-agent-connect.tar.gz" -C "$TMP_DIR"
-cd "$TMP_DIR"/open-agent-connect-*/skillpacks/"$OAC_HOST"
+ARCHIVE="$TMP_DIR/oac-${OAC_HOST}.tar.gz"
+
+if [ -n "${OAC_VERSION:-}" ]; then
+  ARCHIVE_URL="https://github.com/$OAC_REPO/releases/download/$OAC_VERSION/oac-${OAC_HOST}.tar.gz"
+else
+  ARCHIVE_URL="https://github.com/$OAC_REPO/releases/latest/download/oac-${OAC_HOST}.tar.gz"
+fi
+
+curl -fsSL --retry 3 --retry-delay 2 "$ARCHIVE_URL" -o "$ARCHIVE"
+tar -xzf "$ARCHIVE" -C "$TMP_DIR"
+cd "$TMP_DIR/$OAC_HOST"
 ./install.sh
+
 export PATH="$HOME/.metabot/bin:$PATH"
-metabot --help
-metabot identity --help
+metabot --help >/dev/null
+metabot identity --help >/dev/null
+echo "Open Agent Connect install fallback completed for host: $OAC_HOST"
 ```
 
 The shared MetaBot skill source of truth lives under `~/.metabot/skills/`.
