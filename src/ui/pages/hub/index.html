@@ -4,297 +4,33 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>__PAGE_TITLE__</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/ui/shared.css" />
     <style>
-      :root {
-        --bg:        #0d0f12;
-        --surface:   #141720;
-        --surface2:  #1c2030;
-        --border:    #252a38;
-        --border2:   #2e3448;
-        --text:      #e2e6f0;
-        --muted:     #6b7494;
-        --dim:       #3d4460;
-        --green:     #22c55e;
-        --green-dim: rgba(34,197,94,.12);
-        --amber:     #f59e0b;
-        --amber-dim: rgba(245,158,11,.10);
-        --red:       #ef4444;
-        --red-dim:   rgba(239,68,68,.10);
-        --accent:    #6366f1;
-        --accent-dim:rgba(99,102,241,.15);
-        --mono: 'IBM Plex Mono', monospace;
-        --sans: 'IBM Plex Sans', sans-serif;
-      }
-      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-      html { font-size: 14px; }
-      body {
-        background: var(--bg);
-        color: var(--text);
-        font-family: var(--sans);
-        min-height: 100vh;
-        line-height: 1.5;
-      }
-
-      /* ── Layout ── */
-      .shell { display: flex; flex-direction: column; min-height: 100vh; }
-
-      .topbar {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        padding: 0 24px;
-        height: 52px;
-        border-bottom: 1px solid var(--border);
-        background: var(--surface);
-        position: sticky;
-        top: 0;
-        z-index: 10;
-      }
-      .topbar-logo {
-        font-family: var(--mono);
-        font-size: 13px;
-        font-weight: 500;
-        color: var(--accent);
-        letter-spacing: .04em;
-        white-space: nowrap;
-      }
-      .topbar-sep { width: 1px; height: 20px; background: var(--border2); }
-      .topbar-title {
-        font-size: 13px;
-        color: var(--muted);
-        white-space: nowrap;
-      }
-      .topbar-spacer { flex: 1; }
-      .topbar-nav { display: flex; gap: 4px; }
-      .topbar-nav a {
-        font-size: 12px;
-        color: var(--muted);
-        text-decoration: none;
-        padding: 5px 10px;
-        border-radius: 6px;
-        transition: color .15s, background .15s;
-      }
-      .topbar-nav a:hover { color: var(--text); background: var(--surface2); }
-
-      .content { flex: 1; padding: 24px; max-width: 1280px; width: 100%; margin: 0 auto; }
-
-      /* ── Stats row ── */
-      .stats-row {
-        display: flex;
-        gap: 12px;
-        margin-bottom: 24px;
-        flex-wrap: wrap;
-      }
-      .stat-card {
-        flex: 1;
-        min-width: 140px;
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 14px 18px;
-      }
-      .stat-label {
-        font-size: 11px;
-        font-family: var(--mono);
-        color: var(--muted);
-        text-transform: uppercase;
-        letter-spacing: .08em;
-        margin-bottom: 6px;
-      }
-      .stat-value {
-        font-size: 22px;
-        font-family: var(--mono);
-        font-weight: 500;
-        color: var(--text);
-        line-height: 1;
-      }
-      .stat-value.green { color: var(--green); }
-
-      /* ── Section header ── */
-      .section-header {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        margin-bottom: 14px;
-      }
-      .section-title {
-        font-size: 13px;
-        font-family: var(--mono);
-        font-weight: 500;
-        color: var(--text);
-        letter-spacing: .04em;
-      }
-      .section-badge {
-        font-size: 11px;
-        font-family: var(--mono);
-        padding: 2px 8px;
-        border-radius: 4px;
-        background: var(--accent-dim);
-        color: var(--accent);
-      }
-      .section-updated {
-        margin-left: auto;
-        font-size: 11px;
-        font-family: var(--mono);
-        color: var(--dim);
-      }
-      .refresh-btn {
-        font-size: 11px;
-        font-family: var(--mono);
-        color: var(--muted);
-        background: none;
-        border: 1px solid var(--border2);
-        border-radius: 5px;
-        padding: 3px 10px;
-        cursor: pointer;
-        transition: color .15s, border-color .15s;
-      }
-      .refresh-btn:hover { color: var(--text); border-color: var(--accent); }
-
-      /* ── Service table ── */
-      .service-table-wrap {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        overflow: hidden;
-      }
-      .service-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .service-table thead tr {
-        border-bottom: 1px solid var(--border);
-      }
-      .service-table th {
-        font-size: 11px;
-        font-family: var(--mono);
-        font-weight: 500;
-        color: var(--muted);
-        text-transform: uppercase;
-        letter-spacing: .08em;
-        padding: 10px 16px;
-        text-align: left;
-        white-space: nowrap;
-        background: var(--surface2);
-      }
-      .service-table td {
-        padding: 13px 16px;
-        border-bottom: 1px solid var(--border);
-        vertical-align: top;
-      }
-      .service-table tbody tr:last-child td { border-bottom: none; }
-      .service-table tbody tr {
-        transition: background .1s;
-      }
-      .service-table tbody tr:hover { background: var(--surface2); }
-
-      .svc-name {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text);
-        margin-bottom: 3px;
-      }
-      .svc-desc {
-        font-size: 12px;
-        color: var(--muted);
-        max-width: 340px;
-        line-height: 1.45;
-      }
-      .svc-provider-name {
-        font-size: 12px;
-        font-weight: 500;
-        color: var(--text);
-        margin-bottom: 2px;
-      }
-      .svc-provider-gmid {
-        font-size: 11px;
-        font-family: var(--mono);
-        color: var(--dim);
-        word-break: break-all;
-        max-width: 180px;
-      }
-      .svc-price {
-        font-family: var(--mono);
-        font-size: 12px;
-        color: var(--amber);
-        white-space: nowrap;
-      }
+      /* Hub-specific: service table cell styles */
+      .svc-name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+      .svc-desc { font-size: 12px; color: var(--muted); max-width: 340px; line-height: 1.45; }
+      .svc-provider-name { font-size: 12px; font-weight: 500; color: var(--text); margin-bottom: 2px; }
+      .svc-provider-gmid { font-size: 11px; font-family: var(--mono); color: var(--dim); word-break: break-all; max-width: 180px; }
+      .svc-price { font-family: var(--mono); font-size: 12px; color: var(--amber); white-space: nowrap; }
       .svc-skill {
-        font-family: var(--mono);
-        font-size: 11px;
-        color: var(--muted);
-        background: var(--surface2);
-        border: 1px solid var(--border2);
-        border-radius: 4px;
-        padding: 2px 7px;
-        display: inline-block;
-        white-space: nowrap;
+        font-family: var(--mono); font-size: 11px; color: var(--muted);
+        background: var(--surface2); border: 1px solid var(--border2);
+        border-radius: 4px; padding: 2px 7px; display: inline-block; white-space: nowrap;
       }
-
-      /* ── Status pill ── */
-      .status-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 11px;
-        font-family: var(--mono);
-        padding: 3px 9px;
-        border-radius: 20px;
-        white-space: nowrap;
-      }
-      .status-dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        flex-shrink: 0;
-      }
-      .status-online  { background: var(--green-dim);  color: var(--green); }
-      .status-online .status-dot  { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
-      .status-recent  { background: var(--amber-dim);  color: var(--amber); }
-      .status-recent .status-dot  { background: var(--amber); }
-      .status-offline { background: var(--red-dim);    color: var(--red); }
-      .status-offline .status-dot { background: var(--red); }
-
-      @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50%       { opacity: .4; }
-      }
-
-      .last-seen {
-        font-family: var(--mono);
-        font-size: 11px;
-        color: var(--muted);
-        white-space: nowrap;
-      }
-
-      /* ── Empty / loading ── */
-      .table-empty {
-        padding: 48px 24px;
-        text-align: center;
-        color: var(--muted);
-        font-size: 13px;
-        font-family: var(--mono);
-      }
-      .table-empty strong { display: block; color: var(--text); margin-bottom: 6px; font-size: 14px; }
-
-      /* ── Responsive ── */
+      .last-seen { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+      .section-updated { margin-left: auto; font-size: 11px; font-family: var(--mono); color: var(--dim); }
       @media (max-width: 768px) {
-        .content { padding: 16px; }
-        .topbar { padding: 0 16px; }
-        .service-table th:nth-child(4),
-        .service-table td:nth-child(4),
-        .service-table th:nth-child(5),
-        .service-table td:nth-child(5) { display: none; }
+        .data-table th:nth-child(4),
+        .data-table td:nth-child(4),
+        .data-table th:nth-child(5),
+        .data-table td:nth-child(5) { display: none; }
       }
     </style>
   </head>
   <body>
     <div class="shell">
       <header class="topbar">
-        <span class="topbar-logo">MetaBot</span>
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
         <div class="topbar-sep"></div>
         <span class="topbar-title">Service Hub</span>
         <div class="topbar-spacer"></div>
@@ -313,11 +49,11 @@
           </div>
           <div class="stat-card">
             <div class="stat-label">Top Service</div>
-            <div class="stat-value" style="font-size:14px;padding-top:4px" data-top-service>—</div>
+            <div class="stat-value sm" data-top-service>—</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">Directory Source</div>
-            <div class="stat-value" style="font-size:13px;padding-top:4px" data-directory-mode>—</div>
+            <div class="stat-value sm" data-directory-mode>—</div>
           </div>
         </div>
 
@@ -325,11 +61,11 @@
           <span class="section-title">LIVE SERVICES</span>
           <span class="section-badge" data-online-badge>0 online</span>
           <span class="section-updated" data-directory-updated></span>
-          <button class="refresh-btn" id="refresh-btn">↻ refresh</button>
+          <button class="btn btn-sm" id="refresh-btn">↻ refresh</button>
         </div>
 
-        <div class="service-table-wrap">
-          <table class="service-table">
+        <div class="table-wrap">
+          <table class="data-table">
             <thead>
               <tr>
                 <th>Service</th>

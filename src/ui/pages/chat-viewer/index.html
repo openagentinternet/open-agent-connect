@@ -4,376 +4,165 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
     <style>
-      :root {
-        color-scheme: light;
-        --bg: #f7f8fb;
-        --surface: #ffffff;
-        --surface-soft: #eef4f7;
-        --text: #16202a;
-        --muted: #657282;
-        --line: #d6dee7;
-        --accent: #0f766e;
-        --accent-strong: #0b5e59;
-        --danger: #b42318;
-        --danger-hover: #a01c15;
-        --warning: #b45309;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        min-height: 100svh;
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        color: var(--text);
-        background:
-          linear-gradient(180deg, rgba(15, 118, 110, 0.08), transparent 280px),
-          var(--bg);
-      }
-
-      .viewer-shell {
-        min-height: 100svh;
-        display: grid;
-        grid-template-rows: auto 1fr;
-      }
-
-      .viewer-header {
-        padding: 22px clamp(16px, 4vw, 42px);
-        border-bottom: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.88);
-        backdrop-filter: blur(18px);
-      }
-
-      .viewer-header-inner {
-        max-width: 1180px;
-        margin: 0 auto;
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 18px;
-        align-items: end;
-      }
-
-      .eyebrow {
-        margin: 0 0 6px;
-        color: var(--accent-strong);
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
-      h1 {
-        margin: 0;
-        font-size: clamp(1.7rem, 4vw, 2.8rem);
-        line-height: 1.04;
-        letter-spacing: 0;
-      }
-
-      .viewer-subtitle {
-        margin: 8px 0 0;
-        color: var(--muted);
-        line-height: 1.5;
-        max-width: 720px;
-      }
-
-      .viewer-actions {
+      /* Chat viewer needs a full-height layout */
+      .chat-shell {
         display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        justify-content: flex-end;
+        flex-direction: column;
+        min-height: 100vh;
       }
-
-      .peer-control {
-        display: grid;
-        gap: 6px;
-        min-width: min(360px, calc(100vw - 32px));
-      }
-
-      .peer-control > span:first-child {
-        color: var(--muted);
-        font-size: 0.78rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-      }
-
-      .peer-row {
-        display: flex;
-        gap: 8px;
-      }
-
-      input {
-        width: 100%;
-        min-width: 0;
-        height: 40px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 0 12px;
-        color: var(--text);
-        background: var(--surface);
-        font: inherit;
-      }
-
-      button {
-        height: 40px;
-        border: 0;
-        border-radius: 8px;
-        padding: 0 14px;
-        color: #ffffff;
-        background: var(--accent);
-        font: inherit;
-        font-weight: 700;
-        cursor: pointer;
-        white-space: nowrap;
-      }
-
-      button:hover {
-        background: var(--accent-strong);
-      }
-
-      button[data-chat-stop] {
-        background: var(--danger);
-      }
-
-      button[data-chat-stop]:hover {
-        background: var(--danger-hover);
-      }
-
-      button[data-chat-stop]:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-
-      .viewer-main {
+      .chat-main {
+        flex: 1;
         max-width: 1180px;
         width: 100%;
         margin: 0 auto;
-        padding: 18px clamp(16px, 4vw, 42px) 28px;
+        padding: 18px 24px 28px;
         display: grid;
         grid-template-rows: auto auto minmax(360px, 1fr);
         gap: 14px;
         min-height: 0;
       }
-
-      .meta-toggle {
+      .peer-control {
+        display: grid;
+        gap: 6px;
+        min-width: min(360px, calc(100vw - 32px));
+      }
+      .peer-control > .field-label {
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: .06em;
+      }
+      .peer-row {
         display: flex;
+        gap: 8px;
+      }
+      .peer-row input {
+        flex: 1;
+        min-width: 0;
+        height: 36px;
+        background: var(--surface2);
+        border: 1px solid var(--border2);
+        border-radius: var(--radius-sm);
+        padding: 0 12px;
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: 13px;
+        transition: border-color .15s;
+      }
+      .peer-row input:focus { outline: none; border-color: var(--accent); }
+      .meta-toggle {
+        display: inline-flex;
         align-items: center;
         gap: 6px;
-        border: 0;
         background: none;
+        border: none;
         color: var(--muted);
-        font: inherit;
-        font-size: 0.78rem;
-        font-weight: 700;
+        font-family: var(--mono);
+        font-size: 11px;
         text-transform: uppercase;
-        letter-spacing: 0.06em;
+        letter-spacing: .06em;
         cursor: pointer;
         padding: 0 0 6px;
-        height: auto;
-        width: auto;
+        transition: color .15s;
       }
-
-      .meta-toggle:hover {
-        color: var(--text);
-        background: none;
-      }
-
-      .meta-toggle-arrow {
-        display: inline-block;
-        transition: transform 200ms ease;
-        font-size: 0.7rem;
-      }
-
-      .meta-toggle-arrow.collapsed {
-        transform: rotate(-90deg);
-      }
-
+      .meta-toggle:hover { color: var(--text); }
+      .meta-toggle-arrow { display: inline-block; transition: transform 200ms ease; font-size: 10px; }
+      .meta-toggle-arrow.collapsed { transform: rotate(-90deg); }
       .conversation-meta {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 10px;
+      }
+      .conversation-meta.collapsed { display: none; }
+      .message-surface {
+        min-height: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
         overflow: hidden;
-        transition: grid-template-rows 200ms ease, opacity 200ms ease;
-      }
-
-      .conversation-meta.collapsed {
-        display: none;
-      }
-
-      .meta-item {
-        min-width: 0;
-        padding: 12px 14px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
         background: var(--surface);
+        margin-bottom: 24px;
       }
-
-      .meta-item span {
+      id-chat-msg-list {
         display: block;
-        color: var(--muted);
-        font-size: 0.74rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
+        width: 100%;
+        height: min(680px, calc(100svh - 250px));
+        min-height: 360px;
+        --id-bg-body: var(--surface2);
+        --id-text-secondary: var(--muted);
+        --id-color-primary: var(--accent);
       }
-
-      .meta-item strong {
-        display: block;
-        margin-top: 5px;
-        overflow-wrap: anywhere;
-        font-size: 0.92rem;
-      }
-
-      .peer-info {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-top: 5px;
-      }
-
+      [data-chat-status][data-tone="ready"]   { color: var(--green); }
+      [data-chat-status][data-tone="error"]   { color: var(--red); }
+      [data-chat-status][data-tone="warning"] { color: var(--amber); }
       .peer-avatar {
         width: 28px;
         height: 28px;
         border-radius: 50%;
         object-fit: cover;
         flex-shrink: 0;
-        background: var(--surface-soft);
+        background: var(--surface2);
       }
-
-      .peer-name {
-        font-weight: 700;
-        font-size: 0.92rem;
-        overflow-wrap: anywhere;
-      }
-
-      [data-chat-status][data-tone="ready"] {
-        color: var(--accent-strong);
-      }
-
-      [data-chat-status][data-tone="error"] {
-        color: var(--danger);
-      }
-
-      [data-chat-status][data-tone="warning"] {
-        color: var(--warning);
-      }
-
-      .message-surface {
-        min-height: 0;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        overflow: hidden;
-        background: var(--surface);
-        margin-bottom: 24px;
-      }
-
-      id-chat-msg-list {
-        display: block;
-        width: 100%;
-        height: min(680px, calc(100svh - 250px));
-        min-height: 360px;
-        --id-bg-body: var(--surface-soft);
-        --id-text-secondary: var(--muted);
-        --id-color-primary: var(--accent);
-      }
-
+      .peer-info { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+      .peer-name { font-weight: 500; font-size: 13px; overflow-wrap: anywhere; }
       @media (max-width: 860px) {
-        .viewer-header-inner {
-          grid-template-columns: 1fr;
-          align-items: start;
-        }
-
-        .viewer-actions {
-          justify-content: stretch;
-        }
-
-        .peer-control {
-          width: 100%;
-          min-width: 0;
-        }
-
-        .conversation-meta {
-          grid-template-columns: 1fr 1fr;
-        }
-
-        id-chat-msg-list {
-          height: calc(100svh - 360px);
-        }
+        .chat-main { padding: 16px; }
+        .conversation-meta { grid-template-columns: 1fr 1fr; }
+        id-chat-msg-list { height: calc(100svh - 360px); }
       }
-
       @media (max-width: 560px) {
-        .peer-row {
-          flex-direction: column;
-        }
-
-        button {
-          width: 100%;
-        }
-
-        .conversation-meta {
-          grid-template-columns: 1fr;
-        }
-
-        .viewer-main {
-          grid-template-rows: auto minmax(320px, 1fr);
-        }
-
-        id-chat-msg-list {
-          min-height: 320px;
-          height: calc(100svh - 520px);
-        }
+        .peer-row { flex-direction: column; }
+        .conversation-meta { grid-template-columns: 1fr; }
+        id-chat-msg-list { min-height: 320px; height: calc(100svh - 520px); }
       }
     </style>
   </head>
   <body>
-    <div class="viewer-shell">
-      <header class="viewer-header">
-        <div class="viewer-header-inner">
-          <div>
-            <p class="eyebrow">__PAGE_EYEBROW__</p>
-            <h1>__PAGE_HEADING__</h1>
-            <p class="viewer-subtitle">__PAGE_DESCRIPTION__</p>
-          </div>
-          <div class="viewer-actions">
-            <label class="peer-control">
-              <span>Peer globalMetaId</span>
-              <span class="peer-row">
-                <input data-chat-peer-input type="text" autocomplete="off" spellcheck="false" placeholder="gm-target" />
-                <button data-chat-refresh type="button">Refresh</button>
-                <button data-chat-stop type="button">End Chat</button>
-              </span>
-            </label>
-          </div>
+    <div class="chat-shell">
+      <header class="topbar">
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
+        <div class="topbar-sep"></div>
+        <span class="topbar-title">__PAGE_EYEBROW__</span>
+        <div class="topbar-spacer"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <label class="peer-control">
+            <span class="field-label">Peer globalMetaId</span>
+            <span class="peer-row">
+              <input data-chat-peer-input type="text" autocomplete="off" spellcheck="false" placeholder="gm-target" />
+              <button class="btn btn-primary btn-sm" data-chat-refresh type="button">Refresh</button>
+              <button class="btn btn-danger btn-sm" data-chat-stop type="button">End Chat</button>
+            </span>
+          </label>
         </div>
       </header>
 
-      <main class="viewer-main">
+      <main class="chat-main">
         <div>
           <button class="meta-toggle" data-meta-toggle type="button">
             <span class="meta-toggle-arrow" data-meta-arrow>&#9660;</span> Info
           </button>
         </div>
+
         <section class="conversation-meta" data-meta-section aria-label="Conversation status">
-          <div class="meta-item">
-            <span>Local MetaBot</span>
-            <strong data-chat-self>Waiting for local identity</strong>
+          <div class="stat-card">
+            <div class="stat-label">Local MetaBot</div>
+            <div class="stat-value sm" data-chat-self>Waiting…</div>
           </div>
-          <div class="meta-item">
-            <span>Peer MetaBot</span>
+          <div class="stat-card">
+            <div class="stat-label">Peer MetaBot</div>
             <div data-chat-peer-container>
-              <strong data-chat-peer>No peer selected</strong>
+              <div class="stat-value sm" data-chat-peer>No peer selected</div>
             </div>
           </div>
-          <div class="meta-item">
-            <span>Messages</span>
-            <strong data-chat-count>0 messages</strong>
+          <div class="stat-card">
+            <div class="stat-label">Messages</div>
+            <div class="stat-value sm" data-chat-count>0</div>
           </div>
-          <div class="meta-item">
-            <span>Status</span>
-            <strong data-chat-status data-tone="neutral">Ready</strong>
+          <div class="stat-card">
+            <div class="stat-label">Status</div>
+            <div class="stat-value sm" data-chat-status data-tone="neutral">Ready</div>
           </div>
         </section>
 

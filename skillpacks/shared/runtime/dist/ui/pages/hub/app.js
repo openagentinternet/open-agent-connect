@@ -6,171 +6,135 @@ function buildHubPageDefinition() {
     const buildHubServiceDirectoryViewModelSource = viewModel_1.buildHubServiceDirectoryViewModel.toString();
     return {
         page: 'hub',
-        title: 'Agent Hub',
-        eyebrow: 'Yellow Pages',
-        heading: 'Browse online MetaBot services',
-        description: 'A local-only view of discoverable MetaBot services, sorted for humans while the daemon stays machine-first.',
-        panels: [
-            {
-                title: 'Online-first service listing',
-                body: 'Mirror the GigSquare yellow-pages feeling: online bots first, then high-usage services.',
-                items: [
-                    'Show online availability at a glance',
-                    'Highlight provider globalMetaId and service pin id',
-                    'Keep service descriptions compact and scannable',
-                ],
-            },
-            {
-                title: 'Natural-language invocation',
-                body: 'Humans browse here, but the real call path is still agent-to-agent over MetaWeb.',
-                actionLabel: 'Open services API',
-                actionHref: '/api/network/services?online=true',
-            },
-            {
-                title: 'Traceable by design',
-                body: 'Every successful remote call should lead to a trace page, not a hidden local side effect.',
-            },
-        ],
+        title: 'MetaBot Service Hub',
+        eyebrow: 'Service Hub',
+        heading: 'Online MetaBot Services',
+        description: 'Live directory of online MetaBot services on MetaWeb.',
+        panels: [],
         script: `(() => {
   const buildHubServiceDirectoryViewModel = ${buildHubServiceDirectoryViewModelSource};
-  const elements = {
-    onlineCount: document.querySelector('[data-online-count]'),
-    topService: document.querySelector('[data-top-service]'),
-    directoryMode: document.querySelector('[data-directory-mode]'),
-    directory: document.querySelector('[data-service-directory]'),
-    serviceList: document.querySelector('[data-service-list]'),
-    emptyState: document.querySelector('[data-directory-empty]'),
-    emptyTitle: document.querySelector('[data-directory-empty-title]'),
-    emptyBody: document.querySelector('[data-directory-empty-body]'),
-    updatedAt: document.querySelector('[data-directory-updated]'),
+
+  const $ = (sel) => document.querySelector(sel);
+  const setText = (el, v) => { if (el) el.textContent = v; };
+
+  const formatAgo = (agoSec) => {
+    if (typeof agoSec !== 'number') return null;
+    if (agoSec < 60) return agoSec + 's ago';
+    if (agoSec < 3600) return Math.floor(agoSec / 60) + 'm ago';
+    return Math.floor(agoSec / 3600) + 'h ago';
   };
 
-  const setText = (element, value) => {
-    if (!element) return;
-    element.textContent = value;
+  const formatTime = (ms) => {
+    if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return null;
+    try { return new Date(ms).toLocaleString(); } catch { return null; }
   };
 
-  const clearChildren = (element) => {
-    if (!element) return;
-    while (element.firstChild) {
-      element.removeChild(element.firstChild);
-    }
-  };
-
-  const formatTime = (value) => {
-    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-      return 'unknown';
-    }
-    try {
-      return new Date(value).toLocaleString();
-    } catch {
-      return String(value);
-    }
-  };
-
-  const appendMetaRow = (target, label, value) => {
-    if (!target || !value) return;
-    const row = document.createElement('div');
-    row.className = 'service-meta-row';
-    const term = document.createElement('dt');
-    term.textContent = label;
-    const description = document.createElement('dd');
-    description.textContent = value;
-    row.appendChild(term);
-    row.appendChild(description);
-    target.appendChild(row);
-  };
-
-  const renderDirectory = (payload) => {
+  const renderTable = (payload) => {
     const services = Array.isArray(payload && payload.data && payload.data.services)
-      ? payload.data.services
-      : [];
+      ? payload.data.services : [];
     const model = buildHubServiceDirectoryViewModel({ services });
 
-    setText(elements.onlineCount, model.countLabel);
-    setText(elements.directoryMode, 'chain-backed yellow pages');
-    clearChildren(elements.serviceList);
+    const onlineCount = model.entries.filter(e => e.statusTone === 'online').length;
+    setText($('[data-online-count]'), String(onlineCount));
+    setText($('[data-total-count]'), String(model.entries.length));
+    setText($('[data-top-service]'), model.entries[0]?.displayName || '—');
+    setText($('[data-directory-mode]'), payload?.data?.discoverySource || 'chain');
+    setText($('[data-online-badge]'), onlineCount + ' online');
+    setText($('[data-directory-updated]'), 'updated ' + new Date().toLocaleTimeString());
+
+    const tbody = $('[data-service-list]');
+    if (!tbody) return;
+    tbody.innerHTML = '';
 
     if (!model.entries.length) {
-      if (elements.emptyState) {
-        elements.emptyState.hidden = false;
-      }
-      setText(elements.topService, 'none visible');
-      setText(elements.emptyTitle, model.emptyTitle);
-      setText(elements.emptyBody, model.emptyBody);
-      setText(elements.updatedAt, 'Directory checked just now.');
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="6" class="table-empty"><strong>' + model.emptyTitle + '</strong>' + model.emptyBody + '</td>';
+      tbody.appendChild(tr);
       return;
     }
 
-    if (elements.emptyState) {
-      elements.emptyState.hidden = true;
-    }
-
-    const topEntry = model.entries[0];
-    setText(elements.topService, topEntry.displayName);
-    setText(elements.updatedAt, 'Last refreshed ' + formatTime(Date.now()));
-
     model.entries.forEach((entry) => {
-      if (!elements.serviceList) return;
-      const card = document.createElement('article');
-      card.className = 'service-card';
+      const tr = document.createElement('tr');
 
-      const header = document.createElement('div');
-      header.className = 'service-card-header';
+      // Service name + description
+      const tdSvc = document.createElement('td');
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'svc-name';
+      nameDiv.textContent = entry.displayName;
+      const descDiv = document.createElement('div');
+      descDiv.className = 'svc-desc';
+      descDiv.textContent = entry.description;
+      tdSvc.appendChild(nameDiv);
+      tdSvc.appendChild(descDiv);
 
-      const titleBlock = document.createElement('div');
-      titleBlock.className = 'service-card-title';
-      const title = document.createElement('h2');
-      title.textContent = entry.displayName;
-      const capability = document.createElement('p');
-      capability.className = 'service-capability';
-      capability.textContent = entry.capabilityLabel;
-      titleBlock.appendChild(title);
-      titleBlock.appendChild(capability);
+      // Provider
+      const tdProv = document.createElement('td');
+      if (entry.providerName) {
+        const nameDiv2 = document.createElement('div');
+        nameDiv2.className = 'svc-provider-name';
+        nameDiv2.textContent = entry.providerName;
+        tdProv.appendChild(nameDiv2);
+      }
+      const gmidDiv = document.createElement('div');
+      gmidDiv.className = 'svc-provider-gmid';
+      gmidDiv.textContent = entry.providerGmid || entry.providerLabel;
+      tdProv.appendChild(gmidDiv);
 
-      const status = document.createElement('span');
-      status.className = 'service-status service-status-' + entry.statusTone;
-      status.textContent = entry.statusLabel;
+      // Price
+      const tdPrice = document.createElement('td');
+      tdPrice.className = 'svc-price';
+      tdPrice.textContent = entry.priceLabel;
 
-      header.appendChild(titleBlock);
-      header.appendChild(status);
-      card.appendChild(header);
+      // Skill
+      const tdSkill = document.createElement('td');
+      const skillSpan = document.createElement('span');
+      skillSpan.className = 'svc-skill';
+      skillSpan.textContent = entry.capabilityLabel;
+      tdSkill.appendChild(skillSpan);
 
-      const description = document.createElement('p');
-      description.className = 'service-description';
-      description.textContent = entry.description;
-      card.appendChild(description);
+      // Status
+      const tdStatus = document.createElement('td');
+      const pill = document.createElement('span');
+      pill.className = 'status-pill status-' + entry.statusTone;
+      const dot = document.createElement('span');
+      dot.className = 'status-dot';
+      pill.appendChild(dot);
+      pill.appendChild(document.createTextNode(entry.statusLabel));
+      tdStatus.appendChild(pill);
 
-      const meta = document.createElement('dl');
-      meta.className = 'service-meta';
-      appendMetaRow(meta, 'Provider', entry.providerLabel);
-      appendMetaRow(meta, 'Service Pin', entry.servicePinId || 'not published');
-      appendMetaRow(meta, 'Price', entry.priceLabel);
-      appendMetaRow(meta, 'Skill', entry.capabilityLabel);
-      appendMetaRow(meta, 'Last Seen', entry.lastSeenAtMs ? formatTime(entry.lastSeenAtMs) : 'not observed');
-      appendMetaRow(meta, 'Updated', entry.updatedAtMs ? formatTime(entry.updatedAtMs) : 'not published');
-      card.appendChild(meta);
+      // Last seen
+      const tdSeen = document.createElement('td');
+      tdSeen.className = 'last-seen';
+      const agoSec = typeof entry.lastSeenAgoSeconds === 'number' ? entry.lastSeenAgoSeconds : null;
+      tdSeen.textContent = agoSec != null ? formatAgo(agoSec) : (entry.lastSeenAtMs ? formatTime(entry.lastSeenAtMs) : '—');
 
-      elements.serviceList.appendChild(card);
+      tr.appendChild(tdSvc);
+      tr.appendChild(tdProv);
+      tr.appendChild(tdPrice);
+      tr.appendChild(tdSkill);
+      tr.appendChild(tdStatus);
+      tr.appendChild(tdSeen);
+      tbody.appendChild(tr);
     });
   };
 
-  fetch('/api/network/services?online=true', { cache: 'no-store' })
-    .then((response) => response.json())
-    .then((payload) => {
-      renderDirectory(payload);
-    })
-    .catch(() => {
-      setText(elements.onlineCount, '0');
-      setText(elements.topService, 'load failed');
-      setText(elements.directoryMode, 'directory unavailable');
-      if (elements.emptyState) {
-        elements.emptyState.hidden = false;
-      }
-      setText(elements.emptyTitle, 'Directory load failed');
-      setText(elements.emptyBody, 'The local daemon could not load online services right now. Keep the page open and try again after the daemon reconnects.');
-      setText(elements.updatedAt, 'No successful refresh yet.');
-    });
+  const load = () => {
+    fetch('/api/network/services?online=true', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(renderTable)
+      .catch(() => {
+        const tbody = $('[data-service-list]');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="table-empty"><strong>Load failed</strong>Could not reach the local daemon. Is it running?</td></tr>';
+        setText($('[data-online-count]'), '0');
+        setText($('[data-total-count]'), '0');
+        setText($('[data-directory-updated]'), 'failed ' + new Date().toLocaleTimeString());
+      });
+  };
+
+  const refreshBtn = document.getElementById('refresh-btn');
+  if (refreshBtn) refreshBtn.addEventListener('click', load);
+
+  load();
 })();`,
     };
 }

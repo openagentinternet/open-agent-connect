@@ -4,209 +4,107 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
     <style>
-      :root {
-        color-scheme: light;
-        --bg: #f6f3ec;
-        --panel: #fffdf7;
-        --ink: #1f2933;
-        --muted: #5b6773;
-        --line: #d8d1c2;
-        --accent: #0f766e;
-        --accent-soft: #d6f3ef;
-        --warm: #b45309;
-        --error: #b42318;
-      }
-
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        font-family: "IBM Plex Sans", "Helvetica Neue", sans-serif;
-        background:
-          radial-gradient(circle at top left, rgba(15, 118, 110, 0.09), transparent 30%),
-          linear-gradient(180deg, #faf7f0 0%, var(--bg) 100%);
-        color: var(--ink);
-      }
-
-      .page {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 32px 24px 64px;
-      }
-
-      .hero, .panels, .page-rich-content {
-        margin-bottom: 24px;
-      }
-
-      .nav {
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
-      }
-
-      .nav a {
-        color: var(--accent);
-        text-decoration: none;
-        font-weight: 600;
-      }
-
-      .panels {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 16px;
-      }
-
-      .panel,
-      .publish-form,
-      .publish-card {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 18px;
-        box-shadow: 0 12px 40px rgba(31, 41, 51, 0.06);
-      }
-
-      .panel {
-        padding: 18px;
-      }
-
       .publish-shell {
         display: grid;
-        grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.95fr);
+        grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr);
         gap: 20px;
         align-items: start;
       }
-
       .publish-form {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
         padding: 22px;
       }
-
       .publish-form-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 14px;
       }
-
       .publish-field {
         display: flex;
         flex-direction: column;
         gap: 6px;
       }
-
-      .publish-field-wide {
-        grid-column: span 2;
-      }
-
+      .publish-field-wide { grid-column: span 2; }
       .publish-field span {
-        font-size: 12px;
-        font-weight: 700;
-        letter-spacing: 0.04em;
+        font-size: 11px;
+        font-family: var(--mono);
         text-transform: uppercase;
+        letter-spacing: .06em;
         color: var(--muted);
       }
-
       .publish-field input,
       .publish-field textarea {
+        background: var(--surface2);
+        border: 1px solid var(--border2);
+        border-radius: var(--radius-sm);
+        padding: 9px 12px;
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: 13px;
+        transition: border-color .15s;
         width: 100%;
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 12px 14px;
-        background: #fff;
-        color: var(--ink);
-        font: inherit;
       }
-
+      .publish-field input:focus,
+      .publish-field textarea:focus { outline: none; border-color: var(--accent); }
       .publish-actions {
         margin-top: 18px;
         display: flex;
         flex-wrap: wrap;
-        gap: 12px;
+        gap: 10px;
         align-items: center;
       }
-
-      .publish-actions button {
-        border: none;
-        border-radius: 999px;
-        padding: 12px 18px;
-        background: var(--accent);
-        color: #fff;
-        font: inherit;
-        font-weight: 700;
-        cursor: pointer;
-      }
-
-      .publish-actions button:disabled {
-        opacity: 0.6;
-        cursor: progress;
-      }
-
       .publish-status {
+        font-size: 12px;
+        font-family: var(--mono);
         color: var(--muted);
-        font-weight: 600;
       }
-
-      .publish-status[data-tone="success"] { color: var(--accent); }
-      .publish-status[data-tone="error"] { color: var(--error); }
-      .publish-status[data-tone="busy"] { color: var(--warm); }
-
-      .publish-cards {
-        display: grid;
-        gap: 16px;
-      }
-
+      .publish-status[data-tone="success"] { color: var(--green); }
+      .publish-status[data-tone="error"]   { color: var(--red); }
+      .publish-status[data-tone="busy"]    { color: var(--amber); }
+      .publish-cards { display: grid; gap: 14px; }
       .publish-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
         padding: 20px;
       }
-
-      .publish-card h2 {
-        margin: 0 0 8px;
-        font-size: 1rem;
-      }
-
+      .publish-card h2 { font-size: 13px; font-family: var(--mono); font-weight: 500; margin-bottom: 8px; }
       .publish-card-summary,
-      .publish-card-empty {
-        margin: 0 0 14px;
-        color: var(--muted);
-      }
-
-      .publish-card-rows {
-        display: grid;
-        gap: 10px;
-        margin: 0;
-      }
-
+      .publish-card-empty { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+      .publish-card-rows { display: grid; gap: 0; }
       .publish-card-row {
         display: grid;
         grid-template-columns: 132px minmax(0, 1fr);
         gap: 12px;
         padding-top: 10px;
-        border-top: 1px solid rgba(216, 209, 194, 0.7);
+        border-top: 1px solid var(--border);
       }
-
-      .publish-card-row dt {
-        color: var(--muted);
-        font-weight: 700;
-      }
-
-      .publish-card-row dd {
-        margin: 0;
-        overflow-wrap: anywhere;
-      }
-
+      .publish-card-row dt { font-size: 11px; font-family: var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+      .publish-card-row dd { margin: 0; font-size: 12px; overflow-wrap: anywhere; font-family: var(--mono); color: var(--dim); }
       @media (max-width: 900px) {
-        .panels,
-        .publish-shell,
-        .publish-form-grid {
-          grid-template-columns: 1fr;
-        }
-
-        .publish-field-wide {
-          grid-column: span 1;
-        }
+        .publish-shell { grid-template-columns: 1fr; }
+        .publish-form-grid { grid-template-columns: 1fr; }
+        .publish-field-wide { grid-column: span 1; }
       }
     </style>
   </head>
   <body>
-    __PAGE_CONTENT__
+    <div class="shell">
+      <header class="topbar">
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
+        <div class="topbar-sep"></div>
+        <span class="topbar-title">__PAGE_EYEBROW__</span>
+        <div class="topbar-spacer"></div>
+        <nav class="topbar-nav">__PAGE_NAV__</nav>
+      </header>
+      <main class="content">
+        __PAGE_CONTENT__
+      </main>
+    </div>
     <script>__PAGE_SCRIPT__</script>
   </body>
 </html>
