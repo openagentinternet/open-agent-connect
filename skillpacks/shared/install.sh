@@ -80,8 +80,34 @@ done
 
 write_cli_shim() {
   local target_name="$1"
-  printf '%s
-'     '#!/usr/bin/env bash'     'set -euo pipefail'     "exec node "$CLI_ENTRY" "'"$@"'     > "$BIN_DIR/$target_name"
+  {
+    printf '%s
+' '#!/usr/bin/env bash'
+    printf '%s
+' 'set -euo pipefail'
+    printf 'CLI_ENTRY="%s"
+' "$CLI_ENTRY"
+    printf '%s
+' 'if [ ! -f "$CLI_ENTRY" ]; then'
+    printf '%s
+' '  for _f in "$HOME/.metabot/installpacks"/*/runtime/dist/cli/main.js; do'
+    printf '%s
+' '    [ -f "$_f" ] && CLI_ENTRY="$_f" && break'
+    printf '%s
+' '  done'
+    printf '%s
+' 'fi'
+    printf '%s
+' '[ -f "$CLI_ENTRY" ] || {'
+    printf '%s
+' '  echo "MetaBot CLI not found. Please reinstall: https://github.com/openagentinternet/open-agent-connect/releases/latest" >&2'
+    printf '%s
+' '  exit 1'
+    printf '%s
+' '}'
+    printf '%s
+' 'exec node "$CLI_ENTRY" "$@"'
+  } > "$BIN_DIR/$target_name"
   chmod +x "$BIN_DIR/$target_name"
 }
 
