@@ -823,34 +823,32 @@ test('GET /ui/trace serves a built-in trace inspector wired to the trace API, SS
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/ui/trace?traceId=trace-weather-123`);
+  const response = await fetch(`${server.baseUrl}/ui/trace`);
   const html = await response.text();
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
-  assert.match(html, /Trace Inspector/);
-  assert.match(html, /new EventSource\(/);
-  assert.match(html, /\/api\/trace\//);
-  assert.match(html, /\/events/);
-  assert.match(html, /Timeout/);
-  assert.match(html, /Clarification/);
-  assert.match(html, /Manual Action/);
-  assert.match(html, /Remote Result/);
-  assert.match(html, /Rating Follow-Up/);
+  assert.match(html, /A2A Trace/);
+  assert.match(html, /\/api\/trace\/sessions/);
+  assert.match(html, /data-session-list/);
+  assert.match(html, /data-session-detail/);
+  assert.match(html, /data-trace-total/);
+  assert.match(html, /session-panel/);
+  assert.match(html, /detail-panel/);
 });
 
 test('GET /ui/trace gives verbose cards more room and allows long participant values to wrap', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/ui/trace?traceId=trace-weather-123`);
+  const response = await fetch(`${server.baseUrl}/ui/trace`);
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  assert.match(html, /detail-card-wide/);
-  assert.match(html, /participant-item/);
-  assert.match(html, /overflow-wrap:\s*anywhere/);
-  assert.match(html, /grid-column:\s*span 6/);
+  assert.match(html, /trace-workspace/);
+  assert.match(html, /participant-avatar/);
+  assert.match(html, /word-break:\s*break-word/);
+  assert.match(html, /msg-bubble/);
 });
 
 test('GET /ui/chat-viewer serves the built-in private chat viewer shell', async (t) => {

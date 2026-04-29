@@ -6,60 +6,479 @@
     <title>__PAGE_TITLE__</title>
     <link rel="stylesheet" href="/ui/shared.css" />
     <style>
-      .trace-meta-strip {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      /* ── Trace page: full-height two-panel layout ── */
+      .trace-shell {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* Stats strip */
+      .trace-stats {
+        display: flex;
         gap: 12px;
-        margin-bottom: 24px;
+        padding: 16px 24px 0;
+        flex-shrink: 0;
+        flex-wrap: wrap;
       }
-      .detail-grid {
-        display: grid;
-        grid-template-columns: repeat(12, minmax(0, 1fr));
-        gap: 14px;
-        margin-bottom: 14px;
+      .trace-stats .stat-card {
+        flex: 1;
+        min-width: 120px;
       }
-      .detail-card         { grid-column: span 4; }
-      .detail-card-wide    { grid-column: span 6; }
-      .detail-card-full    { grid-column: 1 / -1; }
-      .state-guide { display: grid; gap: 10px; }
-      .state-guide-item {
-        background: var(--surface2);
+
+      /* Two-panel workspace */
+      .trace-workspace {
+        flex: 1;
+        display: flex;
+        gap: 0;
+        min-height: 0;
+        margin: 16px 24px 24px;
         border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: 12px 14px;
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        background: var(--surface);
       }
-      .state-guide-item strong {
-        display: block;
-        font-size: 12px;
+
+      /* ── Left panel: session list ── */
+      .session-panel {
+        width: 280px;
+        flex-shrink: 0;
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--surface);
+      }
+      .session-panel-header {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .session-panel-title {
+        font-size: 11px;
         font-family: var(--mono);
-        color: var(--text);
-        margin-bottom: 4px;
-      }
-      .state-guide-item span {
-        font-size: 12px;
+        font-weight: 500;
         color: var(--muted);
-        line-height: 1.5;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        flex: 1;
       }
-      .hint {
+      .session-panel-count {
         font-size: 11px;
         font-family: var(--mono);
         color: var(--dim);
+      }
+      .session-list-scroll {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+      }
+      .session-list-scroll::-webkit-scrollbar { width: 4px; }
+      .session-list-scroll::-webkit-scrollbar-track { background: transparent; }
+      .session-list-scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+      /* Session list items */
+      .session-item {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        transition: background .1s;
+        outline: none;
+      }
+      .session-item:hover { background: var(--surface2); }
+      .session-item.selected { background: var(--surface3); border-left: 2px solid var(--accent); }
+      .session-item.selected:hover { background: var(--surface3); }
+
+      .session-item-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 5px;
+      }
+      .session-role-badge {
+        font-size: 9px;
+        font-family: var(--mono);
+        font-weight: 500;
+        padding: 2px 6px;
+        border-radius: 3px;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+      }
+      .badge-caller  { background: var(--accent-dim); color: var(--accent); }
+      .badge-provider { background: var(--green-dim); color: var(--green); }
+
+      .session-time {
+        font-size: 10px;
+        font-family: var(--mono);
+        color: var(--dim);
+        margin-left: auto;
+      }
+      .session-item-peer {
+        font-size: 12px;
+        color: var(--text);
+        font-weight: 500;
+        margin-bottom: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .session-item-local {
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--dim);
+        margin-bottom: 6px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .session-item-footer {
+        display: flex;
+        align-items: center;
+      }
+
+      /* Empty / loading states */
+      .session-empty {
+        padding: 32px 20px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      .session-empty-hint {
         margin-top: 8px;
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--dim);
       }
-      @media (max-width: 1040px) {
-        .detail-card      { grid-column: span 6; }
-        .detail-card-wide { grid-column: 1 / -1; }
-        .detail-card-full { grid-column: 1 / -1; }
+
+      /* ── Right panel: session detail ── */
+      .detail-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        min-width: 0;
+        background: var(--bg);
       }
-      @media (max-width: 760px) {
-        .detail-card,
-        .detail-card-wide,
-        .detail-card-full { grid-column: 1 / -1; }
+
+      /* Detail empty / loading */
+      .detail-empty,
+      .detail-loading {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        font-size: 13px;
+        flex-direction: column;
+        gap: 8px;
+        padding: 32px;
+        text-align: center;
+      }
+
+      /* Detail header: participants row */
+      .detail-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        flex-shrink: 0;
+      }
+      .detail-header-participant {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex: 1;
+        min-width: 0;
+      }
+      .detail-header-participant-right {
+        justify-content: flex-end;
+        flex-direction: row;
+      }
+      .participant-avatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        object-fit: cover;
+        flex-shrink: 0;
+        background: var(--surface2);
+      }
+      .participant-info {
+        min-width: 0;
+        flex: 1;
+      }
+      .participant-info-right {
+        text-align: right;
+      }
+      .participant-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .participant-role {
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--muted);
+      }
+      .detail-header-meta {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+        padding: 0 8px;
+      }
+      .detail-trace-id {
+        font-size: 10px;
+        color: var(--dim);
+        text-align: center;
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* Messages scroll area */
+      .messages-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px 0 24px;
+        min-height: 0;
+      }
+      .messages-scroll::-webkit-scrollbar { width: 4px; }
+      .messages-scroll::-webkit-scrollbar-track { background: transparent; }
+      .messages-scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+      .messages-list { display: flex; flex-direction: column; gap: 4px; }
+      .messages-empty {
+        padding: 32px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      /* System message */
+      .msg-system {
+        display: flex;
+        justify-content: center;
+        padding: 6px 24px;
+      }
+      .msg-system span {
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--dim);
+        font-style: italic;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 3px 12px;
+      }
+
+      /* Tool call block */
+      .msg-tool {
+        margin: 4px 24px;
+        border: 1px solid var(--border2);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        font-size: 11px;
+      }
+      .tool-toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 7px 12px;
+        background: var(--surface2);
+        border: none;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        cursor: pointer;
+        text-align: left;
+        transition: background .1s;
+      }
+      .tool-toggle:hover { background: var(--surface3); color: var(--text); }
+      .tool-chevron { color: var(--dim); font-size: 9px; }
+      .tool-body { background: var(--bg); }
+      .tool-input, .tool-result {
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 10px 14px;
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-all;
+        line-height: 1.6;
+        color: var(--muted);
+      }
+      .tool-result {
+        border-top: 1px solid var(--border);
+        color: var(--text);
+      }
+
+      /* Chat bubble rows */
+      .msg-row {
+        display: flex;
+        align-items: flex-end;
+        gap: 8px;
+        padding: 3px 20px;
+      }
+      .msg-local { flex-direction: row-reverse; }
+      .msg-peer  { flex-direction: row; }
+
+      .msg-avatar {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        object-fit: cover;
+        flex-shrink: 0;
+        background: var(--surface2);
+        margin-bottom: 18px;
+      }
+
+      .msg-body {
+        display: flex;
+        flex-direction: column;
+        max-width: 70%;
+      }
+      .msg-local .msg-body { align-items: flex-end; }
+      .msg-peer  .msg-body { align-items: flex-start; }
+
+      .msg-name {
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--muted);
+        margin-bottom: 3px;
+        padding: 0 4px;
+      }
+
+      .msg-bubble {
+        border-radius: 18px;
+        padding: 8px 14px;
+        font-size: 13px;
+        line-height: 1.5;
+        word-break: break-word;
+      }
+      .bubble-local {
+        background: var(--accent);
+        color: #fff;
+        border-bottom-right-radius: 4px;
+      }
+      .bubble-peer {
+        background: var(--surface2);
+        color: var(--text);
+        border: 1px solid var(--border2);
+        border-bottom-left-radius: 4px;
+      }
+
+      /* Markdown in bubbles */
+      .msg-bubble p { margin: 0 0 6px; }
+      .msg-bubble p:last-child { margin: 0; }
+      .msg-bubble h1, .msg-bubble h2, .msg-bubble h3 { margin: 6px 0 4px; font-size: inherit; font-weight: 600; }
+      .msg-bubble ul, .msg-bubble ol { margin: 4px 0; padding-left: 18px; }
+      .msg-bubble li { margin: 2px 0; }
+      .msg-bubble a { color: inherit; text-decoration: underline; opacity: .85; }
+      .msg-bubble strong { font-weight: 600; }
+      .bubble-local .md-code { background: rgba(0,0,0,.2); }
+      .bubble-peer  .md-code { background: var(--surface3); }
+      .md-code {
+        display: block;
+        padding: 8px 12px;
+        border-radius: var(--radius-sm);
+        font-family: var(--mono);
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-all;
+        margin: 6px 0;
+        overflow-x: auto;
+      }
+      .md-inline-code {
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 1px 5px;
+        border-radius: 3px;
+        background: rgba(0,0,0,.15);
+      }
+
+      .msg-metafiles {
+        margin-top: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+        max-width: 320px;
+      }
+
+      .msg-time {
+        font-size: 10px;
+        font-family: var(--mono);
+        color: var(--dim);
+        margin-top: 3px;
+        padding: 0 4px;
+      }
+
+      /* Metafile previews */
+      .metafile-preview {
+        border: 1px solid var(--border2);
+        border-radius: var(--radius);
+        overflow: hidden;
+        background: var(--surface2);
+      }
+      .metafile-preview img,
+      .metafile-preview video { width: 100%; max-height: 240px; object-fit: contain; display: block; }
+      .metafile-preview audio { width: 100%; display: block; }
+      .metafile-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px;
+        border-top: 1px solid var(--border);
+      }
+      .metafile-pin {
+        font-size: 10px;
+        font-family: var(--mono);
+        color: var(--dim);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .metafile-dl {
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--accent);
+        text-decoration: none;
+        flex-shrink: 0;
+        margin-left: 8px;
+      }
+      .metafile-dl-card { padding: 10px; display: flex; justify-content: space-between; align-items: center; }
+
+      /* Error text */
+      .error-text { color: var(--red); }
+
+      /* Status tones inside status pill for active sessions */
+      .tone-active .status-dot { animation: pulse 2s infinite; }
+
+      /* Mobile: stack panels */
+      @media (max-width: 768px) {
+        .trace-stats { padding: 12px 16px 0; }
+        .trace-workspace { margin: 12px 16px 16px; flex-direction: column; }
+        .session-panel { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 220px; }
+        .detail-panel { min-height: 300px; }
+        .msg-row { padding: 3px 12px; }
+        .msg-bubble { max-width: 85%; }
       }
     </style>
   </head>
   <body>
-    <div class="shell">
+    <div class="trace-shell">
       <header class="topbar">
         <a class="topbar-logo" href="/ui/hub">MetaBot</a>
         <div class="topbar-sep"></div>
@@ -68,126 +487,47 @@
         <nav class="topbar-nav">__PAGE_NAV__</nav>
       </header>
 
-      <main class="content">
-        <div class="trace-meta-strip">
-          <div class="stat-card">
-            <div class="stat-label">Trace ID</div>
-            <div class="stat-value sm mono" data-trace-id>—</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Order Focus</div>
-            <div class="stat-value sm mono" data-order-id>—</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Stream State</div>
-            <div class="stat-value sm" data-connection-state>awaiting</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">SSE Endpoint</div>
-            <div class="stat-value sm mono" data-stream-url>/api/trace/{traceId}/events</div>
-          </div>
+      <!-- Summary stats row -->
+      <div class="trace-stats">
+        <div class="stat-card">
+          <div class="stat-label">Total A2A Sessions</div>
+          <div class="stat-value" data-trace-total>—</div>
         </div>
-
-        <div class="section-header" style="margin-bottom:14px">
-          <span class="section-title">STATUS</span>
-          <span class="status-pill status-active" data-status-pill>
-            <span class="status-dot"></span>
-            <span data-status-pill-text>awaiting_trace</span>
-          </span>
-          <span class="section-spacer"></span>
+        <div class="stat-card">
+          <div class="stat-label">Services Used</div>
+          <div class="stat-value accent" data-trace-caller>—</div>
         </div>
-
-        <div class="card" style="margin-bottom:14px">
-          <div class="card-title" data-status-title>Trace inspector is waiting for daemon data</div>
-          <div class="card-subtitle" data-status-copy>
-            This page turns local daemon state into a human-readable view without changing how MetaBots talk over MetaWeb.
-          </div>
+        <div class="stat-card">
+          <div class="stat-label">Services Provided</div>
+          <div class="stat-value green" data-trace-provider>—</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-label">Last Activity</div>
+          <div class="stat-value sm" data-trace-last>—</div>
+        </div>
+      </div>
 
-        <div class="detail-grid">
-          <div class="card detail-card">
-            <div class="card-title">Snapshot</div>
-            <div class="card-subtitle">Current A2A identifiers and public state.</div>
-            <dl class="def-list" data-trace-snapshot></dl>
+      <!-- Two-panel workspace -->
+      <div class="trace-workspace">
+        <!-- Left: session list -->
+        <aside class="session-panel" aria-label="A2A session list">
+          <div class="session-panel-header">
+            <span class="session-panel-title">Sessions</span>
           </div>
-
-          <div class="card detail-card-wide">
-            <div class="card-title">Participants</div>
-            <div class="card-subtitle" style="overflow-wrap: anywhere">Agent-to-agent, not endpoint-to-endpoint.</div>
-            <ul class="timeline" data-trace-participants>
-              <li class="timeline-item participant-item" hidden></li>
-            </ul>
-          </div>
-
-          <div class="card detail-card">
-            <div class="card-title">Artifacts</div>
-            <div class="card-subtitle">Exported markdown and JSON are the durable evidence.</div>
-            <dl class="def-list" data-trace-artifacts></dl>
-          </div>
-
-          <div class="card detail-card">
-            <div class="card-title">First-Class States</div>
-            <div class="card-subtitle">These cases should be visible, not flattened away.</div>
-            <div class="state-guide">
-              <div class="state-guide-item">
-                <strong>Timeout</strong>
-                <span>The host session stopped waiting, but the remote MetaBot may still be working.</span>
-              </div>
-              <div class="state-guide-item">
-                <strong>Clarification</strong>
-                <span>The remote MetaBot requested one follow-up question inside the same A2A session.</span>
-              </div>
-              <div class="state-guide-item">
-                <strong>Manual Action</strong>
-                <span>A guarded branch needs a human decision instead of continuing automatically.</span>
-              </div>
+          <div class="session-list-scroll">
+            <div data-session-list>
+              <div class="session-empty"><p>Loading sessions…</p></div>
             </div>
           </div>
-        </div>
+        </aside>
 
-        <div class="detail-grid">
-          <div class="card detail-card-wide">
-            <div class="card-title">Remote Result</div>
-            <div class="card-subtitle" data-trace-result-summary>
-              When the remote MetaBot completes, the verbatim result appears here.
-            </div>
-            <pre class="code-block" data-trace-result>Waiting for the remote MetaBot to return a result.</pre>
-            <dl class="def-list" style="margin-top:12px" data-trace-result-meta></dl>
+        <!-- Right: session detail -->
+        <section class="detail-panel" aria-label="Session detail" data-session-detail>
+          <div class="detail-empty">
+            <span class="mono">Select a session to inspect it</span>
           </div>
-
-          <div class="card detail-card">
-            <div class="card-title">Rating Follow-Up</div>
-            <div class="card-subtitle" data-trace-rating-summary>
-              DACT T-stage: buyer rating and provider delivery status.
-            </div>
-            <pre class="code-block" style="margin-bottom:8px" data-trace-rating-request>No provider-side rating request stored.</pre>
-            <pre class="code-block" data-trace-rating-comment>No buyer-side rating follow-up stored yet.</pre>
-            <dl class="def-list" style="margin-top:12px" data-trace-rating-meta></dl>
-          </div>
-
-          <div class="card detail-card-wide">
-            <div class="card-title">Transcript Timeline</div>
-            <div class="card-subtitle">Session-level transcript records in order, or exported markdown fallback.</div>
-            <div data-trace-transcript></div>
-            <div class="hint" data-transcript-hint></div>
-          </div>
-
-          <div class="card detail-card">
-            <div class="card-title">Public Status Events</div>
-            <div class="card-subtitle">From the local daemon watch layer, not browser-only animation.</div>
-            <ul class="timeline" data-trace-events></ul>
-          </div>
-        </div>
-
-        <div class="detail-grid">
-          <div class="card detail-card-full">
-            <div class="card-title">Observation Notes</div>
-            <div class="card-subtitle">This inspector is for humans. Task execution, payment, and MetaWeb exchange remain in the daemon and on-chain records.</div>
-          </div>
-        </div>
-
-        <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">__PAGE_PANELS__</section>
-      </main>
+        </section>
+      </div>
     </div>
     <script>__PAGE_SCRIPT__</script>
   </body>

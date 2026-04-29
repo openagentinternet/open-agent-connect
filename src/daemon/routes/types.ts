@@ -74,6 +74,8 @@ export interface MetabotDaemonHttpHandlers {
   trace?: {
     getTrace?: (input: { traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     watchTrace?: (input: { traceId: string }) => Awaitable<string>;
+    listSessions?: () => Awaitable<MetabotCommandResult<unknown>>;
+    getSession?: (input: { sessionId: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   ui?: {
     renderPage?: (page: MetabotUiPageName) => Awaitable<string>;

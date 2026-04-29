@@ -6742,6 +6742,92 @@ export function createDefaultMetabotDaemonHandlers(input: {
           await sleep(Math.min(TRACE_WATCH_POLL_INTERVAL_MS, remainingMs));
         }
       },
+      listSessions: async () => {
+        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        const results: Array<Record<string, unknown>> = [];
+
+        await Promise.all(profiles.map(async (profile) => {
+          try {
+            const store = createSessionStateStore(profile.homeDir);
+            const state = await store.readState();
+            for (const session of state.sessions) {
+              const isCallerLocal = session.role === 'caller';
+              const peerGlobalMetaId = isCallerLocal
+                ? session.providerGlobalMetaId
+                : session.callerGlobalMetaId;
+              results.push({
+                ...session,
+                localMetabotName: profile.name,
+                localMetabotGlobalMetaId: profile.globalMetaId,
+                peerGlobalMetaId,
+              });
+            }
+          } catch {
+            // Skip profiles with unreadable session state
+          }
+        }));
+
+        results.sort((a, b) => {
+          const bTime = typeof b.updatedAt === 'number' ? b.updatedAt : 0;
+          const aTime = typeof a.updatedAt === 'number' ? a.updatedAt : 0;
+          return bTime - aTime;
+        });
+
+        const totalCount = results.length;
+        const callerCount = results.filter((s) => s.role === 'caller').length;
+        const providerCount = results.filter((s) => s.role === 'provider').length;
+        const lastUpdatedAt = results[0]?.updatedAt ?? null;
+
+        return commandSuccess({
+          sessions: results,
+          stats: { totalCount, callerCount, providerCount, lastUpdatedAt },
+        });
+      },
+      getSession: async ({ sessionId }) => {
+        const normalizedSessionId = normalizeText(sessionId);
+        if (!normalizedSessionId) {
+          return commandFailed('missing_session_id', 'Session ID is required.');
+        }
+
+        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+
+        for (const profile of profiles) {
+          try {
+            const store = createSessionStateStore(profile.homeDir);
+            const state = await store.readState();
+            const session = state.sessions.find((s) => s.sessionId === normalizedSessionId);
+            if (!session) continue;
+
+            const transcriptItems = state.transcriptItems.filter(
+              (item) => item.sessionId === normalizedSessionId,
+            );
+            const taskRuns = state.taskRuns.filter(
+              (run) => run.sessionId === normalizedSessionId,
+            );
+            const publicStatusSnapshots = state.publicStatusSnapshots.filter(
+              (snap) => snap.sessionId === normalizedSessionId,
+            );
+            const isCallerLocal = session.role === 'caller';
+            const peerGlobalMetaId = isCallerLocal
+              ? session.providerGlobalMetaId
+              : session.callerGlobalMetaId;
+
+            return commandSuccess({
+              session,
+              transcriptItems,
+              taskRuns,
+              publicStatusSnapshots,
+              localMetabotName: profile.name,
+              localMetabotGlobalMetaId: profile.globalMetaId,
+              peerGlobalMetaId,
+            });
+          } catch {
+            // Try next profile
+          }
+        }
+
+        return commandFailed('session_not_found', `A2A session not found: ${normalizedSessionId}`);
+      },
     },
   };
 }
