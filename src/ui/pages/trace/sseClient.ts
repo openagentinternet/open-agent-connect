@@ -22,6 +22,9 @@ function normalizeTimestamp(value) {
   if (value >= 1e9 && value < 1e12) return value * 1000;
   return value;
 }
+const ACTIVE_STATES = new Set(['requesting_remote', 'remote_received', 'remote_executing']);
+const STALE_THRESHOLD_MS = 15 * 60 * 1000;
+
 function getStateTone(state) {
   switch (state) {
     case 'completed': return 'completed';
@@ -52,6 +55,7 @@ function buildSessionListViewModel(rawSessions, now) {
     var role = normalizeText(record.role) || 'caller';
     var state = normalizeText(record.state);
     var updatedAt = normalizeTimestamp(record.updatedAt);
+    var isStale = ACTIVE_STATES.has(state) && updatedAt > 0 && (now - updatedAt) > STALE_THRESHOLD_MS;
     return {
       sessionId: sessionId,
       traceId: normalizeText(record.traceId),
@@ -63,8 +67,8 @@ function buildSessionListViewModel(rawSessions, now) {
       localMetabotGlobalMetaId: normalizeText(record.localMetabotGlobalMetaId),
       peerGlobalMetaId: normalizeText(record.peerGlobalMetaId),
       servicePinId: normalizeText(record.servicePinId),
-      stateTone: getStateTone(state),
-      stateLabel: getStateLabel(state),
+      stateTone: isStale ? 'timeout' : getStateTone(state),
+      stateLabel: isStale ? 'Timeout' : getStateLabel(state),
       timeAgoMs: now - updatedAt,
     };
   }).filter(function(item) { return item !== null; });
@@ -196,23 +200,26 @@ function extractMetafiles(content) {
 
 function renderMarkdown(text) {
   if (!text) return '';
-  let html = escHtml(text);
-  html = html.replace(/\`\`\`([\\s\\S]*?)\`\`\`/g, function(_, code) {
-    return '<pre class="md-code"><code>' + code + '</code></pre>';
+  const blocks = [];
+  let html = escHtml(text).replace(/\`\`\`([\\s\\S]*?)\`\`\`/g, function(_, code) {
+    const i = blocks.length;
+    blocks.push('<pre class="md-code"><code>' + code + '</code></pre>');
+    return '\\x00' + i + '\\x00';
   });
-  html = html.replace(/\`([^\`]+)\`/g, '<code class="md-inline-code">$1</code>');
-  html = html.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
-  html = html.replace(/\\*([^*]+)\\*/g, '<em>$1</em>');
+  html = html.replace(/\`([^\`\\n]+)\`/g, '<code class="md-inline-code">$1</code>');
+  html = html.replace(/\\*\\*([^*\\n]+)\\*\\*/g, '<strong>$1</strong>');
+  html = html.replace(/\\*([^*\\n]+)\\*/g, '<em>$1</em>');
   html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-  html = html.replace(/^(- .+)(\\n- .+)*/gm, function(block) {
+  html = html.replace(/^(- .+(\\n- .+)*)/gm, function(block) {
     const items = block.split('\\n').map(l => '<li>' + l.replace(/^- /, '') + '</li>').join('');
     return '<ul>' + items + '</ul>';
   });
   html = html.replace(/\\n\\n/g, '</p><p>');
   html = html.replace(/\\n/g, '<br>');
+  html = html.replace(/\\x00(\\d+)\\x00/g, function(_, i) { return blocks[+i]; });
   return '<p>' + html + '</p>';
 }
 
@@ -253,11 +260,17 @@ async function resolveProfile(gmid) {
       const json = await resp.json();
       const data = json?.data || json || {};
       name = data.name || data.showName || data.nickname || '';
-      const rawAvatar = data.avatar || data.avatarUrl || '';
-      if (rawAvatar && (rawAvatar.startsWith('http') || rawAvatar.startsWith('data:'))) {
-        avatarUrl = rawAvatar;
-      } else if (rawAvatar && rawAvatar.match(/^[0-9a-f]{64}$/i)) {
-        avatarUrl = 'https://file.metaid.io/metafile-indexer/api/v1/files/content/' + rawAvatar;
+      const rawAvatar = data.avatar || data.avatarUrl || data.avatarId || '';
+      if (rawAvatar) {
+        if (rawAvatar.startsWith('http') || rawAvatar.startsWith('data:')) {
+          avatarUrl = rawAvatar;
+        } else if (rawAvatar.startsWith('/')) {
+          avatarUrl = 'https://file.metaid.io' + rawAvatar;
+        } else if (/^[0-9a-f]{64}i\\d+$/i.test(rawAvatar)) {
+          avatarUrl = 'https://file.metaid.io/content/' + rawAvatar;
+        } else if (/^[0-9a-f]{64}$/i.test(rawAvatar)) {
+          avatarUrl = 'https://file.metaid.io/metafile-indexer/api/v1/files/content/' + rawAvatar;
+        }
       }
     }
   } catch { /* ignore */ }

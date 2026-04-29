@@ -68,6 +68,28 @@ test('buildSessionListViewModel maps state tones correctly', () => {
   }
 });
 
+test('buildSessionListViewModel treats active sessions stale >15min as timeout', () => {
+  const STALE = 16 * 60 * 1000; // 16 minutes
+  for (const state of ['requesting_remote', 'remote_received', 'remote_executing']) {
+    const [item] = buildSessionListViewModel([{
+      sessionId: 'x',
+      role: 'caller',
+      state,
+      updatedAt: NOW - STALE,
+    }], NOW);
+    assert.equal(item.stateTone, 'timeout', `Stale "${state}" should map to tone "timeout"`);
+    assert.equal(item.stateLabel, 'Timeout', `Stale "${state}" should have label "Timeout"`);
+  }
+  // Fresh active session should still be active
+  const [fresh] = buildSessionListViewModel([{
+    sessionId: 'y',
+    role: 'caller',
+    state: 'requesting_remote',
+    updatedAt: NOW - 60000,
+  }], NOW);
+  assert.equal(fresh.stateTone, 'active');
+});
+
 test('buildSessionDetailViewModel returns null for missing session', () => {
   assert.equal(buildSessionDetailViewModel({}), null);
   assert.equal(buildSessionDetailViewModel({ session: null }), null);

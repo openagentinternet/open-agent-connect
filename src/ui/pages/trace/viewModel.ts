@@ -80,6 +80,9 @@ function normalizeTimestamp(value: unknown): number {
   return value;
 }
 
+const ACTIVE_STATES = new Set<string>(['requesting_remote', 'remote_received', 'remote_executing']);
+const STALE_THRESHOLD_MS = 15 * 60 * 1000;
+
 function getStateTone(state: string): TraceSessionListItem['stateTone'] {
   switch (state) {
     case 'completed': return 'completed';
@@ -141,6 +144,7 @@ export function buildSessionListViewModel(
       const peerGlobalMetaId = normalizeText(record.peerGlobalMetaId);
       const servicePinId = normalizeText(record.servicePinId);
 
+      const isStale = ACTIVE_STATES.has(state) && updatedAt > 0 && (now - updatedAt) > STALE_THRESHOLD_MS;
       return {
         sessionId,
         traceId,
@@ -152,8 +156,8 @@ export function buildSessionListViewModel(
         localMetabotGlobalMetaId,
         peerGlobalMetaId,
         servicePinId,
-        stateTone: getStateTone(state),
-        stateLabel: getStateLabel(state),
+        stateTone: isStale ? 'timeout' : getStateTone(state),
+        stateLabel: isStale ? 'Timeout' : getStateLabel(state),
         timeAgoMs: now - updatedAt,
       } satisfies TraceSessionListItem;
     })
