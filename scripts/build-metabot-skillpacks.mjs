@@ -472,28 +472,16 @@ async function copyIfPresent(sourcePath, targetPath) {
 }
 
 async function copyRuntimeUiAssets(repoRoot, runtimeRoot) {
-  const sourcePagesRoot = path.join(repoRoot, 'src', 'ui', 'pages');
-  const runtimePagesRoot = path.join(runtimeRoot, 'dist', 'ui', 'pages');
-  const pageEntries = await fs.readdir(sourcePagesRoot, { withFileTypes: true });
-  for (const entry of pageEntries) {
-    if (!entry.isDirectory()) continue;
-    await copyIfPresent(
-      path.join(sourcePagesRoot, entry.name, 'index.html'),
-      path.join(runtimePagesRoot, entry.name, 'index.html'),
-    );
-  }
-
-  const viewerChatAssetPaths = [
-    ['components', 'id-chat-msg-list.js'],
-    ['components', 'id-chat-bubble.js'],
-    ['stores', 'chat', 'simple-talk.js'],
-  ];
-  for (const assetPath of viewerChatAssetPaths) {
-    await copyIfPresent(
-      path.join(repoRoot, 'src', 'ui', 'metaapps', 'chat', 'idframework', ...assetPath),
-      path.join(runtimeRoot, 'dist', 'ui', 'metaapps', 'chat', 'idframework', ...assetPath),
-    );
-  }
+  // Copy entire src/ui/ tree into dist/ui/. tsc only emits .js/.d.ts files,
+  // so static assets (.html, .css, .js in metaapps, etc.) are never written
+  // to dist/ by the compiler. Copying the whole tree here ensures nothing is
+  // silently omitted when new pages or metaapps are added.
+  // tsc-compiled .js files land in the same paths and overwrite any same-named
+  // source files — there are currently no naming conflicts.
+  const sourceUiRoot = path.join(repoRoot, 'src', 'ui');
+  const runtimeUiRoot = path.join(runtimeRoot, 'dist', 'ui');
+  await fs.mkdir(runtimeUiRoot, { recursive: true });
+  await fs.cp(sourceUiRoot, runtimeUiRoot, { recursive: true });
 }
 
 async function ensureBundledRuntime(repoRoot, runtimeRoot, compatibilityManifest, dependencyNames) {

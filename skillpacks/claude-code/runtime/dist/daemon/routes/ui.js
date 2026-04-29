@@ -73,35 +73,10 @@ async function loadTemplate(page) {
 async function renderBuiltInPage(page) {
     const definition = PAGE_BUILDERS[page]();
     const template = await loadTemplate(page);
-    const extraContent = definition.contentHtml
-        ? `<section class="page-rich-content">${definition.contentHtml}</section>`
-        : '';
-    const content = `
-    <main class="page">
-      <section class="hero">
-        <div class="eyebrow">${escapeHtml(definition.eyebrow)}</div>
-        <h1>${escapeHtml(definition.heading)}</h1>
-        <p class="hero-copy">${escapeHtml(definition.description)}</p>
-        <div class="hero-meta">
-          <div class="hero-chip">
-            <strong data-online-count>0</strong>
-            <span>Online services detected</span>
-          </div>
-          <div class="hero-chip">
-            <strong data-trace-id>trace-ready</strong>
-            <span>Latest visible trace</span>
-          </div>
-          <div class="hero-chip">
-            <strong data-order-id>order-ready</strong>
-            <span>Manual refund focus</span>
-          </div>
-        </div>
-        <nav class="nav">${renderNav(definition.page)}</nav>
-      </section>
-      <section class="panels">${renderPanels(definition)}</section>
-      ${extraContent}
-    </main>
-  `.trim();
+    // If the template manages its own layout (uses __PAGE_CONTENT__ directly),
+    // inject only the page-specific content HTML. Otherwise fall back to the
+    // legacy hero wrapper for templates that don't have __PAGE_CONTENT__.
+    const content = definition.contentHtml ?? '';
     return template
         .replace(/__PAGE_TITLE__/g, escapeHtml(definition.title))
         .replace(/__PAGE_EYEBROW__/g, escapeHtml(definition.eyebrow))
@@ -116,6 +91,24 @@ const handleUiRoutes = async (context) => {
     const { req, url, handlers } = context;
     if (!url.pathname.startsWith(UI_ROUTE_PREFIX)) {
         return false;
+    }
+    // Serve shared CSS
+    if (url.pathname === '/ui/shared.css') {
+        const candidates = [
+            node_path_1.default.resolve(__dirname, '../../ui/shared.css'),
+            node_path_1.default.resolve(__dirname, '../../../src/ui/shared.css'),
+        ];
+        for (const candidate of candidates) {
+            try {
+                const css = await node_fs_1.promises.readFile(candidate, 'utf8');
+                context.res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' });
+                context.res.end(css);
+                return true;
+            }
+            catch { /* try next */ }
+        }
+        context.sendJson(404, { ok: false, state: 'failed', code: 'not_found', message: 'shared.css not found' });
+        return true;
     }
     if (await (0, uiMetaApps_1.handleBundledMetaAppRoutes)(context)) {
         return true;

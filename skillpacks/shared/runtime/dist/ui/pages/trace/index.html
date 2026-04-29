@@ -4,419 +4,191 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
     <style>
-      :root {
-        color-scheme: light;
-        --bg: #f4efe4;
-        --card: rgba(255, 251, 244, 0.92);
-        --card-strong: #fffdf8;
-        --text: #201c17;
-        --muted: #6c6355;
-        --line: #d4c7b2;
-        --accent: #0f766e;
-        --accent-soft: rgba(15, 118, 110, 0.12);
-        --warning: #b45309;
-        --warning-soft: rgba(180, 83, 9, 0.12);
-        --danger: #b42318;
-        --danger-soft: rgba(180, 35, 24, 0.12);
-        --manual: #7c3aed;
-        --manual-soft: rgba(124, 58, 237, 0.12);
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
-        color: var(--text);
-        background:
-          radial-gradient(circle at top right, rgba(15, 118, 110, 0.1), transparent 30%),
-          radial-gradient(circle at left center, rgba(124, 58, 237, 0.08), transparent 28%),
-          linear-gradient(180deg, #fbf7ef 0%, var(--bg) 100%);
-      }
-      .page {
-        max-width: 1220px;
-        margin: 0 auto;
-        padding: 36px 22px 64px;
+      .trace-meta-strip {
         display: grid;
-        gap: 22px;
-      }
-      .hero,
-      .status-banner,
-      .detail-card,
-      .panel {
-        border: 1px solid var(--line);
-        border-radius: 26px;
-        background: var(--card);
-        box-shadow: 0 20px 55px rgba(90, 76, 50, 0.08);
-      }
-      .hero {
-        padding: 28px;
-        display: grid;
-        gap: 18px;
-      }
-      .eyebrow {
-        display: inline-flex;
-        width: fit-content;
-        padding: 6px 10px;
-        border-radius: 999px;
-        background: var(--accent-soft);
-        color: var(--accent);
-        font-size: 12px;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-      }
-      h1 {
-        margin: 0;
-        font-size: clamp(2rem, 5vw, 4.3rem);
-        line-height: 0.94;
-      }
-      .hero-copy,
-      .panel p,
-      .detail-copy {
-        margin: 0;
-        color: var(--muted);
-        line-height: 1.7;
-      }
-      .meta-strip,
-      .detail-grid,
-      .panels {
-        display: grid;
-        gap: 16px;
-      }
-      .meta-strip {
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      }
-      .meta-card {
-        padding: 14px 16px;
-        border: 1px solid var(--line);
-        border-radius: 18px;
-        background: var(--card-strong);
-      }
-      .meta-card strong,
-      .status-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 0.95rem;
-      }
-      .meta-card span {
-        display: block;
-        margin-top: 6px;
-        color: var(--muted);
-        font-size: 0.84rem;
-      }
-      .nav {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-      }
-      .nav a {
-        text-decoration: none;
-        color: var(--text);
-        padding: 10px 14px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        background: rgba(255,255,255,0.72);
-      }
-      .status-banner {
-        padding: 22px 24px;
-        display: grid;
         gap: 12px;
-      }
-      .status-pill {
-        width: fit-content;
-        padding: 8px 12px;
-        border-radius: 999px;
-        background: rgba(15, 118, 110, 0.1);
-        color: var(--accent);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        font-size: 0.74rem;
-      }
-      .status-pill[data-tone="timeout"] {
-        background: var(--warning-soft);
-        color: var(--warning);
-      }
-      .status-pill[data-tone="manual"],
-      .status-pill[data-tone="clarification"] {
-        background: var(--manual-soft);
-        color: var(--manual);
-      }
-      .status-pill[data-tone="failure"] {
-        background: var(--danger-soft);
-        color: var(--danger);
-      }
-      .status-pill[data-tone="completed"] {
-        background: var(--accent-soft);
-        color: var(--accent);
-      }
-      .status-copy {
-        font-size: 1.05rem;
+        margin-bottom: 24px;
       }
       .detail-grid {
+        display: grid;
         grid-template-columns: repeat(12, minmax(0, 1fr));
-      }
-      .detail-card {
-        padding: 20px;
-        display: grid;
         gap: 14px;
-        min-width: 0;
-        grid-column: span 4;
+        margin-bottom: 14px;
       }
-      .detail-card-wide {
-        grid-column: span 6;
-      }
-      .detail-card-full {
-        grid-column: 1 / -1;
-      }
-      .detail-card h2,
-      .panel h2 {
-        margin: 0;
-        font-size: 1.18rem;
-      }
-      .definition-list {
-        display: grid;
-        gap: 10px;
-        margin: 0;
-      }
-      .definition-row {
-        display: grid;
-        gap: 6px;
-      }
-      .definition-row dt {
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--muted);
-      }
-      .definition-row dd {
-        margin: 0;
-        font-size: 0.98rem;
-        word-break: break-word;
-        overflow-wrap: anywhere;
-      }
-      .timeline-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: grid;
-        gap: 12px;
-      }
-      .timeline-item {
-        padding: 14px 15px;
-        border-radius: 18px;
-        border: 1px solid var(--line);
-        background: var(--card-strong);
-        min-width: 0;
-      }
-      .timeline-item strong {
-        display: block;
-        margin-bottom: 8px;
-        font-size: 0.9rem;
-        overflow-wrap: anywhere;
-      }
-      .timeline-item p {
-        margin: 0;
-        color: var(--muted);
-        line-height: 1.6;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-      .participant-item {
-        min-width: 0;
-      }
-      .tone-active { border-color: rgba(15, 118, 110, 0.25); }
-      .tone-timeout { border-color: rgba(180, 83, 9, 0.25); background: rgba(180, 83, 9, 0.05); }
-      .tone-manual,
-      .tone-clarification { border-color: rgba(124, 58, 237, 0.25); background: rgba(124, 58, 237, 0.05); }
-      .tone-failure { border-color: rgba(180, 35, 24, 0.25); background: rgba(180, 35, 24, 0.05); }
-      .tone-completed { border-color: rgba(15, 118, 110, 0.25); background: rgba(15, 118, 110, 0.05); }
-      pre {
-        margin: 0;
-        padding: 16px;
-        border-radius: 18px;
-        border: 1px solid var(--line);
-        background: #f8f3ea;
-        white-space: pre-wrap;
-        word-break: break-word;
-        font-family: "SFMono-Regular", "Consolas", monospace;
-        font-size: 0.84rem;
-        line-height: 1.6;
-      }
-      .hint {
-        color: var(--muted);
-        font-size: 0.84rem;
-      }
-      .panels {
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      }
-      .panel {
-        padding: 20px;
-      }
-      .panel ul {
-        margin: 12px 0 0;
-        padding-left: 18px;
-        color: var(--muted);
-        line-height: 1.7;
-      }
-      .state-guide {
-        display: grid;
-        gap: 12px;
-      }
+      .detail-card         { grid-column: span 4; }
+      .detail-card-wide    { grid-column: span 6; }
+      .detail-card-full    { grid-column: 1 / -1; }
+      .state-guide { display: grid; gap: 10px; }
       .state-guide-item {
-        padding: 14px 15px;
-        border-radius: 18px;
-        border: 1px solid var(--line);
-        background: var(--card-strong);
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 12px 14px;
       }
       .state-guide-item strong {
         display: block;
-        margin-bottom: 6px;
+        font-size: 12px;
+        font-family: var(--mono);
+        color: var(--text);
+        margin-bottom: 4px;
       }
       .state-guide-item span {
+        font-size: 12px;
         color: var(--muted);
-        line-height: 1.6;
+        line-height: 1.5;
       }
-      @media (max-width: 760px) {
-        .page {
-          padding: 22px 14px 40px;
-        }
-        .hero {
-          padding: 22px;
-        }
-        .detail-card,
-        .detail-card-wide,
-        .detail-card-full {
-          grid-column: 1 / -1;
-        }
+      .hint {
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--dim);
+        margin-top: 8px;
       }
       @media (max-width: 1040px) {
-        .detail-card {
-          grid-column: span 6;
-        }
+        .detail-card      { grid-column: span 6; }
+        .detail-card-wide { grid-column: 1 / -1; }
+        .detail-card-full { grid-column: 1 / -1; }
+      }
+      @media (max-width: 760px) {
+        .detail-card,
         .detail-card-wide,
-        .detail-card-full {
-          grid-column: 1 / -1;
-        }
+        .detail-card-full { grid-column: 1 / -1; }
       }
     </style>
   </head>
   <body>
-    <main class="page">
-      <section class="hero">
-        <div class="eyebrow">__PAGE_EYEBROW__</div>
-        <h1>__PAGE_HEADING__</h1>
-        <p class="hero-copy">__PAGE_DESCRIPTION__</p>
-        <div class="meta-strip">
-          <div class="meta-card">
-            <strong data-trace-id>trace-ready</strong>
-            <span>Trace ID</span>
+    <div class="shell">
+      <header class="topbar">
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
+        <div class="topbar-sep"></div>
+        <span class="topbar-title">__PAGE_EYEBROW__</span>
+        <div class="topbar-spacer"></div>
+        <nav class="topbar-nav">__PAGE_NAV__</nav>
+      </header>
+
+      <main class="content">
+        <div class="trace-meta-strip">
+          <div class="stat-card">
+            <div class="stat-label">Trace ID</div>
+            <div class="stat-value sm mono" data-trace-id>—</div>
           </div>
-          <div class="meta-card">
-            <strong data-order-id>order-ready</strong>
-            <span>Order focus</span>
+          <div class="stat-card">
+            <div class="stat-label">Order Focus</div>
+            <div class="stat-value sm mono" data-order-id>—</div>
           </div>
-          <div class="meta-card">
-            <strong data-connection-state>awaiting-load</strong>
-            <span>Inspector stream state</span>
+          <div class="stat-card">
+            <div class="stat-label">Stream State</div>
+            <div class="stat-value sm" data-connection-state>awaiting</div>
           </div>
-          <div class="meta-card">
-            <strong data-stream-url>/api/trace/{traceId}/events</strong>
-            <span>SSE endpoint</span>
+          <div class="stat-card">
+            <div class="stat-label">SSE Endpoint</div>
+            <div class="stat-value sm mono" data-stream-url>/api/trace/{traceId}/events</div>
           </div>
         </div>
-        <nav class="nav">__PAGE_NAV__</nav>
-      </section>
 
-      <section class="status-banner">
-        <div class="status-pill" data-status-pill data-tone="active">awaiting_trace</div>
-        <h2 data-status-title>Trace inspector is waiting for daemon data</h2>
-        <p class="hero-copy status-copy" data-status-copy>
-          This page turns local daemon state into a human-readable view without changing how MetaBots talk over MetaWeb.
-        </p>
-      </section>
+        <div class="section-header" style="margin-bottom:14px">
+          <span class="section-title">STATUS</span>
+          <span class="status-pill status-active" data-status-pill>
+            <span class="status-dot"></span>
+            <span data-status-pill-text>awaiting_trace</span>
+          </span>
+          <span class="section-spacer"></span>
+        </div>
 
-      <section class="detail-grid">
-        <article class="detail-card">
-          <h2>Snapshot</h2>
-          <p class="detail-copy">One place for the current A2A identifiers and public state.</p>
-          <dl class="definition-list" data-trace-snapshot></dl>
-        </article>
+        <div class="card" style="margin-bottom:14px">
+          <div class="card-title" data-status-title>Trace inspector is waiting for daemon data</div>
+          <div class="card-subtitle" data-status-copy>
+            This page turns local daemon state into a human-readable view without changing how MetaBots talk over MetaWeb.
+          </div>
+        </div>
 
-        <article class="detail-card detail-card-wide">
-          <h2>Participants</h2>
-          <p class="detail-copy">Keep the subject as agent-to-agent, not endpoint-to-endpoint.</p>
-          <ul class="timeline-list" data-trace-participants></ul>
-        </article>
+        <div class="detail-grid">
+          <div class="card detail-card">
+            <div class="card-title">Snapshot</div>
+            <div class="card-subtitle">Current A2A identifiers and public state.</div>
+            <dl class="def-list" data-trace-snapshot></dl>
+          </div>
 
-        <article class="detail-card">
-          <h2>Artifacts</h2>
-          <p class="detail-copy">The browser is observational. The exported markdown and JSON remain the durable evidence.</p>
-          <dl class="definition-list" data-trace-artifacts></dl>
-        </article>
+          <div class="card detail-card-wide">
+            <div class="card-title">Participants</div>
+            <div class="card-subtitle" style="overflow-wrap: anywhere">Agent-to-agent, not endpoint-to-endpoint.</div>
+            <ul class="timeline" data-trace-participants>
+              <li class="timeline-item participant-item" hidden></li>
+            </ul>
+          </div>
 
-        <article class="detail-card">
-          <h2>First-Class States</h2>
-          <p class="detail-copy">These cases should be visible, not flattened away.</p>
-          <div class="state-guide">
-            <div class="state-guide-item">
-              <strong>Timeout</strong>
-              <span>The host session stopped waiting, but the remote MetaBot may still be working and can still complete later.</span>
-            </div>
-            <div class="state-guide-item">
-              <strong>Clarification</strong>
-              <span>The remote MetaBot requested one follow-up question inside the same A2A session.</span>
-            </div>
-            <div class="state-guide-item">
-              <strong>Manual Action</strong>
-              <span>A guarded branch needs a human decision instead of pretending the task can continue automatically.</span>
+          <div class="card detail-card">
+            <div class="card-title">Artifacts</div>
+            <div class="card-subtitle">Exported markdown and JSON are the durable evidence.</div>
+            <dl class="def-list" data-trace-artifacts></dl>
+          </div>
+
+          <div class="card detail-card">
+            <div class="card-title">First-Class States</div>
+            <div class="card-subtitle">These cases should be visible, not flattened away.</div>
+            <div class="state-guide">
+              <div class="state-guide-item">
+                <strong>Timeout</strong>
+                <span>The host session stopped waiting, but the remote MetaBot may still be working.</span>
+              </div>
+              <div class="state-guide-item">
+                <strong>Clarification</strong>
+                <span>The remote MetaBot requested one follow-up question inside the same A2A session.</span>
+              </div>
+              <div class="state-guide-item">
+                <strong>Manual Action</strong>
+                <span>A guarded branch needs a human decision instead of continuing automatically.</span>
+              </div>
             </div>
           </div>
-        </article>
-      </section>
+        </div>
 
-      <section class="detail-grid">
-        <article class="detail-card detail-card-wide">
-          <h2>Remote Result</h2>
-          <p class="detail-copy" data-trace-result-summary>
-            When the remote MetaBot completes, show the verbatim returned result here instead of forcing humans to inspect raw exports first.
-          </p>
-          <pre data-trace-result>Waiting for the remote MetaBot to return a result.</pre>
-          <dl class="definition-list" data-trace-result-meta></dl>
-        </article>
+        <div class="detail-grid">
+          <div class="card detail-card-wide">
+            <div class="card-title">Remote Result</div>
+            <div class="card-subtitle" data-trace-result-summary>
+              When the remote MetaBot completes, the verbatim result appears here.
+            </div>
+            <pre class="code-block" data-trace-result>Waiting for the remote MetaBot to return a result.</pre>
+            <dl class="def-list" style="margin-top:12px" data-trace-result-meta></dl>
+          </div>
 
-        <article class="detail-card">
-          <h2>Rating Follow-Up</h2>
-          <p class="detail-copy" data-trace-rating-summary>
-            Keep the DACT T-stage visible here so humans can see whether the buyer published a rating and whether it was delivered back to the provider MetaBot.
-          </p>
-          <pre data-trace-rating-request>No provider-side rating request is stored for this trace.</pre>
-          <pre data-trace-rating-comment>No buyer-side rating follow-up is stored for this trace yet.</pre>
-          <dl class="definition-list" data-trace-rating-meta></dl>
-        </article>
+          <div class="card detail-card">
+            <div class="card-title">Rating Follow-Up</div>
+            <div class="card-subtitle" data-trace-rating-summary>
+              DACT T-stage: buyer rating and provider delivery status.
+            </div>
+            <pre class="code-block" style="margin-bottom:8px" data-trace-rating-request>No provider-side rating request stored.</pre>
+            <pre class="code-block" data-trace-rating-comment>No buyer-side rating follow-up stored yet.</pre>
+            <dl class="def-list" style="margin-top:12px" data-trace-rating-meta></dl>
+          </div>
 
-        <article class="detail-card detail-card-wide">
-          <h2>Transcript Timeline</h2>
-          <p class="detail-copy">If session-level transcript records exist, show them in order. Otherwise fall back to exported markdown.</p>
-          <div data-trace-transcript></div>
-          <div class="hint" data-transcript-hint></div>
-        </article>
+          <div class="card detail-card-wide">
+            <div class="card-title">Transcript Timeline</div>
+            <div class="card-subtitle">Session-level transcript records in order, or exported markdown fallback.</div>
+            <div data-trace-transcript></div>
+            <div class="hint" data-transcript-hint></div>
+          </div>
 
-        <article class="detail-card">
-          <h2>Public Status Events</h2>
-          <p class="detail-copy">These events come from the local daemon watch layer, not a browser-only animation.</p>
-          <ul class="timeline-list" data-trace-events></ul>
-        </article>
-      </section>
+          <div class="card detail-card">
+            <div class="card-title">Public Status Events</div>
+            <div class="card-subtitle">From the local daemon watch layer, not browser-only animation.</div>
+            <ul class="timeline" data-trace-events></ul>
+          </div>
+        </div>
 
-      <section class="detail-grid">
-        <article class="detail-card detail-card-full">
-          <h2>Observation Notes</h2>
-          <p class="detail-copy">This inspector is for humans. The actual task execution, payment, and MetaWeb exchange remain in the daemon and on-chain records.</p>
-        </article>
-      </section>
+        <div class="detail-grid">
+          <div class="card detail-card-full">
+            <div class="card-title">Observation Notes</div>
+            <div class="card-subtitle">This inspector is for humans. Task execution, payment, and MetaWeb exchange remain in the daemon and on-chain records.</div>
+          </div>
+        </div>
 
-      <section class="panels">__PAGE_PANELS__</section>
-    </main>
+        <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">__PAGE_PANELS__</section>
+      </main>
+    </div>
     <script>__PAGE_SCRIPT__</script>
   </body>
 </html>
