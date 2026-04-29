@@ -20,6 +20,7 @@
 | `skillpacks/codex/runtime/shared-install.sh` | Regenerated | `write_cli_shim` function body |
 | `skillpacks/claude-code/runtime/shared-install.sh` | Regenerated | same |
 | `skillpacks/openclaw/runtime/shared-install.sh` | Regenerated | same |
+| `skillpacks/shared/install.sh` | Regenerated | same |
 
 No new files. No changes to `src/`.
 
@@ -135,7 +136,8 @@ The build script and the generated skillpacks must be committed together so the 
   git add scripts/build-metabot-skillpacks.mjs \
           skillpacks/codex/runtime/shared-install.sh \
           skillpacks/claude-code/runtime/shared-install.sh \
-          skillpacks/openclaw/runtime/shared-install.sh
+          skillpacks/openclaw/runtime/shared-install.sh \
+          skillpacks/shared/install.sh
   git commit -m "fix(shim): make CLI shim self-healing with installpack glob fallback"
   ```
 
