@@ -15,6 +15,11 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
 
   const $ = (sel) => document.querySelector(sel);
   const setText = (el, v) => { if (el) el.textContent = v; };
+  const modal = $('[data-svc-get-modal]');
+  const modalPrompt = $('[data-svc-get-prompt]');
+  const copyBtn = $('[data-svc-copy-btn]');
+  const closeBtn = $('[data-svc-close-btn]');
+  let currentPromptText = '';
 
   const formatAgo = (agoSec) => {
     if (typeof agoSec !== 'number') return null;
@@ -26,6 +31,21 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
   const formatTime = (ms) => {
     if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return null;
     try { return new Date(ms).toLocaleString(); } catch { return null; }
+  };
+
+  const closeModal = () => {
+    if (modal) modal.hidden = true;
+  };
+
+  const openGetServiceModal = (serviceName) => {
+    const cleanName = String(serviceName || 'Unknown Service');
+    currentPromptText = "'帮我请求执行远端服务：" + cleanName + "'";
+    if (modalPrompt) {
+      modalPrompt.value = currentPromptText;
+      modalPrompt.focus();
+      modalPrompt.select();
+    }
+    if (modal) modal.hidden = false;
   };
 
   const renderTable = (payload) => {
@@ -47,7 +67,7 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
 
     if (!model.entries.length) {
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td colspan="6" class="table-empty"><strong>' + model.emptyTitle + '</strong>' + model.emptyBody + '</td>';
+      tr.innerHTML = '<td colspan="7" class="table-empty"><strong>' + model.emptyTitle + '</strong>' + model.emptyBody + '</td>';
       tbody.appendChild(tr);
       return;
     }
@@ -107,12 +127,23 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
       const agoSec = typeof entry.lastSeenAgoSeconds === 'number' ? entry.lastSeenAgoSeconds : null;
       tdSeen.textContent = agoSec != null ? formatAgo(agoSec) : (entry.lastSeenAtMs ? formatTime(entry.lastSeenAtMs) : '—');
 
+      // Action
+      const tdAction = document.createElement('td');
+      tdAction.className = 'svc-action';
+      const actionBtn = document.createElement('button');
+      actionBtn.className = 'btn btn-sm';
+      actionBtn.type = 'button';
+      actionBtn.textContent = 'Get Service';
+      actionBtn.addEventListener('click', () => openGetServiceModal(entry.displayName));
+      tdAction.appendChild(actionBtn);
+
       tr.appendChild(tdSvc);
       tr.appendChild(tdProv);
       tr.appendChild(tdPrice);
       tr.appendChild(tdSkill);
       tr.appendChild(tdStatus);
       tr.appendChild(tdSeen);
+      tr.appendChild(tdAction);
       tbody.appendChild(tr);
     });
   };
@@ -123,7 +154,7 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
       .then(renderTable)
       .catch(() => {
         const tbody = $('[data-service-list]');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="table-empty"><strong>Load failed</strong>Could not reach the local daemon. Is it running?</td></tr>';
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="table-empty"><strong>Load failed</strong>Could not reach the local daemon. Is it running?</td></tr>';
         setText($('[data-online-count]'), '0');
         setText($('[data-total-count]'), '0');
         setText($('[data-directory-updated]'), 'failed ' + new Date().toLocaleTimeString());
@@ -132,6 +163,29 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
 
   const refreshBtn = document.getElementById('refresh-btn');
   if (refreshBtn) refreshBtn.addEventListener('click', load);
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  if (copyBtn) copyBtn.addEventListener('click', async () => {
+    if (!currentPromptText) return;
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(currentPromptText);
+      } else if (modalPrompt) {
+        modalPrompt.focus();
+        modalPrompt.select();
+        document.execCommand('copy');
+      }
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200);
+    } catch {
+      if (modalPrompt) {
+        modalPrompt.focus();
+        modalPrompt.select();
+      }
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeModal();
+  });
 
   load();
 })();`,

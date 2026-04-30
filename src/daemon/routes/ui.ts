@@ -23,12 +23,12 @@ const PAGE_BUILDERS: Record<MetabotUiPageName, () => LocalUiPageDefinition> = {
 
 const NAV_ITEMS: Array<{ page: MetabotUiPageName; label: string }> = [
   { page: 'hub', label: 'Hub' },
-  { page: 'publish', label: 'Publish' },
-  { page: 'my-services', label: 'My Services' },
   { page: 'trace', label: 'Trace' },
   { page: 'refund', label: 'Refund' },
   { page: 'chat-viewer', label: 'Chat Viewer' },
 ];
+
+const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>(['publish', 'my-services']);
 
 function escapeHtml(value: string): string {
   return value
@@ -128,6 +128,16 @@ export const handleUiRoutes: RouteHandler = async (context) => {
 
   const page = url.pathname.slice(UI_ROUTE_PREFIX.length).trim() as MetabotUiPageName;
   if (!(page in PAGE_BUILDERS)) {
+    context.sendJson(404, {
+      ok: false,
+      state: 'failed',
+      code: 'not_found',
+      message: `No UI page matched ${url.pathname}.`,
+    });
+    return true;
+  }
+
+  if (HIDDEN_UI_PAGES.has(page)) {
     context.sendJson(404, {
       ok: false,
       state: 'failed',
