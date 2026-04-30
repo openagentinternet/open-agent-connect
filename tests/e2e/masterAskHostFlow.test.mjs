@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { createECDH } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { cleanupProfileHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
@@ -55,7 +56,7 @@ function parseOutput(chunks) {
 test('manual host-action can preview Ask Master from host-visible context and confirm into the normal caller flow', async (t) => {
   const { systemHome, homeDir } = await createProfileHome('metabot-master-host-flow-');
   t.after(async () => {
-    await rm(systemHome, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const identityPair = createIdentityPair();
@@ -287,7 +288,7 @@ test('manual host-action can preview Ask Master from host-visible context and co
 test('accepted suggestion can preview, confirm, complete, and keep suggest metadata in master trace', async (t) => {
   const { systemHome, homeDir } = await createProfileHome('metabot-master-host-suggest-flow-');
   t.after(async () => {
-    await rm(systemHome, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const identityPair = createIdentityPair();
@@ -499,7 +500,7 @@ test('accepted suggestion can preview, confirm, complete, and keep suggest metad
 test('suggest host flow can run through CLI entrypoints before accept, preview, confirm, and trace', async (t) => {
   const { systemHome, homeDir } = await createProfileHome('metabot-master-host-suggest-cli-flow-');
   t.after(async () => {
-    await rm(systemHome, { recursive: true, force: true });
+    await cleanupProfileHome(homeDir);
   });
 
   const identityPair = createIdentityPair();

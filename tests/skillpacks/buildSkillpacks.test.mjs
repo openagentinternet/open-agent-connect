@@ -637,6 +637,7 @@ test('shared install.sh refreshes a legacy ~/.agent-connect/bin/metabot shim to 
     env: {
       ...process.env,
       HOME: fakeHome,
+      METABOT_ENABLE_LEGACY_SHIM: '1',
       PATH: `${legacyBinDir}${path.delimiter}${process.env.PATH || ''}`,
     },
   });
@@ -713,6 +714,7 @@ test('shared install.sh treats a trailing-slash ~/.agent-connect/bin PATH entry 
     env: {
       ...process.env,
       HOME: fakeHome,
+      METABOT_ENABLE_LEGACY_SHIM: '1',
       PATH: `${legacyBinDir}/${path.delimiter}${process.env.PATH || ''}`,
     },
   });
@@ -760,7 +762,7 @@ test('repository keeps no deprecated skill aliases after migration', async () =>
   const openAgentPrefix = ['open', 'agent'].join('-');
   const openAgentSkillPattern = `${openAgentPrefix}-(chat-privatechat|post-buzz|upload-file|post-skillservice|omni-reader|bootstrap|identity-manage|network-directory|network-sources|call-remote-service|trace-inspector)`;
   try {
-    const result = await execFile('rg', ['-n', openAgentSkillPattern, '.'], {
+    const result = await execFile('git', ['grep', '-nE', openAgentSkillPattern, '--', '.'], {
       cwd: REPO_ROOT,
     });
     assert.fail(`found deprecated open-agent skill aliases:\n${result.stdout}`);

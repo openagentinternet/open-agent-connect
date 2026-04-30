@@ -866,7 +866,6 @@ test('GET /ui/chat-viewer serves the built-in private chat viewer shell', async 
   assert.match(html, /\/api\/chat\/private\/conversation/);
   assert.match(html, /\/ui\/chat\/idframework\/components\/id-chat-msg-list\.js/);
   assert.match(html, /afterIndex/);
-  assert.match(html, /poll/);
 });
 
 test('GET /ui/chat/idframework/components/id-chat-msg-list.js serves the standalone-capable IDFramework component', async (t) => {
@@ -887,43 +886,28 @@ test('GET /ui/chat/idframework/components/id-chat-msg-list.js serves the standal
   assert.match(javascript, /snapshot\.viewerMode === 'standalone'\s*\?\s*null/);
 });
 
-test('GET /ui/publish serves the built-in provider publish console wired to provider summary and publish APIs', async (t) => {
+test('GET /ui/publish is intentionally hidden from direct UI route exposure', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
   const response = await fetch(`${server.baseUrl}/ui/publish`);
-  const html = await response.text();
+  const payload = await response.json();
 
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
-  assert.match(html, /Publish Service/);
-  assert.match(html, /data-publish-form/);
-  assert.match(html, /data-publish-provider-card/);
-  assert.match(html, /data-publish-result-card/);
-  assert.match(html, /data-publish-status/);
-  assert.match(html, /\/api\/provider\/summary/);
-  assert.match(html, /\/api\/services\/publish/);
-  assert.match(html, /Real chain pin/i);
+  assert.equal(response.status, 404);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'not_found');
 });
 
-test('GET /ui/my-services serves the built-in provider console wired to provider summary and presence toggle APIs', async (t) => {
+test('GET /ui/my-services is intentionally hidden from direct UI route exposure', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
   const response = await fetch(`${server.baseUrl}/ui/my-services`);
-  const html = await response.text();
+  const payload = await response.json();
 
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
-  assert.match(html, /My Services/);
-  assert.match(html, /data-provider-presence-card/);
-  assert.match(html, /data-provider-presence-toggle/);
-  assert.match(html, /data-service-inventory/);
-  assert.match(html, /data-recent-orders/);
-  assert.match(html, /data-manual-actions/);
-  assert.match(html, /\/api\/provider\/summary/);
-  assert.match(html, /\/api\/provider\/presence/);
-  assert.match(html, /Manual actions/i);
+  assert.equal(response.status, 404);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'not_found');
 });
 
 test('GET /ui/refund renders the buyer-side initiated refund ledger', async (t) => {

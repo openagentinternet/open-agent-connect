@@ -14,6 +14,7 @@ export interface PollTraceInput {
 
 export interface PollTraceResult {
   completed: boolean;
+  terminalStatus?: string | null;
   trace?: Record<string, unknown>;
 }
 
@@ -31,6 +32,18 @@ function extractPublicStatus(result: unknown): string | null {
         if (typeof first === 'object' && first !== null && 'publicStatus' in first) {
           return String(first.publicStatus);
         }
+      }
+    }
+    if (typeof data === 'object' && data !== null && 'session' in data) {
+      const session = (data as { session: unknown }).session;
+      if (typeof session === 'object' && session !== null && 'publicStatus' in session) {
+        return String((session as { publicStatus: unknown }).publicStatus);
+      }
+    }
+    if (typeof data === 'object' && data !== null && 'a2a' in data) {
+      const a2a = (data as { a2a: unknown }).a2a;
+      if (typeof a2a === 'object' && a2a !== null && 'publicStatus' in a2a) {
+        return String((a2a as { publicStatus: unknown }).publicStatus);
       }
     }
   }
@@ -66,16 +79,16 @@ export async function pollTraceUntilComplete(input: PollTraceInput): Promise<Pol
         }
       }
 
-      if (status === 'completed') {
+      if (status === 'completed' || status === 'timeout' || status === 'manual_action_required' || status === 'failed') {
         const data = (result as { data: unknown }).data as Record<string, unknown>;
-        input.stderr.write(`Response received. View full trace: ${input.localUiUrl}\n`);
-        return { completed: true, trace: data };
+        input.stderr.write(`Trace reached terminal status (${status}). View full trace: ${input.localUiUrl}\n`);
+        return { completed: true, terminalStatus: status, trace: data };
       }
     } catch {
       consecutiveErrors++;
       if (consecutiveErrors > 10) {
         input.stderr.write(`Unable to reach daemon. View trace in browser: ${input.localUiUrl}\n`);
-        return { completed: false };
+        return { completed: false, terminalStatus: null };
       }
     }
 
@@ -83,5 +96,5 @@ export async function pollTraceUntilComplete(input: PollTraceInput): Promise<Pol
   }
 
   input.stderr.write(`Provider has not responded yet. Continue tracking: ${input.localUiUrl}\n`);
-  return { completed: false };
+  return { completed: false, terminalStatus: null };
 }

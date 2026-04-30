@@ -36,6 +36,12 @@ you manually created in that host's documented skill root.
 Use this when a user wants to remove Open Agent Connect from their agent host
 without touching identity or wallet data.
 
+Preferred CLI path:
+
+```bash
+metabot system uninstall
+```
+
 This tier removes:
 
 - `metabot-*` host skill symlinks that point back to `~/.metabot/skills/`
@@ -197,6 +203,18 @@ Before using this tier, the user must explicitly confirm all of the following:
 - every mnemonic or private key has been backed up outside this machine
 - any funds controlled by those keys are understood and intentionally left there or moved
 - deleting all local MetaBot profiles is intended
+
+Preferred CLI path for full erase:
+
+```bash
+metabot system uninstall --all --confirm-token DELETE_OPEN_AGENT_CONNECT_IDENTITY_AND_SECRETS
+```
+
+When this command is used:
+
+- omission of `--confirm-token` returns a confirmation-required result and does not delete data
+- wrong token fails and does not delete data
+- only the exact token allows full erase
 
 Run Tier 1 first, then run this only after explicit user confirmation:
 

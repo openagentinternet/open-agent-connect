@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
-import { commandAwaitingConfirmation, commandFailed, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
+import { commandAwaitingConfirmation, commandFailed, commandManualActionRequired, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
 import type { AskMasterTriggerMode } from '../core/config/configTypes';
 import { createNetworkDirectoryEvolutionService } from '../core/evolution/service';
@@ -57,6 +57,8 @@ import { createPrivateChatAutoReplyOrchestrator } from '../core/chat/privateChat
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
+import { runSystemUpdate } from '../core/system/update';
+import { runSystemUninstall } from '../core/system/uninstall';
 import type { CliDependencies, CliRuntimeContext } from './types';
 
 const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
@@ -1758,6 +1760,55 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
       },
     },
+    system: {
+      update: async (input) => {
+        try {
+          const result = await runSystemUpdate({
+            systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+            host: input.host,
+            version: input.version,
+            dryRun: input.dryRun,
+            env: context.env,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          if (error && typeof error === 'object' && 'code' in error) {
+            const coded = error as { code: string; message?: string; manualActionRequired?: boolean };
+            if (coded.manualActionRequired) {
+              return commandManualActionRequired(coded.code, coded.message || 'Manual action required.');
+            }
+            return commandFailed(coded.code, coded.message || 'System update failed.');
+          }
+          return commandFailed(
+            'system_update_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+      uninstall: async (input) => {
+        try {
+          const result = await runSystemUninstall({
+            systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+            all: input.all,
+            confirmToken: input.confirmToken,
+            env: context.env,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          if (error && typeof error === 'object' && 'code' in error) {
+            const coded = error as { code: string; message?: string; manualActionRequired?: boolean };
+            if (coded.manualActionRequired) {
+              return commandManualActionRequired(coded.code, coded.message || 'Manual action required.');
+            }
+            return commandFailed(coded.code, coded.message || 'System uninstall failed.');
+          }
+          return commandFailed(
+            'system_uninstall_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+    },
     evolution: {
       status: async () => {
         const homeDir = normalizeHomeDir(context.env, context.cwd);
@@ -2044,6 +2095,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     ui: { ...defaults.ui, ...provided.ui },
     skills: { ...defaults.skills, ...provided.skills },
     host: { ...defaults.host, ...provided.host },
+    system: { ...defaults.system, ...provided.system },
     evolution: { ...defaults.evolution, ...provided.evolution },
   };
 }

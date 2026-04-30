@@ -82,7 +82,7 @@ test('runCli dispatches `metabot network services --online` and renders a markdo
   const calls = [];
 
   const exitCode = await runCli(['network', 'services', '--online'], {
-    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stdout: { isTTY: true, write: (chunk) => { stdout.push(String(chunk)); return true; } },
     stderr: { write: () => true },
     dependencies: {
       network: {
@@ -119,7 +119,7 @@ test('runCli dispatches `metabot network bots --online --limit` and renders a ma
   const calls = [];
 
   const exitCode = await runCli(['network', 'bots', '--online', '--limit', '10'], {
-    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stdout: { isTTY: true, write: (chunk) => { stdout.push(String(chunk)); return true; } },
     stderr: { write: () => true },
     dependencies: {
       network: {
