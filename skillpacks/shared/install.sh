@@ -85,10 +85,24 @@ write_cli_shim() {
 ' '#!/usr/bin/env bash'
     printf '%s
 ' 'set -euo pipefail'
-    printf 'CLI_ENTRY="%s"
+    printf 'PREFERRED_CLI_ENTRY="%s"
 ' "$CLI_ENTRY"
     printf '%s
-' 'if [ ! -f "$CLI_ENTRY" ]; then'
+' 'CLI_ENTRY="${METABOT_CLI_ENTRY:-}"'
+    printf '%s
+' 'if [ -n "$CLI_ENTRY" ] && [ ! -f "$CLI_ENTRY" ]; then'
+    printf '%s
+' '  CLI_ENTRY=""'
+    printf '%s
+' 'fi'
+    printf '%s
+' 'if [ -z "$CLI_ENTRY" ] && [ -n "$PREFERRED_CLI_ENTRY" ] && [ -f "$PREFERRED_CLI_ENTRY" ]; then'
+    printf '%s
+' '  CLI_ENTRY="$PREFERRED_CLI_ENTRY"'
+    printf '%s
+' 'fi'
+    printf '%s
+' 'if [ -z "$CLI_ENTRY" ]; then'
     printf '%s
 ' '  for _f in "$HOME/.metabot/installpacks"/*/runtime/dist/cli/main.js; do'
     printf '%s
@@ -140,7 +154,7 @@ EOF
 
 write_cli_shim "metabot"
 
-if [ -d "$LEGACY_BIN_DIR" ] || [ -f "$LEGACY_BIN_DIR/metabot" ] || path_contains_entry "$LEGACY_BIN_DIR"; then
+if [ "${METABOT_ENABLE_LEGACY_SHIM:-0}" = "1" ] && ( [ -d "$LEGACY_BIN_DIR" ] || [ -f "$LEGACY_BIN_DIR/metabot" ] || path_contains_entry "$LEGACY_BIN_DIR" ); then
   write_legacy_forwarder_shim
   echo "Refreshed legacy compatibility shim at $LEGACY_BIN_DIR/metabot"
 fi

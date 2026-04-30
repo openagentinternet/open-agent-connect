@@ -69,7 +69,7 @@ function buildSharedReadme({ packageVersion }) {
   return `# Shared MetaBot Skills for Open Agent Connect
 
 This shared pack installs the host-neutral MetaBot skills into \`~/.metabot/skills\` and installs the primary \`${PRIMARY_CLI_PATH}\` shim into \`~/.metabot/bin\`.
-When a legacy \`~/.agent-connect/bin/metabot\` shim already exists, install also refreshes it into a compatibility forwarder so stale PATH ordering does not keep an old wrapper active.
+Legacy compatibility forwarding to \`~/.agent-connect/bin/metabot\` is opt-in via \`METABOT_ENABLE_LEGACY_SHIM=1\` and disabled by default.
 
 ## Included MetaBot Skills
 
@@ -103,7 +103,7 @@ function buildHostReadme({ hostKey, host, packageVersion }) {
   return `# Open Agent Connect Skill Pack for ${host.displayName}
 
 Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent Internet. This wrapper installs the shared MetaBot skills into \`~/.metabot/skills\`, installs the primary \`${PRIMARY_CLI_PATH}\` CLI shim, and then binds host-native \`metabot-*\` entries into the ${host.displayName} skills root.
-If a legacy \`~/.agent-connect/bin/metabot\` shim is already present, install also refreshes it into a compatibility forwarder to keep the canonical v2 shim authoritative.
+Legacy compatibility forwarding to \`~/.agent-connect/bin/metabot\` is opt-in via \`METABOT_ENABLE_LEGACY_SHIM=1\` and disabled by default.
 
 ## Included MetaBot Skills
 
@@ -263,8 +263,15 @@ write_cli_shim() {
   {
     printf '%s\n' '#!/usr/bin/env bash'
     printf '%s\n' 'set -euo pipefail'
-    printf 'CLI_ENTRY="%s"\n' "$CLI_ENTRY"
-    printf '%s\n' 'if [ ! -f "$CLI_ENTRY" ]; then'
+    printf 'PREFERRED_CLI_ENTRY="%s"\n' "$CLI_ENTRY"
+    printf '%s\n' 'CLI_ENTRY="\${METABOT_CLI_ENTRY:-}"'
+    printf '%s\n' 'if [ -n "$CLI_ENTRY" ] && [ ! -f "$CLI_ENTRY" ]; then'
+    printf '%s\n' '  CLI_ENTRY=""'
+    printf '%s\n' 'fi'
+    printf '%s\n' 'if [ -z "$CLI_ENTRY" ] && [ -n "$PREFERRED_CLI_ENTRY" ] && [ -f "$PREFERRED_CLI_ENTRY" ]; then'
+    printf '%s\n' '  CLI_ENTRY="$PREFERRED_CLI_ENTRY"'
+    printf '%s\n' 'fi'
+    printf '%s\n' 'if [ -z "$CLI_ENTRY" ]; then'
     printf '%s\n' '  for _f in "$HOME/.metabot/installpacks"/*/runtime/dist/cli/main.js; do'
     printf '%s\n' '    [ -f "$_f" ] && CLI_ENTRY="$_f" && break'
     printf '%s\n' '  done'
@@ -307,7 +314,7 @@ EOF
 
 write_cli_shim "${PRIMARY_CLI_PATH}"
 
-if [ -d "$LEGACY_BIN_DIR" ] || [ -f "$LEGACY_BIN_DIR/${PRIMARY_CLI_PATH}" ] || path_contains_entry "$LEGACY_BIN_DIR"; then
+if [ "\${METABOT_ENABLE_LEGACY_SHIM:-0}" = "1" ] && ( [ -d "$LEGACY_BIN_DIR" ] || [ -f "$LEGACY_BIN_DIR/${PRIMARY_CLI_PATH}" ] || path_contains_entry "$LEGACY_BIN_DIR" ); then
   write_legacy_forwarder_shim
   echo "Refreshed legacy compatibility shim at $LEGACY_BIN_DIR/${PRIMARY_CLI_PATH}"
 fi
