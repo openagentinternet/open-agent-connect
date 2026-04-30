@@ -92,6 +92,46 @@ function createRefundPendingTrace() {
   };
 }
 
+function createBuyerRefundTrace() {
+  return {
+    traceId: 'trace-buyer-refund',
+    channel: 'a2a',
+    createdAt: 1_775_000_040_000,
+    session: {
+      id: 'session-trace-buyer-refund',
+      title: 'Buyer Refund Flow',
+      type: 'a2a',
+      metabotId: 1,
+      peerGlobalMetaId: 'idq1seller',
+      peerName: 'Seller Bot',
+      externalConversationId: 'a2a-session:idq1seller:trace-buyer-refund',
+    },
+    order: {
+      id: 'order-buyer-refund-1',
+      role: 'buyer',
+      status: 'refund_pending',
+      serviceId: '/protocols/skill-service-pin-1',
+      serviceName: 'Tarot Reading',
+      paymentTxid: 'b'.repeat(64),
+      paymentCurrency: 'SPACE',
+      paymentAmount: '0.00001',
+      failureReason: 'delivery_timeout',
+      refundRequestPinId: 'buyer-refund-pin-1',
+      refundRequestedAt: 1_775_000_045_000,
+      coworkSessionId: 'buyer-session-1',
+    },
+    a2a: {
+      publicStatus: 'manual_action_required',
+      taskRunState: 'manual_action_required',
+    },
+    artifacts: {
+      transcriptMarkdownPath: '/tmp/transcript-buyer.md',
+      traceMarkdownPath: '/tmp/trace-buyer.md',
+      traceJsonPath: '/tmp/trace-buyer.json',
+    },
+  };
+}
+
 async function fetchJson(baseUrl, routePath, options = {}) {
   const response = await fetch(`${baseUrl}${routePath}`, {
     method: options.method ?? 'GET',
@@ -245,4 +285,26 @@ test('POST /api/provider/refund/confirm clears the manual refund queue for the m
   assert.equal(state.traces[0].order.status, 'refunded');
   assert.equal(typeof state.traces[0].order.refundConfirmedAt, 'number');
   assert.equal(typeof state.traces[0].order.refundedAt, 'number');
+});
+
+test('GET /api/provider/refunds/initiated returns local buyer-side initiated refunds', async (t) => {
+  const app = await startProviderServer();
+  t.after(async () => app.close());
+
+  await app.runtimeStateStore.writeState({
+    identity: createIdentity(),
+    services: [createService()],
+    traces: [createRefundPendingTrace(), createBuyerRefundTrace()],
+  });
+
+  const response = await fetchJson(app.baseUrl, '/api/provider/refunds/initiated');
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.ok, true);
+  assert.equal(response.payload.data.totalCount, 1);
+  assert.equal(response.payload.data.pendingCount, 1);
+  assert.equal(response.payload.data.initiatedByMe.length, 1);
+  assert.equal(response.payload.data.initiatedByMe[0].orderId, 'order-buyer-refund-1');
+  assert.equal(response.payload.data.initiatedByMe[0].role, 'buyer');
+  assert.equal(response.payload.data.initiatedByMe[0].status, 'refund_pending');
+  assert.equal(response.payload.data.initiatedByMe[0].counterpartyGlobalMetaId, 'idq1seller');
 });

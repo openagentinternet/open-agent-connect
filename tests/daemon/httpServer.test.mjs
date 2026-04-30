@@ -926,22 +926,20 @@ test('GET /ui/my-services serves the built-in provider console wired to provider
   assert.match(html, /Manual actions/i);
 });
 
-test('GET /ui/refund renders the provider refund interruption with exact identifiers and one confirm action', async (t) => {
+test('GET /ui/refund renders the buyer-side initiated refund ledger', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/ui/refund?orderId=order-refund-1`);
+  const response = await fetch(`${server.baseUrl}/ui/refund`);
   const html = await response.text();
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
-  assert.match(html, /Manual Refund Confirmation/);
-  assert.match(html, /data-refund-order-id/);
-  assert.match(html, /data-refund-request-pin/);
-  assert.match(html, /data-refund-trace-link/);
-  assert.match(html, /data-refund-confirm/);
-  assert.match(html, /\/api\/provider\/summary/);
-  assert.match(html, /\/api\/provider\/refund\/confirm/);
+  assert.match(html, /Refunds I Initiated/);
+  assert.match(html, /data-refund-total-count/);
+  assert.match(html, /data-refund-pending-count/);
+  assert.match(html, /data-refund-list/);
+  assert.match(html, /\/api\/provider\/refunds\/initiated/);
 });
 
 test('GET /ui/buzz serves the bundled Buzz MetaApp entry from the daemon server', async (t) => {

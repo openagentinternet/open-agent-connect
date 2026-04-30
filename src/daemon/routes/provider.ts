@@ -17,6 +17,19 @@ export const handleProviderRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  if (url.pathname === '/api/provider/refunds/initiated') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+
+    const result = handlers.provider?.getInitiatedRefunds
+      ? await handlers.provider.getInitiatedRefunds()
+      : commandFailed('not_implemented', 'Provider initiated refunds handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
   if (url.pathname === '/api/provider/presence') {
     if (req.method !== 'POST') {
       context.sendMethodNotAllowed(['POST']);

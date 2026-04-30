@@ -715,6 +715,118 @@ function buildProviderSummaryPayload(input: {
   };
 }
 
+interface InitiatedRefundItem {
+  orderId: string;
+  role: 'buyer';
+  serviceName: string;
+  paymentTxid: string | null;
+  paymentAmount: string | null;
+  paymentCurrency: string | null;
+  status: 'refund_pending' | 'refunded';
+  failureReason: string | null;
+  refundRequestPinId: string | null;
+  refundTxid: string | null;
+  refundRequestedAt: number | null;
+  refundCompletedAt: number | null;
+  counterpartyGlobalMetaId: string | null;
+  counterpartyName: string | null;
+  coworkSessionId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+function normalizeTimestamp(value: unknown): number | null {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  return Math.trunc(numeric);
+}
+
+function getInitiatedRefundSortTimestamp(item: InitiatedRefundItem): number {
+  if (item.status === 'refunded') {
+    return item.refundCompletedAt ?? item.updatedAt ?? item.createdAt;
+  }
+  return item.refundRequestedAt ?? item.updatedAt ?? item.createdAt;
+}
+
+function compareInitiatedRefundItems(left: InitiatedRefundItem, right: InitiatedRefundItem): number {
+  const rankLeft = left.status === 'refund_pending' ? 0 : 1;
+  const rankRight = right.status === 'refund_pending' ? 0 : 1;
+  if (rankLeft !== rankRight) {
+    return rankLeft - rankRight;
+  }
+
+  const timeDelta = getInitiatedRefundSortTimestamp(right) - getInitiatedRefundSortTimestamp(left);
+  if (timeDelta !== 0) {
+    return timeDelta;
+  }
+
+  return left.orderId.localeCompare(right.orderId);
+}
+
+function buildInitiatedRefundsPayload(input: { state: RuntimeState }): {
+  initiatedByMe: InitiatedRefundItem[];
+  totalCount: number;
+  pendingCount: number;
+} {
+  const initiatedByMe = input.state.traces
+    .map((trace) => {
+      const traceRecord = trace as unknown as Record<string, unknown>;
+      const order = readObject(traceRecord.order);
+      if (!order || normalizeText(order.role) !== 'buyer') {
+        return null;
+      }
+
+      const status = normalizeText(order.status);
+      if (status !== 'refund_pending' && status !== 'refunded') {
+        return null;
+      }
+
+      const orderId = normalizeText(order.id);
+      if (!orderId) {
+        return null;
+      }
+
+      const createdAt = normalizeTimestamp(traceRecord.createdAt) ?? 0;
+      const session = readObject(traceRecord.session) ?? {};
+      const refundRequestedAt = normalizeTimestamp(order.refundRequestedAt);
+      const refundCompletedAt = normalizeTimestamp(order.refundCompletedAt)
+        ?? normalizeTimestamp(order.refundedAt);
+      const updatedAt = normalizeTimestamp(order.updatedAt)
+        ?? refundCompletedAt
+        ?? refundRequestedAt
+        ?? createdAt;
+      return {
+        orderId,
+        role: 'buyer',
+        serviceName: normalizeText(order.serviceName) || 'Unknown service',
+        paymentTxid: normalizeText(order.paymentTxid) || null,
+        paymentAmount: normalizeText(order.paymentAmount) || null,
+        paymentCurrency: normalizeText(order.paymentCurrency) || null,
+        status,
+        failureReason: normalizeText(order.failureReason) || null,
+        refundRequestPinId: normalizeText(order.refundRequestPinId) || null,
+        refundTxid: normalizeText(order.refundTxid) || null,
+        refundRequestedAt,
+        refundCompletedAt,
+        counterpartyGlobalMetaId: normalizeText(session.peerGlobalMetaId) || null,
+        counterpartyName: normalizeText(session.peerName) || null,
+        coworkSessionId: normalizeText(order.coworkSessionId) || null,
+        createdAt,
+        updatedAt,
+      } satisfies InitiatedRefundItem;
+    })
+    .filter((entry): entry is InitiatedRefundItem => Boolean(entry))
+    .sort(compareInitiatedRefundItems);
+
+  return {
+    initiatedByMe,
+    totalCount: initiatedByMe.length,
+    pendingCount: initiatedByMe.filter((entry) => entry.status === 'refund_pending').length,
+  };
+}
+
 async function readRatingDetailSnapshot(input: {
   ratingDetailStateStore: ReturnType<typeof createRatingDetailStateStore>;
   chainApiBaseUrl?: string;
@@ -5472,6 +5584,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
           ratingSyncState: ratingSnapshot.ratingSyncState,
           ratingSyncError: ratingSnapshot.ratingSyncError,
         }));
+      },
+      getInitiatedRefunds: async () => {
+        const state = await runtimeStateStore.readState();
+        return commandSuccess(buildInitiatedRefundsPayload({ state }));
       },
       setPresence: async ({ enabled }) => {
         const state = await runtimeStateStore.readState();

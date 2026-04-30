@@ -38,6 +38,7 @@ export interface MetabotDaemonHttpHandlers {
   };
   provider?: {
     getSummary?: () => Awaitable<MetabotCommandResult<unknown>>;
+    getInitiatedRefunds?: () => Awaitable<MetabotCommandResult<unknown>>;
     setPresence?: (input: { enabled: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     confirmRefund?: (input: { orderId: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
