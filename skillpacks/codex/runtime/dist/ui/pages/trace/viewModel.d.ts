@@ -1,35 +1,47 @@
-export interface TraceInspectorDefinitionRow {
-    label: string;
-    value: string;
+export type A2ASessionRole = 'caller' | 'provider';
+export type A2ASessionState = 'discovered' | 'awaiting_confirmation' | 'requesting_remote' | 'remote_received' | 'remote_executing' | 'completed' | 'manual_action_required' | 'remote_failed' | 'timeout';
+export type A2ATranscriptSender = 'caller' | 'provider' | 'system';
+export type MessageTone = 'local' | 'peer' | 'system' | 'tool';
+export interface TraceSessionListItem {
+    sessionId: string;
+    traceId: string;
+    role: A2ASessionRole;
+    state: A2ASessionState;
+    createdAt: number;
+    updatedAt: number;
+    localMetabotName: string;
+    localMetabotGlobalMetaId: string;
+    peerGlobalMetaId: string;
+    servicePinId: string;
+    stateTone: 'active' | 'completed' | 'failure' | 'timeout' | 'manual' | 'neutral';
+    stateLabel: string;
+    timeAgoMs: number;
 }
-export interface TraceInspectorTimelineItem {
-    key: string;
-    title: string;
+export interface TraceSessionMessage {
+    id: string;
+    sessionId: string;
+    taskRunId: string | null;
+    timestamp: number;
+    type: string;
+    sender: A2ATranscriptSender;
     content: string;
-    tone: 'active' | 'timeout' | 'manual' | 'clarification' | 'failure' | 'completed' | 'neutral';
-    status?: string | null;
-    timestamp?: number | null;
+    metadata: Record<string, unknown> | null;
+    tone: MessageTone;
 }
-export interface TraceInspectorResultPanel {
-    hasResult: boolean;
-    summary: string;
-    text: string;
-    metaRows: TraceInspectorDefinitionRow[];
+export interface TraceSessionDetail {
+    sessionId: string;
+    traceId: string;
+    role: A2ASessionRole;
+    state: A2ASessionState;
+    createdAt: number;
+    updatedAt: number;
+    localMetabotName: string;
+    localMetabotGlobalMetaId: string;
+    peerGlobalMetaId: string;
+    servicePinId: string;
+    callerGlobalMetaId: string;
+    providerGlobalMetaId: string;
+    messages: TraceSessionMessage[];
 }
-export interface TraceInspectorRatingPanel {
-    status: 'not_requested' | 'requested' | 'sent' | 'publish_only' | 'delivery_failed';
-    summary: string;
-    requestText: string;
-    commentText: string;
-    metaRows: TraceInspectorDefinitionRow[];
-}
-export interface TraceInspectorViewModel {
-    transcriptItems: TraceInspectorTimelineItem[];
-    statusItems: TraceInspectorTimelineItem[];
-    resultPanel: TraceInspectorResultPanel;
-    ratingPanel: TraceInspectorRatingPanel;
-}
-export declare function buildTraceInspectorViewModel(input: {
-    trace?: Record<string, unknown> | null;
-    inspector?: Record<string, unknown> | null;
-}): TraceInspectorViewModel;
+export declare function buildSessionListViewModel(rawSessions: unknown[], now?: number): TraceSessionListItem[];
+export declare function buildSessionDetailViewModel(payload: Record<string, unknown>): TraceSessionDetail | null;

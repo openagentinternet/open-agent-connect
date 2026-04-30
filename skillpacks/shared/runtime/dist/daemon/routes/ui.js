@@ -24,12 +24,11 @@ const PAGE_BUILDERS = {
 };
 const NAV_ITEMS = [
     { page: 'hub', label: 'Hub' },
-    { page: 'publish', label: 'Publish' },
-    { page: 'my-services', label: 'My Services' },
     { page: 'trace', label: 'Trace' },
     { page: 'refund', label: 'Refund' },
     { page: 'chat-viewer', label: 'Chat Viewer' },
 ];
+const HIDDEN_UI_PAGES = new Set(['publish', 'my-services']);
 function escapeHtml(value) {
     return value
         .replace(/&/g, '&amp;')
@@ -119,6 +118,15 @@ const handleUiRoutes = async (context) => {
     }
     const page = url.pathname.slice(UI_ROUTE_PREFIX.length).trim();
     if (!(page in PAGE_BUILDERS)) {
+        context.sendJson(404, {
+            ok: false,
+            state: 'failed',
+            code: 'not_found',
+            message: `No UI page matched ${url.pathname}.`,
+        });
+        return true;
+    }
+    if (HIDDEN_UI_PAGES.has(page)) {
         context.sendJson(404, {
             ok: false,
             state: 'failed',

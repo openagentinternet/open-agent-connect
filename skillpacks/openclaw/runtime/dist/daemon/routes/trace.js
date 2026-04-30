@@ -20,6 +20,27 @@ const handleTraceRoutes = async (context) => {
         return true;
     }
     const routeSuffix = decodeURIComponent(url.pathname.slice(TRACE_ROUTE_PREFIX.length)).trim();
+    // GET /api/trace/sessions — list all A2A sessions across all local MetaBot profiles
+    if (routeSuffix === 'sessions') {
+        const result = handlers.trace?.listSessions
+            ? await handlers.trace.listSessions()
+            : (0, commandResult_1.commandFailed)('not_implemented', 'Trace session list handler is not configured.');
+        context.sendJson(200, result);
+        return true;
+    }
+    // GET /api/trace/sessions/{sessionId} — get a specific session with transcript
+    if (routeSuffix.startsWith('sessions/')) {
+        const sessionId = routeSuffix.slice('sessions/'.length).trim();
+        if (!sessionId) {
+            context.sendJson(400, (0, commandResult_1.commandFailed)('missing_session_id', 'Session ID is required.'));
+            return true;
+        }
+        const result = handlers.trace?.getSession
+            ? await handlers.trace.getSession({ sessionId })
+            : (0, commandResult_1.commandFailed)('not_implemented', 'Trace session detail handler is not configured.');
+        context.sendJson(200, result);
+        return true;
+    }
     if (routeSuffix.endsWith('/events')) {
         const traceId = routeSuffix.slice(0, -'/events'.length).trim();
         const result = handlers.trace?.watchTrace

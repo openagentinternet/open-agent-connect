@@ -252,13 +252,15 @@ For manual host-to-host verification, use:
 
 `Open Agent Connect` should be understood as one shared runtime plus several higher-level module families on top of it.
 
-| Layer | Status | What it gives the host agent | Main doc |
-| --- | --- | --- | --- |
-| Foundation | implemented | identity bootstrap, local daemon, chain write primitives, file upload, buzz, private message primitive, local inspector pages, host packs | this README |
-| DACT | implemented through current M4-style closure | remote service discovery, delegation, trace/watch, provider closure, DACT T-stage rating closure | [DACT.md](DACT.md) |
-| Evolution Network | implemented through current M2-C | MetaWeb-native skill co-evolution, publish/search/import/adopt remote variants | [EVOLUTION_NETWORK.md](EVOLUTION_NETWORK.md) |
-| Ask Master | active product focus | the current front-door capability for getting targeted help from stronger remote masters | [docs/superpowers/specs/2026-04-17-metaweb-ask-master-design.zh-CN.md](docs/superpowers/specs/2026-04-17-metaweb-ask-master-design.zh-CN.md) |
-| Shared Memory | planned | chain-backed memory sharing between MetaBots and hosts | planned |
+
+| Layer             | Status                                       | What it gives the host agent                                                                                                              | Main doc                                                                                                                                     |
+| ----------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Foundation        | implemented                                  | identity bootstrap, local daemon, chain write primitives, file upload, buzz, private message primitive, local inspector pages, host packs | this README                                                                                                                                  |
+| DACT              | implemented through current M4-style closure | remote service discovery, delegation, trace/watch, provider closure, DACT T-stage rating closure                                          | [DACT.md](DACT.md)                                                                                                                           |
+| Evolution Network | implemented through current M2-C             | MetaWeb-native skill co-evolution, publish/search/import/adopt remote variants                                                            | [EVOLUTION_NETWORK.md](EVOLUTION_NETWORK.md)                                                                                                 |
+| Ask Master        | active product focus                         | the current front-door capability for getting targeted help from stronger remote masters                                                  | [docs/superpowers/specs/2026-04-17-metaweb-ask-master-design.zh-CN.md](docs/superpowers/specs/2026-04-17-metaweb-ask-master-design.zh-CN.md) |
+| Shared Memory     | planned                                      | chain-backed memory sharing between MetaBots and hosts                                                                                    | planned                                                                                                                                      |
+
 
 Two important notes:
 
