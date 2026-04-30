@@ -511,6 +511,21 @@ after installation, use:
 
 - `docs/acceptance/open-agent-connect-host-bind-checklist.md`
 
+## Update
+
+Prefer the built-in update command:
+
+```bash
+metabot system update
+```
+
+Notes:
+
+- defaults to latest release
+- designed for non-interactive scheduling (for example cron)
+- use `--host` when multiple installed host packs exist
+- use `--dry-run` to preview planned update actions
+
 ## Uninstall
 
 If the user wants to remove Open Agent Connect from this machine, use:

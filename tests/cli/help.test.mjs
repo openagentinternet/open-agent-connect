@@ -24,6 +24,7 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^\s+services\s+/m);
   assert.match(output, /^\s+host\s+/m);
   assert.match(output, /^\s+trace\s+/m);
+  assert.match(output, /^\s+system\s+/m);
   assert.equal(output.includes('"ok"'), false);
 });
 
@@ -126,6 +127,37 @@ test('runCli prints wallet group help with balance subcommand', async () => {
   assert.match(output, /^Usage:\s+metabot wallet <subcommand>/m);
   assert.match(output, /^Commands:/m);
   assert.match(output, /^\s+balance\s+/m);
+});
+
+test('runCli prints system group help with update and uninstall subcommands', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['system', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot system <subcommand>/m);
+  assert.match(output, /^Commands:/m);
+  assert.match(output, /^\s+update\s+/m);
+  assert.match(output, /^\s+uninstall\s+/m);
+});
+
+test('runCli prints system uninstall help with preservation and token confirmation semantics', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['system', 'uninstall', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot system uninstall \[--all --confirm-token <token>\] \[--yes\]/m);
+  assert.match(output, /Default uninstall preserves identity profiles, mnemonics, private keys, and wallet-related local data\./);
+  assert.match(output, /DELETE_OPEN_AGENT_CONNECT_IDENTITY_AND_SECRETS/);
 });
 
 test('runCli prints leaf help text for `metabot services call --help` with request and result semantics', async () => {

@@ -12,6 +12,12 @@ This runbook keeps the Codex-specific update policy and reuses the unified share
 - apply update only after explicit user confirmation
 - refresh the shared runtime and re-bind Codex exposure after update
 
+Preferred apply command:
+
+```bash
+metabot system update --host codex
+```
+
 ## Update Policy
 
 - default mode: `check-only`
@@ -106,7 +112,13 @@ Expected output:
 
 ## Apply-Update Procedure (Run Only After User Confirmation)
 
-Run from repository root:
+Preferred:
+
+```bash
+metabot system update --host codex
+```
+
+Manual fallback (repository mode) from repository root:
 
 ```bash
 git status --porcelain
