@@ -15,6 +15,7 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
 
   const $ = (sel) => document.querySelector(sel);
   const setText = (el, v) => { if (el) el.textContent = v; };
+  const modalBackdrop = $('[data-svc-get-modal-backdrop]');
   const modal = $('[data-svc-get-modal]');
   const modalPrompt = $('[data-svc-get-prompt]');
   const copyBtn = $('[data-svc-copy-btn]');
@@ -34,18 +35,18 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
   };
 
   const closeModal = () => {
-    if (modal) modal.hidden = true;
+    if (modalBackdrop) modalBackdrop.hidden = true;
   };
 
   const openGetServiceModal = (serviceName) => {
     const cleanName = String(serviceName || 'Unknown Service');
-    currentPromptText = "'帮我请求执行远端服务：" + cleanName + "'";
+    currentPromptText = 'Please request execution of remote service: ' + cleanName;
     if (modalPrompt) {
       modalPrompt.value = currentPromptText;
       modalPrompt.focus();
       modalPrompt.select();
     }
-    if (modal) modal.hidden = false;
+    if (modalBackdrop) modalBackdrop.hidden = false;
   };
 
   const renderTable = (payload) => {
@@ -164,6 +165,9 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
   const refreshBtn = document.getElementById('refresh-btn');
   if (refreshBtn) refreshBtn.addEventListener('click', load);
   if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  if (modalBackdrop) modalBackdrop.addEventListener('click', (event) => {
+    if (event.target === modalBackdrop) closeModal();
+  });
   if (copyBtn) copyBtn.addEventListener('click', async () => {
     if (!currentPromptText) return;
     try {
