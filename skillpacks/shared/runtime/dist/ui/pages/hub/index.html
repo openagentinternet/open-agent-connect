@@ -19,11 +19,51 @@
       }
       .last-seen { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
       .section-updated { margin-left: auto; font-size: 11px; font-family: var(--mono); color: var(--dim); }
+      .svc-action { white-space: nowrap; }
+      .svc-get-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 40;
+      }
+      .svc-get-modal-backdrop[hidden] { display: none; }
+      .svc-get-modal {
+        width: min(460px, calc(100vw - 32px));
+        background: var(--surface);
+        border: 1px solid var(--border2);
+        border-radius: var(--radius);
+        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+        padding: 14px;
+      }
+      .svc-get-title {
+        font-size: 12px;
+        color: var(--text);
+        margin-bottom: 10px;
+      }
+      .svc-get-row { display: flex; gap: 8px; align-items: center; }
+      .svc-get-prompt {
+        flex: 1;
+        min-height: 56px;
+        max-height: 120px;
+        resize: vertical;
+        background: var(--surface2);
+        border: 1px solid var(--border2);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: 12px;
+        padding: 8px 10px;
+      }
       @media (max-width: 768px) {
         .data-table th:nth-child(4),
         .data-table td:nth-child(4),
         .data-table th:nth-child(5),
-        .data-table td:nth-child(5) { display: none; }
+        .data-table td:nth-child(5),
+        .data-table th:nth-child(7),
+        .data-table td:nth-child(7) { display: none; }
       }
     </style>
   </head>
@@ -74,10 +114,11 @@
                 <th>Skill</th>
                 <th>Status</th>
                 <th>Last Seen</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody data-service-list>
-              <tr><td colspan="6" class="table-empty"><strong>Loading…</strong>fetching online services</td></tr>
+              <tr><td colspan="7" class="table-empty"><strong>Loading…</strong>fetching online services</td></tr>
             </tbody>
           </table>
         </div>
@@ -85,6 +126,16 @@
         <!-- Agent Hub — Yellow Pages Directory -->
         <div data-service-directory data-directory-empty hidden style="display:none"></div>
       </main>
+    </div>
+    <div class="svc-get-modal-backdrop" data-svc-get-modal-backdrop hidden>
+      <div class="svc-get-modal" data-svc-get-modal>
+        <div class="svc-get-title">Please copy the following prompt into your agent chat window:</div>
+        <div class="svc-get-row">
+          <textarea class="svc-get-prompt" data-svc-get-prompt readonly></textarea>
+          <button class="btn btn-sm" type="button" data-svc-copy-btn>Copy</button>
+          <button class="btn btn-sm" type="button" data-svc-close-btn>Close</button>
+        </div>
+      </div>
     </div>
     <script>__PAGE_SCRIPT__</script>
   </body>

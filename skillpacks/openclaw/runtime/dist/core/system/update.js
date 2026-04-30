@@ -1,0 +1,163 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.runSystemUpdate = runSystemUpdate;
+const node_fs_1 = require("node:fs");
+const node_os_1 = __importDefault(require("node:os"));
+const node_path_1 = __importDefault(require("node:path"));
+const node_child_process_1 = require("node:child_process");
+const types_1 = require("./types");
+function normalizeText(value) {
+    return typeof value === 'string' ? value.trim() : '';
+}
+function buildReleaseDownloadUrl(host, version) {
+    const normalizedVersion = normalizeText(version);
+    if (!normalizedVersion || normalizedVersion === 'latest') {
+        return `https://github.com/openagentinternet/open-agent-connect/releases/latest/download/oac-${host}.tar.gz`;
+    }
+    return `https://github.com/openagentinternet/open-agent-connect/releases/download/${normalizedVersion}/oac-${host}.tar.gz`;
+}
+async function readInstalledVersion(systemHomeDir, host) {
+    const compatibilityPath = node_path_1.default.join(systemHomeDir, '.metabot', 'installpacks', host, 'runtime', 'compatibility.json');
+    try {
+        const raw = await node_fs_1.promises.readFile(compatibilityPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        const cli = normalizeText(parsed?.cli);
+        return cli || null;
+    }
+    catch {
+        return null;
+    }
+}
+async function resolveHost(systemHomeDir, requestedHost) {
+    if (requestedHost) {
+        return requestedHost;
+    }
+    const installpacksRoot = node_path_1.default.join(systemHomeDir, '.metabot', 'installpacks');
+    let entries = [];
+    try {
+        const dirents = await node_fs_1.promises.readdir(installpacksRoot, { withFileTypes: true });
+        entries = dirents.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    }
+    catch {
+        entries = [];
+    }
+    const detected = entries.filter((name) => {
+        return types_1.SUPPORTED_SYSTEM_HOSTS.includes(name);
+    });
+    if (detected.length === 1) {
+        return detected[0];
+    }
+    if (detected.length === 0) {
+        throw new types_1.SystemCommandError('update_host_unresolved', 'Cannot resolve update target host. No installed host pack found. Pass --host <codex|claude-code|openclaw>.');
+    }
+    throw new types_1.SystemCommandError('update_host_ambiguous', `Multiple installed host packs found: ${detected.join(', ')}. Pass --host to choose one.`, true);
+}
+async function runCommand(command, args, options) {
+    await new Promise((resolve, reject) => {
+        const child = (0, node_child_process_1.spawn)(command, args, {
+            cwd: options.cwd,
+            env: options.env,
+            stdio: 'pipe',
+        });
+        let stderr = '';
+        child.stderr.on('data', (chunk) => {
+            stderr += String(chunk);
+        });
+        child.on('error', reject);
+        child.on('close', (code) => {
+            if (code === 0) {
+                resolve();
+                return;
+            }
+            reject(new Error(stderr.trim() || `${command} exited with code ${code}`));
+        });
+    });
+}
+async function readExtractedVersion(extractedHostDir) {
+    const compatibilityPath = node_path_1.default.join(extractedHostDir, 'runtime', 'compatibility.json');
+    try {
+        const raw = await node_fs_1.promises.readFile(compatibilityPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        const cli = normalizeText(parsed?.cli);
+        return cli || null;
+    }
+    catch {
+        return null;
+    }
+}
+async function runSystemUpdate(input) {
+    const host = await resolveHost(input.systemHomeDir, input.host);
+    const requestedVersion = normalizeText(input.version) || 'latest';
+    const downloadUrl = buildReleaseDownloadUrl(host, requestedVersion);
+    const previousVersion = await readInstalledVersion(input.systemHomeDir, host);
+    const installpackPath = node_path_1.default.join(input.systemHomeDir, '.metabot', 'installpacks', host);
+    if (input.dryRun) {
+        return {
+            host,
+            requestedVersion,
+            resolvedVersion: previousVersion,
+            previousVersion,
+            outcome: 'no_update',
+            downloadUrl,
+            installpackPath,
+            dryRun: true,
+        };
+    }
+    const tmpRoot = await node_fs_1.promises.mkdtemp(node_path_1.default.join(node_os_1.default.tmpdir(), 'metabot-system-update-'));
+    const archivePath = node_path_1.default.join(tmpRoot, `oac-${host}.tar.gz`);
+    try {
+        const response = await fetch(downloadUrl);
+        if (!response.ok) {
+            throw new types_1.SystemCommandError('download_failed', `Failed to download update archive (${response.status} ${response.statusText}) from ${downloadUrl}.`);
+        }
+        const body = await response.arrayBuffer();
+        await node_fs_1.promises.writeFile(archivePath, Buffer.from(body));
+        await runCommand('tar', ['-xzf', archivePath, '-C', tmpRoot], {
+            cwd: tmpRoot,
+            env: input.env,
+        });
+        const extractedHostDir = node_path_1.default.join(tmpRoot, host);
+        const installerPath = node_path_1.default.join(extractedHostDir, 'install.sh');
+        const runtimeEntryPath = node_path_1.default.join(extractedHostDir, 'runtime', 'dist', 'cli', 'main.js');
+        try {
+            await node_fs_1.promises.access(installerPath);
+            await node_fs_1.promises.access(runtimeEntryPath);
+        }
+        catch {
+            throw new types_1.SystemCommandError('install_artifact_invalid', `Invalid update artifact for host ${host}: missing install.sh or runtime CLI entry.`);
+        }
+        await runCommand('bash', [installerPath], {
+            cwd: extractedHostDir,
+            env: {
+                ...input.env,
+                HOME: input.systemHomeDir,
+            },
+        });
+        const resolvedVersion = await readExtractedVersion(extractedHostDir);
+        const outcome = previousVersion && resolvedVersion && previousVersion === resolvedVersion
+            ? 'no_update'
+            : 'updated';
+        return {
+            host,
+            requestedVersion,
+            resolvedVersion,
+            previousVersion,
+            outcome,
+            downloadUrl,
+            installpackPath,
+            dryRun: false,
+        };
+    }
+    catch (error) {
+        if (error instanceof types_1.SystemCommandError) {
+            throw error;
+        }
+        throw new types_1.SystemCommandError('install_failed', error instanceof Error ? error.message : String(error));
+    }
+    finally {
+        await node_fs_1.promises.rm(tmpRoot, { recursive: true, force: true });
+    }
+}

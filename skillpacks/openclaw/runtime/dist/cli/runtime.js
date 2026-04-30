@@ -48,6 +48,8 @@ const privateChatAutoReply_1 = require("../core/chat/privateChatAutoReply");
 const privateChatStateStore_1 = require("../core/chat/privateChatStateStore");
 const chatStrategyStore_1 = require("../core/chat/chatStrategyStore");
 const hostLlmChatReplyRunner_1 = require("../core/chat/hostLlmChatReplyRunner");
+const update_1 = require("../core/system/update");
+const uninstall_1 = require("../core/system/uninstall");
 const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
 const DEFAULT_DAEMON_HOST = '127.0.0.1';
 const DEFAULT_DAEMON_START_TIMEOUT_MS = 5_000;
@@ -1395,6 +1397,51 @@ function createDefaultCliDependencies(context) {
                 }
             },
         },
+        system: {
+            update: async (input) => {
+                try {
+                    const result = await (0, update_1.runSystemUpdate)({
+                        systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+                        host: input.host,
+                        version: input.version,
+                        dryRun: input.dryRun,
+                        env: context.env,
+                    });
+                    return (0, commandResult_1.commandSuccess)(result);
+                }
+                catch (error) {
+                    if (error && typeof error === 'object' && 'code' in error) {
+                        const coded = error;
+                        if (coded.manualActionRequired) {
+                            return (0, commandResult_1.commandManualActionRequired)(coded.code, coded.message || 'Manual action required.');
+                        }
+                        return (0, commandResult_1.commandFailed)(coded.code, coded.message || 'System update failed.');
+                    }
+                    return (0, commandResult_1.commandFailed)('system_update_failed', error instanceof Error ? error.message : String(error));
+                }
+            },
+            uninstall: async (input) => {
+                try {
+                    const result = await (0, uninstall_1.runSystemUninstall)({
+                        systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+                        all: input.all,
+                        confirmToken: input.confirmToken,
+                        env: context.env,
+                    });
+                    return (0, commandResult_1.commandSuccess)(result);
+                }
+                catch (error) {
+                    if (error && typeof error === 'object' && 'code' in error) {
+                        const coded = error;
+                        if (coded.manualActionRequired) {
+                            return (0, commandResult_1.commandManualActionRequired)(coded.code, coded.message || 'Manual action required.');
+                        }
+                        return (0, commandResult_1.commandFailed)(coded.code, coded.message || 'System uninstall failed.');
+                    }
+                    return (0, commandResult_1.commandFailed)('system_uninstall_failed', error instanceof Error ? error.message : String(error));
+                }
+            },
+        },
         evolution: {
             status: async () => {
                 const homeDir = normalizeHomeDir(context.env, context.cwd);
@@ -1649,6 +1696,7 @@ function mergeCliDependencies(context) {
         ui: { ...defaults.ui, ...provided.ui },
         skills: { ...defaults.skills, ...provided.skills },
         host: { ...defaults.host, ...provided.host },
+        system: { ...defaults.system, ...provided.system },
         evolution: { ...defaults.evolution, ...provided.evolution },
     };
 }

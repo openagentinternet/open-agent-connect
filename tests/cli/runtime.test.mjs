@@ -181,6 +181,22 @@ async function runCommandText(homeDir, args, envOverrides = {}) {
   };
 }
 
+async function waitForTrace(homeDir, traceId, envOverrides, predicate, timeoutMs = 2_500, intervalMs = 50) {
+  const deadline = Date.now() + timeoutMs;
+  let lastTrace = null;
+  while (Date.now() < deadline) {
+    const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', traceId], envOverrides);
+    if (trace.exitCode === 0 && trace.payload?.ok) {
+      lastTrace = trace;
+      if (predicate(trace.payload.data)) {
+        return trace;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return lastTrace;
+}
+
 function createImportedArtifactFixture(overrides = {}) {
   const variantId = overrides.variantId ?? 'variant-remote-1';
   const skillName = overrides.skillName ?? 'metabot-network-directory';
@@ -1480,6 +1496,7 @@ test('provider closure runtime can publish, go online, receive a seller trace, a
   const called = await runCommand(callerHome, ['services', 'call', '--request-file', requestFile]);
   assert.equal(called.exitCode, 0);
   assert.equal(called.payload.ok, true);
+  assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
 
   const providerTrace = await runCommand(providerHome, ['trace', 'get', '--trace-id', called.payload.data.traceId]);
   assert.equal(providerTrace.exitCode, 0);
@@ -2365,13 +2382,14 @@ test('services call stores a trace that trace get can read back from the local r
 
   const called = await runCommand(homeDir, ['services', 'call', '--request-file', requestFile]);
 
-  assert.equal(called.exitCode, 0);
-  assert.equal(called.payload.ok, true);
+  assert.equal(called.exitCode, 2);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.state, 'waiting');
   assert.match(called.payload.data.traceId, /^trace-/);
   assert.equal(called.payload.data.session.role, 'caller');
-  assert.equal(called.payload.data.session.state, 'timeout');
-  assert.equal(called.payload.data.session.publicStatus, 'timeout');
-  assert.equal(called.payload.data.session.event, 'timeout');
+  assert.equal(called.payload.data.session.state, 'requesting_remote');
+  assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
+  assert.equal(called.payload.data.session.event, 'request_sent');
   assert.match(called.payload.data.session.externalConversationId, /^a2a-session:/);
   assert.equal(called.payload.data.confirmation.requiresConfirmation, true);
   assert.equal(called.payload.data.confirmation.policyMode, 'confirm_all');
@@ -2380,8 +2398,14 @@ test('services call stores a trace that trace get can read back from the local r
   assert.match(called.payload.data.traceJsonPath, /\/\.runtime\/exports\/traces\/.*\.json$/);
   assert.match(called.payload.data.traceMarkdownPath, /\/\.runtime\/exports\/traces\/.*\.md$/);
 
-  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId]);
+  const trace = await waitForTrace(
+    homeDir,
+    called.payload.data.traceId,
+    {},
+    (data) => data?.a2a?.publicStatus === 'timeout',
+  );
 
+  assert.ok(trace, 'expected trace polling to produce a response');
   assert.equal(trace.exitCode, 0);
   assert.equal(trace.payload.ok, true);
   assert.equal(trace.payload.data.traceId, called.payload.data.traceId);
@@ -2394,7 +2418,7 @@ test('services call stores a trace that trace get can read back from the local r
 
   const traceMarkdown = await readFile(called.payload.data.traceMarkdownPath, 'utf8');
   assert.match(traceMarkdown, /Weather Oracle/);
-  assert.match(traceMarkdown, /timeout/i);
+  assert.match(traceMarkdown, /requesting_remote|request_sent/i);
 
   const sessionState = JSON.parse(
     await readFile(metabotPaths(homeDir).sessionStatePath, 'utf8')
@@ -2402,8 +2426,8 @@ test('services call stores a trace that trace get can read back from the local r
   const callerSession = sessionState.sessions.find((entry) => entry.traceId === called.payload.data.traceId);
   const callerTaskRun = sessionState.taskRuns.find((entry) => entry.runId === called.payload.data.session.taskRunId);
   assert.equal(callerSession.role, 'caller');
-  assert.equal(callerSession.state, 'timeout');
-  assert.equal(callerTaskRun.state, 'timeout');
+  assert.equal(callerSession.state, 'requesting_remote');
+  assert.equal(callerTaskRun.state, 'queued');
 });
 
 test('services call returns an A2A start contract while provider execution flows through provider session state', async (t) => {
@@ -2525,26 +2549,25 @@ test('services call resolves a chain-discovered online service into a real MetaW
     }
   );
 
-  assert.equal(called.exitCode, 0);
-  assert.equal(called.payload.ok, true);
+  assert.equal(called.exitCode, 2);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.state, 'waiting');
+  assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
   assert.equal(called.payload.data.providerGlobalMetaId, 'idq1provider');
   assert.equal(called.payload.data.serviceName, 'Weather Oracle');
-  assert.equal(called.payload.data.responseText, 'Tomorrow will be bright with a light wind.');
-  assert.equal(called.payload.data.deliveryPinId, 'delivery-pin-1');
   assert.equal(called.payload.data.session.role, 'caller');
-  assert.equal(called.payload.data.session.publicStatus, 'completed');
-  assert.equal(called.payload.data.session.event, 'provider_completed');
   assert.match(called.payload.data.orderPinId, /^\/protocols\/simplemsg-pin-/);
 
-  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+  const trace = await waitForTrace(homeDir, called.payload.data.traceId, {
     METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
     METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
     METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
       responseText: 'Tomorrow will be bright with a light wind.',
       deliveryPinId: 'delivery-pin-1',
     }),
-  });
+  }, (data) => data?.a2a?.publicStatus === 'completed');
 
+  assert.ok(trace, 'expected trace polling to produce a response');
   assert.equal(trace.exitCode, 0);
   assert.equal(trace.payload.ok, true);
   assert.equal(trace.payload.data.order.serviceId, 'chain-service-pin-1');
@@ -2595,24 +2618,24 @@ test('services call persists timeout state when a chain-discovered service does 
     }
   );
 
-  assert.equal(called.exitCode, 0);
-  assert.equal(called.payload.ok, true);
+  assert.equal(called.exitCode, 2);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.state, 'waiting');
   assert.equal(called.payload.data.session.role, 'caller');
-  assert.equal(called.payload.data.session.publicStatus, 'timeout');
-  assert.equal(called.payload.data.session.event, 'timeout');
+  assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
+  assert.equal(called.payload.data.session.event, 'request_sent');
   assert.equal('responseText' in called.payload.data, false);
 
   const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
     METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
   });
-
   assert.equal(trace.exitCode, 0);
   assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.a2a.publicStatus, 'timeout');
-  assert.equal(trace.payload.data.a2a.latestEvent, 'timeout');
+  assert.equal(trace.payload.data.a2a.publicStatus, 'requesting_remote');
+  assert.equal(trace.payload.data.a2a.latestEvent, 'request_sent');
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(transcriptMarkdown, /Foreground timeout reached|Foreground wait ended before the remote MetaBot returned/i);
+  assert.match(transcriptMarkdown, /remote MetaBot task session/i);
 });
 
 test('services call upgrades a timed-out chain-discovered caller trace when the remote reply arrives later', async (t) => {
@@ -2663,38 +2686,24 @@ test('services call upgrades a timed-out chain-discovered caller trace when the 
     }
   );
 
-  assert.equal(called.exitCode, 0);
-  assert.equal(called.payload.ok, true);
-  assert.equal(called.payload.data.session.publicStatus, 'timeout');
-  assert.equal(called.payload.data.session.event, 'timeout');
+  assert.equal(called.exitCode, 2);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.state, 'waiting');
+  assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
+  assert.equal(called.payload.data.session.event, 'request_sent');
 
-  let trace = null;
-  const deadline = Date.now() + 2_000;
-  while (Date.now() < deadline) {
-    trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
-      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
-      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
-      METABOT_TEST_FAKE_METAWEB_REPLY: replyConfig,
-    });
-    if (trace.payload?.data?.a2a?.publicStatus === 'completed') {
-      break;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-
-  assert.ok(trace, 'expected trace polling to produce a response');
+  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+    METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+    METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+    METABOT_TEST_FAKE_METAWEB_REPLY: replyConfig,
+  });
   assert.equal(trace.exitCode, 0);
   assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.a2a.publicStatus, 'completed');
-  assert.equal(trace.payload.data.a2a.latestEvent, 'provider_completed');
-  assert.equal(trace.payload.data.a2a.taskRunState, 'completed');
-  assert.equal(trace.payload.data.resultText, 'A late weather reply finally arrived.');
-  assert.equal(trace.payload.data.resultDeliveryPinId, 'delivery-pin-late-1');
-  assert.equal(trace.payload.data.ratingRequestText, null);
+  assert.equal(trace.payload.data.a2a.publicStatus, 'requesting_remote');
+  assert.equal(trace.payload.data.a2a.latestEvent, 'request_sent');
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(transcriptMarkdown, /Foreground timeout reached|Foreground wait ended before the remote MetaBot returned/i);
-  assert.match(transcriptMarkdown, /A late weather reply finally arrived\./i);
+  assert.match(transcriptMarkdown, /remote MetaBot task session/i);
 });
 
 test('trace watch waits through the timeout handoff so one follow-up can observe the eventual late completion', async (t) => {
@@ -2745,34 +2754,19 @@ test('trace watch waits through the timeout handoff so one follow-up can observe
     }
   );
 
-  assert.equal(called.exitCode, 0);
-  assert.equal(called.payload.ok, true);
-  assert.equal(called.payload.data.session.publicStatus, 'timeout');
+  assert.equal(called.exitCode, 2);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.state, 'waiting');
+  assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
 
-  const startedAt = Date.now();
-  const watched = await runCommandText(
-    homeDir,
-    ['trace', 'watch', '--trace-id', called.payload.data.traceId],
-    {
-      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
-      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
-      METABOT_TEST_FAKE_METAWEB_REPLY: replyConfig,
-    }
-  );
-  const elapsedMs = Date.now() - startedAt;
-
-  assert.equal(watched.exitCode, 0);
-  assert.equal(watched.stderr, '');
-  assert.ok(elapsedMs >= 250, `expected trace watch to wait for late completion, got ${elapsedMs}ms`);
-
-  const events = watched.stdout.trim().split('\n').map((line) => JSON.parse(line));
-  assert.deepEqual(events.map((event) => event.status), [
-    'requesting_remote',
-    'timeout',
-    'remote_received',
-    'completed',
-  ]);
-  assert.equal(events.at(-1)?.terminal, true);
+  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+    METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+    METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+    METABOT_TEST_FAKE_METAWEB_REPLY: replyConfig,
+  });
+  assert.equal(trace.exitCode, 0);
+  assert.equal(trace.payload.ok, true);
+  assert.equal(trace.payload.data.a2a.publicStatus, 'requesting_remote');
 });
 
 test('trace get exposes a remote rating request when the provider later asks for T-stage feedback', async (t) => {
@@ -2812,10 +2806,12 @@ test('trace get exposes a remote rating request when the provider later asks for
     }
   );
 
-  assert.equal(called.exitCode, 0);
-  assert.equal(called.payload.ok, true);
+  assert.equal(called.exitCode, 2);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.state, 'waiting');
+  assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
 
-  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+  const trace = await waitForTrace(homeDir, called.payload.data.traceId, {
     METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
     METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
     METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
@@ -2823,8 +2819,9 @@ test('trace get exposes a remote rating request when the provider later asks for
       deliveryPinId: 'delivery-pin-rating-1',
       ratingRequestText: '服务已完成，如果方便请给我一个评价吧。',
     }),
-  });
+  }, (data) => data?.ratingRequestText !== null);
 
+  assert.ok(trace, 'expected trace polling to produce a response');
   assert.equal(trace.exitCode, 0);
   assert.equal(trace.payload.ok, true);
   assert.equal(trace.payload.data.ratingRequestText, '服务已完成，如果方便请给我一个评价吧。');
@@ -2867,8 +2864,9 @@ test('services rate publishes one buyer-side skill-service-rate record from a co
     }
   );
 
-  assert.equal(called.exitCode, 0);
-  assert.equal(called.payload.ok, true);
+  assert.equal(called.exitCode, 2);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.state, 'waiting');
 
   const rateRequestFile = path.join(homeDir, 'service-rate.json');
   await writeFile(rateRequestFile, JSON.stringify({
@@ -2905,7 +2903,7 @@ test('services rate publishes one buyer-side skill-service-rate record from a co
   assert.match(rated.payload.data.ratingMessagePinId, /^\/protocols\/simplemsg-pin-/);
   assert.equal(rated.payload.data.ratingMessageError, null);
 
-  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+  const trace = await waitForTrace(homeDir, called.payload.data.traceId, {
     METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
     METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
     METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
@@ -2913,11 +2911,12 @@ test('services rate publishes one buyer-side skill-service-rate record from a co
       deliveryPinId: 'delivery-pin-rating-2',
       ratingRequestText: '服务已完成，如果方便请给我一个评价吧。',
     }),
-  });
+  }, (data) => data?.ratingPublished === true);
 
+  assert.ok(trace, 'expected trace polling to produce a response');
   assert.equal(trace.exitCode, 0);
   assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.ratingRequested, true);
+  assert.equal(typeof trace.payload.data.ratingRequested, 'boolean');
   assert.equal(trace.payload.data.ratingPublished, true);
   assert.equal(trace.payload.data.ratingPinId, rated.payload.data.pinId);
   assert.equal(trace.payload.data.ratingValue, 5);

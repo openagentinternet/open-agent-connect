@@ -25,8 +25,8 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.match(guide, /does not need to clone this repository/i);
   assert.match(guide, /do not run `npm install`, `npm run build`, or `npm run build:skillpacks`/i);
   assert.match(guide, /OAC_HOST:=claude-code/);
-  assert.match(guide, /github\.com\/\$OAC_REPO\/archive\/refs\/heads\/\$OAC_BRANCH\.tar\.gz/);
-  assert.match(guide, /skillpacks\/\$OAC_HOST_PACK/);
+  assert.match(guide, /github\.com\/\$OAC_REPO\/releases\/latest\/download\/oac-\$\{OAC_HOST_PACK\}\.tar\.gz/);
+  assert.match(guide, /OAC_TMP_DIR\/\$OAC_HOST_PACK/);
   assert.match(guide, /\.\/install\.sh/);
   assert.match(guide, /metabot host bind-skills --host codex/);
   assert.match(guide, /metabot host bind-skills --host claude-code/);

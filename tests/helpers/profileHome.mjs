@@ -28,5 +28,24 @@ export function deriveSystemHome(homeDir) {
 }
 
 export async function cleanupProfileHome(homeDir) {
-  await rm(deriveSystemHome(homeDir), { recursive: true, force: true });
+  const target = deriveSystemHome(homeDir);
+  let lastError = null;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      await rm(target, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error
+        ? error.code
+        : '';
+      if (code !== 'ENOTEMPTY' && code !== 'EBUSY') {
+        throw error;
+      }
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 40 * (attempt + 1)));
+    }
+  }
+  if (lastError) {
+    throw lastError;
+  }
 }

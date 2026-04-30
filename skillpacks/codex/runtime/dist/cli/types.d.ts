@@ -1,5 +1,6 @@
 import type { MetabotCommandResult } from '../core/contracts/commandResult';
 import type { ConcreteSkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
+import type { SystemHost } from '../core/system/types';
 export type Awaitable<T> = T | Promise<T>;
 export interface CliDependencies {
     config?: {
@@ -143,6 +144,18 @@ export interface CliDependencies {
         }) => Awaitable<MetabotCommandResult<unknown>>;
         imported?: (input: {
             skill: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    system?: {
+        update?: (input: {
+            host?: SystemHost;
+            version?: string;
+            dryRun: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        uninstall?: (input: {
+            all: boolean;
+            confirmToken?: string;
+            yes: boolean;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
 }

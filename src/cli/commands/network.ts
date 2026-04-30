@@ -22,6 +22,13 @@ function parseLimitFlag(args: string[]): { limit?: number; error?: MetabotComman
 }
 
 export async function runNetworkCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
+  const shouldRenderTable = Boolean(
+    context.stdout
+    && typeof context.stdout === 'object'
+    && 'isTTY' in (context.stdout as Record<string, unknown>)
+    && (context.stdout as { isTTY?: boolean }).isTTY,
+  );
+
   if (args[0] === 'services') {
     const handler = context.dependencies.network?.listServices;
     if (!handler) {
@@ -38,7 +45,7 @@ export async function runNetworkCommand(args: string[], context: CliRuntimeConte
       online: hasFlag(args, '--online') ? true : undefined,
     });
 
-    if (result.ok && result.state === 'success') {
+    if (shouldRenderTable && result.ok && result.state === 'success') {
       const data = result.data as { services?: Array<Record<string, unknown>> };
       const allServices = Array.isArray(data?.services) ? data.services : [];
       const services = allServices.slice(0, limit);
@@ -82,7 +89,7 @@ export async function runNetworkCommand(args: string[], context: CliRuntimeConte
       limit: parsedLimit.limit,
     });
 
-    if (result.ok && result.state === 'success') {
+    if (shouldRenderTable && result.ok && result.state === 'success') {
       const data = result.data as { bots?: Array<{ globalMetaId: string; name?: string; goal?: string; lastSeenAgoSeconds?: number }> };
       const bots = Array.isArray(data?.bots) ? data.bots : [];
       const truncate = (s: string, max: number) => s.length > max ? s.slice(0, max) + '...' : s;
