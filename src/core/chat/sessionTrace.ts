@@ -18,6 +18,9 @@ export interface SessionTraceOrderInput {
   role?: string | null;
   serviceId?: string | null;
   serviceName?: string | null;
+  orderPinId?: string | null;
+  orderTxid?: string | null;
+  orderTxids?: string[] | null;
   paymentTxid?: string | null;
   orderReference?: string | null;
   paymentCurrency?: string | null;
@@ -128,6 +131,9 @@ export interface SessionTraceRecord {
     role: string | null;
     serviceId: string | null;
     serviceName: string | null;
+    orderPinId: string | null;
+    orderTxid: string | null;
+    orderTxids: string[];
     paymentTxid: string | null;
     orderReference: string | null;
     paymentCurrency: string | null;
@@ -363,6 +369,11 @@ export function buildSessionTrace(input: BuildSessionTraceInput): SessionTraceRe
           role: normalizeText(input.order.role) || null,
           serviceId: normalizeText(input.order.serviceId) || null,
           serviceName: normalizeText(input.order.serviceName) || null,
+          orderPinId: normalizeText(input.order.orderPinId) || null,
+          orderTxid: normalizeText(input.order.orderTxid) || null,
+          orderTxids: Array.isArray(input.order.orderTxids)
+            ? input.order.orderTxids.map((entry) => normalizeText(entry)).filter(Boolean)
+            : [],
           paymentTxid: normalizeText(input.order.paymentTxid) || null,
           orderReference: normalizeText(input.order.orderReference) || null,
           paymentCurrency: normalizeText(input.order.paymentCurrency) || null,

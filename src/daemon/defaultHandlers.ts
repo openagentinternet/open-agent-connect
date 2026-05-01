@@ -1717,11 +1717,19 @@ async function buildTraceInspectorPayload(input: {
   sessionStateStore: ReturnType<typeof createSessionStateStore>;
   ratingDetailStateStore: ReturnType<typeof createRatingDetailStateStore>;
   chainApiBaseUrl?: string;
+  daemon?: RuntimeDaemonRecord | null;
+  selectedSessionId?: string | null;
 }) {
   const sessionState = await input.sessionStateStore.readState();
   const sessions = sessionState.sessions
     .filter((entry) => entry.traceId === input.traceId)
     .sort((left, right) => left.createdAt - right.createdAt);
+  const selectedSession = sessions.find((entry) => entry.sessionId === input.selectedSessionId)
+    ?? sessions.at(-1)
+    ?? null;
+  const selectedSessionId = normalizeText(selectedSession?.sessionId)
+    || normalizeText(input.trace.a2a?.sessionId)
+    || null;
   const sessionIds = new Set(sessions.map((entry) => entry.sessionId));
   const taskRuns = sessionState.taskRuns
     .filter((entry) => sessionIds.has(entry.sessionId))
@@ -1751,16 +1759,42 @@ async function buildTraceInspectorPayload(input: {
     transcriptItems,
     ratingDetail,
   });
+  const order = input.trace.order;
+  const peerGlobalMetaId = input.trace.session.peerGlobalMetaId
+    ?? (selectedSession?.role === 'caller'
+      ? selectedSession.providerGlobalMetaId
+      : selectedSession?.callerGlobalMetaId)
+    ?? null;
 
   return {
     ...input.trace,
+    sessionId: selectedSessionId,
+    orderPinId: order?.orderPinId ?? null,
+    orderTxid: order?.orderTxid ?? null,
+    orderTxids: order?.orderTxids ?? [],
+    paymentTxid: order?.paymentTxid ?? null,
+    localUiUrl: buildDaemonLocalUiUrl(input.daemon, '/ui/trace', {
+      traceId: input.traceId,
+      sessionId: selectedSessionId,
+    }),
+    session: {
+      ...input.trace.session,
+      ...(selectedSession ?? {}),
+      id: input.trace.session.id,
+      title: input.trace.session.title,
+      type: input.trace.session.type,
+      metabotId: input.trace.session.metabotId,
+      peerGlobalMetaId,
+      peerName: input.trace.session.peerName,
+      externalConversationId: input.trace.session.externalConversationId,
+    },
     ...result,
     ...ratingRequest,
     ...ratingClosure,
     ratingSyncState: ratingSnapshot.ratingSyncState,
     ratingSyncError: ratingSnapshot.ratingSyncError,
     inspector: {
-      session: sessions.at(-1) ?? null,
+      session: selectedSession,
       sessions,
       taskRuns,
       transcriptItems,
@@ -5863,6 +5897,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
           taskContext: request.taskContext,
         });
         let orderPinId: string | null = null;
+        let orderTxid: string | null = null;
+        let orderTxids: string[] = [];
         let providerReplyText: string | null = null;
         let deliveryPinId: string | null = null;
         const persistCallerTraceSnapshot = async (failure?: {
@@ -5905,6 +5941,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 event: failure?.code || started.event,
                 externalConversationId: started.linkage.externalConversationId,
                 orderPinId,
+                orderTxid,
+                orderTxids,
                 paymentTxid: paymentTxid || null,
                 orderReference: orderReference || null,
                 failureCode: failure?.code || null,
@@ -5930,6 +5968,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
               role: 'buyer',
               serviceId: plan.service.servicePinId,
               serviceName: serviceDisplayName,
+              orderPinId,
+              orderTxid,
+              orderTxids,
               paymentTxid,
               orderReference,
               paymentCurrency: orderPayment.paymentCurrency,
@@ -5978,6 +6019,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
                     confirmationRequired: plan.confirmation.requiresConfirmation,
                     providerDaemonBaseUrl: request.providerDaemonBaseUrl || null,
                     orderPinId,
+                    orderTxid,
+                    orderTxids,
                     paymentTxid: paymentTxid || null,
                     orderReference: orderReference || null,
                     failureCode: failure?.code || null,
@@ -6121,6 +6164,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
               network: 'mvc',
             });
             orderPinId = orderWrite.pinId;
+            orderTxids = Array.isArray(orderWrite.txids)
+              ? orderWrite.txids.map((entry) => normalizeText(entry)).filter(Boolean)
+              : [];
+            orderTxid = (
+              normalizeOrderProtocolReference(orderTxids[0])
+              || normalizeOrderProtocolReference(orderPinId)
+              || orderTxids[0]
+              || null
+            );
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             await persistCallerTraceSnapshot({
@@ -6163,7 +6215,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               providerChatPublicKey: peerChatPublicKey,
               servicePinId: plan.service.servicePinId,
               paymentTxid,
-              orderTxid: normalizeOrderProtocolReference(orderPinId) || null,
+              orderTxid: normalizeOrderProtocolReference(orderTxid) || normalizeOrderProtocolReference(orderPinId) || null,
               timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
             },
           });
@@ -6175,7 +6227,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
             'Order sent to provider. Waiting for response...',
             3000,
             {
-              localUiUrl: buildDaemonLocalUiUrl(daemon, '/ui/trace', { traceId: trace.traceId }),
+              localUiUrl: buildDaemonLocalUiUrl(daemon, '/ui/trace', {
+                traceId: trace.traceId,
+                sessionId: started.session.sessionId,
+              }),
               data: {
                 traceId: trace.traceId,
                 providerGlobalMetaId: plan.service.providerGlobalMetaId,
@@ -6186,6 +6241,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 paymentTxid: paymentTxid || null,
                 orderReference: orderReference || null,
                 orderPinId,
+                orderTxid,
+                orderTxids,
                 session: {
                   sessionId: started.session.sessionId,
                   taskRunId: started.taskRun.runId,
@@ -6214,6 +6271,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
           paymentTxid: paymentTxid || null,
           orderReference: orderReference || null,
           orderPinId,
+          orderTxid,
+          orderTxids,
           ...(deliveryPinId ? { deliveryPinId } : {}),
           ...(providerReplyText ? { responseText: providerReplyText } : {}),
           session: {
@@ -6229,7 +6288,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
           traceJsonPath: responseArtifacts.traceJsonPath,
           traceMarkdownPath: responseArtifacts.traceMarkdownPath,
           transcriptMarkdownPath: responseArtifacts.transcriptMarkdownPath,
-          localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', { traceId: responseTrace.traceId }),
+          localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
+            traceId: responseTrace.traceId,
+            sessionId: responseSession.sessionId,
+          }),
         });
       },
       rate: async (rawInput) => {
@@ -6952,6 +7014,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             sessionStateStore,
             ratingDetailStateStore,
             chainApiBaseUrl: input.chainApiBaseUrl,
+            daemon: input.getDaemonRecord(),
           })
         );
       },
@@ -7054,23 +7117,98 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
             const transcriptItems = state.transcriptItems.filter(
               (item) => item.sessionId === normalizedSessionId,
-            );
+            ).sort((left, right) => left.timestamp - right.timestamp);
             const taskRuns = state.taskRuns.filter(
               (run) => run.sessionId === normalizedSessionId,
-            );
+            ).sort((left, right) => left.createdAt - right.createdAt);
             const publicStatusSnapshots = state.publicStatusSnapshots.filter(
               (snap) => snap.sessionId === normalizedSessionId,
-            );
+            ).sort((left, right) => left.resolvedAt - right.resolvedAt);
             const isCallerLocal = session.role === 'caller';
             const peerGlobalMetaId = isCallerLocal
               ? session.providerGlobalMetaId
               : session.callerGlobalMetaId;
+            const traceId = normalizeText(session.traceId);
+            let trace: SessionTraceRecord | null = null;
+            try {
+              const profileRuntimeStateStore = createRuntimeStateStore(profile.homeDir);
+              const runtimeState = await profileRuntimeStateStore.readState();
+              trace = runtimeState.traces.find((entry) => entry.traceId === traceId) ?? null;
+            } catch {
+              trace = null;
+            }
+            if (trace) {
+              const payload = await buildTraceInspectorPayload({
+                traceId,
+                trace,
+                sessionStateStore: store,
+                ratingDetailStateStore: createRatingDetailStateStore(profile.homeDir),
+                chainApiBaseUrl: input.chainApiBaseUrl,
+                daemon: input.getDaemonRecord(),
+                selectedSessionId: normalizedSessionId,
+              });
+
+              return commandSuccess({
+                ...payload,
+                localMetabotName: profile.name,
+                localMetabotGlobalMetaId: profile.globalMetaId,
+                peerGlobalMetaId,
+              });
+            }
+            const latestStatusSnapshot = publicStatusSnapshots.at(-1) ?? null;
 
             return commandSuccess({
-              session,
+              traceId,
+              sessionId: normalizedSessionId,
+              session: {
+                ...session,
+                id: normalizedSessionId,
+                title: null,
+                type: 'a2a',
+                metabotId: null,
+                peerGlobalMetaId,
+                peerName: null,
+                externalConversationId: null,
+              },
               transcriptItems,
               taskRuns,
               publicStatusSnapshots,
+              order: null,
+              orderPinId: null,
+              orderTxid: null,
+              orderTxids: [],
+              paymentTxid: null,
+              localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
+                traceId,
+                sessionId: normalizedSessionId,
+              }),
+              a2a: {
+                sessionId: normalizedSessionId,
+                taskRunId: session.currentTaskRunId,
+                role: session.role,
+                publicStatus: latestStatusSnapshot?.status ?? session.state,
+                latestEvent: latestStatusSnapshot?.rawEvent ?? null,
+                taskRunState: session.latestTaskRunState,
+                callerGlobalMetaId: session.callerGlobalMetaId,
+                callerName: null,
+                providerGlobalMetaId: session.providerGlobalMetaId,
+                providerName: null,
+                servicePinId: session.servicePinId,
+              },
+              artifacts: {
+                transcriptMarkdownPath: null,
+                traceMarkdownPath: null,
+                traceJsonPath: null,
+              },
+              inspector: {
+                session,
+                sessions: [session],
+                taskRuns,
+                transcriptItems,
+                publicStatusSnapshots,
+                transcriptMarkdown: null,
+                traceMarkdown: null,
+              },
               localMetabotName: profile.name,
               localMetabotGlobalMetaId: profile.globalMetaId,
               peerGlobalMetaId,

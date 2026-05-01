@@ -13,6 +13,7 @@ const { resolveMetabotHomeSelection } = require('../../dist/core/state/homeSelec
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
+const { createSessionStateStore } = require('../../dist/core/a2a/sessionStateStore.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
 const { createRemoteEvolutionStore } = require('../../dist/core/evolution/remoteEvolutionStore.js');
@@ -2490,6 +2491,10 @@ test('services call returns an A2A start contract while provider execution flows
   assert.equal(called.payload.data.confirmation.policyMode, 'confirm_all');
   assert.equal(called.payload.data.providerGlobalMetaId, providerIdentity.payload.data.globalMetaId);
   assert.equal(called.payload.data.serviceName, 'Weather Oracle');
+  const providerDaemonTraceUrl = new URL(called.payload.data.localUiUrl);
+  assert.equal(providerDaemonTraceUrl.pathname, '/ui/trace');
+  assert.equal(providerDaemonTraceUrl.searchParams.get('traceId'), called.payload.data.traceId);
+  assert.equal(providerDaemonTraceUrl.searchParams.get('sessionId'), called.payload.data.session.sessionId);
   assert.equal('responseText' in called.payload.data, false);
   assert.equal('providerTraceJsonPath' in called.payload.data, false);
   assert.equal('providerTraceMarkdownPath' in called.payload.data, false);
@@ -2518,6 +2523,102 @@ test('services call returns an A2A start contract while provider execution flows
   assert.equal(providerSession.role, 'provider');
   assert.equal(providerSession.state, 'completed');
   assert.equal(providerTaskRun.state, 'completed');
+});
+
+test('trace get by session id returns an inspector-shaped fallback when the runtime trace is missing', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const sessionStore = createSessionStateStore(homeDir);
+  const now = Date.now();
+  await sessionStore.writeState({
+    version: 1,
+    sessions: [
+      {
+        sessionId: 'session-missing-trace',
+        traceId: 'trace-missing',
+        role: 'caller',
+        state: 'requesting_remote',
+        createdAt: now,
+        updatedAt: now,
+        callerGlobalMetaId: 'idq1caller',
+        providerGlobalMetaId: 'idq1provider',
+        servicePinId: 'service-pin-1',
+        currentTaskRunId: 'run-missing-trace',
+        latestTaskRunState: 'running',
+      },
+    ],
+    taskRuns: [
+      {
+        runId: 'run-missing-trace',
+        sessionId: 'session-missing-trace',
+        state: 'running',
+        createdAt: now,
+        updatedAt: now,
+        startedAt: now,
+        completedAt: null,
+        failureCode: null,
+        failureReason: null,
+        clarificationRounds: [],
+      },
+    ],
+    transcriptItems: [
+      {
+        id: 'transcript-1',
+        sessionId: 'session-missing-trace',
+        taskRunId: 'run-missing-trace',
+        timestamp: now,
+        type: 'message',
+        sender: 'caller',
+        content: 'hello provider',
+        metadata: null,
+      },
+    ],
+    cursors: {
+      caller: null,
+      provider: null,
+    },
+    publicStatusSnapshots: [
+      {
+        sessionId: 'session-missing-trace',
+        taskRunId: 'run-missing-trace',
+        status: 'requesting_remote',
+        mapped: true,
+        rawEvent: 'order_sent',
+        resolvedAt: now,
+      },
+    ],
+  });
+
+  const result = await runCommand(homeDir, [
+    'trace',
+    'get',
+    '--session-id',
+    'session-missing-trace',
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.traceId, 'trace-missing');
+  assert.equal(result.payload.data.sessionId, 'session-missing-trace');
+  assert.equal(result.payload.data.session.sessionId, 'session-missing-trace');
+  assert.equal(result.payload.data.session.peerGlobalMetaId, 'idq1provider');
+  assert.equal(result.payload.data.order, null);
+  assert.equal(result.payload.data.orderTxid, null);
+  assert.equal(result.payload.data.paymentTxid, null);
+  assert.equal(result.payload.data.a2a.sessionId, 'session-missing-trace');
+  assert.equal(result.payload.data.a2a.publicStatus, 'requesting_remote');
+  assert.deepEqual(result.payload.data.artifacts, {
+    transcriptMarkdownPath: null,
+    traceMarkdownPath: null,
+    traceJsonPath: null,
+  });
+  assert.equal(result.payload.data.inspector.session.sessionId, 'session-missing-trace');
+  assert.equal(result.payload.data.inspector.transcriptItems[0].content, 'hello provider');
+  const localUiUrl = new URL(result.payload.data.localUiUrl);
+  assert.equal(localUiUrl.pathname, '/ui/trace');
+  assert.equal(localUiUrl.searchParams.get('traceId'), 'trace-missing');
+  assert.equal(localUiUrl.searchParams.get('sessionId'), 'session-missing-trace');
 });
 
 test('services call resolves a chain-discovered online service into a real MetaWeb reply path without providerDaemonBaseUrl', async (t) => {
@@ -2564,6 +2665,12 @@ test('services call resolves a chain-discovered online service into a real MetaW
   assert.equal(called.payload.data.serviceName, 'Weather Oracle');
   assert.equal(called.payload.data.session.role, 'caller');
   assert.match(called.payload.data.orderPinId, /^\/protocols\/simplemsg-pin-/);
+  assert.match(called.payload.data.orderTxid, /^\/protocols\/simplemsg-tx-/);
+  assert.deepEqual(called.payload.data.orderTxids, [called.payload.data.orderTxid]);
+  const traceUrl = new URL(called.payload.localUiUrl);
+  assert.equal(traceUrl.pathname, '/ui/trace');
+  assert.equal(traceUrl.searchParams.get('traceId'), called.payload.data.traceId);
+  assert.equal(traceUrl.searchParams.get('sessionId'), called.payload.data.session.sessionId);
   const expectedPayment = await createTestServicePaymentExecutor().execute({
     servicePinId: 'chain-service-pin-1',
     providerGlobalMetaId: 'idq1provider',
@@ -2595,6 +2702,35 @@ test('services call resolves a chain-discovered online service into a real MetaW
   assert.equal(trace.payload.data.resultDeliveryPinId, 'delivery-pin-1');
   assert.equal(trace.payload.data.ratingRequestText, null);
   assert.equal(trace.payload.data.order.paymentTxid, expectedPayment.paymentTxid);
+  assert.equal(trace.payload.data.order.orderPinId, called.payload.data.orderPinId);
+  assert.equal(trace.payload.data.order.orderTxid, called.payload.data.orderTxid);
+  assert.deepEqual(trace.payload.data.order.orderTxids, called.payload.data.orderTxids);
+  const traceGetUrl = new URL(trace.payload.data.localUiUrl);
+  assert.equal(traceGetUrl.pathname, '/ui/trace');
+  assert.equal(traceGetUrl.searchParams.get('traceId'), called.payload.data.traceId);
+  assert.equal(traceGetUrl.searchParams.get('sessionId'), called.payload.data.session.sessionId);
+
+  const sessionDetail = await runCommand(homeDir, [
+    'trace',
+    'get',
+    '--session-id',
+    called.payload.data.session.sessionId,
+  ], {
+    METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+    METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+  });
+  assert.equal(sessionDetail.exitCode, 0);
+  assert.equal(sessionDetail.payload.ok, true);
+  assert.equal(sessionDetail.payload.data.traceId, called.payload.data.traceId);
+  assert.equal(sessionDetail.payload.data.session.sessionId, called.payload.data.session.sessionId);
+  assert.equal(sessionDetail.payload.data.order.orderPinId, called.payload.data.orderPinId);
+  assert.equal(sessionDetail.payload.data.order.orderTxid, called.payload.data.orderTxid);
+  assert.deepEqual(sessionDetail.payload.data.order.orderTxids, called.payload.data.orderTxids);
+  assert.equal(sessionDetail.payload.data.order.paymentTxid, expectedPayment.paymentTxid);
+  const sessionTraceUrl = new URL(sessionDetail.payload.data.localUiUrl);
+  assert.equal(sessionTraceUrl.pathname, '/ui/trace');
+  assert.equal(sessionTraceUrl.searchParams.get('traceId'), called.payload.data.traceId);
+  assert.equal(sessionTraceUrl.searchParams.get('sessionId'), called.payload.data.session.sessionId);
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /Tomorrow will be bright with a light wind/);

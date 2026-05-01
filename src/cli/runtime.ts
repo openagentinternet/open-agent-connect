@@ -1698,7 +1698,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       },
     },
     trace: {
-      get: async (input) => requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}`),
+      get: async (input) => input.sessionId
+        ? requestJson(context, 'GET', `/api/trace/sessions/${encodeURIComponent(input.sessionId)}`)
+        : requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId || '')}`),
       watch: async (input) => requestText(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}/watch`),
     },
     ui: {
