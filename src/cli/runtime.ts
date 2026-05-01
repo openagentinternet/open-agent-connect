@@ -50,9 +50,9 @@ import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain } from '../daemon/defaultHandlers';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
+import { createA2ASimplemsgListenerManager } from '../core/a2a/simplemsgListener';
 import { createSocketIoMetaWebMasterReplyWaiter, type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
 import { parseMasterResponse } from '../core/master/masterMessageSchema';
-import { createPrivateChatListener } from '../core/chat/privateChatListener';
 import { createPrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
@@ -341,7 +341,8 @@ type SupportedBooleanConfigKey =
   | 'evolution_network.enabled'
   | 'evolution_network.autoAdoptSameSkillSameScope'
   | 'evolution_network.autoRecordExecutions'
-  | 'askMaster.enabled';
+  | 'askMaster.enabled'
+  | 'a2a.simplemsgListenerEnabled';
 
 type SupportedEnumConfigKey =
   | 'askMaster.triggerMode';
@@ -356,6 +357,7 @@ const SUPPORTED_CONFIG_KEYS = new Set<SupportedConfigKey>([
   'evolution_network.autoRecordExecutions',
   'askMaster.enabled',
   'askMaster.triggerMode',
+  'a2a.simplemsgListenerEnabled',
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -408,7 +410,8 @@ function isSupportedBooleanConfigKey(key: SupportedConfigKey): key is SupportedB
   return key === 'evolution_network.enabled'
     || key === 'evolution_network.autoAdoptSameSkillSameScope'
     || key === 'evolution_network.autoRecordExecutions'
-    || key === 'askMaster.enabled';
+    || key === 'askMaster.enabled'
+    || key === 'a2a.simplemsgListenerEnabled';
 }
 
 function readConfigValue(
@@ -429,6 +432,9 @@ function readConfigValue(
   }
   if (key === 'askMaster.triggerMode') {
     return config.askMaster.triggerMode;
+  }
+  if (key === 'a2a.simplemsgListenerEnabled') {
+    return config.a2a.simplemsgListenerEnabled;
   }
   return config.evolution_network.autoRecordExecutions;
 }
@@ -471,6 +477,15 @@ function writeConfigValue(
       evolution_network: {
         ...config.evolution_network,
         autoAdoptSameSkillSameScope: value === true,
+      },
+    };
+  }
+  if (key === 'a2a.simplemsgListenerEnabled') {
+    return {
+      ...config,
+      a2a: {
+        ...config.a2a,
+        simplemsgListenerEnabled: value === true,
       },
     };
   }
@@ -2217,33 +2232,28 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     replyRunner: createHostLlmChatReplyRunner(),
   }, sharedAutoReplyConfig);
 
-  const privateChatListener = createPrivateChatListener({
-    getIdentity: async () => {
-      const state = await runtimeStore.readState();
-      if (!state.identity) return null;
-      try {
-        const chatIdentity = await signer.getPrivateChatIdentity();
-        return {
-          globalMetaId: chatIdentity.globalMetaId,
-          privateKeyHex: chatIdentity.privateKeyHex,
-          chatPublicKey: chatIdentity.chatPublicKey,
-        };
-      } catch {
-        return null;
+  const daemonConfig = await createConfigStore(paths).read();
+  const simplemsgListener = createA2ASimplemsgListenerManager({
+    systemHomeDir: paths.systemHomeDir,
+    resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+    onMessage: (profile, message) => {
+      if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
+        void chatAutoReplyOrchestrator.handleInboundMessage(message);
       }
     },
-    callbacks: {
-      onMessage: (message) => { void chatAutoReplyOrchestrator.handleInboundMessage(message); },
+    onError: (error) => {
+      console.warn('[A2A simplemsg listener]', error.message);
     },
-    resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
   });
-  privateChatListener.start();
+  if (daemonConfig.a2a.simplemsgListenerEnabled) {
+    await simplemsgListener.start();
+  }
 
   let shuttingDown = false;
   const shutdown = async (exitCode: number) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    privateChatListener.stop();
+    simplemsgListener.stop();
     providerHeartbeatLoop.stop();
     await runtimeStore.clearDaemon(process.pid);
     await daemon.close();

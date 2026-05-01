@@ -141,6 +141,39 @@ test('runCli supports `metabot config set askMaster.enabled false`', async () =>
   assert.equal(configFromDisk.askMaster.enabled, false);
 });
 
+test('runCli supports `metabot config get a2a.simplemsgListenerEnabled`', async () => {
+  const homeDir = createProfileHome('metabot-cli-config-get-a2a-listener-');
+  const result = await runConfigCli(homeDir, ['config', 'get', 'a2a.simplemsgListenerEnabled']);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.deepEqual(result.payload.data, {
+    key: 'a2a.simplemsgListenerEnabled',
+    value: true,
+  });
+});
+
+test('runCli supports `metabot config set a2a.simplemsgListenerEnabled false`', async () => {
+  const homeDir = createProfileHome('metabot-cli-config-set-a2a-listener-');
+  const setResult = await runConfigCli(homeDir, ['config', 'set', 'a2a.simplemsgListenerEnabled', 'false']);
+
+  assert.equal(setResult.exitCode, 0);
+  assert.equal(setResult.payload.ok, true);
+  assert.deepEqual(setResult.payload.data, {
+    key: 'a2a.simplemsgListenerEnabled',
+    value: false,
+  });
+
+  const getResult = await runConfigCli(homeDir, ['config', 'get', 'a2a.simplemsgListenerEnabled']);
+  assert.equal(getResult.exitCode, 0);
+  assert.equal(getResult.payload.ok, true);
+  assert.equal(getResult.payload.data.value, false);
+
+  const configPath = resolveMetabotPaths(homeDir).configPath;
+  const configFromDisk = JSON.parse(readFileSync(configPath, 'utf8'));
+  assert.equal(configFromDisk.a2a.simplemsgListenerEnabled, false);
+});
+
 test('runCli supports `metabot config get askMaster.triggerMode`', async () => {
   const homeDir = createProfileHome('metabot-cli-config-get-ask-master-trigger-');
   const result = await runConfigCli(homeDir, ['config', 'get', 'askMaster.triggerMode']);

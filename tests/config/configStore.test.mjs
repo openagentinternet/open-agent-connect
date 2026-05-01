@@ -93,6 +93,9 @@ test('createConfigStore defaults to evolution_network enabled true and persists 
         allowTrustedAutoSend: false,
       },
     });
+    assert.deepEqual(defaults.a2a, {
+      simplemsgListenerEnabled: true,
+    });
 
     const updated = {
       evolution_network: {
@@ -113,7 +116,10 @@ test('createConfigStore defaults to evolution_network enabled true and persists 
           globalCooldownMs: 90_000,
           allowTrustedAutoSend: true,
         },
-      }
+      },
+      a2a: {
+        simplemsgListenerEnabled: false,
+      },
     };
 
     await store.set(updated);
@@ -153,7 +159,10 @@ test('read merges defaults when config fields are missing', async () => {
           globalCooldownMs: 1_800_000,
           allowTrustedAutoSend: false,
         },
-      }
+      },
+      a2a: {
+        simplemsgListenerEnabled: true,
+      },
     });
   });
 });
@@ -191,7 +200,10 @@ test('read ignores non-boolean config values and falls back to defaults', async 
           globalCooldownMs: 1_800_000,
           allowTrustedAutoSend: false,
         },
-      }
+      },
+      a2a: {
+        simplemsgListenerEnabled: true,
+      },
     });
   });
 });

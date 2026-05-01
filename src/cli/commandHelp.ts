@@ -304,6 +304,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     optionalFlags: [HELP_JSON_FLAG],
     examples: [
       'metabot config get askMaster.enabled',
+      'metabot config get a2a.simplemsgListenerEnabled',
       'metabot config set askMaster.triggerMode suggest',
     ],
   },
@@ -322,6 +323,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot config get askMaster.enabled',
       'metabot config get askMaster.triggerMode',
+      'metabot config get a2a.simplemsgListenerEnabled',
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
@@ -340,6 +342,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot config set askMaster.enabled false',
+      'metabot config set a2a.simplemsgListenerEnabled false',
       'metabot config set askMaster.triggerMode suggest',
     ],
     optionalFlags: [HELP_JSON_FLAG],
