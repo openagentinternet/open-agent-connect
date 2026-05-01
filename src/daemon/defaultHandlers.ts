@@ -219,6 +219,26 @@ function resolvePaymentAddress(identity: RuntimeIdentityRecord, currency: string
   return identity.mvcAddress;
 }
 
+export function resolveServiceOrderPaymentMetadata(currency: unknown): {
+  paymentChain?: 'mvc' | 'btc';
+  settlementKind?: 'native';
+} {
+  const normalized = normalizeText(currency).toUpperCase();
+  if (normalized === 'SPACE' || normalized === 'MVC') {
+    return {
+      paymentChain: 'mvc',
+      settlementKind: 'native',
+    };
+  }
+  if (normalized === 'BTC') {
+    return {
+      paymentChain: 'btc',
+      settlementKind: 'native',
+    };
+  }
+  return {};
+}
+
 function buildDaemonLocalUiUrl(
   daemon: RuntimeDaemonRecord | null | undefined,
   pathname: string,
@@ -5855,6 +5875,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             );
           }
 
+          const paymentMetadata = resolveServiceOrderPaymentMetadata(plan.payment.currency);
           const orderPayload = buildDelegationOrderPayload({
             rawRequest: request.rawRequest || request.userTask,
             taskContext: request.taskContext,
@@ -5863,8 +5884,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
             providerSkill: normalizeText(service.providerSkill) || normalizeText(service.serviceName),
             servicePinId: plan.service.servicePinId,
             paymentTxid,
+            ...paymentMetadata,
             price: plan.payment.amount,
             currency: plan.payment.currency,
+            outputType: normalizeText(service.outputType),
           });
 
           let outboundOrder;
