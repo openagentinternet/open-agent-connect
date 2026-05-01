@@ -197,7 +197,7 @@ function createProfileSimplemsgListener(input: {
 
     const localGlobalMetaId = normalizeText(input.identity.globalMetaId);
     const toGlobalMetaId = normalizeText(message.toGlobalMetaId);
-    if (toGlobalMetaId !== localGlobalMetaId) {
+    if (toGlobalMetaId && toGlobalMetaId !== localGlobalMetaId) {
       return;
     }
     if (fromGlobalMetaId === localGlobalMetaId) {

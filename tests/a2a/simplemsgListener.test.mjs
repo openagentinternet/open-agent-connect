@@ -364,7 +364,7 @@ test('simplemsg listener ignores messages addressed to another local profile', a
   assert.equal(conversation.messages.length, 0);
 });
 
-test('simplemsg listener ignores socket messages without an explicit recipient', async (t) => {
+test('simplemsg listener accepts socket messages without an explicit recipient on the subscribed identity stream', async (t) => {
   const systemHomeDir = await createSystemHome(t);
   const localKeys = createIdentityPair();
   const peerKeys = createIdentityPair();
@@ -390,7 +390,7 @@ test('simplemsg listener ignores socket messages without an explicit recipient',
     fromKeys: peerKeys,
     toGlobalMetaId: localGlobalMetaId,
     toChatPublicKey: localKeys.publicKeyHex,
-    content: 'missing recipient should not persist',
+    content: 'missing recipient should still persist',
     pinId: 'incoming-pin-no-recipient',
   });
   delete payload.toGlobalMetaId;
@@ -408,5 +408,8 @@ test('simplemsg listener ignores socket messages without an explicit recipient',
     },
   }).readConversation();
 
-  assert.equal(conversation.messages.length, 0);
+  assert.equal(conversation.messages.length, 1);
+  assert.equal(conversation.messages[0].direction, 'incoming');
+  assert.equal(conversation.messages[0].content, 'missing recipient should still persist');
+  assert.equal(conversation.messages[0].pinId, 'incoming-pin-no-recipient');
 });

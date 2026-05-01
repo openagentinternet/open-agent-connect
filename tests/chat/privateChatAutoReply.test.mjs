@@ -259,6 +259,109 @@ test('auto-reply persists inbound and outbound private chat messages to the unif
   ), true);
 });
 
+test('auto-reply persists order protocol messages without sending ordinary private-chat replies', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const localKeys = createIdentityPair();
+  const peerKeys = createIdentityPair();
+  const localGlobalMetaId = 'idq1localbot0000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peerbot00000000000000000000000000';
+  const orderTxid = 'a'.repeat(64);
+  const writes = [];
+  const runnerInputs = [];
+
+  const orchestrator = createPrivateChatAutoReplyOrchestrator({
+    stateStore: createPrivateChatStateStore(paths),
+    strategyStore: createChatStrategyStore(paths),
+    paths,
+    signer: {
+      async getIdentity() {
+        throw new Error('not used');
+      },
+      async getPrivateChatIdentity() {
+        return {
+          globalMetaId: localGlobalMetaId,
+          chatPublicKey: localKeys.publicKeyHex,
+          privateKeyHex: localKeys.privateKeyHex,
+        };
+      },
+      async writePin(input) {
+        writes.push(input);
+        return {
+          txids: ['unexpected-reply-tx'],
+          pinId: 'unexpected-reply-pin',
+          totalCost: 0,
+          network: 'mvc',
+          operation: 'create',
+          path: input.path,
+          contentType: input.contentType,
+          encoding: 'utf-8',
+          globalMetaId: localGlobalMetaId,
+          mvcAddress: 'mvc-local',
+        };
+      },
+    },
+    selfGlobalMetaId: async () => localGlobalMetaId,
+    resolvePeerChatPublicKey: async () => peerKeys.publicKeyHex,
+    replyRunner: async (input) => {
+      runnerInputs.push(input);
+      return {
+        state: 'reply',
+        content: 'ordinary reply should not be sent',
+      };
+    },
+    now: () => 1_770_000_000_000,
+  }, {
+    enabled: true,
+    acceptPolicy: 'accept_all',
+    defaultStrategyId: null,
+  });
+
+  await orchestrator.handleInboundMessage({
+    fromGlobalMetaId: peerGlobalMetaId,
+    content: `[DELIVERY:${orderTxid}] ${JSON.stringify({
+      paymentTxid: 'payment-tx-1',
+      servicePinId: 'service-pin-1',
+      result: '# Weather\n\nSunny.',
+    })}`,
+    messagePinId: 'delivery-pin-1',
+    fromChatPublicKey: peerKeys.publicKeyHex,
+    timestamp: 1_770_000_000_000,
+    rawMessage: {
+      pinId: 'delivery-pin-1',
+      txid: 'delivery-tx-1',
+    },
+  });
+
+  assert.equal(writes.length, 0);
+  assert.equal(runnerInputs.length, 0);
+
+  const legacyMessages = await createPrivateChatStateStore(paths)
+    .getRecentMessages(`pc-${localGlobalMetaId}-${peerGlobalMetaId}`, 10);
+  assert.equal(legacyMessages.length, 1);
+  assert.equal(legacyMessages[0].messagePinId, 'delivery-pin-1');
+
+  const conversation = await createA2AConversationStore({
+    paths,
+    local: {
+      globalMetaId: localGlobalMetaId,
+      chatPublicKey: localKeys.publicKeyHex,
+    },
+    peer: {
+      globalMetaId: peerGlobalMetaId,
+      chatPublicKey: peerKeys.publicKeyHex,
+    },
+  }).readConversation();
+
+  assert.equal(conversation.messages.length, 1);
+  assert.equal(conversation.messages[0].kind, 'order_protocol');
+  assert.equal(conversation.messages[0].protocolTag, 'DELIVERY');
+  assert.equal(conversation.messages[0].orderTxid, orderTxid);
+  const orderSession = conversation.sessions.find((session) => session.sessionId === `a2a-order-${orderTxid}`);
+  assert.ok(orderSession);
+  assert.equal(orderSession.state, 'completed');
+});
+
 test('auto-reply unified A2A persistence is best-effort and does not block replies', async () => {
   const { profileRoot } = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);

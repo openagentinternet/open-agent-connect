@@ -1,6 +1,7 @@
 import { sendPrivateChat } from './privateChat';
 import { loadChatPersona } from './chatPersonaLoader';
 import { persistA2AConversationMessageBestEffort } from '../a2a/conversationPersistence';
+import { classifySimplemsgContent } from '../a2a/simplemsgClassifier';
 import type { PrivateChatStateStore } from './privateChatStateStore';
 import type { ChatStrategyStore } from './chatStrategyStore';
 import type { MetabotPaths } from '../state/paths';
@@ -172,6 +173,7 @@ export function createPrivateChatAutoReplyOrchestrator(
       if (!peerGlobalMetaId) return;
 
       const conversationId = buildConversationId(selfGlobalMetaId, peerGlobalMetaId);
+      const simplemsgClassification = classifySimplemsgContent(message.content);
 
       // Step 1: Store the inbound message.
       let conversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId);
@@ -228,6 +230,10 @@ export function createPrivateChatAutoReplyOrchestrator(
           raw: message.rawMessage,
         },
       });
+
+      if (simplemsgClassification.kind === 'order_protocol') {
+        return;
+      }
 
       // Step 2: Check for closing signal from peer.
       if (hasClosingSignal(message)) {
