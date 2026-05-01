@@ -39,6 +39,7 @@ import { buildSessionTrace } from '../core/chat/sessionTrace';
 import type { SessionTraceRecord } from '../core/chat/sessionTrace';
 import { exportSessionArtifacts } from '../core/chat/transcriptExport';
 import { sendPrivateChat } from '../core/chat/privateChat';
+import type { ChainWriteRequest } from '../core/chain/writePin';
 import {
   buildPrivateConversationResponse,
   normalizeConversationAfterIndex,
@@ -149,6 +150,7 @@ const PROVIDER_RATING_SYNC_STALE_MS = 30_000;
 const DEFAULT_MASTER_HOST_MODE = 'codex';
 const DEFAULT_NETWORK_BOT_LIST_LIMIT = 20;
 const MAX_NETWORK_BOT_LIST_LIMIT = 100;
+const DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS = [1_500, 5_000, 10_000];
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -158,6 +160,41 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function isMempoolConflictError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /txn-mempool-conflict|mempool[-\s]?conflict/i.test(message);
+}
+
+function normalizeRetryDelays(value: unknown, fallback: number[]): number[] {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+  return value
+    .map((entry) => Number(entry))
+    .filter((entry) => Number.isFinite(entry) && entry >= 0)
+    .map((entry) => Math.trunc(entry));
+}
+
+async function writePinRetryingMempoolConflict(input: {
+  signer: Signer;
+  request: ChainWriteRequest;
+  retryDelaysMs: number[];
+}) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await input.signer.writePin(input.request);
+    } catch (error) {
+      const delayMs = input.retryDelaysMs[attempt];
+      if (delayMs === undefined || !isMempoolConflictError(error)) {
+        throw error;
+      }
+      if (delayMs > 0) {
+        await sleep(delayMs);
+      }
+    }
+  }
 }
 
 async function ensureDefaultPersonaFiles(paths: MetabotPaths, metabotName: string): Promise<void> {
@@ -775,6 +812,17 @@ function normalizeTimestamp(value: unknown): number | null {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return null;
+  }
+  return Math.trunc(numeric);
+}
+
+function normalizeTraceTimestamp(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  if (numeric >= 1_000_000_000 && numeric < 1_000_000_000_000) {
+    return Math.trunc(numeric * 1000);
   }
   return Math.trunc(numeric);
 }
@@ -1566,7 +1614,7 @@ function extractTraceResult(input: {
     }
     return {
       resultText: content,
-      resultObservedAt: Number.isFinite(item.timestamp) ? item.timestamp : null,
+      resultObservedAt: Number.isFinite(item.timestamp) ? normalizeTraceTimestamp(item.timestamp) : null,
       resultDeliveryPinId: deliveryPinId || null,
     };
   }
@@ -1604,7 +1652,7 @@ function extractTraceRatingRequest(input: {
     }
     return {
       ratingRequestText: content,
-      ratingRequestedAt: Number.isFinite(item.timestamp) ? item.timestamp : null,
+      ratingRequestedAt: Number.isFinite(item.timestamp) ? normalizeTraceTimestamp(item.timestamp) : null,
     };
   }
 
@@ -1648,7 +1696,7 @@ function extractTraceRatingClosure(input: {
     : null;
   let ratingComment = normalizeText(input.ratingDetail?.comment) || null;
   let ratingCreatedAt = Number.isFinite(input.ratingDetail?.createdAt)
-    ? Number(input.ratingDetail?.createdAt)
+    ? normalizeTraceTimestamp(input.ratingDetail?.createdAt)
     : null;
   let ratingMessageSent: boolean | null = null;
   let ratingMessagePinId: string | null = null;
@@ -1674,7 +1722,7 @@ function extractTraceRatingClosure(input: {
       ratingComment = content;
     }
     if (!ratingCreatedAt && type === 'rating' && Number.isFinite(item.timestamp)) {
-      ratingCreatedAt = item.timestamp;
+      ratingCreatedAt = normalizeTraceTimestamp(item.timestamp);
     }
 
     if (type === 'rating' || metadataEvent === 'service_rating_published') {
@@ -1745,10 +1793,10 @@ async function buildTraceInspectorPayload(input: {
     .sort((left, right) => left.createdAt - right.createdAt);
   const transcriptItems = sessionState.transcriptItems
     .filter((entry) => sessionIds.has(entry.sessionId))
-    .sort((left, right) => left.timestamp - right.timestamp);
+    .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
   const publicStatusSnapshots = sessionState.publicStatusSnapshots
     .filter((entry) => sessionIds.has(entry.sessionId))
-    .sort((left, right) => left.resolvedAt - right.resolvedAt);
+    .sort((left, right) => normalizeTraceTimestamp(left.resolvedAt) - normalizeTraceTimestamp(right.resolvedAt));
   const result = extractTraceResult({ transcriptItems });
   const ratingRequest = extractTraceRatingRequest({ transcriptItems });
   const ratingSnapshot = await readRatingDetailSnapshot({
@@ -2793,7 +2841,7 @@ export async function rebuildTraceArtifactsFromSessionState(input: {
   const sessionIds = new Set(sessions.map((entry) => entry.sessionId));
   const transcriptMessages = sessionState.transcriptItems
     .filter((entry) => sessionIds.has(entry.sessionId))
-    .sort((left, right) => left.timestamp - right.timestamp)
+    .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp))
     .map((entry) => ({
       id: entry.id,
       type: entry.sender === 'caller'
@@ -2807,7 +2855,7 @@ export async function rebuildTraceArtifactsFromSessionState(input: {
     }));
   const latestSnapshot = sessionState.publicStatusSnapshots
     .filter((entry) => latestSession && entry.sessionId === latestSession.sessionId)
-    .sort((left, right) => left.resolvedAt - right.resolvedAt)
+    .sort((left, right) => normalizeTraceTimestamp(left.resolvedAt) - normalizeTraceTimestamp(right.resolvedAt))
     .at(-1);
 
   const nextTrace = buildSessionTrace({
@@ -3027,6 +3075,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   callerReplyWaiter?: MetaWebServiceReplyWaiter;
   masterReplyWaiter?: MetaWebMasterReplyWaiter;
   servicePaymentExecutor?: ServicePaymentExecutor;
+  ratingFollowupRetryDelaysMs?: number[];
   a2aConversationPersister?: A2AConversationMessagePersister;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   requestMvcGasSubsidy?: (
@@ -3056,6 +3105,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const callerReplyWaiter = input.callerReplyWaiter ?? createSocketIoMetaWebReplyWaiter();
   const masterReplyWaiter = input.masterReplyWaiter ?? null;
   const servicePaymentExecutor = input.servicePaymentExecutor ?? createWalletServicePaymentExecutor({ secretStore });
+  const ratingFollowupRetryDelaysMs = normalizeRetryDelays(
+    input.ratingFollowupRetryDelaysMs,
+    DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS,
+  );
   const a2aConversationPersister = input.a2aConversationPersister ?? persistA2AConversationMessage;
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const getDaemonRecord = input.getDaemonRecord;
@@ -6466,15 +6519,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
               content: combinedMessage,
             });
 
-            const ratingMessageWrite = await signer.writePin({
-              operation: 'create',
-              path: outgoingRatingMessage.path,
-              encryption: outgoingRatingMessage.encryption,
-              version: outgoingRatingMessage.version,
-              contentType: outgoingRatingMessage.contentType,
-              payload: outgoingRatingMessage.payload,
-              encoding: 'utf-8',
-              network,
+            const ratingMessageWrite = await writePinRetryingMempoolConflict({
+              signer,
+              retryDelaysMs: ratingFollowupRetryDelaysMs,
+              request: {
+                operation: 'create',
+                path: outgoingRatingMessage.path,
+                encryption: outgoingRatingMessage.encryption,
+                version: outgoingRatingMessage.version,
+                contentType: outgoingRatingMessage.contentType,
+                payload: outgoingRatingMessage.payload,
+                encoding: 'utf-8',
+                network,
+              },
             });
             ratingMessageSent = true;
             ratingMessagePinId = ratingMessageWrite.pinId ?? null;
@@ -7252,13 +7309,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
             const transcriptItems = state.transcriptItems.filter(
               (item) => item.sessionId === normalizedSessionId,
-            ).sort((left, right) => left.timestamp - right.timestamp);
+            ).sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
             const taskRuns = state.taskRuns.filter(
               (run) => run.sessionId === normalizedSessionId,
             ).sort((left, right) => left.createdAt - right.createdAt);
             const publicStatusSnapshots = state.publicStatusSnapshots.filter(
               (snap) => snap.sessionId === normalizedSessionId,
-            ).sort((left, right) => left.resolvedAt - right.resolvedAt);
+            ).sort((left, right) => normalizeTraceTimestamp(left.resolvedAt) - normalizeTraceTimestamp(right.resolvedAt));
             const isCallerLocal = session.role === 'caller';
             const peerGlobalMetaId = isCallerLocal
               ? session.providerGlobalMetaId

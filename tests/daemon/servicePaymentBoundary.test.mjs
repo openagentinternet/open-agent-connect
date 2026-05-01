@@ -7,6 +7,8 @@ import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mj
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
 const { receivePrivateChat } = require('../../dist/core/chat/privateChat.js');
+const { buildSessionTrace } = require('../../dist/core/chat/sessionTrace.js');
+const { createSessionStateStore } = require('../../dist/core/a2a/sessionStateStore.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 
 function createIdentityPair() {
@@ -121,6 +123,7 @@ async function createServiceCallHarness(t, options = {}) {
       },
     },
     fetchPeerChatPublicKey: options.fetchPeerChatPublicKey ?? (async () => providerPair.publicKeyHex),
+    ratingFollowupRetryDelaysMs: options.ratingFollowupRetryDelaysMs,
     callerReplyWaiter: {
       async awaitServiceReply() {
         return { state: 'timeout' };
@@ -143,13 +146,112 @@ async function createServiceCallHarness(t, options = {}) {
   });
 
   return {
+    homeDir,
     callerPair,
     providerPair,
+    identity,
     runtimeStateStore,
     handlers,
     writes,
     events,
   };
+}
+
+async function seedBuyerTraceForRating(harness) {
+  const state = await harness.runtimeStateStore.readState();
+  const trace = buildSessionTrace({
+    traceId: 'trace-rating-retry',
+    channel: 'a2a',
+    exportRoot: harness.runtimeStateStore.paths.exportsRoot,
+    createdAt: 1_775_000_001_000,
+    session: {
+      id: 'session-trace-rating-retry',
+      title: 'Weather Oracle Call',
+      type: 'a2a',
+      metabotId: 1,
+      peerGlobalMetaId: 'idq1provider',
+      peerName: 'Weather Oracle',
+      externalConversationId: 'a2a-session:idq1provider:trace-rating-retry',
+    },
+    order: {
+      id: 'order-trace-rating-retry',
+      role: 'buyer',
+      serviceId: 'chain-service-pin-1',
+      serviceName: 'Weather Oracle',
+      orderPinId: 'order-pin-1',
+      orderTxid: 'order-tx-1',
+      orderTxids: ['order-tx-1'],
+      paymentTxid: 'payment-tx-1',
+      paymentCurrency: 'SPACE',
+      paymentAmount: '0.00001',
+    },
+    a2a: {
+      sessionId: 'session-rating-retry-1',
+      taskRunId: 'run-rating-retry-1',
+      role: 'caller',
+      publicStatus: 'completed',
+      latestEvent: 'provider_completed',
+      taskRunState: 'completed',
+      callerGlobalMetaId: 'idq1caller',
+      providerGlobalMetaId: 'idq1provider',
+      providerName: 'Weather Oracle',
+      servicePinId: 'chain-service-pin-1',
+    },
+  });
+
+  await harness.runtimeStateStore.writeState({
+    ...state,
+    traces: [trace],
+  });
+
+  const sessionStateStore = createSessionStateStore(harness.homeDir);
+  await sessionStateStore.writeState({
+    version: 1,
+    sessions: [
+      {
+        sessionId: 'session-rating-retry-1',
+        traceId: 'trace-rating-retry',
+        role: 'caller',
+        state: 'completed',
+        createdAt: 1_775_000_001_000,
+        updatedAt: 1_775_000_002_000,
+        callerGlobalMetaId: 'idq1caller',
+        providerGlobalMetaId: 'idq1provider',
+        servicePinId: 'chain-service-pin-1',
+        currentTaskRunId: 'run-rating-retry-1',
+        latestTaskRunState: 'completed',
+      },
+    ],
+    taskRuns: [
+      {
+        runId: 'run-rating-retry-1',
+        sessionId: 'session-rating-retry-1',
+        state: 'completed',
+        input: 'weather',
+        output: 'sunny',
+        error: null,
+        createdAt: 1_775_000_001_000,
+        updatedAt: 1_775_000_002_000,
+      },
+    ],
+    transcriptItems: [],
+    publicStatusSnapshots: [
+      {
+        sessionId: 'session-rating-retry-1',
+        taskRunId: 'run-rating-retry-1',
+        status: 'completed',
+        mapped: true,
+        rawEvent: 'provider_completed',
+        resolvedAt: 1_775_000_002_000,
+      },
+    ],
+    cursors: {
+      caller: null,
+      provider: null,
+    },
+  });
+
+  return sessionStateStore;
 }
 
 function decryptSimplemsgOrder(write, harness) {
@@ -207,6 +309,99 @@ test('free simplemsg service orders use an order reference instead of a payment 
   assert.ok(trace, 'expected caller trace to be persisted');
   assert.equal(trace.order.paymentTxid, null);
   assert.match(trace.order.orderReference, /^free-order-/);
+});
+
+test('service rating retries provider follow-up simplemsg after a mempool conflict', async (t) => {
+  let simplemsgAttempts = 0;
+  const harness = await createServiceCallHarness(t, {
+    ratingFollowupRetryDelaysMs: [0],
+    writePin(input, { writes, identity }) {
+      if (input.path === '/protocols/simplemsg') {
+        simplemsgAttempts += 1;
+        if (simplemsgAttempts === 1) {
+          throw new Error('[-26]258: txn-mempool-conflict');
+        }
+      }
+      return {
+        txids: [`${input.path}-tx-${writes.length}`],
+        pinId: `${input.path}-pin-${writes.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      };
+    },
+  });
+  const sessionStateStore = await seedBuyerTraceForRating(harness);
+
+  const result = await harness.handlers.services.rate({
+    traceId: 'trace-rating-retry',
+    rate: 5,
+    comment: 'Great weather report.',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(simplemsgAttempts, 2);
+  assert.equal(result.data.ratingMessageSent, true);
+  assert.equal(result.data.ratingMessageError, null);
+  assert.match(result.data.ratingMessagePinId, /\/protocols\/simplemsg-pin-/);
+
+  const sessionState = await sessionStateStore.readState();
+  const followup = sessionState.transcriptItems.find(
+    (item) => item.metadata?.event === 'service_rating_message_sent',
+  );
+  assert.ok(followup);
+  assert.equal(followup.sender, 'caller');
+  assert.match(followup.content, /Great weather report/);
+});
+
+test('service rating does not retry provider follow-up simplemsg for non-conflict tx rejection', async (t) => {
+  let simplemsgAttempts = 0;
+  const harness = await createServiceCallHarness(t, {
+    ratingFollowupRetryDelaysMs: [0, 0],
+    writePin(input, { writes, identity }) {
+      if (input.path === '/protocols/simplemsg') {
+        simplemsgAttempts += 1;
+        throw new Error('[-26] mandatory-script-verify-flag-failed');
+      }
+      return {
+        txids: [`${input.path}-tx-${writes.length}`],
+        pinId: `${input.path}-pin-${writes.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      };
+    },
+  });
+  const sessionStateStore = await seedBuyerTraceForRating(harness);
+
+  const result = await harness.handlers.services.rate({
+    traceId: 'trace-rating-retry',
+    rate: 5,
+    comment: 'Great weather report.',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(simplemsgAttempts, 1);
+  assert.equal(result.data.ratingMessageSent, false);
+  assert.equal(result.data.ratingMessagePinId, null);
+  assert.match(result.data.ratingMessageError, /mandatory-script-verify-flag-failed/);
+
+  const sessionState = await sessionStateStore.readState();
+  const failedFollowup = sessionState.transcriptItems.find(
+    (item) => item.metadata?.event === 'service_rating_message_failed',
+  );
+  assert.ok(failedFollowup);
+  assert.match(failedFollowup.metadata.ratingMessageError, /mandatory-script-verify-flag-failed/);
 });
 
 test('paid simplemsg service payment is not executed until local dispatch prerequisites pass', async (t) => {

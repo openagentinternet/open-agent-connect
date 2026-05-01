@@ -183,7 +183,11 @@ export function buildSessionDetailViewModel(
   const localMetabotGlobalMetaId = normalizeText(payload.localMetabotGlobalMetaId);
   const peerGlobalMetaId = normalizeText(payload.peerGlobalMetaId);
 
-  const rawItems = coerceArray(payload.transcriptItems);
+  const topLevelItems = coerceArray(payload.transcriptItems);
+  const inspector = coerceObject(payload.inspector);
+  const rawItems = topLevelItems.length
+    ? topLevelItems
+    : coerceArray(inspector?.transcriptItems);
   const messages: TraceSessionMessage[] = rawItems
     .map((item) => {
       const id = normalizeText(item.id);

@@ -9,10 +9,12 @@ const require = createRequire(import.meta.url);
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { persistA2AConversationMessage } = require('../../dist/core/a2a/conversationPersistence.js');
 const { createSessionStateStore } = require('../../dist/core/a2a/sessionStateStore.js');
+const { buildSessionTrace } = require('../../dist/core/chat/sessionTrace.js');
 const {
   getUnifiedA2ATraceSessionForProfile,
   listUnifiedA2ATraceSessionsForProfile,
 } = require('../../dist/core/a2a/traceProjection.js');
+const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const {
   setActiveMetabotHome,
   upsertIdentityProfile,
@@ -373,6 +375,157 @@ test('default trace handlers still return legacy-only session-state records when
   assert.equal(detailResult.data.sessionId, 'legacy-session-1');
   assert.equal(detailResult.data.peerGlobalMetaId, PEER_GLOBAL_META_ID);
   assert.equal(detailResult.data.inspector.transcriptItems[0].content, 'legacy trace hello');
+});
+
+test('default trace handlers sort legacy transcript items with mixed seconds and milliseconds timestamps', async () => {
+  const { systemHomeDir, homeDir } = await createProfileFixture();
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+  const trace = buildSessionTrace({
+    traceId: 'legacy-trace-mixed-timestamps',
+    channel: 'a2a',
+    exportRoot: runtimeStateStore.paths.exportsRoot,
+    createdAt: 1_777_658_751_699,
+    session: {
+      id: 'session-legacy-mixed-timestamps',
+      title: 'Mixed Timestamp Trace',
+      type: 'a2a',
+      metabotId: 1,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+      peerName: 'Remote Bot',
+      externalConversationId: null,
+    },
+    order: null,
+    a2a: {
+      sessionId: 'legacy-session-mixed-timestamps',
+      taskRunId: 'legacy-run-mixed-timestamps',
+      role: 'caller',
+      publicStatus: 'completed',
+      latestEvent: 'provider_completed',
+      taskRunState: 'completed',
+      callerGlobalMetaId: LOCAL_GLOBAL_META_ID,
+      providerGlobalMetaId: PEER_GLOBAL_META_ID,
+      providerName: 'Remote Bot',
+      servicePinId: 'legacy-service-pin',
+    },
+  });
+  await runtimeStateStore.writeState({
+    identity: null,
+    services: [],
+    traces: [trace],
+  });
+
+  const store = createSessionStateStore(homeDir);
+  await store.writeState({
+    version: 1,
+    sessions: [
+      {
+        sessionId: 'legacy-session-mixed-timestamps',
+        traceId: 'legacy-trace-mixed-timestamps',
+        role: 'caller',
+        state: 'completed',
+        createdAt: 1_777_658_751_699,
+        updatedAt: 1_777_658_848_557,
+        callerGlobalMetaId: LOCAL_GLOBAL_META_ID,
+        providerGlobalMetaId: PEER_GLOBAL_META_ID,
+        servicePinId: 'legacy-service-pin',
+        currentTaskRunId: 'legacy-run-mixed-timestamps',
+        latestTaskRunState: 'completed',
+      },
+    ],
+    taskRuns: [],
+    transcriptItems: [
+      {
+        id: 'provider-delivery-seconds',
+        sessionId: 'legacy-session-mixed-timestamps',
+        taskRunId: 'legacy-run-mixed-timestamps',
+        timestamp: 1_777_658_847,
+        type: 'assistant',
+        sender: 'provider',
+        content: 'legacy weather result',
+        metadata: {
+          deliveryPinId: 'delivery-pin-seconds',
+          publicStatus: 'completed',
+        },
+      },
+      {
+        id: 'provider-needs-rating-seconds',
+        sessionId: 'legacy-session-mixed-timestamps',
+        taskRunId: 'legacy-run-mixed-timestamps',
+        timestamp: 1_777_658_848,
+        type: 'rating_request',
+        sender: 'provider',
+        content: 'Please rate this service.',
+        metadata: { needsRating: true },
+      },
+      {
+        id: 'caller-rating-seconds',
+        sessionId: 'legacy-session-mixed-timestamps',
+        taskRunId: 'legacy-run-mixed-timestamps',
+        timestamp: 1_777_658_849,
+        type: 'rating',
+        sender: 'caller',
+        content: 'Great service.',
+        metadata: {
+          ratingPinId: 'rating-pin-seconds',
+          rate: '5',
+        },
+      },
+      {
+        id: 'caller-request-millis',
+        sessionId: 'legacy-session-mixed-timestamps',
+        taskRunId: 'legacy-run-mixed-timestamps',
+        timestamp: 1_777_658_751_699,
+        type: 'user_task',
+        sender: 'caller',
+        content: 'query weather',
+        metadata: null,
+      },
+    ],
+    cursors: {
+      caller: null,
+      provider: null,
+    },
+    publicStatusSnapshots: [
+      {
+        sessionId: 'legacy-session-mixed-timestamps',
+        taskRunId: 'legacy-run-mixed-timestamps',
+        status: 'completed',
+        mapped: true,
+        rawEvent: 'provider_completed',
+        resolvedAt: 1_777_658_848,
+      },
+      {
+        sessionId: 'legacy-session-mixed-timestamps',
+        taskRunId: 'legacy-run-mixed-timestamps',
+        status: 'requesting_remote',
+        mapped: true,
+        rawEvent: 'request_sent',
+        resolvedAt: 1_777_658_751_699,
+      },
+    ],
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
+  });
+
+  const detailResult = await handlers.trace.getSession({ sessionId: 'legacy-session-mixed-timestamps' });
+
+  assert.equal(detailResult.ok, true);
+  assert.deepEqual(detailResult.data.inspector.transcriptItems.map((item) => item.id), [
+    'caller-request-millis',
+    'provider-delivery-seconds',
+    'provider-needs-rating-seconds',
+    'caller-rating-seconds',
+  ]);
+  assert.deepEqual(detailResult.data.inspector.publicStatusSnapshots.map((item) => item.rawEvent), [
+    'request_sent',
+    'provider_completed',
+  ]);
+  assert.equal(detailResult.data.resultObservedAt, 1_777_658_847_000);
+  assert.equal(detailResult.data.ratingRequestedAt, 1_777_658_848_000);
+  assert.equal(detailResult.data.ratingCreatedAt, 1_777_658_849_000);
 });
 
 test('caller-side projection hides provider-side service-order sessions for this phase', async () => {

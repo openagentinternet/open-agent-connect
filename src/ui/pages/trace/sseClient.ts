@@ -78,7 +78,9 @@ function buildSessionDetailViewModel(payload) {
   if (!session) return null;
   var sessionId = normalizeText(session.sessionId);
   var role = normalizeText(session.role) || 'caller';
-  var rawItems = coerceArray(payload.transcriptItems);
+  var topLevelItems = coerceArray(payload.transcriptItems);
+  var inspector = coerceObject(payload.inspector);
+  var rawItems = topLevelItems.length ? topLevelItems : coerceArray(inspector && inspector.transcriptItems);
   var messages = rawItems.map(function(item) {
     var id = normalizeText(item.id);
     if (!id) return null;
@@ -298,6 +300,29 @@ function renderStats() {
   if (el4) el4.textContent = stats.lastUpdatedAt ? fmtDate(stats.lastUpdatedAt) : '—';
 }
 
+function getInitialTraceSelection() {
+  let params;
+  try {
+    params = new URLSearchParams((typeof window !== 'undefined' && window.location && window.location.search) || '');
+  } catch {
+    return { sessionId: '', traceId: '' };
+  }
+  return {
+    sessionId: normalizeText(params.get('sessionId')),
+    traceId: normalizeText(params.get('traceId')),
+  };
+}
+
+function resolveInitialSessionId() {
+  const selection = getInitialTraceSelection();
+  if (selection.sessionId) return selection.sessionId;
+  if (!selection.traceId) return '';
+  const matched = sessions.find(session => (
+    session.traceId === selection.traceId || session.sessionId === selection.traceId
+  ));
+  return matched ? matched.sessionId : '';
+}
+
 function renderSessionList() {
   const list = $('[data-session-list]');
   if (!list) return;
@@ -488,6 +513,12 @@ function startRefresh() {
 
 async function init() {
   await loadSessions();
+  const initialSessionId = resolveInitialSessionId();
+  if (initialSessionId) {
+    await selectSession(initialSessionId);
+  } else {
+    await renderSessionDetail();
+  }
   startRefresh();
 }
 
