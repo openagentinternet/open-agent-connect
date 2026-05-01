@@ -37,6 +37,10 @@ exports.runServicesCommand = runServicesCommand;
 const commandResult_1 = require("../../core/contracts/commandResult");
 const helpers_1 = require("./helpers");
 async function runServicesCommand(args, context) {
+    const shouldPollTrace = Boolean(context.stdout
+        && typeof context.stdout === 'object'
+        && 'isTTY' in context.stdout
+        && context.stdout.isTTY);
     const subcommand = args[0];
     if (subcommand === 'publish') {
         const payloadFile = (0, helpers_1.readFlagValue)(args, '--payload-file');
@@ -71,7 +75,7 @@ async function runServicesCommand(args, context) {
             typeof result.data === 'object' &&
             'traceId' in result.data &&
             result.localUiUrl &&
-            process.stdout.isTTY) {
+            shouldPollTrace) {
             const { pollTraceUntilComplete } = await Promise.resolve().then(() => __importStar(require('./pollTraceHelper')));
             const traceGet = context.dependencies.trace?.get;
             if (traceGet) {
@@ -85,12 +89,28 @@ async function runServicesCommand(args, context) {
                     stderr: context.stderr,
                 });
                 if (poll.completed && poll.trace) {
-                    const { commandSuccess } = await Promise.resolve().then(() => __importStar(require('../../core/contracts/commandResult')));
                     const sessions = Array.isArray(poll.trace.sessions) ? poll.trace.sessions : [];
                     const firstSession = sessions[0];
-                    return commandSuccess({
+                    const sessionFromTrace = (typeof poll.trace.session === 'object' && poll.trace.session !== null
+                        ? poll.trace.session
+                        : firstSession);
+                    const responseTextFromTrace = typeof poll.trace.resultText === 'string'
+                        ? poll.trace.resultText
+                        : firstSession?.responseText;
+                    const deliveryPinIdFromTrace = typeof poll.trace.resultDeliveryPinId === 'string'
+                        ? poll.trace.resultDeliveryPinId
+                        : undefined;
+                    const ratingRequestTextFromTrace = typeof poll.trace.ratingRequestText === 'string'
+                        ? poll.trace.ratingRequestText
+                        : poll.trace.ratingRequestText === null
+                            ? null
+                            : undefined;
+                    return (0, commandResult_1.commandSuccess)({
                         ...result.data,
-                        ...(firstSession?.responseText ? { responseText: firstSession.responseText } : {}),
+                        ...(sessionFromTrace ? { session: sessionFromTrace } : {}),
+                        ...(responseTextFromTrace ? { responseText: responseTextFromTrace } : {}),
+                        ...(deliveryPinIdFromTrace ? { deliveryPinId: deliveryPinIdFromTrace } : {}),
+                        ...(ratingRequestTextFromTrace !== undefined ? { ratingRequestText: ratingRequestTextFromTrace } : {}),
                         localUiUrl: result.localUiUrl,
                     });
                 }

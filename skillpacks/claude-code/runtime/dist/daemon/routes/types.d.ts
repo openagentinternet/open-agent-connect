@@ -52,6 +52,7 @@ export interface MetabotDaemonHttpHandlers {
     };
     provider?: {
         getSummary?: () => Awaitable<MetabotCommandResult<unknown>>;
+        getInitiatedRefunds?: () => Awaitable<MetabotCommandResult<unknown>>;
         setPresence?: (input: {
             enabled: boolean;
         }) => Awaitable<MetabotCommandResult<unknown>>;

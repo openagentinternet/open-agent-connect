@@ -17,6 +17,18 @@ function extractPublicStatus(result) {
                 }
             }
         }
+        if (typeof data === 'object' && data !== null && 'session' in data) {
+            const session = data.session;
+            if (typeof session === 'object' && session !== null && 'publicStatus' in session) {
+                return String(session.publicStatus);
+            }
+        }
+        if (typeof data === 'object' && data !== null && 'a2a' in data) {
+            const a2a = data.a2a;
+            if (typeof a2a === 'object' && a2a !== null && 'publicStatus' in a2a) {
+                return String(a2a.publicStatus);
+            }
+        }
     }
     return null;
 }
@@ -43,21 +55,21 @@ async function pollTraceUntilComplete(input) {
                     input.stderr.write(`Status: ${status}\n`);
                 }
             }
-            if (status === 'completed') {
+            if (status === 'completed' || status === 'timeout' || status === 'manual_action_required' || status === 'failed') {
                 const data = result.data;
-                input.stderr.write(`Response received. View full trace: ${input.localUiUrl}\n`);
-                return { completed: true, trace: data };
+                input.stderr.write(`Trace reached terminal status (${status}). View full trace: ${input.localUiUrl}\n`);
+                return { completed: true, terminalStatus: status, trace: data };
             }
         }
         catch {
             consecutiveErrors++;
             if (consecutiveErrors > 10) {
                 input.stderr.write(`Unable to reach daemon. View trace in browser: ${input.localUiUrl}\n`);
-                return { completed: false };
+                return { completed: false, terminalStatus: null };
             }
         }
         await sleep(intervalMs);
     }
     input.stderr.write(`Provider has not responded yet. Continue tracking: ${input.localUiUrl}\n`);
-    return { completed: false };
+    return { completed: false, terminalStatus: null };
 }

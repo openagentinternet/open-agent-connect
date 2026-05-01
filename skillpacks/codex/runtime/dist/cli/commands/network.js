@@ -17,6 +17,10 @@ function parseLimitFlag(args) {
     return { limit: parsed };
 }
 async function runNetworkCommand(args, context) {
+    const shouldRenderTable = Boolean(context.stdout
+        && typeof context.stdout === 'object'
+        && 'isTTY' in context.stdout
+        && context.stdout.isTTY);
     if (args[0] === 'services') {
         const handler = context.dependencies.network?.listServices;
         if (!handler) {
@@ -30,7 +34,7 @@ async function runNetworkCommand(args, context) {
         const result = await handler({
             online: (0, helpers_1.hasFlag)(args, '--online') ? true : undefined,
         });
-        if (result.ok && result.state === 'success') {
+        if (shouldRenderTable && result.ok && result.state === 'success') {
             const data = result.data;
             const allServices = Array.isArray(data?.services) ? data.services : [];
             const services = allServices.slice(0, limit);
@@ -69,7 +73,7 @@ async function runNetworkCommand(args, context) {
             online: (0, helpers_1.hasFlag)(args, '--online') ? true : undefined,
             limit: parsedLimit.limit,
         });
-        if (result.ok && result.state === 'success') {
+        if (shouldRenderTable && result.ok && result.state === 'success') {
             const data = result.data;
             const bots = Array.isArray(data?.bots) ? data.bots : [];
             const truncate = (s, max) => s.length > max ? s.slice(0, max) + '...' : s;

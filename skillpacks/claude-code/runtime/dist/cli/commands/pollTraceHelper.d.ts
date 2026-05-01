@@ -9,6 +9,7 @@ export interface PollTraceInput {
 }
 export interface PollTraceResult {
     completed: boolean;
+    terminalStatus?: string | null;
     trace?: Record<string, unknown>;
 }
 export declare function pollTraceUntilComplete(input: PollTraceInput): Promise<PollTraceResult>;
