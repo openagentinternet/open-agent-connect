@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createECDH } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -8,9 +9,11 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createPrivateChatStateStore } = require('../../dist/core/chat/privateChatStateStore.js');
+const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { createChatStrategyStore } = require('../../dist/core/chat/chatStrategyStore.js');
 const { loadChatPersona } = require('../../dist/core/chat/chatPersonaLoader.js');
 const { createDefaultChatReplyRunner } = require('../../dist/core/chat/defaultChatReplyRunner.js');
+const { createPrivateChatAutoReplyOrchestrator } = require('../../dist/core/chat/privateChatAutoReply.js');
 
 async function createTempProfileHome() {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-autoreply-test-'));
@@ -21,6 +24,15 @@ async function createTempProfileHome() {
   await fs.mkdir(managerRoot, { recursive: true });
   await fs.mkdir(skillsRoot, { recursive: true });
   return { base, profileRoot };
+}
+
+function createIdentityPair() {
+  const ecdh = createECDH('prime256v1');
+  ecdh.generateKeys();
+  return {
+    privateKeyHex: ecdh.getPrivateKey('hex'),
+    publicKeyHex: ecdh.getPublicKey('hex', 'uncompressed'),
+  };
 }
 
 test('chatPersonaLoader returns empty strings when files do not exist', async () => {
@@ -137,4 +149,291 @@ test('defaultChatReplyRunner returns end_conversation near max turns', () => {
   });
 
   assert.equal(result.state, 'end_conversation');
+});
+
+test('auto-reply persists inbound and outbound private chat messages to the unified A2A store', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const localKeys = createIdentityPair();
+  const peerKeys = createIdentityPair();
+  const localGlobalMetaId = 'idq1localbot0000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peerbot00000000000000000000000000';
+  const writes = [];
+  const runnerInputs = [];
+
+  const orchestrator = createPrivateChatAutoReplyOrchestrator({
+    stateStore: createPrivateChatStateStore(paths),
+    strategyStore: createChatStrategyStore(paths),
+    paths,
+    signer: {
+      async getIdentity() {
+        throw new Error('not used');
+      },
+      async getPrivateChatIdentity() {
+        return {
+          globalMetaId: localGlobalMetaId,
+          chatPublicKey: localKeys.publicKeyHex,
+          privateKeyHex: localKeys.privateKeyHex,
+        };
+      },
+      async writePin(input) {
+        writes.push(input);
+        return {
+          txids: ['reply-tx-1'],
+          pinId: 'reply-pin-1',
+          totalCost: 0,
+          network: 'mvc',
+          operation: 'create',
+          path: input.path,
+          contentType: input.contentType,
+          encoding: 'utf-8',
+          globalMetaId: localGlobalMetaId,
+          mvcAddress: 'mvc-local',
+        };
+      },
+    },
+    selfGlobalMetaId: async () => localGlobalMetaId,
+    resolvePeerChatPublicKey: async () => peerKeys.publicKeyHex,
+    replyRunner: async (input) => {
+      runnerInputs.push(input);
+      return {
+        state: 'reply',
+        content: 'reply from LLM',
+      };
+    },
+    now: () => 1_770_000_000_000,
+  }, {
+    enabled: true,
+    acceptPolicy: 'accept_all',
+    defaultStrategyId: null,
+  });
+
+  await orchestrator.handleInboundMessage({
+    fromGlobalMetaId: peerGlobalMetaId,
+    content: 'hello local bot',
+    messagePinId: 'incoming-pin-1',
+    fromChatPublicKey: peerKeys.publicKeyHex,
+    timestamp: 1_770_000_000_000,
+    rawMessage: {
+      pinId: 'incoming-pin-1',
+      txid: 'incoming-tx-1',
+    },
+  });
+
+  assert.equal(writes.length, 1);
+  assert.equal(runnerInputs.length, 1);
+  assert.equal(runnerInputs[0].inboundMessage.content, 'hello local bot');
+
+  const legacyMessages = await createPrivateChatStateStore(paths)
+    .getRecentMessages(`pc-${localGlobalMetaId}-${peerGlobalMetaId}`, 10);
+  assert.equal(legacyMessages.length, 2);
+  assert.equal(legacyMessages[0].content, 'hello local bot');
+  assert.equal(legacyMessages[1].content, 'reply from LLM');
+
+  const conversation = await createA2AConversationStore({
+    paths,
+    local: {
+      globalMetaId: localGlobalMetaId,
+      chatPublicKey: localKeys.publicKeyHex,
+    },
+    peer: {
+      globalMetaId: peerGlobalMetaId,
+      chatPublicKey: peerKeys.publicKeyHex,
+    },
+  }).readConversation();
+
+  assert.equal(conversation.messages.length, 2);
+  const incoming = conversation.messages.find((message) => message.direction === 'incoming');
+  const outgoing = conversation.messages.find((message) => message.direction === 'outgoing');
+  assert.ok(incoming, 'expected inbound message in unified A2A store');
+  assert.ok(outgoing, 'expected outbound reply in unified A2A store');
+  assert.equal(incoming.kind, 'private_chat');
+  assert.equal(incoming.content, 'hello local bot');
+  assert.equal(incoming.pinId, 'incoming-pin-1');
+  assert.equal(outgoing.kind, 'private_chat');
+  assert.equal(outgoing.content, 'reply from LLM');
+  assert.equal(outgoing.pinId, 'reply-pin-1');
+  assert.deepEqual(outgoing.txids, ['reply-tx-1']);
+  assert.equal(conversation.sessions.some(
+    (session) => session.sessionId === incoming.sessionId && session.type === 'peer',
+  ), true);
+});
+
+test('auto-reply unified A2A persistence is best-effort and does not block replies', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const blockedPath = path.join(paths.runtimeRoot, 'a2a-blocker');
+  await fs.mkdir(paths.runtimeRoot, { recursive: true });
+  await fs.writeFile(blockedPath, 'not a directory', 'utf8');
+  const brokenA2APaths = {
+    ...paths,
+    a2aRoot: path.join(blockedPath, 'A2A'),
+  };
+  const localKeys = createIdentityPair();
+  const peerKeys = createIdentityPair();
+  const localGlobalMetaId = 'idq1localbot0000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peerbot00000000000000000000000000';
+  const writes = [];
+  const runnerInputs = [];
+
+  const orchestrator = createPrivateChatAutoReplyOrchestrator({
+    stateStore: createPrivateChatStateStore(paths),
+    strategyStore: createChatStrategyStore(paths),
+    paths: brokenA2APaths,
+    signer: {
+      async getIdentity() {
+        throw new Error('not used');
+      },
+      async getPrivateChatIdentity() {
+        return {
+          globalMetaId: localGlobalMetaId,
+          chatPublicKey: localKeys.publicKeyHex,
+          privateKeyHex: localKeys.privateKeyHex,
+        };
+      },
+      async writePin(input) {
+        writes.push(input);
+        return {
+          txids: ['reply-tx-1'],
+          pinId: 'reply-pin-1',
+          totalCost: 0,
+          network: 'mvc',
+          operation: 'create',
+          path: input.path,
+          contentType: input.contentType,
+          encoding: 'utf-8',
+          globalMetaId: localGlobalMetaId,
+          mvcAddress: 'mvc-local',
+        };
+      },
+    },
+    selfGlobalMetaId: async () => localGlobalMetaId,
+    resolvePeerChatPublicKey: async () => peerKeys.publicKeyHex,
+    replyRunner: async (input) => {
+      runnerInputs.push(input);
+      return {
+        state: 'reply',
+        content: 'reply survived local store failure',
+      };
+    },
+    now: () => 1_770_000_000_000,
+  }, {
+    enabled: true,
+    acceptPolicy: 'accept_all',
+    defaultStrategyId: null,
+  });
+
+  await orchestrator.handleInboundMessage({
+    fromGlobalMetaId: peerGlobalMetaId,
+    content: 'hello despite broken A2A store',
+    messagePinId: 'incoming-pin-1',
+    fromChatPublicKey: peerKeys.publicKeyHex,
+    timestamp: 1_770_000_000_000,
+    rawMessage: {
+      pinId: 'incoming-pin-1',
+      content: 'encrypted-simplemsg-ciphertext',
+    },
+  });
+
+  assert.equal(runnerInputs.length, 1);
+  assert.equal(writes.length, 1);
+
+  const legacyMessages = await createPrivateChatStateStore(paths)
+    .getRecentMessages(`pc-${localGlobalMetaId}-${peerGlobalMetaId}`, 10);
+  assert.equal(legacyMessages.length, 2);
+  assert.equal(legacyMessages[0].content, 'hello despite broken A2A store');
+  assert.equal(legacyMessages[1].content, 'reply survived local store failure');
+});
+
+test('auto-reply unified A2A persistence removes encrypted socket payload fields from raw metadata', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const localKeys = createIdentityPair();
+  const peerKeys = createIdentityPair();
+  const localGlobalMetaId = 'idq1localbot0000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peerbot00000000000000000000000000';
+
+  const orchestrator = createPrivateChatAutoReplyOrchestrator({
+    stateStore: createPrivateChatStateStore(paths),
+    strategyStore: createChatStrategyStore(paths),
+    paths,
+    signer: {
+      async getIdentity() {
+        throw new Error('not used');
+      },
+      async getPrivateChatIdentity() {
+        return {
+          globalMetaId: localGlobalMetaId,
+          chatPublicKey: localKeys.publicKeyHex,
+          privateKeyHex: localKeys.privateKeyHex,
+        };
+      },
+      async writePin(input) {
+        return {
+          txids: ['reply-tx-1'],
+          pinId: 'reply-pin-1',
+          totalCost: 0,
+          network: 'mvc',
+          operation: 'create',
+          path: input.path,
+          contentType: input.contentType,
+          encoding: 'utf-8',
+          globalMetaId: localGlobalMetaId,
+          mvcAddress: 'mvc-local',
+        };
+      },
+    },
+    selfGlobalMetaId: async () => localGlobalMetaId,
+    resolvePeerChatPublicKey: async () => peerKeys.publicKeyHex,
+    replyRunner: async () => ({
+      state: 'reply',
+      content: 'reply from LLM',
+    }),
+    now: () => 1_770_000_000_000,
+  }, {
+    enabled: true,
+    acceptPolicy: 'accept_all',
+    defaultStrategyId: null,
+  });
+
+  await orchestrator.handleInboundMessage({
+    fromGlobalMetaId: peerGlobalMetaId,
+    content: 'decrypted hello',
+    messagePinId: 'incoming-pin-1',
+    fromChatPublicKey: peerKeys.publicKeyHex,
+    timestamp: 1_770_000_000_000,
+    rawMessage: {
+      pinId: 'incoming-pin-1',
+      txid: 'incoming-tx-1',
+      content: 'encrypted-simplemsg-ciphertext',
+      rawData: '{"content":"encrypted-simplemsg-ciphertext"}',
+      nested: {
+        payload: 'nested encrypted payload',
+        blockHeight: 123,
+      },
+    },
+  });
+
+  const conversation = await createA2AConversationStore({
+    paths,
+    local: {
+      globalMetaId: localGlobalMetaId,
+      chatPublicKey: localKeys.publicKeyHex,
+    },
+    peer: {
+      globalMetaId: peerGlobalMetaId,
+      chatPublicKey: peerKeys.publicKeyHex,
+    },
+  }).readConversation();
+
+  const incoming = conversation.messages.find((message) => message.direction === 'incoming');
+  assert.ok(incoming, 'expected inbound message in unified A2A store');
+  assert.equal(incoming.content, 'decrypted hello');
+  assert.equal(incoming.raw.pinId, 'incoming-pin-1');
+  assert.equal(incoming.raw.txid, 'incoming-tx-1');
+  assert.equal(incoming.raw.nested.blockHeight, 123);
+  assert.equal(Object.hasOwn(incoming.raw, 'content'), false);
+  assert.equal(Object.hasOwn(incoming.raw, 'rawData'), false);
+  assert.equal(Object.hasOwn(incoming.raw.nested, 'payload'), false);
+  assert.doesNotMatch(JSON.stringify(conversation), /encrypted-simplemsg-ciphertext|nested encrypted payload/);
 });

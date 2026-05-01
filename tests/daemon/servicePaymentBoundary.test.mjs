@@ -126,6 +126,7 @@ async function createServiceCallHarness(t, options = {}) {
         return { state: 'timeout' };
       },
     },
+    a2aConversationPersister: options.a2aConversationPersister,
     servicePaymentExecutor: options.servicePaymentExecutor ?? {
       async execute(input) {
         events.push('payment');
@@ -332,4 +333,82 @@ test('paid simplemsg service broadcast failure keeps a trace with payment proven
   assert.equal(trace.order.paymentCurrency, 'SPACE');
   assert.equal(trace.order.paymentAmount, '0.00001');
   assert.equal(trace.a2a.latestEvent, 'remote_order_broadcast_failed');
+});
+
+test('paid simplemsg service local A2A store failure does not mask successful order broadcast', async (t) => {
+  const paymentTxid = 'f'.repeat(64);
+  const persistenceCalls = [];
+  const harness = await createServiceCallHarness(t, {
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    a2aConversationPersister: async (input) => {
+      persistenceCalls.push(input);
+      throw new Error('simulated local A2A store failure');
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.ok, false);
+  assert.equal(called.state, 'waiting');
+  assert.equal(called.code, 'order_sent_awaiting_provider');
+  assert.equal(called.data.paymentTxid, paymentTxid);
+  assert.match(called.data.orderTxid, /^\/protocols\/simplemsg-tx-/);
+  assert.equal(called.data.a2aStorePersisted, false);
+  assert.match(called.data.a2aStoreError, /simulated local A2A store failure/);
+  assert.equal(persistenceCalls.length, 1);
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/simplemsg'), true);
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.session?.peerGlobalMetaId === 'idq1provider');
+  assert.ok(trace, 'expected caller trace to remain persisted after order broadcast');
+  assert.notEqual(trace.a2a.latestEvent, 'remote_order_broadcast_failed');
+});
+
+test('private chat local A2A store failure does not mask successful chain broadcast', async (t) => {
+  const persistenceCalls = [];
+  const harness = await createServiceCallHarness(t, {
+    a2aConversationPersister: async (input) => {
+      persistenceCalls.push(input);
+      throw new Error('simulated local A2A chat store failure');
+    },
+  });
+
+  const sent = await harness.handlers.chat.private({
+    to: 'idq1provider',
+    content: 'hello provider',
+    peerChatPublicKey: harness.providerPair.publicKeyHex,
+  });
+
+  assert.equal(sent.ok, true);
+  assert.equal(sent.state, 'success');
+  assert.equal(sent.data.deliveryMode, 'onchain_simplemsg');
+  assert.match(sent.data.pinId, /^\/protocols\/simplemsg-pin-/);
+  assert.deepEqual(sent.data.txids, ['/protocols/simplemsg-tx-1']);
+  assert.equal(sent.data.a2aStorePersisted, false);
+  assert.match(sent.data.a2aStoreError, /simulated local A2A chat store failure/);
+  assert.equal(persistenceCalls.length, 1);
+  assert.equal(persistenceCalls[0].message.content, 'hello provider');
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/simplemsg'), true);
 });

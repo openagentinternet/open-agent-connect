@@ -14,6 +14,7 @@ const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { createSessionStateStore } = require('../../dist/core/a2a/sessionStateStore.js');
+const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
 const { createRemoteEvolutionStore } = require('../../dist/core/evolution/remoteEvolutionStore.js');
@@ -2671,6 +2672,33 @@ test('services call resolves a chain-discovered online service into a real MetaW
   assert.equal(traceUrl.pathname, '/ui/trace');
   assert.equal(traceUrl.searchParams.get('traceId'), called.payload.data.traceId);
   assert.equal(traceUrl.searchParams.get('sessionId'), called.payload.data.session.sessionId);
+  const orderConversation = await createA2AConversationStore({
+    homeDir,
+    local: {
+      globalMetaId: created.payload.data.globalMetaId,
+      name: created.payload.data.name,
+      chatPublicKey: created.payload.data.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: 'idq1provider',
+      name: 'Weather Oracle',
+    },
+  }).readConversation();
+  const orderMessage = orderConversation.messages.find(
+    (message) => message.protocolTag === 'ORDER',
+  );
+  assert.ok(orderMessage, 'expected outgoing ORDER message in the unified A2A store');
+  assert.equal(orderMessage.direction, 'outgoing');
+  assert.equal(orderMessage.kind, 'order_protocol');
+  assert.equal(orderMessage.orderTxid, called.payload.data.orderTxid);
+  assert.equal(orderMessage.paymentTxid, called.payload.data.paymentTxid);
+  assert.equal(orderMessage.pinId, called.payload.data.orderPinId);
+  assert.deepEqual(orderMessage.txids, called.payload.data.orderTxids);
+  assert.match(orderMessage.content, /^\[ORDER\]/);
+  assert.equal(orderConversation.sessions.some(
+    (session) => session.sessionId === orderMessage.sessionId && session.type === 'peer',
+  ), true);
+  assert.equal(orderConversation.indexes.orderTxidToSessionId[called.payload.data.orderTxid], orderMessage.orderSessionId);
   const expectedPayment = await createTestServicePaymentExecutor().execute({
     servicePinId: 'chain-service-pin-1',
     providerGlobalMetaId: 'idq1provider',
@@ -3175,6 +3203,33 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
   assert.equal(trace.payload.data.traceId, sent.payload.data.traceId);
   assert.equal(trace.payload.data.channel, 'simplemsg');
   assert.equal(trace.payload.data.session.peerGlobalMetaId, created.payload.data.globalMetaId);
+
+  const chatConversation = await createA2AConversationStore({
+    homeDir,
+    local: {
+      globalMetaId: created.payload.data.globalMetaId,
+      name: created.payload.data.name,
+      chatPublicKey: created.payload.data.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: created.payload.data.globalMetaId,
+      name: created.payload.data.name,
+      chatPublicKey: created.payload.data.chatPublicKey,
+    },
+  }).readConversation();
+  const chatMessage = chatConversation.messages.find(
+    (message) => message.content === 'hello from loopback',
+  );
+  assert.ok(chatMessage, 'expected outgoing private chat message in the unified A2A store');
+  assert.equal(chatMessage.direction, 'outgoing');
+  assert.equal(chatMessage.kind, 'private_chat');
+  assert.equal(chatMessage.protocolTag, null);
+  assert.equal(chatMessage.pinId, sent.payload.data.pinId);
+  assert.deepEqual(chatMessage.txids, sent.payload.data.txids);
+  assert.equal(chatMessage.replyPinId, 'reply-pin-1');
+  assert.equal(chatConversation.sessions.some(
+    (session) => session.sessionId === chatMessage.sessionId && session.type === 'peer',
+  ), true);
 
   const transcriptMarkdown = await readFile(sent.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /hello from loopback/);

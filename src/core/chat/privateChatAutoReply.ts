@@ -1,5 +1,6 @@
 import { sendPrivateChat } from './privateChat';
 import { loadChatPersona } from './chatPersonaLoader';
+import { persistA2AConversationMessageBestEffort } from '../a2a/conversationPersistence';
 import type { PrivateChatStateStore } from './privateChatStateStore';
 import type { ChatStrategyStore } from './chatStrategyStore';
 import type { MetabotPaths } from '../state/paths';
@@ -36,6 +37,12 @@ export interface PrivateChatAutoReplyOrchestrator {
 
 interface RateLimiterState {
   replyTimestamps: number[];
+}
+
+interface SentPrivateChatReply {
+  pinId: string | null;
+  txids: string[];
+  network: string | null;
 }
 
 function normalizeText(value: unknown): string {
@@ -105,7 +112,7 @@ export function createPrivateChatAutoReplyOrchestrator(
     peerGlobalMetaId: string,
     content: string,
     extensions: Record<string, unknown> | null,
-  ): Promise<string | null> {
+  ): Promise<SentPrivateChatReply | null> {
     let privateChatIdentity;
     try {
       privateChatIdentity = await deps.signer.getPrivateChatIdentity();
@@ -141,7 +148,13 @@ export function createPrivateChatAutoReplyOrchestrator(
         encoding: 'utf-8',
         network: 'mvc',
       });
-      return normalizeText(chatWrite.pinId) || null;
+      return {
+        pinId: normalizeText(chatWrite.pinId) || null,
+        txids: Array.isArray(chatWrite.txids)
+          ? chatWrite.txids.map((entry) => normalizeText(entry)).filter(Boolean)
+          : [],
+        network: normalizeText(chatWrite.network) || null,
+      };
     } catch {
       return null;
     }
@@ -197,6 +210,24 @@ export function createPrivateChatAutoReplyOrchestrator(
         updatedAt: now,
       };
       await deps.stateStore.upsertConversation(conversation);
+      await persistA2AConversationMessageBestEffort({
+        paths: deps.paths,
+        local: {
+          globalMetaId: selfGlobalMetaId,
+        },
+        peer: {
+          globalMetaId: peerGlobalMetaId,
+          chatPublicKey: message.fromChatPublicKey,
+        },
+        message: {
+          messageId: inboundMessageRecord.messageId,
+          direction: 'incoming',
+          content: inboundMessageRecord.content,
+          pinId: inboundMessageRecord.messagePinId,
+          timestamp: inboundMessageRecord.timestamp,
+          raw: message.rawMessage,
+        },
+      });
 
       // Step 2: Check for closing signal from peer.
       if (hasClosingSignal(message)) {
@@ -224,12 +255,13 @@ export function createPrivateChatAutoReplyOrchestrator(
       // Step 5: Check hard turn limit.
       if (conversation.turnCount >= maxTurns) {
         const closingContent = 'It was great chatting with you. Let us continue another time!';
-        const closingPinId = await sendReplyMessage(
+        const closingReply = await sendReplyMessage(
           selfGlobalMetaId,
           peerGlobalMetaId,
           closingContent,
           { conversationSignal: CLOSING_SIGNAL },
         );
+        const closingPinId = closingReply?.pinId ?? null;
 
         const outboundRecord: PrivateChatMessage = {
           conversationId: conversation.conversationId,
@@ -242,6 +274,25 @@ export function createPrivateChatAutoReplyOrchestrator(
           timestamp: getNow(),
         };
         await deps.stateStore.appendMessages([outboundRecord]);
+        await persistA2AConversationMessageBestEffort({
+          paths: deps.paths,
+          local: {
+            globalMetaId: selfGlobalMetaId,
+          },
+          peer: {
+            globalMetaId: peerGlobalMetaId,
+          },
+          message: {
+            messageId: outboundRecord.messageId,
+            direction: 'outgoing',
+            content: outboundRecord.content,
+            pinId: outboundRecord.messagePinId,
+            txid: closingReply?.txids[0] ?? null,
+            txids: closingReply?.txids ?? [],
+            chain: closingReply?.network ?? 'mvc',
+            timestamp: outboundRecord.timestamp,
+          },
+        });
         rateLimiter.replyTimestamps.push(getNow());
         conversation = {
           ...conversation,
@@ -294,12 +345,13 @@ export function createPrivateChatAutoReplyOrchestrator(
       if (!replyContent) return;
 
       // Step 8: Send reply.
-      const outboundPinId = await sendReplyMessage(
+      const outboundReply = await sendReplyMessage(
         selfGlobalMetaId,
         peerGlobalMetaId,
         replyContent,
         replyExtensions,
       );
+      const outboundPinId = outboundReply?.pinId ?? null;
 
       const outboundRecord: PrivateChatMessage = {
         conversationId: conversation.conversationId,
@@ -313,6 +365,25 @@ export function createPrivateChatAutoReplyOrchestrator(
       };
 
       await deps.stateStore.appendMessages([outboundRecord]);
+      await persistA2AConversationMessageBestEffort({
+        paths: deps.paths,
+        local: {
+          globalMetaId: selfGlobalMetaId,
+        },
+        peer: {
+          globalMetaId: peerGlobalMetaId,
+        },
+        message: {
+          messageId: outboundRecord.messageId,
+          direction: 'outgoing',
+          content: outboundRecord.content,
+          pinId: outboundRecord.messagePinId,
+          txid: outboundReply?.txids[0] ?? null,
+          txids: outboundReply?.txids ?? [],
+          chain: outboundReply?.network ?? 'mvc',
+          timestamp: outboundRecord.timestamp,
+        },
+      });
 
       rateLimiter.replyTimestamps.push(getNow());
 

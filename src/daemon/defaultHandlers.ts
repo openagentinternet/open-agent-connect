@@ -65,6 +65,11 @@ import type { A2ASessionRecord, A2ATaskRunRecord } from '../core/a2a/sessionType
 import { buildTraceWatchEvents, serializeTraceWatchEvents } from '../core/a2a/watch/traceWatch';
 import { isTerminalTraceWatchStatus } from '../core/a2a/watch/watchEvents';
 import {
+  persistA2AConversationMessage,
+  persistA2AConversationMessageBestEffort,
+  type A2AConversationMessagePersister,
+} from '../core/a2a/conversationPersistence';
+import {
   createLocalIdentitySyncStep,
   createLocalMetabotStep,
   createMetabotSubsidyStep,
@@ -3018,6 +3023,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   callerReplyWaiter?: MetaWebServiceReplyWaiter;
   masterReplyWaiter?: MetaWebMasterReplyWaiter;
   servicePaymentExecutor?: ServicePaymentExecutor;
+  a2aConversationPersister?: A2AConversationMessagePersister;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   requestMvcGasSubsidy?: (
     options: RequestMvcGasSubsidyOptions
@@ -3046,6 +3052,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const callerReplyWaiter = input.callerReplyWaiter ?? createSocketIoMetaWebReplyWaiter();
   const masterReplyWaiter = input.masterReplyWaiter ?? null;
   const servicePaymentExecutor = input.servicePaymentExecutor ?? createWalletServicePaymentExecutor({ secretStore });
+  const a2aConversationPersister = input.a2aConversationPersister ?? persistA2AConversationMessage;
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const getDaemonRecord = input.getDaemonRecord;
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
@@ -5899,6 +5906,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
         let orderPinId: string | null = null;
         let orderTxid: string | null = null;
         let orderTxids: string[] = [];
+        let a2aStorePersisted: boolean | null = null;
+        let a2aStoreError: string | null = null;
         let providerReplyText: string | null = null;
         let deliveryPinId: string | null = null;
         const persistCallerTraceSnapshot = async (failure?: {
@@ -6152,8 +6161,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
             );
           }
 
+          let orderWrite;
           try {
-            const orderWrite = await signer.writePin({
+            orderWrite = await signer.writePin({
               operation: 'create',
               path: outboundOrder.path,
               encryption: outboundOrder.encryption,
@@ -6163,16 +6173,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
               encoding: 'utf-8',
               network: 'mvc',
             });
-            orderPinId = orderWrite.pinId;
-            orderTxids = Array.isArray(orderWrite.txids)
-              ? orderWrite.txids.map((entry) => normalizeText(entry)).filter(Boolean)
-              : [];
-            orderTxid = (
-              normalizeOrderProtocolReference(orderTxids[0])
-              || normalizeOrderProtocolReference(orderPinId)
-              || orderTxids[0]
-              || null
-            );
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             await persistCallerTraceSnapshot({
@@ -6184,6 +6184,59 @@ export function createDefaultMetabotDaemonHandlers(input: {
               message
             );
           }
+
+          orderPinId = orderWrite.pinId;
+          orderTxids = Array.isArray(orderWrite.txids)
+            ? orderWrite.txids.map((entry) => normalizeText(entry)).filter(Boolean)
+            : [];
+          orderTxid = (
+            normalizeOrderProtocolReference(orderTxids[0])
+            || normalizeOrderProtocolReference(orderPinId)
+            || orderTxids[0]
+            || null
+          );
+          const a2aStoreResult = await persistA2AConversationMessageBestEffort({
+            paths: runtimeStateStore.paths,
+            local: {
+              profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+              globalMetaId: state.identity.globalMetaId,
+              name: state.identity.name,
+              chatPublicKey: state.identity.chatPublicKey,
+            },
+            peer: {
+              globalMetaId: plan.service.providerGlobalMetaId,
+              name: serviceDisplayName,
+              chatPublicKey: peerChatPublicKey,
+            },
+            message: {
+              direction: 'outgoing',
+              content: orderPayload,
+              pinId: orderPinId,
+              txid: orderTxid,
+              txids: orderTxids,
+              chain: 'mvc',
+              orderTxid,
+              paymentTxid: paymentTxid || null,
+              timestamp: Date.now(),
+              raw: {
+                chainWrite: {
+                  path: outboundOrder.path,
+                  contentType: outboundOrder.contentType,
+                },
+              },
+            },
+            orderSession: {
+              role: 'caller',
+              state: 'awaiting_delivery',
+              orderTxid,
+              paymentTxid: paymentTxid || null,
+              servicePinId: plan.service.servicePinId,
+              serviceName: serviceDisplayName,
+              outputType: normalizeText(service.outputType) || null,
+            },
+          }, a2aConversationPersister);
+          a2aStorePersisted = a2aStoreResult.persisted;
+          a2aStoreError = a2aStoreResult.errorMessage;
         }
 
         if (!orderPayment) {
@@ -6243,6 +6296,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 orderPinId,
                 orderTxid,
                 orderTxids,
+                a2aStorePersisted,
+                a2aStoreError,
                 session: {
                   sessionId: started.session.sessionId,
                   taskRunId: started.taskRun.runId,
@@ -6273,6 +6328,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
           orderPinId,
           orderTxid,
           orderTxids,
+          a2aStorePersisted,
+          a2aStoreError,
           ...(deliveryPinId ? { deliveryPinId } : {}),
           ...(providerReplyText ? { responseText: providerReplyText } : {}),
           session: {
@@ -6844,6 +6901,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
             error instanceof Error ? error.message : 'Failed to broadcast private chat to chain.'
           );
         }
+        const chatTxids = Array.isArray(chatWrite.txids)
+          ? chatWrite.txids.map((entry) => normalizeText(entry)).filter(Boolean)
+          : [];
+        const chatA2AStoreResult = await persistA2AConversationMessageBestEffort({
+          paths: runtimeStateStore.paths,
+          local: {
+            profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+            globalMetaId: state.identity.globalMetaId,
+            name: state.identity.name,
+            chatPublicKey: state.identity.chatPublicKey,
+          },
+          peer: {
+            globalMetaId: request.to,
+            name: request.to === state.identity.globalMetaId ? state.identity.name : null,
+            chatPublicKey: peerChatPublicKey,
+          },
+          message: {
+            direction: 'outgoing',
+            content: request.content,
+            pinId: normalizeText(chatWrite.pinId) || null,
+            txid: chatTxids[0] || null,
+            txids: chatTxids,
+            replyPinId: request.replyPin || null,
+            chain: normalizeText(chatWrite.network) || 'mvc',
+            timestamp: Date.now(),
+            raw: {
+              chainWrite: {
+                path: sent.path,
+                contentType: sent.contentType,
+              },
+            },
+          },
+        }, a2aConversationPersister);
         const structuredContent = describeStructuredPrivateChatContent(request.content);
 
         const traceId = `trace-private-${Date.now().toString(36)}`;
@@ -6914,6 +7004,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
           messageType: structuredContent.messageType,
           requestId: structuredContent.requestId,
           correlatedTraceId: structuredContent.traceId,
+          a2aStorePersisted: chatA2AStoreResult.persisted,
+          a2aStoreError: chatA2AStoreResult.errorMessage,
           traceId: trace.traceId,
           localUiUrl: buildDaemonLocalUiUrl(
             input.getDaemonRecord(),
