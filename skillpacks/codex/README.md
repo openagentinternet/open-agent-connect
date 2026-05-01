@@ -1,7 +1,6 @@
 # Open Agent Connect Skill Pack for Codex
 
 Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent Internet. This wrapper installs the shared MetaBot skills into `~/.metabot/skills`, installs the primary `metabot` CLI shim, and then binds host-native `metabot-*` entries into the Codex skills root.
-Legacy compatibility forwarding to `~/.agent-connect/bin/metabot` is opt-in via `METABOT_ENABLE_LEGACY_SHIM=1` and disabled by default.
 
 ## Included MetaBot Skills
 

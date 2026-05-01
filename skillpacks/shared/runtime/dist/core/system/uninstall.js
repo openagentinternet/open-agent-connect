@@ -96,23 +96,6 @@ async function stopDaemonBestEffort(systemHomeDir) {
         return { attempted: true, stopped: false };
     }
 }
-async function removeLegacyShimIfRecognized(systemHomeDir) {
-    const legacyShimPath = node_path_1.default.join(systemHomeDir, '.agent-connect', 'bin', 'metabot');
-    try {
-        const body = await node_fs_1.promises.readFile(legacyShimPath, 'utf8');
-        if (!body.includes('Canonical MetaBot CLI shim')) {
-            return false;
-        }
-        await node_fs_1.promises.rm(legacyShimPath, { force: true });
-        return true;
-    }
-    catch (error) {
-        if (isNotFound(error)) {
-            return false;
-        }
-        throw error;
-    }
-}
 async function runTier1Uninstall(systemHomeDir, env) {
     const daemonStatus = await stopDaemonBestEffort(systemHomeDir);
     const roots = resolveBuiltInHostRoots(systemHomeDir, env);
@@ -132,12 +115,10 @@ async function runTier1Uninstall(systemHomeDir, env) {
             throw error;
         }
     }
-    const removedLegacyShim = await removeLegacyShimIfRecognized(systemHomeDir);
     return {
         tier: 'safe',
         removedHostBindings,
         removedCliShim,
-        removedLegacyShim,
         daemonStopAttempted: daemonStatus.attempted,
         daemonStopped: daemonStatus.stopped,
         preservedSensitiveData: true,

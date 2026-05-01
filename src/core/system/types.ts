@@ -30,7 +30,6 @@ export interface SystemUninstallResult {
   tier: 'safe' | 'full_erase';
   removedHostBindings: string[];
   removedCliShim: boolean;
-  removedLegacyShim: boolean;
   daemonStopAttempted: boolean;
   daemonStopped: boolean;
   preservedSensitiveData: boolean;

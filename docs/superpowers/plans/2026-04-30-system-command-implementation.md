@@ -109,7 +109,6 @@ Tier 1 (`metabot system uninstall`) removes:
 
 - host `metabot-*` symlinks under built-in host roots only when symlink target points to `.metabot/skills/metabot-*`
 - `~/.metabot/bin/metabot`
-- `~/.agent-connect/bin/metabot` only when recognizable as OAC compatibility shim
 - active daemon by best-effort stop
 
 Tier 1 must preserve:

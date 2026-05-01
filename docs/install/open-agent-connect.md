@@ -199,11 +199,6 @@ If the CLI is not on `PATH`, export:
 export PATH="$HOME/.metabot/bin:$PATH"
 ```
 
-If this machine still has a legacy `~/.agent-connect/bin/metabot` shim or that
-legacy bin directory still appears earlier on `PATH`, rerun the same install
-command. The installer refreshes that legacy shim into a compatibility
-forwarder, but the canonical v2 CLI remains `~/.metabot/bin/metabot`.
-
 ## Bind Additional Hosts
 
 If one machine should serve multiple local agent hosts, run the remote install

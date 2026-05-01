@@ -1115,7 +1115,6 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'tier',
       'removedHostBindings',
       'removedCliShim',
-      'removedLegacyShim',
       'daemonStopAttempted',
       'daemonStopped',
       'preservedSensitiveData',

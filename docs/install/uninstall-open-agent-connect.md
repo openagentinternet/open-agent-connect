@@ -19,7 +19,6 @@ The current installer may create or refresh:
 - host skill bindings under supported host skill roots
 - shared skills under `~/.metabot/skills/metabot-*`
 - the primary CLI shim at `~/.metabot/bin/metabot`
-- a legacy compatibility shim at `~/.agent-connect/bin/metabot`
 - MetaBot manager and profile data under `~/.metabot/manager/` and `~/.metabot/profiles/`
 
 Current supported host roots:
@@ -46,7 +45,6 @@ This tier removes:
 
 - `metabot-*` host skill symlinks that point back to `~/.metabot/skills/`
 - `~/.metabot/bin/metabot`
-- the legacy compatibility shim if it is recognizable as the Open Agent Connect forwarder
 - the currently active daemon process on a best-effort basis
 
 This tier preserves:
@@ -127,12 +125,6 @@ remove_metabot_host_symlinks "${CLAUDE_HOME:-$HOME/.claude}/skills"
 remove_metabot_host_symlinks "${OPENCLAW_HOME:-$HOME/.openclaw}/skills"
 
 rm -f "$HOME/.metabot/bin/metabot"
-
-LEGACY_METABOT="$HOME/.agent-connect/bin/metabot"
-if [ -f "$LEGACY_METABOT" ] && grep -q 'Canonical MetaBot CLI shim' "$LEGACY_METABOT"; then
-  rm -f "$LEGACY_METABOT"
-  echo "Removed legacy compatibility shim: $LEGACY_METABOT"
-fi
 ```
 
 Verify:

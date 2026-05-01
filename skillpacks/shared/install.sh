@@ -4,7 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHARED_SKILL_DEST="${METABOT_SHARED_SKILL_DEST:-$HOME/.metabot/skills}"
 BIN_DIR="${METABOT_BIN_DIR:-$HOME/.metabot/bin}"
-LEGACY_BIN_DIR="${METABOT_LEGACY_BIN_DIR:-$HOME/.agent-connect/bin}"
 SOURCE_ROOT="${METABOT_SOURCE_ROOT:-}"
 CLI_ENTRY="${METABOT_CLI_ENTRY:-}"
 SOURCE_SKILLS_ROOT="$SCRIPT_DIR/skills"
@@ -125,39 +124,7 @@ write_cli_shim() {
   chmod +x "$BIN_DIR/$target_name"
 }
 
-path_contains_entry() {
-  local target_dir="$1"
-  local normalized_target="${target_dir%/}"
-  local path_entry=""
-  IFS=':' read -r -a path_entries <<< "${PATH:-}"
-  for path_entry in "${path_entries[@]}"; do
-    [ "${path_entry%/}" = "$normalized_target" ] && return 0
-  done
-  return 1
-}
-
-write_legacy_forwarder_shim() {
-  [ "$LEGACY_BIN_DIR" = "$BIN_DIR" ] && return 0
-  mkdir -p "$LEGACY_BIN_DIR"
-  cat > "$LEGACY_BIN_DIR/metabot" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-CANONICAL_METABOT_BIN="$BIN_DIR/metabot"
-  [ -x "\$CANONICAL_METABOT_BIN" ] || {
-  echo "Canonical MetaBot CLI shim not found at \$CANONICAL_METABOT_BIN" >&2
-  exit 1
-}
-exec "\$CANONICAL_METABOT_BIN" "\$@"
-EOF
-  chmod +x "$LEGACY_BIN_DIR/metabot"
-}
-
 write_cli_shim "metabot"
-
-if [ "${METABOT_ENABLE_LEGACY_SHIM:-0}" = "1" ] && ( [ -d "$LEGACY_BIN_DIR" ] || [ -f "$LEGACY_BIN_DIR/metabot" ] || path_contains_entry "$LEGACY_BIN_DIR" ); then
-  write_legacy_forwarder_shim
-  echo "Refreshed legacy compatibility shim at $LEGACY_BIN_DIR/metabot"
-fi
 
 echo "Installed shared MetaBot skills to $SHARED_SKILL_DEST"
 echo "Installed primary CLI shim to $BIN_DIR/metabot"

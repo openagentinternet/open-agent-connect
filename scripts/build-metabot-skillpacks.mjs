@@ -69,7 +69,6 @@ function buildSharedReadme({ packageVersion }) {
   return `# Shared MetaBot Skills for Open Agent Connect
 
 This shared pack installs the host-neutral MetaBot skills into \`~/.metabot/skills\` and installs the primary \`${PRIMARY_CLI_PATH}\` shim into \`~/.metabot/bin\`.
-Legacy compatibility forwarding to \`~/.agent-connect/bin/metabot\` is opt-in via \`METABOT_ENABLE_LEGACY_SHIM=1\` and disabled by default.
 
 ## Included MetaBot Skills
 
@@ -103,7 +102,6 @@ function buildHostReadme({ hostKey, host, packageVersion }) {
   return `# Open Agent Connect Skill Pack for ${host.displayName}
 
 Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent Internet. This wrapper installs the shared MetaBot skills into \`~/.metabot/skills\`, installs the primary \`${PRIMARY_CLI_PATH}\` CLI shim, and then binds host-native \`metabot-*\` entries into the ${host.displayName} skills root.
-Legacy compatibility forwarding to \`~/.agent-connect/bin/metabot\` is opt-in via \`METABOT_ENABLE_LEGACY_SHIM=1\` and disabled by default.
 
 ## Included MetaBot Skills
 
@@ -184,7 +182,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 SHARED_SKILL_DEST="\${METABOT_SHARED_SKILL_DEST:-$HOME/.metabot/skills}"
 BIN_DIR="\${METABOT_BIN_DIR:-$HOME/.metabot/bin}"
-LEGACY_BIN_DIR="\${METABOT_LEGACY_BIN_DIR:-$HOME/.agent-connect/bin}"
 SOURCE_ROOT="\${METABOT_SOURCE_ROOT:-}"
 CLI_ENTRY="\${METABOT_CLI_ENTRY:-}"
 SOURCE_SKILLS_ROOT="$SCRIPT_DIR/${sourceSkillsRelativePath}"
@@ -285,39 +282,7 @@ write_cli_shim() {
   chmod +x "$BIN_DIR/$target_name"
 }
 
-path_contains_entry() {
-  local target_dir="$1"
-  local normalized_target="\${target_dir%/}"
-  local path_entry=""
-  IFS=':' read -r -a path_entries <<< "\${PATH:-}"
-  for path_entry in "\${path_entries[@]}"; do
-    [ "\${path_entry%/}" = "$normalized_target" ] && return 0
-  done
-  return 1
-}
-
-write_legacy_forwarder_shim() {
-  [ "$LEGACY_BIN_DIR" = "$BIN_DIR" ] && return 0
-  mkdir -p "$LEGACY_BIN_DIR"
-  cat > "$LEGACY_BIN_DIR/${PRIMARY_CLI_PATH}" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-CANONICAL_METABOT_BIN="$BIN_DIR/${PRIMARY_CLI_PATH}"
-  [ -x "\\$CANONICAL_METABOT_BIN" ] || {
-  echo "Canonical MetaBot CLI shim not found at \\$CANONICAL_METABOT_BIN" >&2
-  exit 1
-}
-exec "\\$CANONICAL_METABOT_BIN" "\\$@"
-EOF
-  chmod +x "$LEGACY_BIN_DIR/${PRIMARY_CLI_PATH}"
-}
-
 write_cli_shim "${PRIMARY_CLI_PATH}"
-
-if [ "\${METABOT_ENABLE_LEGACY_SHIM:-0}" = "1" ] && ( [ -d "$LEGACY_BIN_DIR" ] || [ -f "$LEGACY_BIN_DIR/${PRIMARY_CLI_PATH}" ] || path_contains_entry "$LEGACY_BIN_DIR" ); then
-  write_legacy_forwarder_shim
-  echo "Refreshed legacy compatibility shim at $LEGACY_BIN_DIR/${PRIMARY_CLI_PATH}"
-fi
 
 echo "Installed shared MetaBot skills to $SHARED_SKILL_DEST"
 echo "Installed primary CLI shim to $BIN_DIR/${PRIMARY_CLI_PATH}"

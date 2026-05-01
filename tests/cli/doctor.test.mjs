@@ -167,8 +167,6 @@ test('runCli dispatches `metabot doctor` and preserves the doctor envelope', asy
           code: 'canonical_cli_shim_preferred',
           ok: true,
           canonicalShimPath: null,
-          legacyShimPath: null,
-          legacyCompatibilityForwarder: false,
         },
       ],
     },
