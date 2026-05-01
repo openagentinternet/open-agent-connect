@@ -75,6 +75,7 @@ import { buildDelegationOrderPayload } from '../core/orders/delegationOrderMessa
 import { createConfigStore } from '../core/config/configStore';
 import {
   createSocketIoMetaWebReplyWaiter,
+  normalizeOrderProtocolReference,
   type AwaitMetaWebServiceReplyInput,
   type AwaitMetaWebServiceReplyResult,
   type MetaWebServiceReplyWaiter,
@@ -6034,6 +6035,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               providerChatPublicKey: peerChatPublicKey,
               servicePinId: plan.service.servicePinId,
               paymentTxid,
+              orderTxid: normalizeOrderProtocolReference(orderPinId) || null,
               timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
             },
           });
