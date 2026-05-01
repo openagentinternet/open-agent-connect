@@ -159,6 +159,37 @@ function buildMessageId(input: {
     || `${input.sessionId}-${input.direction}-${input.timestamp}`;
 }
 
+function isFailureEndReason(reason: unknown): boolean {
+  const normalized = normalizeText(reason).toLowerCase();
+  return Boolean(normalized.match(/\b(fail|failed|failure|error|declined|cancelled|canceled|timeout|expired)\b/u));
+}
+
+function deriveOrderSessionState(input: {
+  explicitState?: string | null;
+  existingState?: string | null;
+  classification: ReturnType<typeof classifySimplemsgContent>;
+}): string {
+  const explicitState = normalizeText(input.explicitState);
+  if (explicitState) {
+    return explicitState;
+  }
+  const existingState = normalizeText(input.existingState);
+  if (input.classification.kind === 'order_protocol') {
+    if (input.classification.tag === 'DELIVERY' || input.classification.tag === 'NeedsRating') {
+      return 'completed';
+    }
+    if (input.classification.tag === 'ORDER_END') {
+      return isFailureEndReason(input.classification.reason) ? 'remote_failed' : 'completed';
+    }
+    if (input.classification.tag === 'ORDER_STATUS') {
+      return existingState === 'completed' || existingState === 'remote_failed'
+        ? existingState
+        : 'remote_executing';
+    }
+  }
+  return existingState || 'awaiting_delivery';
+}
+
 export async function persistA2AConversationMessage(
   input: PersistA2AConversationMessageInput,
 ): Promise<A2AConversationMessage> {
@@ -232,26 +263,68 @@ export async function persistA2AConversationMessage(
     latestMessageId: message.messageId,
   });
   if (orderSessionId && orderTxid) {
+    const existingSession = await store.findSessionById(orderSessionId);
+    const existingOrderSession = existingSession?.type === 'service_order'
+      ? existingSession
+      : null;
+    const deliveredAt = classification.kind === 'order_protocol' && classification.tag === 'DELIVERY'
+      ? timestamp
+      : null;
+    const ratingRequestedAt = classification.kind === 'order_protocol' && classification.tag === 'NeedsRating'
+      ? timestamp
+      : null;
+    const endedAt = classification.kind === 'order_protocol' && classification.tag === 'ORDER_END'
+      ? timestamp
+      : null;
     await store.upsertSession({
       sessionId: orderSessionId,
       type: 'service_order',
-      role: input.orderSession?.role ?? 'caller',
-      state: input.orderSession?.state ?? 'awaiting_delivery',
+      role: input.orderSession?.role ?? existingOrderSession?.role ?? 'caller',
+      state: deriveOrderSessionState({
+        explicitState: input.orderSession?.state,
+        existingState: existingOrderSession?.state,
+        classification,
+      }),
       orderTxid,
-      paymentTxid: normalizeText(input.orderSession?.paymentTxid) || message.paymentTxid,
-      servicePinId: normalizeText(input.orderSession?.servicePinId) || null,
-      serviceName: normalizeText(input.orderSession?.serviceName) || null,
-      outputType: normalizeText(input.orderSession?.outputType) || null,
+      paymentTxid: normalizeText(input.orderSession?.paymentTxid)
+        || message.paymentTxid
+        || normalizeText(existingOrderSession?.paymentTxid)
+        || null,
+      servicePinId: normalizeText(input.orderSession?.servicePinId)
+        || normalizeText(existingOrderSession?.servicePinId)
+        || null,
+      serviceName: normalizeText(input.orderSession?.serviceName)
+        || normalizeText(existingOrderSession?.serviceName)
+        || null,
+      outputType: normalizeText(input.orderSession?.outputType)
+        || normalizeText(existingOrderSession?.outputType)
+        || null,
       createdAt: Number.isFinite(input.orderSession?.createdAt)
         ? Math.trunc(Number(input.orderSession?.createdAt))
+        : Number.isFinite(existingOrderSession?.createdAt)
+          ? Math.trunc(Number(existingOrderSession?.createdAt))
         : timestamp,
       updatedAt: timestamp,
-      firstResponseAt: input.orderSession?.firstResponseAt ?? null,
-      deliveredAt: input.orderSession?.deliveredAt ?? null,
-      ratingRequestedAt: input.orderSession?.ratingRequestedAt ?? null,
-      endedAt: input.orderSession?.endedAt ?? null,
-      endReason: normalizeText(input.orderSession?.endReason) || null,
-      failureReason: normalizeText(input.orderSession?.failureReason) || null,
+      firstResponseAt: input.orderSession?.firstResponseAt
+        ?? existingOrderSession?.firstResponseAt
+        ?? (message.direction === 'incoming' ? timestamp : null),
+      deliveredAt: input.orderSession?.deliveredAt
+        ?? existingOrderSession?.deliveredAt
+        ?? deliveredAt,
+      ratingRequestedAt: input.orderSession?.ratingRequestedAt
+        ?? existingOrderSession?.ratingRequestedAt
+        ?? ratingRequestedAt,
+      endedAt: input.orderSession?.endedAt
+        ?? existingOrderSession?.endedAt
+        ?? endedAt,
+      endReason: normalizeText(input.orderSession?.endReason)
+        || normalizeText(existingOrderSession?.endReason)
+        || (classification.kind === 'order_protocol' && classification.tag === 'ORDER_END'
+          ? normalizeText(classification.reason)
+          : null),
+      failureReason: normalizeText(input.orderSession?.failureReason)
+        || normalizeText(existingOrderSession?.failureReason)
+        || null,
     });
   }
   return message;

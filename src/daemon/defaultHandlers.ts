@@ -70,6 +70,10 @@ import {
   type A2AConversationMessagePersister,
 } from '../core/a2a/conversationPersistence';
 import {
+  getUnifiedA2ATraceSessionForProfile,
+  listUnifiedA2ATraceSessionsForProfile,
+} from '../core/a2a/traceProjection';
+import {
   createLocalIdentitySyncStep,
   createLocalMetabotStep,
   createMetabotSubsidyStep,
@@ -7154,8 +7158,34 @@ export function createDefaultMetabotDaemonHandlers(input: {
       listSessions: async () => {
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
         const results: Array<Record<string, unknown>> = [];
+        const seenSessionIds = new Set<string>();
+
+        const pushSession = (session: unknown) => {
+          if (!session || typeof session !== 'object' || Array.isArray(session)) {
+            return;
+          }
+          const record = session as Record<string, unknown>;
+          const sessionId = normalizeText(record.sessionId);
+          if (!sessionId || seenSessionIds.has(sessionId)) {
+            return;
+          }
+          seenSessionIds.add(sessionId);
+          results.push(record);
+        };
 
         await Promise.all(profiles.map(async (profile) => {
+          try {
+            const unifiedSessions = await listUnifiedA2ATraceSessionsForProfile({
+              profile,
+              daemon: input.getDaemonRecord(),
+            });
+            for (const session of unifiedSessions) {
+              pushSession(session);
+            }
+          } catch {
+            // Skip profiles with unreadable unified A2A conversations.
+          }
+
           try {
             const store = createSessionStateStore(profile.homeDir);
             const state = await store.readState();
@@ -7164,7 +7194,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               const peerGlobalMetaId = isCallerLocal
                 ? session.providerGlobalMetaId
                 : session.callerGlobalMetaId;
-              results.push({
+              pushSession({
                 ...session,
                 localMetabotName: profile.name,
                 localMetabotGlobalMetaId: profile.globalMetaId,
@@ -7201,6 +7231,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
 
         for (const profile of profiles) {
+          try {
+            const unifiedSession = await getUnifiedA2ATraceSessionForProfile({
+              profile,
+              sessionId: normalizedSessionId,
+              daemon: input.getDaemonRecord(),
+            });
+            if (unifiedSession) {
+              return commandSuccess(unifiedSession);
+            }
+          } catch {
+            // Try legacy session-state for this profile below.
+          }
+
           try {
             const store = createSessionStateStore(profile.homeDir);
             const state = await store.readState();
