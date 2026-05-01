@@ -66,6 +66,7 @@ function cloneEmptyState(): RuntimeState {
 export async function ensureRuntimeLayout(paths: MetabotPaths): Promise<void> {
   await Promise.all([
     fs.mkdir(paths.runtimeRoot, { recursive: true }),
+    fs.mkdir(paths.a2aRoot, { recursive: true }),
     fs.mkdir(paths.stateRoot, { recursive: true }),
     fs.mkdir(paths.sessionsRoot, { recursive: true }),
     fs.mkdir(paths.exportsRoot, { recursive: true }),

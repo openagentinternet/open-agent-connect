@@ -9,6 +9,7 @@ export interface MetabotPaths {
   profileRoot: string;
   workspaceRoot: string;
   runtimeRoot: string;
+  a2aRoot: string;
   sessionsRoot: string;
   exportsRoot: string;
   stateRoot: string;
@@ -117,6 +118,7 @@ function buildMetabotPaths(input: {
   daemonLockPath: string;
 }): MetabotPaths {
   const evolutionRoot = path.join(input.runtimeRoot, 'evolution');
+  const a2aRoot = path.join(input.runtimeRoot, 'A2A');
   const evolutionExecutionsRoot = path.join(evolutionRoot, 'executions');
   const evolutionAnalysesRoot = path.join(evolutionRoot, 'analyses');
   const evolutionArtifactsRoot = path.join(evolutionRoot, 'artifacts');
@@ -134,6 +136,7 @@ function buildMetabotPaths(input: {
     profileRoot: input.profileRoot,
     workspaceRoot: input.workspaceRoot,
     runtimeRoot: input.runtimeRoot,
+    a2aRoot,
     sessionsRoot: input.sessionsRoot,
     exportsRoot: input.exportsRoot,
     stateRoot: input.stateRoot,
