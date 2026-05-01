@@ -16,6 +16,7 @@ const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateS
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
 const { createRemoteEvolutionStore } = require('../../dist/core/evolution/remoteEvolutionStore.js');
+const { createTestServicePaymentExecutor } = require('../../dist/core/payments/servicePayment.js');
 
 const NETWORK_DIRECTORY_SCOPE_HASH = JSON.stringify({
   allowedCommands: [
@@ -260,6 +261,9 @@ function createImportedArtifactFixture(overrides = {}) {
 
 async function startFakeChainApiServer(options = {}) {
   const ratingPins = Array.isArray(options.ratingPins) ? options.ratingPins : [];
+  const serviceCurrency = typeof options.serviceCurrency === 'string' ? options.serviceCurrency : 'SPACE';
+  const servicePrice = typeof options.servicePrice === 'string' ? options.servicePrice : '0.00001';
+  const paymentAddress = typeof options.paymentAddress === 'string' ? options.paymentAddress : 'mvc-payment-address';
   const evolutionMetadataPinId = 'evolution-metadata-pin-1';
   const evolutionArtifactPinId = 'evolution-artifact-pin-1';
   const evolutionScopeHash = JSON.stringify({
@@ -388,13 +392,13 @@ async function startFakeChainApiServer(options = {}) {
                   description: 'Returns tomorrow weather.',
                   providerMetaBot: 'idq1provider',
                   providerSkill: 'metabot-weather-oracle',
-                  price: '0.00001',
-                  currency: 'SPACE',
+                  price: servicePrice,
+                  currency: serviceCurrency,
                   skillDocument: '# Weather Oracle',
                   inputType: 'text',
                   outputType: 'text',
                   endpoint: 'simplemsg',
-                  paymentAddress: 'mvc-payment-address',
+                  paymentAddress,
                 }),
               },
             ],
@@ -1503,6 +1507,9 @@ test('provider closure runtime can publish, go online, receive a seller trace, a
   assert.equal(providerTrace.payload.ok, true);
   assert.equal(providerTrace.payload.data.order.role, 'seller');
   assert.equal(providerTrace.payload.data.order.serviceId, published.payload.data.servicePinId);
+  assert.equal(providerTrace.payload.data.order.paymentTxid, called.payload.data.paymentTxid);
+  assert.equal(providerTrace.payload.data.order.paymentCurrency, 'SPACE');
+  assert.equal(providerTrace.payload.data.order.paymentAmount, '0.00001');
 
   const runtimeStateStore = createRuntimeStateStore(providerHome);
   const state = await runtimeStateStore.readState();
@@ -2557,6 +2564,16 @@ test('services call resolves a chain-discovered online service into a real MetaW
   assert.equal(called.payload.data.serviceName, 'Weather Oracle');
   assert.equal(called.payload.data.session.role, 'caller');
   assert.match(called.payload.data.orderPinId, /^\/protocols\/simplemsg-pin-/);
+  const expectedPayment = await createTestServicePaymentExecutor().execute({
+    servicePinId: 'chain-service-pin-1',
+    providerGlobalMetaId: 'idq1provider',
+    paymentAddress: 'mvc-payment-address',
+    amount: '0.00001',
+    currency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+  });
+  assert.equal(called.payload.data.paymentTxid, expectedPayment.paymentTxid);
 
   const trace = await waitForTrace(homeDir, called.payload.data.traceId, {
     METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
@@ -2577,10 +2594,56 @@ test('services call resolves a chain-discovered online service into a real MetaW
   assert.equal(trace.payload.data.resultText, 'Tomorrow will be bright with a light wind.');
   assert.equal(trace.payload.data.resultDeliveryPinId, 'delivery-pin-1');
   assert.equal(trace.payload.data.ratingRequestText, null);
-  assert.match(trace.payload.data.order.paymentTxid, /^[0-9a-f]{64}$/i);
+  assert.equal(trace.payload.data.order.paymentTxid, expectedPayment.paymentTxid);
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /Tomorrow will be bright with a light wind/);
+});
+
+test('services call rejects unsupported chain service payment before sending order', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  const chainApi = await startFakeChainApiServer({
+    serviceCurrency: 'DOGE',
+    servicePrice: '1',
+    paymentAddress: 'doge-payment-address',
+  });
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'chain-doge-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '2',
+        currency: 'DOGE',
+      },
+    },
+  }), 'utf8');
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+    }
+  );
+
+  assert.equal(called.exitCode, 1);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.state, 'failed');
+  assert.equal(called.payload.code, 'service_payment_unsupported_settlement');
+  assert.equal(called.payload.data?.orderPinId, undefined);
+
+  const state = await createRuntimeStateStore(homeDir).readState();
+  assert.equal(state.traces.some((trace) => trace.session?.peerGlobalMetaId === 'idq1provider'), false);
 });
 
 test('services call persists timeout state when a chain-discovered service does not reply during the foreground wait', async (t) => {

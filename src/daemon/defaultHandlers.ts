@@ -72,6 +72,12 @@ import {
 } from '../core/bootstrap/localIdentityBootstrap';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import { buildDelegationOrderPayload } from '../core/orders/delegationOrderMessage';
+import {
+  executeServiceOrderPayment,
+  createWalletServicePaymentExecutor,
+  type A2AOrderPaymentResult,
+  type ServicePaymentExecutor,
+} from '../core/payments/servicePayment';
 import { createConfigStore } from '../core/config/configStore';
 import {
   createSocketIoMetaWebReplyWaiter,
@@ -1003,6 +1009,7 @@ function readMasterHostActionRequest(rawInput: Record<string, unknown>) {
 function readExecuteServiceRequest(rawInput: Record<string, unknown>) {
   const buyer = readObject(rawInput.buyer) ?? {};
   const request = readObject(rawInput.request) ?? {};
+  const payment = readObject(rawInput.payment) ?? {};
   return {
     traceId: normalizeText(rawInput.traceId),
     externalConversationId: normalizeText(rawInput.externalConversationId),
@@ -1016,6 +1023,15 @@ function readExecuteServiceRequest(rawInput: Record<string, unknown>) {
     request: {
       userTask: normalizeText(request.userTask),
       taskContext: normalizeText(request.taskContext),
+    },
+    payment: {
+      paymentTxid: normalizeText(payment.paymentTxid) || null,
+      paymentCommitTxid: normalizeText(payment.paymentCommitTxid) || null,
+      paymentChain: normalizeText(payment.paymentChain) || null,
+      paymentAmount: normalizeText(payment.paymentAmount),
+      paymentCurrency: normalizeText(payment.paymentCurrency),
+      settlementKind: normalizeText(payment.settlementKind) || null,
+      orderReference: normalizeText(payment.orderReference) || null,
     },
   };
 }
@@ -1370,6 +1386,7 @@ async function executeRemoteServiceCall(input: {
   servicePinId: string;
   providerGlobalMetaId: string;
   buyer: RuntimeIdentityRecord;
+  payment: A2AOrderPaymentResult;
   request: {
     userTask: string;
     taskContext: string;
@@ -1390,6 +1407,15 @@ async function executeRemoteServiceCall(input: {
           host: 'local-runtime',
           globalMetaId: input.buyer.globalMetaId,
           name: input.buyer.name,
+        },
+        payment: {
+          paymentTxid: input.payment.paymentTxid || null,
+          paymentCommitTxid: input.payment.paymentCommitTxid || null,
+          paymentChain: input.payment.paymentChain || null,
+          paymentAmount: input.payment.paymentAmount,
+          paymentCurrency: input.payment.paymentCurrency,
+          settlementKind: input.payment.settlementKind,
+          orderReference: input.payment.orderReference || null,
         },
         request: input.request,
       }),
@@ -1772,22 +1798,6 @@ export async function fetchPeerChatPublicKey(globalMetaId: string): Promise<stri
   }
 
   return null;
-}
-
-function buildSyntheticPaymentTxid(input: {
-  traceId: string;
-  servicePinId: string;
-  providerGlobalMetaId: string;
-  userTask: string;
-}): string {
-  return createHash('sha256')
-    .update([
-      normalizeText(input.traceId),
-      normalizeText(input.servicePinId),
-      normalizeText(input.providerGlobalMetaId),
-      normalizeText(input.userTask),
-    ].join('\n'))
-    .digest('hex');
 }
 
 async function listRuntimeDirectoryServices(input: {
@@ -2973,6 +2983,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   fetchPrivateChatHistory?: FetchPrivateHistory;
   callerReplyWaiter?: MetaWebServiceReplyWaiter;
   masterReplyWaiter?: MetaWebMasterReplyWaiter;
+  servicePaymentExecutor?: ServicePaymentExecutor;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   requestMvcGasSubsidy?: (
     options: RequestMvcGasSubsidyOptions
@@ -3000,6 +3011,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey ?? fetchPeerChatPublicKey;
   const callerReplyWaiter = input.callerReplyWaiter ?? createSocketIoMetaWebReplyWaiter();
   const masterReplyWaiter = input.masterReplyWaiter ?? null;
+  const servicePaymentExecutor = input.servicePaymentExecutor ?? createWalletServicePaymentExecutor({ secretStore });
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const getDaemonRecord = input.getDaemonRecord;
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
@@ -5816,6 +5828,32 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('service_not_found', 'Published service was not found in the available service directory.');
         }
 
+        const serviceDisplayName = normalizeText(service.displayName) || normalizeText(service.serviceName);
+        let orderPayment: A2AOrderPaymentResult | null = null;
+        let paymentTxid = '';
+        let orderReference = '';
+        const createOrderPayment = async (): Promise<
+          { ok: true; payment: A2AOrderPaymentResult }
+          | { ok: false; failure: MetabotCommandResult<never> }
+        > => {
+          try {
+            const payment = await executeServiceOrderPayment({
+              traceId: plan.traceId,
+              servicePinId: plan.service.servicePinId,
+              providerGlobalMetaId: plan.service.providerGlobalMetaId,
+              paymentAddress: normalizeText(service.paymentAddress) || normalizeText(service.providerAddress),
+              amount: plan.payment.amount,
+              currency: plan.payment.currency,
+              executor: servicePaymentExecutor,
+            });
+            return { ok: true, payment };
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const code = message.split(':', 1)[0] || 'service_payment_failed';
+            return { ok: false, failure: commandFailed(code, message) };
+          }
+        };
+
         const started = sessionEngine.startCallerSession({
           traceId: plan.traceId,
           servicePinId: plan.service.servicePinId,
@@ -5824,18 +5862,144 @@ export function createDefaultMetabotDaemonHandlers(input: {
           userTask: request.userTask,
           taskContext: request.taskContext,
         });
-        const serviceDisplayName = normalizeText(service.displayName) || normalizeText(service.serviceName);
-        const paymentTxid = buildSyntheticPaymentTxid({
-          traceId: plan.traceId,
-          servicePinId: plan.service.servicePinId,
-          providerGlobalMetaId: plan.service.providerGlobalMetaId,
-          userTask: request.userTask,
-        });
         let orderPinId: string | null = null;
         let providerReplyText: string | null = null;
         let deliveryPinId: string | null = null;
+        const persistCallerTraceSnapshot = async (failure?: {
+          code?: string | null;
+          message?: string | null;
+        }) => {
+          if (!orderPayment) {
+            throw new Error('Service order payment metadata was not created.');
+          }
+          const publicStatus = await persistSessionMutation(sessionStateStore, started);
+          await appendA2ATranscriptItems(sessionStateStore, [
+            {
+              id: `${plan.traceId}-caller-user-task`,
+              sessionId: started.session.sessionId,
+              taskRunId: started.taskRun.runId,
+              timestamp: started.session.createdAt,
+              type: 'user_task',
+              sender: 'caller',
+              content: request.userTask,
+              metadata: {
+                taskContext: request.taskContext || null,
+                servicePinId: plan.service.servicePinId,
+                providerGlobalMetaId: plan.service.providerGlobalMetaId,
+                paymentTxid: paymentTxid || null,
+                orderReference: orderReference || null,
+              },
+            },
+            {
+              id: `${plan.traceId}-caller-request-sent`,
+              sessionId: started.session.sessionId,
+              taskRunId: started.taskRun.runId,
+              timestamp: started.session.updatedAt,
+              type: failure?.code ? 'failure' : 'status_note',
+              sender: 'system',
+              content: failure?.message
+                ? `Local MetaBot prepared a remote MetaBot task session for ${normalizeText(service.displayName) || normalizeText(service.serviceName) || plan.service.providerGlobalMetaId}, but dispatch failed: ${failure.message}`
+                : `Local MetaBot delegated this task to remote MetaBot ${normalizeText(service.displayName) || normalizeText(service.serviceName) || plan.service.providerGlobalMetaId}.`,
+              metadata: {
+                publicStatus: publicStatus.status,
+                event: failure?.code || started.event,
+                externalConversationId: started.linkage.externalConversationId,
+                orderPinId,
+                paymentTxid: paymentTxid || null,
+                orderReference: orderReference || null,
+                failureCode: failure?.code || null,
+              },
+            },
+          ]);
+
+          const trace = buildSessionTrace({
+            traceId: plan.traceId,
+            channel: 'a2a',
+            exportRoot: runtimeStateStore.paths.exportsRoot,
+            session: {
+              id: `session-${plan.traceId}`,
+              title: `${serviceDisplayName} Call`,
+              type: 'a2a',
+              metabotId: state.identity?.metabotId ?? null,
+              peerGlobalMetaId: normalizeText(service.providerGlobalMetaId),
+              peerName: serviceDisplayName,
+              externalConversationId: started.linkage.externalConversationId,
+            },
+            order: {
+              id: `order-${plan.traceId}`,
+              role: 'buyer',
+              serviceId: plan.service.servicePinId,
+              serviceName: serviceDisplayName,
+              paymentTxid,
+              orderReference,
+              paymentCurrency: orderPayment.paymentCurrency,
+              paymentAmount: orderPayment.paymentAmount,
+            },
+            a2a: {
+              sessionId: started.session.sessionId,
+              taskRunId: started.taskRun.runId,
+              role: started.session.role,
+              publicStatus: publicStatus.status,
+              latestEvent: failure?.code || started.event,
+              taskRunState: started.taskRun.state,
+              callerGlobalMetaId: started.session.callerGlobalMetaId,
+              providerGlobalMetaId: started.session.providerGlobalMetaId,
+              providerName: serviceDisplayName,
+              servicePinId: started.session.servicePinId,
+            },
+          });
+
+          const artifacts = await exportSessionArtifacts({
+            trace,
+            transcript: {
+              sessionId: trace.session.id,
+              title: trace.session.title,
+              messages: [
+                {
+                  id: `${trace.traceId}-user`,
+                  type: 'user',
+                  timestamp: trace.createdAt,
+                  content: request.userTask,
+                  metadata: {
+                    taskContext: request.taskContext || null,
+                  },
+                },
+                {
+                  id: `${trace.traceId}-assistant`,
+                  type: failure?.code ? 'system' : 'assistant',
+                  timestamp: trace.createdAt,
+                  content: failure?.message
+                    ? `Local MetaBot runtime recorded the paid remote MetaBot task session for ${serviceDisplayName}, but dispatch failed: ${failure.message}`
+                    : `Local MetaBot runtime created a remote MetaBot task session for ${serviceDisplayName}.`,
+                  metadata: {
+                    servicePinId: plan.service.servicePinId,
+                    providerGlobalMetaId: normalizeText(service.providerGlobalMetaId),
+                    confirmationPolicyMode: plan.confirmation.policyMode,
+                    confirmationRequired: plan.confirmation.requiresConfirmation,
+                    providerDaemonBaseUrl: request.providerDaemonBaseUrl || null,
+                    orderPinId,
+                    paymentTxid: paymentTxid || null,
+                    orderReference: orderReference || null,
+                    failureCode: failure?.code || null,
+                  },
+                },
+              ],
+            },
+          });
+
+          await persistTraceRecord(runtimeStateStore, trace);
+          return { publicStatus, trace, artifacts };
+        };
 
         if (request.providerDaemonBaseUrl) {
+          const paymentResult = await createOrderPayment();
+          if (!paymentResult.ok) {
+            return paymentResult.failure;
+          }
+          orderPayment = paymentResult.payment;
+          paymentTxid = orderPayment.paymentTxid || '';
+          orderReference = orderPayment.orderReference || '';
+
           const execution = await executeRemoteServiceCall({
             providerDaemonBaseUrl: request.providerDaemonBaseUrl,
             traceId: plan.traceId,
@@ -5843,12 +6007,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
             servicePinId: plan.service.servicePinId,
             providerGlobalMetaId: plan.service.providerGlobalMetaId,
             buyer: state.identity,
+            payment: orderPayment,
             request: {
               userTask: request.userTask,
               taskContext: request.taskContext,
             },
           });
           if (!execution.ok) {
+            await persistCallerTraceSnapshot({
+              code: normalizeText(execution.code) || 'remote_execution_failed',
+              message: normalizeText(execution.message) || 'Remote execution failed.',
+            });
             if (execution.state === 'manual_action_required') {
               return execution;
             }
@@ -5875,7 +6044,31 @@ export function createDefaultMetabotDaemonHandlers(input: {
             );
           }
 
-          const paymentMetadata = resolveServiceOrderPaymentMetadata(plan.payment.currency);
+          try {
+            sendPrivateChat({
+              fromIdentity: {
+                globalMetaId: privateChatIdentity.globalMetaId,
+                privateKeyHex: privateChatIdentity.privateKeyHex,
+              },
+              toGlobalMetaId: plan.service.providerGlobalMetaId,
+              peerChatPublicKey,
+              content: '[ORDER] preflight',
+            });
+          } catch (error) {
+            return commandFailed(
+              'remote_order_build_failed',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
+
+          const paymentResult = await createOrderPayment();
+          if (!paymentResult.ok) {
+            return paymentResult.failure;
+          }
+          orderPayment = paymentResult.payment;
+          paymentTxid = orderPayment.paymentTxid || '';
+          orderReference = orderPayment.orderReference || '';
+
           const orderPayload = buildDelegationOrderPayload({
             rawRequest: request.rawRequest || request.userTask,
             taskContext: request.taskContext,
@@ -5884,9 +6077,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
             providerSkill: normalizeText(service.providerSkill) || normalizeText(service.serviceName),
             servicePinId: plan.service.servicePinId,
             paymentTxid,
-            ...paymentMetadata,
-            price: plan.payment.amount,
-            currency: plan.payment.currency,
+            paymentCommitTxid: orderPayment.paymentCommitTxid,
+            paymentChain: orderPayment.paymentChain,
+            settlementKind: orderPayment.settlementKind,
+            orderReference,
+            price: orderPayment.paymentAmount,
+            currency: orderPayment.paymentCurrency,
             outputType: normalizeText(service.outputType),
           });
 
@@ -5902,9 +6098,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
               content: orderPayload,
             });
           } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await persistCallerTraceSnapshot({
+              code: 'remote_order_build_failed',
+              message,
+            });
             return commandFailed(
               'remote_order_build_failed',
-              error instanceof Error ? error.message : String(error)
+              message
             );
           }
 
@@ -5921,119 +6122,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
             });
             orderPinId = orderWrite.pinId;
           } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await persistCallerTraceSnapshot({
+              code: 'remote_order_broadcast_failed',
+              message,
+            });
             return commandFailed(
               'remote_order_broadcast_failed',
-              error instanceof Error ? error.message : String(error)
+              message
             );
           }
         }
 
-        const publicStatus = await persistSessionMutation(sessionStateStore, started);
-        await appendA2ATranscriptItems(sessionStateStore, [
-          {
-            id: `${plan.traceId}-caller-user-task`,
-            sessionId: started.session.sessionId,
-            taskRunId: started.taskRun.runId,
-            timestamp: started.session.createdAt,
-            type: 'user_task',
-            sender: 'caller',
-            content: request.userTask,
-            metadata: {
-              taskContext: request.taskContext || null,
-              servicePinId: plan.service.servicePinId,
-              providerGlobalMetaId: plan.service.providerGlobalMetaId,
-              paymentTxid,
-            },
-          },
-          {
-            id: `${plan.traceId}-caller-request-sent`,
-            sessionId: started.session.sessionId,
-            taskRunId: started.taskRun.runId,
-            timestamp: started.session.updatedAt,
-            type: 'status_note',
-            sender: 'system',
-            content: `Local MetaBot delegated this task to remote MetaBot ${normalizeText(service.displayName) || normalizeText(service.serviceName) || plan.service.providerGlobalMetaId}.`,
-            metadata: {
-              publicStatus: publicStatus.status,
-              event: started.event,
-              externalConversationId: started.linkage.externalConversationId,
-              orderPinId,
-              paymentTxid,
-            },
-          },
-        ]);
+        if (!orderPayment) {
+          return commandFailed('service_payment_missing', 'Service order payment metadata was not created.');
+        }
 
-        const trace = buildSessionTrace({
-          traceId: plan.traceId,
-          channel: 'a2a',
-          exportRoot: runtimeStateStore.paths.exportsRoot,
-          session: {
-            id: `session-${plan.traceId}`,
-            title: `${serviceDisplayName} Call`,
-            type: 'a2a',
-            metabotId: state.identity.metabotId,
-            peerGlobalMetaId: normalizeText(service.providerGlobalMetaId),
-            peerName: serviceDisplayName,
-            externalConversationId: started.linkage.externalConversationId,
-          },
-          order: {
-            id: `order-${plan.traceId}`,
-            role: 'buyer',
-            serviceId: plan.service.servicePinId,
-            serviceName: serviceDisplayName,
-            paymentTxid,
-            paymentCurrency: plan.payment.currency,
-            paymentAmount: plan.payment.amount,
-          },
-          a2a: {
-            sessionId: started.session.sessionId,
-            taskRunId: started.taskRun.runId,
-            role: started.session.role,
-            publicStatus: publicStatus.status,
-            latestEvent: started.event,
-            taskRunState: started.taskRun.state,
-            callerGlobalMetaId: started.session.callerGlobalMetaId,
-            providerGlobalMetaId: started.session.providerGlobalMetaId,
-            providerName: serviceDisplayName,
-            servicePinId: started.session.servicePinId,
-          },
-        });
-
-        const artifacts = await exportSessionArtifacts({
-          trace,
-          transcript: {
-            sessionId: trace.session.id,
-            title: trace.session.title,
-            messages: [
-              {
-                id: `${trace.traceId}-user`,
-                type: 'user',
-                timestamp: trace.createdAt,
-                content: request.userTask,
-                metadata: {
-                  taskContext: request.taskContext || null,
-                },
-              },
-              {
-                id: `${trace.traceId}-assistant`,
-                type: 'assistant',
-                timestamp: trace.createdAt,
-                content: `Local MetaBot runtime created a remote MetaBot task session for ${serviceDisplayName}.`,
-                metadata: {
-                  servicePinId: plan.service.servicePinId,
-                  providerGlobalMetaId: normalizeText(service.providerGlobalMetaId),
-                  confirmationPolicyMode: plan.confirmation.policyMode,
-                  confirmationRequired: plan.confirmation.requiresConfirmation,
-                  providerDaemonBaseUrl: request.providerDaemonBaseUrl || null,
-                  orderPinId,
-                  paymentTxid,
-                },
-              },
-            ],
-          },
-        });
-
-        await persistTraceRecord(runtimeStateStore, trace);
+        const { publicStatus, trace, artifacts } = await persistCallerTraceSnapshot();
 
         let responseTrace = trace;
         let responseArtifacts = artifacts;
@@ -6078,7 +6183,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 service: plan.service,
                 payment: plan.payment,
                 confirmation: plan.confirmation,
-                paymentTxid,
+                paymentTxid: paymentTxid || null,
+                orderReference: orderReference || null,
                 orderPinId,
                 session: {
                   sessionId: started.session.sessionId,
@@ -6105,7 +6211,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
           service: plan.service,
           payment: plan.payment,
           confirmation: plan.confirmation,
-          paymentTxid,
+          paymentTxid: paymentTxid || null,
+          orderReference: orderReference || null,
           orderPinId,
           ...(deliveryPinId ? { deliveryPinId } : {}),
           ...(providerReplyText ? { responseText: providerReplyText } : {}),
@@ -6384,6 +6491,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
               callerGlobalMetaId: execution.buyer.globalMetaId || null,
               callerName: execution.buyer.name || execution.buyer.host || null,
               publicStatus: receivedStatus.status,
+              paymentTxid: execution.payment.paymentTxid,
+              orderReference: execution.payment.orderReference,
             },
           },
         ]);
@@ -6413,6 +6522,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             traceId,
             externalConversationId: execution.externalConversationId || null,
             buyer: execution.buyer,
+            payment: execution.payment,
           },
         });
         const applied = sessionEngine.applyProviderRunnerResult({
@@ -6468,9 +6578,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
             role: 'seller',
             serviceId: service.currentPinId,
             serviceName: service.displayName,
-            paymentTxid: null,
-            paymentCurrency: service.currency,
-            paymentAmount: service.price,
+            paymentTxid: execution.payment.paymentTxid,
+            orderReference: execution.payment.orderReference,
+            paymentCurrency: execution.payment.paymentCurrency || service.currency,
+            paymentAmount: execution.payment.paymentAmount || service.price,
           },
           a2a: {
             sessionId: received.session.sessionId,
@@ -6501,6 +6612,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   taskContext: execution.request.taskContext || null,
                   buyerHost: execution.buyer.host || null,
                   buyerGlobalMetaId: execution.buyer.globalMetaId || null,
+                  paymentTxid: execution.payment.paymentTxid,
+                  orderReference: execution.payment.orderReference,
                 },
               },
               {

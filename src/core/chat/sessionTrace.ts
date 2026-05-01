@@ -19,6 +19,7 @@ export interface SessionTraceOrderInput {
   serviceId?: string | null;
   serviceName?: string | null;
   paymentTxid?: string | null;
+  orderReference?: string | null;
   paymentCurrency?: string | null;
   paymentAmount?: string | null;
 }
@@ -128,6 +129,7 @@ export interface SessionTraceRecord {
     serviceId: string | null;
     serviceName: string | null;
     paymentTxid: string | null;
+    orderReference: string | null;
     paymentCurrency: string | null;
     paymentAmount: string | null;
   } | null;
@@ -362,6 +364,7 @@ export function buildSessionTrace(input: BuildSessionTraceInput): SessionTraceRe
           serviceId: normalizeText(input.order.serviceId) || null,
           serviceName: normalizeText(input.order.serviceName) || null,
           paymentTxid: normalizeText(input.order.paymentTxid) || null,
+          orderReference: normalizeText(input.order.orderReference) || null,
           paymentCurrency: normalizeText(input.order.paymentCurrency) || null,
           paymentAmount: normalizeText(input.order.paymentAmount) || null,
         }

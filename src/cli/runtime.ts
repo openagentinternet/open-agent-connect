@@ -57,6 +57,7 @@ import { createPrivateChatAutoReplyOrchestrator } from '../core/chat/privateChat
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
+import { createTestServicePaymentExecutor } from '../core/payments/servicePayment';
 import { runSystemUpdate } from '../core/system/update';
 import { runSystemUninstall } from '../core/system/uninstall';
 import type { CliDependencies, CliRuntimeContext } from './types';
@@ -2117,6 +2118,9 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
   const callerReplyWaiter = createTestMetaWebReplyWaiter(context.env);
   const masterReplyWaiter = createTestMasterReplyWaiter(context.env) ?? createSocketIoMetaWebMasterReplyWaiter();
+  const servicePaymentExecutor = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+    ? createTestServicePaymentExecutor()
+    : undefined;
   const socketPresenceApiBaseUrl = context.env.METABOT_SOCKET_PRESENCE_API_BASE_URL
     || (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 'http://127.0.0.1:9' : undefined);
 
@@ -2143,6 +2147,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       fetchPeerChatPublicKey,
       callerReplyWaiter,
       masterReplyWaiter,
+      servicePaymentExecutor,
       requestMvcGasSubsidy,
       autoReplyConfig: sharedAutoReplyConfig,
     }),
