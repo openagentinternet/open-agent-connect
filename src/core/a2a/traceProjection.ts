@@ -1,7 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { resolveMetabotPaths } from '../state/paths';
-import { extractOrderDisplaySummary } from '../orders/orderMessage';
 import {
   parseDeliveryMessage,
   parseNeedsRatingMessage,
@@ -450,7 +449,7 @@ function projectProtocolMessage(input: {
   if (protocolTag.toUpperCase() === 'ORDER') {
     return {
       type: 'order',
-      content: extractOrderDisplaySummary(rawContent) || stripOrderProtocolFallback(rawContent) || rawContent,
+      content: stripOrderProtocolFallback(rawContent) || rawContent,
       metadata,
     };
   }
@@ -785,6 +784,43 @@ export async function getUnifiedA2ATraceSessionForProfile(input: {
     const session = record.conversation.sessions.find((entry) => (
       normalizeText(entry.sessionId) === sessionId && isCallerVisibleSession(entry)
     ));
+    if (!session) {
+      continue;
+    }
+    return projectDetailSession({
+      profile: input.profile,
+      daemon: input.daemon,
+      conversation: record.conversation,
+      filePath: record.filePath,
+      session,
+    });
+  }
+  return null;
+}
+
+export async function findUnifiedA2ATraceSessionForProfileByOrder(input: {
+  profile: A2ATraceProjectionProfile;
+  orderTxid?: string | null;
+  paymentTxid?: string | null;
+  daemon?: A2ATraceProjectionDaemon | null;
+}): Promise<UnifiedA2ATraceSessionDetail | null> {
+  const orderTxid = normalizeText(input.orderTxid);
+  const paymentTxid = normalizeText(input.paymentTxid);
+  if (!orderTxid && !paymentTxid) {
+    return null;
+  }
+
+  const conversations = await readUnifiedConversations(input.profile);
+  for (const record of conversations) {
+    const session = record.conversation.sessions.find((entry) => {
+      if (entry.type !== 'service_order' || !isCallerVisibleSession(entry)) {
+        return false;
+      }
+      return Boolean(
+        (orderTxid && normalizeText(entry.orderTxid) === orderTxid)
+        || (paymentTxid && normalizeText(entry.paymentTxid) === paymentTxid)
+      );
+    });
     if (!session) {
       continue;
     }

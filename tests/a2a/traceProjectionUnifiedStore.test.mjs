@@ -151,6 +151,9 @@ async function seedUnifiedConversation(homeDir) {
       orderSessionId: ORDER_SESSION_ID,
       orderTxid: ORDER_TXID,
       paymentTxid: PAYMENT_TXID,
+      pinId: `${ORDER_TXID}i0`,
+      txid: ORDER_TXID,
+      txids: [ORDER_TXID],
       content: `[ORDER] Tell me tomorrow weather\n<raw_request>\nTell me tomorrow weather\n</raw_request>\ntxid: ${PAYMENT_TXID}\nservice id: service-pin-1\nskill name: Weather Oracle`,
     }),
     createMessage(3, {
@@ -281,6 +284,13 @@ test('getUnifiedA2ATraceSessionForProfile scopes service-order details and expos
     'msg-4',
     'msg-5',
   ]);
+  const order = detail.transcriptItems.find((item) => item.type === 'order');
+  assert.ok(order);
+  assert.equal(order.sender, 'caller');
+  assert.match(order.content, /Tell me tomorrow weather/);
+  assert.match(order.content, /<raw_request>/);
+  assert.match(order.content, new RegExp(`txid: ${PAYMENT_TXID}`));
+  assert.match(order.content, /service id: service-pin-1/);
 
   const delivery = detail.transcriptItems.find((item) => item.type === 'delivery');
   assert.ok(delivery);
@@ -375,6 +385,113 @@ test('default trace handlers still return legacy-only session-state records when
   assert.equal(detailResult.data.sessionId, 'legacy-session-1');
   assert.equal(detailResult.data.peerGlobalMetaId, PEER_GLOBAL_META_ID);
   assert.equal(detailResult.data.inspector.transcriptItems[0].content, 'legacy trace hello');
+});
+
+test('legacy trace detail uses unified A2A chain order content when the trace only stored a user summary', async () => {
+  const { systemHomeDir, homeDir } = await createProfileFixture();
+  await seedUnifiedConversation(homeDir);
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+  const trace = buildSessionTrace({
+    traceId: 'legacy-trace-with-chain-order',
+    channel: 'a2a',
+    exportRoot: runtimeStateStore.paths.exportsRoot,
+    createdAt: BASE_TIME,
+    session: {
+      id: 'session-legacy-chain-order',
+      title: 'Weather Oracle Call',
+      type: 'a2a',
+      metabotId: 1,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+      peerName: 'Remote Bot',
+      externalConversationId: null,
+    },
+    order: {
+      id: 'order-legacy-chain-order',
+      role: 'buyer',
+      serviceId: 'service-pin-1',
+      serviceName: 'Weather Oracle',
+      orderPinId: `${ORDER_TXID}i0`,
+      orderTxid: ORDER_TXID,
+      orderTxids: [ORDER_TXID],
+      paymentTxid: PAYMENT_TXID,
+      orderReference: null,
+      paymentCurrency: 'SPACE',
+      paymentAmount: '0.00005',
+    },
+    a2a: {
+      sessionId: 'legacy-session-chain-order',
+      taskRunId: 'legacy-run-chain-order',
+      role: 'caller',
+      publicStatus: 'requesting_remote',
+      latestEvent: 'request_sent',
+      taskRunState: 'queued',
+      callerGlobalMetaId: LOCAL_GLOBAL_META_ID,
+      providerGlobalMetaId: PEER_GLOBAL_META_ID,
+      providerName: 'Remote Bot',
+      servicePinId: 'service-pin-1',
+    },
+  });
+  await runtimeStateStore.writeState({
+    identity: null,
+    services: [],
+    traces: [trace],
+  });
+  const store = createSessionStateStore(homeDir);
+  await store.writeState({
+    version: 1,
+    sessions: [
+      {
+        sessionId: 'legacy-session-chain-order',
+        traceId: 'legacy-trace-with-chain-order',
+        role: 'caller',
+        state: 'requesting_remote',
+        createdAt: BASE_TIME,
+        updatedAt: BASE_TIME + 10,
+        callerGlobalMetaId: LOCAL_GLOBAL_META_ID,
+        providerGlobalMetaId: PEER_GLOBAL_META_ID,
+        servicePinId: 'service-pin-1',
+        currentTaskRunId: 'legacy-run-chain-order',
+        latestTaskRunState: 'queued',
+      },
+    ],
+    taskRuns: [],
+    transcriptItems: [
+      {
+        id: 'legacy-user-summary',
+        sessionId: 'legacy-session-chain-order',
+        taskRunId: 'legacy-run-chain-order',
+        timestamp: BASE_TIME,
+        type: 'user_task',
+        sender: 'caller',
+        content: 'Tell me tomorrow weather',
+        metadata: {
+          paymentTxid: PAYMENT_TXID,
+        },
+      },
+    ],
+    cursors: {
+      caller: null,
+      provider: null,
+    },
+    publicStatusSnapshots: [],
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
+  });
+
+  const detailResult = await handlers.trace.getSession({ sessionId: 'legacy-session-chain-order' });
+
+  assert.equal(detailResult.ok, true);
+  const [first] = detailResult.data.inspector.transcriptItems;
+  assert.equal(first.type, 'order');
+  assert.equal(first.sender, 'caller');
+  assert.match(first.content, /Tell me tomorrow weather/);
+  assert.match(first.content, /<raw_request>/);
+  assert.match(first.content, new RegExp(`txid: ${PAYMENT_TXID}`));
+  assert.equal(first.metadata.orderTxid, ORDER_TXID);
+  assert.deepEqual(first.metadata.txids, [ORDER_TXID]);
 });
 
 test('default trace handlers sort legacy transcript items with mixed seconds and milliseconds timestamps', async () => {

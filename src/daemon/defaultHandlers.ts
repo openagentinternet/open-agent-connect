@@ -55,7 +55,7 @@ import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
 import { readChainDirectoryWithFallback } from '../core/discovery/chainDirectoryReader';
 import { HEARTBEAT_ONLINE_WINDOW_SEC } from '../core/discovery/chainHeartbeatDirectory';
 import { readOnlineMetaBotsFromSocketPresence } from '../core/discovery/socketPresenceDirectory';
-import { createSessionStateStore } from '../core/a2a/sessionStateStore';
+import { createSessionStateStore, type A2ATranscriptItemRecord } from '../core/a2a/sessionStateStore';
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/sessionEngine';
@@ -71,6 +71,7 @@ import {
   type A2AConversationMessagePersister,
 } from '../core/a2a/conversationPersistence';
 import {
+  findUnifiedA2ATraceSessionForProfileByOrder,
   getUnifiedA2ATraceSessionForProfile,
   listUnifiedA2ATraceSessionsForProfile,
 } from '../core/a2a/traceProjection';
@@ -1768,6 +1769,89 @@ function extractTraceRatingClosure(input: {
   };
 }
 
+function readTranscriptMetadata(item: {
+  metadata?: Record<string, unknown> | null;
+}): Record<string, unknown> {
+  return item.metadata && typeof item.metadata === 'object' && !Array.isArray(item.metadata)
+    ? item.metadata
+    : {};
+}
+
+function normalizedMetadataValue(
+  item: { metadata?: Record<string, unknown> | null },
+  key: string,
+): string {
+  return normalizeText(readTranscriptMetadata(item)[key]);
+}
+
+function transcriptItemsShareOrderReference(
+  legacyItem: A2ATranscriptItemRecord,
+  unifiedItem: A2ATranscriptItemRecord,
+): boolean {
+  const keys = ['orderTxid', 'paymentTxid', 'txid', 'pinId', 'deliveryPinId', 'ratingPinId'];
+  return keys.some((key) => {
+    const left = normalizedMetadataValue(legacyItem, key);
+    const right = normalizedMetadataValue(unifiedItem, key);
+    return Boolean(left && right && left === right);
+  });
+}
+
+function mergeLegacyTranscriptWithUnifiedChainMessages(input: {
+  transcriptItems: A2ATranscriptItemRecord[];
+  unifiedTranscriptItems?: A2ATranscriptItemRecord[] | null;
+}): A2ATranscriptItemRecord[] {
+  const unifiedOrders = (input.unifiedTranscriptItems ?? [])
+    .filter((item) => item.sender === 'caller' && item.type === 'order' && normalizeText(item.content));
+  if (!unifiedOrders.length) {
+    return input.transcriptItems;
+  }
+
+  const usedUnifiedIds = new Set<string>();
+  const merged = input.transcriptItems.map((item) => {
+    const canReplace = item.sender === 'caller' && (
+      item.type === 'user_task'
+      || item.type === 'order'
+      || item.type === 'message'
+    );
+    if (!canReplace) {
+      return item;
+    }
+    const replacement = unifiedOrders.find((candidate) => (
+      !usedUnifiedIds.has(candidate.id)
+      && transcriptItemsShareOrderReference(item, candidate)
+    ));
+    if (!replacement) {
+      return item;
+    }
+    usedUnifiedIds.add(replacement.id);
+    return {
+      ...item,
+      timestamp: normalizeTraceTimestamp(replacement.timestamp) || item.timestamp,
+      type: replacement.type,
+      content: replacement.content,
+      metadata: {
+        ...readTranscriptMetadata(item),
+        ...readTranscriptMetadata(replacement),
+        legacyContent: item.content,
+        legacyType: item.type,
+        legacyId: item.id,
+      },
+    };
+  });
+
+  const existingIds = new Set(merged.map((item) => item.id));
+  for (const order of unifiedOrders) {
+    if (usedUnifiedIds.has(order.id) || existingIds.has(order.id)) {
+      continue;
+    }
+    merged.push(order);
+  }
+
+  return merged.sort((left, right) => (
+    normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp)
+  ));
+}
+
 async function buildTraceInspectorPayload(input: {
   traceId: string;
   trace: ReturnType<typeof buildSessionTrace>;
@@ -1776,6 +1860,7 @@ async function buildTraceInspectorPayload(input: {
   chainApiBaseUrl?: string;
   daemon?: RuntimeDaemonRecord | null;
   selectedSessionId?: string | null;
+  unifiedTranscriptItems?: A2ATranscriptItemRecord[] | null;
 }) {
   const sessionState = await input.sessionStateStore.readState();
   const sessions = sessionState.sessions
@@ -1791,9 +1876,13 @@ async function buildTraceInspectorPayload(input: {
   const taskRuns = sessionState.taskRuns
     .filter((entry) => sessionIds.has(entry.sessionId))
     .sort((left, right) => left.createdAt - right.createdAt);
-  const transcriptItems = sessionState.transcriptItems
+  let transcriptItems = sessionState.transcriptItems
     .filter((entry) => sessionIds.has(entry.sessionId))
     .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
+  transcriptItems = mergeLegacyTranscriptWithUnifiedChainMessages({
+    transcriptItems,
+    unifiedTranscriptItems: input.unifiedTranscriptItems ?? null,
+  });
   const publicStatusSnapshots = sessionState.publicStatusSnapshots
     .filter((entry) => sessionIds.has(entry.sessionId))
     .sort((left, right) => normalizeTraceTimestamp(left.resolvedAt) - normalizeTraceTimestamp(right.resolvedAt));
@@ -5967,6 +6056,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         let a2aStoreError: string | null = null;
         let providerReplyText: string | null = null;
         let deliveryPinId: string | null = null;
+        let orderPayloadForTrace = '';
         const persistCallerTraceSnapshot = async (failure?: {
           code?: string | null;
           message?: string | null;
@@ -5975,21 +6065,28 @@ export function createDefaultMetabotDaemonHandlers(input: {
             throw new Error('Service order payment metadata was not created.');
           }
           const publicStatus = await persistSessionMutation(sessionStateStore, started);
+          const callerChainContent = normalizeText(orderPayloadForTrace);
           await appendA2ATranscriptItems(sessionStateStore, [
             {
               id: `${plan.traceId}-caller-user-task`,
               sessionId: started.session.sessionId,
               taskRunId: started.taskRun.runId,
               timestamp: started.session.createdAt,
-              type: 'user_task',
+              type: callerChainContent ? 'order' : 'user_task',
               sender: 'caller',
-              content: request.userTask,
+              content: callerChainContent || request.userTask,
               metadata: {
                 taskContext: request.taskContext || null,
                 servicePinId: plan.service.servicePinId,
                 providerGlobalMetaId: plan.service.providerGlobalMetaId,
+                protocolTag: callerChainContent ? 'ORDER' : null,
+                pinId: orderPinId,
+                txid: orderTxid,
+                txids: orderTxids,
+                orderTxid,
                 paymentTxid: paymentTxid || null,
                 orderReference: orderReference || null,
+                rawContent: callerChainContent || null,
               },
             },
             {
@@ -6194,6 +6291,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             currency: orderPayment.paymentCurrency,
             outputType: normalizeText(service.outputType),
           });
+          orderPayloadForTrace = orderPayload;
 
           let outboundOrder;
           try {
@@ -7330,6 +7428,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
               trace = null;
             }
             if (trace) {
+              const unifiedOrderSession = await findUnifiedA2ATraceSessionForProfileByOrder({
+                profile,
+                orderTxid: trace.order?.orderTxid ?? null,
+                paymentTxid: trace.order?.paymentTxid ?? null,
+                daemon: input.getDaemonRecord(),
+              }).catch(() => null);
               const payload = await buildTraceInspectorPayload({
                 traceId,
                 trace,
@@ -7338,6 +7442,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 chainApiBaseUrl: input.chainApiBaseUrl,
                 daemon: input.getDaemonRecord(),
                 selectedSessionId: normalizedSessionId,
+                unifiedTranscriptItems: unifiedOrderSession?.transcriptItems ?? null,
               });
 
               return commandSuccess({

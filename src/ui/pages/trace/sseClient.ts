@@ -135,9 +135,21 @@ function fmtTimeAgo(ms) {
 function fmtTime(ms) {
   if (!ms) return '';
   const d = new Date(ms);
+  const now = new Date();
   const hh = String(d.getHours()).padStart(2,'0');
   const mm = String(d.getMinutes()).padStart(2,'0');
-  return hh + ':' + mm;
+  const time = hh + ':' + mm;
+  const sameDay = d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate();
+  if (sameDay) return time;
+  const month = String(d.getMonth() + 1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  if (d.getFullYear() === now.getFullYear()) {
+    return month + '-' + day + ' ' + time;
+  }
+  const yy = String(d.getFullYear()).slice(-2);
+  return yy + '-' + month + '-' + day + ' ' + time;
 }
 
 function fmtDate(ms) {
@@ -198,31 +210,211 @@ function extractMetafiles(content) {
   return result;
 }
 
+// ─── Chain txid helpers ─────────────────────────────────────────────────────
+
+const TXID_RE = /^[0-9a-f]{64}$/i;
+const PIN_ID_TXID_RE = /^([0-9a-f]{64})i\\d+$/i;
+
+function normalizeTxidCandidate(value) {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return TXID_RE.test(normalized) ? normalized : '';
+}
+
+function normalizePinIdTxid(value) {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const match = normalized.match(PIN_ID_TXID_RE);
+  return match ? match[1] : '';
+}
+
+function resolveMessageTxid(msg) {
+  const metadata = msg && msg.metadata && typeof msg.metadata === 'object' ? msg.metadata : {};
+  const txidsCandidate = Array.isArray(metadata.txids)
+    ? metadata.txids.map(normalizeTxidCandidate).find(Boolean)
+    : '';
+  if (txidsCandidate) return txidsCandidate;
+
+  const directKeys = [
+    'txid',
+    'messageTxid',
+    'pinTxid',
+    'deliveryTxid',
+    'deliveryMessageTxid',
+    'orderMessageTxid',
+    'orderTxid',
+    'ratingTxid',
+  ];
+  for (const key of directKeys) {
+    const normalized = normalizeTxidCandidate(metadata[key]);
+    if (normalized) return normalized;
+  }
+
+  const pinKeys = [
+    'pinId',
+    'messagePinId',
+    'deliveryPinId',
+    'deliveryMessagePinId',
+    'orderPinId',
+    'orderMessagePinId',
+    'ratingPinId',
+    'refundRequestPinId',
+    'refundFinalizePinId',
+  ];
+  for (const key of pinKeys) {
+    const normalized = normalizePinIdTxid(metadata[key]);
+    if (normalized) return normalized;
+  }
+
+  return '';
+}
+
+function formatTxidPreview(txid) {
+  const normalized = normalizeTxidCandidate(txid);
+  return normalized ? normalized.slice(0, 8) + '....' : '';
+}
+
 // ─── Simple markdown renderer ────────────────────────────────────────────────
 
 function renderMarkdown(text) {
   if (!text) return '';
-  const blocks = [];
-  let html = escHtml(text).replace(/\`\`\`([\\s\\S]*?)\`\`\`/g, function(_, code) {
-    const i = blocks.length;
-    blocks.push('<pre class="md-code"><code>' + code + '</code></pre>');
-    return '\\x00' + i + '\\x00';
+  const codeBlocks = [];
+  let source = String(text || '').replace(/\\r\\n?/g, '\\n');
+  source = source.replace(/\`\`\`([^\\n\`]*)\\n?([\\s\\S]*?)\`\`\`/g, function(_, lang, code) {
+    const index = codeBlocks.length;
+    codeBlocks.push('<pre class="md-code"><code>' + escHtml(code.replace(/\\n$/, '')) + '</code></pre>');
+    return '@@CODEBLOCK_' + index + '@@';
   });
-  html = html.replace(/\`([^\`\\n]+)\`/g, '<code class="md-inline-code">$1</code>');
-  html = html.replace(/\\*\\*([^*\\n]+)\\*\\*/g, '<strong>$1</strong>');
-  html = html.replace(/\\*([^*\\n]+)\\*/g, '<em>$1</em>');
-  html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-  html = html.replace(/^(- .+(\\n- .+)*)/gm, function(block) {
-    const items = block.split('\\n').map(l => '<li>' + l.replace(/^- /, '') + '</li>').join('');
-    return '<ul>' + items + '</ul>';
-  });
-  html = html.replace(/\\n\\n/g, '</p><p>');
-  html = html.replace(/\\n/g, '<br>');
-  html = html.replace(/\\x00(\\d+)\\x00/g, function(_, i) { return blocks[+i]; });
-  return '<p>' + html + '</p>';
+
+  function safeHref(rawHref) {
+    const href = String(rawHref || '').trim().replace(/&amp;/g, '&');
+    if (/^(https?:|mailto:|tel:|file:)/i.test(href)) {
+      return escHtml(href);
+    }
+    return '';
+  }
+  function inlineMarkdown(raw) {
+    let html = escHtml(raw);
+    html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, function(_, label, href) {
+      const safe = safeHref(href);
+      return safe
+        ? '<a href="' + safe + '" target="_blank" rel="noopener">' + label + '</a>'
+        : label;
+    });
+    html = html.replace(/\`([^\`\\n]+)\`/g, '<code class="md-inline-code">$1</code>');
+    html = html.replace(/\\*\\*([^*\\n]+)\\*\\*/g, '<strong>$1</strong>');
+    html = html.replace(/\\*([^*\\n]+)\\*/g, '<em>$1</em>');
+    return html;
+  }
+  function isTableSeparator(line) {
+    return /^\\s*\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)+\\|?\\s*$/.test(line || '');
+  }
+  function splitTableRow(line) {
+    let trimmed = String(line || '').trim();
+    if (trimmed.startsWith('|')) trimmed = trimmed.slice(1);
+    if (trimmed.endsWith('|')) trimmed = trimmed.slice(0, -1);
+    return trimmed.split('|').map(cell => cell.trim());
+  }
+  function startsBlock(line, nextLine) {
+    return /^@@CODEBLOCK_\\d+@@$/.test(line)
+      || /^#{1,6}\\s+/.test(line)
+      || /^\\s*>\\s?/.test(line)
+      || /^\\s*[-*]\\s+/.test(line)
+      || /^\\s*\\d+\\.\\s+/.test(line)
+      || /^\\s*(-{3,}|\\*{3,}|_{3,})\\s*$/.test(line)
+      || (line.includes('|') && isTableSeparator(nextLine || ''));
+  }
+
+  const lines = source.split('\\n');
+  const html = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    const codeMatch = trimmed.match(/^@@CODEBLOCK_(\\d+)@@$/);
+    if (codeMatch) {
+      html.push(codeBlocks[Number(codeMatch[1])] || '');
+      continue;
+    }
+
+    if (line.includes('|') && isTableSeparator(lines[index + 1] || '')) {
+      const headers = splitTableRow(line);
+      index += 2;
+      const rows = [];
+      while (index < lines.length && lines[index].trim() && lines[index].includes('|')) {
+        rows.push(splitTableRow(lines[index]));
+        index += 1;
+      }
+      index -= 1;
+      html.push(
+        '<table><thead><tr>'
+        + headers.map(cell => '<th>' + inlineMarkdown(cell) + '</th>').join('')
+        + '</tr></thead><tbody>'
+        + rows.map(row => '<tr>' + row.map(cell => '<td>' + inlineMarkdown(cell) + '</td>').join('') + '</tr>').join('')
+        + '</tbody></table>'
+      );
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      html.push('<h' + level + '>' + inlineMarkdown(heading[2]) + '</h' + level + '>');
+      continue;
+    }
+
+    if (/^\\s*(-{3,}|\\*{3,}|_{3,})\\s*$/.test(line)) {
+      html.push('<hr>');
+      continue;
+    }
+
+    if (/^\\s*>\\s?/.test(line)) {
+      const quoteLines = [];
+      while (index < lines.length && /^\\s*>\\s?/.test(lines[index])) {
+        quoteLines.push(lines[index].replace(/^\\s*>\\s?/, ''));
+        index += 1;
+      }
+      index -= 1;
+      html.push('<blockquote>' + quoteLines.map(inlineMarkdown).join('<br>') + '</blockquote>');
+      continue;
+    }
+
+    if (/^\\s*[-*]\\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\\s*[-*]\\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\\s*[-*]\\s+/, ''));
+        index += 1;
+      }
+      index -= 1;
+      html.push('<ul>' + items.map(item => '<li>' + inlineMarkdown(item) + '</li>').join('') + '</ul>');
+      continue;
+    }
+
+    if (/^\\s*\\d+\\.\\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\\s*\\d+\\.\\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\\s*\\d+\\.\\s+/, ''));
+        index += 1;
+      }
+      index -= 1;
+      html.push('<ol>' + items.map(item => '<li>' + inlineMarkdown(item) + '</li>').join('') + '</ol>');
+      continue;
+    }
+
+    const paragraph = [line];
+    while (
+      index + 1 < lines.length
+      && lines[index + 1].trim()
+      && !startsBlock(lines[index + 1], lines[index + 2])
+    ) {
+      index += 1;
+      paragraph.push(lines[index]);
+    }
+    html.push('<p>' + paragraph.map(inlineMarkdown).join('<br>') + '</p>');
+  }
+
+  return html.join('');
 }
 
 // ─── Avatar helpers ─────────────────────────────────────────────────────────
@@ -288,6 +480,8 @@ let stats = { totalCount: 0, callerCount: 0, providerCount: 0, lastUpdatedAt: nu
 let selectedSessionId = null;
 let sessionDetail = null;
 let refreshTimer = null;
+let refreshInFlight = false;
+let detailLoadSeq = 0;
 
 const $ = (sel) => document.querySelector(sel);
 const qAll = (sel) => [...document.querySelectorAll(sel)];
@@ -422,9 +616,19 @@ async function renderSessionDetail() {
       }
     });
   });
+  panel.querySelectorAll('[data-copy-txid]').forEach(btn => {
+    btn.addEventListener('click', () => copyTextToClipboard(btn.dataset.copyTxid || ''));
+  });
 }
 
 const TOOL_ID_SEQ = { n: 0 };
+
+function copyTextToClipboard(value) {
+  if (!value || typeof navigator === 'undefined' || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+    return;
+  }
+  navigator.clipboard.writeText(value).catch(() => {});
+}
 
 function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
   if (msg.tone === 'system') {
@@ -448,6 +652,15 @@ function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
   const avatar = isLocal ? localAvatar : peerAvatar;
   const metafiles = extractMetafiles(msg.content);
   const timeStr = fmtTime(msg.timestamp);
+  const txid = resolveMessageTxid(msg);
+  const txidPreview = formatTxidPreview(txid);
+  const timeHtml = '<span class="msg-time">' + escHtml(timeStr) + '</span>';
+  const txidHtml = txidPreview
+    ? '<span class="msg-txid"><span class="msg-txid-text">txid: ' + escHtml(txidPreview) + '</span><button type="button" class="copy-txid" data-copy-txid="' + escHtml(txid) + '" title="Copy txid" aria-label="Copy txid">Copy</button></span>'
+    : '';
+  const metaHtml = isLocal
+    ? txidHtml + timeHtml
+    : timeHtml + txidHtml;
   let contentHtml = renderMarkdown(msg.content);
   if (metafiles.length) {
     const cleanContent = msg.content.replace(METAFILE_REGEX, '').trim();
@@ -460,7 +673,7 @@ function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
       '<div class="msg-name">' + escHtml(name) + '</div>' +
       '<div class="msg-bubble ' + (isLocal ? 'bubble-local' : 'bubble-peer') + '">' + (contentHtml || '<span class="muted">(empty)</span>') + '</div>' +
       (metafileHtml ? '<div class="msg-metafiles">' + metafileHtml + '</div>' : '') +
-      '<div class="msg-time">' + escHtml(timeStr) + '</div>' +
+      '<div class="msg-meta ' + (isLocal ? 'msg-meta-local' : 'msg-meta-peer') + '">' + metaHtml + '</div>' +
     '</div></div>';
 }
 
@@ -481,16 +694,21 @@ async function loadSessions() {
   }
 }
 
-async function loadSessionDetail(sessionId) {
+async function loadSessionDetail(sessionId, options) {
+  options = options || {};
+  const silent = options.silent === true;
+  const sequence = ++detailLoadSeq;
   const panel = $('[data-session-detail]');
-  if (panel) panel.innerHTML = '<div class="detail-loading"><span class="mono">Loading session…</span></div>';
+  if (panel && !silent) panel.innerHTML = '<div class="detail-loading"><span class="mono">Loading session…</span></div>';
   try {
     const resp = await fetch('/api/trace/sessions/' + encodeURIComponent(sessionId));
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const json = await resp.json();
+    if (sequence !== detailLoadSeq) return;
     sessionDetail = buildSessionDetailViewModel(json.data || json);
     await renderSessionDetail();
   } catch (err) {
+    if (sequence !== detailLoadSeq) return;
     sessionDetail = null;
     if (panel) panel.innerHTML = '<div class="detail-empty error-text"><p>Failed to load session: ' + escHtml(String(err)) + '</p></div>';
   }
@@ -500,14 +718,20 @@ async function selectSession(sessionId) {
   if (selectedSessionId === sessionId) return;
   selectedSessionId = sessionId;
   qAll('[data-session-id]').forEach(el => el.classList.toggle('selected', el.dataset.sessionId === sessionId));
-  await loadSessionDetail(sessionId);
+  await loadSessionDetail(sessionId, { silent: false });
 }
 
 function startRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(async () => {
-    await loadSessions();
-    if (selectedSessionId) await loadSessionDetail(selectedSessionId);
+    if (refreshInFlight) return;
+    refreshInFlight = true;
+    try {
+      await loadSessions();
+      if (selectedSessionId) await loadSessionDetail(selectedSessionId, { silent: true });
+    } finally {
+      refreshInFlight = false;
+    }
   }, 15000);
 }
 
