@@ -57,6 +57,10 @@ import { createPrivateChatAutoReplyOrchestrator } from '../core/chat/privateChat
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
+import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
+import { createLlmBindingStore } from '../core/llm/llmBindingStore';
+import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
+import { discoverLlmRuntimes } from '../core/llm/llmRuntimeDiscovery';
 import { runSystemUpdate } from '../core/system/update';
 import { runSystemUninstall } from '../core/system/uninstall';
 import type { CliDependencies, CliRuntimeContext } from './types';
@@ -823,7 +827,7 @@ async function startDetachedDaemon(
 
 async function requestJson<T>(
   context: CliRuntimeContext,
-  method: 'GET' | 'POST' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   routePath: string,
   body?: Record<string, unknown>,
   options: { allowUnindexedExplicitHome?: boolean } = {},
@@ -1402,11 +1406,15 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           targetHomeDir = resolvedHome.homeDir;
         }
 
+        const createInput: Record<string, unknown> = { name: input.name };
+        if (input.host) {
+          createInput.host = input.host;
+        }
         return requestJson(
           cloneContextWithHomeDir(context, targetHomeDir),
           'POST',
           '/api/identity/create',
-          input,
+          createInput,
           {
             allowUnindexedExplicitHome: true,
           },
@@ -1809,6 +1817,15 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
       },
     },
+    llm: {
+      listRuntimes: async () => requestJson(context, 'GET', '/api/llm/runtimes'),
+      discoverRuntimes: async () => requestJson(context, 'POST', '/api/llm/runtimes/discover'),
+      listBindings: async (input) => requestJson(context, 'GET', `/api/llm/bindings/${encodeURIComponent(input.slug)}`),
+      upsertBindings: async (input) => requestJson(context, 'PUT', `/api/llm/bindings/${encodeURIComponent(input.slug)}`, { bindings: input.bindings }),
+      removeBinding: async (input) => requestJson(context, 'DELETE', `/api/llm/bindings/${encodeURIComponent(input.bindingId)}/delete`),
+      getPreferredRuntime: async (input) => requestJson(context, 'GET', `/api/llm/preferred-runtime/${encodeURIComponent(input.slug)}`),
+      setPreferredRuntime: async (input) => requestJson(context, 'PUT', `/api/llm/preferred-runtime/${encodeURIComponent(input.slug)}`, { runtimeId: input.runtimeId }),
+    },
     evolution: {
       status: async () => {
         const homeDir = normalizeHomeDir(context.env, context.cwd);
@@ -2096,6 +2113,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     skills: { ...defaults.skills, ...provided.skills },
     host: { ...defaults.host, ...provided.host },
     system: { ...defaults.system, ...provided.system },
+    llm: { ...defaults.llm, ...provided.llm },
     evolution: { ...defaults.evolution, ...provided.evolution },
   };
 }
@@ -2194,6 +2212,31 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     await providerHeartbeatLoop.start();
   }
 
+  // ---- LLM runtime discovery and resolver ----
+  const llmRuntimeStore = createLlmRuntimeStore(paths);
+  const llmBindingStore = createLlmBindingStore(paths);
+  const llmResolver = createLlmRuntimeResolver({
+    runtimeStore: llmRuntimeStore,
+    bindingStore: llmBindingStore,
+    getPreferredRuntimeId: async (_slug) => {
+      try {
+        const raw = await fs.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
+        const data = JSON.parse(raw) as { runtimeId?: string | null };
+        return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+      } catch {
+        return null;
+      }
+    },
+  });
+
+  // Discover LLM runtimes in background (non-blocking).
+  const metaBotSlug = path.basename(paths.profileRoot);
+  void discoverLlmRuntimes({ env: context.env }).then(async (result) => {
+    for (const runtime of result.runtimes) {
+      await llmRuntimeStore.upsertRuntime(runtime).catch(() => { /* best effort */ });
+    }
+  });
+
   const chatStateStore = createPrivateChatStateStore(paths);
   const chatStrategyStore = createChatStrategyStore(paths);
   const resolvePeerChatPublicKeyForChat = fetchPeerChatPublicKey ?? fetchPeerChatPublicKeyFromChain;
@@ -2207,7 +2250,10 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       return state.identity?.globalMetaId ?? null;
     },
     resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
-    replyRunner: createHostLlmChatReplyRunner(),
+    replyRunner: createHostLlmChatReplyRunner({
+      runtimeResolver: llmResolver,
+      metaBotSlug,
+    }),
   }, sharedAutoReplyConfig);
 
   const privateChatListener = createPrivateChatListener({

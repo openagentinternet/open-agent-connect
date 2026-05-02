@@ -4,7 +4,7 @@ import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 
 export type Awaitable<T> = T | Promise<T>;
 
-export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'chat-viewer';
+export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'chat-viewer' | 'bot';
 
 export interface MetabotDaemonHttpHandlers {
   buzz?: {
@@ -18,7 +18,7 @@ export interface MetabotDaemonHttpHandlers {
     doctor?: () => Awaitable<MetabotCommandResult<unknown>>;
   };
   identity?: {
-    create?: (input: { name: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    create?: (input: { name: string; host?: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   master?: {
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
@@ -80,6 +80,15 @@ export interface MetabotDaemonHttpHandlers {
   };
   ui?: {
     renderPage?: (page: MetabotUiPageName) => Awaitable<string>;
+  };
+  llm?: {
+    listRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
+    discoverRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
+    listBindings?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    upsertBindings?: (input: { slug: string; bindings: Record<string, unknown>[] }) => Awaitable<MetabotCommandResult<unknown>>;
+    removeBinding?: (input: { bindingId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    getPreferredRuntime?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    setPreferredRuntime?: (input: { slug: string; runtimeId: string | null }) => Awaitable<MetabotCommandResult<unknown>>;
   };
 }
 

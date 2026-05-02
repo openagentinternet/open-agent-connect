@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
+    <style>
+      .runtime-card { background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
+      .runtime-card .name { font-weight: 600; color: var(--text); }
+      .runtime-card .meta { font-size: 12px; color: var(--muted); }
+      .health-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+      .health-dot.healthy { background: var(--green, #4ade80); }
+      .health-dot.degraded { background: var(--amber, #fbbf24); }
+      .health-dot.unavailable { background: var(--red, #f87171); }
+      .binding-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border2); }
+      .binding-role { font-size: 11px; text-transform: uppercase; font-weight: 600; background: var(--surface2); padding: 2px 6px; border-radius: 4px; }
+      .btn-sm { font-size: 12px; padding: 4px 10px; border: 1px solid var(--border2); border-radius: 4px; cursor: pointer; background: var(--surface2); color: var(--text); }
+      .btn-sm:hover { background: var(--surface-hover); }
+      .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); }
+      .section-title { font-size: 14px; font-weight: 600; color: var(--text); margin: 16px 0 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      __PAGE_NAV__
+      <main class="main-content">
+        <div class="page-header">
+          <p class="eyebrow">__PAGE_EYEBROW__</p>
+          <h1 class="page-heading">__PAGE_HEADING__</h1>
+        </div>
+        __PAGE_CONTENT__
+      </main>
+    </div>
+    <script>__PAGE_SCRIPT__</script>
+  </body>
+</html>

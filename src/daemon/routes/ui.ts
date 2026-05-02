@@ -6,6 +6,7 @@ import { buildMyServicesPageDefinition } from '../../ui/pages/my-services/app';
 import { buildPublishPageDefinition } from '../../ui/pages/publish/app';
 import { buildRefundPageDefinition } from '../../ui/pages/refund/app';
 import { buildTracePageDefinition } from '../../ui/pages/trace/app';
+import { buildBotPageDefinition } from '../../ui/pages/bot/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
 import type { MetabotUiPageName, RouteHandler } from './types';
 import { handleBundledMetaAppRoutes } from './uiMetaApps';
@@ -19,10 +20,12 @@ const PAGE_BUILDERS: Record<MetabotUiPageName, () => LocalUiPageDefinition> = {
   'trace': buildTracePageDefinition,
   'refund': buildRefundPageDefinition,
   'chat-viewer': buildChatViewerPageDefinition,
+  'bot': buildBotPageDefinition,
 };
 
 const NAV_ITEMS: Array<{ page: MetabotUiPageName; label: string }> = [
   { page: 'hub', label: 'Hub' },
+  { page: 'bot', label: 'Bot' },
   { page: 'trace', label: 'Trace' },
   { page: 'refund', label: 'Refund' },
   { page: 'chat-viewer', label: 'Chat Viewer' },

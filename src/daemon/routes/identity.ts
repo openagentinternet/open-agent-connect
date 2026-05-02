@@ -17,6 +17,7 @@ export const handleIdentityRoutes: RouteHandler = async (context) => {
   const result = handlers.identity?.create
     ? await handlers.identity.create({
         name: typeof input.name === 'string' ? input.name : '',
+        ...(typeof input.host === 'string' ? { host: input.host } : {}),
       })
     : commandFailed('not_implemented', 'Identity create handler is not configured.');
   context.sendJson(200, result);

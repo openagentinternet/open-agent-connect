@@ -199,6 +199,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'ui', summary: 'Open local human-only HTML pages backed by the MetaBot runtime.' },
     { name: 'skills', summary: 'Resolve shared-default or host-specific skill contracts for install/runtime use.' },
     { name: 'system', summary: 'Update or uninstall local Open Agent Connect runtime assets.' },
+	{ name: 'llm', summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings.' },
   ],
   optionalFlags: [VERSION_FLAG, HELP_JSON_FLAG],
   examples: [
@@ -1163,4 +1164,27 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot ui open --page trace --trace-id trace-123',
     ],
   },
+
+  {
+    commandPath: ['llm'],
+    summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings.',
+    usage: 'metabot llm <subcommand>',
+    subcommands: [
+      { name: 'list-runtimes', summary: 'List all discovered LLM runtimes on this machine.' },
+      { name: 'discover', summary: 'Scan PATH for available LLM runtimes (claude, codex, openclaw) and register them.' },
+      { name: 'bindings', summary: 'List LLM bindings for a MetaBot profile.' },
+      { name: 'bind', summary: 'Create or update a binding between a MetaBot and an LLM runtime.' },
+      { name: 'unbind', summary: 'Remove a specific LLM binding by id.' },
+      { name: 'set-preferred', summary: 'Set the preferred LLM runtime for a MetaBot profile.' },
+      { name: 'get-preferred', summary: 'Get the preferred LLM runtime for a MetaBot profile.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+    examples: [
+      'metabot llm discover',
+      'metabot llm list-runtimes',
+      'metabot llm bind --slug my-bot --runtime-id llm_claude_code_0 --role primary',
+      'metabot llm bindings --slug my-bot',
+    ],
+  },
+
 ];
