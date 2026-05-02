@@ -26,7 +26,11 @@ import {
   type RuntimeIdentityRecord,
   type RuntimeState,
 } from '../core/state/runtimeStateStore';
-import type { MetabotPaths } from '../core/state/paths';
+import { resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
+import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
+import { createLlmBindingStore } from '../core/llm/llmBindingStore';
+import { discoverLlmRuntimes } from '../core/llm/llmRuntimeDiscovery';
+import { normalizeLlmBinding } from '../core/llm/llmTypes';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 import { buildPublishedService } from '../core/services/publishService';
 import { publishServiceToChain } from '../core/services/servicePublishChain';
@@ -4818,7 +4822,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     },
     identity: {
-      create: async ({ name }) => {
+      create: async ({ name, host }) => {
         const normalizedName = normalizeText(name);
         if (!normalizedName) {
           return commandFailed('missing_name', 'MetaBot identity name is required.');
@@ -4904,6 +4908,34 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
           await registerActiveIdentityProfile(nextState.identity);
           await ensureDefaultPersonaFiles(runtimeStateStore.paths, normalizedName);
+
+          // Auto-bind to LLM runtime if host is specified or detectable.
+          try {
+            const resolvedHost = normalizeText(host) || normalizeText(process.env.METABOT_HOST || '') || '';
+            if (resolvedHost && ['claude-code', 'codex', 'openclaw'].includes(resolvedHost)) {
+              const discoveryResult = await discoverLlmRuntimes({ env: process.env });
+              const matchedRuntime = discoveryResult.runtimes.find((r) => r.provider === resolvedHost);
+              if (matchedRuntime) {
+                const runtimeStore = createLlmRuntimeStore(input.homeDir);
+                await runtimeStore.upsertRuntime(matchedRuntime);
+                const resolvedSlug = path.basename(input.homeDir);
+                const bindingStore = createLlmBindingStore(input.homeDir);
+                await bindingStore.upsertBinding({
+                  id: `lb_${resolvedSlug}_${matchedRuntime.id}_primary`,
+                  metaBotSlug: resolvedSlug,
+                  llmRuntimeId: matchedRuntime.id,
+                  role: 'primary',
+                  priority: 0,
+                  enabled: true,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                });
+              }
+            }
+          } catch {
+            // Auto-binding is best-effort; never fail identity creation.
+          }
+
           return commandSuccess(nextState.identity);
         }
 
@@ -4911,6 +4943,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
           'identity_bootstrap_failed',
           bootstrap.error ?? 'MetaBot identity bootstrap failed before the identity was ready.'
         );
+      },
+      listProfiles: async () => {
+        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        return commandSuccess({
+          profiles: profiles.map((p) => ({
+            name: p.name,
+            slug: p.slug,
+            globalMetaId: p.globalMetaId,
+            mvcAddress: p.mvcAddress,
+            homeDir: p.homeDir,
+          })),
+        });
       },
     },
     master: {
@@ -8249,6 +8293,81 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         return commandFailed('session_not_found', `A2A session not found: ${normalizedSessionId}`);
+      },
+    },
+    llm: {
+      listRuntimes: async () => {
+        const runtimeStore = createLlmRuntimeStore(input.homeDir);
+        const state = await runtimeStore.read();
+        return commandSuccess(state);
+      },
+      discoverRuntimes: async () => {
+        const result = await discoverLlmRuntimes({ env: process.env });
+        const runtimeStore = createLlmRuntimeStore(input.homeDir);
+        for (const runtime of result.runtimes) {
+          await runtimeStore.upsertRuntime(runtime);
+        }
+        const updated = await runtimeStore.read();
+        return commandSuccess({ discovered: result.runtimes.length, runtimes: updated.runtimes, errors: result.errors });
+      },
+      listBindings: async ({ slug }) => {
+        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        const profile = profiles.find((p) => p.slug === slug);
+        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${slug}`);
+        const paths = resolveMetabotPaths(profile.homeDir);
+        const bindingStore = createLlmBindingStore(paths);
+        const state = await bindingStore.read();
+        return commandSuccess(state);
+      },
+      upsertBindings: async ({ slug, bindings }) => {
+        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        const profile = profiles.find((p) => p.slug === slug);
+        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${slug}`);
+        const paths = resolveMetabotPaths(profile.homeDir);
+        const bindingStore = createLlmBindingStore(paths);
+        const state = await bindingStore.read();
+        const otherBindings = state.bindings.filter((b) => b.metaBotSlug !== slug);
+        const normalizedBindings = bindings
+          .map((b) => normalizeLlmBinding({ ...b, metaBotSlug: slug }))
+          .filter((b): b is NonNullable<ReturnType<typeof normalizeLlmBinding>> => b !== null);
+        const nextState = { ...state, bindings: [...otherBindings, ...normalizedBindings], version: state.version + 1 };
+        const written = await bindingStore.write(nextState);
+        return commandSuccess(written);
+      },
+      removeBinding: async ({ bindingId }) => {
+        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        for (const profile of profiles) {
+          const paths = resolveMetabotPaths(profile.homeDir);
+          const bindingStore = createLlmBindingStore(paths);
+          const state = await bindingStore.read();
+          if (state.bindings.some((b) => b.id === bindingId)) {
+            const next = await bindingStore.removeBinding(bindingId);
+            return commandSuccess(next);
+          }
+        }
+        return commandFailed('binding_not_found', `Binding not found: ${bindingId}`);
+      },
+      getPreferredRuntime: async ({ slug }) => {
+        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        const profile = profiles.find((p) => p.slug === slug);
+        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${slug}`);
+        const paths = resolveMetabotPaths(profile.homeDir);
+        try {
+          const raw = await fs.readFile(paths.preferredLlmRuntimePath, 'utf8');
+          const data = JSON.parse(raw);
+          return commandSuccess({ runtimeId: typeof data.runtimeId === 'string' ? data.runtimeId : null });
+        } catch {
+          return commandSuccess({ runtimeId: null });
+        }
+      },
+      setPreferredRuntime: async ({ slug, runtimeId }) => {
+        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        const profile = profiles.find((p) => p.slug === slug);
+        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${slug}`);
+        const paths = resolveMetabotPaths(profile.homeDir);
+        await fs.mkdir(path.dirname(paths.preferredLlmRuntimePath), { recursive: true });
+        await fs.writeFile(paths.preferredLlmRuntimePath, JSON.stringify({ runtimeId }, null, 2) + '\n', 'utf8');
+        return commandSuccess({ runtimeId });
       },
     },
   };

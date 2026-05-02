@@ -121,6 +121,16 @@ export async function ensureProfileWorkspace(input: {
     path.join(homeDir, '.runtime', 'config.json'),
     `${JSON.stringify(createDefaultConfig(), null, 2)}\n`,
   );
+
+  await writeFileIfMissing(
+    path.join(homeDir, 'llmbindings.json'),
+    `${JSON.stringify({ version: 1, bindings: [] }, null, 2)}\n`,
+  );
+
+  await writeFileIfMissing(
+    path.join(homeDir, 'preferred-llm-runtime.json'),
+    `${JSON.stringify({ runtimeId: null }, null, 2)}\n`,
+  );
 }
 
 export function resolveIdentityCreateProfileHome(input: {

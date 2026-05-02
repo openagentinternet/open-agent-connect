@@ -45,6 +45,13 @@ export interface MetabotPaths {
   roleMdPath: string;
   daemonLockPath: string;
 
+  // LLM runtime / binding paths.
+  llmRoot: string;
+  llmRuntimesPath: string;
+  llmBindingsPath: string;
+  llmSecretsRoot: string;
+  preferredLlmRuntimePath: string;
+
   // Temporary compatibility aliases for untouched later-task modules.
   baseRoot: string;
   exportRoot: string;
@@ -116,6 +123,11 @@ function buildMetabotPaths(input: {
   goalMdPath: string;
   roleMdPath: string;
   daemonLockPath: string;
+  llmRoot: string;
+  llmRuntimesPath: string;
+  llmBindingsPath: string;
+  llmSecretsRoot: string;
+  preferredLlmRuntimePath: string;
 }): MetabotPaths {
   const evolutionRoot = path.join(input.runtimeRoot, 'evolution');
   const a2aRoot = path.join(input.runtimeRoot, 'A2A');
@@ -172,6 +184,13 @@ function buildMetabotPaths(input: {
     roleMdPath: input.roleMdPath,
     daemonLockPath: input.daemonLockPath,
 
+    // LLM paths.
+    llmRoot: input.llmRoot,
+    llmRuntimesPath: input.llmRuntimesPath,
+    llmBindingsPath: input.llmBindingsPath,
+    llmSecretsRoot: input.llmSecretsRoot,
+    preferredLlmRuntimePath: input.preferredLlmRuntimePath,
+
     // Temporary compatibility aliases for untouched later-task modules.
     baseRoot: input.metabotRoot,
     exportRoot: input.exportsRoot,
@@ -223,5 +242,10 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     goalMdPath: path.join(profileRoot, 'GOAL.md'),
     roleMdPath: path.join(profileRoot, 'ROLE.md'),
     daemonLockPath: path.join(locksRoot, 'daemon.lock'),
+    llmRoot: path.join(metabotRoot, 'LLM'),
+    llmRuntimesPath: path.join(metabotRoot, 'LLM', 'runtimes.json'),
+    llmBindingsPath: path.join(profileRoot, 'llmbindings.json'),
+    llmSecretsRoot: path.join(metabotRoot, 'LLM', 'secrets'),
+    preferredLlmRuntimePath: path.join(profileRoot, 'preferred-llm-runtime.json'),
   });
 }

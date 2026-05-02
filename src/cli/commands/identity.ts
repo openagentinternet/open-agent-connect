@@ -11,11 +11,15 @@ export async function runIdentityCommand(args: string[], context: CliRuntimeCont
       return commandMissingFlag('--name');
     }
 
+    const host = readFlagValue(args, '--host') ?? '';
+
     const handler = context.dependencies.identity?.create;
     if (!handler) {
       return commandFailed('not_implemented', 'Identity create handler is not configured.');
     }
-    return handler({ name });
+    const input: { name: string; host?: string } = { name };
+    if (host) input.host = host;
+    return handler(input);
   }
 
   if (subcommand === 'who') {
