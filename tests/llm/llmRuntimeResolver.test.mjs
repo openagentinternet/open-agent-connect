@@ -41,8 +41,8 @@ test('resolveRuntime returns null when no runtimes exist', async () => {
     bindingStore,
     getPreferredRuntimeId: async () => null,
   });
-  const result = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
-  assert.equal(result, null);
+  const resolved = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
+  assert.equal(resolved.runtime, null);
 });
 
 test('resolveRuntime returns explicit runtime by id', async () => {
@@ -57,8 +57,8 @@ test('resolveRuntime returns explicit runtime by id', async () => {
     bindingStore,
     getPreferredRuntimeId: async () => null,
   });
-  const result = await resolver.resolveRuntime({ explicitRuntimeId: 'r_codex' });
-  assert.equal(result.id, 'r_codex');
+  const resolved = await resolver.resolveRuntime({ explicitRuntimeId: 'r_codex' });
+  assert.equal(resolved.runtime.id, 'r_codex');
 });
 
 test('resolveRuntime skips explicit runtime when unavailable', async () => {
@@ -73,8 +73,8 @@ test('resolveRuntime skips explicit runtime when unavailable', async () => {
     bindingStore,
     getPreferredRuntimeId: async () => null,
   });
-  const result = await resolver.resolveRuntime({ explicitRuntimeId: 'r_claude' });
-  assert.equal(result.id, 'r_codex');
+  const resolved = await resolver.resolveRuntime({ explicitRuntimeId: 'r_claude' });
+  assert.equal(resolved.runtime.id, 'r_codex');
 });
 
 test('resolveRuntime uses preferred runtime when available', async () => {
@@ -89,8 +89,8 @@ test('resolveRuntime uses preferred runtime when available', async () => {
     bindingStore,
     getPreferredRuntimeId: async () => 'r_codex',
   });
-  const result = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
-  assert.equal(result.id, 'r_codex');
+  const resolved = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
+  assert.equal(resolved.runtime.id, 'r_codex');
 });
 
 test('resolveRuntime follows priority order in bindings', async () => {
@@ -107,8 +107,8 @@ test('resolveRuntime follows priority order in bindings', async () => {
     bindingStore,
     getPreferredRuntimeId: async () => null,
   });
-  const result = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
-  assert.equal(result.id, 'r_claude');
+  const resolved = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
+  assert.equal(resolved.runtime.id, 'r_claude');
 });
 
 test('resolveRuntime skips disabled bindings', async () => {
@@ -125,8 +125,8 @@ test('resolveRuntime skips disabled bindings', async () => {
     bindingStore,
     getPreferredRuntimeId: async () => null,
   });
-  const result = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
-  assert.equal(result.id, 'r_codex');
+  const resolved = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
+  assert.equal(resolved.runtime.id, 'r_codex');
 });
 
 test('resolveRuntime falls back to healthy runtime when no binding matches', async () => {
@@ -142,8 +142,8 @@ test('resolveRuntime falls back to healthy runtime when no binding matches', asy
     bindingStore,
     getPreferredRuntimeId: async () => null,
   });
-  const result = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
-  assert.equal(result.id, 'r_codex');
+  const resolved = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
+  assert.equal(resolved.runtime.id, 'r_codex');
 });
 
 test('selectMetaBot finds best match by provider and lastUsedAt', async () => {

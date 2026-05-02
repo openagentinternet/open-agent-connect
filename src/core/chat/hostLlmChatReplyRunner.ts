@@ -110,11 +110,11 @@ export function createHostLlmChatReplyRunner(options: {
   const fallbackRunner = createDefaultChatReplyRunner();
 
   return async (input: ChatReplyRunnerInput): Promise<ChatReplyRunnerResult> => {
-    const runtime = await options.runtimeResolver.resolveRuntime({
+    const resolved = await options.runtimeResolver.resolveRuntime({
       metaBotSlug: options.metaBotSlug,
     });
 
-    if (!runtime) {
+    if (!resolved.runtime) {
       return fallbackRunner(input);
     }
 
@@ -122,27 +122,14 @@ export function createHostLlmChatReplyRunner(options: {
 
     try {
       const result = await executeLlm({
-        runtime,
+        runtime: resolved.runtime,
         prompt,
         timeoutMs,
       });
 
-      // Update the lastUsedAt timestamp on the binding used.
-      // We find the binding by inspecting the resolver's selectMetaBot.
-      // Since resolveRuntime already found the runtime via the binding (or preferred),
-      // we mark the last used timestamp via the resolver.
-      try {
-        const resolved = await options.runtimeResolver.resolveRuntime({
-          metaBotSlug: options.metaBotSlug,
-          explicitRuntimeId: runtime.id,
-        });
-        if (resolved && resolved.id === runtime.id) {
-          // The bindingLastUsed tracking is done via resolveRuntime's side-effect.
-          // We use a direct call to markBindingUsed if we can get the binding id.
-          // For now, we pass: the resolver handles it internally.
-        }
-      } catch {
-        // Best effort.
+      // Track lastUsedAt on the binding that was used.
+      if (resolved.bindingId) {
+        options.runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => { /* best effort */ });
       }
 
       if (!result.ok) {

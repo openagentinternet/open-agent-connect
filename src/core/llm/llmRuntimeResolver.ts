@@ -13,6 +13,11 @@ export interface ResolveRuntimeInput {
   explicitRuntimeId?: string;
 }
 
+export interface ResolveRuntimeResult {
+  runtime: LlmRuntime | null;
+  bindingId?: string;
+}
+
 export interface SelectMetaBotInput {
   targetProvider: LlmProvider;
 }
@@ -24,7 +29,7 @@ export interface SelectMetaBotResult {
 }
 
 export interface LlmRuntimeResolver {
-  resolveRuntime(input: ResolveRuntimeInput): Promise<LlmRuntime | null>;
+  resolveRuntime(input: ResolveRuntimeInput): Promise<ResolveRuntimeResult>;
   selectMetaBot(input: SelectMetaBotInput): Promise<SelectMetaBotResult | null>;
   markBindingUsed(bindingId: string): Promise<void>;
 }
@@ -40,14 +45,14 @@ export function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): Ll
   return {
     async resolveRuntime(input) {
       const runtimes = await loadRuntimes();
-      if (runtimes.length === 0) return null;
+      if (runtimes.length === 0) return { runtime: null };
 
       const runtimeById = new Map(runtimes.map((r) => [r.id, r]));
 
       // 1. Explicit runtimeId — use it directly.
       if (input.explicitRuntimeId) {
         const rt = runtimeById.get(input.explicitRuntimeId);
-        if (rt && rt.health !== 'unavailable') return rt;
+        if (rt && rt.health !== 'unavailable') return { runtime: rt };
       }
 
       // 2. Preferred runtime for this MetaBot slug.
@@ -55,7 +60,7 @@ export function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): Ll
         const preferredId = await getPreferredRuntimeId(input.metaBotSlug);
         if (preferredId) {
           const rt = runtimeById.get(preferredId);
-          if (rt && rt.health !== 'unavailable') return rt;
+          if (rt && rt.health !== 'unavailable') return { runtime: rt };
         }
 
         // 3. Enabled bindings sorted by priority → first healthy.
@@ -63,16 +68,18 @@ export function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): Ll
         bindings.sort((a, b) => a.priority - b.priority);
         for (const binding of bindings) {
           const rt = runtimeById.get(binding.llmRuntimeId);
-          if (rt && rt.health !== 'unavailable') return rt;
+          if (rt && rt.health !== 'unavailable') {
+            return { runtime: rt, bindingId: binding.id };
+          }
         }
       }
 
       // 4. First healthy runtime.
       const healthy = runtimes.find((r) => r.health === 'healthy');
-      if (healthy) return healthy;
+      if (healthy) return { runtime: healthy };
 
       // 5. First any runtime (absolute fallback).
-      return runtimes[0];
+      return { runtime: runtimes[0] };
     },
 
     async selectMetaBot(input) {
@@ -81,7 +88,6 @@ export function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): Ll
       const state = await bindingStore.read();
       const allBindings = state.bindings;
 
-      // Filter bindings to those matching the target provider, enabled only.
       const matching: Array<{ binding: LlmBinding; runtime: LlmRuntime }> = [];
       for (const binding of allBindings) {
         if (!binding.enabled) continue;
@@ -93,7 +99,6 @@ export function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): Ll
 
       if (matching.length === 0) return null;
 
-      // Sort by lastUsedAt descending (most recently used first).
       matching.sort((a, b) => {
         const aTime = a.binding.lastUsedAt ?? '';
         const bTime = b.binding.lastUsedAt ?? '';
