@@ -13,9 +13,12 @@ const { resolveMetabotHomeSelection } = require('../../dist/core/state/homeSelec
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
+const { createSessionStateStore } = require('../../dist/core/a2a/sessionStateStore.js');
+const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
 const { createRemoteEvolutionStore } = require('../../dist/core/evolution/remoteEvolutionStore.js');
+const { createTestServicePaymentExecutor } = require('../../dist/core/payments/servicePayment.js');
 
 const NETWORK_DIRECTORY_SCOPE_HASH = JSON.stringify({
   allowedCommands: [
@@ -260,6 +263,9 @@ function createImportedArtifactFixture(overrides = {}) {
 
 async function startFakeChainApiServer(options = {}) {
   const ratingPins = Array.isArray(options.ratingPins) ? options.ratingPins : [];
+  const serviceCurrency = typeof options.serviceCurrency === 'string' ? options.serviceCurrency : 'SPACE';
+  const servicePrice = typeof options.servicePrice === 'string' ? options.servicePrice : '0.00001';
+  const paymentAddress = typeof options.paymentAddress === 'string' ? options.paymentAddress : 'mvc-payment-address';
   const evolutionMetadataPinId = 'evolution-metadata-pin-1';
   const evolutionArtifactPinId = 'evolution-artifact-pin-1';
   const evolutionScopeHash = JSON.stringify({
@@ -388,13 +394,13 @@ async function startFakeChainApiServer(options = {}) {
                   description: 'Returns tomorrow weather.',
                   providerMetaBot: 'idq1provider',
                   providerSkill: 'metabot-weather-oracle',
-                  price: '0.00001',
-                  currency: 'SPACE',
+                  price: servicePrice,
+                  currency: serviceCurrency,
                   skillDocument: '# Weather Oracle',
                   inputType: 'text',
                   outputType: 'text',
                   endpoint: 'simplemsg',
-                  paymentAddress: 'mvc-payment-address',
+                  paymentAddress,
                 }),
               },
             ],
@@ -1402,6 +1408,9 @@ test('provider closure runtime can publish, go online, receive a seller trace, a
   assert.equal(providerTrace.payload.ok, true);
   assert.equal(providerTrace.payload.data.order.role, 'seller');
   assert.equal(providerTrace.payload.data.order.serviceId, published.payload.data.servicePinId);
+  assert.equal(providerTrace.payload.data.order.paymentTxid, called.payload.data.paymentTxid);
+  assert.equal(providerTrace.payload.data.order.paymentCurrency, 'SPACE');
+  assert.equal(providerTrace.payload.data.order.paymentAmount, '0.00001');
 
   const runtimeStateStore = createRuntimeStateStore(providerHome);
   const state = await runtimeStateStore.readState();
@@ -2382,6 +2391,10 @@ test('services call returns an A2A start contract while provider execution flows
   assert.equal(called.payload.data.confirmation.policyMode, 'confirm_all');
   assert.equal(called.payload.data.providerGlobalMetaId, providerIdentity.payload.data.globalMetaId);
   assert.equal(called.payload.data.serviceName, 'Weather Oracle');
+  const providerDaemonTraceUrl = new URL(called.payload.data.localUiUrl);
+  assert.equal(providerDaemonTraceUrl.pathname, '/ui/trace');
+  assert.equal(providerDaemonTraceUrl.searchParams.get('traceId'), called.payload.data.traceId);
+  assert.equal(providerDaemonTraceUrl.searchParams.get('sessionId'), called.payload.data.session.sessionId);
   assert.equal('responseText' in called.payload.data, false);
   assert.equal('providerTraceJsonPath' in called.payload.data, false);
   assert.equal('providerTraceMarkdownPath' in called.payload.data, false);
@@ -2410,6 +2423,102 @@ test('services call returns an A2A start contract while provider execution flows
   assert.equal(providerSession.role, 'provider');
   assert.equal(providerSession.state, 'completed');
   assert.equal(providerTaskRun.state, 'completed');
+});
+
+test('trace get by session id returns an inspector-shaped fallback when the runtime trace is missing', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const sessionStore = createSessionStateStore(homeDir);
+  const now = Date.now();
+  await sessionStore.writeState({
+    version: 1,
+    sessions: [
+      {
+        sessionId: 'session-missing-trace',
+        traceId: 'trace-missing',
+        role: 'caller',
+        state: 'requesting_remote',
+        createdAt: now,
+        updatedAt: now,
+        callerGlobalMetaId: 'idq1caller',
+        providerGlobalMetaId: 'idq1provider',
+        servicePinId: 'service-pin-1',
+        currentTaskRunId: 'run-missing-trace',
+        latestTaskRunState: 'running',
+      },
+    ],
+    taskRuns: [
+      {
+        runId: 'run-missing-trace',
+        sessionId: 'session-missing-trace',
+        state: 'running',
+        createdAt: now,
+        updatedAt: now,
+        startedAt: now,
+        completedAt: null,
+        failureCode: null,
+        failureReason: null,
+        clarificationRounds: [],
+      },
+    ],
+    transcriptItems: [
+      {
+        id: 'transcript-1',
+        sessionId: 'session-missing-trace',
+        taskRunId: 'run-missing-trace',
+        timestamp: now,
+        type: 'message',
+        sender: 'caller',
+        content: 'hello provider',
+        metadata: null,
+      },
+    ],
+    cursors: {
+      caller: null,
+      provider: null,
+    },
+    publicStatusSnapshots: [
+      {
+        sessionId: 'session-missing-trace',
+        taskRunId: 'run-missing-trace',
+        status: 'requesting_remote',
+        mapped: true,
+        rawEvent: 'order_sent',
+        resolvedAt: now,
+      },
+    ],
+  });
+
+  const result = await runCommand(homeDir, [
+    'trace',
+    'get',
+    '--session-id',
+    'session-missing-trace',
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.traceId, 'trace-missing');
+  assert.equal(result.payload.data.sessionId, 'session-missing-trace');
+  assert.equal(result.payload.data.session.sessionId, 'session-missing-trace');
+  assert.equal(result.payload.data.session.peerGlobalMetaId, 'idq1provider');
+  assert.equal(result.payload.data.order, null);
+  assert.equal(result.payload.data.orderTxid, null);
+  assert.equal(result.payload.data.paymentTxid, null);
+  assert.equal(result.payload.data.a2a.sessionId, 'session-missing-trace');
+  assert.equal(result.payload.data.a2a.publicStatus, 'requesting_remote');
+  assert.deepEqual(result.payload.data.artifacts, {
+    transcriptMarkdownPath: null,
+    traceMarkdownPath: null,
+    traceJsonPath: null,
+  });
+  assert.equal(result.payload.data.inspector.session.sessionId, 'session-missing-trace');
+  assert.equal(result.payload.data.inspector.transcriptItems[0].content, 'hello provider');
+  const localUiUrl = new URL(result.payload.data.localUiUrl);
+  assert.equal(localUiUrl.pathname, '/ui/trace');
+  assert.equal(localUiUrl.searchParams.get('traceId'), 'trace-missing');
+  assert.equal(localUiUrl.searchParams.get('sessionId'), 'session-missing-trace');
 });
 
 test('services call resolves a chain-discovered online service into a real MetaWeb reply path without providerDaemonBaseUrl', async (t) => {
@@ -2456,6 +2565,49 @@ test('services call resolves a chain-discovered online service into a real MetaW
   assert.equal(called.payload.data.serviceName, 'Weather Oracle');
   assert.equal(called.payload.data.session.role, 'caller');
   assert.match(called.payload.data.orderPinId, /^\/protocols\/simplemsg-pin-/);
+  assert.match(called.payload.data.orderTxid, /^\/protocols\/simplemsg-tx-/);
+  assert.deepEqual(called.payload.data.orderTxids, [called.payload.data.orderTxid]);
+  const traceUrl = new URL(called.payload.localUiUrl);
+  assert.equal(traceUrl.pathname, '/ui/trace');
+  assert.equal(traceUrl.searchParams.get('traceId'), called.payload.data.traceId);
+  assert.equal(traceUrl.searchParams.get('sessionId'), called.payload.data.session.sessionId);
+  const orderConversation = await createA2AConversationStore({
+    homeDir,
+    local: {
+      globalMetaId: created.payload.data.globalMetaId,
+      name: created.payload.data.name,
+      chatPublicKey: created.payload.data.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: 'idq1provider',
+      name: 'Weather Oracle',
+    },
+  }).readConversation();
+  const orderMessage = orderConversation.messages.find(
+    (message) => message.protocolTag === 'ORDER',
+  );
+  assert.ok(orderMessage, 'expected outgoing ORDER message in the unified A2A store');
+  assert.equal(orderMessage.direction, 'outgoing');
+  assert.equal(orderMessage.kind, 'order_protocol');
+  assert.equal(orderMessage.orderTxid, called.payload.data.orderTxid);
+  assert.equal(orderMessage.paymentTxid, called.payload.data.paymentTxid);
+  assert.equal(orderMessage.pinId, called.payload.data.orderPinId);
+  assert.deepEqual(orderMessage.txids, called.payload.data.orderTxids);
+  assert.match(orderMessage.content, /^\[ORDER\]/);
+  assert.equal(orderConversation.sessions.some(
+    (session) => session.sessionId === orderMessage.sessionId && session.type === 'peer',
+  ), true);
+  assert.equal(orderConversation.indexes.orderTxidToSessionId[called.payload.data.orderTxid], orderMessage.orderSessionId);
+  const expectedPayment = await createTestServicePaymentExecutor().execute({
+    servicePinId: 'chain-service-pin-1',
+    providerGlobalMetaId: 'idq1provider',
+    paymentAddress: 'mvc-payment-address',
+    amount: '0.00001',
+    currency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+  });
+  assert.equal(called.payload.data.paymentTxid, expectedPayment.paymentTxid);
 
   const trace = await waitForTrace(homeDir, called.payload.data.traceId, {
     METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
@@ -2476,10 +2628,85 @@ test('services call resolves a chain-discovered online service into a real MetaW
   assert.equal(trace.payload.data.resultText, 'Tomorrow will be bright with a light wind.');
   assert.equal(trace.payload.data.resultDeliveryPinId, 'delivery-pin-1');
   assert.equal(trace.payload.data.ratingRequestText, null);
-  assert.match(trace.payload.data.order.paymentTxid, /^[0-9a-f]{64}$/i);
+  assert.equal(trace.payload.data.order.paymentTxid, expectedPayment.paymentTxid);
+  assert.equal(trace.payload.data.order.orderPinId, called.payload.data.orderPinId);
+  assert.equal(trace.payload.data.order.orderTxid, called.payload.data.orderTxid);
+  assert.deepEqual(trace.payload.data.order.orderTxids, called.payload.data.orderTxids);
+  const traceGetUrl = new URL(trace.payload.data.localUiUrl);
+  assert.equal(traceGetUrl.pathname, '/ui/trace');
+  assert.equal(traceGetUrl.searchParams.get('traceId'), called.payload.data.traceId);
+  assert.equal(traceGetUrl.searchParams.get('sessionId'), called.payload.data.session.sessionId);
+
+  const sessionDetail = await runCommand(homeDir, [
+    'trace',
+    'get',
+    '--session-id',
+    called.payload.data.session.sessionId,
+  ], {
+    METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+    METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+  });
+  assert.equal(sessionDetail.exitCode, 0);
+  assert.equal(sessionDetail.payload.ok, true);
+  assert.equal(sessionDetail.payload.data.traceId, called.payload.data.traceId);
+  assert.equal(sessionDetail.payload.data.session.sessionId, called.payload.data.session.sessionId);
+  assert.equal(sessionDetail.payload.data.order.orderPinId, called.payload.data.orderPinId);
+  assert.equal(sessionDetail.payload.data.order.orderTxid, called.payload.data.orderTxid);
+  assert.deepEqual(sessionDetail.payload.data.order.orderTxids, called.payload.data.orderTxids);
+  assert.equal(sessionDetail.payload.data.order.paymentTxid, expectedPayment.paymentTxid);
+  const sessionTraceUrl = new URL(sessionDetail.payload.data.localUiUrl);
+  assert.equal(sessionTraceUrl.pathname, '/ui/trace');
+  assert.equal(sessionTraceUrl.searchParams.get('traceId'), called.payload.data.traceId);
+  assert.equal(sessionTraceUrl.searchParams.get('sessionId'), called.payload.data.session.sessionId);
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /Tomorrow will be bright with a light wind/);
+});
+
+test('services call rejects unsupported chain service payment before sending order', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  const chainApi = await startFakeChainApiServer({
+    serviceCurrency: 'DOGE',
+    servicePrice: '1',
+    paymentAddress: 'doge-payment-address',
+  });
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'chain-doge-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '2',
+        currency: 'DOGE',
+      },
+    },
+  }), 'utf8');
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+    }
+  );
+
+  assert.equal(called.exitCode, 1);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.state, 'failed');
+  assert.equal(called.payload.code, 'service_payment_unsupported_settlement');
+  assert.equal(called.payload.data?.orderPinId, undefined);
+
+  const state = await createRuntimeStateStore(homeDir).readState();
+  assert.equal(state.traces.some((trace) => trace.session?.peerGlobalMetaId === 'idq1provider'), false);
 });
 
 test('services call persists timeout state when a chain-discovered service does not reply during the foreground wait', async (t) => {
@@ -2726,6 +2953,95 @@ test('trace get exposes a remote rating request when the provider later asks for
   assert.equal(trace.payload.data.ratingRequestText, '服务已完成，如果方便请给我一个评价吧。');
 });
 
+test('services call auto-rates with ORDER_END after a provider NeedsRating request', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  const chainApi = await startFakeChainApiServer();
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'chain-auto-rating-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  }), 'utf8');
+
+  const env = {
+    METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+    METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+    METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
+      responseText: 'Tomorrow will be bright with a light wind.',
+      deliveryPinId: 'delivery-pin-auto-rating-1',
+      ratingRequestText: '服务已完成，如果方便请给我一个评价吧。',
+    }),
+    METABOT_TEST_FAKE_BUYER_RATING_REPLY: '评分：5分。结果清晰，响应可靠，谢谢你的天气服务。',
+  };
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    env,
+  );
+
+  assert.equal(called.exitCode, 2);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.state, 'waiting');
+
+  const trace = await waitForTrace(
+    homeDir,
+    called.payload.data.traceId,
+    env,
+    (data) => data?.ratingPublished === true && data?.ratingMessageSent === true,
+  );
+
+  assert.ok(trace, 'expected trace polling to observe automatic buyer rating');
+  assert.equal(trace.exitCode, 0);
+  assert.equal(trace.payload.ok, true);
+  assert.equal(trace.payload.data.ratingPublished, true);
+  assert.equal(trace.payload.data.ratingValue, 5);
+  assert.equal(trace.payload.data.ratingComment, '评分：5分。结果清晰，响应可靠，谢谢你的天气服务。');
+  assert.match(trace.payload.data.ratingPinId, /^\/protocols\/skill-service-rate-pin-/);
+  assert.equal(trace.payload.data.ratingMessageSent, true);
+  assert.match(trace.payload.data.ratingMessagePinId, /^\/protocols\/simplemsg-pin-/);
+  assert.equal(trace.payload.data.tStageCompleted, true);
+
+  const orderEndTranscript = trace.payload.data.inspector.transcriptItems.find((item) => (
+    typeof item.content === 'string' && item.content.startsWith('[ORDER_END')
+  ));
+  assert.ok(orderEndTranscript, 'expected trace transcript to include the ORDER_END ceremony');
+  assert.match(orderEndTranscript.content, /rated\]/);
+  assert.match(orderEndTranscript.content, /评分：5分/);
+
+  const chatConversation = await createA2AConversationStore({
+    homeDir,
+    local: {
+      globalMetaId: created.payload.data.globalMetaId,
+      name: created.payload.data.name,
+      chatPublicKey: created.payload.data.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: 'idq1provider',
+      name: 'Weather Oracle',
+      chatPublicKey: env.METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY,
+    },
+  }).readConversation();
+  const orderEnd = chatConversation.messages.find((message) => message.protocolTag === 'ORDER_END');
+  assert.ok(orderEnd, 'expected automatic rating to persist an outgoing ORDER_END message');
+  assert.equal(orderEnd.direction, 'outgoing');
+  assert.match(orderEnd.content, /^\[ORDER_END(?::[0-9a-f]{64})? rated\]/);
+  assert.match(orderEnd.content, /\/protocols\/skill-service-rate-pin-/);
+});
+
 test('services rate publishes one buyer-side skill-service-rate record from a completed remote trace', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
@@ -2875,6 +3191,33 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
   assert.equal(trace.payload.data.traceId, sent.payload.data.traceId);
   assert.equal(trace.payload.data.channel, 'simplemsg');
   assert.equal(trace.payload.data.session.peerGlobalMetaId, created.payload.data.globalMetaId);
+
+  const chatConversation = await createA2AConversationStore({
+    homeDir,
+    local: {
+      globalMetaId: created.payload.data.globalMetaId,
+      name: created.payload.data.name,
+      chatPublicKey: created.payload.data.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: created.payload.data.globalMetaId,
+      name: created.payload.data.name,
+      chatPublicKey: created.payload.data.chatPublicKey,
+    },
+  }).readConversation();
+  const chatMessage = chatConversation.messages.find(
+    (message) => message.content === 'hello from loopback',
+  );
+  assert.ok(chatMessage, 'expected outgoing private chat message in the unified A2A store');
+  assert.equal(chatMessage.direction, 'outgoing');
+  assert.equal(chatMessage.kind, 'private_chat');
+  assert.equal(chatMessage.protocolTag, null);
+  assert.equal(chatMessage.pinId, sent.payload.data.pinId);
+  assert.deepEqual(chatMessage.txids, sent.payload.data.txids);
+  assert.equal(chatMessage.replyPinId, 'reply-pin-1');
+  assert.equal(chatConversation.sessions.some(
+    (session) => session.sessionId === chatMessage.sessionId && session.type === 'peer',
+  ), true);
 
   const transcriptMarkdown = await readFile(sent.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /hello from loopback/);

@@ -1,9 +1,12 @@
 import { io, type Socket } from 'socket.io-client';
 import { receivePrivateChat } from '../chat/privateChat';
 import {
+  normalizeOrderProtocolTxid,
+  parseNeedsRatingMessage as parseA2ANeedsRatingMessage,
+} from './protocol/orderProtocol';
+import {
   cleanServiceResultText,
   parseDeliveryMessage,
-  parseNeedsRatingMessage,
 } from '../orders/serviceOrderProtocols';
 
 const DEFAULT_SOCKET_ENDPOINTS = [
@@ -19,6 +22,7 @@ export interface AwaitMetaWebServiceReplyInput {
   providerChatPublicKey?: string | null;
   servicePinId: string;
   paymentTxid: string;
+  orderTxid?: string | null;
   timeoutMs: number;
 }
 
@@ -57,6 +61,72 @@ interface MetaWebPrivateMessage {
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+export function normalizeOrderProtocolReference(value: unknown): string {
+  const text = normalizeText(value).toLowerCase();
+  const normalizedTxid = normalizeOrderProtocolTxid(text);
+  if (normalizedTxid) return normalizedTxid;
+  const pinMatch = text.match(/^([0-9a-f]{64})i\d+$/i);
+  return pinMatch ? normalizeOrderProtocolTxid(pinMatch[1]) : '';
+}
+
+export function shouldAcceptServiceDeliveryForReplyWaiter(input: {
+  delivery: {
+    orderTxid?: unknown;
+    paymentTxid?: unknown;
+    servicePinId?: unknown;
+  };
+  expected: {
+    orderTxid?: unknown;
+    paymentTxid?: unknown;
+    servicePinId?: unknown;
+  };
+}): boolean {
+  const deliveryOrderTxid = normalizeOrderProtocolReference(input.delivery.orderTxid);
+  const expectedOrderTxid = normalizeOrderProtocolReference(input.expected.orderTxid);
+  const deliveryPaymentTxid = normalizeText(input.delivery.paymentTxid);
+  const expectedPaymentTxid = normalizeText(input.expected.paymentTxid);
+  const deliveryServicePinId = normalizeText(input.delivery.servicePinId);
+  const expectedServicePinId = normalizeText(input.expected.servicePinId);
+  const matchesPayment = Boolean(
+    deliveryPaymentTxid
+    && expectedPaymentTxid
+    && deliveryPaymentTxid === expectedPaymentTxid
+  );
+  const matchesService = Boolean(
+    deliveryServicePinId
+    && expectedServicePinId
+    && deliveryServicePinId === expectedServicePinId
+  );
+
+  if (deliveryOrderTxid) {
+    if (expectedOrderTxid) {
+      return deliveryOrderTxid === expectedOrderTxid;
+    }
+    return matchesPayment;
+  }
+
+  return matchesPayment || matchesService;
+}
+
+export function shouldAcceptServiceRatingRequestForReplyWaiter(input: {
+  ratingOrderTxid?: unknown;
+  expectedOrderTxid?: unknown;
+  pendingDeliveryOrderTxid?: unknown;
+}): boolean {
+  const ratingOrderTxid = normalizeOrderProtocolReference(input.ratingOrderTxid);
+  if (!ratingOrderTxid) {
+    return true;
+  }
+
+  const expectedOrderTxid = normalizeOrderProtocolReference(input.expectedOrderTxid);
+  if (expectedOrderTxid) {
+    return ratingOrderTxid === expectedOrderTxid;
+  }
+
+  const pendingDeliveryOrderTxid = normalizeOrderProtocolReference(input.pendingDeliveryOrderTxid);
+  return Boolean(pendingDeliveryOrderTxid && ratingOrderTxid === pendingDeliveryOrderTxid);
 }
 
 function normalizeObject(value: unknown): Record<string, unknown> | null {
@@ -165,6 +235,7 @@ export function createSocketIoMetaWebReplyWaiter(): MetaWebServiceReplyWaiter {
         let ratingGraceHandle: ReturnType<typeof setTimeout> | null = null;
         const sockets: Socket[] = [];
         let pendingDelivery: Omit<Extract<AwaitMetaWebServiceReplyResult, { state: 'completed' }>, 'state'> | null = null;
+        let pendingDeliveryOrderTxid: string | null = null;
 
         const finish = (result: AwaitMetaWebServiceReplyResult) => {
           if (settled) return;
@@ -216,12 +287,19 @@ export function createSocketIoMetaWebReplyWaiter(): MetaWebServiceReplyWaiter {
               return;
             }
 
-            const ratingRequestText = parseNeedsRatingMessage(plaintext);
-            if (ratingRequestText != null && pendingDelivery) {
+            const ratingRequest = parseA2ANeedsRatingMessage(plaintext);
+            if (ratingRequest && pendingDelivery) {
+              if (!shouldAcceptServiceRatingRequestForReplyWaiter({
+                ratingOrderTxid: ratingRequest.orderTxid,
+                expectedOrderTxid: input.orderTxid,
+                pendingDeliveryOrderTxid,
+              })) {
+                return;
+              }
               finish({
                 state: 'completed',
                 ...pendingDelivery,
-                ratingRequestText,
+                ratingRequestText: ratingRequest.content,
               });
               return;
             }
@@ -231,12 +309,14 @@ export function createSocketIoMetaWebReplyWaiter(): MetaWebServiceReplyWaiter {
               return;
             }
 
-            const matchesPayment = normalizeText(delivery.paymentTxid) === normalizeText(input.paymentTxid);
-            const matchesService = normalizeText(delivery.servicePinId) === normalizeText(input.servicePinId);
-            if (!matchesPayment && !matchesService) {
+            if (!shouldAcceptServiceDeliveryForReplyWaiter({
+              delivery,
+              expected: input,
+            })) {
               return;
             }
 
+            pendingDeliveryOrderTxid = normalizeOrderProtocolReference(delivery.orderTxid) || null;
             pendingDelivery = {
               responseText: cleanServiceResultText(normalizeText(delivery.result)) || normalizeText(delivery.result),
               deliveryPinId: pinIdFromMessage(message),

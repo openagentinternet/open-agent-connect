@@ -1,8 +1,12 @@
-const DELIVERY_PREFIX = '[DELIVERY]';
-const NEEDS_RATING_PREFIX = '[NEEDSRATING]';
+import {
+  buildDeliveryMessage as buildA2ADeliveryMessage,
+  parseDeliveryMessage as parseA2ADeliveryMessage,
+  parseNeedsRatingMessage as parseA2ANeedsRatingMessage,
+} from '../a2a/protocol/orderProtocol';
+
 const MARKDOWN_HEADING_RE = /^#{1,6}\s+/;
 const EXCLUDED_RESULT_SECTION_RE = /(服务订单确认|订单确认|order confirmation|payment confirmation|payment details|交易信息|付款信息|支付信息)/i;
-const RESULT_METADATA_LINE_RE = /^\s*(?:[-*]\s*)?(?:\*\*)?\s*(支付金额|交易ID|交易Id|txid|service id|服务ID|技能名称|skill name|payment(?: amount)?|transaction id|service name)\s*[:：]/i;
+const RESULT_METADATA_LINE_RE = /^\s*(?:[-*]\s*)?(?:\*\*)?\s*(?:(?:支付金额)(?:\s+[0-9]+(?:\.[0-9]+)?\s+[A-Za-z0-9._-]+|\s*[:：])|(?:交易ID|交易Id|txid|commit txid|payment chain|settlement kind|mrc20 ticker|mrc20 id|output type|service id|服务ID|技能名称|skill name|payment(?: amount)?|transaction id|service name)\s*[:：])/i;
 const INTRO_CHATTER_RE = /(你好|您好|我是|数字主分身|收到你的服务订单|成功处理了你的服务订单|已经成功处理|链上远端服务)/i;
 const CLOSING_CHATTER_RE = /(?:服务已完成|感谢.*使用|如有其他需求|欢迎随时联系|欢迎再次使用|希望.*体验|欢迎.*评价|欢迎.*反馈|期待.*再次)/i;
 
@@ -16,7 +20,7 @@ export interface DeliveryMessagePayload {
 }
 
 export function buildDeliveryMessage(payload: DeliveryMessagePayload): string {
-  return `${DELIVERY_PREFIX} ${JSON.stringify(payload ?? {})}`;
+  return buildA2ADeliveryMessage(payload);
 }
 
 function normalizeMultilineText(value: unknown): string {
@@ -138,33 +142,10 @@ export function cleanServiceResultText(content: string): string {
 }
 
 export function parseDeliveryMessage(content: string): DeliveryMessagePayload | null {
-  const trimmed = String(content || '').trim();
-  if (!trimmed.toUpperCase().startsWith(DELIVERY_PREFIX)) {
-    return null;
-  }
-
-  const jsonText = trimmed.slice(DELIVERY_PREFIX.length).trim();
-  if (!jsonText) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(jsonText) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as DeliveryMessagePayload;
-  } catch {
-    return null;
-  }
+  return parseA2ADeliveryMessage(content) as DeliveryMessagePayload | null;
 }
 
 export function parseNeedsRatingMessage(content: string): string | null {
-  const trimmed = String(content || '').trim();
-  if (!trimmed.toUpperCase().startsWith(NEEDS_RATING_PREFIX)) {
-    return null;
-  }
-
-  const message = trimmed.slice(NEEDS_RATING_PREFIX.length).trim();
-  return message || '';
+  const parsed = parseA2ANeedsRatingMessage(content);
+  return parsed ? parsed.content : null;
 }

@@ -184,6 +184,30 @@ test('runCli prints leaf help text for `metabot services call --help` with reque
   assert.equal(output.includes('"ok"'), false);
 });
 
+test('runCli documents trace get lookup by trace id or session id', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['trace', 'get', '--help', '--json'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = JSON.parse(stdout.join(''));
+  assert.deepEqual(output.commandPath, ['trace', 'get']);
+  assert.match(output.usage, /--trace-id <trace-id>/);
+  assert.match(output.usage, /--session-id <session-id>/);
+  assert.ok(output.requiredFlags.some((entry) => entry.flag === '--trace-id'));
+  assert.ok(output.requiredFlags.some((entry) => entry.flag === '--session-id'));
+  assert.ok(output.successFields.includes('traceId'));
+  assert.ok(output.successFields.includes('sessionId'));
+  assert.ok(output.successFields.includes('orderTxid'));
+  assert.ok(output.successFields.includes('paymentTxid'));
+  assert.ok(output.successFields.includes('localUiUrl'));
+  assert.ok(output.examples.includes('metabot trace get --session-id session-a2a-123'));
+});
+
 test('runCli prints machine-readable help for `metabot chat private --help --json`', async () => {
   const stdout = [];
 

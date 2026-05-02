@@ -31,6 +31,7 @@ test('buildSessionListViewModel maps a caller session correctly', () => {
     localMetabotName: 'Alice',
     localMetabotGlobalMetaId: 'gm-alice',
     peerGlobalMetaId: 'gm-bob',
+    peerName: 'Bob Bot',
     servicePinId: 'pin-svc-1',
   };
   const [item] = buildSessionListViewModel([rawSession], NOW);
@@ -42,6 +43,7 @@ test('buildSessionListViewModel maps a caller session correctly', () => {
   assert.equal(item.stateLabel, 'Completed');
   assert.equal(item.localMetabotName, 'Alice');
   assert.equal(item.peerGlobalMetaId, 'gm-bob');
+  assert.equal(item.peerName, 'Bob Bot');
   assert.equal(item.timeAgoMs, 5000);
 });
 
@@ -161,6 +163,35 @@ test('buildSessionDetailViewModel builds session detail with messages', () => {
   assert.equal(detail.messages[0].tone, 'system');
   assert.equal(detail.messages[1].tone, 'local');   // caller in caller session
   assert.equal(detail.messages[2].tone, 'peer');    // provider in caller session
+});
+
+test('buildSessionDetailViewModel reads legacy trace messages from inspector transcript fallback', () => {
+  const detail = buildSessionDetailViewModel({
+    session: {
+      sessionId: 'session-legacy',
+      traceId: 'trace-legacy',
+      role: 'caller',
+      state: 'completed',
+    },
+    inspector: {
+      transcriptItems: [
+        {
+          id: 'legacy-delivery',
+          sessionId: 'session-legacy',
+          timestamp: NOW,
+          type: 'delivery',
+          sender: 'provider',
+          content: '# Forecast\n\nSunny.',
+          metadata: null,
+        },
+      ],
+    },
+  });
+
+  assert.ok(detail !== null);
+  assert.equal(detail.messages.length, 1);
+  assert.equal(detail.messages[0].id, 'legacy-delivery');
+  assert.equal(detail.messages[0].content, '# Forecast\n\nSunny.');
 });
 
 test('buildSessionDetailViewModel assigns tool tone for tool_use and tool_result', () => {

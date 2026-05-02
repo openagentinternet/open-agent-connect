@@ -77,12 +77,16 @@ function normalizeConfig(input: unknown): MetabotConfig {
   const root = input as Record<string, unknown>;
   const maybeNetwork = root['evolution_network'];
   const maybeAskMaster = root['askMaster'];
+  const maybeA2A = root['a2a'];
 
   const networkSource = maybeNetwork && typeof maybeNetwork === 'object'
     ? maybeNetwork as Record<string, unknown>
     : {};
   const askMasterSource = maybeAskMaster && typeof maybeAskMaster === 'object'
     ? maybeAskMaster as Record<string, unknown>
+    : {};
+  const a2aSource = maybeA2A && typeof maybeA2A === 'object'
+    ? maybeA2A as Record<string, unknown>
     : {};
 
   const triggerMode = normalizeString(askMasterSource.triggerMode);
@@ -116,7 +120,13 @@ function normalizeConfig(input: unknown): MetabotConfig {
         : defaults.askMaster.contextMode,
       trustedMasters: normalizeStringArray(askMasterSource.trustedMasters),
       autoPolicy: normalizeAskMasterAutoPolicyConfig(askMasterSource.autoPolicy),
-    }
+    },
+    a2a: {
+      simplemsgListenerEnabled: normalizeBoolean(
+        a2aSource.simplemsgListenerEnabled,
+        defaults.a2a.simplemsgListenerEnabled,
+      ),
+    },
   };
 }
 

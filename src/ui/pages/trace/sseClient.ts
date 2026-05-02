@@ -65,7 +65,10 @@ function buildSessionListViewModel(rawSessions, now) {
       updatedAt: updatedAt,
       localMetabotName: normalizeText(record.localMetabotName),
       localMetabotGlobalMetaId: normalizeText(record.localMetabotGlobalMetaId),
+      localMetabotAvatar: normalizeText(record.localMetabotAvatar),
       peerGlobalMetaId: normalizeText(record.peerGlobalMetaId),
+      peerName: normalizeText(record.peerName),
+      peerAvatar: normalizeText(record.peerAvatar),
       servicePinId: normalizeText(record.servicePinId),
       stateTone: isStale ? 'timeout' : getStateTone(state),
       stateLabel: isStale ? 'Timeout' : getStateLabel(state),
@@ -78,7 +81,9 @@ function buildSessionDetailViewModel(payload) {
   if (!session) return null;
   var sessionId = normalizeText(session.sessionId);
   var role = normalizeText(session.role) || 'caller';
-  var rawItems = coerceArray(payload.transcriptItems);
+  var topLevelItems = coerceArray(payload.transcriptItems);
+  var inspector = coerceObject(payload.inspector);
+  var rawItems = topLevelItems.length ? topLevelItems : coerceArray(inspector && inspector.transcriptItems);
   var messages = rawItems.map(function(item) {
     var id = normalizeText(item.id);
     if (!id) return null;
@@ -106,7 +111,10 @@ function buildSessionDetailViewModel(payload) {
     updatedAt: normalizeTimestamp(session.updatedAt),
     localMetabotName: normalizeText(payload.localMetabotName),
     localMetabotGlobalMetaId: normalizeText(payload.localMetabotGlobalMetaId),
+    localMetabotAvatar: normalizeText(payload.localMetabotAvatar) || normalizeText(session.localMetabotAvatar),
     peerGlobalMetaId: normalizeText(payload.peerGlobalMetaId),
+    peerName: normalizeText(payload.peerName) || normalizeText(session.peerName),
+    peerAvatar: normalizeText(payload.peerAvatar) || normalizeText(session.peerAvatar),
     servicePinId: normalizeText(session.servicePinId),
     callerGlobalMetaId: normalizeText(session.callerGlobalMetaId),
     providerGlobalMetaId: normalizeText(session.providerGlobalMetaId),
@@ -133,9 +141,21 @@ function fmtTimeAgo(ms) {
 function fmtTime(ms) {
   if (!ms) return '';
   const d = new Date(ms);
+  const now = new Date();
   const hh = String(d.getHours()).padStart(2,'0');
   const mm = String(d.getMinutes()).padStart(2,'0');
-  return hh + ':' + mm;
+  const time = hh + ':' + mm;
+  const sameDay = d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate();
+  if (sameDay) return time;
+  const month = String(d.getMonth() + 1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  if (d.getFullYear() === now.getFullYear()) {
+    return month + '-' + day + ' ' + time;
+  }
+  const yy = String(d.getFullYear()).slice(-2);
+  return yy + '-' + month + '-' + day + ' ' + time;
 }
 
 function fmtDate(ms) {
@@ -196,36 +216,273 @@ function extractMetafiles(content) {
   return result;
 }
 
+// ─── Chain txid helpers ─────────────────────────────────────────────────────
+
+const TXID_RE = /^[0-9a-f]{64}$/i;
+const PIN_ID_TXID_RE = /^([0-9a-f]{64})i\\d+$/i;
+
+function normalizeTxidCandidate(value) {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return TXID_RE.test(normalized) ? normalized : '';
+}
+
+function normalizePinIdTxid(value) {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const match = normalized.match(PIN_ID_TXID_RE);
+  return match ? match[1] : '';
+}
+
+function resolveMessageTxid(msg) {
+  const metadata = msg && msg.metadata && typeof msg.metadata === 'object' ? msg.metadata : {};
+  const txidsCandidate = Array.isArray(metadata.txids)
+    ? metadata.txids.map(normalizeTxidCandidate).find(Boolean)
+    : '';
+  if (txidsCandidate) return txidsCandidate;
+
+  const directKeys = [
+    'txid',
+    'messageTxid',
+    'pinTxid',
+    'deliveryTxid',
+    'deliveryMessageTxid',
+    'orderMessageTxid',
+    'orderTxid',
+    'ratingTxid',
+  ];
+  for (const key of directKeys) {
+    const normalized = normalizeTxidCandidate(metadata[key]);
+    if (normalized) return normalized;
+  }
+
+  const pinKeys = [
+    'pinId',
+    'messagePinId',
+    'deliveryPinId',
+    'deliveryMessagePinId',
+    'orderPinId',
+    'orderMessagePinId',
+    'ratingPinId',
+    'refundRequestPinId',
+    'refundFinalizePinId',
+  ];
+  for (const key of pinKeys) {
+    const normalized = normalizePinIdTxid(metadata[key]);
+    if (normalized) return normalized;
+  }
+
+  return '';
+}
+
+function formatTxidPreview(txid) {
+  const normalized = normalizeTxidCandidate(txid);
+  return normalized ? normalized.slice(0, 8) + '....' : '';
+}
+
 // ─── Simple markdown renderer ────────────────────────────────────────────────
 
 function renderMarkdown(text) {
   if (!text) return '';
-  const blocks = [];
-  let html = escHtml(text).replace(/\`\`\`([\\s\\S]*?)\`\`\`/g, function(_, code) {
-    const i = blocks.length;
-    blocks.push('<pre class="md-code"><code>' + code + '</code></pre>');
-    return '\\x00' + i + '\\x00';
+  const codeBlocks = [];
+  let source = String(text || '').replace(/\\r\\n?/g, '\\n');
+  source = source.replace(/\`\`\`([^\\n\`]*)\\n?([\\s\\S]*?)\`\`\`/g, function(_, lang, code) {
+    const index = codeBlocks.length;
+    codeBlocks.push('<pre class="md-code"><code>' + escHtml(code.replace(/\\n$/, '')) + '</code></pre>');
+    return '@@CODEBLOCK_' + index + '@@';
   });
-  html = html.replace(/\`([^\`\\n]+)\`/g, '<code class="md-inline-code">$1</code>');
-  html = html.replace(/\\*\\*([^*\\n]+)\\*\\*/g, '<strong>$1</strong>');
-  html = html.replace(/\\*([^*\\n]+)\\*/g, '<em>$1</em>');
-  html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-  html = html.replace(/^(- .+(\\n- .+)*)/gm, function(block) {
-    const items = block.split('\\n').map(l => '<li>' + l.replace(/^- /, '') + '</li>').join('');
-    return '<ul>' + items + '</ul>';
-  });
-  html = html.replace(/\\n\\n/g, '</p><p>');
-  html = html.replace(/\\n/g, '<br>');
-  html = html.replace(/\\x00(\\d+)\\x00/g, function(_, i) { return blocks[+i]; });
-  return '<p>' + html + '</p>';
+
+  function safeHref(rawHref) {
+    const href = String(rawHref || '').trim().replace(/&amp;/g, '&');
+    if (/^(https?:|mailto:|tel:|file:)/i.test(href)) {
+      return escHtml(href);
+    }
+    return '';
+  }
+  function inlineMarkdown(raw) {
+    let html = escHtml(raw);
+    html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, function(_, label, href) {
+      const safe = safeHref(href);
+      return safe
+        ? '<a href="' + safe + '" target="_blank" rel="noopener">' + label + '</a>'
+        : label;
+    });
+    html = html.replace(/\`([^\`\\n]+)\`/g, '<code class="md-inline-code">$1</code>');
+    html = html.replace(/\\*\\*([^*\\n]+)\\*\\*/g, '<strong>$1</strong>');
+    html = html.replace(/\\*([^*\\n]+)\\*/g, '<em>$1</em>');
+    return html;
+  }
+  function isTableSeparator(line) {
+    return /^\\s*\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)+\\|?\\s*$/.test(line || '');
+  }
+  function splitTableRow(line) {
+    let trimmed = String(line || '').trim();
+    if (trimmed.startsWith('|')) trimmed = trimmed.slice(1);
+    if (trimmed.endsWith('|')) trimmed = trimmed.slice(0, -1);
+    return trimmed.split('|').map(cell => cell.trim());
+  }
+  function startsBlock(line, nextLine) {
+    return /^@@CODEBLOCK_\\d+@@$/.test(line)
+      || /^#{1,6}\\s+/.test(line)
+      || /^\\s*>\\s?/.test(line)
+      || /^\\s*[-*]\\s+/.test(line)
+      || /^\\s*\\d+\\.\\s+/.test(line)
+      || /^\\s*(-{3,}|\\*{3,}|_{3,})\\s*$/.test(line)
+      || (line.includes('|') && isTableSeparator(nextLine || ''));
+  }
+
+  const lines = source.split('\\n');
+  const html = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    const codeMatch = trimmed.match(/^@@CODEBLOCK_(\\d+)@@$/);
+    if (codeMatch) {
+      html.push(codeBlocks[Number(codeMatch[1])] || '');
+      continue;
+    }
+
+    if (line.includes('|') && isTableSeparator(lines[index + 1] || '')) {
+      const headers = splitTableRow(line);
+      index += 2;
+      const rows = [];
+      while (index < lines.length && lines[index].trim() && lines[index].includes('|')) {
+        rows.push(splitTableRow(lines[index]));
+        index += 1;
+      }
+      index -= 1;
+      html.push(
+        '<table><thead><tr>'
+        + headers.map(cell => '<th>' + inlineMarkdown(cell) + '</th>').join('')
+        + '</tr></thead><tbody>'
+        + rows.map(row => '<tr>' + row.map(cell => '<td>' + inlineMarkdown(cell) + '</td>').join('') + '</tr>').join('')
+        + '</tbody></table>'
+      );
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      html.push('<h' + level + '>' + inlineMarkdown(heading[2]) + '</h' + level + '>');
+      continue;
+    }
+
+    if (/^\\s*(-{3,}|\\*{3,}|_{3,})\\s*$/.test(line)) {
+      html.push('<hr>');
+      continue;
+    }
+
+    if (/^\\s*>\\s?/.test(line)) {
+      const quoteLines = [];
+      while (index < lines.length && /^\\s*>\\s?/.test(lines[index])) {
+        quoteLines.push(lines[index].replace(/^\\s*>\\s?/, ''));
+        index += 1;
+      }
+      index -= 1;
+      html.push('<blockquote>' + quoteLines.map(inlineMarkdown).join('<br>') + '</blockquote>');
+      continue;
+    }
+
+    if (/^\\s*[-*]\\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\\s*[-*]\\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\\s*[-*]\\s+/, ''));
+        index += 1;
+      }
+      index -= 1;
+      html.push('<ul>' + items.map(item => '<li>' + inlineMarkdown(item) + '</li>').join('') + '</ul>');
+      continue;
+    }
+
+    if (/^\\s*\\d+\\.\\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\\s*\\d+\\.\\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\\s*\\d+\\.\\s+/, ''));
+        index += 1;
+      }
+      index -= 1;
+      html.push('<ol>' + items.map(item => '<li>' + inlineMarkdown(item) + '</li>').join('') + '</ol>');
+      continue;
+    }
+
+    const paragraph = [line];
+    while (
+      index + 1 < lines.length
+      && lines[index + 1].trim()
+      && !startsBlock(lines[index + 1], lines[index + 2])
+    ) {
+      index += 1;
+      paragraph.push(lines[index]);
+    }
+    html.push('<p>' + paragraph.map(inlineMarkdown).join('<br>') + '</p>');
+  }
+
+  return html.join('');
 }
 
 // ─── Avatar helpers ─────────────────────────────────────────────────────────
 
 const profileCache = new Map();
+
+function normalizeAvatarUrl(rawAvatar) {
+  const raw = normalizeText(rawAvatar);
+  if (!raw) return '';
+  if (/^(data:|blob:)/i.test(raw)) {
+    return raw;
+  }
+  const pinRef = extractAvatarPinReference(raw);
+  if (pinRef) {
+    return '/api/file/avatar?ref=' + encodeURIComponent(pinRef);
+  }
+  if (isHttpUrl(raw)) {
+    return raw;
+  }
+  return raw;
+}
+
+function extractAvatarPinReference(rawAvatar) {
+  const raw = normalizeText(rawAvatar);
+  if (!raw) return '';
+  if (raw.toLowerCase().indexOf('metafile://') === 0) {
+    const pinId = raw.slice('metafile://'.length).trim().split(/[?#]/)[0] || '';
+    return pinId ? 'metafile://' + pinId : '';
+  }
+  const path = (() => {
+    if (isHttpUrl(raw)) {
+      try {
+        return new URL(raw).pathname;
+      } catch {
+        return '';
+      }
+    }
+    return raw;
+  })();
+  const prefixes = [
+    '/content/',
+    '/metafile-indexer/content/',
+    '/metafile-indexer/thumbnail/',
+    '/metafile-indexer/api/v1/files/content/',
+    '/metafile-indexer/api/v1/files/accelerate/content/',
+    '/metafile-indexer/api/v1/users/avatar/accelerate/',
+  ];
+  for (const prefix of prefixes) {
+    if (path.toLowerCase().indexOf(prefix.toLowerCase()) === 0) {
+      return decodeURIComponent((path.slice(prefix.length).split(/[?#]/)[0] || '').trim());
+    }
+  }
+  if (/^[0-9a-f]{64}(?:i[0-9]+)?$/i.test(raw)) {
+    return raw;
+  }
+  return '';
+}
+
+function isHttpUrl(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized.indexOf('http://') === 0 || normalized.indexOf('https://') === 0;
+}
 
 function getInitialsAvatar(name, gmid) {
   const text = name || gmid || '?';
@@ -260,18 +517,8 @@ async function resolveProfile(gmid) {
       const json = await resp.json();
       const data = json?.data || json || {};
       name = data.name || data.showName || data.nickname || '';
-      const rawAvatar = data.avatar || data.avatarUrl || data.avatarId || '';
-      if (rawAvatar) {
-        if (rawAvatar.startsWith('http') || rawAvatar.startsWith('data:')) {
-          avatarUrl = rawAvatar;
-        } else if (rawAvatar.startsWith('/')) {
-          avatarUrl = 'https://file.metaid.io' + rawAvatar;
-        } else if (/^[0-9a-f]{64}i\\d+$/i.test(rawAvatar)) {
-          avatarUrl = 'https://file.metaid.io/content/' + rawAvatar;
-        } else if (/^[0-9a-f]{64}$/i.test(rawAvatar)) {
-          avatarUrl = 'https://file.metaid.io/metafile-indexer/api/v1/files/content/' + rawAvatar;
-        }
-      }
+      const rawAvatar = data.avatar || data.avatarUrl || data.avatarId || data.avatarImage || data.avatarUri || data.avatar_uri || '';
+      avatarUrl = normalizeAvatarUrl(rawAvatar);
     }
   } catch { /* ignore */ }
   profileCache.set(gmid, { name, avatar: avatarUrl, fetching: null });
@@ -286,6 +533,8 @@ let stats = { totalCount: 0, callerCount: 0, providerCount: 0, lastUpdatedAt: nu
 let selectedSessionId = null;
 let sessionDetail = null;
 let refreshTimer = null;
+let refreshInFlight = false;
+let detailLoadSeq = 0;
 
 const $ = (sel) => document.querySelector(sel);
 const qAll = (sel) => [...document.querySelectorAll(sel)];
@@ -298,6 +547,29 @@ function renderStats() {
   if (el4) el4.textContent = stats.lastUpdatedAt ? fmtDate(stats.lastUpdatedAt) : '—';
 }
 
+function getInitialTraceSelection() {
+  let params;
+  try {
+    params = new URLSearchParams((typeof window !== 'undefined' && window.location && window.location.search) || '');
+  } catch {
+    return { sessionId: '', traceId: '' };
+  }
+  return {
+    sessionId: normalizeText(params.get('sessionId')),
+    traceId: normalizeText(params.get('traceId')),
+  };
+}
+
+function resolveInitialSessionId() {
+  const selection = getInitialTraceSelection();
+  if (selection.sessionId) return selection.sessionId;
+  if (!selection.traceId) return '';
+  const matched = sessions.find(session => (
+    session.traceId === selection.traceId || session.sessionId === selection.traceId
+  ));
+  return matched ? matched.sessionId : '';
+}
+
 function renderSessionList() {
   const list = $('[data-session-list]');
   if (!list) return;
@@ -308,7 +580,11 @@ function renderSessionList() {
   list.innerHTML = sessions.map(session => {
     const roleBadgeTone = session.role === 'caller' ? 'caller' : 'provider';
     const roleBadge = session.role === 'caller' ? 'CALLER' : 'PROVIDER';
-    const peer = session.peerGlobalMetaId ? session.peerGlobalMetaId.slice(0, 16) + '…' : '(unknown peer)';
+    const peerName = session.peerName || session.peerGlobalMetaId || '(unknown remote)';
+    const peerMeta = session.peerGlobalMetaId && session.peerGlobalMetaId !== peerName
+      ? session.peerGlobalMetaId.slice(0, 16) + '…'
+      : '';
+    const localName = session.localMetabotName || session.localMetabotGlobalMetaId || '—';
     const timeAgo = session.updatedAt ? fmtTimeAgo(Date.now() - session.updatedAt) : '';
     const isSelected = session.sessionId === selectedSessionId;
     return '<div class="session-item' + (isSelected ? ' selected' : '') + '" data-session-id="' + escHtml(session.sessionId) + '" role="button" tabindex="0">' +
@@ -316,8 +592,8 @@ function renderSessionList() {
         '<span class="session-role-badge badge-' + roleBadgeTone + '">' + roleBadge + '</span>' +
         '<span class="session-time">' + escHtml(timeAgo) + '</span>' +
       '</div>' +
-      '<div class="session-item-peer" data-peer-name="' + escHtml(session.sessionId) + '">' + escHtml(peer) + '</div>' +
-      '<div class="session-item-local">' + escHtml(session.localMetabotName || session.localMetabotGlobalMetaId || '—') + '</div>' +
+      '<div class="session-item-peer" data-peer-name="' + escHtml(session.sessionId) + '">' + escHtml(peerName) + '</div>' +
+      '<div class="session-item-local">' + escHtml(peerMeta ? peerMeta + ' · local: ' + localName : 'local: ' + localName) + '</div>' +
       '<div class="session-item-footer">' +
         '<span class="status-pill status-' + session.stateTone + '">' +
           '<span class="status-dot"></span>' +
@@ -352,31 +628,33 @@ async function renderSessionDetail() {
     resolveProfile(detail.peerGlobalMetaId),
   ]);
   const localName = detail.localMetabotName || localProfile.name || detail.localMetabotGlobalMetaId || 'Local';
-  const peerName = peerProfile.name && peerProfile.name !== detail.peerGlobalMetaId
+  const peerName = detail.peerName
+    || (peerProfile.name && peerProfile.name !== detail.peerGlobalMetaId
     ? peerProfile.name
-    : (detail.peerGlobalMetaId ? detail.peerGlobalMetaId.slice(0, 20) + '…' : 'Peer');
-  const localAvatar = localProfile.avatar || getInitialsAvatar(localName, detail.localMetabotGlobalMetaId);
-  const peerAvatar = peerProfile.avatar || getInitialsAvatar(peerName, detail.peerGlobalMetaId);
+    : (detail.peerGlobalMetaId ? detail.peerGlobalMetaId.slice(0, 20) + '…' : 'Peer'));
+  const localAvatar = normalizeAvatarUrl(detail.localMetabotAvatar) || localProfile.avatar || getInitialsAvatar(localName, detail.localMetabotGlobalMetaId);
+  const peerAvatar = normalizeAvatarUrl(detail.peerAvatar) || peerProfile.avatar || getInitialsAvatar(peerName, detail.peerGlobalMetaId);
+  const traceCopyValue = detail.traceId || detail.sessionId;
 
   const headerHtml =
     '<div class="detail-header">' +
       '<div class="detail-header-participant">' +
-        avatarImg(localAvatar, getInitialsAvatar(localName, detail.localMetabotGlobalMetaId), 'participant-avatar') +
+        avatarImg(peerAvatar, getInitialsAvatar(peerName, detail.peerGlobalMetaId), 'participant-avatar') +
         '<div class="participant-info">' +
-          '<div class="participant-name">' + escHtml(localName) + '</div>' +
-          '<div class="participant-role">Local · ' + escHtml(detail.role === 'caller' ? 'Caller' : 'Provider') + '</div>' +
+          '<div class="participant-name">' + escHtml(peerName) + '</div>' +
+          '<div class="participant-role">Remote · ' + escHtml(detail.role === 'caller' ? 'Provider' : 'Caller') + '</div>' +
         '</div>' +
       '</div>' +
       '<div class="detail-header-meta">' +
         '<span class="status-pill status-' + getStateTone(detail.state) + '"><span class="status-dot"></span><span>' + escHtml(getStateLabel(detail.state)) + '</span></span>' +
-        '<div class="detail-trace-id mono">trace: ' + escHtml(detail.traceId || detail.sessionId) + '</div>' +
+        '<div class="detail-trace-row"><span class="detail-trace-id mono">trace: ' + escHtml(traceCopyValue) + '</span>' + copyButton(traceCopyValue, 'Copy trace id', 'copy-trace') + '</div>' +
       '</div>' +
       '<div class="detail-header-participant detail-header-participant-right">' +
         '<div class="participant-info participant-info-right">' +
-          '<div class="participant-name">' + escHtml(peerName) + '</div>' +
-          '<div class="participant-role">' + escHtml(detail.role === 'caller' ? 'Provider' : 'Caller') + ' · Remote</div>' +
+          '<div class="participant-name">' + escHtml(localName) + '</div>' +
+          '<div class="participant-role">' + escHtml(detail.role === 'caller' ? 'Caller' : 'Provider') + ' · Local</div>' +
         '</div>' +
-        avatarImg(peerAvatar, getInitialsAvatar(peerName, detail.peerGlobalMetaId), 'participant-avatar') +
+        avatarImg(localAvatar, getInitialsAvatar(localName, detail.localMetabotGlobalMetaId), 'participant-avatar') +
       '</div>' +
     '</div>';
 
@@ -397,9 +675,77 @@ async function renderSessionDetail() {
       }
     });
   });
+  panel.querySelectorAll('[data-copy-text]').forEach(btn => {
+    btn.addEventListener('click', () => copyTextToClipboard(btn.dataset.copyText || ''));
+  });
 }
 
 const TOOL_ID_SEQ = { n: 0 };
+
+function copyIconSvg() {
+  return '<svg class="copy-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+    '<path d="M8 7.5V6a2 2 0 0 1 2-2h7.5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H16" />' +
+    '<path d="M4.5 9.5a2 2 0 0 1 2-2H14a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V9.5Z" />' +
+  '</svg>';
+}
+
+function copyButton(value, label, cls) {
+  if (!value) return '';
+  return '<button type="button" class="copy-action ' + escHtml(cls || '') + '" data-copy-text="' + escHtml(value) + '" title="' + escHtml(label) + '" aria-label="' + escHtml(label) + '">' + copyIconSvg() + '</button>';
+}
+
+function showToast(message) {
+  const toast = $('[data-copy-toast]');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.add('show');
+  if (showToast.timer) clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => toast.classList.remove('show'), 1600);
+}
+
+function copyTextFallback(value) {
+  if (typeof document === 'undefined' || !document.createElement || !document.body) {
+    return false;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', 'readonly');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '0';
+  textarea.style.left = '0';
+  textarea.style.width = '1px';
+  textarea.style.height = '1px';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus({ preventScroll: true });
+  textarea.select();
+  textarea.setSelectionRange(0, value.length);
+  let ok = false;
+  try {
+    ok = document.execCommand && document.execCommand('copy');
+  } catch {
+    ok = false;
+  }
+  document.body.removeChild(textarea);
+  return ok;
+}
+
+async function copyTextToClipboard(value) {
+  if (!value) return;
+  let copied = false;
+  if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(value);
+      copied = true;
+    } catch {
+      copied = false;
+    }
+  }
+  if (!copied) {
+    copied = copyTextFallback(value);
+  }
+  showToast(copied ? 'Copied' : 'Copy unavailable');
+}
 
 function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
   if (msg.tone === 'system') {
@@ -423,6 +769,15 @@ function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
   const avatar = isLocal ? localAvatar : peerAvatar;
   const metafiles = extractMetafiles(msg.content);
   const timeStr = fmtTime(msg.timestamp);
+  const txid = resolveMessageTxid(msg);
+  const txidPreview = formatTxidPreview(txid);
+  const timeHtml = '<span class="msg-time">' + escHtml(timeStr) + '</span>';
+  const txidHtml = txidPreview
+    ? '<span class="msg-txid"><span class="msg-txid-text">txid: ' + escHtml(txidPreview) + '</span>' + copyButton(txid, 'Copy txid', 'copy-txid') + '</span>'
+    : '';
+  const metaHtml = isLocal
+    ? txidHtml + timeHtml
+    : timeHtml + txidHtml;
   let contentHtml = renderMarkdown(msg.content);
   if (metafiles.length) {
     const cleanContent = msg.content.replace(METAFILE_REGEX, '').trim();
@@ -435,7 +790,7 @@ function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
       '<div class="msg-name">' + escHtml(name) + '</div>' +
       '<div class="msg-bubble ' + (isLocal ? 'bubble-local' : 'bubble-peer') + '">' + (contentHtml || '<span class="muted">(empty)</span>') + '</div>' +
       (metafileHtml ? '<div class="msg-metafiles">' + metafileHtml + '</div>' : '') +
-      '<div class="msg-time">' + escHtml(timeStr) + '</div>' +
+      '<div class="msg-meta ' + (isLocal ? 'msg-meta-local' : 'msg-meta-peer') + '">' + metaHtml + '</div>' +
     '</div></div>';
 }
 
@@ -456,16 +811,21 @@ async function loadSessions() {
   }
 }
 
-async function loadSessionDetail(sessionId) {
+async function loadSessionDetail(sessionId, options) {
+  options = options || {};
+  const silent = options.silent === true;
+  const sequence = ++detailLoadSeq;
   const panel = $('[data-session-detail]');
-  if (panel) panel.innerHTML = '<div class="detail-loading"><span class="mono">Loading session…</span></div>';
+  if (panel && !silent) panel.innerHTML = '<div class="detail-loading"><span class="mono">Loading session…</span></div>';
   try {
     const resp = await fetch('/api/trace/sessions/' + encodeURIComponent(sessionId));
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const json = await resp.json();
+    if (sequence !== detailLoadSeq) return;
     sessionDetail = buildSessionDetailViewModel(json.data || json);
     await renderSessionDetail();
   } catch (err) {
+    if (sequence !== detailLoadSeq) return;
     sessionDetail = null;
     if (panel) panel.innerHTML = '<div class="detail-empty error-text"><p>Failed to load session: ' + escHtml(String(err)) + '</p></div>';
   }
@@ -475,19 +835,31 @@ async function selectSession(sessionId) {
   if (selectedSessionId === sessionId) return;
   selectedSessionId = sessionId;
   qAll('[data-session-id]').forEach(el => el.classList.toggle('selected', el.dataset.sessionId === sessionId));
-  await loadSessionDetail(sessionId);
+  await loadSessionDetail(sessionId, { silent: false });
 }
 
 function startRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(async () => {
-    await loadSessions();
-    if (selectedSessionId) await loadSessionDetail(selectedSessionId);
+    if (refreshInFlight) return;
+    refreshInFlight = true;
+    try {
+      await loadSessions();
+      if (selectedSessionId) await loadSessionDetail(selectedSessionId, { silent: true });
+    } finally {
+      refreshInFlight = false;
+    }
   }, 15000);
 }
 
 async function init() {
   await loadSessions();
+  const initialSessionId = resolveInitialSessionId();
+  if (initialSessionId) {
+    await selectSession(initialSessionId);
+  } else {
+    await renderSessionDetail();
+  }
   startRefresh();
 }
 

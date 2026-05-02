@@ -50,13 +50,15 @@ import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain } from '../daemon/defaultHandlers';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
+import { createA2ASimplemsgListenerManager } from '../core/a2a/simplemsgListener';
 import { createSocketIoMetaWebMasterReplyWaiter, type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
 import { parseMasterResponse } from '../core/master/masterMessageSchema';
-import { createPrivateChatListener } from '../core/chat/privateChatListener';
 import { createPrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
+import type { ChatReplyRunner } from '../core/chat/privateChatTypes';
+import { createTestServicePaymentExecutor } from '../core/payments/servicePayment';
 import { runSystemUpdate } from '../core/system/update';
 import { runSystemUninstall } from '../core/system/uninstall';
 import type { CliDependencies, CliRuntimeContext } from './types';
@@ -72,6 +74,7 @@ const TEST_FAKE_CHAIN_WRITE_ENV = 'METABOT_TEST_FAKE_CHAIN_WRITE';
 const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
+const TEST_FAKE_BUYER_RATING_REPLY_ENV = 'METABOT_TEST_FAKE_BUYER_RATING_REPLY';
 const TEST_FAKE_MASTER_REPLY_ENV = 'METABOT_TEST_FAKE_MASTER_REPLY';
 const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
@@ -340,7 +343,8 @@ type SupportedBooleanConfigKey =
   | 'evolution_network.enabled'
   | 'evolution_network.autoAdoptSameSkillSameScope'
   | 'evolution_network.autoRecordExecutions'
-  | 'askMaster.enabled';
+  | 'askMaster.enabled'
+  | 'a2a.simplemsgListenerEnabled';
 
 type SupportedEnumConfigKey =
   | 'askMaster.triggerMode';
@@ -355,6 +359,7 @@ const SUPPORTED_CONFIG_KEYS = new Set<SupportedConfigKey>([
   'evolution_network.autoRecordExecutions',
   'askMaster.enabled',
   'askMaster.triggerMode',
+  'a2a.simplemsgListenerEnabled',
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -407,7 +412,8 @@ function isSupportedBooleanConfigKey(key: SupportedConfigKey): key is SupportedB
   return key === 'evolution_network.enabled'
     || key === 'evolution_network.autoAdoptSameSkillSameScope'
     || key === 'evolution_network.autoRecordExecutions'
-    || key === 'askMaster.enabled';
+    || key === 'askMaster.enabled'
+    || key === 'a2a.simplemsgListenerEnabled';
 }
 
 function readConfigValue(
@@ -428,6 +434,9 @@ function readConfigValue(
   }
   if (key === 'askMaster.triggerMode') {
     return config.askMaster.triggerMode;
+  }
+  if (key === 'a2a.simplemsgListenerEnabled') {
+    return config.a2a.simplemsgListenerEnabled;
   }
   return config.evolution_network.autoRecordExecutions;
 }
@@ -470,6 +479,15 @@ function writeConfigValue(
       evolution_network: {
         ...config.evolution_network,
         autoAdoptSameSkillSameScope: value === true,
+      },
+    };
+  }
+  if (key === 'a2a.simplemsgListenerEnabled') {
+    return {
+      ...config,
+      a2a: {
+        ...config.a2a,
+        simplemsgListenerEnabled: value === true,
       },
     };
   }
@@ -596,6 +614,7 @@ export function buildDaemonConfigHash(
       fakeSubsidy: normalizeEnvText(env[TEST_FAKE_SUBSIDY_ENV]),
       fakeProviderChatPublicKey: normalizeEnvText(env[TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV]),
       fakeMetaWebReply: normalizeEnvText(env[TEST_FAKE_METAWEB_REPLY_ENV]),
+      fakeBuyerRatingReply: normalizeEnvText(env[TEST_FAKE_BUYER_RATING_REPLY_ENV]),
       fakeMasterReply: normalizeEnvText(env[TEST_FAKE_MASTER_REPLY_ENV]),
     }))
     .digest('hex');
@@ -1201,6 +1220,19 @@ function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceRep
   };
 }
 
+function createTestBuyerRatingReplyRunner(env: NodeJS.ProcessEnv): ChatReplyRunner | undefined {
+  const raw = typeof env[TEST_FAKE_BUYER_RATING_REPLY_ENV] === 'string'
+    ? env[TEST_FAKE_BUYER_RATING_REPLY_ENV]!.trim()
+    : '';
+  if (!raw) {
+    return undefined;
+  }
+  return async () => ({
+    state: 'reply',
+    content: raw,
+  });
+}
+
 function createTestMasterReplyWaiter(env: NodeJS.ProcessEnv): MetaWebMasterReplyWaiter | undefined {
   const raw = typeof env[TEST_FAKE_MASTER_REPLY_ENV] === 'string'
     ? env[TEST_FAKE_MASTER_REPLY_ENV]!.trim()
@@ -1697,7 +1729,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       },
     },
     trace: {
-      get: async (input) => requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}`),
+      get: async (input) => input.sessionId
+        ? requestJson(context, 'GET', `/api/trace/sessions/${encodeURIComponent(input.sessionId)}`)
+        : requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId || '')}`),
       watch: async (input) => requestText(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}/watch`),
     },
     ui: {
@@ -2116,7 +2150,11 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     : undefined;
   const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
   const callerReplyWaiter = createTestMetaWebReplyWaiter(context.env);
+  const buyerRatingReplyRunner = createTestBuyerRatingReplyRunner(context.env) ?? createHostLlmChatReplyRunner();
   const masterReplyWaiter = createTestMasterReplyWaiter(context.env) ?? createSocketIoMetaWebMasterReplyWaiter();
+  const servicePaymentExecutor = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+    ? createTestServicePaymentExecutor()
+    : undefined;
   const socketPresenceApiBaseUrl = context.env.METABOT_SOCKET_PRESENCE_API_BASE_URL
     || (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 'http://127.0.0.1:9' : undefined);
 
@@ -2142,7 +2180,9 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
       fetchPeerChatPublicKey,
       callerReplyWaiter,
+      buyerRatingReplyRunner,
       masterReplyWaiter,
+      servicePaymentExecutor,
       requestMvcGasSubsidy,
       autoReplyConfig: sharedAutoReplyConfig,
     }),
@@ -2210,33 +2250,28 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     replyRunner: createHostLlmChatReplyRunner(),
   }, sharedAutoReplyConfig);
 
-  const privateChatListener = createPrivateChatListener({
-    getIdentity: async () => {
-      const state = await runtimeStore.readState();
-      if (!state.identity) return null;
-      try {
-        const chatIdentity = await signer.getPrivateChatIdentity();
-        return {
-          globalMetaId: chatIdentity.globalMetaId,
-          privateKeyHex: chatIdentity.privateKeyHex,
-          chatPublicKey: chatIdentity.chatPublicKey,
-        };
-      } catch {
-        return null;
+  const daemonConfig = await createConfigStore(paths).read();
+  const simplemsgListener = createA2ASimplemsgListenerManager({
+    systemHomeDir: paths.systemHomeDir,
+    resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+    onMessage: (profile, message) => {
+      if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
+        void chatAutoReplyOrchestrator.handleInboundMessage(message);
       }
     },
-    callbacks: {
-      onMessage: (message) => { void chatAutoReplyOrchestrator.handleInboundMessage(message); },
+    onError: (error) => {
+      console.warn('[A2A simplemsg listener]', error.message);
     },
-    resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
   });
-  privateChatListener.start();
+  if (daemonConfig.a2a.simplemsgListenerEnabled) {
+    await simplemsgListener.start();
+  }
 
   let shuttingDown = false;
   const shutdown = async (exitCode: number) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    privateChatListener.stop();
+    simplemsgListener.stop();
     providerHeartbeatLoop.stop();
     await runtimeStore.clearDaemon(process.pid);
     await daemon.close();
