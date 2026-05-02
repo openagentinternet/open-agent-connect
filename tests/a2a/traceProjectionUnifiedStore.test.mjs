@@ -216,7 +216,7 @@ async function seedUnifiedConversation(homeDir) {
   return store;
 }
 
-test('listUnifiedA2ATraceSessionsForProfile lists peer and service-order sessions from per-peer JSON', async () => {
+test('listUnifiedA2ATraceSessionsForProfile lists one peer window per remote MetaBot', async () => {
   const { homeDir, profile } = await createProfileFixture();
   await seedUnifiedConversation(homeDir);
 
@@ -225,10 +225,9 @@ test('listUnifiedA2ATraceSessionsForProfile lists peer and service-order session
     daemon: { baseUrl: 'http://127.0.0.1:38245' },
   });
 
-  assert.equal(sessions.length, 2);
+  assert.equal(sessions.length, 1);
   assert.deepEqual(sessions.map((session) => session.sessionId), [
     PEER_SESSION_ID,
-    ORDER_SESSION_ID,
   ]);
   assert.equal(sessions[0].traceId, PEER_SESSION_ID);
   assert.equal(sessions[0].role, 'caller');
@@ -238,12 +237,6 @@ test('listUnifiedA2ATraceSessionsForProfile lists peer and service-order session
   assert.equal(sessions[0].peerGlobalMetaId, PEER_GLOBAL_META_ID);
   assert.equal(sessions[0].peerName, 'Remote Bot');
   assert.equal(sessions[0].source, 'unified_a2a');
-
-  assert.equal(sessions[1].traceId, ORDER_SESSION_ID);
-  assert.equal(sessions[1].role, 'caller');
-  assert.equal(sessions[1].state, 'completed');
-  assert.equal(sessions[1].servicePinId, 'service-pin-1');
-  assert.equal(sessions[1].serviceName, 'Weather Oracle');
 });
 
 test('getUnifiedA2ATraceSessionForProfile shows all messages for the peer conversation session', async () => {
@@ -281,7 +274,7 @@ test('getUnifiedA2ATraceSessionForProfile shows all messages for the peer conver
   assert.equal(localUiUrl.searchParams.get('sessionId'), PEER_SESSION_ID);
 });
 
-test('getUnifiedA2ATraceSessionForProfile scopes service-order details and exposes delivery markdown result', async () => {
+test('getUnifiedA2ATraceSessionForProfile maps service-order ids back to the peer window', async () => {
   const { homeDir, profile } = await createProfileFixture();
   await seedUnifiedConversation(homeDir);
 
@@ -292,18 +285,19 @@ test('getUnifiedA2ATraceSessionForProfile scopes service-order details and expos
   });
 
   assert.ok(detail);
-  assert.equal(detail.sessionId, ORDER_SESSION_ID);
-  assert.equal(detail.traceId, ORDER_SESSION_ID);
-  assert.equal(detail.session.sessionId, ORDER_SESSION_ID);
+  assert.equal(detail.sessionId, PEER_SESSION_ID);
+  assert.equal(detail.traceId, PEER_SESSION_ID);
+  assert.equal(detail.session.sessionId, PEER_SESSION_ID);
   assert.equal(detail.session.role, 'caller');
-  assert.equal(detail.session.state, 'completed');
+  assert.equal(detail.session.state, 'active');
   assert.equal(detail.orderTxid, ORDER_TXID);
   assert.equal(detail.paymentTxid, PAYMENT_TXID);
   assert.equal(detail.order.serviceId, 'service-pin-1');
   assert.equal(detail.order.serviceName, 'Weather Oracle');
   assert.equal(detail.a2a.publicStatus, 'completed');
-  assert.equal(detail.transcriptItems.length, 4);
+  assert.equal(detail.transcriptItems.length, 5);
   assert.deepEqual(detail.transcriptItems.map((item) => item.id), [
+    'msg-1',
     'msg-2',
     'msg-3',
     'msg-4',
@@ -326,7 +320,7 @@ test('getUnifiedA2ATraceSessionForProfile scopes service-order details and expos
   assert.equal(detail.resultText, delivery.content);
   assert.equal(detail.responseText, delivery.content);
   assert.equal(detail.ratingRequestText, 'Please rate this service.');
-  assert.equal(detail.inspector.transcriptItems.length, 4);
+  assert.equal(detail.inspector.transcriptItems.length, 5);
 });
 
 test('default trace handlers read unified A2A sessions before legacy session-state fallback', async () => {
@@ -340,19 +334,73 @@ test('default trace handlers read unified A2A sessions before legacy session-sta
 
   const listResult = await handlers.trace.listSessions();
   assert.equal(listResult.ok, true);
-  assert.equal(listResult.data.sessions.length, 2);
+  assert.equal(listResult.data.sessions.length, 1);
   assert.deepEqual(listResult.data.sessions.map((session) => session.sessionId), [
     PEER_SESSION_ID,
-    ORDER_SESSION_ID,
   ]);
-  assert.equal(listResult.data.stats.totalCount, 2);
-  assert.equal(listResult.data.stats.callerCount, 2);
+  assert.equal(listResult.data.stats.totalCount, 1);
+  assert.equal(listResult.data.stats.callerCount, 1);
 
   const detailResult = await handlers.trace.getSession({ sessionId: ORDER_SESSION_ID });
   assert.equal(detailResult.ok, true);
-  assert.equal(detailResult.data.sessionId, ORDER_SESSION_ID);
+  assert.equal(detailResult.data.sessionId, PEER_SESSION_ID);
   assert.equal(detailResult.data.responseText, '# Forecast\n\nSunny with light wind.\n\nmetafile://weather-chart-1');
-  assert.equal(detailResult.data.inspector.transcriptItems.length, 4);
+  assert.equal(detailResult.data.inspector.transcriptItems.length, 5);
+});
+
+test('default trace handlers hide legacy duplicate windows when a unified peer window exists', async () => {
+  const { systemHomeDir, homeDir } = await createProfileFixture();
+  await seedUnifiedConversation(homeDir);
+  const store = createSessionStateStore(homeDir);
+  await store.writeState({
+    version: 1,
+    sessions: [
+      {
+        sessionId: 'legacy-duplicate-session-1',
+        traceId: 'trace-duplicate-1',
+        role: 'caller',
+        state: 'completed',
+        createdAt: BASE_TIME + 1,
+        updatedAt: BASE_TIME + 200,
+        callerGlobalMetaId: LOCAL_GLOBAL_META_ID,
+        providerGlobalMetaId: PEER_GLOBAL_META_ID,
+        servicePinId: 'legacy-service-pin',
+        currentTaskRunId: 'legacy-run-1',
+        latestTaskRunState: 'completed',
+      },
+      {
+        sessionId: 'legacy-duplicate-session-2',
+        traceId: 'trace-duplicate-2',
+        role: 'caller',
+        state: 'requesting_remote',
+        createdAt: BASE_TIME + 2,
+        updatedAt: BASE_TIME + 300,
+        callerGlobalMetaId: LOCAL_GLOBAL_META_ID,
+        providerGlobalMetaId: PEER_GLOBAL_META_ID,
+        servicePinId: 'legacy-service-pin-2',
+        currentTaskRunId: 'legacy-run-2',
+        latestTaskRunState: 'running',
+      },
+    ],
+    taskRuns: [],
+    transcriptItems: [],
+    cursors: {
+      caller: null,
+      provider: null,
+    },
+    publicStatusSnapshots: [],
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
+  });
+
+  const listResult = await handlers.trace.listSessions();
+  assert.equal(listResult.ok, true);
+  assert.deepEqual(listResult.data.sessions.map((session) => session.sessionId), [PEER_SESSION_ID]);
+  assert.equal(listResult.data.stats.totalCount, 1);
+  assert.equal(listResult.data.stats.callerCount, 1);
 });
 
 test('default trace handlers still return legacy-only session-state records when no unified session exists', async () => {
@@ -980,11 +1028,7 @@ test('projection derives completed state from delivery messages written by the r
   });
 
   const sessions = await listUnifiedA2ATraceSessionsForProfile({ profile });
-  const orderSession = sessions.find((session) => session.sessionId === ORDER_SESSION_ID);
-  assert.ok(orderSession);
-  assert.equal(orderSession.state, 'completed');
-  assert.equal(orderSession.servicePinId, 'service-pin-1');
-  assert.equal(orderSession.serviceName, 'Weather Oracle');
+  assert.deepEqual(sessions.map((session) => session.sessionId), [PEER_SESSION_ID]);
 
   const detail = await getUnifiedA2ATraceSessionForProfile({
     profile,
@@ -1058,7 +1102,7 @@ test('projection derives completed state from NeedsRating messages written by th
     sessionId: ORDER_SESSION_ID,
   });
   assert.ok(detail);
-  assert.equal(detail.session.state, 'completed');
+  assert.equal(detail.session.state, 'active');
   assert.equal(detail.a2a.publicStatus, 'completed');
   assert.equal(detail.ratingRequestText, 'Please rate this service.');
   assert.equal(detail.order.serviceId, 'service-pin-1');
@@ -1123,7 +1167,7 @@ test('projection derives failed state from ORDER_END failure messages written by
     sessionId: ORDER_SESSION_ID,
   });
   assert.ok(detail);
-  assert.equal(detail.session.state, 'remote_failed');
+  assert.equal(detail.session.state, 'active');
   assert.equal(detail.a2a.publicStatus, 'remote_failed');
   assert.equal(detail.order.serviceId, 'service-pin-1');
   const orderEnd = detail.transcriptItems.find((item) => item.type === 'order_end');

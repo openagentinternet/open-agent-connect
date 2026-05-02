@@ -279,6 +279,22 @@ function isCallerVisibleSession(session: A2AConversationSession): boolean {
   return session.type === 'peer' || normalizeRole(session.role) === 'caller';
 }
 
+function isCallerServiceOrderSession(session: A2AConversationSession): session is A2AOrderConversationSession {
+  return session.type === 'service_order' && normalizeRole(session.role) === 'caller';
+}
+
+function findPeerSession(conversation: A2AConversationState): A2AConversationSession | null {
+  return conversation.sessions.find((session) => session.type === 'peer') ?? null;
+}
+
+function findLatestCallerOrderSession(conversation: A2AConversationState): A2AOrderConversationSession | null {
+  return conversation.sessions
+    .filter(isCallerServiceOrderSession)
+    .sort((left, right) => normalizeTimestamp(left.updatedAt) - normalizeTimestamp(right.updatedAt))
+    .at(-1)
+    ?? null;
+}
+
 function messageBelongsToServiceOrder(
   message: A2AConversationMessage,
   session: A2AOrderConversationSession,
@@ -610,21 +626,23 @@ function findOrderPinId(
 function buildProjectedOrder(input: {
   conversation: A2AConversationState;
   session: A2AConversationSession;
+  orderSession?: A2AOrderConversationSession | null;
   callerGlobalMetaId: string;
   providerGlobalMetaId: string;
 }): Record<string, unknown> | null {
-  const { conversation, session, callerGlobalMetaId, providerGlobalMetaId } = input;
-  if (session.type !== 'service_order') {
+  const { conversation, session, orderSession, callerGlobalMetaId, providerGlobalMetaId } = input;
+  const selectedOrderSession = orderSession ?? (session.type === 'service_order' ? session : null);
+  if (!selectedOrderSession) {
     return null;
   }
   return {
-    orderPinId: findOrderPinId(conversation.messages, session),
-    orderTxid: normalizeText(session.orderTxid) || null,
-    paymentTxid: normalizeText(session.paymentTxid) || null,
-    serviceId: normalizeText(session.servicePinId) || null,
-    servicePinId: normalizeText(session.servicePinId) || null,
-    serviceName: normalizeText(session.serviceName) || null,
-    outputType: normalizeText(session.outputType) || null,
+    orderPinId: findOrderPinId(conversation.messages, selectedOrderSession),
+    orderTxid: normalizeText(selectedOrderSession.orderTxid) || null,
+    paymentTxid: normalizeText(selectedOrderSession.paymentTxid) || null,
+    serviceId: normalizeText(selectedOrderSession.servicePinId) || null,
+    servicePinId: normalizeText(selectedOrderSession.servicePinId) || null,
+    serviceName: normalizeText(selectedOrderSession.serviceName) || null,
+    outputType: normalizeText(selectedOrderSession.outputType) || null,
     callerGlobalMetaId,
     providerGlobalMetaId,
   };
@@ -636,8 +654,14 @@ function projectDetailSession(input: {
   conversation: A2AConversationState;
   filePath: string;
   session: A2AConversationSession;
+  orderSession?: A2AOrderConversationSession | null;
 }): UnifiedA2ATraceSessionDetail {
   const listItem = projectListSession(input);
+  const statusSession = input.orderSession ?? input.session;
+  const projectedState = deriveProjectedSessionState({
+    conversation: input.conversation,
+    session: statusSession,
+  });
   const transcriptItems = projectTranscriptItems({
     conversation: input.conversation,
     session: input.session,
@@ -646,7 +670,7 @@ function projectDetailSession(input: {
   const latestStatusSnapshot = {
     sessionId: listItem.sessionId,
     taskRunId: null,
-    status: listItem.state,
+    status: projectedState,
     mapped: true,
     rawEvent: 'unified_a2a_session_state',
     resolvedAt: listItem.updatedAt,
@@ -656,13 +680,14 @@ function projectDetailSession(input: {
   const order = buildProjectedOrder({
     conversation: input.conversation,
     session: input.session,
+    orderSession: input.orderSession ?? null,
     callerGlobalMetaId: listItem.callerGlobalMetaId,
     providerGlobalMetaId: listItem.providerGlobalMetaId,
   });
   const orderPinId = normalizeText(order?.orderPinId) || null;
   const orderTxid = normalizeText(order?.orderTxid) || null;
   const paymentTxid = normalizeText(order?.paymentTxid) || null;
-  const servicePinId = normalizeText(listItem.servicePinId);
+  const servicePinId = normalizeText(order?.servicePinId) || normalizeText(listItem.servicePinId);
   const sessionRecord: Record<string, unknown> = {
     ...input.session,
     id: listItem.sessionId,
@@ -670,7 +695,7 @@ function projectDetailSession(input: {
     traceId: listItem.traceId,
     role: listItem.role,
     state: listItem.state,
-    title: listItem.serviceName ?? listItem.peerName ?? null,
+    title: normalizeText(order?.serviceName) || listItem.serviceName || listItem.peerName || null,
     type: 'a2a',
     source: 'unified_a2a',
     sessionKind: listItem.sessionKind,
@@ -678,6 +703,8 @@ function projectDetailSession(input: {
     callerGlobalMetaId: listItem.callerGlobalMetaId,
     providerGlobalMetaId: listItem.providerGlobalMetaId,
     servicePinId,
+    serviceName: normalizeText(order?.serviceName) || listItem.serviceName,
+    outputType: normalizeText(order?.outputType) || listItem.outputType,
     peerGlobalMetaId: listItem.peerGlobalMetaId,
     peerName: listItem.peerName,
     peerAvatar: listItem.peerAvatar,
@@ -757,7 +784,7 @@ export async function listUnifiedA2ATraceSessionsForProfile(input: {
   const conversations = await readUnifiedConversations(input.profile);
   const sessions = conversations.flatMap((record) => (
     record.conversation.sessions
-      .filter(isCallerVisibleSession)
+      .filter((session) => session.type === 'peer')
       .map((session) => projectListSession({
         profile: input.profile,
         daemon: input.daemon,
@@ -781,18 +808,31 @@ export async function getUnifiedA2ATraceSessionForProfile(input: {
 
   const conversations = await readUnifiedConversations(input.profile);
   for (const record of conversations) {
-    const session = record.conversation.sessions.find((entry) => (
+    const requestedSession = record.conversation.sessions.find((entry) => (
       normalizeText(entry.sessionId) === sessionId && isCallerVisibleSession(entry)
     ));
-    if (!session) {
+    if (!requestedSession) {
       continue;
     }
+    if (requestedSession.type === 'service_order' && !isCallerServiceOrderSession(requestedSession)) {
+      continue;
+    }
+    const peerSession = requestedSession.type === 'peer'
+      ? requestedSession
+      : findPeerSession(record.conversation);
+    if (!peerSession) {
+      continue;
+    }
+    const orderSession = requestedSession.type === 'service_order'
+      ? requestedSession
+      : findLatestCallerOrderSession(record.conversation);
     return projectDetailSession({
       profile: input.profile,
       daemon: input.daemon,
       conversation: record.conversation,
       filePath: record.filePath,
-      session,
+      session: peerSession,
+      orderSession,
     });
   }
   return null;
@@ -812,8 +852,8 @@ export async function findUnifiedA2ATraceSessionForProfileByOrder(input: {
 
   const conversations = await readUnifiedConversations(input.profile);
   for (const record of conversations) {
-    const session = record.conversation.sessions.find((entry) => {
-      if (entry.type !== 'service_order' || !isCallerVisibleSession(entry)) {
+    const orderSession = record.conversation.sessions.find((entry): entry is A2AOrderConversationSession => {
+      if (!isCallerServiceOrderSession(entry)) {
         return false;
       }
       return Boolean(
@@ -821,7 +861,11 @@ export async function findUnifiedA2ATraceSessionForProfileByOrder(input: {
         || (paymentTxid && normalizeText(entry.paymentTxid) === paymentTxid)
       );
     });
-    if (!session) {
+    if (!orderSession) {
+      continue;
+    }
+    const peerSession = findPeerSession(record.conversation);
+    if (!peerSession) {
       continue;
     }
     return projectDetailSession({
@@ -829,7 +873,8 @@ export async function findUnifiedA2ATraceSessionForProfileByOrder(input: {
       daemon: input.daemon,
       conversation: record.conversation,
       filePath: record.filePath,
-      session,
+      session: peerSession,
+      orderSession,
     });
   }
   return null;

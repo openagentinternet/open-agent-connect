@@ -3054,6 +3054,95 @@ test('trace get exposes a remote rating request when the provider later asks for
   assert.equal(trace.payload.data.ratingRequestText, '服务已完成，如果方便请给我一个评价吧。');
 });
 
+test('services call auto-rates with ORDER_END after a provider NeedsRating request', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  const chainApi = await startFakeChainApiServer();
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'chain-auto-rating-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  }), 'utf8');
+
+  const env = {
+    METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+    METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+    METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
+      responseText: 'Tomorrow will be bright with a light wind.',
+      deliveryPinId: 'delivery-pin-auto-rating-1',
+      ratingRequestText: '服务已完成，如果方便请给我一个评价吧。',
+    }),
+    METABOT_TEST_FAKE_BUYER_RATING_REPLY: '评分：5分。结果清晰，响应可靠，谢谢你的天气服务。',
+  };
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    env,
+  );
+
+  assert.equal(called.exitCode, 2);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.state, 'waiting');
+
+  const trace = await waitForTrace(
+    homeDir,
+    called.payload.data.traceId,
+    env,
+    (data) => data?.ratingPublished === true && data?.ratingMessageSent === true,
+  );
+
+  assert.ok(trace, 'expected trace polling to observe automatic buyer rating');
+  assert.equal(trace.exitCode, 0);
+  assert.equal(trace.payload.ok, true);
+  assert.equal(trace.payload.data.ratingPublished, true);
+  assert.equal(trace.payload.data.ratingValue, 5);
+  assert.equal(trace.payload.data.ratingComment, '评分：5分。结果清晰，响应可靠，谢谢你的天气服务。');
+  assert.match(trace.payload.data.ratingPinId, /^\/protocols\/skill-service-rate-pin-/);
+  assert.equal(trace.payload.data.ratingMessageSent, true);
+  assert.match(trace.payload.data.ratingMessagePinId, /^\/protocols\/simplemsg-pin-/);
+  assert.equal(trace.payload.data.tStageCompleted, true);
+
+  const orderEndTranscript = trace.payload.data.inspector.transcriptItems.find((item) => (
+    typeof item.content === 'string' && item.content.startsWith('[ORDER_END')
+  ));
+  assert.ok(orderEndTranscript, 'expected trace transcript to include the ORDER_END ceremony');
+  assert.match(orderEndTranscript.content, /rated\]/);
+  assert.match(orderEndTranscript.content, /评分：5分/);
+
+  const chatConversation = await createA2AConversationStore({
+    homeDir,
+    local: {
+      globalMetaId: created.payload.data.globalMetaId,
+      name: created.payload.data.name,
+      chatPublicKey: created.payload.data.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: 'idq1provider',
+      name: 'Weather Oracle',
+      chatPublicKey: env.METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY,
+    },
+  }).readConversation();
+  const orderEnd = chatConversation.messages.find((message) => message.protocolTag === 'ORDER_END');
+  assert.ok(orderEnd, 'expected automatic rating to persist an outgoing ORDER_END message');
+  assert.equal(orderEnd.direction, 'outgoing');
+  assert.match(orderEnd.content, /^\[ORDER_END(?::[0-9a-f]{64})? rated\]/);
+  assert.match(orderEnd.content, /\/protocols\/skill-service-rate-pin-/);
+});
+
 test('services rate publishes one buyer-side skill-service-rate record from a completed remote trace', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();

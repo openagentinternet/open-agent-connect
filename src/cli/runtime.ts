@@ -57,6 +57,7 @@ import { createPrivateChatAutoReplyOrchestrator } from '../core/chat/privateChat
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
+import type { ChatReplyRunner } from '../core/chat/privateChatTypes';
 import { createTestServicePaymentExecutor } from '../core/payments/servicePayment';
 import { runSystemUpdate } from '../core/system/update';
 import { runSystemUninstall } from '../core/system/uninstall';
@@ -73,6 +74,7 @@ const TEST_FAKE_CHAIN_WRITE_ENV = 'METABOT_TEST_FAKE_CHAIN_WRITE';
 const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
+const TEST_FAKE_BUYER_RATING_REPLY_ENV = 'METABOT_TEST_FAKE_BUYER_RATING_REPLY';
 const TEST_FAKE_MASTER_REPLY_ENV = 'METABOT_TEST_FAKE_MASTER_REPLY';
 const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
@@ -612,6 +614,7 @@ export function buildDaemonConfigHash(
       fakeSubsidy: normalizeEnvText(env[TEST_FAKE_SUBSIDY_ENV]),
       fakeProviderChatPublicKey: normalizeEnvText(env[TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV]),
       fakeMetaWebReply: normalizeEnvText(env[TEST_FAKE_METAWEB_REPLY_ENV]),
+      fakeBuyerRatingReply: normalizeEnvText(env[TEST_FAKE_BUYER_RATING_REPLY_ENV]),
       fakeMasterReply: normalizeEnvText(env[TEST_FAKE_MASTER_REPLY_ENV]),
     }))
     .digest('hex');
@@ -1215,6 +1218,19 @@ function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceRep
       };
     },
   };
+}
+
+function createTestBuyerRatingReplyRunner(env: NodeJS.ProcessEnv): ChatReplyRunner | undefined {
+  const raw = typeof env[TEST_FAKE_BUYER_RATING_REPLY_ENV] === 'string'
+    ? env[TEST_FAKE_BUYER_RATING_REPLY_ENV]!.trim()
+    : '';
+  if (!raw) {
+    return undefined;
+  }
+  return async () => ({
+    state: 'reply',
+    content: raw,
+  });
 }
 
 function createTestMasterReplyWaiter(env: NodeJS.ProcessEnv): MetaWebMasterReplyWaiter | undefined {
@@ -2134,6 +2150,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     : undefined;
   const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
   const callerReplyWaiter = createTestMetaWebReplyWaiter(context.env);
+  const buyerRatingReplyRunner = createTestBuyerRatingReplyRunner(context.env) ?? createHostLlmChatReplyRunner();
   const masterReplyWaiter = createTestMasterReplyWaiter(context.env) ?? createSocketIoMetaWebMasterReplyWaiter();
   const servicePaymentExecutor = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
     ? createTestServicePaymentExecutor()
@@ -2163,6 +2180,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
       fetchPeerChatPublicKey,
       callerReplyWaiter,
+      buyerRatingReplyRunner,
       masterReplyWaiter,
       servicePaymentExecutor,
       requestMvcGasSubsidy,

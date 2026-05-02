@@ -39,6 +39,9 @@ import { buildSessionTrace } from '../core/chat/sessionTrace';
 import type { SessionTraceRecord } from '../core/chat/sessionTrace';
 import { exportSessionArtifacts } from '../core/chat/transcriptExport';
 import { sendPrivateChat } from '../core/chat/privateChat';
+import { loadChatPersona } from '../core/chat/chatPersonaLoader';
+import { createDefaultChatReplyRunner } from '../core/chat/defaultChatReplyRunner';
+import type { ChatReplyRunner } from '../core/chat/privateChatTypes';
 import type { ChainWriteRequest } from '../core/chain/writePin';
 import {
   buildPrivateConversationResponse,
@@ -99,11 +102,13 @@ import {
   type MetaWebServiceReplyWaiter,
 } from '../core/a2a/metawebReplyWaiter';
 import {
+  buildOrderEndMessage,
   parseDeliveryMessage,
   parseNeedsRatingMessage,
   parseOrderEndMessage,
   parseOrderStatusMessage,
 } from '../core/a2a/protocol/orderProtocol';
+import { generateBuyerServiceRating } from '../core/a2a/callerRating';
 import { parseMasterRequest, parseMasterResponse, type MasterResponseMessage } from '../core/master/masterMessageSchema';
 import {
   type AwaitMetaWebMasterReplyInput,
@@ -3434,6 +3439,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   servicePaymentExecutor?: ServicePaymentExecutor;
   ratingFollowupRetryDelaysMs?: number[];
   a2aConversationPersister?: A2AConversationMessagePersister;
+  buyerRatingReplyRunner?: ChatReplyRunner;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   requestMvcGasSubsidy?: (
     options: RequestMvcGasSubsidyOptions
@@ -3467,6 +3473,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS,
   );
   const a2aConversationPersister = input.a2aConversationPersister ?? persistA2AConversationMessage;
+  const buyerRatingReplyRunner = input.buyerRatingReplyRunner ?? createDefaultChatReplyRunner();
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const getDaemonRecord = input.getDaemonRecord;
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
@@ -3694,6 +3701,318 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
+  async function publishBuyerServiceRating(request: {
+    traceId: string;
+    rate: number;
+    comment: string;
+    network?: string;
+  }): Promise<MetabotCommandResult<Record<string, unknown>>> {
+    const state = await runtimeStateStore.readState();
+    if (!state.identity) {
+      return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing service ratings.');
+    }
+
+    const trace = state.traces.find((entry) => entry.traceId === request.traceId);
+    if (!trace) {
+      return commandFailed('trace_not_found', `Trace not found: ${request.traceId}`);
+    }
+    if (normalizeText(trace.order?.role) !== 'buyer') {
+      return commandFailed('service_rating_not_buyer_trace', 'Only buyer-side remote traces can publish service ratings.');
+    }
+
+    const serviceId = normalizeText(trace.order?.serviceId);
+    const servicePrice = normalizeText(trace.order?.paymentAmount);
+    const serviceCurrency = normalizeText(trace.order?.paymentCurrency);
+    const servicePaidTx = normalizeText(trace.order?.paymentTxid);
+    const serverBot = normalizeText(trace.session.peerGlobalMetaId ?? trace.a2a?.providerGlobalMetaId);
+    if (!serviceId || !servicePrice || !serviceCurrency || !servicePaidTx || !serverBot) {
+      return commandFailed(
+        'service_rating_trace_incomplete',
+        'Trace is missing service or payment metadata required for skill-service-rate.'
+      );
+    }
+
+    const directory = await listRuntimeDirectoryServices({
+      state,
+      directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+      chainApiBaseUrl: input.chainApiBaseUrl,
+      socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+      socketPresenceFailureMode: input.socketPresenceFailureMode,
+      onlineOnly: false,
+    });
+    const matchedService = directory.services.find((entry) => (
+      normalizeText(entry.servicePinId) === serviceId
+      || normalizeText(entry.sourceServicePinId) === serviceId
+    ));
+    const serviceSkill = normalizeText(
+      matchedService?.providerSkill
+      ?? matchedService?.serviceName
+      ?? trace.order?.serviceName
+    );
+    const payload = {
+      serviceID: serviceId,
+      servicePrice,
+      serviceCurrency,
+      servicePaidTx,
+      serviceSkill: serviceSkill || normalizeText(trace.order?.serviceName),
+      serverBot,
+      rate: String(request.rate),
+      comment: request.comment,
+    };
+
+    let ratingWrite;
+    try {
+      ratingWrite = await signer.writePin({
+        operation: 'create',
+        path: '/protocols/skill-service-rate',
+        encryption: '0',
+        version: '1.0.0',
+        contentType: 'application/json',
+        payload: JSON.stringify(payload),
+        network: request.network,
+      });
+    } catch (error) {
+      return commandFailed(
+        'service_rating_publish_failed',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+
+    const orderTxid = normalizeOrderProtocolReference(trace.order?.orderTxid)
+      || normalizeOrderProtocolReference(trace.order?.orderPinId)
+      || normalizeOrderProtocolReference(Array.isArray(trace.order?.orderTxids) ? trace.order?.orderTxids[0] : null)
+      || '';
+    const combinedBody = buildServiceRatingFollowupMessage({
+      comment: request.comment,
+      ratingPinId: ratingWrite.pinId ?? null,
+    });
+    const combinedMessage = orderTxid
+      ? buildOrderEndMessage(orderTxid, 'rated', combinedBody)
+      : buildOrderEndMessage('', 'rated', combinedBody);
+
+    let ratingMessageSent = false;
+    let ratingMessagePinId: string | null = null;
+    let ratingMessageError: string | null = null;
+    let ratingMessageTxids: string[] = [];
+    let peerChatPublicKey = '';
+    if (combinedMessage) {
+      try {
+        const privateChatIdentity = await signer.getPrivateChatIdentity();
+        peerChatPublicKey = serverBot === state.identity.globalMetaId
+          ? state.identity.chatPublicKey
+          : await resolvePeerChatPublicKey(serverBot) ?? '';
+        if (!peerChatPublicKey) {
+          throw new Error('Remote agent has no published chat public key on chain.');
+        }
+
+        const outgoingRatingMessage = sendPrivateChat({
+          fromIdentity: {
+            globalMetaId: privateChatIdentity.globalMetaId,
+            privateKeyHex: privateChatIdentity.privateKeyHex,
+          },
+          toGlobalMetaId: serverBot,
+          peerChatPublicKey,
+          content: combinedMessage,
+        });
+
+        const ratingMessageWrite = await writePinRetryingMempoolConflict({
+          signer,
+          retryDelaysMs: ratingFollowupRetryDelaysMs,
+          request: {
+            operation: 'create',
+            path: outgoingRatingMessage.path,
+            encryption: outgoingRatingMessage.encryption,
+            version: outgoingRatingMessage.version,
+            contentType: outgoingRatingMessage.contentType,
+            payload: outgoingRatingMessage.payload,
+            encoding: 'utf-8',
+            network: request.network,
+          },
+        });
+        ratingMessageSent = true;
+        ratingMessagePinId = ratingMessageWrite.pinId ?? null;
+        ratingMessageTxids = Array.isArray(ratingMessageWrite.txids)
+          ? ratingMessageWrite.txids.map((entry) => normalizeText(entry)).filter(Boolean)
+          : [];
+      } catch (error) {
+        ratingMessageError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    let a2aStorePersisted: boolean | null = null;
+    let a2aStoreError: string | null = null;
+    if (ratingMessageSent) {
+      const a2aStoreResult = await persistA2AConversationMessageBestEffort({
+        paths: runtimeStateStore.paths,
+        local: {
+          profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+          globalMetaId: state.identity.globalMetaId,
+          name: state.identity.name,
+          chatPublicKey: state.identity.chatPublicKey,
+        },
+        peer: {
+          globalMetaId: serverBot,
+          name: normalizeText(trace.session.peerName) || normalizeText(trace.order?.serviceName) || null,
+          chatPublicKey: peerChatPublicKey || null,
+        },
+        message: {
+          direction: 'outgoing',
+          content: combinedMessage,
+          pinId: ratingMessagePinId,
+          txid: ratingMessageTxids[0] ?? ratingMessagePinId,
+          txids: ratingMessageTxids,
+          chain: request.network ?? 'mvc',
+          orderTxid: orderTxid || normalizeText(trace.order?.orderTxid) || null,
+          paymentTxid: servicePaidTx,
+          timestamp: Date.now(),
+          raw: {
+            ratingPinId: ratingWrite.pinId ?? null,
+          },
+        },
+        orderSession: {
+          role: 'caller',
+          state: 'completed',
+          orderTxid: orderTxid || normalizeText(trace.order?.orderTxid) || null,
+          paymentTxid: servicePaidTx,
+          servicePinId: serviceId,
+          serviceName: normalizeText(trace.order?.serviceName) || null,
+          outputType: null,
+          endReason: 'rated',
+        },
+      }, a2aConversationPersister);
+      a2aStorePersisted = a2aStoreResult.persisted;
+      a2aStoreError = a2aStoreResult.errorMessage;
+    }
+
+    const sessionState = await sessionStateStore.readState();
+    const latestSession = sessionState.sessions
+      .filter((entry) => entry.traceId === request.traceId)
+      .sort((left, right) => left.updatedAt - right.updatedAt)
+      .at(-1);
+    let nextTrace = trace;
+    let nextArtifacts = trace.artifacts;
+    if (latestSession) {
+      const now = Date.now();
+      await appendA2ATranscriptItems(sessionStateStore, [
+        {
+          id: `${trace.traceId}-caller-rating-${now.toString(36)}`,
+          sessionId: latestSession.sessionId,
+          taskRunId: latestSession.currentTaskRunId,
+          timestamp: now,
+          type: 'rating',
+          sender: 'caller',
+          content: request.comment,
+          metadata: {
+            event: 'service_rating_published',
+            rate: String(request.rate),
+            ratingPinId: ratingWrite.pinId ?? null,
+            ratingMessageSent,
+            ratingMessagePinId,
+            ratingMessageError,
+          },
+        },
+        {
+          id: `${trace.traceId}-caller-rating-followup-${now.toString(36)}`,
+          sessionId: latestSession.sessionId,
+          taskRunId: latestSession.currentTaskRunId,
+          timestamp: now + 1,
+          type: ratingMessageSent ? 'order_end' : 'status_note',
+          sender: ratingMessageSent ? 'caller' : 'system',
+          content: ratingMessageSent
+            ? combinedMessage
+            : `Buyer-side rating was published on-chain, but provider follow-up delivery failed: ${ratingMessageError ?? 'unknown error'}`,
+          metadata: {
+            event: ratingMessageSent ? 'service_rating_message_sent' : 'service_rating_message_failed',
+            protocolTag: ratingMessageSent ? 'ORDER_END' : null,
+            orderTxid: orderTxid || normalizeText(trace.order?.orderTxid) || null,
+            paymentTxid: servicePaidTx,
+            ratingPinId: ratingWrite.pinId ?? null,
+            ratingMessagePinId,
+            ratingMessageError,
+            rawContent: combinedMessage,
+          },
+        },
+      ]);
+      const rebuilt = await rebuildTraceArtifactsFromSessionState({
+        baseTrace: trace,
+        runtimeStateStore,
+        sessionStateStore,
+      });
+      nextTrace = rebuilt.trace;
+      nextArtifacts = rebuilt.artifacts;
+    }
+
+    return commandSuccess({
+      traceId: request.traceId,
+      path: '/protocols/skill-service-rate',
+      pinId: ratingWrite.pinId ?? null,
+      txids: ratingWrite.txids,
+      rate: String(request.rate),
+      comment: request.comment,
+      serviceId,
+      servicePaidTx,
+      serverBot,
+      serviceSkill: payload.serviceSkill,
+      ratingMessageSent,
+      ratingMessagePinId,
+      ratingMessageError,
+      a2aStorePersisted,
+      a2aStoreError,
+      traceJsonPath: nextArtifacts.traceJsonPath ?? nextTrace.artifacts.traceJsonPath,
+      traceMarkdownPath: nextArtifacts.traceMarkdownPath ?? nextTrace.artifacts.traceMarkdownPath,
+      transcriptMarkdownPath: nextArtifacts.transcriptMarkdownPath ?? nextTrace.artifacts.transcriptMarkdownPath,
+    });
+  }
+
+  async function autoPublishBuyerRatingForReply(input: {
+    trace: SessionTraceRecord;
+    reply: AwaitMetaWebServiceReplyResult;
+  }): Promise<void> {
+    const ratingRequestText = input.reply.state === 'completed'
+      ? normalizeText(input.reply.ratingRequestText)
+      : '';
+    if (!ratingRequestText) {
+      return;
+    }
+
+    const runtimeState = await runtimeStateStore.readState();
+    const trace = runtimeState.traces.find((entry) => entry.traceId === input.trace.traceId) ?? input.trace;
+    const sessionState = await sessionStateStore.readState();
+    const sessions = sessionState.sessions.filter((entry) => entry.traceId === trace.traceId);
+    const sessionIds = new Set(sessions.map((entry) => entry.sessionId));
+    const transcriptItems = sessionState.transcriptItems
+      .filter((entry) => sessionIds.has(entry.sessionId))
+      .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
+    const ratingClosure = extractTraceRatingClosure({
+      trace,
+      transcriptItems,
+      ratingDetail: null,
+    });
+    if (ratingClosure.ratingPublished) {
+      return;
+    }
+
+    const persona = await loadChatPersona(runtimeStateStore.paths);
+    const rating = await generateBuyerServiceRating({
+      replyRunner: buyerRatingReplyRunner,
+      persona,
+      traceId: trace.traceId,
+      providerGlobalMetaId: normalizeText(trace.a2a?.providerGlobalMetaId) || normalizeText(trace.session.peerGlobalMetaId),
+      providerName: normalizeText(trace.a2a?.providerName) || normalizeText(trace.session.peerName),
+      originalRequest: normalizeText((trace.order as Record<string, unknown> | null | undefined)?.requestText),
+      serviceResult: input.reply.state === 'completed' ? input.reply.responseText : null,
+      expectedOutputType: normalizeText((trace.order as Record<string, unknown> | null | undefined)?.outputType),
+      ratingRequestText,
+      transcriptItems,
+    });
+    await publishBuyerServiceRating({
+      traceId: trace.traceId,
+      rate: rating.rate,
+      comment: rating.comment,
+      network: 'mvc',
+    });
+  }
+
   function scheduleCallerReplyContinuation(input: {
     trace: SessionTraceRecord;
     sessionId: string;
@@ -3724,7 +4043,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return;
         }
 
-        await applyCallerReplyResult({
+        const applied = await applyCallerReplyResult({
           reply,
           session: current.session,
           taskRun: current.taskRun,
@@ -3732,6 +4051,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
           sessionStateStore,
           runtimeStateStore,
           trace: current.trace,
+        });
+        await autoPublishBuyerRatingForReply({
+          trace: applied.trace,
+          reply,
         });
       } catch {
         // Best effort follow-up: keep the persisted timeout state if late delivery capture fails.
@@ -6858,11 +7181,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
       },
       rate: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
-        if (!state.identity) {
-          return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing service ratings.');
-        }
-
         const request = readServiceRateRequest(rawInput);
         if (!request.traceId) {
           return commandFailed('invalid_service_rating_request', 'Service rating request must include traceId.');
@@ -6874,195 +7192,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('invalid_service_rating_comment', 'Service rating request must include a non-empty comment.');
         }
 
-        const trace = state.traces.find((entry) => entry.traceId === request.traceId);
-        if (!trace) {
-          return commandFailed('trace_not_found', `Trace not found: ${request.traceId}`);
-        }
-        if (normalizeText(trace.order?.role) !== 'buyer') {
-          return commandFailed('service_rating_not_buyer_trace', 'Only buyer-side remote traces can publish service ratings.');
-        }
-
-        const serviceId = normalizeText(trace.order?.serviceId);
-        const servicePrice = normalizeText(trace.order?.paymentAmount);
-        const serviceCurrency = normalizeText(trace.order?.paymentCurrency);
-        const servicePaidTx = normalizeText(trace.order?.paymentTxid);
-        const serverBot = normalizeText(trace.session.peerGlobalMetaId ?? trace.a2a?.providerGlobalMetaId);
-        if (!serviceId || !servicePrice || !serviceCurrency || !servicePaidTx || !serverBot) {
-          return commandFailed(
-            'service_rating_trace_incomplete',
-            'Trace is missing service or payment metadata required for skill-service-rate.'
-          );
-        }
-
-        const directory = await listRuntimeDirectoryServices({
-          state,
-          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
-          chainApiBaseUrl: input.chainApiBaseUrl,
-          socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
-          socketPresenceFailureMode: input.socketPresenceFailureMode,
-          onlineOnly: false,
-        });
-        const matchedService = directory.services.find((entry) => (
-          normalizeText(entry.servicePinId) === serviceId
-          || normalizeText(entry.sourceServicePinId) === serviceId
-        ));
-        const serviceSkill = normalizeText(
-          matchedService?.providerSkill
-          ?? matchedService?.serviceName
-          ?? trace.order?.serviceName
-        );
-        const payload = {
-          serviceID: serviceId,
-          servicePrice,
-          serviceCurrency,
-          servicePaidTx,
-          serviceSkill: serviceSkill || normalizeText(trace.order?.serviceName),
-          serverBot,
-          rate: String(request.rate),
-          comment: request.comment,
-        };
         const network = typeof rawInput.network === 'string' ? rawInput.network : undefined;
-
-        let ratingWrite;
-        try {
-          ratingWrite = await signer.writePin({
-            operation: 'create',
-            path: '/protocols/skill-service-rate',
-            encryption: '0',
-            version: '1.0.0',
-            contentType: 'application/json',
-            payload: JSON.stringify(payload),
-            network,
-          });
-        } catch (error) {
-          return commandFailed(
-            'service_rating_publish_failed',
-            error instanceof Error ? error.message : String(error)
-          );
-        }
-
-        const combinedMessage = buildServiceRatingFollowupMessage({
-          comment: request.comment,
-          ratingPinId: ratingWrite.pinId ?? null,
-        });
-        let ratingMessageSent = false;
-        let ratingMessagePinId: string | null = null;
-        let ratingMessageError: string | null = null;
-        if (combinedMessage) {
-          try {
-            const privateChatIdentity = await signer.getPrivateChatIdentity();
-            const peerChatPublicKey = serverBot === state.identity.globalMetaId
-              ? state.identity.chatPublicKey
-              : await resolvePeerChatPublicKey(serverBot) ?? '';
-            if (!peerChatPublicKey) {
-              throw new Error('Remote agent has no published chat public key on chain.');
-            }
-
-            const outgoingRatingMessage = sendPrivateChat({
-              fromIdentity: {
-                globalMetaId: privateChatIdentity.globalMetaId,
-                privateKeyHex: privateChatIdentity.privateKeyHex,
-              },
-              toGlobalMetaId: serverBot,
-              peerChatPublicKey,
-              content: combinedMessage,
-            });
-
-            const ratingMessageWrite = await writePinRetryingMempoolConflict({
-              signer,
-              retryDelaysMs: ratingFollowupRetryDelaysMs,
-              request: {
-                operation: 'create',
-                path: outgoingRatingMessage.path,
-                encryption: outgoingRatingMessage.encryption,
-                version: outgoingRatingMessage.version,
-                contentType: outgoingRatingMessage.contentType,
-                payload: outgoingRatingMessage.payload,
-                encoding: 'utf-8',
-                network,
-              },
-            });
-            ratingMessageSent = true;
-            ratingMessagePinId = ratingMessageWrite.pinId ?? null;
-          } catch (error) {
-            ratingMessageError = error instanceof Error ? error.message : String(error);
-          }
-        }
-
-        const sessionState = await sessionStateStore.readState();
-        const latestSession = sessionState.sessions
-          .filter((entry) => entry.traceId === request.traceId)
-          .sort((left, right) => left.updatedAt - right.updatedAt)
-          .at(-1);
-        let nextTrace = trace;
-        let nextArtifacts = trace.artifacts;
-        if (latestSession) {
-          await appendA2ATranscriptItems(sessionStateStore, [
-            {
-              id: `${trace.traceId}-caller-rating-${Date.now().toString(36)}`,
-              sessionId: latestSession.sessionId,
-              taskRunId: latestSession.currentTaskRunId,
-              timestamp: Date.now(),
-              type: 'rating',
-              sender: 'caller',
-              content: request.comment,
-              metadata: {
-                event: 'service_rating_published',
-                rate: String(request.rate),
-                ratingPinId: ratingWrite.pinId ?? null,
-                ratingMessageSent,
-                ratingMessagePinId,
-                ratingMessageError,
-              },
-            },
-          ]);
-          if (combinedMessage) {
-            await appendA2ATranscriptItems(sessionStateStore, [
-              {
-                id: `${trace.traceId}-caller-rating-followup-${Date.now().toString(36)}`,
-                sessionId: latestSession.sessionId,
-                taskRunId: latestSession.currentTaskRunId,
-                timestamp: Date.now() + 1,
-                type: ratingMessageSent ? 'assistant' : 'status_note',
-                sender: ratingMessageSent ? 'caller' : 'system',
-                content: ratingMessageSent
-                  ? combinedMessage
-                  : `Buyer-side rating was published on-chain, but provider follow-up delivery failed: ${ratingMessageError ?? 'unknown error'}`,
-                metadata: {
-                  event: ratingMessageSent ? 'service_rating_message_sent' : 'service_rating_message_failed',
-                  ratingPinId: ratingWrite.pinId ?? null,
-                  ratingMessagePinId,
-                  ratingMessageError,
-                },
-              },
-            ]);
-          }
-          const rebuilt = await rebuildTraceArtifactsFromSessionState({
-            baseTrace: trace,
-            runtimeStateStore,
-            sessionStateStore,
-          });
-          nextTrace = rebuilt.trace;
-          nextArtifacts = rebuilt.artifacts;
-        }
-
-        return commandSuccess({
+        return publishBuyerServiceRating({
           traceId: request.traceId,
-          path: '/protocols/skill-service-rate',
-          pinId: ratingWrite.pinId ?? null,
-          txids: ratingWrite.txids,
-          rate: String(request.rate),
+          rate: request.rate,
           comment: request.comment,
-          serviceId,
-          servicePaidTx,
-          serverBot,
-          serviceSkill: payload.serviceSkill,
-          ratingMessageSent,
-          ratingMessagePinId,
-          ratingMessageError,
-          traceJsonPath: nextArtifacts.traceJsonPath ?? nextTrace.artifacts.traceJsonPath,
-          traceMarkdownPath: nextArtifacts.traceMarkdownPath ?? nextTrace.artifacts.traceMarkdownPath,
-          transcriptMarkdownPath: nextArtifacts.transcriptMarkdownPath ?? nextTrace.artifacts.transcriptMarkdownPath,
+          network,
         });
       },
       execute: async (rawInput) => {
@@ -7665,8 +7800,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
         const results: Array<Record<string, unknown>> = [];
         const seenSessionIds = new Set<string>();
+        const seenPeerWindowKeys = new Set<string>();
 
-        const pushSession = (session: unknown) => {
+        const buildPeerWindowKey = (
+          localGlobalMetaId: unknown,
+          peerGlobalMetaId: unknown,
+        ): string | null => {
+          const local = normalizeText(localGlobalMetaId);
+          const peer = normalizeText(peerGlobalMetaId);
+          return local && peer ? `${local}::${peer}` : null;
+        };
+
+        const pushSession = (session: unknown, options: {
+          localGlobalMetaId?: string | null;
+          dedupeByPeer?: boolean;
+        } = {}) => {
           if (!session || typeof session !== 'object' || Array.isArray(session)) {
             return;
           }
@@ -7675,7 +7823,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
           if (!sessionId || seenSessionIds.has(sessionId)) {
             return;
           }
+          const peerWindowKey = buildPeerWindowKey(
+            normalizeText(record.localMetabotGlobalMetaId) || options.localGlobalMetaId,
+            record.peerGlobalMetaId,
+          );
+          if (options.dedupeByPeer && peerWindowKey && seenPeerWindowKeys.has(peerWindowKey)) {
+            return;
+          }
           seenSessionIds.add(sessionId);
+          if (peerWindowKey) {
+            seenPeerWindowKeys.add(peerWindowKey);
+          }
           results.push(record);
         };
 
@@ -7686,7 +7844,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
               daemon: input.getDaemonRecord(),
             });
             for (const session of unifiedSessions) {
-              pushSession(session);
+              pushSession(session, {
+                localGlobalMetaId: profile.globalMetaId,
+                dedupeByPeer: true,
+              });
             }
           } catch {
             // Skip profiles with unreadable unified A2A conversations.
@@ -7705,6 +7866,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 localMetabotName: profile.name,
                 localMetabotGlobalMetaId: profile.globalMetaId,
                 peerGlobalMetaId,
+              }, {
+                localGlobalMetaId: profile.globalMetaId,
+                dedupeByPeer: true,
               });
             }
           } catch {
