@@ -3849,6 +3849,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
           bootstrap.error ?? 'MetaBot identity bootstrap failed before the identity was ready.'
         );
       },
+      listProfiles: async () => {
+        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        return commandSuccess({
+          profiles: profiles.map((p) => ({
+            name: p.name,
+            slug: p.slug,
+            globalMetaId: p.globalMetaId,
+            mvcAddress: p.mvcAddress,
+            homeDir: p.homeDir,
+          })),
+        });
+      },
     },
     master: {
       publish: async (rawInput) => {

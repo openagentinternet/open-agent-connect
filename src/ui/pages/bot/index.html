@@ -16,13 +16,24 @@
       .health-dot.unavailable { background: var(--red, #f87171); }
       .health-dot.unknown { background: var(--muted, #9ca3af); }
       .binding-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border2); }
-      .binding-role { font-size: 11px; text-transform: uppercase; font-weight: 600; background: var(--surface2); border: 1px solid var(--border2); padding: 2px 8px; border-radius: 4px; color: var(--text); }
+      .binding-row.disabled-row { opacity: 0.5; }
+      .binding-role { font-size: 11px; text-transform: uppercase; font-weight: 600; padding: 2px 8px; border-radius: 4px; color: var(--text); border: 1px solid var(--border2); }
+      .binding-role.primary { border-color: var(--green, #4ade80); color: var(--green, #4ade80); }
+      .binding-role.fallback { border-color: var(--amber, #fbbf24); color: var(--amber, #fbbf24); }
+      .binding-role.reviewer { border-color: #60a5fa; color: #60a5fa; }
+      .binding-role.specialist { border-color: #c084fc; color: #c084fc; }
+      .binding-runtime { font-size: 13px; color: var(--text); min-width: 120px; }
+      .toggle-label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; }
       .btn { font-size: 13px; padding: 6px 14px; border: 1px solid var(--border2); border-radius: var(--radius); cursor: pointer; background: var(--surface2); color: var(--text); }
       .btn:hover { background: var(--surface-hover); }
       .btn:disabled { opacity: 0.5; cursor: default; }
-      .input-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
-      .input-row input { padding: 6px 10px; border: 1px solid var(--border2); border-radius: var(--radius); background: var(--surface2); color: var(--text); font-size: 13px; }
-      .section-title { font-size: 15px; font-weight: 600; color: var(--text); margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border2); }
+      .btn-sm { font-size: 11px; padding: 3px 8px; border: 1px solid var(--border2); border-radius: 4px; cursor: pointer; background: var(--surface2); color: var(--text); }
+      .btn-sm:hover { background: var(--surface-hover); color: var(--red, #f87171); }
+      .add-binding-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px; background: var(--surface2); border-radius: var(--radius); flex-wrap: wrap; }
+      .add-binding-row select, .add-binding-row input { padding: 5px 8px; border: 1px solid var(--border2); border-radius: 4px; background: var(--surface); color: var(--text); font-size: 13px; }
+      .section-title { font-size: 15px; font-weight: 600; color: var(--text); margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border2); display: flex; align-items: center; }
+      .section-title .btn { margin-left: 12px; }
+      .slug-label { font-size: 13px; color: var(--muted); margin-bottom: 10px; font-family: var(--mono); }
     </style>
   </head>
   <body>
@@ -33,16 +44,27 @@
           <p class="eyebrow">__PAGE_EYEBROW__</p>
           <h1 class="page-heading">__PAGE_HEADING__</h1>
         </div>
-        <div class="section-title">LLM Runtimes <button class="btn" style="margin-left:12px" data-discover-btn>Discover Runtimes</button></div>
+
+        <div class="section-title">
+          MetaBot Profile
+        </div>
+        <div data-profile-selector style="margin-bottom:16px">
+          <p class="dim">Loading profiles…</p>
+        </div>
+
+        <div class="section-title">
+          LLM Runtimes
+          <button class="btn" data-discover-btn>Discover Runtimes</button>
+        </div>
         <div data-runtimes-panel><p class="dim">Loading runtimes…</p></div>
 
-        <div class="section-title">MetaBot Bindings</div>
-        <div class="input-row">
-          <input type="text" data-slug-input placeholder="Profile slug (e.g. my-bot)" style="flex:1;max-width:300px" />
-          <button class="btn" data-load-bindings-btn>Load Bindings</button>
-        </div>
-        <div data-slug-label style="font-size:13px;color:var(--muted);margin-bottom:8px"></div>
-        <div data-bindings-panel><p class="dim">Enter a profile slug and click "Load Bindings".</p></div>
+        <div class="section-title">Bindings</div>
+        <div class="slug-label" data-slug-label></div>
+        <div data-bindings-panel><p class="dim">Select a profile to manage its bindings.</p></div>
+
+        <div data-preferred-panel></div>
+        <div data-add-binding-panel></div>
+
         __PAGE_CONTENT__
       </main>
     </div>
