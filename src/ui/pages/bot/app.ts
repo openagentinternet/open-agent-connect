@@ -13,284 +13,169 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 }
 
 function buildBotPageScript(): string {
-  return `(() => {
-  const $ = (sel) => document.querySelector(sel);
-  const $$ = (sel) => document.querySelectorAll(sel);
-
-  function el(tag, attrs, children) {
-    const e = document.createElement(tag);
-    if (attrs) Object.entries(attrs).forEach(([k, v]) => { if (v != null) e.setAttribute(k, String(v)); });
-    if (typeof children === 'string') e.innerHTML = children;
-    else if (children) children.forEach(c => e.appendChild(c));
-    return e;
-  }
-
-  function healthDot(h) {
-    return '<span class="health-dot ' + (h || 'unknown') + '" title="' + (h || 'unknown') + '"></span>';
-  }
-
-  async function fetchJson(url, opts) {
-    const res = await fetch(url, opts);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return res.json();
-  }
-
-  // ---- State ----
-  let state = { profiles: [], runtimes: [], bindings: [], preferredRuntimeId: null, selectedSlug: '' };
-
-  // ---- Render helpers ----
-  function renderRuntimes() {
-    const panel = $('[data-runtimes-panel]');
-    if (!panel) return;
-    if (!state.runtimes.length) {
-      panel.innerHTML = '<p class="dim">No runtimes discovered. Click Discover.</p>';
-      return;
-    }
-    panel.innerHTML = state.runtimes.map(r =>
-      '<div class="runtime-card" data-runtime-id="' + r.id + '">' +
-        '<div class="flex-row">' +
-          '<span class="name">' + healthDot(r.health) + (r.displayName || r.provider) + '</span>' +
-          '<span class="meta">v' + (r.version || '?') + '</span>' +
-        '</div>' +
-        '<div class="meta">' + (r.binaryPath || 'no binary') + ' &middot; ' + (r.authState || 'unknown') + '</div>' +
-      '</div>'
-    ).join('');
-  }
-
-  function renderBindings() {
-    const panel = $('[data-bindings-panel]');
-    const slugLabel = $('[data-slug-label]');
-    if (!panel) return;
-    if (slugLabel) slugLabel.textContent = state.selectedSlug ? 'Bindings for: ' + state.selectedSlug : '';
-
-    if (!state.selectedSlug) {
-      panel.innerHTML = '<p class="dim">Select a profile to manage its bindings.</p>';
-      renderAddBinding(false);
-      return;
-    }
-
-    if (!state.bindings.length) {
-      panel.innerHTML = '<p class="dim">No bindings. Add one below.</p>';
-      renderAddBinding(true);
-      return;
-    }
-
-    var html = '';
-    for (var i = 0; i < state.bindings.length; i++) {
-      var b = state.bindings[i];
-      var runtimeName = b.llmRuntimeId;
-      var rt = state.runtimes.find(function(r) { return r.id === b.llmRuntimeId; });
-      if (rt) runtimeName = rt.displayName || rt.provider;
-
-      html += '<div class="binding-row' + (b.enabled ? '' : ' disabled-row') + '" data-binding-id="' + b.id + '">' +
-        '<span class="binding-role ' + b.role + '">' + b.role + '</span>' +
-        '<span class="binding-runtime">' + runtimeName + '</span>' +
-        '<span class="meta">priority=' + b.priority + '</span>' +
-        '<label class="toggle-label"><input type="checkbox" data-toggle-binding data-binding-id="' + b.id + '"' + (b.enabled ? ' checked' : '') + '> enabled</label>' +
-        '<button class="btn-sm" data-delete-binding data-binding-id="' + b.id + '">Remove</button>' +
-      '</div>';
-    }
-    panel.innerHTML = html;
-
-    // Wire up toggle checkboxes
-    $$('[data-toggle-binding]').forEach(function(cb) {
-      cb.addEventListener('change', function() {
-        var id = this.getAttribute('data-binding-id');
-        var binding = state.bindings.find(function(b) { return b.id === id; });
-        if (binding) { binding.enabled = this.checked; saveBindings(); }
-      });
-    });
-
-    // Wire up delete buttons
-    $$('[data-delete-binding]').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        var id = this.getAttribute('data-binding-id');
-        state.bindings = state.bindings.filter(function(b) { return b.id !== id; });
-        saveBindings();
-      });
-    });
-
-    renderAddBinding(true);
-    renderPreferredRuntime();
-  }
-
-  function renderAddBinding(show) {
-    var panel = $('[data-add-binding-panel]');
-    if (!panel) return;
-    if (!show) { panel.innerHTML = ''; return; }
-
-    var runtimeOpts = state.runtimes.map(function(r) {
-      return '<option value="' + r.id + '">' + (r.displayName || r.provider) + ' (' + r.health + ')</option>';
-    }).join('');
-
-    panel.innerHTML =
-      '<div class="add-binding-row">' +
-        '<select data-new-binding-runtime>' + runtimeOpts + '</select>' +
-        '<select data-new-binding-role>' +
-          '<option value="primary">primary</option>' +
-          '<option value="fallback">fallback</option>' +
-          '<option value="reviewer">reviewer</option>' +
-          '<option value="specialist">specialist</option>' +
-        '</select>' +
-        '<input type="number" data-new-binding-priority value="0" min="0" style="width:60px" />' +
-        '<button class="btn" data-add-binding-btn>Add Binding</button>' +
-      '</div>';
-
-    $('[data-add-binding-btn]').addEventListener('click', function() {
-      var runtimeId = $('[data-new-binding-runtime]').value;
-      var role = $('[data-new-binding-role]').value;
-      var priority = parseInt($('[data-new-binding-priority]').value, 10) || 0;
-      if (!runtimeId) return;
-
-      var id = 'lb_' + state.selectedSlug + '_' + runtimeId + '_' + role;
-      // Replace if same composite key exists
-      state.bindings = state.bindings.filter(function(b) {
-        return !(b.llmRuntimeId === runtimeId && b.role === role);
-      });
-      state.bindings.push({
-        id: id,
-        metaBotSlug: state.selectedSlug,
-        llmRuntimeId: runtimeId,
-        role: role,
-        priority: priority,
-        enabled: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-      saveBindings();
-    });
-  }
-
-  function renderPreferredRuntime() {
-    var panel = $('[data-preferred-panel]');
-    if (!panel) return;
-
-    var runtimeOpts = '<option value="">(none)</option>' + state.runtimes.map(function(r) {
-      var sel = state.preferredRuntimeId === r.id ? ' selected' : '';
-      return '<option value="' + r.id + '"' + sel + '>' + (r.displayName || r.provider) + '</option>';
-    }).join('');
-
-    panel.innerHTML =
-      '<div class="add-binding-row">' +
-        '<label>Preferred Runtime: </label>' +
-        '<select data-preferred-runtime>' + runtimeOpts + '</select>' +
-        '<button class="btn" data-save-preferred-btn>Save</button>' +
-      '</div>';
-
-    $('[data-save-preferred-btn]').addEventListener('click', function() {
-      var val = $('[data-preferred-runtime]').value || null;
-      savePreferred(val);
-    });
-  }
-
-  // ---- API calls ----
-  async function loadRuntimes() {
-    var panel = $('[data-runtimes-panel]');
-    if (panel) panel.innerHTML = '<p class="dim">Loading…</p>';
-    try {
-      var result = await fetchJson('/api/llm/runtimes');
-      state.runtimes = result.data.runtimes || [];
-      renderRuntimes();
-      if (state.selectedSlug) loadBindingsFor(state.selectedSlug);
-    } catch (e) {
-      if (panel) panel.innerHTML = '<p class="dim">Failed to load runtimes.</p>';
-    }
-  }
-
-  async function loadProfiles() {
-    try {
-      var result = await fetchJson('/api/identity/profiles');
-      state.profiles = result.data.profiles || [];
-      renderProfileSelector();
-    } catch (e) {
-      // Profiles endpoint might not be available yet
-    }
-  }
-
-  async function loadBindingsFor(slug) {
-    state.selectedSlug = slug;
-    try {
-      var result = await fetchJson('/api/llm/bindings/' + encodeURIComponent(slug));
-      state.bindings = result.data.bindings || [];
-    } catch (e) {
-      state.bindings = [];
-    }
-    try {
-      var pref = await fetchJson('/api/llm/preferred-runtime/' + encodeURIComponent(slug));
-      state.preferredRuntimeId = pref.data.runtimeId || null;
-    } catch (e) {
-      state.preferredRuntimeId = null;
-    }
-    renderBindings();
-  }
-
-  async function saveBindings() {
-    try {
-      await fetchJson('/api/llm/bindings/' + encodeURIComponent(state.selectedSlug), {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ bindings: state.bindings }),
-      });
-      renderBindings();
-    } catch (e) {
-      alert('Failed to save bindings: ' + e.message);
-    }
-  }
-
-  async function savePreferred(runtimeId) {
-    try {
-      await fetchJson('/api/llm/preferred-runtime/' + encodeURIComponent(state.selectedSlug), {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ runtimeId: runtimeId }),
-      });
-      state.preferredRuntimeId = runtimeId;
-      renderPreferredRuntime();
-    } catch (e) {
-      alert('Failed to save preferred runtime: ' + e.message);
-    }
-  }
-
-  async function discoverRuntimes() {
-    var btn = $('[data-discover-btn]');
-    btn.disabled = true;
-    btn.textContent = 'Scanning…';
-    try {
-      await fetchJson('/api/llm/runtimes/discover', { method: 'POST' });
-      await loadRuntimes();
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Discover Runtimes';
-    }
-  }
-
-  function renderProfileSelector() {
-    var container = $('[data-profile-selector]');
-    if (!container || !state.profiles.length) return;
-
-    var opts = state.profiles.map(function(p) {
-      var sel = state.selectedSlug === p.slug ? ' selected' : '';
-      return '<option value="' + p.slug + '"' + sel + '>' + p.name + ' (' + p.slug + ')</option>';
-    }).join('');
-
-    container.innerHTML =
-      '<label>MetaBot Profile: </label>' +
-      '<select data-profile-select>' +
-        '<option value="">-- select --</option>' +
-        opts +
-      '</select>';
-
-    $('[data-profile-select]').addEventListener('change', function() {
-      var slug = this.value;
-      if (slug) loadBindingsFor(slug);
-    });
-  }
-
-  // ---- Init ----
-  document.addEventListener('DOMContentLoaded', function() {
-    loadRuntimes();
-    loadProfiles();
-    $('[data-discover-btn]').addEventListener('click', discoverRuntimes);
-  });
-})()`;
+  return "(function() {\n" +
+  "var q = function(s) { return document.querySelector(s); };\n" +
+  "var qq = function(s) { return document.querySelectorAll(s); };\n" +
+  "\n" +
+  "var state = { profiles: [], runtimes: [], bindings: [], preferredRuntimeId: null, selectedSlug: '' };\n" +
+  "\n" +
+  "function hdot(h) { return '<span class=\"health-dot ' + (h||'unknown') + '\" title=\"' + (h||'unknown') + '\"></span>'; }\n" +
+  "\n" +
+  "function api(url, opts) {\n" +
+  "  return fetch(url, opts).then(function(r) {\n" +
+  "    if (!r.ok) throw new Error('HTTP ' + r.status);\n" +
+  "    return r.json();\n" +
+  "  });\n" +
+  "}\n" +
+  "\n" +
+  "function renderRuntimes() {\n" +
+  "  var p = q('[data-runtimes-panel]'); if (!p) return;\n" +
+  "  if (!state.runtimes.length) { p.innerHTML = '<p class=\"dim\">No runtimes discovered. Click Discover.</p>'; return; }\n" +
+  "  p.innerHTML = state.runtimes.map(function(r) {\n" +
+  "    return '<div class=\"runtime-card\" data-runtime-id=\"' + r.id + '\">' +\n" +
+  "      '<div class=\"flex-row\"><span class=\"name\">' + hdot(r.health) + (r.displayName||r.provider) + '</span>' +\n" +
+  "      '<span class=\"meta\">v' + (r.version||'?') + '</span></div>' +\n" +
+  "      '<div class=\"meta\">' + (r.binaryPath||'no binary') + ' · ' + (r.authState||'unknown') + '</div></div>';\n" +
+  "  }).join('');\n" +
+  "}\n" +
+  "\n" +
+  "function renderBindings() {\n" +
+  "  var p = q('[data-bindings-panel]'); var sl = q('[data-slug-label]');\n" +
+  "  if (!p) return;\n" +
+  "  if (sl) sl.textContent = state.selectedSlug ? 'Bindings for: ' + state.selectedSlug : '';\n" +
+  "  if (!state.selectedSlug) { p.innerHTML = '<p class=\"dim\">Select a profile to manage its bindings.</p>'; renderAdd(false); return; }\n" +
+  "  if (!state.bindings.length) { p.innerHTML = '<p class=\"dim\">No bindings. Add one below.</p>'; renderAdd(true); return; }\n" +
+  "  var h = '';\n" +
+  "  for (var i = 0; i < state.bindings.length; i++) {\n" +
+  "    var b = state.bindings[i];\n" +
+  "    var rn = b.llmRuntimeId;\n" +
+  "    var rt = state.runtimes.find(function(r) { return r.id === b.llmRuntimeId; });\n" +
+  "    if (rt) rn = rt.displayName || rt.provider;\n" +
+  "    h += '<div class=\"binding-row' + (b.enabled?'':' disabled-row') + '\" data-binding-id=\"' + b.id + '\">' +\n" +
+  "      '<span class=\"binding-role ' + b.role + '\">' + b.role + '</span>' +\n" +
+  "      '<span class=\"binding-runtime\">' + rn + '</span>' +\n" +
+  "      '<span class=\"meta\">priority=' + b.priority + '</span>' +\n" +
+  "      '<label class=\"toggle-label\"><input type=\"checkbox\" data-tog data-bid=\"' + b.id + '\"' + (b.enabled?' checked':'') + '> enabled</label>' +\n" +
+  "      '<button class=\"btn-sm\" data-del data-bid=\"' + b.id + '\">Remove</button></div>';\n" +
+  "  }\n" +
+  "  p.innerHTML = h;\n" +
+  "  qq('[data-tog]').forEach(function(cb) {\n" +
+  "    cb.addEventListener('change', function() {\n" +
+  "      var id = this.getAttribute('data-bid');\n" +
+  "      var b = state.bindings.find(function(x) { return x.id === id; });\n" +
+  "      if (b) { b.enabled = this.checked; saveBindings(); }\n" +
+  "    });\n" +
+  "  });\n" +
+  "  qq('[data-del]').forEach(function(btn) {\n" +
+  "    btn.addEventListener('click', function() {\n" +
+  "      var id = this.getAttribute('data-bid');\n" +
+  "      state.bindings = state.bindings.filter(function(x) { return x.id !== id; });\n" +
+  "      saveBindings();\n" +
+  "    });\n" +
+  "  });\n" +
+  "  renderAdd(true); renderPref();\n" +
+  "}\n" +
+  "\n" +
+  "function renderAdd(show) {\n" +
+  "  var p = q('[data-add-binding-panel]'); if (!p) return;\n" +
+  "  if (!show) { p.innerHTML = ''; return; }\n" +
+  "  var ropts = state.runtimes.map(function(r) {\n" +
+  "    return '<option value=\"' + r.id + '\">' + (r.displayName||r.provider) + ' (' + (r.health||'?') + ')</option>';\n" +
+  "  }).join('');\n" +
+  "  p.innerHTML = '<div class=\"add-binding-row\">' +\n" +
+  "    '<select data-nr>' + ropts + '</select>' +\n" +
+  "    '<select data-nrole><option value=\"primary\">primary</option><option value=\"fallback\">fallback</option><option value=\"reviewer\">reviewer</option><option value=\"specialist\">specialist</option></select>' +\n" +
+  "    '<input type=\"number\" data-npri value=\"0\" min=\"0\" style=\"width:60px\">' +\n" +
+  "    '<button class=\"btn\" data-add-btn>Add Binding</button></div>';\n" +
+  "  q('[data-add-btn]').addEventListener('click', function() {\n" +
+  "    var rid = q('[data-nr]').value; var role = q('[data-nrole]').value;\n" +
+  "    var pri = parseInt(q('[data-npri]').value,10)||0;\n" +
+  "    if (!rid) return;\n" +
+  "    var id = 'lb_' + state.selectedSlug + '_' + rid + '_' + role;\n" +
+  "    state.bindings = state.bindings.filter(function(b) { return !(b.llmRuntimeId===rid && b.role===role); });\n" +
+  "    state.bindings.push({id:id,metaBotSlug:state.selectedSlug,llmRuntimeId:rid,role:role,priority:pri,enabled:true,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});\n" +
+  "    saveBindings();\n" +
+  "  });\n" +
+  "}\n" +
+  "\n" +
+  "function renderPref() {\n" +
+  "  var p = q('[data-preferred-panel]'); if (!p) return;\n" +
+  "  var ropts = '<option value=\"\">(none)</option>' + state.runtimes.map(function(r) {\n" +
+  "    var sel = state.preferredRuntimeId === r.id ? ' selected' : '';\n" +
+  "    return '<option value=\"' + r.id + '\"' + sel + '>' + (r.displayName||r.provider) + '</option>';\n" +
+  "  }).join('');\n" +
+  "  p.innerHTML = '<div class=\"add-binding-row\"><label>Preferred Runtime: </label>' +\n" +
+  "    '<select data-pr>' + ropts + '</select>' +\n" +
+  "    '<button class=\"btn\" data-save-pr-btn>Save</button></div>';\n" +
+  "  q('[data-save-pr-btn]').addEventListener('click', function() {\n" +
+  "    savePref(q('[data-pr]').value || null);\n" +
+  "  });\n" +
+  "}\n" +
+  "\n" +
+  "function loadRuntimes() {\n" +
+  "  var p = q('[data-runtimes-panel]'); if (p) p.innerHTML = '<p class=\"dim\">Loading...</p>';\n" +
+  "  api('/api/llm/runtimes').then(function(r) {\n" +
+  "    state.runtimes = r.data.runtimes || [];\n" +
+  "    renderRuntimes();\n" +
+  "    if (state.selectedSlug) loadBindingsFor(state.selectedSlug);\n" +
+  "  }).catch(function() { if (p) p.innerHTML = '<p class=\"dim\">Failed to load runtimes.</p>'; });\n" +
+  "}\n" +
+  "\n" +
+  "function loadProfiles() {\n" +
+  "  api('/api/identity/profiles').then(function(r) {\n" +
+  "    state.profiles = r.data.profiles || [];\n" +
+  "    renderProfileSelector();\n" +
+  "  }).catch(function() {});\n" +
+  "}\n" +
+  "\n" +
+  "function loadBindingsFor(slug) {\n" +
+  "  state.selectedSlug = slug;\n" +
+  "  api('/api/llm/bindings/' + encodeURIComponent(slug)).then(function(r) {\n" +
+  "    state.bindings = r.data.bindings || [];\n" +
+  "    return api('/api/llm/preferred-runtime/' + encodeURIComponent(slug));\n" +
+  "  }).then(function(pr) {\n" +
+  "    state.preferredRuntimeId = (pr.data && pr.data.runtimeId) || null;\n" +
+  "    renderBindings();\n" +
+  "  }).catch(function() { state.bindings = []; state.preferredRuntimeId = null; renderBindings(); });\n" +
+  "}\n" +
+  "\n" +
+  "function saveBindings() {\n" +
+  "  api('/api/llm/bindings/' + encodeURIComponent(state.selectedSlug), {\n" +
+  "    method: 'PUT', headers: {'content-type':'application/json'},\n" +
+  "    body: JSON.stringify({bindings:state.bindings}),\n" +
+  "  }).then(function() { renderBindings(); }).catch(function(e) { alert('Failed to save: ' + e.message); });\n" +
+  "}\n" +
+  "\n" +
+  "function savePref(rid) {\n" +
+  "  api('/api/llm/preferred-runtime/' + encodeURIComponent(state.selectedSlug), {\n" +
+  "    method: 'PUT', headers: {'content-type':'application/json'},\n" +
+  "    body: JSON.stringify({runtimeId:rid}),\n" +
+  "  }).then(function() { state.preferredRuntimeId = rid; renderPref(); }).catch(function(e) { alert('Failed: ' + e.message); });\n" +
+  "}\n" +
+  "\n" +
+  "function discoverRuntimes() {\n" +
+  "  var btn = q('[data-discover-btn]'); btn.disabled = true; btn.textContent = 'Scanning...';\n" +
+  "  api('/api/llm/runtimes/discover', {method:'POST'}).then(function() { loadRuntimes(); }).finally(function() {\n" +
+  "    btn.disabled = false; btn.textContent = 'Discover Runtimes';\n" +
+  "  });\n" +
+  "}\n" +
+  "\n" +
+  "function renderProfileSelector() {\n" +
+  "  var c = q('[data-profile-selector]'); if (!c || !state.profiles.length) return;\n" +
+  "  var opts = state.profiles.map(function(p) {\n" +
+  "    var sel = state.selectedSlug === p.slug ? ' selected' : '';\n" +
+  "    return '<option value=\"' + p.slug + '\"' + sel + '>' + p.name + ' (' + p.slug + ')</option>';\n" +
+  "  }).join('');\n" +
+  "  c.innerHTML = '<label>MetaBot Profile: </label><select data-ps>' +\n" +
+  "    '<option value=\"\">-- select --</option>' + opts + '</select>';\n" +
+  "  q('[data-ps]').addEventListener('change', function() {\n" +
+  "    var slug = this.value; if (slug) loadBindingsFor(slug);\n" +
+  "  });\n" +
+  "}\n" +
+  "\n" +
+  "document.addEventListener('DOMContentLoaded', function() {\n" +
+  "  loadRuntimes(); loadProfiles();\n" +
+  "  q('[data-discover-btn]').addEventListener('click', discoverRuntimes);\n" +
+  "});\n" +
+  "})()";
 }
