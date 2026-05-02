@@ -28,6 +28,8 @@ const ORDER_TXID = 'a'.repeat(64);
 const PAYMENT_TXID = 'payment-tx-1';
 const ORDER_SESSION_ID = `a2a-order-${ORDER_TXID}`;
 const BASE_TIME = 1_777_000_000_000;
+const LOCAL_AVATAR = '/content/f77ba5db20c19242f9a5e5025357d29ad83f897f3700d2b1972f6ce1485098d7i0';
+const PEER_AVATAR = '/content/607b2da84bbd01e01397bb6ea8cd09e4f9b0e87552dd0d0e24b828f18884dd30i0';
 
 async function createProfileFixture() {
   const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-a2a-trace-projection-'));
@@ -93,6 +95,29 @@ function createMessage(index, overrides = {}) {
       },
     },
     ...overrides,
+  };
+}
+
+function privateHistoryRow({ index, from, content, txid, timestamp = BASE_TIME + index }) {
+  const outgoing = from === 'local';
+  const fromInfo = outgoing
+    ? { globalMetaId: LOCAL_GLOBAL_META_ID, name: 'Alice', avatar: LOCAL_AVATAR }
+    : { globalMetaId: PEER_GLOBAL_META_ID, name: 'Remote Bot', avatar: PEER_AVATAR };
+  const toInfo = outgoing
+    ? { globalMetaId: PEER_GLOBAL_META_ID, name: 'Remote Bot', avatar: PEER_AVATAR }
+    : { globalMetaId: LOCAL_GLOBAL_META_ID, name: 'Alice', avatar: LOCAL_AVATAR };
+  return {
+    index,
+    timestamp: Math.floor(timestamp / 1000),
+    protocol: '/protocols/simplemsg',
+    chain: 'mvc',
+    pinId: `${txid}i0`,
+    txId: txid,
+    content,
+    fromGlobalMetaId: fromInfo.globalMetaId,
+    toGlobalMetaId: toInfo.globalMetaId,
+    fromUserInfo: fromInfo,
+    toUserInfo: toInfo,
   };
 }
 
@@ -492,6 +517,209 @@ test('legacy trace detail uses unified A2A chain order content when the trace on
   assert.match(first.content, new RegExp(`txid: ${PAYMENT_TXID}`));
   assert.equal(first.metadata.orderTxid, ORDER_TXID);
   assert.deepEqual(first.metadata.txids, [ORDER_TXID]);
+});
+
+test('legacy trace detail prefers scoped on-chain simplemsg history over local synthetic bubbles', async () => {
+  const { systemHomeDir, homeDir } = await createProfileFixture();
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+  const statusTxid = 'b'.repeat(64);
+  const deliveryTxid = 'c'.repeat(64);
+  const needsRatingTxid = 'd'.repeat(64);
+  const orderEndTxid = 'e'.repeat(64);
+  const localRatingTxid = 'f'.repeat(64);
+  const unrelatedOrderTxid = '1'.repeat(64);
+  const unrelatedDeliveryTxid = '2'.repeat(64);
+  const trace = buildSessionTrace({
+    traceId: 'legacy-trace-chain-history',
+    channel: 'a2a',
+    exportRoot: runtimeStateStore.paths.exportsRoot,
+    createdAt: BASE_TIME,
+    session: {
+      id: 'session-legacy-chain-history',
+      title: 'Weather Oracle Call',
+      type: 'a2a',
+      metabotId: 1,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+      peerName: 'Remote Bot',
+      externalConversationId: null,
+    },
+    order: {
+      id: 'order-legacy-chain-history',
+      role: 'buyer',
+      serviceId: 'service-pin-1',
+      serviceName: 'Weather Oracle',
+      orderPinId: `${ORDER_TXID}i0`,
+      orderTxid: ORDER_TXID,
+      orderTxids: [ORDER_TXID],
+      paymentTxid: PAYMENT_TXID,
+      orderReference: null,
+      paymentCurrency: 'SPACE',
+      paymentAmount: '0.00005',
+    },
+    a2a: {
+      sessionId: 'legacy-session-chain-history',
+      taskRunId: 'legacy-run-chain-history',
+      role: 'caller',
+      publicStatus: 'completed',
+      latestEvent: 'provider_completed',
+      taskRunState: 'completed',
+      callerGlobalMetaId: LOCAL_GLOBAL_META_ID,
+      providerGlobalMetaId: PEER_GLOBAL_META_ID,
+      providerName: 'Remote Bot',
+      servicePinId: 'service-pin-1',
+    },
+  });
+  await runtimeStateStore.writeState({
+    identity: null,
+    services: [],
+    traces: [trace],
+  });
+  const store = createSessionStateStore(homeDir);
+  await store.writeState({
+    version: 1,
+    sessions: [
+      {
+        sessionId: 'legacy-session-chain-history',
+        traceId: 'legacy-trace-chain-history',
+        role: 'caller',
+        state: 'completed',
+        createdAt: BASE_TIME,
+        updatedAt: BASE_TIME + 500,
+        callerGlobalMetaId: LOCAL_GLOBAL_META_ID,
+        providerGlobalMetaId: PEER_GLOBAL_META_ID,
+        servicePinId: 'service-pin-1',
+        currentTaskRunId: 'legacy-run-chain-history',
+        latestTaskRunState: 'completed',
+      },
+    ],
+    taskRuns: [],
+    transcriptItems: [
+      {
+        id: 'legacy-user-summary',
+        sessionId: 'legacy-session-chain-history',
+        taskRunId: 'legacy-run-chain-history',
+        timestamp: BASE_TIME,
+        type: 'user_task',
+        sender: 'caller',
+        content: 'Tell me tomorrow weather',
+        metadata: { paymentTxid: PAYMENT_TXID },
+      },
+      {
+        id: 'local-rating-detail',
+        sessionId: 'legacy-session-chain-history',
+        taskRunId: 'legacy-run-chain-history',
+        timestamp: BASE_TIME + 400,
+        type: 'rating',
+        sender: 'caller',
+        content: 'Five stars',
+        metadata: {
+          event: 'service_rating_published',
+          ratingPinId: `${localRatingTxid}i0`,
+          ratingMessageSent: false,
+          ratingMessageError: '[-26] txn-mempool-conflict',
+        },
+      },
+    ],
+    cursors: { caller: null, provider: null },
+    publicStatusSnapshots: [],
+  });
+
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
+    fetchPeerChatPublicKey: async () => 'peer-chat-public-key',
+    signer: {
+      getPrivateChatIdentity: async () => ({
+        globalMetaId: LOCAL_GLOBAL_META_ID,
+        privateKeyHex: '1'.repeat(64),
+        chatPublicKey: 'local-chat-public-key',
+      }),
+    },
+    fetchPrivateChatHistory: async () => [
+      privateHistoryRow({
+        index: 0,
+        from: 'local',
+        txid: unrelatedOrderTxid,
+        content: `[ORDER] Earlier order for the same service\n<raw_request>\nEarlier order\n</raw_request>\ntxid: other-payment-tx\nservice id: service-pin-1\nskill name: Weather Oracle`,
+      }),
+      privateHistoryRow({
+        index: 0.5,
+        from: 'peer',
+        txid: unrelatedDeliveryTxid,
+        content: `[DELIVERY:${unrelatedOrderTxid}] ${JSON.stringify({
+          paymentTxid: 'other-payment-tx',
+          servicePinId: 'service-pin-1',
+          result: '# Earlier Forecast',
+        })}`,
+      }),
+      privateHistoryRow({
+        index: 1,
+        from: 'local',
+        txid: ORDER_TXID,
+        content: `[ORDER] Tell me tomorrow weather\n<raw_request>\nTell me tomorrow weather\n</raw_request>\ntxid: ${PAYMENT_TXID}\nservice id: service-pin-1\nskill name: Weather Oracle`,
+      }),
+      privateHistoryRow({
+        index: 2,
+        from: 'peer',
+        txid: statusTxid,
+        content: `[ORDER_STATUS:${ORDER_TXID}] I received the order and started processing.`,
+      }),
+      privateHistoryRow({
+        index: 3,
+        from: 'peer',
+        txid: deliveryTxid,
+        content: `[DELIVERY:${ORDER_TXID}] ${JSON.stringify({
+          paymentTxid: PAYMENT_TXID,
+          servicePinId: 'service-pin-1',
+          serviceName: 'Weather Oracle',
+          result: '# Forecast\n\nSunny with light wind.',
+          deliveredAt: BASE_TIME + 300,
+        })}`,
+      }),
+      privateHistoryRow({
+        index: 4,
+        from: 'peer',
+        txid: needsRatingTxid,
+        content: `[NeedsRating:${ORDER_TXID}] Please rate this service.`,
+      }),
+      privateHistoryRow({
+        index: 5,
+        from: 'peer',
+        txid: orderEndTxid,
+        content: `[ORDER_END:${ORDER_TXID} rating_timeout] Rating timed out; the order is closed.`,
+      }),
+    ],
+  });
+
+  const detailResult = await handlers.trace.getSession({ sessionId: 'legacy-session-chain-history' });
+
+  assert.equal(detailResult.ok, true);
+  const items = detailResult.data.inspector.transcriptItems;
+  assert.deepEqual(items.map((item) => item.metadata.txid), [
+    ORDER_TXID,
+    statusTxid,
+    deliveryTxid,
+    needsRatingTxid,
+    orderEndTxid,
+  ]);
+  assert.deepEqual(items.map((item) => item.type), [
+    'order',
+    'order_status',
+    'delivery',
+    'needs_rating',
+    'order_end',
+  ]);
+  assert.equal(items[0].sender, 'caller');
+  assert.equal(items[1].sender, 'provider');
+  assert.equal(items[2].content, '# Forecast\n\nSunny with light wind.');
+  assert.equal(items[3].content, 'Please rate this service.');
+  assert.equal(items[4].content, 'Rating timed out; the order is closed.');
+  assert.equal(items.some((item) => item.metadata.ratingPinId === `${localRatingTxid}i0`), false);
+  assert.equal(detailResult.data.resultText, '# Forecast\n\nSunny with light wind.');
+  assert.equal(detailResult.data.ratingRequestText, 'Please rate this service.');
+  assert.equal(detailResult.data.localMetabotAvatar, LOCAL_AVATAR);
+  assert.equal(detailResult.data.peerAvatar, PEER_AVATAR);
 });
 
 test('default trace handlers sort legacy transcript items with mixed seconds and milliseconds timestamps', async () => {

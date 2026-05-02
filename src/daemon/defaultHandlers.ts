@@ -44,6 +44,7 @@ import {
   buildPrivateConversationResponse,
   normalizeConversationAfterIndex,
   normalizeConversationLimit,
+  type ChatViewerMessage,
   type FetchPrivateHistory,
 } from '../core/chat/privateConversation';
 import { createLocalMnemonicSigner } from '../core/signing/localMnemonicSigner';
@@ -97,6 +98,12 @@ import {
   type AwaitMetaWebServiceReplyResult,
   type MetaWebServiceReplyWaiter,
 } from '../core/a2a/metawebReplyWaiter';
+import {
+  parseDeliveryMessage,
+  parseNeedsRatingMessage,
+  parseOrderEndMessage,
+  parseOrderStatusMessage,
+} from '../core/a2a/protocol/orderProtocol';
 import { parseMasterRequest, parseMasterResponse, type MasterResponseMessage } from '../core/master/masterMessageSchema';
 import {
   type AwaitMetaWebMasterReplyInput,
@@ -1799,7 +1806,16 @@ function transcriptItemsShareOrderReference(
 function mergeLegacyTranscriptWithUnifiedChainMessages(input: {
   transcriptItems: A2ATranscriptItemRecord[];
   unifiedTranscriptItems?: A2ATranscriptItemRecord[] | null;
+  chainTranscriptItems?: A2ATranscriptItemRecord[] | null;
 }): A2ATranscriptItemRecord[] {
+  const chainTranscriptItems = (input.chainTranscriptItems ?? [])
+    .filter((item) => normalizeText(item.id) && normalizeText(item.content));
+  if (chainTranscriptItems.length > 0) {
+    return chainTranscriptItems
+      .slice()
+      .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
+  }
+
   const unifiedOrders = (input.unifiedTranscriptItems ?? [])
     .filter((item) => item.sender === 'caller' && item.type === 'order' && normalizeText(item.content));
   if (!unifiedOrders.length) {
@@ -1852,6 +1868,256 @@ function mergeLegacyTranscriptWithUnifiedChainMessages(input: {
   ));
 }
 
+interface ScopedPrivateHistoryProjection {
+  transcriptItems: A2ATranscriptItemRecord[];
+  localName: string | null;
+  localAvatar: string | null;
+  peerName: string | null;
+  peerAvatar: string | null;
+}
+
+function normalizeChainTxid(value: unknown): string {
+  const normalized = normalizeText(value).replace(/i\d+$/iu, '').toLowerCase();
+  return /^[0-9a-f]{64}$/iu.test(normalized) ? normalized : '';
+}
+
+function normalizeMessageProtocolTag(content: string): string {
+  const trimmed = String(content || '').trim();
+  if (/^\[ORDER\]/iu.test(trimmed)) return 'ORDER';
+  if (parseOrderStatusMessage(trimmed)) return 'ORDER_STATUS';
+  if (parseDeliveryMessage(trimmed)) return 'DELIVERY';
+  if (parseNeedsRatingMessage(trimmed)) return 'NeedsRating';
+  if (parseOrderEndMessage(trimmed)) return 'ORDER_END';
+  return '';
+}
+
+function stripOrderProtocolBubblePrefix(content: string): string {
+  return String(content || '').replace(/^\[[A-Za-z_]+(?::[0-9a-fA-F]{64})?(?:\s+[A-Za-z0-9_-]+)?\]\s*/u, '').trim();
+}
+
+function readChatUserName(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return normalizeText(record.name)
+    || normalizeText(record.nickname)
+    || normalizeText(record.nickName)
+    || null;
+}
+
+function readChatUserAvatar(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return normalizeText(record.avatar)
+    || normalizeText(record.avatarUrl)
+    || normalizeText(record.avatarImage)
+    || normalizeText(record.avatarUri)
+    || normalizeText(record.avatar_uri)
+    || null;
+}
+
+function readMessageUserInfoForGlobalMetaId(
+  message: ChatViewerMessage,
+  globalMetaId: string,
+): unknown | null {
+  if (!globalMetaId) return null;
+  if (message.fromGlobalMetaId === globalMetaId) {
+    return message.fromUserInfo ?? message.userInfo ?? null;
+  }
+  if (message.toGlobalMetaId === globalMetaId) {
+    return message.toUserInfo ?? null;
+  }
+  return null;
+}
+
+function privateHistoryMessageMatchesOrder(input: {
+  message: ChatViewerMessage;
+  orderTxid: string;
+  paymentTxid: string;
+  servicePinId: string;
+}): boolean {
+  const content = String(input.message.content || '');
+  const hasStrongOrderReference = Boolean(input.orderTxid || input.paymentTxid);
+  const messageTxid = normalizeChainTxid(input.message.txId ?? input.message.pinId ?? input.message.id);
+  if (input.orderTxid && messageTxid === input.orderTxid) {
+    return true;
+  }
+
+  const status = parseOrderStatusMessage(content);
+  if (input.orderTxid && normalizeChainTxid(status?.orderTxid) === input.orderTxid) {
+    return true;
+  }
+  const delivery = parseDeliveryMessage(content);
+  if (delivery) {
+    if (input.orderTxid && normalizeChainTxid(delivery.orderTxid) === input.orderTxid) {
+      return true;
+    }
+    if (input.paymentTxid && normalizeText(delivery.paymentTxid) === input.paymentTxid) {
+      return true;
+    }
+    if (!hasStrongOrderReference && input.servicePinId && normalizeText(delivery.servicePinId) === input.servicePinId) {
+      return true;
+    }
+  }
+  const needsRating = parseNeedsRatingMessage(content);
+  if (input.orderTxid && normalizeChainTxid(needsRating?.orderTxid) === input.orderTxid) {
+    return true;
+  }
+  const orderEnd = parseOrderEndMessage(content);
+  if (input.orderTxid && normalizeChainTxid(orderEnd?.orderTxid) === input.orderTxid) {
+    return true;
+  }
+
+  if (/^\[ORDER\]/iu.test(content)) {
+    return Boolean(
+      (input.paymentTxid && content.includes(input.paymentTxid))
+      || (!hasStrongOrderReference && input.servicePinId && content.includes(input.servicePinId))
+    );
+  }
+
+  return false;
+}
+
+function isRemoteFailureReason(reason: unknown): boolean {
+  const normalized = normalizeText(reason).toLowerCase();
+  return /\b(fail|failed|failure|error|declined|cancelled|canceled)\b/u.test(normalized);
+}
+
+function projectPrivateHistoryMessageToTranscript(input: {
+  message: ChatViewerMessage;
+  sessionId: string;
+  localGlobalMetaId: string;
+  localRole: 'caller' | 'provider';
+  orderTxid: string;
+  paymentTxid: string;
+  servicePinId: string;
+}): A2ATranscriptItemRecord | null {
+  if (normalizeText(input.message.protocol) !== '/protocols/simplemsg') {
+    return null;
+  }
+  if (!privateHistoryMessageMatchesOrder({
+    message: input.message,
+    orderTxid: input.orderTxid,
+    paymentTxid: input.paymentTxid,
+    servicePinId: input.servicePinId,
+  })) {
+    return null;
+  }
+
+  const rawContent = String(input.message.content || '');
+  const protocolTag = normalizeMessageProtocolTag(rawContent);
+  const messageTxid = normalizeChainTxid(input.message.txId ?? input.message.pinId ?? input.message.id);
+  const sender: 'caller' | 'provider' = input.message.fromGlobalMetaId === input.localGlobalMetaId
+    ? input.localRole
+    : (input.localRole === 'caller' ? 'provider' : 'caller');
+  const metadata: Record<string, unknown> = {
+    source: 'private_history',
+    protocol: normalizeText(input.message.protocol),
+    protocolTag: protocolTag || null,
+    direction: input.message.fromGlobalMetaId === input.localGlobalMetaId ? 'outgoing' : 'incoming',
+    pinId: normalizeText(input.message.pinId) || null,
+    txid: messageTxid || null,
+    txids: messageTxid ? [messageTxid] : [],
+    chain: normalizeText(input.message.chain) || null,
+    rawContent,
+    orderTxid: input.orderTxid || null,
+    paymentTxid: input.paymentTxid || null,
+    servicePinId: input.servicePinId || null,
+    fromGlobalMetaId: input.message.fromGlobalMetaId,
+    toGlobalMetaId: input.message.toGlobalMetaId,
+    fromUserInfo: input.message.fromUserInfo ?? null,
+    toUserInfo: input.message.toUserInfo ?? null,
+  };
+
+  let type = protocolTag ? protocolTag.toLowerCase() : 'message';
+  let content = stripOrderProtocolBubblePrefix(rawContent) || rawContent;
+  if (protocolTag === 'ORDER') {
+    type = 'order';
+  } else if (protocolTag === 'ORDER_STATUS') {
+    const parsed = parseOrderStatusMessage(rawContent);
+    type = 'order_status';
+    content = normalizeText(parsed?.content) || content;
+  } else if (protocolTag === 'DELIVERY') {
+    const parsed = parseDeliveryMessage(rawContent);
+    type = 'delivery';
+    content = normalizeText(parsed?.result) || content;
+    metadata.deliveryPinId = normalizeText(input.message.pinId) || null;
+    metadata.deliveryPayload = parsed ?? null;
+    metadata.publicStatus = 'completed';
+    metadata.event = 'provider_completed';
+    metadata.servicePinId = normalizeText(parsed?.servicePinId) || input.servicePinId || null;
+    metadata.deliveredAt = normalizeTraceTimestamp(parsed?.deliveredAt ?? input.message.timestamp);
+  } else if (protocolTag === 'NeedsRating') {
+    const parsed = parseNeedsRatingMessage(rawContent);
+    type = 'needs_rating';
+    content = normalizeText(parsed?.content) || content;
+    metadata.needsRating = true;
+  } else if (protocolTag === 'ORDER_END') {
+    const parsed = parseOrderEndMessage(rawContent);
+    type = 'order_end';
+    content = normalizeText(parsed?.content) || content;
+    metadata.endReason = normalizeText(parsed?.reason) || null;
+    metadata.orderEnd = true;
+    metadata.endState = isRemoteFailureReason(parsed?.reason) ? 'remote_failed' : 'completed';
+  }
+
+  const id = normalizeText(input.message.pinId)
+    || normalizeText(input.message.txId)
+    || normalizeText(input.message.id);
+  if (!id) return null;
+  return {
+    id,
+    sessionId: input.sessionId,
+    taskRunId: null,
+    timestamp: normalizeTraceTimestamp(input.message.timestamp),
+    type,
+    sender,
+    content,
+    metadata,
+  };
+}
+
+function projectScopedPrivateHistory(input: {
+  messages: ChatViewerMessage[];
+  sessionId: string;
+  localGlobalMetaId: string;
+  peerGlobalMetaId: string;
+  localRole: 'caller' | 'provider';
+  orderTxid: string;
+  paymentTxid: string;
+  servicePinId: string;
+}): ScopedPrivateHistoryProjection | null {
+  const transcriptItems = input.messages
+    .map((message) => projectPrivateHistoryMessageToTranscript({
+      message,
+      sessionId: input.sessionId,
+      localGlobalMetaId: input.localGlobalMetaId,
+      localRole: input.localRole,
+      orderTxid: input.orderTxid,
+      paymentTxid: input.paymentTxid,
+      servicePinId: input.servicePinId,
+    }))
+    .filter((item): item is A2ATranscriptItemRecord => item !== null)
+    .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
+
+  if (!transcriptItems.length) {
+    return null;
+  }
+
+  const firstLocalInfo = input.messages
+    .map((message) => readMessageUserInfoForGlobalMetaId(message, input.localGlobalMetaId))
+    .find((info) => info != null);
+  const firstPeerInfo = input.messages
+    .map((message) => readMessageUserInfoForGlobalMetaId(message, input.peerGlobalMetaId))
+    .find((info) => info != null);
+  return {
+    transcriptItems,
+    localName: readChatUserName(firstLocalInfo),
+    localAvatar: readChatUserAvatar(firstLocalInfo),
+    peerName: readChatUserName(firstPeerInfo),
+    peerAvatar: readChatUserAvatar(firstPeerInfo),
+  };
+}
+
 async function buildTraceInspectorPayload(input: {
   traceId: string;
   trace: ReturnType<typeof buildSessionTrace>;
@@ -1861,6 +2127,7 @@ async function buildTraceInspectorPayload(input: {
   daemon?: RuntimeDaemonRecord | null;
   selectedSessionId?: string | null;
   unifiedTranscriptItems?: A2ATranscriptItemRecord[] | null;
+  chainTranscriptItems?: A2ATranscriptItemRecord[] | null;
 }) {
   const sessionState = await input.sessionStateStore.readState();
   const sessions = sessionState.sessions
@@ -1882,6 +2149,7 @@ async function buildTraceInspectorPayload(input: {
   transcriptItems = mergeLegacyTranscriptWithUnifiedChainMessages({
     transcriptItems,
     unifiedTranscriptItems: input.unifiedTranscriptItems ?? null,
+    chainTranscriptItems: input.chainTranscriptItems ?? null,
   });
   const publicStatusSnapshots = sessionState.publicStatusSnapshots
     .filter((entry) => sessionIds.has(entry.sessionId))
@@ -3223,6 +3491,89 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }
     if (Number.isFinite(now)) {
       lastMasterAutoPreparedAt = Math.max(0, Math.trunc(now));
+    }
+  }
+
+  async function buildScopedPrivateHistoryProjectionForTrace(args: {
+    profile: { homeDir?: string | null; globalMetaId?: string | null; name?: string | null };
+    trace: SessionTraceRecord;
+    session: A2ASessionRecord;
+    peerGlobalMetaId: string;
+  }): Promise<ScopedPrivateHistoryProjection | null> {
+    const localGlobalMetaId = normalizeText(args.profile.globalMetaId);
+    const peerGlobalMetaId = normalizeText(args.peerGlobalMetaId);
+    const sessionId = normalizeText(args.session.sessionId);
+    const orderTxid = normalizeChainTxid(args.trace.order?.orderTxid);
+    const paymentTxid = normalizeText(args.trace.order?.paymentTxid);
+    const servicePinId = normalizeText(args.trace.order?.serviceId)
+      || normalizeText(args.trace.a2a?.servicePinId)
+      || normalizeText(args.session.servicePinId);
+    if (!localGlobalMetaId || !peerGlobalMetaId || !sessionId || (!orderTxid && !paymentTxid && !servicePinId)) {
+      return null;
+    }
+
+    const profileHomeDir = normalizeText(args.profile.homeDir) || input.homeDir;
+    const privateChatSigner = profileHomeDir === normalizeText(input.homeDir)
+      ? signer
+      : createLocalMnemonicSigner({ secretStore: createFileSecretStore(profileHomeDir) });
+
+    let privateChatIdentity;
+    try {
+      privateChatIdentity = await privateChatSigner.getPrivateChatIdentity();
+    } catch {
+      return null;
+    }
+
+    let peerChatPublicKey = peerGlobalMetaId === localGlobalMetaId
+      ? normalizeText(privateChatIdentity.chatPublicKey)
+      : '';
+    if (!peerChatPublicKey) {
+      peerChatPublicKey = await resolvePeerChatPublicKey(peerGlobalMetaId) ?? '';
+    }
+    if (!peerChatPublicKey) {
+      return null;
+    }
+
+    try {
+      const messages: ChatViewerMessage[] = [];
+      const seenIds = new Set<string>();
+      let afterIndex: number | undefined;
+      for (let page = 0; page < 10; page += 1) {
+        const response = await buildPrivateConversationResponse({
+          selfGlobalMetaId: localGlobalMetaId,
+          peerGlobalMetaId,
+          localPrivateKeyHex: privateChatIdentity.privateKeyHex,
+          peerChatPublicKey,
+          afterIndex,
+          limit: 200,
+          fetchHistory: input.fetchPrivateChatHistory,
+          idChatApiBaseUrl: input.idChatApiBaseUrl,
+        });
+        for (const message of response.messages) {
+          const id = normalizeText(message.id);
+          if (!id || seenIds.has(id)) {
+            continue;
+          }
+          seenIds.add(id);
+          messages.push(message);
+        }
+        if (response.messages.length < 200 || response.nextPollAfterIndex <= (afterIndex ?? -1)) {
+          break;
+        }
+        afterIndex = response.nextPollAfterIndex;
+      }
+      return projectScopedPrivateHistory({
+        messages,
+        sessionId,
+        localGlobalMetaId,
+        peerGlobalMetaId,
+        localRole: args.session.role === 'provider' ? 'provider' : 'caller',
+        orderTxid,
+        paymentTxid,
+        servicePinId,
+      });
+    } catch {
+      return null;
     }
   }
 
@@ -7434,6 +7785,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 paymentTxid: trace.order?.paymentTxid ?? null,
                 daemon: input.getDaemonRecord(),
               }).catch(() => null);
+              const privateHistoryProjection = await buildScopedPrivateHistoryProjectionForTrace({
+                profile,
+                trace,
+                session,
+                peerGlobalMetaId,
+              }).catch(() => null);
               const payload = await buildTraceInspectorPayload({
                 traceId,
                 trace,
@@ -7443,13 +7800,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 daemon: input.getDaemonRecord(),
                 selectedSessionId: normalizedSessionId,
                 unifiedTranscriptItems: unifiedOrderSession?.transcriptItems ?? null,
+                chainTranscriptItems: privateHistoryProjection?.transcriptItems ?? null,
               });
 
               return commandSuccess({
                 ...payload,
-                localMetabotName: profile.name,
+                localMetabotName: privateHistoryProjection?.localName ?? profile.name,
                 localMetabotGlobalMetaId: profile.globalMetaId,
+                localMetabotAvatar: privateHistoryProjection?.localAvatar ?? null,
                 peerGlobalMetaId,
+                peerName: privateHistoryProjection?.peerName ?? null,
+                peerAvatar: privateHistoryProjection?.peerAvatar ?? null,
               });
             }
             const latestStatusSnapshot = publicStatusSnapshots.at(-1) ?? null;

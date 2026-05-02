@@ -65,7 +65,10 @@ function buildSessionListViewModel(rawSessions, now) {
       updatedAt: updatedAt,
       localMetabotName: normalizeText(record.localMetabotName),
       localMetabotGlobalMetaId: normalizeText(record.localMetabotGlobalMetaId),
+      localMetabotAvatar: normalizeText(record.localMetabotAvatar),
       peerGlobalMetaId: normalizeText(record.peerGlobalMetaId),
+      peerName: normalizeText(record.peerName),
+      peerAvatar: normalizeText(record.peerAvatar),
       servicePinId: normalizeText(record.servicePinId),
       stateTone: isStale ? 'timeout' : getStateTone(state),
       stateLabel: isStale ? 'Timeout' : getStateLabel(state),
@@ -108,7 +111,10 @@ function buildSessionDetailViewModel(payload) {
     updatedAt: normalizeTimestamp(session.updatedAt),
     localMetabotName: normalizeText(payload.localMetabotName),
     localMetabotGlobalMetaId: normalizeText(payload.localMetabotGlobalMetaId),
+    localMetabotAvatar: normalizeText(payload.localMetabotAvatar) || normalizeText(session.localMetabotAvatar),
     peerGlobalMetaId: normalizeText(payload.peerGlobalMetaId),
+    peerName: normalizeText(payload.peerName) || normalizeText(session.peerName),
+    peerAvatar: normalizeText(payload.peerAvatar) || normalizeText(session.peerAvatar),
     servicePinId: normalizeText(session.servicePinId),
     callerGlobalMetaId: normalizeText(session.callerGlobalMetaId),
     providerGlobalMetaId: normalizeText(session.providerGlobalMetaId),
@@ -421,6 +427,63 @@ function renderMarkdown(text) {
 
 const profileCache = new Map();
 
+function normalizeAvatarUrl(rawAvatar) {
+  const raw = normalizeText(rawAvatar);
+  if (!raw) return '';
+  if (/^(data:|blob:)/i.test(raw)) {
+    return raw;
+  }
+  const pinRef = extractAvatarPinReference(raw);
+  if (pinRef) {
+    return '/api/file/avatar?ref=' + encodeURIComponent(pinRef);
+  }
+  if (isHttpUrl(raw)) {
+    return raw;
+  }
+  return raw;
+}
+
+function extractAvatarPinReference(rawAvatar) {
+  const raw = normalizeText(rawAvatar);
+  if (!raw) return '';
+  if (raw.toLowerCase().indexOf('metafile://') === 0) {
+    const pinId = raw.slice('metafile://'.length).trim().split(/[?#]/)[0] || '';
+    return pinId ? 'metafile://' + pinId : '';
+  }
+  const path = (() => {
+    if (isHttpUrl(raw)) {
+      try {
+        return new URL(raw).pathname;
+      } catch {
+        return '';
+      }
+    }
+    return raw;
+  })();
+  const prefixes = [
+    '/content/',
+    '/metafile-indexer/content/',
+    '/metafile-indexer/thumbnail/',
+    '/metafile-indexer/api/v1/files/content/',
+    '/metafile-indexer/api/v1/files/accelerate/content/',
+    '/metafile-indexer/api/v1/users/avatar/accelerate/',
+  ];
+  for (const prefix of prefixes) {
+    if (path.toLowerCase().indexOf(prefix.toLowerCase()) === 0) {
+      return decodeURIComponent((path.slice(prefix.length).split(/[?#]/)[0] || '').trim());
+    }
+  }
+  if (/^[0-9a-f]{64}(?:i[0-9]+)?$/i.test(raw)) {
+    return raw;
+  }
+  return '';
+}
+
+function isHttpUrl(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized.indexOf('http://') === 0 || normalized.indexOf('https://') === 0;
+}
+
 function getInitialsAvatar(name, gmid) {
   const text = name || gmid || '?';
   const char = text.charAt(0).toUpperCase();
@@ -454,18 +517,8 @@ async function resolveProfile(gmid) {
       const json = await resp.json();
       const data = json?.data || json || {};
       name = data.name || data.showName || data.nickname || '';
-      const rawAvatar = data.avatar || data.avatarUrl || data.avatarId || '';
-      if (rawAvatar) {
-        if (rawAvatar.startsWith('http') || rawAvatar.startsWith('data:')) {
-          avatarUrl = rawAvatar;
-        } else if (rawAvatar.startsWith('/')) {
-          avatarUrl = 'https://file.metaid.io' + rawAvatar;
-        } else if (/^[0-9a-f]{64}i\\d+$/i.test(rawAvatar)) {
-          avatarUrl = 'https://file.metaid.io/content/' + rawAvatar;
-        } else if (/^[0-9a-f]{64}$/i.test(rawAvatar)) {
-          avatarUrl = 'https://file.metaid.io/metafile-indexer/api/v1/files/content/' + rawAvatar;
-        }
-      }
+      const rawAvatar = data.avatar || data.avatarUrl || data.avatarId || data.avatarImage || data.avatarUri || data.avatar_uri || '';
+      avatarUrl = normalizeAvatarUrl(rawAvatar);
     }
   } catch { /* ignore */ }
   profileCache.set(gmid, { name, avatar: avatarUrl, fetching: null });
@@ -571,31 +624,33 @@ async function renderSessionDetail() {
     resolveProfile(detail.peerGlobalMetaId),
   ]);
   const localName = detail.localMetabotName || localProfile.name || detail.localMetabotGlobalMetaId || 'Local';
-  const peerName = peerProfile.name && peerProfile.name !== detail.peerGlobalMetaId
+  const peerName = detail.peerName
+    || (peerProfile.name && peerProfile.name !== detail.peerGlobalMetaId
     ? peerProfile.name
-    : (detail.peerGlobalMetaId ? detail.peerGlobalMetaId.slice(0, 20) + '…' : 'Peer');
-  const localAvatar = localProfile.avatar || getInitialsAvatar(localName, detail.localMetabotGlobalMetaId);
-  const peerAvatar = peerProfile.avatar || getInitialsAvatar(peerName, detail.peerGlobalMetaId);
+    : (detail.peerGlobalMetaId ? detail.peerGlobalMetaId.slice(0, 20) + '…' : 'Peer'));
+  const localAvatar = normalizeAvatarUrl(detail.localMetabotAvatar) || localProfile.avatar || getInitialsAvatar(localName, detail.localMetabotGlobalMetaId);
+  const peerAvatar = normalizeAvatarUrl(detail.peerAvatar) || peerProfile.avatar || getInitialsAvatar(peerName, detail.peerGlobalMetaId);
+  const traceCopyValue = detail.traceId || detail.sessionId;
 
   const headerHtml =
     '<div class="detail-header">' +
       '<div class="detail-header-participant">' +
-        avatarImg(localAvatar, getInitialsAvatar(localName, detail.localMetabotGlobalMetaId), 'participant-avatar') +
+        avatarImg(peerAvatar, getInitialsAvatar(peerName, detail.peerGlobalMetaId), 'participant-avatar') +
         '<div class="participant-info">' +
-          '<div class="participant-name">' + escHtml(localName) + '</div>' +
-          '<div class="participant-role">Local · ' + escHtml(detail.role === 'caller' ? 'Caller' : 'Provider') + '</div>' +
+          '<div class="participant-name">' + escHtml(peerName) + '</div>' +
+          '<div class="participant-role">Remote · ' + escHtml(detail.role === 'caller' ? 'Provider' : 'Caller') + '</div>' +
         '</div>' +
       '</div>' +
       '<div class="detail-header-meta">' +
         '<span class="status-pill status-' + getStateTone(detail.state) + '"><span class="status-dot"></span><span>' + escHtml(getStateLabel(detail.state)) + '</span></span>' +
-        '<div class="detail-trace-id mono">trace: ' + escHtml(detail.traceId || detail.sessionId) + '</div>' +
+        '<div class="detail-trace-row"><span class="detail-trace-id mono">trace: ' + escHtml(traceCopyValue) + '</span>' + copyButton(traceCopyValue, 'Copy trace id', 'copy-trace') + '</div>' +
       '</div>' +
       '<div class="detail-header-participant detail-header-participant-right">' +
         '<div class="participant-info participant-info-right">' +
-          '<div class="participant-name">' + escHtml(peerName) + '</div>' +
-          '<div class="participant-role">' + escHtml(detail.role === 'caller' ? 'Provider' : 'Caller') + ' · Remote</div>' +
+          '<div class="participant-name">' + escHtml(localName) + '</div>' +
+          '<div class="participant-role">' + escHtml(detail.role === 'caller' ? 'Caller' : 'Provider') + ' · Local</div>' +
         '</div>' +
-        avatarImg(peerAvatar, getInitialsAvatar(peerName, detail.peerGlobalMetaId), 'participant-avatar') +
+        avatarImg(localAvatar, getInitialsAvatar(localName, detail.localMetabotGlobalMetaId), 'participant-avatar') +
       '</div>' +
     '</div>';
 
@@ -616,18 +671,76 @@ async function renderSessionDetail() {
       }
     });
   });
-  panel.querySelectorAll('[data-copy-txid]').forEach(btn => {
-    btn.addEventListener('click', () => copyTextToClipboard(btn.dataset.copyTxid || ''));
+  panel.querySelectorAll('[data-copy-text]').forEach(btn => {
+    btn.addEventListener('click', () => copyTextToClipboard(btn.dataset.copyText || ''));
   });
 }
 
 const TOOL_ID_SEQ = { n: 0 };
 
-function copyTextToClipboard(value) {
-  if (!value || typeof navigator === 'undefined' || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
-    return;
+function copyIconSvg() {
+  return '<svg class="copy-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+    '<path d="M8 7.5V6a2 2 0 0 1 2-2h7.5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H16" />' +
+    '<path d="M4.5 9.5a2 2 0 0 1 2-2H14a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V9.5Z" />' +
+  '</svg>';
+}
+
+function copyButton(value, label, cls) {
+  if (!value) return '';
+  return '<button type="button" class="copy-action ' + escHtml(cls || '') + '" data-copy-text="' + escHtml(value) + '" title="' + escHtml(label) + '" aria-label="' + escHtml(label) + '">' + copyIconSvg() + '</button>';
+}
+
+function showToast(message) {
+  const toast = $('[data-copy-toast]');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.add('show');
+  if (showToast.timer) clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => toast.classList.remove('show'), 1600);
+}
+
+function copyTextFallback(value) {
+  if (typeof document === 'undefined' || !document.createElement || !document.body) {
+    return false;
   }
-  navigator.clipboard.writeText(value).catch(() => {});
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', 'readonly');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '0';
+  textarea.style.left = '0';
+  textarea.style.width = '1px';
+  textarea.style.height = '1px';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus({ preventScroll: true });
+  textarea.select();
+  textarea.setSelectionRange(0, value.length);
+  let ok = false;
+  try {
+    ok = document.execCommand && document.execCommand('copy');
+  } catch {
+    ok = false;
+  }
+  document.body.removeChild(textarea);
+  return ok;
+}
+
+async function copyTextToClipboard(value) {
+  if (!value) return;
+  let copied = false;
+  if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(value);
+      copied = true;
+    } catch {
+      copied = false;
+    }
+  }
+  if (!copied) {
+    copied = copyTextFallback(value);
+  }
+  showToast(copied ? 'Copied' : 'Copy unavailable');
 }
 
 function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
@@ -656,7 +769,7 @@ function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
   const txidPreview = formatTxidPreview(txid);
   const timeHtml = '<span class="msg-time">' + escHtml(timeStr) + '</span>';
   const txidHtml = txidPreview
-    ? '<span class="msg-txid"><span class="msg-txid-text">txid: ' + escHtml(txidPreview) + '</span><button type="button" class="copy-txid" data-copy-txid="' + escHtml(txid) + '" title="Copy txid" aria-label="Copy txid">Copy</button></span>'
+    ? '<span class="msg-txid"><span class="msg-txid-text">txid: ' + escHtml(txidPreview) + '</span>' + copyButton(txid, 'Copy txid', 'copy-txid') + '</span>'
     : '';
   const metaHtml = isLocal
     ? txidHtml + timeHtml

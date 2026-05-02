@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import vm from 'node:vm';
@@ -103,6 +104,10 @@ async function runTraceScriptWithUrl(search) {
                 state: 'completed',
               },
               localMetabotName: 'Caller',
+              localMetabotAvatar: '/content/f77ba5db20c19242f9a5e5025357d29ad83f897f3700d2b1972f6ce1485098d7i0',
+              peerGlobalMetaId: 'idq14hmv23j5fnlx4ccnmvlyldjd38xjsechzwg9xz',
+              peerName: 'AI_Sunny',
+              peerAvatar: '/content/607b2da84bbd01e01397bb6ea8cd09e4f9b0e87552dd0d0e24b828f18884dd30i0',
               inspector: {
                 transcriptItems: [
                   {
@@ -171,7 +176,37 @@ test('trace page renders markdown tables, blockquotes, and txid copy affordance 
   assert.match(detail.innerHTML, /<strong>Sunny<\/strong>/);
   assert.match(detail.innerHTML, /<blockquote>/);
   assert.match(detail.innerHTML, /txid: 65a469a2\.\.\.\./);
-  assert.match(detail.innerHTML, /data-copy-txid="65a469a273a5d212975309c2eda54b1c6c9ece97cab6e60d07e23e349f41932b"/);
+  assert.match(detail.innerHTML, /data-copy-text="65a469a273a5d212975309c2eda54b1c6c9ece97cab6e60d07e23e349f41932b"/);
+  assert.match(detail.innerHTML, /class="copy-icon"/);
+  assert.doesNotMatch(detail.innerHTML, />Copy<\/button>/);
+});
+
+test('trace page header renders remote on the left, local on the right, avatars, and icon trace copy', async () => {
+  const { detail } = await runTraceScriptWithUrl('?traceId=trace-weather-1&sessionId=session-weather-1');
+
+  const remoteIndex = detail.innerHTML.indexOf('AI_Sunny');
+  const traceIndex = detail.innerHTML.indexOf('trace: trace-weather-1');
+  const localIndex = detail.innerHTML.indexOf('Caller');
+
+  assert.ok(remoteIndex >= 0);
+  assert.ok(traceIndex > remoteIndex);
+  assert.ok(localIndex > traceIndex);
+  assert.match(
+    detail.innerHTML,
+    /src="\/api\/file\/avatar\?ref=607b2da84bbd01e01397bb6ea8cd09e4f9b0e87552dd0d0e24b828f18884dd30i0"/,
+  );
+  assert.match(
+    detail.innerHTML,
+    /src="\/api\/file\/avatar\?ref=f77ba5db20c19242f9a5e5025357d29ad83f897f3700d2b1972f6ce1485098d7i0"/,
+  );
+  assert.match(detail.innerHTML, /data-copy-text="trace-weather-1"/);
+  assert.match(detail.innerHTML, /aria-label="Copy trace id"/);
+});
+
+test('trace page includes a toast target for copy feedback', () => {
+  const html = readFileSync(new URL('../../src/ui/pages/trace/index.html', import.meta.url), 'utf8');
+
+  assert.match(html, /data-copy-toast/);
 });
 
 test('trace page background refresh keeps the current detail while the next fetch is in flight', async () => {
