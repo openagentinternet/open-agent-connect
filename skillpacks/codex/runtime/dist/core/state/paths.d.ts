@@ -7,6 +7,7 @@ export interface MetabotPaths {
     profileRoot: string;
     workspaceRoot: string;
     runtimeRoot: string;
+    a2aRoot: string;
     sessionsRoot: string;
     exportsRoot: string;
     stateRoot: string;
@@ -41,6 +42,11 @@ export interface MetabotPaths {
     goalMdPath: string;
     roleMdPath: string;
     daemonLockPath: string;
+    llmRoot: string;
+    llmRuntimesPath: string;
+    llmBindingsPath: string;
+    llmSecretsRoot: string;
+    preferredLlmRuntimePath: string;
     baseRoot: string;
     exportRoot: string;
 }

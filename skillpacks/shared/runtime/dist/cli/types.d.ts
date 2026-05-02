@@ -28,6 +28,7 @@ export interface CliDependencies {
     identity?: {
         create?: (input: {
             name: string;
+            host?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         who?: () => Awaitable<MetabotCommandResult<unknown>>;
         list?: () => Awaitable<MetabotCommandResult<unknown>>;
@@ -98,7 +99,8 @@ export interface CliDependencies {
     };
     trace?: {
         get?: (input: {
-            traceId: string;
+            traceId?: string;
+            sessionId?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         watch?: (input: {
             traceId: string;
@@ -156,6 +158,27 @@ export interface CliDependencies {
             all: boolean;
             confirmToken?: string;
             yes: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    llm?: {
+        listRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
+        discoverRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
+        listBindings?: (input: {
+            slug: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        upsertBindings?: (input: {
+            slug: string;
+            bindings: Record<string, unknown>[];
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        removeBinding?: (input: {
+            bindingId: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        getPreferredRuntime?: (input: {
+            slug: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        setPreferredRuntime?: (input: {
+            slug: string;
+            runtimeId: string | null;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
 }

@@ -74,5 +74,8 @@ function createDefaultConfig() {
             trustedMasters: [],
             autoPolicy: createDefaultAskMasterAutoPolicyConfig(),
         },
+        a2a: {
+            simplemsgListenerEnabled: true,
+        },
     };
 }

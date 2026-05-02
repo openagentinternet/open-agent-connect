@@ -15,6 +15,23 @@ export interface PrivateChatListener {
     stop(): void;
     isRunning(): boolean;
 }
+export interface MetaWebPrivateMessage {
+    txId?: string | null;
+    pinId?: string | null;
+    content?: string | null;
+    timestamp?: number | null;
+    replyPin?: string | null;
+    fromGlobalMetaId?: string | null;
+    toGlobalMetaId?: string | null;
+    fromUserInfo?: {
+        name?: string | null;
+        avatar?: string | null;
+        chatPublicKey?: string | null;
+    } | null;
+}
+export declare function pinIdFromPrivateChatSocketMessage(message: MetaWebPrivateMessage): string | null;
+export declare function normalizePrivateChatSocketMessage(data: unknown): MetaWebPrivateMessage | null;
+export declare function decryptPrivateChatSocketMessage(message: MetaWebPrivateMessage, identity: PrivateChatListenerIdentity, peerChatPublicKeyOverride: string | null): string | null;
 export declare function createPrivateChatListener(input: {
     getIdentity: () => Promise<PrivateChatListenerIdentity | null>;
     callbacks: PrivateChatListenerCallbacks;

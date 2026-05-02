@@ -12,6 +12,7 @@ export interface TraceSessionListItem {
     localMetabotName: string;
     localMetabotGlobalMetaId: string;
     peerGlobalMetaId: string;
+    peerName: string;
     servicePinId: string;
     stateTone: 'active' | 'completed' | 'failure' | 'timeout' | 'manual' | 'neutral';
     stateLabel: string;
@@ -38,6 +39,7 @@ export interface TraceSessionDetail {
     localMetabotName: string;
     localMetabotGlobalMetaId: string;
     peerGlobalMetaId: string;
+    peerName: string;
     servicePinId: string;
     callerGlobalMetaId: string;
     providerGlobalMetaId: string;

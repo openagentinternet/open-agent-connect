@@ -30,6 +30,7 @@ function normalizeProfileHomeDir(homeDir) {
 }
 function buildMetabotPaths(input) {
     const evolutionRoot = node_path_1.default.join(input.runtimeRoot, 'evolution');
+    const a2aRoot = node_path_1.default.join(input.runtimeRoot, 'A2A');
     const evolutionExecutionsRoot = node_path_1.default.join(evolutionRoot, 'executions');
     const evolutionAnalysesRoot = node_path_1.default.join(evolutionRoot, 'analyses');
     const evolutionArtifactsRoot = node_path_1.default.join(evolutionRoot, 'artifacts');
@@ -46,6 +47,7 @@ function buildMetabotPaths(input) {
         profileRoot: input.profileRoot,
         workspaceRoot: input.workspaceRoot,
         runtimeRoot: input.runtimeRoot,
+        a2aRoot,
         sessionsRoot: input.sessionsRoot,
         exportsRoot: input.exportsRoot,
         stateRoot: input.stateRoot,
@@ -80,6 +82,12 @@ function buildMetabotPaths(input) {
         goalMdPath: input.goalMdPath,
         roleMdPath: input.roleMdPath,
         daemonLockPath: input.daemonLockPath,
+        // LLM paths.
+        llmRoot: input.llmRoot,
+        llmRuntimesPath: input.llmRuntimesPath,
+        llmBindingsPath: input.llmBindingsPath,
+        llmSecretsRoot: input.llmSecretsRoot,
+        preferredLlmRuntimePath: input.preferredLlmRuntimePath,
         // Temporary compatibility aliases for untouched later-task modules.
         baseRoot: input.metabotRoot,
         exportRoot: input.exportsRoot,
@@ -124,5 +132,10 @@ function resolveMetabotPaths(homeDir) {
         goalMdPath: node_path_1.default.join(profileRoot, 'GOAL.md'),
         roleMdPath: node_path_1.default.join(profileRoot, 'ROLE.md'),
         daemonLockPath: node_path_1.default.join(locksRoot, 'daemon.lock'),
+        llmRoot: node_path_1.default.join(metabotRoot, 'LLM'),
+        llmRuntimesPath: node_path_1.default.join(metabotRoot, 'LLM', 'runtimes.json'),
+        llmBindingsPath: node_path_1.default.join(profileRoot, 'llmbindings.json'),
+        llmSecretsRoot: node_path_1.default.join(metabotRoot, 'LLM', 'secrets'),
+        preferredLlmRuntimePath: node_path_1.default.join(profileRoot, 'preferred-llm-runtime.json'),
     });
 }

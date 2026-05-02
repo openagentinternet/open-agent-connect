@@ -15,7 +15,11 @@ export interface SessionTraceOrderInput {
     role?: string | null;
     serviceId?: string | null;
     serviceName?: string | null;
+    orderPinId?: string | null;
+    orderTxid?: string | null;
+    orderTxids?: string[] | null;
     paymentTxid?: string | null;
+    orderReference?: string | null;
     paymentCurrency?: string | null;
     paymentAmount?: string | null;
 }
@@ -118,7 +122,11 @@ export interface SessionTraceRecord {
         role: string | null;
         serviceId: string | null;
         serviceName: string | null;
+        orderPinId: string | null;
+        orderTxid: string | null;
+        orderTxids: string[];
         paymentTxid: string | null;
+        orderReference: string | null;
         paymentCurrency: string | null;
         paymentAmount: string | null;
     } | null;

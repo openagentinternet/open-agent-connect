@@ -12,6 +12,7 @@ const app_3 = require("../../ui/pages/my-services/app");
 const app_4 = require("../../ui/pages/publish/app");
 const app_5 = require("../../ui/pages/refund/app");
 const app_6 = require("../../ui/pages/trace/app");
+const app_7 = require("../../ui/pages/bot/app");
 const uiMetaApps_1 = require("./uiMetaApps");
 const UI_ROUTE_PREFIX = '/ui/';
 const PAGE_BUILDERS = {
@@ -21,9 +22,11 @@ const PAGE_BUILDERS = {
     'trace': app_6.buildTracePageDefinition,
     'refund': app_5.buildRefundPageDefinition,
     'chat-viewer': app_2.buildChatViewerPageDefinition,
+    'bot': app_7.buildBotPageDefinition,
 };
 const NAV_ITEMS = [
     { page: 'hub', label: 'Hub' },
+    { page: 'bot', label: 'Bot' },
     { page: 'trace', label: 'Trace' },
     { page: 'refund', label: 'Refund' },
     { page: 'chat-viewer', label: 'Chat Viewer' },

@@ -10,9 +10,15 @@ export declare function buildOrderPayload(input: {
     price?: unknown;
     currency?: unknown;
     paymentTxid?: unknown;
+    paymentCommitTxid?: unknown;
+    paymentChain?: unknown;
+    settlementKind?: unknown;
+    mrc20Ticker?: unknown;
+    mrc20Id?: unknown;
     orderReference?: unknown;
     serviceId?: unknown;
     skillName?: unknown;
     serviceName?: unknown;
+    outputType?: unknown;
 }): string;
 export declare function extractOrderDisplaySummary(plaintext: string): string;

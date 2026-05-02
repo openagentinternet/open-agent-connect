@@ -54,7 +54,13 @@ function buildOrderPayload(input) {
         || normalizeSingleLineText(input?.skillName)
         || 'Service Order';
     const paymentTxid = normalizeSingleLineText(input?.paymentTxid);
+    const paymentCommitTxid = normalizeSingleLineText(input?.paymentCommitTxid);
+    const paymentChain = normalizeSingleLineText(input?.paymentChain);
+    const settlementKind = normalizeSingleLineText(input?.settlementKind);
+    const mrc20Ticker = normalizeSingleLineText(input?.mrc20Ticker);
+    const mrc20Id = normalizeSingleLineText(input?.mrc20Id);
     const orderReference = normalizeSingleLineText(input?.orderReference);
+    const outputType = normalizeSingleLineText(input?.outputType);
     const metadataLines = [
         `支付金额 ${String(input?.price || '').trim()} ${String(input?.currency || '').trim()}`,
     ];
@@ -64,7 +70,25 @@ function buildOrderPayload(input) {
     else if (orderReference) {
         metadataLines.push(`order id: ${orderReference}`);
     }
+    if (paymentCommitTxid) {
+        metadataLines.push(`commit txid: ${paymentCommitTxid}`);
+    }
+    if (paymentChain) {
+        metadataLines.push(`payment chain: ${paymentChain}`);
+    }
+    if (settlementKind) {
+        metadataLines.push(`settlement kind: ${settlementKind}`);
+    }
+    if (mrc20Ticker) {
+        metadataLines.push(`mrc20 ticker: ${mrc20Ticker}`);
+    }
+    if (mrc20Id) {
+        metadataLines.push(`mrc20 id: ${mrc20Id}`);
+    }
     metadataLines.push(`service id: ${String(input?.serviceId || '').trim()}`, `skill name: ${String(input?.skillName || '').trim()}`);
+    if (outputType) {
+        metadataLines.push(`output type: ${outputType}`);
+    }
     return [
         `${exports.ORDER_PREFIX} ${displaySummary}`,
         buildOrderRawRequestBlock(effectiveRawRequest),

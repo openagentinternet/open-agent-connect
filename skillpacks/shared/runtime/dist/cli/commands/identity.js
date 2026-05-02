@@ -10,11 +10,15 @@ async function runIdentityCommand(args, context) {
         if (!name) {
             return (0, helpers_1.commandMissingFlag)('--name');
         }
+        const host = (0, helpers_1.readFlagValue)(args, '--host') ?? '';
         const handler = context.dependencies.identity?.create;
         if (!handler) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'Identity create handler is not configured.');
         }
-        return handler({ name });
+        const input = { name };
+        if (host)
+            input.host = host;
+        return handler(input);
     }
     if (subcommand === 'who') {
         const handler = context.dependencies.identity?.who;

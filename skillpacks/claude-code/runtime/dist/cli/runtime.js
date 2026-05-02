@@ -41,13 +41,18 @@ const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const writePin_1 = require("../core/chain/writePin");
 const daemon_1 = require("../daemon");
 const defaultHandlers_1 = require("../daemon/defaultHandlers");
+const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
 const metawebMasterReplyWaiter_1 = require("../core/master/metawebMasterReplyWaiter");
 const masterMessageSchema_1 = require("../core/master/masterMessageSchema");
-const privateChatListener_1 = require("../core/chat/privateChatListener");
 const privateChatAutoReply_1 = require("../core/chat/privateChatAutoReply");
 const privateChatStateStore_1 = require("../core/chat/privateChatStateStore");
 const chatStrategyStore_1 = require("../core/chat/chatStrategyStore");
 const hostLlmChatReplyRunner_1 = require("../core/chat/hostLlmChatReplyRunner");
+const servicePayment_1 = require("../core/payments/servicePayment");
+const llmRuntimeStore_1 = require("../core/llm/llmRuntimeStore");
+const llmBindingStore_1 = require("../core/llm/llmBindingStore");
+const llmRuntimeResolver_1 = require("../core/llm/llmRuntimeResolver");
+const llmRuntimeDiscovery_1 = require("../core/llm/llmRuntimeDiscovery");
 const update_1 = require("../core/system/update");
 const uninstall_1 = require("../core/system/uninstall");
 const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
@@ -61,6 +66,7 @@ const TEST_FAKE_CHAIN_WRITE_ENV = 'METABOT_TEST_FAKE_CHAIN_WRITE';
 const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
+const TEST_FAKE_BUYER_RATING_REPLY_ENV = 'METABOT_TEST_FAKE_BUYER_RATING_REPLY';
 const TEST_FAKE_MASTER_REPLY_ENV = 'METABOT_TEST_FAKE_MASTER_REPLY';
 const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
@@ -239,6 +245,7 @@ const SUPPORTED_CONFIG_KEYS = new Set([
     'evolution_network.autoRecordExecutions',
     'askMaster.enabled',
     'askMaster.triggerMode',
+    'a2a.simplemsgListenerEnabled',
 ]);
 function isRecord(value) {
     return typeof value === 'object' && value !== null;
@@ -283,7 +290,8 @@ function isSupportedBooleanConfigKey(key) {
     return key === 'evolution_network.enabled'
         || key === 'evolution_network.autoAdoptSameSkillSameScope'
         || key === 'evolution_network.autoRecordExecutions'
-        || key === 'askMaster.enabled';
+        || key === 'askMaster.enabled'
+        || key === 'a2a.simplemsgListenerEnabled';
 }
 function readConfigValue(config, key) {
     if (key === 'evolution_network.enabled') {
@@ -300,6 +308,9 @@ function readConfigValue(config, key) {
     }
     if (key === 'askMaster.triggerMode') {
         return config.askMaster.triggerMode;
+    }
+    if (key === 'a2a.simplemsgListenerEnabled') {
+        return config.a2a.simplemsgListenerEnabled;
     }
     return config.evolution_network.autoRecordExecutions;
 }
@@ -337,6 +348,15 @@ function writeConfigValue(config, key, value) {
             evolution_network: {
                 ...config.evolution_network,
                 autoAdoptSameSkillSameScope: value === true,
+            },
+        };
+    }
+    if (key === 'a2a.simplemsgListenerEnabled') {
+        return {
+            ...config,
+            a2a: {
+                ...config.a2a,
+                simplemsgListenerEnabled: value === true,
             },
         };
     }
@@ -446,6 +466,7 @@ function buildDaemonConfigHash(env, options = {}) {
         fakeSubsidy: normalizeEnvText(env[TEST_FAKE_SUBSIDY_ENV]),
         fakeProviderChatPublicKey: normalizeEnvText(env[TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV]),
         fakeMetaWebReply: normalizeEnvText(env[TEST_FAKE_METAWEB_REPLY_ENV]),
+        fakeBuyerRatingReply: normalizeEnvText(env[TEST_FAKE_BUYER_RATING_REPLY_ENV]),
         fakeMasterReply: normalizeEnvText(env[TEST_FAKE_MASTER_REPLY_ENV]),
     }))
         .digest('hex');
@@ -924,6 +945,18 @@ function createTestMetaWebReplyWaiter(env) {
         },
     };
 }
+function createTestBuyerRatingReplyRunner(env) {
+    const raw = typeof env[TEST_FAKE_BUYER_RATING_REPLY_ENV] === 'string'
+        ? env[TEST_FAKE_BUYER_RATING_REPLY_ENV].trim()
+        : '';
+    if (!raw) {
+        return undefined;
+    }
+    return async () => ({
+        state: 'reply',
+        content: raw,
+    });
+}
 function createTestMasterReplyWaiter(env) {
     const raw = typeof env[TEST_FAKE_MASTER_REPLY_ENV] === 'string'
         ? env[TEST_FAKE_MASTER_REPLY_ENV].trim()
@@ -1091,7 +1124,11 @@ function createDefaultCliDependencies(context) {
                     }
                     targetHomeDir = resolvedHome.homeDir;
                 }
-                return requestJson(cloneContextWithHomeDir(context, targetHomeDir), 'POST', '/api/identity/create', input, {
+                const createInput = { name: input.name };
+                if (input.host) {
+                    createInput.host = input.host;
+                }
+                return requestJson(cloneContextWithHomeDir(context, targetHomeDir), 'POST', '/api/identity/create', createInput, {
                     allowUnindexedExplicitHome: true,
                 });
             },
@@ -1336,7 +1373,9 @@ function createDefaultCliDependencies(context) {
             },
         },
         trace: {
-            get: async (input) => requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}`),
+            get: async (input) => input.sessionId
+                ? requestJson(context, 'GET', `/api/trace/sessions/${encodeURIComponent(input.sessionId)}`)
+                : requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId || '')}`),
             watch: async (input) => requestText(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}/watch`),
         },
         ui: {
@@ -1441,6 +1480,15 @@ function createDefaultCliDependencies(context) {
                     return (0, commandResult_1.commandFailed)('system_uninstall_failed', error instanceof Error ? error.message : String(error));
                 }
             },
+        },
+        llm: {
+            listRuntimes: async () => requestJson(context, 'GET', '/api/llm/runtimes'),
+            discoverRuntimes: async () => requestJson(context, 'POST', '/api/llm/runtimes/discover'),
+            listBindings: async (input) => requestJson(context, 'GET', `/api/llm/bindings/${encodeURIComponent(input.slug)}`),
+            upsertBindings: async (input) => requestJson(context, 'PUT', `/api/llm/bindings/${encodeURIComponent(input.slug)}`, { bindings: input.bindings }),
+            removeBinding: async (input) => requestJson(context, 'DELETE', `/api/llm/bindings/${encodeURIComponent(input.bindingId)}/delete`),
+            getPreferredRuntime: async (input) => requestJson(context, 'GET', `/api/llm/preferred-runtime/${encodeURIComponent(input.slug)}`),
+            setPreferredRuntime: async (input) => requestJson(context, 'PUT', `/api/llm/preferred-runtime/${encodeURIComponent(input.slug)}`, { runtimeId: input.runtimeId }),
         },
         evolution: {
             status: async () => {
@@ -1697,6 +1745,7 @@ function mergeCliDependencies(context) {
         skills: { ...defaults.skills, ...provided.skills },
         host: { ...defaults.host, ...provided.host },
         system: { ...defaults.system, ...provided.system },
+        llm: { ...defaults.llm, ...provided.llm },
         evolution: { ...defaults.evolution, ...provided.evolution },
     };
 }
@@ -1716,7 +1765,11 @@ async function serveCliDaemonProcess(context) {
         : undefined;
     const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
     const callerReplyWaiter = createTestMetaWebReplyWaiter(context.env);
+    const buyerRatingReplyRunner = createTestBuyerRatingReplyRunner(context.env) ?? (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)();
     const masterReplyWaiter = createTestMasterReplyWaiter(context.env) ?? (0, metawebMasterReplyWaiter_1.createSocketIoMetaWebMasterReplyWaiter)();
+    const servicePaymentExecutor = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+        ? (0, servicePayment_1.createTestServicePaymentExecutor)()
+        : undefined;
     const socketPresenceApiBaseUrl = context.env.METABOT_SOCKET_PRESENCE_API_BASE_URL
         || (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 'http://127.0.0.1:9' : undefined);
     const sharedAutoReplyConfig = {
@@ -1740,7 +1793,9 @@ async function serveCliDaemonProcess(context) {
             identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
             fetchPeerChatPublicKey,
             callerReplyWaiter,
+            buyerRatingReplyRunner,
             masterReplyWaiter,
+            servicePaymentExecutor,
             requestMvcGasSubsidy,
             autoReplyConfig: sharedAutoReplyConfig,
         }),
@@ -1789,6 +1844,30 @@ async function serveCliDaemonProcess(context) {
     if (providerPresence.enabled) {
         await providerHeartbeatLoop.start();
     }
+    // ---- LLM runtime discovery and resolver ----
+    const llmRuntimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(paths);
+    const llmBindingStore = (0, llmBindingStore_1.createLlmBindingStore)(paths);
+    const llmResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
+        runtimeStore: llmRuntimeStore,
+        bindingStore: llmBindingStore,
+        getPreferredRuntimeId: async (_slug) => {
+            try {
+                const raw = await node_fs_1.default.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
+                const data = JSON.parse(raw);
+                return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+            }
+            catch {
+                return null;
+            }
+        },
+    });
+    // Discover LLM runtimes in background (non-blocking).
+    const metaBotSlug = node_path_1.default.basename(paths.profileRoot);
+    void (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: context.env }).then(async (result) => {
+        for (const runtime of result.runtimes) {
+            await llmRuntimeStore.upsertRuntime(runtime).catch(() => { });
+        }
+    });
     const chatStateStore = (0, privateChatStateStore_1.createPrivateChatStateStore)(paths);
     const chatStrategyStore = (0, chatStrategyStore_1.createChatStrategyStore)(paths);
     const resolvePeerChatPublicKeyForChat = fetchPeerChatPublicKey ?? defaultHandlers_1.fetchPeerChatPublicKey;
@@ -1802,37 +1881,33 @@ async function serveCliDaemonProcess(context) {
             return state.identity?.globalMetaId ?? null;
         },
         resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
-        replyRunner: (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)(),
+        replyRunner: (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)({
+            runtimeResolver: llmResolver,
+            metaBotSlug,
+        }),
     }, sharedAutoReplyConfig);
-    const privateChatListener = (0, privateChatListener_1.createPrivateChatListener)({
-        getIdentity: async () => {
-            const state = await runtimeStore.readState();
-            if (!state.identity)
-                return null;
-            try {
-                const chatIdentity = await signer.getPrivateChatIdentity();
-                return {
-                    globalMetaId: chatIdentity.globalMetaId,
-                    privateKeyHex: chatIdentity.privateKeyHex,
-                    chatPublicKey: chatIdentity.chatPublicKey,
-                };
-            }
-            catch {
-                return null;
-            }
-        },
-        callbacks: {
-            onMessage: (message) => { void chatAutoReplyOrchestrator.handleInboundMessage(message); },
-        },
+    const daemonConfig = await (0, configStore_1.createConfigStore)(paths).read();
+    const simplemsgListener = (0, simplemsgListener_1.createA2ASimplemsgListenerManager)({
+        systemHomeDir: paths.systemHomeDir,
         resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+        onMessage: (profile, message) => {
+            if (node_path_1.default.resolve(profile.homeDir) === node_path_1.default.resolve(homeDir)) {
+                void chatAutoReplyOrchestrator.handleInboundMessage(message);
+            }
+        },
+        onError: (error) => {
+            console.warn('[A2A simplemsg listener]', error.message);
+        },
     });
-    privateChatListener.start();
+    if (daemonConfig.a2a.simplemsgListenerEnabled) {
+        await simplemsgListener.start();
+    }
     let shuttingDown = false;
     const shutdown = async (exitCode) => {
         if (shuttingDown)
             return;
         shuttingDown = true;
-        privateChatListener.stop();
+        simplemsgListener.stop();
         providerHeartbeatLoop.stop();
         await runtimeStore.clearDaemon(process.pid);
         await daemon.close();

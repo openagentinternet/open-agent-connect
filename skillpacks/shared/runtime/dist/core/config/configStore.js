@@ -68,11 +68,15 @@ function normalizeConfig(input) {
     const root = input;
     const maybeNetwork = root['evolution_network'];
     const maybeAskMaster = root['askMaster'];
+    const maybeA2A = root['a2a'];
     const networkSource = maybeNetwork && typeof maybeNetwork === 'object'
         ? maybeNetwork
         : {};
     const askMasterSource = maybeAskMaster && typeof maybeAskMaster === 'object'
         ? maybeAskMaster
+        : {};
+    const a2aSource = maybeA2A && typeof maybeA2A === 'object'
+        ? maybeA2A
         : {};
     const triggerMode = normalizeString(askMasterSource.triggerMode);
     const confirmationMode = normalizeString(askMasterSource.confirmationMode);
@@ -98,7 +102,10 @@ function normalizeConfig(input) {
                 : defaults.askMaster.contextMode,
             trustedMasters: normalizeStringArray(askMasterSource.trustedMasters),
             autoPolicy: (0, configTypes_1.normalizeAskMasterAutoPolicyConfig)(askMasterSource.autoPolicy),
-        }
+        },
+        a2a: {
+            simplemsgListenerEnabled: normalizeBoolean(a2aSource.simplemsgListenerEnabled, defaults.a2a.simplemsgListenerEnabled),
+        },
     };
 }
 function resolvePaths(homeDirOrPaths) {

@@ -150,6 +150,7 @@ exports.ROOT_COMMAND_HELP = {
         { name: 'ui', summary: 'Open local human-only HTML pages backed by the MetaBot runtime.' },
         { name: 'skills', summary: 'Resolve shared-default or host-specific skill contracts for install/runtime use.' },
         { name: 'system', summary: 'Update or uninstall local Open Agent Connect runtime assets.' },
+        { name: 'llm', summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings.' },
     ],
     optionalFlags: [VERSION_FLAG, HELP_JSON_FLAG],
     examples: [
@@ -254,6 +255,7 @@ const COMMAND_HELP_SPECS = [
         optionalFlags: [HELP_JSON_FLAG],
         examples: [
             'metabot config get askMaster.enabled',
+            'metabot config get a2a.simplemsgListenerEnabled',
             'metabot config set askMaster.triggerMode suggest',
         ],
     },
@@ -272,6 +274,7 @@ const COMMAND_HELP_SPECS = [
         examples: [
             'metabot config get askMaster.enabled',
             'metabot config get askMaster.triggerMode',
+            'metabot config get a2a.simplemsgListenerEnabled',
         ],
         optionalFlags: [HELP_JSON_FLAG],
     },
@@ -290,6 +293,7 @@ const COMMAND_HELP_SPECS = [
         ],
         examples: [
             'metabot config set askMaster.enabled false',
+            'metabot config set a2a.simplemsgListenerEnabled false',
             'metabot config set askMaster.triggerMode suggest',
         ],
         optionalFlags: [HELP_JSON_FLAG],
@@ -982,24 +986,33 @@ const COMMAND_HELP_SPECS = [
     },
     {
         commandPath: ['trace', 'get'],
-        summary: 'Read the full structured trace record plus exported transcript and inspector evidence paths.',
-        usage: 'metabot trace get --trace-id <trace-id>',
+        summary: 'Read the full structured trace or exact A2A session record plus exported transcript and inspector evidence paths.',
+        usage: 'metabot trace get --trace-id <trace-id> | metabot trace get --session-id <session-id>',
         requiredFlags: [
-            { flag: '--trace-id', value: '<trace-id>', description: 'Trace identifier returned by a remote service call.' },
+            { flag: '--trace-id', value: '<trace-id>', description: 'Trace identifier returned by a remote service call. Required when --session-id is not provided.' },
+            { flag: '--session-id', value: '<session-id>', description: 'A2A session identifier returned by a private chat or service call. Required when --trace-id is not provided.' },
         ],
         successFields: [
             'traceId',
+            'sessionId',
             'session',
             'order',
+            'orderPinId',
+            'orderTxid',
+            'orderTxids',
+            'paymentTxid',
             'a2a',
             'artifacts',
             'inspector',
+            'localUiUrl',
         ],
         failureSemantics: [
-            'Fails when the traceId is unknown in the local runtime state.',
+            'Fails when neither selector is provided.',
+            'Fails when the traceId or sessionId is unknown in the local runtime state.',
         ],
         examples: [
             'metabot trace get --trace-id trace-123',
+            'metabot trace get --session-id session-a2a-123',
         ],
         optionalFlags: [HELP_JSON_FLAG],
     },
@@ -1111,6 +1124,27 @@ const COMMAND_HELP_SPECS = [
             'metabot ui open --page buzz',
             'metabot ui open --page chat',
             'metabot ui open --page trace --trace-id trace-123',
+        ],
+    },
+    {
+        commandPath: ['llm'],
+        summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings.',
+        usage: 'metabot llm <subcommand>',
+        subcommands: [
+            { name: 'list-runtimes', summary: 'List all discovered LLM runtimes on this machine.' },
+            { name: 'discover', summary: 'Scan PATH for available LLM runtimes (claude, codex, openclaw) and register them.' },
+            { name: 'bindings', summary: 'List LLM bindings for a MetaBot profile.' },
+            { name: 'bind', summary: 'Create or update a binding between a MetaBot and an LLM runtime.' },
+            { name: 'unbind', summary: 'Remove a specific LLM binding by id.' },
+            { name: 'set-preferred', summary: 'Set the preferred LLM runtime for a MetaBot profile.' },
+            { name: 'get-preferred', summary: 'Get the preferred LLM runtime for a MetaBot profile.' },
+        ],
+        optionalFlags: [HELP_JSON_FLAG],
+        examples: [
+            'metabot llm discover',
+            'metabot llm list-runtimes',
+            'metabot llm bind --slug my-bot --runtime-id llm_claude_code_0 --role primary',
+            'metabot llm bindings --slug my-bot',
         ],
     },
 ];

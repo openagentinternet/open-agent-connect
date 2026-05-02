@@ -3,6 +3,9 @@ export interface EvolutionNetworkConfig {
     autoAdoptSameSkillSameScope: boolean;
     autoRecordExecutions: boolean;
 }
+export interface A2AConfig {
+    simplemsgListenerEnabled: boolean;
+}
 export type AskMasterTriggerMode = 'manual' | 'suggest' | 'auto';
 export type AskMasterConfirmationMode = 'always' | 'sensitive_only' | 'never';
 export type AskMasterContextMode = 'compact' | 'standard' | 'full_task';
@@ -27,6 +30,7 @@ export interface AskMasterConfig {
 export interface MetabotConfig {
     evolution_network: EvolutionNetworkConfig;
     askMaster: AskMasterConfig;
+    a2a: A2AConfig;
 }
 export declare function isAskMasterTriggerMode(value: unknown): value is AskMasterTriggerMode;
 export declare function isAskMasterConfirmationMode(value: unknown): value is AskMasterConfirmationMode;

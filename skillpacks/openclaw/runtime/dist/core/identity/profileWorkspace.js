@@ -105,6 +105,8 @@ async function ensureProfileWorkspace(input) {
     const starterFiles = buildStarterFiles(name);
     await Promise.all(Object.entries(starterFiles).map(([relativePath, content]) => (writeFileIfMissing(node_path_1.default.join(homeDir, relativePath), content))));
     await writeFileIfMissing(node_path_1.default.join(homeDir, '.runtime', 'config.json'), `${JSON.stringify((0, configTypes_1.createDefaultConfig)(), null, 2)}\n`);
+    await writeFileIfMissing(node_path_1.default.join(homeDir, 'llmbindings.json'), `${JSON.stringify({ version: 1, bindings: [] }, null, 2)}\n`);
+    await writeFileIfMissing(node_path_1.default.join(homeDir, 'preferred-llm-runtime.json'), `${JSON.stringify({ runtimeId: null }, null, 2)}\n`);
 }
 function resolveIdentityCreateProfileHome(input) {
     const requestedName = normalizeText(input.requestedName);

@@ -1,5 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.pinIdFromPrivateChatSocketMessage = pinIdFromPrivateChatSocketMessage;
+exports.normalizePrivateChatSocketMessage = normalizePrivateChatSocketMessage;
+exports.decryptPrivateChatSocketMessage = decryptPrivateChatSocketMessage;
 exports.createPrivateChatListener = createPrivateChatListener;
 const socket_io_client_1 = require("socket.io-client");
 const privateChat_1 = require("./privateChat");
@@ -17,14 +20,14 @@ function normalizeObject(value) {
         ? value
         : null;
 }
-function pinIdFromMessage(message) {
+function pinIdFromPrivateChatSocketMessage(message) {
     const pinId = normalizeText(message.pinId);
     if (pinId)
         return pinId;
     const txId = normalizeText(message.txId);
     return txId ? `${txId}i0` : null;
 }
-function extractSocketMessage(data) {
+function normalizePrivateChatSocketMessage(data) {
     let parsed = data;
     if (typeof parsed === 'string') {
         try {
@@ -59,7 +62,7 @@ function extractSocketMessage(data) {
     }
     return null;
 }
-function decryptInboundMessage(message, identity, peerChatPublicKeyOverride) {
+function decryptPrivateChatSocketMessage(message, identity, peerChatPublicKeyOverride) {
     const peerChatPublicKey = normalizeText(message.fromUserInfo?.chatPublicKey)
         || normalizeText(peerChatPublicKeyOverride);
     if (!peerChatPublicKey) {
@@ -115,7 +118,7 @@ function createPrivateChatListener(input) {
         return true;
     }
     async function handleSocketMessage(data, identity) {
-        const message = extractSocketMessage(data);
+        const message = normalizePrivateChatSocketMessage(data);
         if (!message)
             return;
         const fromGlobalMetaId = normalizeText(message.fromGlobalMetaId);
@@ -131,7 +134,7 @@ function createPrivateChatListener(input) {
         if (normalizeText(fromGlobalMetaId) === normalizeText(identity.globalMetaId)) {
             return;
         }
-        const messagePinId = pinIdFromMessage(message);
+        const messagePinId = pinIdFromPrivateChatSocketMessage(message);
         if (!deduplicateByPinId(messagePinId))
             return;
         let peerChatPublicKey = normalizeText(message.fromUserInfo?.chatPublicKey) || null;
@@ -143,7 +146,7 @@ function createPrivateChatListener(input) {
                 // Failed to resolve peer chat public key.
             }
         }
-        const plaintext = decryptInboundMessage(message, identity, peerChatPublicKey);
+        const plaintext = decryptPrivateChatSocketMessage(message, identity, peerChatPublicKey);
         if (!plaintext)
             return;
         const inboundMessage = {

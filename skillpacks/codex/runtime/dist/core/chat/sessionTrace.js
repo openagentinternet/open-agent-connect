@@ -185,7 +185,13 @@ function buildSessionTrace(input) {
                 role: normalizeText(input.order.role) || null,
                 serviceId: normalizeText(input.order.serviceId) || null,
                 serviceName: normalizeText(input.order.serviceName) || null,
+                orderPinId: normalizeText(input.order.orderPinId) || null,
+                orderTxid: normalizeText(input.order.orderTxid) || null,
+                orderTxids: Array.isArray(input.order.orderTxids)
+                    ? input.order.orderTxids.map((entry) => normalizeText(entry)).filter(Boolean)
+                    : [],
                 paymentTxid: normalizeText(input.order.paymentTxid) || null,
+                orderReference: normalizeText(input.order.orderReference) || null,
                 paymentCurrency: normalizeText(input.order.paymentCurrency) || null,
                 paymentAmount: normalizeText(input.order.paymentAmount) || null,
             }

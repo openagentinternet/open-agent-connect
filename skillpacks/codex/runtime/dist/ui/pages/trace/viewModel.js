@@ -77,6 +77,7 @@ function buildSessionListViewModel(rawSessions, now = Date.now()) {
         const localMetabotName = normalizeText(record.localMetabotName);
         const localMetabotGlobalMetaId = normalizeText(record.localMetabotGlobalMetaId);
         const peerGlobalMetaId = normalizeText(record.peerGlobalMetaId);
+        const peerName = normalizeText(record.peerName);
         const servicePinId = normalizeText(record.servicePinId);
         const isStale = ACTIVE_STATES.has(state) && updatedAt > 0 && (now - updatedAt) > STALE_THRESHOLD_MS;
         return {
@@ -89,6 +90,7 @@ function buildSessionListViewModel(rawSessions, now = Date.now()) {
             localMetabotName,
             localMetabotGlobalMetaId,
             peerGlobalMetaId,
+            peerName,
             servicePinId,
             stateTone: isStale ? 'timeout' : getStateTone(state),
             stateLabel: isStale ? 'Timeout' : getStateLabel(state),
@@ -113,7 +115,12 @@ function buildSessionDetailViewModel(payload) {
     const localMetabotName = normalizeText(payload.localMetabotName);
     const localMetabotGlobalMetaId = normalizeText(payload.localMetabotGlobalMetaId);
     const peerGlobalMetaId = normalizeText(payload.peerGlobalMetaId);
-    const rawItems = coerceArray(payload.transcriptItems);
+    const peerName = normalizeText(payload.peerName) || normalizeText(session.peerName);
+    const topLevelItems = coerceArray(payload.transcriptItems);
+    const inspector = coerceObject(payload.inspector);
+    const rawItems = topLevelItems.length
+        ? topLevelItems
+        : coerceArray(inspector?.transcriptItems);
     const messages = rawItems
         .map((item) => {
         const id = normalizeText(item.id);
@@ -149,6 +156,7 @@ function buildSessionDetailViewModel(payload) {
         localMetabotName,
         localMetabotGlobalMetaId,
         peerGlobalMetaId,
+        peerName,
         servicePinId,
         callerGlobalMetaId,
         providerGlobalMetaId,

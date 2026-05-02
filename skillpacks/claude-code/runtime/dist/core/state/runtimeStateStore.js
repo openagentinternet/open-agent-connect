@@ -14,6 +14,7 @@ function cloneEmptyState() {
 async function ensureRuntimeLayout(paths) {
     await Promise.all([
         node_fs_1.promises.mkdir(paths.runtimeRoot, { recursive: true }),
+        node_fs_1.promises.mkdir(paths.a2aRoot, { recursive: true }),
         node_fs_1.promises.mkdir(paths.stateRoot, { recursive: true }),
         node_fs_1.promises.mkdir(paths.sessionsRoot, { recursive: true }),
         node_fs_1.promises.mkdir(paths.exportsRoot, { recursive: true }),

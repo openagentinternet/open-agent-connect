@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createPrivateChatAutoReplyOrchestrator = createPrivateChatAutoReplyOrchestrator;
 const privateChat_1 = require("./privateChat");
 const chatPersonaLoader_1 = require("./chatPersonaLoader");
+const conversationPersistence_1 = require("../a2a/conversationPersistence");
+const simplemsgClassifier_1 = require("../a2a/simplemsgClassifier");
 const DEFAULT_MAX_TURNS = 30;
 const DEFAULT_RECENT_MESSAGES_LIMIT = 20;
 const END_CONVERSATION_MARKER = '[END_CONVERSATION]';
@@ -96,7 +98,13 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 encoding: 'utf-8',
                 network: 'mvc',
             });
-            return normalizeText(chatWrite.pinId) || null;
+            return {
+                pinId: normalizeText(chatWrite.pinId) || null,
+                txids: Array.isArray(chatWrite.txids)
+                    ? chatWrite.txids.map((entry) => normalizeText(entry)).filter(Boolean)
+                    : [],
+                network: normalizeText(chatWrite.network) || null,
+            };
         }
         catch {
             return null;
@@ -114,6 +122,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             if (!peerGlobalMetaId)
                 return;
             const conversationId = buildConversationId(selfGlobalMetaId, peerGlobalMetaId);
+            const simplemsgClassification = (0, simplemsgClassifier_1.classifySimplemsgContent)(message.content);
             // Step 1: Store the inbound message.
             let conversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId);
             if (!conversation || conversation.state === 'closed') {
@@ -148,6 +157,27 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 updatedAt: now,
             };
             await deps.stateStore.upsertConversation(conversation);
+            await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
+                paths: deps.paths,
+                local: {
+                    globalMetaId: selfGlobalMetaId,
+                },
+                peer: {
+                    globalMetaId: peerGlobalMetaId,
+                    chatPublicKey: message.fromChatPublicKey,
+                },
+                message: {
+                    messageId: inboundMessageRecord.messageId,
+                    direction: 'incoming',
+                    content: inboundMessageRecord.content,
+                    pinId: inboundMessageRecord.messagePinId,
+                    timestamp: inboundMessageRecord.timestamp,
+                    raw: message.rawMessage,
+                },
+            });
+            if (simplemsgClassification.kind === 'order_protocol') {
+                return;
+            }
             // Step 2: Check for closing signal from peer.
             if (hasClosingSignal(message)) {
                 conversation = { ...conversation, state: 'closed', updatedAt: now };
@@ -172,7 +202,8 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             // Step 5: Check hard turn limit.
             if (conversation.turnCount >= maxTurns) {
                 const closingContent = 'It was great chatting with you. Let us continue another time!';
-                const closingPinId = await sendReplyMessage(selfGlobalMetaId, peerGlobalMetaId, closingContent, { conversationSignal: CLOSING_SIGNAL });
+                const closingReply = await sendReplyMessage(selfGlobalMetaId, peerGlobalMetaId, closingContent, { conversationSignal: CLOSING_SIGNAL });
+                const closingPinId = closingReply?.pinId ?? null;
                 const outboundRecord = {
                     conversationId: conversation.conversationId,
                     messageId: closingPinId || buildMessageId(getNow()),
@@ -184,6 +215,25 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     timestamp: getNow(),
                 };
                 await deps.stateStore.appendMessages([outboundRecord]);
+                await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
+                    paths: deps.paths,
+                    local: {
+                        globalMetaId: selfGlobalMetaId,
+                    },
+                    peer: {
+                        globalMetaId: peerGlobalMetaId,
+                    },
+                    message: {
+                        messageId: outboundRecord.messageId,
+                        direction: 'outgoing',
+                        content: outboundRecord.content,
+                        pinId: outboundRecord.messagePinId,
+                        txid: closingReply?.txids[0] ?? null,
+                        txids: closingReply?.txids ?? [],
+                        chain: closingReply?.network ?? 'mvc',
+                        timestamp: outboundRecord.timestamp,
+                    },
+                });
                 rateLimiter.replyTimestamps.push(getNow());
                 conversation = {
                     ...conversation,
@@ -228,7 +278,8 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             if (!replyContent)
                 return;
             // Step 8: Send reply.
-            const outboundPinId = await sendReplyMessage(selfGlobalMetaId, peerGlobalMetaId, replyContent, replyExtensions);
+            const outboundReply = await sendReplyMessage(selfGlobalMetaId, peerGlobalMetaId, replyContent, replyExtensions);
+            const outboundPinId = outboundReply?.pinId ?? null;
             const outboundRecord = {
                 conversationId: conversation.conversationId,
                 messageId: outboundPinId || buildMessageId(getNow()),
@@ -240,6 +291,25 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 timestamp: getNow(),
             };
             await deps.stateStore.appendMessages([outboundRecord]);
+            await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
+                paths: deps.paths,
+                local: {
+                    globalMetaId: selfGlobalMetaId,
+                },
+                peer: {
+                    globalMetaId: peerGlobalMetaId,
+                },
+                message: {
+                    messageId: outboundRecord.messageId,
+                    direction: 'outgoing',
+                    content: outboundRecord.content,
+                    pinId: outboundRecord.messagePinId,
+                    txid: outboundReply?.txids[0] ?? null,
+                    txids: outboundReply?.txids ?? [],
+                    chain: outboundReply?.network ?? 'mvc',
+                    timestamp: outboundRecord.timestamp,
+                },
+            });
             rateLimiter.replyTimestamps.push(getNow());
             conversation = {
                 ...conversation,

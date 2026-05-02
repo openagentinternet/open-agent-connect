@@ -2,14 +2,21 @@ import { createRuntimeStateStore, type RuntimeDaemonRecord } from '../core/state
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 import type { SessionTraceRecord } from '../core/chat/sessionTrace';
 import { exportSessionArtifacts } from '../core/chat/transcriptExport';
+import type { ChatReplyRunner } from '../core/chat/privateChatTypes';
 import { type FetchPrivateHistory } from '../core/chat/privateConversation';
 import type { SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
 import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
+import { type A2AConversationMessagePersister } from '../core/a2a/conversationPersistence';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
+import { type ServicePaymentExecutor } from '../core/payments/servicePayment';
 import { type MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
+export declare function resolveServiceOrderPaymentMetadata(currency: unknown): {
+    paymentChain?: 'mvc' | 'btc';
+    settlementKind?: 'native';
+};
 export declare function fetchPeerChatPublicKey(globalMetaId: string): Promise<string | null>;
 export declare function rebuildTraceArtifactsFromSessionState(input: {
     baseTrace: SessionTraceRecord;
@@ -34,6 +41,10 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     fetchPrivateChatHistory?: FetchPrivateHistory;
     callerReplyWaiter?: MetaWebServiceReplyWaiter;
     masterReplyWaiter?: MetaWebMasterReplyWaiter;
+    servicePaymentExecutor?: ServicePaymentExecutor;
+    ratingFollowupRetryDelaysMs?: number[];
+    a2aConversationPersister?: A2AConversationMessagePersister;
+    buyerRatingReplyRunner?: ChatReplyRunner;
     onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
     requestMvcGasSubsidy?: (options: RequestMvcGasSubsidyOptions) => Promise<RequestMvcGasSubsidyResult>;
     autoReplyConfig?: PrivateChatAutoReplyConfig;
