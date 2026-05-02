@@ -31,6 +31,7 @@ test('buildSessionListViewModel maps a caller session correctly', () => {
     localMetabotName: 'Alice',
     localMetabotGlobalMetaId: 'gm-alice',
     peerGlobalMetaId: 'gm-bob',
+    peerName: 'Bob Bot',
     servicePinId: 'pin-svc-1',
   };
   const [item] = buildSessionListViewModel([rawSession], NOW);
@@ -42,6 +43,7 @@ test('buildSessionListViewModel maps a caller session correctly', () => {
   assert.equal(item.stateLabel, 'Completed');
   assert.equal(item.localMetabotName, 'Alice');
   assert.equal(item.peerGlobalMetaId, 'gm-bob');
+  assert.equal(item.peerName, 'Bob Bot');
   assert.equal(item.timeAgoMs, 5000);
 });
 

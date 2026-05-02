@@ -85,6 +85,10 @@ async function runTraceScriptWithUrl(search) {
                   state: 'completed',
                   createdAt: 1_777_000_000_000,
                   updatedAt: 1_777_000_001_000,
+                  localMetabotName: 'Caller',
+                  localMetabotGlobalMetaId: 'idq-local',
+                  peerGlobalMetaId: 'idq14hmv23j5fnlx4ccnmvlyldjd38xjsechzwg9xz',
+                  peerName: 'AI_Sunny',
                 },
               ],
               stats: { totalCount: 1, callerCount: 1, providerCount: 0, lastUpdatedAt: 1_777_000_001_000 },
@@ -142,25 +146,27 @@ async function runTraceScriptWithUrl(search) {
   for (let i = 0; i < 20 && !/Forecast detail/.test(detail.innerHTML); i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  return { fetchCalls, detail };
+  return { fetchCalls, detail, list };
 }
 
 test('trace page URL with sessionId auto-loads that A2A session detail', async () => {
-  const { fetchCalls, detail } = await runTraceScriptWithUrl(
+  const { fetchCalls, detail, list } = await runTraceScriptWithUrl(
     '?traceId=trace-weather-1&sessionId=session-weather-1',
   );
 
-  assert.deepEqual(fetchCalls.slice(0, 2), [
+  assert.deepEqual(fetchCalls.filter((url) => url.startsWith('/api/')).slice(0, 2), [
     '/api/trace/sessions',
     '/api/trace/sessions/session-weather-1',
   ]);
   assert.match(detail.innerHTML, /Forecast detail/);
+  assert.match(list.innerHTML, /AI_Sunny/);
+  assert.match(list.innerHTML, /local: Caller/);
 });
 
 test('trace page URL with only traceId selects the matching A2A session', async () => {
   const { fetchCalls, detail } = await runTraceScriptWithUrl('?traceId=trace-weather-1');
 
-  assert.deepEqual(fetchCalls.slice(0, 2), [
+  assert.deepEqual(fetchCalls.filter((url) => url.startsWith('/api/')).slice(0, 2), [
     '/api/trace/sessions',
     '/api/trace/sessions/session-weather-1',
   ]);

@@ -111,7 +111,10 @@ export interface UnifiedA2ATraceSessionDetail {
   };
   localMetabotName: string;
   localMetabotGlobalMetaId: string;
+  localMetabotAvatar: string | null;
   peerGlobalMetaId: string;
+  peerName: string | null;
+  peerAvatar: string | null;
 }
 
 interface ReadConversationRecord {
@@ -773,7 +776,10 @@ function projectDetailSession(input: {
     },
     localMetabotName: listItem.localMetabotName,
     localMetabotGlobalMetaId: listItem.localMetabotGlobalMetaId,
+    localMetabotAvatar: listItem.localMetabotAvatar,
     peerGlobalMetaId: listItem.peerGlobalMetaId,
+    peerName: listItem.peerName,
+    peerAvatar: listItem.peerAvatar,
   };
 }
 

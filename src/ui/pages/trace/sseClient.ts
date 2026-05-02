@@ -580,7 +580,11 @@ function renderSessionList() {
   list.innerHTML = sessions.map(session => {
     const roleBadgeTone = session.role === 'caller' ? 'caller' : 'provider';
     const roleBadge = session.role === 'caller' ? 'CALLER' : 'PROVIDER';
-    const peer = session.peerGlobalMetaId ? session.peerGlobalMetaId.slice(0, 16) + '…' : '(unknown peer)';
+    const peerName = session.peerName || session.peerGlobalMetaId || '(unknown remote)';
+    const peerMeta = session.peerGlobalMetaId && session.peerGlobalMetaId !== peerName
+      ? session.peerGlobalMetaId.slice(0, 16) + '…'
+      : '';
+    const localName = session.localMetabotName || session.localMetabotGlobalMetaId || '—';
     const timeAgo = session.updatedAt ? fmtTimeAgo(Date.now() - session.updatedAt) : '';
     const isSelected = session.sessionId === selectedSessionId;
     return '<div class="session-item' + (isSelected ? ' selected' : '') + '" data-session-id="' + escHtml(session.sessionId) + '" role="button" tabindex="0">' +
@@ -588,8 +592,8 @@ function renderSessionList() {
         '<span class="session-role-badge badge-' + roleBadgeTone + '">' + roleBadge + '</span>' +
         '<span class="session-time">' + escHtml(timeAgo) + '</span>' +
       '</div>' +
-      '<div class="session-item-peer" data-peer-name="' + escHtml(session.sessionId) + '">' + escHtml(peer) + '</div>' +
-      '<div class="session-item-local">' + escHtml(session.localMetabotName || session.localMetabotGlobalMetaId || '—') + '</div>' +
+      '<div class="session-item-peer" data-peer-name="' + escHtml(session.sessionId) + '">' + escHtml(peerName) + '</div>' +
+      '<div class="session-item-local">' + escHtml(peerMeta ? peerMeta + ' · local: ' + localName : 'local: ' + localName) + '</div>' +
       '<div class="session-item-footer">' +
         '<span class="status-pill status-' + session.stateTone + '">' +
           '<span class="status-dot"></span>' +

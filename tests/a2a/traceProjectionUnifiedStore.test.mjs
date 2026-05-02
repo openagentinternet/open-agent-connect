@@ -348,6 +348,108 @@ test('default trace handlers read unified A2A sessions before legacy session-sta
   assert.equal(detailResult.data.inspector.transcriptItems.length, 5);
 });
 
+test('default trace handlers enrich unified peer windows with full on-chain private history', async () => {
+  const { systemHomeDir, homeDir } = await createProfileFixture();
+  await seedUnifiedConversation(homeDir);
+  const chatTxid = '1'.repeat(64);
+  const statusTxid = '2'.repeat(64);
+  const deliveryTxid = '3'.repeat(64);
+  const needsRatingTxid = '4'.repeat(64);
+  const orderEndTxid = '5'.repeat(64);
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
+    fetchPeerChatPublicKey: async () => 'peer-chat-public-key',
+    signer: {
+      getPrivateChatIdentity: async () => ({
+        globalMetaId: LOCAL_GLOBAL_META_ID,
+        privateKeyHex: '1'.repeat(64),
+        chatPublicKey: 'local-chat-public-key',
+      }),
+    },
+    fetchPrivateChatHistory: async () => [
+      privateHistoryRow({
+        index: 1,
+        from: 'peer',
+        txid: chatTxid,
+        content: 'Can you call my weather service?',
+      }),
+      privateHistoryRow({
+        index: 2,
+        from: 'local',
+        txid: ORDER_TXID,
+        content: `[ORDER] Tell me tomorrow weather\n<raw_request>\nTell me tomorrow weather\n</raw_request>\ntxid: ${PAYMENT_TXID}\nservice id: service-pin-1\nskill name: Weather Oracle`,
+      }),
+      privateHistoryRow({
+        index: 3,
+        from: 'peer',
+        txid: statusTxid,
+        content: `[ORDER_STATUS:${ORDER_TXID}] I received the order and started processing.`,
+      }),
+      privateHistoryRow({
+        index: 4,
+        from: 'peer',
+        txid: deliveryTxid,
+        content: `[DELIVERY:${ORDER_TXID}] ${JSON.stringify({
+          paymentTxid: PAYMENT_TXID,
+          servicePinId: 'service-pin-1',
+          serviceName: 'Weather Oracle',
+          result: '# Chain Forecast\n\nRain clearing later.',
+          deliveredAt: BASE_TIME + 400,
+        })}`,
+      }),
+      privateHistoryRow({
+        index: 5,
+        from: 'peer',
+        txid: needsRatingTxid,
+        content: `[NeedsRating:${ORDER_TXID}] Please rate this service.`,
+      }),
+      privateHistoryRow({
+        index: 6,
+        from: 'local',
+        txid: orderEndTxid,
+        content: `[ORDER_END:${ORDER_TXID} rated] ${JSON.stringify({
+          rate: 5,
+          comment: 'Accurate result.',
+        })}`,
+      }),
+    ],
+  });
+
+  const detailResult = await handlers.trace.getSession({ sessionId: PEER_SESSION_ID });
+
+  assert.equal(detailResult.ok, true);
+  assert.equal(detailResult.data.sessionId, PEER_SESSION_ID);
+  const items = detailResult.data.inspector.transcriptItems;
+  assert.deepEqual(items.map((item) => item.metadata.txid), [
+    chatTxid,
+    ORDER_TXID,
+    statusTxid,
+    deliveryTxid,
+    needsRatingTxid,
+    orderEndTxid,
+  ]);
+  assert.deepEqual(items.map((item) => item.type), [
+    'message',
+    'order',
+    'order_status',
+    'delivery',
+    'needs_rating',
+    'order_end',
+  ]);
+  assert.equal(items[0].sender, 'provider');
+  assert.equal(items[1].sender, 'caller');
+  assert.equal(items[2].content, 'I received the order and started processing.');
+  assert.equal(items[3].content, '# Chain Forecast\n\nRain clearing later.');
+  assert.equal(items[5].sender, 'caller');
+  assert.equal(detailResult.data.resultText, '# Chain Forecast\n\nRain clearing later.');
+  assert.equal(detailResult.data.responseText, '# Chain Forecast\n\nRain clearing later.');
+  assert.equal(detailResult.data.ratingRequestText, 'Please rate this service.');
+  assert.equal(detailResult.data.localMetabotAvatar, LOCAL_AVATAR);
+  assert.equal(detailResult.data.peerAvatar, PEER_AVATAR);
+});
+
 test('default trace handlers hide legacy duplicate windows when a unified peer window exists', async () => {
   const { systemHomeDir, homeDir } = await createProfileFixture();
   await seedUnifiedConversation(homeDir);

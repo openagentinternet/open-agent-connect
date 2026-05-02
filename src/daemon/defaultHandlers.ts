@@ -78,6 +78,7 @@ import {
   findUnifiedA2ATraceSessionForProfileByOrder,
   getUnifiedA2ATraceSessionForProfile,
   listUnifiedA2ATraceSessionsForProfile,
+  type UnifiedA2ATraceSessionDetail,
 } from '../core/a2a/traceProjection';
 import {
   createLocalIdentitySyncStep,
@@ -1900,6 +1901,12 @@ function stripOrderProtocolBubblePrefix(content: string): string {
   return String(content || '').replace(/^\[[A-Za-z_]+(?::[0-9a-fA-F]{64})?(?:\s+[A-Za-z0-9_-]+)?\]\s*/u, '').trim();
 }
 
+function extractOrderLineValue(content: string, label: string): string {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const match = String(content || '').match(new RegExp(`(?:^|\\n)\\s*${escapedLabel}\\s*:\\s*([^\\n]+)`, 'iu'));
+  return normalizeText(match?.[1]);
+}
+
 function readChatUserName(value: unknown): string | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -2008,9 +2015,45 @@ function projectPrivateHistoryMessageToTranscript(input: {
     return null;
   }
 
+  return projectPrivateHistorySimpleMessageToTranscript(input);
+}
+
+function projectPrivateHistorySimpleMessageToTranscript(input: {
+  message: ChatViewerMessage;
+  sessionId: string;
+  localGlobalMetaId: string;
+  localRole: 'caller' | 'provider';
+  orderTxid?: string | null;
+  paymentTxid?: string | null;
+  servicePinId?: string | null;
+}): A2ATranscriptItemRecord | null {
+  if (normalizeText(input.message.protocol) !== '/protocols/simplemsg') {
+    return null;
+  }
+
   const rawContent = String(input.message.content || '');
   const protocolTag = normalizeMessageProtocolTag(rawContent);
   const messageTxid = normalizeChainTxid(input.message.txId ?? input.message.pinId ?? input.message.id);
+  const status = parseOrderStatusMessage(rawContent);
+  const delivery = parseDeliveryMessage(rawContent);
+  const needsRating = parseNeedsRatingMessage(rawContent);
+  const orderEnd = parseOrderEndMessage(rawContent);
+  const parsedOrderTxid = normalizeChainTxid(input.orderTxid)
+    || normalizeChainTxid(status?.orderTxid)
+    || normalizeChainTxid(delivery?.orderTxid)
+    || normalizeChainTxid(needsRating?.orderTxid)
+    || normalizeChainTxid(orderEnd?.orderTxid)
+    || (protocolTag === 'ORDER' ? messageTxid : '');
+  const parsedPaymentTxid = normalizeText(input.paymentTxid)
+    || normalizeText(delivery?.paymentTxid)
+    || (protocolTag === 'ORDER' ? extractOrderLineValue(rawContent, 'txid') : '');
+  const parsedServicePinId = normalizeText(input.servicePinId)
+    || normalizeText(delivery?.servicePinId)
+    || (protocolTag === 'ORDER' ? (
+      extractOrderLineValue(rawContent, 'service id')
+      || extractOrderLineValue(rawContent, 'serviceId')
+      || extractOrderLineValue(rawContent, 'service pin id')
+    ) : '');
   const sender: 'caller' | 'provider' = input.message.fromGlobalMetaId === input.localGlobalMetaId
     ? input.localRole
     : (input.localRole === 'caller' ? 'provider' : 'caller');
@@ -2024,9 +2067,9 @@ function projectPrivateHistoryMessageToTranscript(input: {
     txids: messageTxid ? [messageTxid] : [],
     chain: normalizeText(input.message.chain) || null,
     rawContent,
-    orderTxid: input.orderTxid || null,
-    paymentTxid: input.paymentTxid || null,
-    servicePinId: input.servicePinId || null,
+    orderTxid: parsedOrderTxid || null,
+    paymentTxid: parsedPaymentTxid || null,
+    servicePinId: parsedServicePinId || null,
     fromGlobalMetaId: input.message.fromGlobalMetaId,
     toGlobalMetaId: input.message.toGlobalMetaId,
     fromUserInfo: input.message.fromUserInfo ?? null,
@@ -2038,31 +2081,27 @@ function projectPrivateHistoryMessageToTranscript(input: {
   if (protocolTag === 'ORDER') {
     type = 'order';
   } else if (protocolTag === 'ORDER_STATUS') {
-    const parsed = parseOrderStatusMessage(rawContent);
     type = 'order_status';
-    content = normalizeText(parsed?.content) || content;
+    content = normalizeText(status?.content) || content;
   } else if (protocolTag === 'DELIVERY') {
-    const parsed = parseDeliveryMessage(rawContent);
     type = 'delivery';
-    content = normalizeText(parsed?.result) || content;
+    content = normalizeText(delivery?.result) || content;
     metadata.deliveryPinId = normalizeText(input.message.pinId) || null;
-    metadata.deliveryPayload = parsed ?? null;
+    metadata.deliveryPayload = delivery ?? null;
     metadata.publicStatus = 'completed';
     metadata.event = 'provider_completed';
-    metadata.servicePinId = normalizeText(parsed?.servicePinId) || input.servicePinId || null;
-    metadata.deliveredAt = normalizeTraceTimestamp(parsed?.deliveredAt ?? input.message.timestamp);
+    metadata.servicePinId = parsedServicePinId || null;
+    metadata.deliveredAt = normalizeTraceTimestamp(delivery?.deliveredAt ?? input.message.timestamp);
   } else if (protocolTag === 'NeedsRating') {
-    const parsed = parseNeedsRatingMessage(rawContent);
     type = 'needs_rating';
-    content = normalizeText(parsed?.content) || content;
+    content = normalizeText(needsRating?.content) || content;
     metadata.needsRating = true;
   } else if (protocolTag === 'ORDER_END') {
-    const parsed = parseOrderEndMessage(rawContent);
     type = 'order_end';
-    content = normalizeText(parsed?.content) || content;
-    metadata.endReason = normalizeText(parsed?.reason) || null;
+    content = normalizeText(orderEnd?.content) || content;
+    metadata.endReason = normalizeText(orderEnd?.reason) || null;
     metadata.orderEnd = true;
-    metadata.endState = isRemoteFailureReason(parsed?.reason) ? 'remote_failed' : 'completed';
+    metadata.endState = isRemoteFailureReason(orderEnd?.reason) ? 'remote_failed' : 'completed';
   }
 
   const id = normalizeText(input.message.pinId)
@@ -2100,6 +2139,42 @@ function projectScopedPrivateHistory(input: {
       orderTxid: input.orderTxid,
       paymentTxid: input.paymentTxid,
       servicePinId: input.servicePinId,
+    }))
+    .filter((item): item is A2ATranscriptItemRecord => item !== null)
+    .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
+
+  if (!transcriptItems.length) {
+    return null;
+  }
+
+  const firstLocalInfo = input.messages
+    .map((message) => readMessageUserInfoForGlobalMetaId(message, input.localGlobalMetaId))
+    .find((info) => info != null);
+  const firstPeerInfo = input.messages
+    .map((message) => readMessageUserInfoForGlobalMetaId(message, input.peerGlobalMetaId))
+    .find((info) => info != null);
+  return {
+    transcriptItems,
+    localName: readChatUserName(firstLocalInfo),
+    localAvatar: readChatUserAvatar(firstLocalInfo),
+    peerName: readChatUserName(firstPeerInfo),
+    peerAvatar: readChatUserAvatar(firstPeerInfo),
+  };
+}
+
+function projectPeerPrivateHistory(input: {
+  messages: ChatViewerMessage[];
+  sessionId: string;
+  localGlobalMetaId: string;
+  peerGlobalMetaId: string;
+  localRole: 'caller' | 'provider';
+}): ScopedPrivateHistoryProjection | null {
+  const transcriptItems = input.messages
+    .map((message) => projectPrivateHistorySimpleMessageToTranscript({
+      message,
+      sessionId: input.sessionId,
+      localGlobalMetaId: input.localGlobalMetaId,
+      localRole: input.localRole,
     }))
     .filter((item): item is A2ATranscriptItemRecord => item !== null)
     .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
@@ -3501,21 +3576,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }
   }
 
-  async function buildScopedPrivateHistoryProjectionForTrace(args: {
+  async function loadPrivateHistoryMessagesForProfile(args: {
     profile: { homeDir?: string | null; globalMetaId?: string | null; name?: string | null };
-    trace: SessionTraceRecord;
-    session: A2ASessionRecord;
     peerGlobalMetaId: string;
-  }): Promise<ScopedPrivateHistoryProjection | null> {
+  }): Promise<{
+    messages: ChatViewerMessage[];
+    localGlobalMetaId: string;
+    peerGlobalMetaId: string;
+  } | null> {
     const localGlobalMetaId = normalizeText(args.profile.globalMetaId);
     const peerGlobalMetaId = normalizeText(args.peerGlobalMetaId);
-    const sessionId = normalizeText(args.session.sessionId);
-    const orderTxid = normalizeChainTxid(args.trace.order?.orderTxid);
-    const paymentTxid = normalizeText(args.trace.order?.paymentTxid);
-    const servicePinId = normalizeText(args.trace.order?.serviceId)
-      || normalizeText(args.trace.a2a?.servicePinId)
-      || normalizeText(args.session.servicePinId);
-    if (!localGlobalMetaId || !peerGlobalMetaId || !sessionId || (!orderTxid && !paymentTxid && !servicePinId)) {
+    if (!localGlobalMetaId || !peerGlobalMetaId) {
       return null;
     }
 
@@ -3569,19 +3640,149 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
         afterIndex = response.nextPollAfterIndex;
       }
-      return projectScopedPrivateHistory({
+      return {
         messages,
-        sessionId,
         localGlobalMetaId,
         peerGlobalMetaId,
-        localRole: args.session.role === 'provider' ? 'provider' : 'caller',
-        orderTxid,
-        paymentTxid,
-        servicePinId,
-      });
+      };
     } catch {
       return null;
     }
+  }
+
+  async function buildScopedPrivateHistoryProjectionForTrace(args: {
+    profile: { homeDir?: string | null; globalMetaId?: string | null; name?: string | null };
+    trace: SessionTraceRecord;
+    session: A2ASessionRecord;
+    peerGlobalMetaId: string;
+  }): Promise<ScopedPrivateHistoryProjection | null> {
+    const sessionId = normalizeText(args.session.sessionId);
+    const orderTxid = normalizeChainTxid(args.trace.order?.orderTxid);
+    const paymentTxid = normalizeText(args.trace.order?.paymentTxid);
+    const servicePinId = normalizeText(args.trace.order?.serviceId)
+      || normalizeText(args.trace.a2a?.servicePinId)
+      || normalizeText(args.session.servicePinId);
+    if (!sessionId || (!orderTxid && !paymentTxid && !servicePinId)) {
+      return null;
+    }
+
+    const loaded = await loadPrivateHistoryMessagesForProfile({
+      profile: args.profile,
+      peerGlobalMetaId: args.peerGlobalMetaId,
+    });
+    if (!loaded) {
+      return null;
+    }
+
+    return projectScopedPrivateHistory({
+      messages: loaded.messages,
+      sessionId,
+      localGlobalMetaId: loaded.localGlobalMetaId,
+      peerGlobalMetaId: loaded.peerGlobalMetaId,
+      localRole: args.session.role === 'provider' ? 'provider' : 'caller',
+      orderTxid,
+      paymentTxid,
+      servicePinId,
+    });
+  }
+
+  async function buildPeerPrivateHistoryProjectionForUnifiedSession(args: {
+    profile: { homeDir?: string | null; globalMetaId?: string | null; name?: string | null };
+    session: UnifiedA2ATraceSessionDetail;
+  }): Promise<ScopedPrivateHistoryProjection | null> {
+    const sessionId = normalizeText(args.session.sessionId);
+    const peerGlobalMetaId = normalizeText(args.session.peerGlobalMetaId)
+      || normalizeText(args.session.session?.peerGlobalMetaId);
+    if (!sessionId || !peerGlobalMetaId) {
+      return null;
+    }
+
+    const loaded = await loadPrivateHistoryMessagesForProfile({
+      profile: args.profile,
+      peerGlobalMetaId,
+    });
+    if (!loaded) {
+      return null;
+    }
+
+    return projectPeerPrivateHistory({
+      messages: loaded.messages,
+      sessionId,
+      localGlobalMetaId: loaded.localGlobalMetaId,
+      peerGlobalMetaId: loaded.peerGlobalMetaId,
+      localRole: normalizeText(args.session.a2a?.role) === 'provider' ? 'provider' : 'caller',
+    });
+  }
+
+  function enrichUnifiedSessionWithPeerHistory(
+    session: UnifiedA2ATraceSessionDetail,
+    projection: ScopedPrivateHistoryProjection | null,
+  ): UnifiedA2ATraceSessionDetail {
+    if (!projection?.transcriptItems.length) {
+      return session;
+    }
+
+    const transcriptItems = projection.transcriptItems.map((item) => ({
+      ...item,
+      taskRunId: null,
+      metadata: item.metadata ?? {},
+    }));
+    const result = extractTraceResult({ transcriptItems });
+    const ratingRequest = extractTraceRatingRequest({ transcriptItems });
+    const latestOrder = transcriptItems
+      .slice()
+      .reverse()
+      .find((item) => item.type === 'order');
+    const latestOrderMetadata = latestOrder?.metadata ?? {};
+    const orderTxid = normalizeChainTxid(latestOrderMetadata.orderTxid)
+      || normalizeChainTxid(latestOrderMetadata.txid)
+      || normalizeChainTxid(session.orderTxid);
+    const paymentTxid = normalizeText(latestOrderMetadata.paymentTxid)
+      || normalizeText(session.paymentTxid)
+      || null;
+    const localMetabotName = projection.localName ?? session.localMetabotName;
+    const localMetabotAvatar = projection.localAvatar ?? session.localMetabotAvatar;
+    const peerName = projection.peerName ?? session.peerName;
+    const peerAvatar = projection.peerAvatar ?? session.peerAvatar;
+    const sessionRecord = {
+      ...session.session,
+      peerName,
+      peerAvatar,
+    };
+    const order = session.order
+      ? {
+          ...session.order,
+          ...(orderTxid ? { orderTxid } : {}),
+          ...(paymentTxid ? { paymentTxid } : {}),
+        }
+      : session.order;
+
+    return {
+      ...session,
+      session: sessionRecord,
+      transcriptItems,
+      order,
+      orderTxid: orderTxid || session.orderTxid,
+      orderTxids: orderTxid ? [orderTxid] : session.orderTxids,
+      paymentTxid: paymentTxid || session.paymentTxid,
+      resultText: result.resultText,
+      responseText: result.resultText,
+      resultObservedAt: result.resultObservedAt,
+      resultDeliveryPinId: result.resultDeliveryPinId,
+      ratingRequestText: ratingRequest.ratingRequestText,
+      ratingRequestedAt: ratingRequest.ratingRequestedAt,
+      ratingRequested: Boolean(ratingRequest.ratingRequestText),
+      localMetabotName,
+      localMetabotAvatar,
+      peerName,
+      peerAvatar,
+      inspector: {
+        ...session.inspector,
+        session: sessionRecord,
+        sessions: [sessionRecord],
+        transcriptItems,
+      },
+    };
   }
 
   function buildAutoTriggerReasonSignature(input: {
@@ -7908,7 +8109,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
               daemon: input.getDaemonRecord(),
             });
             if (unifiedSession) {
-              return commandSuccess(unifiedSession);
+              const privateHistoryProjection = await buildPeerPrivateHistoryProjectionForUnifiedSession({
+                profile,
+                session: unifiedSession,
+              }).catch(() => null);
+              return commandSuccess(enrichUnifiedSessionWithPeerHistory(
+                unifiedSession,
+                privateHistoryProjection,
+              ));
             }
           } catch {
             // Try legacy session-state for this profile below.

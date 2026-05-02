@@ -25,6 +25,7 @@ export interface TraceSessionListItem {
   localMetabotName: string;
   localMetabotGlobalMetaId: string;
   peerGlobalMetaId: string;
+  peerName: string;
   servicePinId: string;
   stateTone: 'active' | 'completed' | 'failure' | 'timeout' | 'manual' | 'neutral';
   stateLabel: string;
@@ -53,6 +54,7 @@ export interface TraceSessionDetail {
   localMetabotName: string;
   localMetabotGlobalMetaId: string;
   peerGlobalMetaId: string;
+  peerName: string;
   servicePinId: string;
   callerGlobalMetaId: string;
   providerGlobalMetaId: string;
@@ -142,6 +144,7 @@ export function buildSessionListViewModel(
       const localMetabotName = normalizeText(record.localMetabotName);
       const localMetabotGlobalMetaId = normalizeText(record.localMetabotGlobalMetaId);
       const peerGlobalMetaId = normalizeText(record.peerGlobalMetaId);
+      const peerName = normalizeText(record.peerName);
       const servicePinId = normalizeText(record.servicePinId);
 
       const isStale = ACTIVE_STATES.has(state) && updatedAt > 0 && (now - updatedAt) > STALE_THRESHOLD_MS;
@@ -155,6 +158,7 @@ export function buildSessionListViewModel(
         localMetabotName,
         localMetabotGlobalMetaId,
         peerGlobalMetaId,
+        peerName,
         servicePinId,
         stateTone: isStale ? 'timeout' : getStateTone(state),
         stateLabel: isStale ? 'Timeout' : getStateLabel(state),
@@ -182,6 +186,7 @@ export function buildSessionDetailViewModel(
   const localMetabotName = normalizeText(payload.localMetabotName);
   const localMetabotGlobalMetaId = normalizeText(payload.localMetabotGlobalMetaId);
   const peerGlobalMetaId = normalizeText(payload.peerGlobalMetaId);
+  const peerName = normalizeText(payload.peerName) || normalizeText(session.peerName);
 
   const topLevelItems = coerceArray(payload.transcriptItems);
   const inspector = coerceObject(payload.inspector);
@@ -224,6 +229,7 @@ export function buildSessionDetailViewModel(
     localMetabotName,
     localMetabotGlobalMetaId,
     peerGlobalMetaId,
+    peerName,
     servicePinId,
     callerGlobalMetaId,
     providerGlobalMetaId,
