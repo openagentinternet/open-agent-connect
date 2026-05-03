@@ -12,6 +12,7 @@ export interface DelegationRequest {
   userTask: string;
   taskContext: string;
   rawRequest: string;
+  policyMode?: string;
 }
 
 export interface RemoteServiceDescriptor {
@@ -25,6 +26,11 @@ export interface RemoteServiceDescriptor {
   currency?: string | null;
   ratingAvg?: number | null;
   ratingCount?: number | null;
+  providerName?: string | null;
+  providerDaemonBaseUrl?: string | null;
+  providerChatPublicKey?: string | null;
+  updatedAt?: number | null;
+  lastSeenAgoSeconds?: number | null;
 }
 
 export interface RemoteCallRequest {
@@ -223,6 +229,7 @@ export function parseDelegationMessage(content: string): DelegationRequest | nul
     userTask: typeof obj.userTask === 'string' ? obj.userTask : '',
     taskContext: typeof obj.taskContext === 'string' ? obj.taskContext : '',
     rawRequest: typeof obj.rawRequest === 'string' ? obj.rawRequest : '',
+    policyMode: typeof obj.policyMode === 'string' ? obj.policyMode : undefined,
   };
 }
 
@@ -241,6 +248,8 @@ export function buildRemoteServicesPrompt(availableServices: RemoteServiceDescri
         `<price_currency>${normalizeSpendCurrency(svc.currency)}</price_currency>` +
         `<rating_avg>${svc.ratingAvg ?? 'N/A'}</rating_avg>` +
         `<rating_count>${svc.ratingCount ?? 0}</rating_count>` +
+        `<updated_at>${svc.updatedAt ?? ''}</updated_at>` +
+        `<provider_name>${normalizeText(svc.providerName)}</provider_name>` +
         `<provider_global_metaid>${identity.providerGlobalMetaId}</provider_global_metaid>` +
         `</remote_service>`
       );
@@ -250,8 +259,12 @@ export function buildRemoteServicesPrompt(availableServices: RemoteServiceDescri
   return (
     `\n<available_remote_services>\n` +
     `  <notice>\n` +
-    `    These are remote on-chain services.\n` +
-    `    If a remote service matches and the user confirms, emit [DELEGATE_REMOTE_SERVICE] plus JSON.\n` +
+    `    These are locally cached online remote on-chain services.\n` +
+    `    Select the best match by service name, description, rating, rating count, and recency.\n` +
+    `    If price is greater than 0, present provider, service, price, currency, and wait for explicit confirmation.\n` +
+    `    If price_amount is an explicit numeric 0, the service is free and may be delegated directly when it matches the user's request.\n` +
+    `    To delegate, emit [DELEGATE_REMOTE_SERVICE] plus JSON and include policyMode "confirm_paid_only".\n` +
+    `    JSON format: {"servicePinId":"...","serviceName":"...","providerGlobalMetaid":"...","price":"0","currency":"SPACE","rawRequest":"verbatim original request","userTask":"summary","taskContext":"routing context","policyMode":"confirm_paid_only"}\n` +
     `  </notice>\n` +
     entries +
     '\n' +
@@ -294,11 +307,11 @@ export function planRemoteCall(input: {
   const normalizedCurrency = normalizeSpendCurrency(normalizedTerms.currency);
   const confirmation = evaluateDelegationPolicy({
     policyMode: input.request.policyMode,
-    estimatedCostAmount: normalizedTerms.price || '0',
+    estimatedCostAmount: normalizedTerms.price,
     estimatedCostCurrency: normalizedCurrency,
   });
   const spendDecision = evaluateSpendCap({
-    price: normalizedTerms.price || '0',
+    price: normalizedTerms.price,
     currency: normalizedCurrency,
     spendCap: input.request.spendCap,
   });
@@ -332,11 +345,11 @@ export function planRemoteCall(input: {
       servicePinId: resolveServiceIdentity(service).servicePinId,
       providerGlobalMetaId: resolveServiceIdentity(service).providerGlobalMetaId,
       serviceName: normalizeText(service.displayName) || normalizeText(service.serviceName),
-      price: normalizedTerms.price || '0',
+      price: normalizedTerms.price,
       currency: normalizedCurrency,
     },
     payment: {
-      amount: normalizedTerms.price || '0',
+      amount: normalizedTerms.price,
       currency: normalizedCurrency,
     },
     traceId,

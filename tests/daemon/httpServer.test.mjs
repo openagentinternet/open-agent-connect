@@ -480,11 +480,11 @@ test('GET /api/network/services forwards query filters to network.listServices',
   const server = await startServer();
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/api/network/services?online=true`);
+  const response = await fetch(`${server.baseUrl}/api/network/services?online=true&cached=true&query=tarot`);
   const payload = await response.json();
 
   assert.equal(response.status, 200);
-  assert.deepEqual(server.calls.networkServices, [{ online: true }]);
+  assert.deepEqual(server.calls.networkServices, [{ online: true, query: 'tarot', cached: true }]);
   assert.equal(payload.ok, true);
   assert.equal(payload.data.services.length, 1);
   assert.equal(payload.data.services[0].servicePinId, 'service-weather');

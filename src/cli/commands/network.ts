@@ -40,10 +40,18 @@ export async function runNetworkCommand(args: string[], context: CliRuntimeConte
       return parsedLimit.error;
     }
     const limit = parsedLimit.limit ?? 20;
+    const query = readFlagValue(args, '--query') ?? readFlagValue(args, '--search') ?? undefined;
 
-    const result = await handler({
+    const request: { online?: boolean; query?: string; cached?: boolean } = {
       online: hasFlag(args, '--online') ? true : undefined,
-    });
+    };
+    if (hasFlag(args, '--cached')) {
+      request.cached = true;
+    }
+    if (query) {
+      request.query = query;
+    }
+    const result = await handler(request);
 
     if (shouldRenderTable && result.ok && result.state === 'success') {
       const data = result.data as { services?: Array<Record<string, unknown>> };

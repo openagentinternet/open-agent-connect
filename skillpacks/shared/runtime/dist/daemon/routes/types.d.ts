@@ -38,6 +38,8 @@ export interface MetabotDaemonHttpHandlers {
     network?: {
         listServices?: (input: {
             online?: boolean;
+            query?: string;
+            cached?: boolean;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         listBots?: (input: {
             online?: boolean;

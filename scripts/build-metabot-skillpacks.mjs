@@ -437,7 +437,7 @@ async function copyBundledRuntimeDependencies(repoRoot, runtimeRoot, dependencyN
     await fs.cp(
       sourceDependencyRoot,
       path.join(bundledNodeModulesRoot, ...dependencyPathSegments),
-      { recursive: true },
+      { recursive: true, verbatimSymlinks: true },
     );
   }
 }

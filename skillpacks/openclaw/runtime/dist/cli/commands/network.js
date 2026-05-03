@@ -31,9 +31,17 @@ async function runNetworkCommand(args, context) {
             return parsedLimit.error;
         }
         const limit = parsedLimit.limit ?? 20;
-        const result = await handler({
+        const query = (0, helpers_1.readFlagValue)(args, '--query') ?? (0, helpers_1.readFlagValue)(args, '--search') ?? undefined;
+        const request = {
             online: (0, helpers_1.hasFlag)(args, '--online') ? true : undefined,
-        });
+        };
+        if ((0, helpers_1.hasFlag)(args, '--cached')) {
+            request.cached = true;
+        }
+        if (query) {
+            request.query = query;
+        }
+        const result = await handler(request);
         if (shouldRenderTable && result.ok && result.state === 'success') {
             const data = result.data;
             const allServices = Array.isArray(data?.services) ? data.services : [];

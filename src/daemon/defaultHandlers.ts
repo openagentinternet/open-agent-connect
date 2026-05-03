@@ -61,6 +61,11 @@ import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
 import { readChainDirectoryWithFallback } from '../core/discovery/chainDirectoryReader';
+import {
+  buildOnlineServiceCacheState,
+  createOnlineServiceCacheStore,
+  searchOnlineServiceCacheServices,
+} from '../core/discovery/onlineServiceCache';
 import { HEARTBEAT_ONLINE_WINDOW_SEC } from '../core/discovery/chainHeartbeatDirectory';
 import { readOnlineMetaBotsFromSocketPresence } from '../core/discovery/socketPresenceDirectory';
 import { createSessionStateStore, type A2ATranscriptItemRecord } from '../core/a2a/sessionStateStore';
@@ -973,15 +978,20 @@ async function readRatingDetailSnapshot(input: {
 
 function readCallRequest(rawInput: Record<string, unknown>) {
   const request = readObject(rawInput.request) ?? rawInput;
+  const rawRequest = normalizeText(request.rawRequest);
+  const serviceQuery = normalizeText(request.query ?? request.intent ?? rawInput.query ?? rawInput.intent);
+  const userTask = normalizeText(request.userTask) || rawRequest || serviceQuery;
   return {
     servicePinId: normalizeText(request.servicePinId),
     providerGlobalMetaId: normalizeText(request.providerGlobalMetaId),
     providerDaemonBaseUrl: normalizeText(request.providerDaemonBaseUrl ?? rawInput.providerDaemonBaseUrl),
-    userTask: normalizeText(request.userTask),
+    userTask,
     taskContext: normalizeText(request.taskContext),
-    rawRequest: normalizeText(request.rawRequest),
+    rawRequest,
+    serviceQuery,
     spendCap: readObject(request.spendCap),
     policyMode: request.policyMode,
+    confirmed: request.confirmed === true || rawInput.confirmed === true,
   };
 }
 
@@ -1338,6 +1348,41 @@ function dedupeServices(services: Array<Record<string, unknown>>): Array<Record<
     const rightUpdatedAt = Number(right.updatedAt ?? 0);
     return rightUpdatedAt - leftUpdatedAt;
   });
+}
+
+async function enrichServicesWithProviderChatPublicKeys(input: {
+  services: Array<Record<string, unknown>>;
+  resolvePeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
+}): Promise<Array<Record<string, unknown>>> {
+  if (!input.resolvePeerChatPublicKey) {
+    return input.services;
+  }
+
+  const chatKeyByProvider = new Map<string, string | null>();
+  const enriched = [];
+  for (const service of input.services) {
+    const providerGlobalMetaId = normalizeText(service.providerGlobalMetaId ?? service.globalMetaId);
+    const existingChatKey = normalizeText(service.providerChatPublicKey ?? service.chatPublicKey);
+    if (!providerGlobalMetaId || existingChatKey) {
+      enriched.push(existingChatKey ? { ...service, providerChatPublicKey: existingChatKey } : service);
+      continue;
+    }
+
+    if (!chatKeyByProvider.has(providerGlobalMetaId)) {
+      try {
+        chatKeyByProvider.set(
+          providerGlobalMetaId,
+          normalizeText(await input.resolvePeerChatPublicKey(providerGlobalMetaId)) || null,
+        );
+      } catch {
+        chatKeyByProvider.set(providerGlobalMetaId, null);
+      }
+    }
+
+    const providerChatPublicKey = chatKeyByProvider.get(providerGlobalMetaId);
+    enriched.push(providerChatPublicKey ? { ...service, providerChatPublicKey } : service);
+  }
+  return enriched;
 }
 
 function normalizeEpochSeconds(value: unknown): number | null {
@@ -2470,11 +2515,17 @@ async function buildTraceInspectorPayload(input: {
   };
 }
 
-export async function fetchPeerChatPublicKey(globalMetaId: string): Promise<string | null> {
+export async function fetchPeerChatPublicKey(
+  globalMetaId: string,
+  options: { chainApiBaseUrl?: string } = {},
+): Promise<string | null> {
   const normalized = normalizeText(globalMetaId);
   if (!normalized) return null;
 
   const urls = [
+    ...(normalizeText(options.chainApiBaseUrl)
+      ? [`${normalizeText(options.chainApiBaseUrl).replace(/\/$/, '')}/api/info/metaid/${encodeURIComponent(normalized)}`]
+      : []),
     `https://file.metaid.io/metafile-indexer/api/v1/info/globalmetaid/${encodeURIComponent(normalized)}`,
     `https://manapi.metaid.io/api/info/metaid/${encodeURIComponent(normalized)}`,
   ];
@@ -2502,38 +2553,112 @@ export async function fetchPeerChatPublicKey(globalMetaId: string): Promise<stri
 async function listRuntimeDirectoryServices(input: {
   state: RuntimeState;
   directorySeedsPath: string;
+  onlineServiceCacheStore?: ReturnType<typeof createOnlineServiceCacheStore>;
+  ratingDetailStateStore?: ReturnType<typeof createRatingDetailStateStore>;
+  resolvePeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
   chainApiBaseUrl?: string;
   socketPresenceApiBaseUrl?: string;
   socketPresenceFailureMode?: 'throw' | 'assume_service_providers_online';
   onlineOnly: boolean;
+  query?: string | null;
+  cacheOnly?: boolean;
 }): Promise<{
   services: Array<Record<string, unknown>>;
-  discoverySource: 'chain' | 'seeded';
+  discoverySource: 'chain' | 'seeded' | 'cache';
   fallbackUsed: boolean;
 }> {
+  const selectCachedServices = async (fallbackUsed: boolean) => {
+    const cache = await input.onlineServiceCacheStore?.read().catch(() => null);
+    if (!cache || cache.services.length === 0) {
+      return null;
+    }
+    return {
+      services: searchOnlineServiceCacheServices(cache.services, {
+        query: input.query,
+        onlineOnly: input.onlineOnly,
+      }) as unknown as Array<Record<string, unknown>>,
+      discoverySource: 'cache' as const,
+      fallbackUsed,
+    };
+  };
+
+  if (input.cacheOnly) {
+    return (await selectCachedServices(false)) ?? {
+      services: [],
+      discoverySource: 'cache',
+      fallbackUsed: false,
+    };
+  }
+
   const localServices = input.state.services
     .filter((service) => service.available === 1)
     .map((service) => summarizeService(service));
-  const directory = await readChainDirectoryWithFallback({
-    chainApiBaseUrl: input.chainApiBaseUrl,
-    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
-    socketPresenceFailureMode: input.socketPresenceFailureMode,
-    onlineOnly: input.onlineOnly,
-    fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(input.directorySeedsPath),
+  let directory;
+  let decoratedLocalServices;
+
+  try {
+    directory = await readChainDirectoryWithFallback({
+      chainApiBaseUrl: input.chainApiBaseUrl,
+      socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+      socketPresenceFailureMode: input.socketPresenceFailureMode,
+      onlineOnly: input.onlineOnly,
+      fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(input.directorySeedsPath),
+    });
+    decoratedLocalServices = await decorateServicesWithSocketPresence({
+      services: localServices,
+      socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+      socketPresenceFailureMode: input.socketPresenceFailureMode,
+      onlineOnly: input.onlineOnly,
+    });
+  } catch (error) {
+    const cached = await selectCachedServices(true);
+    if (cached) {
+      return cached;
+    }
+    throw error;
+  }
+
+  const mergedServices = await enrichServicesWithProviderChatPublicKeys({
+    services: dedupeServices([
+      ...directory.services,
+      ...decoratedLocalServices,
+    ]),
+    resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
   });
-  const decoratedLocalServices = await decorateServicesWithSocketPresence({
-    services: localServices,
-    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
-    socketPresenceFailureMode: input.socketPresenceFailureMode,
-    onlineOnly: input.onlineOnly,
+
+  if (directory.fallbackUsed && mergedServices.length === 0) {
+    const cached = await selectCachedServices(true);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  let ratingDetails: Awaited<ReturnType<ReturnType<typeof createRatingDetailStateStore>['read']>>['items'] = [];
+  if (input.ratingDetailStateStore) {
+    const current = await input.ratingDetailStateStore.read();
+    try {
+      const refreshed = await refreshRatingDetailCacheFromChain({
+        store: input.ratingDetailStateStore,
+        chainApiBaseUrl: input.chainApiBaseUrl,
+      });
+      ratingDetails = refreshed.state.items;
+    } catch {
+      ratingDetails = current.items;
+    }
+  }
+
+  const cacheState = buildOnlineServiceCacheState({
+    services: mergedServices,
+    ratingDetails,
+    discoverySource: directory.source,
+    fallbackUsed: directory.fallbackUsed,
   });
-  const mergedServices = dedupeServices([
-    ...directory.services,
-    ...decoratedLocalServices,
-  ]);
-  const services = input.onlineOnly
-    ? mergedServices.filter((service) => service.online === true)
-    : mergedServices;
+  await input.onlineServiceCacheStore?.write(cacheState).catch(() => null);
+
+  const services = searchOnlineServiceCacheServices(cacheState.services, {
+    query: input.query,
+    onlineOnly: input.onlineOnly,
+  }) as unknown as Array<Record<string, unknown>>;
 
   return {
     services,
@@ -3702,6 +3827,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const masterAutoFeedbackStateStore = createMasterAutoFeedbackStateStore(input.homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(input.homeDir);
   const ratingDetailStateStore = createRatingDetailStateStore(input.homeDir);
+  const onlineServiceCacheStore = createOnlineServiceCacheStore(input.homeDir);
   const sessionStateStore = createSessionStateStore(input.homeDir);
   const privateChatStateStore = createPrivateChatStateStore(input.homeDir);
   const autoReplyConfig: PrivateChatAutoReplyConfig = input.autoReplyConfig ?? {
@@ -3710,7 +3836,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
     defaultStrategyId: null,
   };
   const sessionEngine = createA2ASessionEngine();
-  const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey ?? fetchPeerChatPublicKey;
+  const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey
+    ?? ((globalMetaId: string) => fetchPeerChatPublicKey(globalMetaId, {
+      chainApiBaseUrl: input.chainApiBaseUrl,
+    }));
   const callerReplyWaiter = input.callerReplyWaiter ?? createSocketIoMetaWebReplyWaiter();
   const masterReplyWaiter = input.masterReplyWaiter ?? null;
   const servicePaymentExecutor = input.servicePaymentExecutor ?? createWalletServicePaymentExecutor({ secretStore });
@@ -4237,6 +4366,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const directory = await listRuntimeDirectoryServices({
       state,
       directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+      onlineServiceCacheStore,
+      ratingDetailStateStore,
+      resolvePeerChatPublicKey,
       chainApiBaseUrl: input.chainApiBaseUrl,
       socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
       socketPresenceFailureMode: input.socketPresenceFailureMode,
@@ -6990,15 +7122,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     },
     network: {
-      listServices: async ({ online }) => {
+      listServices: async ({ online, query, cached }) => {
         const state = await runtimeStateStore.readState();
         const directory = await listRuntimeDirectoryServices({
           state,
           directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+          onlineServiceCacheStore,
+          ratingDetailStateStore,
+          resolvePeerChatPublicKey,
           chainApiBaseUrl: input.chainApiBaseUrl,
           socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
           socketPresenceFailureMode: input.socketPresenceFailureMode,
           onlineOnly: online === true,
+          query,
+          cacheOnly: cached === true,
         });
 
         return commandSuccess({
@@ -7033,6 +7170,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
             const directory = await listRuntimeDirectoryServices({
               state,
               directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+              onlineServiceCacheStore,
+              ratingDetailStateStore,
+              resolvePeerChatPublicKey,
               chainApiBaseUrl: input.chainApiBaseUrl,
               socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
               socketPresenceFailureMode: input.socketPresenceFailureMode,
@@ -7282,7 +7422,36 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before calling services.');
         }
 
-        const request = readCallRequest(rawInput);
+        let request = readCallRequest(rawInput);
+        let selectedFromCache = false;
+        let cachedSelectionServices: Array<Record<string, unknown>> | null = null;
+        if ((!request.servicePinId || !request.providerGlobalMetaId) && request.userTask) {
+          const cache = await onlineServiceCacheStore.read().catch(() => null);
+          const matches = cache
+            ? searchOnlineServiceCacheServices(cache.services, {
+                query: request.serviceQuery || request.rawRequest || request.userTask,
+                onlineOnly: true,
+                limit: 1,
+              })
+            : [];
+          const selected = matches[0] as unknown as Record<string, unknown> | undefined;
+          if (!selected) {
+            return commandFailed(
+              'cached_service_match_not_found',
+              'No cached online service matched this request. Refresh online services or provide servicePinId and providerGlobalMetaId.'
+            );
+          }
+          request = {
+            ...request,
+            servicePinId: normalizeText(selected.servicePinId),
+            providerGlobalMetaId: normalizeText(selected.providerGlobalMetaId),
+            providerDaemonBaseUrl: request.providerDaemonBaseUrl || normalizeText(selected.providerDaemonBaseUrl),
+            taskContext: request.taskContext || `Selected cached online service: ${normalizeText(selected.displayName) || normalizeText(selected.serviceName)}`,
+            confirmed: false,
+          };
+          selectedFromCache = true;
+          cachedSelectionServices = [selected];
+        }
         if (!request.servicePinId || !request.providerGlobalMetaId || !request.userTask) {
           return commandFailed(
             'invalid_call_request',
@@ -7300,10 +7469,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
             return remoteDirectory;
           }
           availableServices = remoteDirectory.services;
+        } else if (cachedSelectionServices) {
+          availableServices = cachedSelectionServices;
         } else {
           const directory = await listRuntimeDirectoryServices({
             state,
             directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+            onlineServiceCacheStore,
+            ratingDetailStateStore,
+            resolvePeerChatPublicKey,
             chainApiBaseUrl: input.chainApiBaseUrl,
             socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
             socketPresenceFailureMode: input.socketPresenceFailureMode,
@@ -7341,6 +7515,48 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const serviceDisplayName = normalizeText(service.displayName) || normalizeText(service.serviceName);
+        if (
+          plan.confirmation.requiresConfirmation
+          && request.confirmed !== true
+          && (plan.confirmation.policyMode === 'confirm_paid_only' || plan.confirmation.policyMode === 'auto_when_safe')
+        ) {
+          const confirmRequest: Record<string, unknown> = {
+            servicePinId: plan.service.servicePinId,
+            providerGlobalMetaId: plan.service.providerGlobalMetaId,
+            userTask: request.userTask,
+            taskContext: request.taskContext,
+            rawRequest: request.rawRequest,
+            policyMode: plan.confirmation.policyMode,
+            confirmed: true,
+          };
+          if (request.providerDaemonBaseUrl) {
+            confirmRequest.providerDaemonBaseUrl = request.providerDaemonBaseUrl;
+          }
+          if (request.spendCap) {
+            confirmRequest.spendCap = request.spendCap;
+          }
+          return commandAwaitingConfirmation({
+            traceId: null,
+            providerGlobalMetaId: plan.service.providerGlobalMetaId,
+            serviceName: serviceDisplayName,
+            selectedFromCache,
+            service: plan.service,
+            payment: plan.payment,
+            confirmation: plan.confirmation,
+            confirmRequest: {
+              request: confirmRequest,
+            },
+          });
+        }
+
+        const resolveServicePeerChatPublicKey = async () => (
+          normalizeText(service.providerChatPublicKey ?? service.chatPublicKey)
+          || (
+            plan.service.providerGlobalMetaId === state.identity!.globalMetaId
+              ? state.identity!.chatPublicKey
+              : await resolvePeerChatPublicKey(plan.service.providerGlobalMetaId) ?? ''
+          )
+        );
         let orderPayment: A2AOrderPaymentResult | null = null;
         let paymentTxid = '';
         let orderReference = '';
@@ -7574,9 +7790,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             );
           }
 
-          const peerChatPublicKey = plan.service.providerGlobalMetaId === state.identity.globalMetaId
-            ? state.identity.chatPublicKey
-            : await resolvePeerChatPublicKey(plan.service.providerGlobalMetaId) ?? '';
+          const peerChatPublicKey = await resolveServicePeerChatPublicKey();
           if (!peerChatPublicKey) {
             return commandFailed(
               'peer_chat_public_key_missing',
@@ -7746,9 +7960,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         let responsePublicStatus = publicStatus.status;
         if (!request.providerDaemonBaseUrl) {
           const privateChatIdentity = await signer.getPrivateChatIdentity();
-          const peerChatPublicKey = plan.service.providerGlobalMetaId === state.identity.globalMetaId
-            ? state.identity.chatPublicKey
-            : await resolvePeerChatPublicKey(plan.service.providerGlobalMetaId) ?? '';
+          const peerChatPublicKey = await resolveServicePeerChatPublicKey();
 
           // Schedule background continuation immediately (was previously only on timeout)
           scheduleCallerReplyContinuation({
@@ -7779,8 +7991,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
               }),
               data: {
                 traceId: trace.traceId,
+                servicePinId: plan.service.servicePinId,
                 providerGlobalMetaId: plan.service.providerGlobalMetaId,
                 serviceName: serviceDisplayName,
+                selectedFromCache,
                 service: plan.service,
                 payment: plan.payment,
                 confirmation: plan.confirmation,
@@ -7811,8 +8025,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         return commandSuccess({
           traceId: responseTrace.traceId,
+          servicePinId: plan.service.servicePinId,
           providerGlobalMetaId: plan.service.providerGlobalMetaId,
           serviceName: serviceDisplayName,
+          selectedFromCache,
           service: plan.service,
           payment: plan.payment,
           confirmation: plan.confirmation,

@@ -35,7 +35,7 @@ export interface A2ASessionRecord {
     latestTaskRunState: A2ATaskRunState | null;
 }
 export type DelegationPolicyMode = 'confirm_all' | 'confirm_paid_only' | 'auto_when_safe';
-export type DelegationPolicyReason = 'confirm_all_requires_confirmation' | 'policy_mode_not_publicly_enabled';
+export type DelegationPolicyReason = 'confirm_all_requires_confirmation' | 'paid_service_requires_confirmation' | 'free_service_auto_approved' | 'policy_mode_not_publicly_enabled';
 export interface DelegationPolicyDecision {
     requiresConfirmation: boolean;
     policyMode: DelegationPolicyMode;
