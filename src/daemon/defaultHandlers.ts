@@ -6938,25 +6938,34 @@ export function createDefaultMetabotDaemonHandlers(input: {
         let orderPayment: A2AOrderPaymentResult | null = null;
         let paymentTxid = '';
         let orderReference = '';
+        const paymentMempoolRetryDelays = DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS;
         const createOrderPayment = async (): Promise<
           { ok: true; payment: A2AOrderPaymentResult }
           | { ok: false; failure: MetabotCommandResult<never> }
         > => {
-          try {
-            const payment = await executeServiceOrderPayment({
-              traceId: plan.traceId,
-              servicePinId: plan.service.servicePinId,
-              providerGlobalMetaId: plan.service.providerGlobalMetaId,
-              paymentAddress: normalizeText(service.paymentAddress) || normalizeText(service.providerAddress),
-              amount: plan.payment.amount,
-              currency: plan.payment.currency,
-              executor: servicePaymentExecutor,
-            });
-            return { ok: true, payment };
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            const code = message.split(':', 1)[0] || 'service_payment_failed';
-            return { ok: false, failure: commandFailed(code, message) };
+          for (let attempt = 0; ; attempt += 1) {
+            try {
+              const payment = await executeServiceOrderPayment({
+                traceId: plan.traceId,
+                servicePinId: plan.service.servicePinId,
+                providerGlobalMetaId: plan.service.providerGlobalMetaId,
+                paymentAddress: normalizeText(service.paymentAddress) || normalizeText(service.providerAddress),
+                amount: plan.payment.amount,
+                currency: plan.payment.currency,
+                executor: servicePaymentExecutor,
+              });
+              return { ok: true, payment };
+            } catch (error) {
+              const delayMs = paymentMempoolRetryDelays[attempt];
+              if (delayMs === undefined || !isMempoolConflictError(error)) {
+                const message = error instanceof Error ? error.message : String(error);
+                const code = message.split(':', 1)[0] || 'service_payment_failed';
+                return { ok: false, failure: commandFailed(code, message) };
+              }
+              if (delayMs > 0) {
+                await sleep(delayMs);
+              }
+            }
           }
         };
 
@@ -7237,15 +7246,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
           let orderWrite;
           try {
-            orderWrite = await signer.writePin({
-              operation: 'create',
-              path: outboundOrder.path,
-              encryption: outboundOrder.encryption,
-              version: outboundOrder.version,
-              contentType: outboundOrder.contentType,
-              payload: outboundOrder.payload,
-              encoding: 'utf-8',
-              network: 'mvc',
+            orderWrite = await writePinRetryingMempoolConflict({
+              signer,
+              retryDelaysMs: DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS,
+              request: {
+                operation: 'create',
+                path: outboundOrder.path,
+                encryption: outboundOrder.encryption,
+                version: outboundOrder.version,
+                contentType: outboundOrder.contentType,
+                payload: outboundOrder.payload,
+                encoding: 'utf-8',
+                network: 'mvc',
+              },
             });
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);

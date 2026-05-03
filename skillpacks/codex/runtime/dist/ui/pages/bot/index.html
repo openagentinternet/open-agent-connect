@@ -6,66 +6,168 @@
     <title>__PAGE_TITLE__</title>
     <link rel="stylesheet" href="/ui/shared.css" />
     <style>
-      .runtime-card { background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 8px; }
-      .runtime-card .name { font-weight: 600; color: var(--text); }
-      .runtime-card .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
-      .flex-row { display: flex; align-items: center; gap: 10px; }
-      .health-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-      .health-dot.healthy { background: var(--green, #4ade80); }
-      .health-dot.degraded { background: var(--amber, #fbbf24); }
-      .health-dot.unavailable { background: var(--red, #f87171); }
-      .health-dot.unknown { background: var(--muted, #9ca3af); }
-      .binding-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border2); }
-      .binding-row.disabled-row { opacity: 0.5; }
-      .binding-role { font-size: 11px; text-transform: uppercase; font-weight: 600; padding: 2px 8px; border-radius: 4px; color: var(--text); border: 1px solid var(--border2); }
-      .binding-role.primary { border-color: var(--green, #4ade80); color: var(--green, #4ade80); }
-      .binding-role.fallback { border-color: var(--amber, #fbbf24); color: var(--amber, #fbbf24); }
-      .binding-role.reviewer { border-color: #60a5fa; color: #60a5fa; }
-      .binding-role.specialist { border-color: #c084fc; color: #c084fc; }
-      .binding-runtime { font-size: 13px; color: var(--text); min-width: 120px; }
-      .toggle-label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; }
-      .btn { font-size: 13px; padding: 6px 14px; border: 1px solid var(--border2); border-radius: var(--radius); cursor: pointer; background: var(--surface2); color: var(--text); }
-      .btn:hover { background: var(--surface-hover); }
-      .btn:disabled { opacity: 0.5; cursor: default; }
-      .btn-sm { font-size: 11px; padding: 3px 8px; border: 1px solid var(--border2); border-radius: 4px; cursor: pointer; background: var(--surface2); color: var(--text); }
-      .btn-sm:hover { background: var(--surface-hover); color: var(--red, #f87171); }
-      .add-binding-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px; background: var(--surface2); border-radius: var(--radius); flex-wrap: wrap; }
-      .add-binding-row select, .add-binding-row input { padding: 5px 8px; border: 1px solid var(--border2); border-radius: 4px; background: var(--surface); color: var(--text); font-size: 13px; }
-      .section-title { font-size: 15px; font-weight: 600; color: var(--text); margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border2); display: flex; align-items: center; }
-      .section-title .btn { margin-left: 12px; }
-      .slug-label { font-size: 13px; color: var(--muted); margin-bottom: 10px; font-family: var(--mono); }
+      .rt-name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+      .rt-path { font-size: 11px; font-family: var(--mono); color: var(--dim); word-break: break-all; }
+      .rt-version { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+      .rt-auth { font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+      .rt-auth.ok { color: var(--green); }
+      .rt-auth.nope { color: var(--dim); }
+      .binding-role-badge {
+        display: inline-block; font-family: var(--mono); font-size: 10px; font-weight: 500;
+        text-transform: uppercase; letter-spacing: .06em; padding: 2px 8px; border-radius: 4px;
+      }
+      .binding-role-badge.primary    { background: var(--green-dim);  color: var(--green); }
+      .binding-role-badge.fallback   { background: var(--amber-dim);  color: var(--amber); }
+      .binding-role-badge.reviewer   { background: var(--accent-dim); color: var(--accent); }
+      .binding-role-badge.specialist { background: var(--purple-dim); color: var(--purple); }
+      .binding-runtime-name { font-size: 13px; font-weight: 500; color: var(--text); }
+      .binding-priority { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+      .binding-last-used { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+      .disabled-row td { opacity: .4; }
+      .binding-form-row {
+        display: flex; align-items: flex-end; gap: 10px; padding: 14px 16px;
+        background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
+        margin-bottom: 14px; flex-wrap: wrap;
+      }
+      .binding-form-row select, .binding-form-row input {
+        background: var(--bg); border: 1px solid var(--border2); border-radius: var(--radius-sm);
+        padding: 8px 12px; color: var(--text); font-family: var(--sans); font-size: 13px;
+      }
+      .binding-form-row select:focus, .binding-form-row input:focus { outline: none; border-color: var(--accent); }
+      .preferred-indicator { font-family: var(--mono); font-size: 10px; color: var(--accent); white-space: nowrap; }
+      .profile-select {
+        background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius-sm);
+        padding: 9px 12px; color: var(--text); font-family: var(--sans); font-size: 13px; min-width: 280px;
+      }
+      .profile-select:focus { outline: none; border-color: var(--accent); }
+      .profile-meta { font-size: 11px; font-family: var(--mono); color: var(--dim); margin-left: 12px; }
     </style>
   </head>
   <body>
-    <div class="app-shell">
-      __PAGE_NAV__
-      <main class="main-content">
-        <div class="page-header">
-          <p class="eyebrow">__PAGE_EYEBROW__</p>
-          <h1 class="page-heading">__PAGE_HEADING__</h1>
+    <div class="shell">
+      <header class="topbar">
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
+        <div class="topbar-sep"></div>
+        <span class="topbar-title">Bot Management</span>
+        <div class="topbar-spacer"></div>
+        <nav class="topbar-nav">__PAGE_NAV__</nav>
+      </header>
+
+      <main class="content">
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="stat-label">Runtimes</div>
+            <div class="stat-value green" data-stat-runtimes>—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Profiles</div>
+            <div class="stat-value" data-stat-profiles>—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Total Bindings</div>
+            <div class="stat-value accent" data-stat-bindings>—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Active Profile</div>
+            <div class="stat-value sm" data-stat-active>—</div>
+          </div>
         </div>
 
-        <div class="section-title">
-          MetaBot Profile
+        <div class="section-header">
+          <span class="section-title">PROFILE</span>
         </div>
-        <div data-profile-selector style="margin-bottom:16px">
-          <p class="dim">Loading profiles…</p>
+        <div style="margin-bottom:20px">
+          <select class="profile-select" data-profile-select>
+            <option value="">-- select a profile --</option>
+          </select>
+          <span class="profile-meta" data-profile-meta></span>
         </div>
 
-        <div class="section-title">
-          LLM Runtimes
-          <button class="btn" data-discover-btn>Discover Runtimes</button>
+        <div class="section-header">
+          <span class="section-title">LLM RUNTIMES</span>
+          <span class="section-badge green" data-runtime-count-badge>0 available</span>
+          <span class="section-spacer"></span>
+          <button class="btn btn-sm" id="discover-btn">↻ discover</button>
         </div>
-        <div data-runtimes-panel><p class="dim">Loading runtimes…</p></div>
+        <div class="table-wrap" style="margin-bottom:24px">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Runtime</th>
+                <th>Binary Path</th>
+                <th>Version</th>
+                <th>Auth</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody data-runtime-list>
+              <tr><td colspan="5" class="table-empty"><strong>No runtimes discovered</strong>Click discover to scan PATH for available LLM binaries.</td></tr>
+            </tbody>
+          </table>
+        </div>
 
-        <div class="section-title">Bindings</div>
-        <div class="slug-label" data-slug-label></div>
-        <div data-bindings-panel><p class="dim">Select a profile to manage its bindings.</p></div>
+        <div class="section-header">
+          <span class="section-title">BINDINGS</span>
+          <span class="section-badge accent" data-binding-count-badge>—</span>
+          <span class="section-spacer"></span>
+          <span class="section-meta" data-preferred-label></span>
+        </div>
+        <div class="card" data-no-bindings style="display:none">
+          <div class="card-title">No bindings yet</div>
+          <div class="card-subtitle">Select a profile and add bindings below to connect this MetaBot to an LLM runtime.</div>
+        </div>
+        <div class="table-wrap" style="margin-bottom:14px" data-bindings-table-wrap>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Role</th>
+                <th>Runtime</th>
+                <th>Priority</th>
+                <th>Last Used</th>
+                <th>Enabled</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody data-binding-list></tbody>
+          </table>
+        </div>
 
-        <div data-preferred-panel></div>
-        <div data-add-binding-panel></div>
+        <div class="section-header">
+          <span class="section-title">ADD BINDING</span>
+        </div>
+        <div class="binding-form-row">
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:11px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Runtime</div>
+            <select data-new-runtime style="min-width:200px"></select>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:11px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Role</div>
+            <select data-new-role>
+              <option value="primary">primary</option>
+              <option value="fallback">fallback</option>
+              <option value="reviewer">reviewer</option>
+              <option value="specialist">specialist</option>
+            </select>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:11px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Priority</div>
+            <input type="number" data-new-priority value="0" min="0" style="width:80px" />
+          </div>
+          <button class="btn btn-primary" id="add-binding-btn">+ Add Binding</button>
+        </div>
 
-        __PAGE_CONTENT__
+        <div class="section-header">
+          <span class="section-title">PREFERRED RUNTIME</span>
+        </div>
+        <div class="binding-form-row">
+          <div style="display:flex;flex-direction:column;gap:6px;flex:1">
+            <div style="font-size:11px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Default Runtime</div>
+            <select data-preferred-runtime style="max-width:320px">
+              <option value="">(none — fall back to priority bindings)</option>
+            </select>
+          </div>
+          <button class="btn" id="save-preferred-btn">Save Preferred</button>
+        </div>
       </main>
     </div>
     <script>__PAGE_SCRIPT__</script>

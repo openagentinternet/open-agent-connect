@@ -48,6 +48,8 @@ Prepare a request file:
 }
 ```
 
+Payment is handled automatically by the local MetaBot daemon. UTXOs are spendable regardless of confirmation status — the total balance (confirmed + unconfirmed) is what matters for payments. If the human is concerned about balance, run `wallet balance` first; only `totalBalance` needs to cover the spend cap amount.
+
 Then call:
 
 ```bash
