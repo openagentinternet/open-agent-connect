@@ -2188,28 +2188,30 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     defaultStrategyId: null as string | null,
   };
 
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+    getDaemonRecord: () => daemonRecord,
+    secretStore,
+    signer,
+    chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+    socketPresenceApiBaseUrl,
+    socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+      ? 'assume_service_providers_online'
+      : 'throw',
+    identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
+    fetchPeerChatPublicKey,
+    callerReplyWaiter,
+    buyerRatingReplyRunner,
+    masterReplyWaiter,
+    servicePaymentExecutor,
+    requestMvcGasSubsidy,
+    autoReplyConfig: sharedAutoReplyConfig,
+  });
+
   const daemon = createMetabotDaemon({
     homeDirOrPaths: paths,
-    handlers: createDefaultMetabotDaemonHandlers({
-      homeDir,
-      systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
-      getDaemonRecord: () => daemonRecord,
-      secretStore,
-      signer,
-      chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
-      socketPresenceApiBaseUrl,
-      socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
-        ? 'assume_service_providers_online'
-        : 'throw',
-      identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
-      fetchPeerChatPublicKey,
-      callerReplyWaiter,
-      buyerRatingReplyRunner,
-      masterReplyWaiter,
-      servicePaymentExecutor,
-      requestMvcGasSubsidy,
-      autoReplyConfig: sharedAutoReplyConfig,
-    }),
+    handlers,
   });
 
   const host = DEFAULT_DAEMON_HOST;
@@ -2309,6 +2311,17 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     onMessage: (profile, message) => {
       if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
         void chatAutoReplyOrchestrator.handleInboundMessage(message);
+        const orderProtocolHandler = handlers.services?.handleInboundOrderProtocolMessage;
+        if (orderProtocolHandler) {
+          void Promise.resolve(orderProtocolHandler({
+            fromGlobalMetaId: message.fromGlobalMetaId,
+            content: message.content,
+            messagePinId: message.messagePinId,
+            timestamp: message.timestamp,
+          })).catch((error) => {
+            console.warn('[A2A order protocol handler]', error instanceof Error ? error.message : String(error));
+          });
+        }
       }
     },
     onError: (error) => {
