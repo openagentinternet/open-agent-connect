@@ -3547,7 +3547,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const callerReplyWaiter = input.callerReplyWaiter ?? createSocketIoMetaWebReplyWaiter();
   const masterReplyWaiter = input.masterReplyWaiter ?? null;
   const servicePaymentExecutor = input.servicePaymentExecutor ?? createWalletServicePaymentExecutor({ secretStore });
-  const ratingFollowupRetryDelaysMs = normalizeRetryDelays(
+  const ratingMempoolRetryDelaysMs = normalizeRetryDelays(
     input.ratingFollowupRetryDelaysMs,
     DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS,
   );
@@ -3967,14 +3967,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
     let ratingWrite;
     try {
-      ratingWrite = await signer.writePin({
-        operation: 'create',
-        path: '/protocols/skill-service-rate',
-        encryption: '0',
-        version: '1.0.0',
-        contentType: 'application/json',
-        payload: JSON.stringify(payload),
-        network: request.network,
+      ratingWrite = await writePinRetryingMempoolConflict({
+        signer,
+        retryDelaysMs: ratingMempoolRetryDelaysMs,
+        request: {
+          operation: 'create',
+          path: '/protocols/skill-service-rate',
+          encryption: '0',
+          version: '1.0.0',
+          contentType: 'application/json',
+          payload: JSON.stringify(payload),
+          network: request.network,
+        },
       });
     } catch (error) {
       return commandFailed(
@@ -4022,7 +4026,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         const ratingMessageWrite = await writePinRetryingMempoolConflict({
           signer,
-          retryDelaysMs: ratingFollowupRetryDelaysMs,
+          retryDelaysMs: ratingMempoolRetryDelaysMs,
           request: {
             operation: 'create',
             path: outgoingRatingMessage.path,
