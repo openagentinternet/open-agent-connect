@@ -266,6 +266,26 @@ async function startFakeChainApiServer(options = {}) {
   const serviceCurrency = typeof options.serviceCurrency === 'string' ? options.serviceCurrency : 'SPACE';
   const servicePrice = typeof options.servicePrice === 'string' ? options.servicePrice : '0.00001';
   const paymentAddress = typeof options.paymentAddress === 'string' ? options.paymentAddress : 'mvc-payment-address';
+  const serviceSummary = {
+    serviceName: typeof options.serviceName === 'string' ? options.serviceName : 'weather-oracle',
+    displayName: typeof options.displayName === 'string' ? options.displayName : 'Weather Oracle',
+    description: typeof options.description === 'string' ? options.description : 'Returns tomorrow weather.',
+    providerMetaBot: typeof options.providerMetaBot === 'string' ? options.providerMetaBot : 'idq1provider',
+    providerSkill: typeof options.providerSkill === 'string' ? options.providerSkill : 'metabot-weather-oracle',
+    price: servicePrice,
+    currency: serviceCurrency,
+    skillDocument: typeof options.skillDocument === 'string' ? options.skillDocument : '# Weather Oracle',
+    inputType: typeof options.inputType === 'string' ? options.inputType : 'text',
+    outputType: typeof options.outputType === 'string' ? options.outputType : 'text',
+    endpoint: typeof options.endpoint === 'string' ? options.endpoint : 'simplemsg',
+    paymentAddress,
+  };
+  const serviceSummaries = Array.isArray(options.serviceSummaries) && options.serviceSummaries.length > 0
+    ? options.serviceSummaries
+    : [serviceSummary];
+  const providerChatPublicKeys = options.providerChatPublicKeys && typeof options.providerChatPublicKeys === 'object'
+    ? options.providerChatPublicKeys
+    : {};
   const evolutionMetadataPinId = 'evolution-metadata-pin-1';
   const evolutionArtifactPinId = 'evolution-artifact-pin-1';
   const evolutionScopeHash = JSON.stringify({
@@ -379,31 +399,16 @@ async function startFakeChainApiServer(options = {}) {
       } else {
         payload = {
           data: {
-            list: [
-                {
-                  id: 'chain-service-pin-1',
-                  metaid: 'metaid-provider',
-                  address: 'mvc-provider-address',
-                  timestamp: nowSec,
-                  status: 0,
-                  operation: 'create',
-                  path: '/protocols/skill-service',
-                  contentSummary: JSON.stringify({
-                  serviceName: 'weather-oracle',
-                  displayName: 'Weather Oracle',
-                  description: 'Returns tomorrow weather.',
-                  providerMetaBot: 'idq1provider',
-                  providerSkill: 'metabot-weather-oracle',
-                  price: servicePrice,
-                  currency: serviceCurrency,
-                  skillDocument: '# Weather Oracle',
-                  inputType: 'text',
-                  outputType: 'text',
-                  endpoint: 'simplemsg',
-                  paymentAddress,
-                }),
-              },
-            ],
+            list: serviceSummaries.map((summary, index) => ({
+              id: typeof summary.pinId === 'string' ? summary.pinId : `chain-service-pin-${index + 1}`,
+              metaid: typeof summary.metaid === 'string' ? summary.metaid : 'metaid-provider',
+              address: typeof summary.providerAddress === 'string' ? summary.providerAddress : 'mvc-provider-address',
+              timestamp: nowSec + index,
+              status: 0,
+              operation: 'create',
+              path: '/protocols/skill-service',
+              contentSummary: JSON.stringify(summary),
+            })),
             nextCursor: null,
           },
         };
@@ -431,6 +436,17 @@ async function startFakeChainApiServer(options = {}) {
           content: JSON.stringify(evolutionArtifactBody),
         },
       };
+    } else if (url.pathname.startsWith('/api/info/metaid/')) {
+      const globalMetaId = decodeURIComponent(url.pathname.slice('/api/info/metaid/'.length));
+      const chatpubkey = providerChatPublicKeys[globalMetaId]
+        ?? (typeof options.providerChatPublicKey === 'string' ? options.providerChatPublicKey : '');
+      if (chatpubkey) {
+        payload = {
+          data: {
+            chatpubkey,
+          },
+        };
+      }
     }
 
     if (payload == null) {
@@ -1594,6 +1610,160 @@ test('network services reads chain-backed online services without local director
   assert.equal(listed.payload.data.services[0].online, true);
 });
 
+test('network services refreshes the global online service cache and reuses it when chain discovery is unavailable', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  const chainApi = await startFakeChainApiServer({
+    serviceName: 'tarot-reading',
+    displayName: '塔罗牌占卜',
+    description: '为明天运程、事业和情感提供塔罗牌占卜。',
+    providerSkill: 'metabot-tarot-reader',
+    servicePrice: '0',
+    ratingPins: [
+      {
+        id: 'rating-pin-1',
+        metaid: 'rater-1',
+        globalMetaId: 'idq1rater1',
+        timestamp: 1_775_000_100,
+        contentSummary: JSON.stringify({
+          serviceID: 'chain-service-pin-1',
+          servicePaidTx: 'payment-1',
+          rate: '5',
+          comment: '很准确。',
+        }),
+      },
+      {
+        id: 'rating-pin-2',
+        metaid: 'rater-2',
+        globalMetaId: 'idq1rater2',
+        timestamp: 1_775_000_200,
+        contentSummary: JSON.stringify({
+          serviceID: 'chain-service-pin-1',
+          servicePaidTx: 'payment-2',
+          rate: '3',
+          comment: '可参考。',
+        }),
+      },
+    ],
+  });
+  t.after(async () => stopDaemon(homeDir));
+
+  const listed = await runCommand(
+    homeDir,
+    ['network', 'services', '--online', '--query', '塔罗牌 明天运程'],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+
+  assert.equal(listed.exitCode, 0);
+  assert.equal(listed.payload.ok, true);
+  assert.equal(listed.payload.data.discoverySource, 'chain');
+  assert.equal(listed.payload.data.services.length, 1);
+  assert.equal(listed.payload.data.services[0].displayName, '塔罗牌占卜');
+  assert.equal(listed.payload.data.services[0].ratingAvg, 4);
+  assert.equal(listed.payload.data.services[0].ratingCount, 2);
+
+  const cachePath = path.join(deriveSystemHome(homeDir), '.metabot', 'services', 'services.json');
+  const cached = JSON.parse(await readFile(cachePath, 'utf8'));
+  assert.equal(cached.services[0].servicePinId, 'chain-service-pin-1');
+  assert.equal(cached.services[0].ratingAvg, 4);
+  assert.equal(cached.services[0].ratingCount, 2);
+
+  await chainApi.close();
+  const fromCache = await runCommand(
+    homeDir,
+    ['network', 'services', '--online', '--query', '塔罗牌'],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+
+  assert.equal(fromCache.exitCode, 0);
+  assert.equal(fromCache.payload.ok, true);
+  assert.equal(fromCache.payload.data.discoverySource, 'cache');
+  assert.equal(fromCache.payload.data.fallbackUsed, true);
+  assert.equal(fromCache.payload.data.services.length, 1);
+  assert.equal(fromCache.payload.data.services[0].servicePinId, 'chain-service-pin-1');
+  assert.equal(fromCache.payload.data.services[0].ratingAvg, 4);
+});
+
+test('daemon-backed network services forwards --query and filters refreshed online service cache results', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  const chainApi = await startFakeChainApiServer({
+    serviceSummaries: [
+      {
+        serviceName: 'weather-oracle',
+        displayName: 'Weather Oracle',
+        description: 'Returns tomorrow weather.',
+        providerMetaBot: 'idq1weather',
+        providerSkill: 'metabot-weather-oracle',
+        price: '0.00001',
+        currency: 'SPACE',
+        skillDocument: '# Weather Oracle',
+        inputType: 'text',
+        outputType: 'text',
+        endpoint: 'simplemsg',
+        paymentAddress: 'mvc-weather-payment',
+      },
+      {
+        serviceName: 'tarot-reading',
+        displayName: '塔罗牌占卜',
+        description: '为明天运程、事业和情感提供塔罗牌占卜。',
+        providerMetaBot: 'idq1tarot',
+        providerSkill: 'metabot-tarot-reader',
+        price: '0',
+        currency: 'SPACE',
+        skillDocument: '# Tarot Reader',
+        inputType: 'text',
+        outputType: 'markdown',
+        endpoint: 'simplemsg',
+        paymentAddress: 'mvc-tarot-payment',
+      },
+    ],
+  });
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const listed = await runCommand(
+    homeDir,
+    ['network', 'services', '--online', '--query', '塔罗牌 明天运程'],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+
+  assert.equal(listed.exitCode, 0);
+  assert.equal(listed.payload.ok, true);
+  assert.equal(listed.payload.data.services.length, 1);
+  assert.equal(listed.payload.data.services[0].displayName, '塔罗牌占卜');
+});
+
+test('skills resolve injects the current cached online remote services context', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  const chainApi = await startFakeChainApiServer({
+    serviceName: 'tarot-reading',
+    displayName: '塔罗牌占卜',
+    description: '为明天运程、事业和情感提供塔罗牌占卜。',
+    providerSkill: 'metabot-tarot-reader',
+    servicePrice: '0',
+  });
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const listed = await runCommand(
+    homeDir,
+    ['network', 'services', '--online', '--query', '塔罗牌'],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+  assert.equal(listed.exitCode, 0);
+
+  const resolved = await runCommand(
+    homeDir,
+    ['skills', 'resolve', '--skill', 'metabot-network-directory', '--format', 'markdown'],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+
+  assert.equal(resolved.exitCode, 0);
+  assert.equal(resolved.payload.ok, true);
+  assert.match(resolved.payload.data, /<available_remote_services>/);
+  assert.match(resolved.payload.data, /<service_name>塔罗牌占卜<\/service_name>/);
+  assert.match(resolved.payload.data, /policyMode "confirm_paid_only"/);
+});
+
 test('network bots --online falls back to service directory when socket presence is unavailable', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
@@ -2661,6 +2831,114 @@ test('services call resolves a chain-discovered online service into a real MetaW
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /Tomorrow will be bright with a light wind/);
+});
+
+test('services call can resolve a cached online service when the chain directory is temporarily unavailable', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  const providerChatPublicKey = '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf';
+  const chainApi = await startFakeChainApiServer({
+    servicePrice: '0',
+    providerChatPublicKeys: {
+      idq1provider: providerChatPublicKey,
+    },
+  });
+  t.after(async () => stopDaemon(homeDir));
+
+  const listed = await runCommand(
+    homeDir,
+    ['network', 'services', '--online'],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+  assert.equal(listed.exitCode, 0);
+  assert.equal(listed.payload.ok, true);
+  assert.equal(listed.payload.data.services[0].servicePinId, 'chain-service-pin-1');
+
+  const created = await runCommand(
+    homeDir,
+    ['identity', 'create', '--name', 'Alice'],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+  assert.equal(created.exitCode, 0);
+
+  await chainApi.close();
+
+  const requestFile = path.join(homeDir, 'cached-chain-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      policyMode: 'confirm_paid_only',
+    },
+  }), 'utf8');
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+
+  assert.equal(called.exitCode, 2);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.state, 'waiting');
+  assert.equal(called.payload.data.serviceName, 'Weather Oracle');
+  assert.equal(called.payload.data.providerGlobalMetaId, 'idq1provider');
+  assert.equal(called.payload.data.confirmation.requiresConfirmation, false);
+  assert.equal(called.payload.data.confirmation.policyMode, 'confirm_paid_only');
+  assert.equal(called.payload.data.confirmation.confirmationBypassed, true);
+});
+
+test('paid confirm_paid_only service call returns confirmation preview before payment or order write', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  const chainApi = await startFakeChainApiServer({
+    servicePrice: '0.00001',
+  });
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const listed = await runCommand(
+    homeDir,
+    ['network', 'services', '--online'],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+  assert.equal(listed.exitCode, 0);
+
+  const created = await runCommand(
+    homeDir,
+    ['identity', 'create', '--name', 'Alice'],
+    { METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl }
+  );
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'paid-confirm-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      policyMode: 'confirm_paid_only',
+    },
+  }), 'utf8');
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+    }
+  );
+
+  assert.equal(called.exitCode, 0);
+  assert.equal(called.payload.ok, true);
+  assert.equal(called.payload.state, 'awaiting_confirmation');
+  assert.equal(called.payload.data.serviceName, 'Weather Oracle');
+  assert.equal(called.payload.data.payment.amount, '0.00001');
+  assert.equal(called.payload.data.confirmation.requiresConfirmation, true);
+  assert.equal(called.payload.data.confirmRequest.request.confirmed, true);
+  assert.equal(called.payload.data.traceId, null);
 });
 
 test('services call rejects unsupported chain service payment before sending order', async (t) => {

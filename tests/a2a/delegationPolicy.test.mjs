@@ -30,15 +30,40 @@ test('policy decision shape exposes requiresConfirmation, policyMode, and policy
   assert.equal(typeof decision.policyReason, 'string');
 });
 
-test('future-safe modes are accepted but not publicly enabled yet', () => {
+test('confirm_paid_only bypasses confirmation for free services but still confirms paid services', () => {
   assert.equal(resolveDelegationPolicyMode('confirm_paid_only'), 'confirm_paid_only');
   assert.equal(resolveDelegationPolicyMode('auto_when_safe'), 'auto_when_safe');
 
-  const decision = evaluateDelegationPolicy({ policyMode: 'confirm_paid_only' });
-  assert.equal(decision.requestedPolicyMode, 'confirm_paid_only');
-  assert.equal(decision.policyMode, 'confirm_all');
-  assert.equal(decision.requiresConfirmation, true);
-  assert.equal(decision.policyReason, 'policy_mode_not_publicly_enabled');
+  const freeDecision = evaluateDelegationPolicy({
+    policyMode: 'confirm_paid_only',
+    estimatedCostAmount: '0',
+    estimatedCostCurrency: 'SPACE',
+  });
+  assert.equal(freeDecision.requestedPolicyMode, 'confirm_paid_only');
+  assert.equal(freeDecision.policyMode, 'confirm_paid_only');
+  assert.equal(freeDecision.requiresConfirmation, false);
+  assert.equal(freeDecision.policyReason, 'free_service_auto_approved');
+  assert.equal(freeDecision.confirmationBypassed, true);
+
+  const unpricedDecision = evaluateDelegationPolicy({
+    policyMode: 'confirm_paid_only',
+    estimatedCostAmount: '',
+    estimatedCostCurrency: 'SPACE',
+  });
+  assert.equal(unpricedDecision.requiresConfirmation, true);
+  assert.equal(unpricedDecision.policyReason, 'paid_service_requires_confirmation');
+  assert.equal(unpricedDecision.confirmationBypassed, false);
+
+  const paidDecision = evaluateDelegationPolicy({
+    policyMode: 'confirm_paid_only',
+    estimatedCostAmount: '0.00001',
+    estimatedCostCurrency: 'SPACE',
+  });
+  assert.equal(paidDecision.requestedPolicyMode, 'confirm_paid_only');
+  assert.equal(paidDecision.policyMode, 'confirm_paid_only');
+  assert.equal(paidDecision.requiresConfirmation, true);
+  assert.equal(paidDecision.policyReason, 'paid_service_requires_confirmation');
+  assert.equal(paidDecision.confirmationBypassed, false);
 });
 
 test('resolveDelegationPolicyMode normalizes trimmed and case-insensitive values', () => {

@@ -17,7 +17,9 @@ export declare function resolveServiceOrderPaymentMetadata(currency: unknown): {
     paymentChain?: 'mvc' | 'btc';
     settlementKind?: 'native';
 };
-export declare function fetchPeerChatPublicKey(globalMetaId: string): Promise<string | null>;
+export declare function fetchPeerChatPublicKey(globalMetaId: string, options?: {
+    chainApiBaseUrl?: string;
+}): Promise<string | null>;
 export declare function rebuildTraceArtifactsFromSessionState(input: {
     baseTrace: SessionTraceRecord;
     runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;

@@ -5,6 +5,8 @@ export interface MetabotPaths {
   metabotRoot: string;
   managerRoot: string;
   skillsRoot: string;
+  globalServicesRoot: string;
+  onlineServicesCachePath: string;
   profilesRoot: string;
   profileRoot: string;
   workspaceRoot: string;
@@ -144,6 +146,8 @@ function buildMetabotPaths(input: {
     metabotRoot: input.metabotRoot,
     managerRoot: input.managerRoot,
     skillsRoot: input.skillsRoot,
+    globalServicesRoot: path.join(input.metabotRoot, 'services'),
+    onlineServicesCachePath: path.join(input.metabotRoot, 'services', 'services.json'),
     profilesRoot: input.profilesRoot,
     profileRoot: input.profileRoot,
     workspaceRoot: input.workspaceRoot,

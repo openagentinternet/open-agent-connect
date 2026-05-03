@@ -43,6 +43,8 @@ function buildMetabotPaths(input) {
         metabotRoot: input.metabotRoot,
         managerRoot: input.managerRoot,
         skillsRoot: input.skillsRoot,
+        globalServicesRoot: node_path_1.default.join(input.metabotRoot, 'services'),
+        onlineServicesCachePath: node_path_1.default.join(input.metabotRoot, 'services', 'services.json'),
         profilesRoot: input.profilesRoot,
         profileRoot: input.profileRoot,
         workspaceRoot: input.workspaceRoot,

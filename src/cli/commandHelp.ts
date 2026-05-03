@@ -756,6 +756,8 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot network services [--online]',
     optionalFlags: [
       { flag: '--online', description: 'Return only services whose providers currently appear in the socket online-users directory.' },
+      { flag: '--query', value: '<text>', description: 'Search cached/refreshed online services by service name, description, provider, skill, rating, and recency.' },
+      { flag: '--search', value: '<text>', description: 'Alias for --query.' },
       HELP_JSON_FLAG,
     ],
     successFields: [

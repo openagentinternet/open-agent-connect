@@ -38,6 +38,10 @@ import {
 } from '../core/state/runtimeStateStore';
 import { createProviderHeartbeatLoop } from '../core/provider/providerHeartbeatLoop';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
+import { createOnlineServiceCacheStore, DEFAULT_ONLINE_SERVICE_CACHE_SYNC_INTERVAL_MS } from '../core/discovery/onlineServiceCache';
+import { refreshOnlineServiceCacheFromChain } from '../core/discovery/onlineServiceCacheSync';
+import { buildRemoteServicesPrompt } from '../core/delegation/remoteCall';
+import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
 import {
   createLocalMnemonicSigner,
@@ -1012,6 +1016,55 @@ async function clearActiveVariantMapping(
   };
 }
 
+async function readInjectedRemoteServicesPrompt(context: CliRuntimeContext): Promise<string | null> {
+  try {
+    const homeDir = normalizeHomeDir(context.env, context.cwd);
+    const cache = await createOnlineServiceCacheStore(homeDir).read();
+    const services = cache.services
+      .filter((service) => service.available && service.online)
+      .slice(0, 20);
+    return buildRemoteServicesPrompt(services);
+  } catch {
+    return null;
+  }
+}
+
+async function renderSkillContractWithOnlineServiceContext(input: {
+  context: CliRuntimeContext;
+  skill: string;
+  host?: ConcreteSkillHost;
+  format: SkillRenderFormat;
+  evolutionNetworkEnabled: boolean;
+  activeVariant: SkillVariantArtifact | null;
+  activeVariantSource: SkillActiveVariantRef['source'] | null;
+}) {
+  const rendered = renderResolvedSkillContract({
+    skillName: input.skill,
+    host: input.host,
+    format: input.format,
+    evolutionNetworkEnabled: input.evolutionNetworkEnabled,
+    activeVariant: input.activeVariant,
+    activeVariantSource: input.activeVariantSource,
+  });
+  const remoteServicesPrompt = await readInjectedRemoteServicesPrompt(input.context);
+  if (!remoteServicesPrompt) {
+    return rendered;
+  }
+  if (rendered.format === 'markdown') {
+    return {
+      ...rendered,
+      markdown: `${rendered.markdown}\n\n## Available Remote Services\n${remoteServicesPrompt}`,
+    };
+  }
+  return {
+    ...rendered,
+    contract: {
+      ...rendered.contract,
+      instructions: `${rendered.contract.instructions}\n\n${remoteServicesPrompt}`,
+    },
+  };
+}
+
 async function resolveEvolutionScopeHashForSkill(input: {
   context: CliRuntimeContext;
   skillName: string;
@@ -1549,8 +1602,15 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     },
     network: {
       listServices: async (input) => {
-        const query = input.online === undefined ? '' : `?online=${input.online ? 'true' : 'false'}`;
-        return requestJson(context, 'GET', `/api/network/services${query}`);
+        const query = new URLSearchParams();
+        if (input.online !== undefined) {
+          query.set('online', input.online ? 'true' : 'false');
+        }
+        if (typeof input.query === 'string' && input.query.trim()) {
+          query.set('query', input.query.trim());
+        }
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/network/services${suffix}`);
       },
       listBots: async (input) => {
         const query = new URLSearchParams();
@@ -1768,8 +1828,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const resolvedActiveVariant = config.evolution_network.enabled
           ? await resolveActiveVariantForSkill(context, input.skill)
           : { activeVariant: null, activeVariantSource: null };
-        const rendered = renderResolvedSkillContract({
-          skillName: input.skill,
+        const rendered = await renderSkillContractWithOnlineServiceContext({
+          context,
+          skill: input.skill,
           host: input.host as ConcreteSkillHost | undefined,
           format: input.format as SkillRenderFormat,
           evolutionNetworkEnabled: config.evolution_network.enabled,
@@ -2258,6 +2319,33 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     await providerHeartbeatLoop.start();
   }
 
+  const onlineServiceCacheStore = createOnlineServiceCacheStore(paths);
+  const ratingDetailStateStore = createRatingDetailStateStore(paths);
+  const refreshOnlineServiceCache = async () => {
+    await refreshOnlineServiceCacheFromChain({
+      store: onlineServiceCacheStore,
+      ratingDetailStateStore,
+      chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+      socketPresenceApiBaseUrl,
+      socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+        ? 'assume_service_providers_online'
+        : 'throw',
+      resolvePeerChatPublicKey: fetchPeerChatPublicKey
+        ?? ((globalMetaId: string) => fetchPeerChatPublicKeyFromChain(globalMetaId, {
+          chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+        })),
+    });
+  };
+  void refreshOnlineServiceCache().catch((error) => {
+    console.warn('[online service cache] initial refresh failed:', error instanceof Error ? error.message : String(error));
+  });
+  const onlineServiceCacheInterval = setInterval(() => {
+    void refreshOnlineServiceCache().catch((error) => {
+      console.warn('[online service cache] periodic refresh failed:', error instanceof Error ? error.message : String(error));
+    });
+  }, DEFAULT_ONLINE_SERVICE_CACHE_SYNC_INTERVAL_MS);
+  onlineServiceCacheInterval.unref?.();
+
   // ---- LLM runtime discovery and resolver ----
   const llmRuntimeStore = createLlmRuntimeStore(paths);
   const llmBindingStore = createLlmBindingStore(paths);
@@ -2325,6 +2413,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     shuttingDown = true;
     simplemsgListener.stop();
     providerHeartbeatLoop.stop();
+    clearInterval(onlineServiceCacheInterval);
     await runtimeStore.clearDaemon(process.pid);
     await daemon.close();
     process.exit(exitCode);

@@ -18,6 +18,7 @@ Delegate one task to a remote MetaBot over MetaWeb while preserving validated or
 Should trigger when:
 
 - The user asks to call/delegate a task to a remote MetaBot service.
+- The user describes a task that matches an available cached online skill service, even if they did not explicitly ask to browse services first.
 - The user asks to continue following a call by trace id (`trace watch` / `trace get`).
 - The user asks to inspect post-call details after timeout/clarification/manual-action signals.
 - The user asks to complete buyer-side rating closure after delivery.
@@ -43,7 +44,8 @@ Prepare a request file:
     "spendCap": {
       "amount": "0.00005",
       "currency": "SPACE"
-    }
+    },
+    "policyMode": "confirm_paid_only"
   }
 }
 ```
@@ -95,13 +97,19 @@ That rating call also attempts the validated provider-side follow-up: it writes 
 
 {{CONFIRMATION_CONTRACT}}
 
+Free services (`price` explicitly equal to numeric `0`) may be delegated directly when they clearly match the user's request. Missing, blank, invalid, or non-zero prices must not be treated as free. Paid services must still show provider, service, price, and currency, then wait for explicit confirmation before calling. After the human confirms, call `services call` with the same request plus `"confirmed": true`.
+
 ## Delegation Flow
 
 - Keep the framing as one local MetaBot delegating to one remote MetaBot.
+- First prefer any `<available_remote_services>` context already injected by the host/runtime. Select the best match by service name, description, provider skill, rating average, rating count, and freshness.
+- If no injected context is available, run `{{METABOT_CLI}} network services --online --query "<short task keywords>"` internally to refresh and search the local online service cache before preparing the request.
 - If a demo-time `providerDaemonBaseUrl` is available from the network manage flow, include it in the request as a transport hint.
 - `{{METABOT_CLI}} services call` is the only command that starts remote delegation.
 - `{{METABOT_CLI}} trace watch` is the host-session live progress stream after delegation starts.
 - If no provider daemon URL is available yet, the command can still return the validated local delegation plan and trace envelope so the host can pause or hand off cleanly.
+- Always include `policyMode: "confirm_paid_only"` in the call request unless the human explicitly asks for stricter confirmation.
+- If `services call` returns `awaiting_confirmation`, surface the preview to the human and only resend the returned `confirmRequest` after explicit confirmation.
 
 ## Result Handling
 

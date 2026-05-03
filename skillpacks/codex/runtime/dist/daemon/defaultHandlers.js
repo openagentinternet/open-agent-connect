@@ -38,6 +38,7 @@ const uploadFile_1 = require("../core/files/uploadFile");
 const postBuzz_1 = require("../core/buzz/postBuzz");
 const bootstrapFlow_1 = require("../core/bootstrap/bootstrapFlow");
 const chainDirectoryReader_1 = require("../core/discovery/chainDirectoryReader");
+const onlineServiceCache_1 = require("../core/discovery/onlineServiceCache");
 const chainHeartbeatDirectory_1 = require("../core/discovery/chainHeartbeatDirectory");
 const socketPresenceDirectory_1 = require("../core/discovery/socketPresenceDirectory");
 const sessionStateStore_1 = require("../core/a2a/sessionStateStore");
@@ -735,6 +736,7 @@ function readCallRequest(rawInput) {
         rawRequest: normalizeText(request.rawRequest),
         spendCap: readObject(request.spendCap),
         policyMode: request.policyMode,
+        confirmed: request.confirmed === true || rawInput.confirmed === true,
     };
 }
 function readPrivateChatRequest(rawInput) {
@@ -1006,6 +1008,32 @@ function dedupeServices(services) {
         const rightUpdatedAt = Number(right.updatedAt ?? 0);
         return rightUpdatedAt - leftUpdatedAt;
     });
+}
+async function enrichServicesWithProviderChatPublicKeys(input) {
+    if (!input.resolvePeerChatPublicKey) {
+        return input.services;
+    }
+    const chatKeyByProvider = new Map();
+    const enriched = [];
+    for (const service of input.services) {
+        const providerGlobalMetaId = normalizeText(service.providerGlobalMetaId ?? service.globalMetaId);
+        const existingChatKey = normalizeText(service.providerChatPublicKey ?? service.chatPublicKey);
+        if (!providerGlobalMetaId || existingChatKey) {
+            enriched.push(existingChatKey ? { ...service, providerChatPublicKey: existingChatKey } : service);
+            continue;
+        }
+        if (!chatKeyByProvider.has(providerGlobalMetaId)) {
+            try {
+                chatKeyByProvider.set(providerGlobalMetaId, normalizeText(await input.resolvePeerChatPublicKey(providerGlobalMetaId)) || null);
+            }
+            catch {
+                chatKeyByProvider.set(providerGlobalMetaId, null);
+            }
+        }
+        const providerChatPublicKey = chatKeyByProvider.get(providerGlobalMetaId);
+        enriched.push(providerChatPublicKey ? { ...service, providerChatPublicKey } : service);
+    }
+    return enriched;
 }
 function normalizeEpochSeconds(value) {
     if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
@@ -1740,11 +1768,14 @@ async function buildTraceInspectorPayload(input) {
         },
     };
 }
-async function fetchPeerChatPublicKey(globalMetaId) {
+async function fetchPeerChatPublicKey(globalMetaId, options = {}) {
     const normalized = normalizeText(globalMetaId);
     if (!normalized)
         return null;
     const urls = [
+        ...(normalizeText(options.chainApiBaseUrl)
+            ? [`${normalizeText(options.chainApiBaseUrl).replace(/\/$/, '')}/api/info/metaid/${encodeURIComponent(normalized)}`]
+            : []),
         `https://file.metaid.io/metafile-indexer/api/v1/info/globalmetaid/${encodeURIComponent(normalized)}`,
         `https://manapi.metaid.io/api/info/metaid/${encodeURIComponent(normalized)}`,
     ];
@@ -1766,29 +1797,85 @@ async function fetchPeerChatPublicKey(globalMetaId) {
     return null;
 }
 async function listRuntimeDirectoryServices(input) {
+    const selectCachedServices = async () => {
+        const cache = await input.onlineServiceCacheStore?.read().catch(() => null);
+        if (!cache || cache.services.length === 0) {
+            return null;
+        }
+        return {
+            services: (0, onlineServiceCache_1.searchOnlineServiceCacheServices)(cache.services, {
+                query: input.query,
+                onlineOnly: input.onlineOnly,
+            }),
+            discoverySource: 'cache',
+            fallbackUsed: true,
+        };
+    };
     const localServices = input.state.services
         .filter((service) => service.available === 1)
         .map((service) => summarizeService(service));
-    const directory = await (0, chainDirectoryReader_1.readChainDirectoryWithFallback)({
-        chainApiBaseUrl: input.chainApiBaseUrl,
-        socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
-        socketPresenceFailureMode: input.socketPresenceFailureMode,
-        onlineOnly: input.onlineOnly,
-        fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(input.directorySeedsPath),
+    let directory;
+    let decoratedLocalServices;
+    try {
+        directory = await (0, chainDirectoryReader_1.readChainDirectoryWithFallback)({
+            chainApiBaseUrl: input.chainApiBaseUrl,
+            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceFailureMode: input.socketPresenceFailureMode,
+            onlineOnly: input.onlineOnly,
+            fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(input.directorySeedsPath),
+        });
+        decoratedLocalServices = await decorateServicesWithSocketPresence({
+            services: localServices,
+            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceFailureMode: input.socketPresenceFailureMode,
+            onlineOnly: input.onlineOnly,
+        });
+    }
+    catch (error) {
+        const cached = await selectCachedServices();
+        if (cached) {
+            return cached;
+        }
+        throw error;
+    }
+    const mergedServices = await enrichServicesWithProviderChatPublicKeys({
+        services: dedupeServices([
+            ...directory.services,
+            ...decoratedLocalServices,
+        ]),
+        resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
     });
-    const decoratedLocalServices = await decorateServicesWithSocketPresence({
-        services: localServices,
-        socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
-        socketPresenceFailureMode: input.socketPresenceFailureMode,
+    if (directory.fallbackUsed && mergedServices.length === 0) {
+        const cached = await selectCachedServices();
+        if (cached) {
+            return cached;
+        }
+    }
+    let ratingDetails = [];
+    if (input.ratingDetailStateStore) {
+        const current = await input.ratingDetailStateStore.read();
+        try {
+            const refreshed = await (0, ratingDetailSync_1.refreshRatingDetailCacheFromChain)({
+                store: input.ratingDetailStateStore,
+                chainApiBaseUrl: input.chainApiBaseUrl,
+            });
+            ratingDetails = refreshed.state.items;
+        }
+        catch {
+            ratingDetails = current.items;
+        }
+    }
+    const cacheState = (0, onlineServiceCache_1.buildOnlineServiceCacheState)({
+        services: mergedServices,
+        ratingDetails,
+        discoverySource: directory.source,
+        fallbackUsed: directory.fallbackUsed,
+    });
+    await input.onlineServiceCacheStore?.write(cacheState).catch(() => null);
+    const services = (0, onlineServiceCache_1.searchOnlineServiceCacheServices)(cacheState.services, {
+        query: input.query,
         onlineOnly: input.onlineOnly,
     });
-    const mergedServices = dedupeServices([
-        ...directory.services,
-        ...decoratedLocalServices,
-    ]);
-    const services = input.onlineOnly
-        ? mergedServices.filter((service) => service.online === true)
-        : mergedServices;
     return {
         services,
         discoverySource: directory.source,
@@ -2691,6 +2778,7 @@ function createDefaultMetabotDaemonHandlers(input) {
     const masterAutoFeedbackStateStore = (0, masterAutoFeedbackState_1.createMasterAutoFeedbackStateStore)(input.homeDir);
     const providerPresenceStore = (0, providerPresenceState_1.createProviderPresenceStateStore)(input.homeDir);
     const ratingDetailStateStore = (0, ratingDetailState_1.createRatingDetailStateStore)(input.homeDir);
+    const onlineServiceCacheStore = (0, onlineServiceCache_1.createOnlineServiceCacheStore)(input.homeDir);
     const sessionStateStore = (0, sessionStateStore_1.createSessionStateStore)(input.homeDir);
     const privateChatStateStore = (0, privateChatStateStore_1.createPrivateChatStateStore)(input.homeDir);
     const autoReplyConfig = input.autoReplyConfig ?? {
@@ -2699,7 +2787,10 @@ function createDefaultMetabotDaemonHandlers(input) {
         defaultStrategyId: null,
     };
     const sessionEngine = (0, sessionEngine_1.createA2ASessionEngine)();
-    const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey ?? fetchPeerChatPublicKey;
+    const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey
+        ?? ((globalMetaId) => fetchPeerChatPublicKey(globalMetaId, {
+            chainApiBaseUrl: input.chainApiBaseUrl,
+        }));
     const callerReplyWaiter = input.callerReplyWaiter ?? (0, metawebReplyWaiter_1.createSocketIoMetaWebReplyWaiter)();
     const masterReplyWaiter = input.masterReplyWaiter ?? null;
     const servicePaymentExecutor = input.servicePaymentExecutor ?? (0, servicePayment_1.createWalletServicePaymentExecutor)({ secretStore });
@@ -3021,6 +3112,9 @@ function createDefaultMetabotDaemonHandlers(input) {
         const directory = await listRuntimeDirectoryServices({
             state,
             directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+            onlineServiceCacheStore,
+            ratingDetailStateStore,
+            resolvePeerChatPublicKey,
             chainApiBaseUrl: input.chainApiBaseUrl,
             socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
             socketPresenceFailureMode: input.socketPresenceFailureMode,
@@ -5400,15 +5494,19 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
         },
         network: {
-            listServices: async ({ online }) => {
+            listServices: async ({ online, query }) => {
                 const state = await runtimeStateStore.readState();
                 const directory = await listRuntimeDirectoryServices({
                     state,
                     directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+                    onlineServiceCacheStore,
+                    ratingDetailStateStore,
+                    resolvePeerChatPublicKey,
                     chainApiBaseUrl: input.chainApiBaseUrl,
                     socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
                     socketPresenceFailureMode: input.socketPresenceFailureMode,
                     onlineOnly: online === true,
+                    query,
                 });
                 return (0, commandResult_1.commandSuccess)({
                     services: directory.services,
@@ -5442,6 +5540,9 @@ function createDefaultMetabotDaemonHandlers(input) {
                         const directory = await listRuntimeDirectoryServices({
                             state,
                             directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+                            onlineServiceCacheStore,
+                            ratingDetailStateStore,
+                            resolvePeerChatPublicKey,
                             chainApiBaseUrl: input.chainApiBaseUrl,
                             socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
                             socketPresenceFailureMode: input.socketPresenceFailureMode,
@@ -5684,6 +5785,9 @@ function createDefaultMetabotDaemonHandlers(input) {
                     const directory = await listRuntimeDirectoryServices({
                         state,
                         directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+                        onlineServiceCacheStore,
+                        ratingDetailStateStore,
+                        resolvePeerChatPublicKey,
                         chainApiBaseUrl: input.chainApiBaseUrl,
                         socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
                         socketPresenceFailureMode: input.socketPresenceFailureMode,
@@ -5715,6 +5819,40 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('service_not_found', 'Published service was not found in the available service directory.');
                 }
                 const serviceDisplayName = normalizeText(service.displayName) || normalizeText(service.serviceName);
+                if (plan.confirmation.requiresConfirmation
+                    && request.confirmed !== true
+                    && (plan.confirmation.policyMode === 'confirm_paid_only' || plan.confirmation.policyMode === 'auto_when_safe')) {
+                    const confirmRequest = {
+                        servicePinId: plan.service.servicePinId,
+                        providerGlobalMetaId: plan.service.providerGlobalMetaId,
+                        userTask: request.userTask,
+                        taskContext: request.taskContext,
+                        rawRequest: request.rawRequest,
+                        policyMode: plan.confirmation.policyMode,
+                        confirmed: true,
+                    };
+                    if (request.providerDaemonBaseUrl) {
+                        confirmRequest.providerDaemonBaseUrl = request.providerDaemonBaseUrl;
+                    }
+                    if (request.spendCap) {
+                        confirmRequest.spendCap = request.spendCap;
+                    }
+                    return (0, commandResult_1.commandAwaitingConfirmation)({
+                        traceId: null,
+                        providerGlobalMetaId: plan.service.providerGlobalMetaId,
+                        serviceName: serviceDisplayName,
+                        service: plan.service,
+                        payment: plan.payment,
+                        confirmation: plan.confirmation,
+                        confirmRequest: {
+                            request: confirmRequest,
+                        },
+                    });
+                }
+                const resolveServicePeerChatPublicKey = async () => (normalizeText(service.providerChatPublicKey ?? service.chatPublicKey)
+                    || (plan.service.providerGlobalMetaId === state.identity.globalMetaId
+                        ? state.identity.chatPublicKey
+                        : await resolvePeerChatPublicKey(plan.service.providerGlobalMetaId) ?? ''));
                 let orderPayment = null;
                 let paymentTxid = '';
                 let orderReference = '';
@@ -5935,9 +6073,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     catch (error) {
                         return (0, commandResult_1.commandFailed)('identity_secret_missing', error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.');
                     }
-                    const peerChatPublicKey = plan.service.providerGlobalMetaId === state.identity.globalMetaId
-                        ? state.identity.chatPublicKey
-                        : await resolvePeerChatPublicKey(plan.service.providerGlobalMetaId) ?? '';
+                    const peerChatPublicKey = await resolveServicePeerChatPublicKey();
                     if (!peerChatPublicKey) {
                         return (0, commandResult_1.commandFailed)('peer_chat_public_key_missing', 'Remote agent has no published chat public key on chain.');
                     }
@@ -6087,9 +6223,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 let responsePublicStatus = publicStatus.status;
                 if (!request.providerDaemonBaseUrl) {
                     const privateChatIdentity = await signer.getPrivateChatIdentity();
-                    const peerChatPublicKey = plan.service.providerGlobalMetaId === state.identity.globalMetaId
-                        ? state.identity.chatPublicKey
-                        : await resolvePeerChatPublicKey(plan.service.providerGlobalMetaId) ?? '';
+                    const peerChatPublicKey = await resolveServicePeerChatPublicKey();
                     // Schedule background continuation immediately (was previously only on timeout)
                     scheduleCallerReplyContinuation({
                         trace,

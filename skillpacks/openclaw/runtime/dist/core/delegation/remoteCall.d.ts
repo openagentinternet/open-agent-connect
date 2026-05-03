@@ -9,6 +9,7 @@ export interface DelegationRequest {
     userTask: string;
     taskContext: string;
     rawRequest: string;
+    policyMode?: string;
 }
 export interface RemoteServiceDescriptor {
     servicePinId?: string | null;
@@ -21,6 +22,11 @@ export interface RemoteServiceDescriptor {
     currency?: string | null;
     ratingAvg?: number | null;
     ratingCount?: number | null;
+    providerName?: string | null;
+    providerDaemonBaseUrl?: string | null;
+    providerChatPublicKey?: string | null;
+    updatedAt?: number | null;
+    lastSeenAgoSeconds?: number | null;
 }
 export interface RemoteCallRequest {
     servicePinId: string;

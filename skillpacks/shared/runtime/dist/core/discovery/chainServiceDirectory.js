@@ -198,7 +198,7 @@ function parseChainServiceItem(item) {
         serviceName,
         displayName: toSafeString(summary.displayName) || serviceName || 'Service',
         description: toSafeString(summary.description),
-        price: toSafeString(summary.price) || '0',
+        price: toSafeString(summary.price),
         currency: toSafeString(summary.currency ?? summary.priceUnit),
         serviceIcon: toSafeString(summary.serviceIcon) || null,
         providerSkill: toSafeString(summary.providerSkill) || null,

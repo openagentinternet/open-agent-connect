@@ -52,6 +52,7 @@ export interface CliDependencies {
     network?: {
         listServices?: (input: {
             online?: boolean;
+            query?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         listBots?: (input: {
             online?: boolean;

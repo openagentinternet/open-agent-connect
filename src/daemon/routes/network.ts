@@ -30,10 +30,15 @@ export const handleNetworkRoutes: RouteHandler = async (context) => {
       return true;
     }
 
+    const query = url.searchParams.get('query') ?? url.searchParams.get('q') ?? undefined;
+    const request: { online?: boolean; query?: string } = {
+      online: parseBoolean(url.searchParams.get('online')),
+    };
+    if (query) {
+      request.query = query;
+    }
     const result = handlers.network?.listServices
-      ? await handlers.network.listServices({
-          online: parseBoolean(url.searchParams.get('online')),
-        })
+      ? await handlers.network.listServices(request)
       : commandFailed('not_implemented', 'Network services handler is not configured.');
     context.sendJson(200, result);
     return true;

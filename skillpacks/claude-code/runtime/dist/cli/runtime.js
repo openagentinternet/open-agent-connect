@@ -36,6 +36,10 @@ const homeSelection_1 = require("../core/state/homeSelection");
 const runtimeStateStore_1 = require("../core/state/runtimeStateStore");
 const providerHeartbeatLoop_1 = require("../core/provider/providerHeartbeatLoop");
 const providerPresenceState_1 = require("../core/provider/providerPresenceState");
+const onlineServiceCache_1 = require("../core/discovery/onlineServiceCache");
+const onlineServiceCacheSync_1 = require("../core/discovery/onlineServiceCacheSync");
+const remoteCall_1 = require("../core/delegation/remoteCall");
+const ratingDetailState_1 = require("../core/ratings/ratingDetailState");
 const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const writePin_1 = require("../core/chain/writePin");
@@ -774,6 +778,46 @@ async function clearActiveVariantMapping(context, skillName) {
         previousVariantId: previousVariantRef.variantId,
     };
 }
+async function readInjectedRemoteServicesPrompt(context) {
+    try {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const cache = await (0, onlineServiceCache_1.createOnlineServiceCacheStore)(homeDir).read();
+        const services = cache.services
+            .filter((service) => service.available && service.online)
+            .slice(0, 20);
+        return (0, remoteCall_1.buildRemoteServicesPrompt)(services);
+    }
+    catch {
+        return null;
+    }
+}
+async function renderSkillContractWithOnlineServiceContext(input) {
+    const rendered = (0, skillResolver_1.renderResolvedSkillContract)({
+        skillName: input.skill,
+        host: input.host,
+        format: input.format,
+        evolutionNetworkEnabled: input.evolutionNetworkEnabled,
+        activeVariant: input.activeVariant,
+        activeVariantSource: input.activeVariantSource,
+    });
+    const remoteServicesPrompt = await readInjectedRemoteServicesPrompt(input.context);
+    if (!remoteServicesPrompt) {
+        return rendered;
+    }
+    if (rendered.format === 'markdown') {
+        return {
+            ...rendered,
+            markdown: `${rendered.markdown}\n\n## Available Remote Services\n${remoteServicesPrompt}`,
+        };
+    }
+    return {
+        ...rendered,
+        contract: {
+            ...rendered.contract,
+            instructions: `${rendered.contract.instructions}\n\n${remoteServicesPrompt}`,
+        },
+    };
+}
 async function resolveEvolutionScopeHashForSkill(input) {
     const resolvedActiveVariant = input.evolutionNetworkEnabled
         ? await resolveActiveVariantForSkill(input.context, input.skillName)
@@ -1210,8 +1254,15 @@ function createDefaultCliDependencies(context) {
         },
         network: {
             listServices: async (input) => {
-                const query = input.online === undefined ? '' : `?online=${input.online ? 'true' : 'false'}`;
-                return requestJson(context, 'GET', `/api/network/services${query}`);
+                const query = new URLSearchParams();
+                if (input.online !== undefined) {
+                    query.set('online', input.online ? 'true' : 'false');
+                }
+                if (typeof input.query === 'string' && input.query.trim()) {
+                    query.set('query', input.query.trim());
+                }
+                const suffix = query.size ? `?${query.toString()}` : '';
+                return requestJson(context, 'GET', `/api/network/services${suffix}`);
             },
             listBots: async (input) => {
                 const query = new URLSearchParams();
@@ -1404,8 +1455,9 @@ function createDefaultCliDependencies(context) {
                 const resolvedActiveVariant = config.evolution_network.enabled
                     ? await resolveActiveVariantForSkill(context, input.skill)
                     : { activeVariant: null, activeVariantSource: null };
-                const rendered = (0, skillResolver_1.renderResolvedSkillContract)({
-                    skillName: input.skill,
+                const rendered = await renderSkillContractWithOnlineServiceContext({
+                    context,
+                    skill: input.skill,
                     host: input.host,
                     format: input.format,
                     evolutionNetworkEnabled: config.evolution_network.enabled,
@@ -1850,6 +1902,32 @@ async function serveCliDaemonProcess(context) {
     if (providerPresence.enabled) {
         await providerHeartbeatLoop.start();
     }
+    const onlineServiceCacheStore = (0, onlineServiceCache_1.createOnlineServiceCacheStore)(paths);
+    const ratingDetailStateStore = (0, ratingDetailState_1.createRatingDetailStateStore)(paths);
+    const refreshOnlineServiceCache = async () => {
+        await (0, onlineServiceCacheSync_1.refreshOnlineServiceCacheFromChain)({
+            store: onlineServiceCacheStore,
+            ratingDetailStateStore,
+            chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+            socketPresenceApiBaseUrl,
+            socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+                ? 'assume_service_providers_online'
+                : 'throw',
+            resolvePeerChatPublicKey: fetchPeerChatPublicKey
+                ?? ((globalMetaId) => (0, defaultHandlers_1.fetchPeerChatPublicKey)(globalMetaId, {
+                    chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+                })),
+        });
+    };
+    void refreshOnlineServiceCache().catch((error) => {
+        console.warn('[online service cache] initial refresh failed:', error instanceof Error ? error.message : String(error));
+    });
+    const onlineServiceCacheInterval = setInterval(() => {
+        void refreshOnlineServiceCache().catch((error) => {
+            console.warn('[online service cache] periodic refresh failed:', error instanceof Error ? error.message : String(error));
+        });
+    }, onlineServiceCache_1.DEFAULT_ONLINE_SERVICE_CACHE_SYNC_INTERVAL_MS);
+    onlineServiceCacheInterval.unref?.();
     // ---- LLM runtime discovery and resolver ----
     const llmRuntimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(paths);
     const llmBindingStore = (0, llmBindingStore_1.createLlmBindingStore)(paths);
@@ -1915,6 +1993,7 @@ async function serveCliDaemonProcess(context) {
         shuttingDown = true;
         simplemsgListener.stop();
         providerHeartbeatLoop.stop();
+        clearInterval(onlineServiceCacheInterval);
         await runtimeStore.clearDaemon(process.pid);
         await daemon.close();
         process.exit(exitCode);

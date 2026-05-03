@@ -3,7 +3,11 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
-const { planRemoteCall } = require('../../dist/core/delegation/remoteCall.js');
+const {
+  buildRemoteServicesPrompt,
+  parseDelegationMessage,
+  planRemoteCall,
+} = require('../../dist/core/delegation/remoteCall.js');
 
 function createAvailableService(overrides = {}) {
   return {
@@ -64,6 +68,24 @@ test('planRemoteCall blocks payment before broadcast when the service price exce
   assert.equal(result.state, 'blocked');
   assert.equal(result.code, 'spend_cap_exceeded');
   assert.match(result.message, /spend cap/i);
+});
+
+test('planRemoteCall rejects unpriced services instead of treating them as free', () => {
+  const result = planRemoteCall({
+    request: {
+      servicePinId: 'service-weather',
+      providerGlobalMetaId: 'seller-global-metaid',
+      userTask: 'check tomorrow weather',
+      taskContext: 'Shanghai tomorrow weather',
+      policyMode: 'confirm_paid_only',
+    },
+    availableServices: [createAvailableService({ price: '' })],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'blocked');
+  assert.equal(result.code, 'invalid_price');
+  assert.equal(result.confirmation.requiresConfirmation, true);
 });
 
 test('planRemoteCall returns offline when the requested remote service is not available', () => {
@@ -149,4 +171,28 @@ test('planRemoteCall surfaces manual_action_required when refund follow-up must 
   assert.equal(result.code, 'manual_refund_required');
   assert.equal(result.traceId, 'trace-weather-order-1');
   assert.equal(result.confirmation.policyMode, 'confirm_all');
+});
+
+test('remote service prompt supports natural-language selection and free-service auto delegation policy', () => {
+  const prompt = buildRemoteServicesPrompt([
+    createAvailableService({
+      servicePinId: 'tarot-service',
+      serviceName: 'tarot-reading',
+      displayName: '塔罗牌占卜',
+      description: '为明天运程提供塔罗牌占卜。',
+      price: '0',
+      providerName: 'TarotBot',
+      updatedAt: 1_775_000_000_000,
+    }),
+  ]);
+
+  assert.match(prompt, /locally cached online remote on-chain services/);
+  assert.match(prompt, /rating average|rating/i);
+  assert.match(prompt, /policyMode "confirm_paid_only"/);
+  assert.match(prompt, /<provider_name>TarotBot<\/provider_name>/);
+  assert.match(prompt, /<updated_at>1775000000000<\/updated_at>/);
+
+  const parsed = parseDelegationMessage(`[DELEGATE_REMOTE_SERVICE] {"servicePinId":"tarot-service","serviceName":"塔罗牌占卜","providerGlobalMetaid":"seller-global-metaid","price":"0","currency":"SPACE","rawRequest":"我想用塔罗牌占卜一下明天运程","userTask":"tarot tomorrow fortune","taskContext":"free tarot service match","policyMode":"confirm_paid_only"}`);
+  assert.equal(parsed.policyMode, 'confirm_paid_only');
+  assert.equal(parsed.rawRequest, '我想用塔罗牌占卜一下明天运程');
 });

@@ -3,6 +3,8 @@ export interface MetabotPaths {
     metabotRoot: string;
     managerRoot: string;
     skillsRoot: string;
+    globalServicesRoot: string;
+    onlineServicesCachePath: string;
     profilesRoot: string;
     profileRoot: string;
     workspaceRoot: string;
