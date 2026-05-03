@@ -127,7 +127,8 @@ function normalizeBtcUtxos(input) {
         && Number.isFinite(utxo.satoshis)
         && utxo.satoshis >= 600));
     const confirmed = normalized.filter((utxo) => utxo.confirmed !== false);
-    return confirmed.length > 0 ? confirmed : normalized;
+    const unconfirmed = normalized.filter((utxo) => utxo.confirmed === false);
+    return [...confirmed, ...unconfirmed];
 }
 async function fetchBtcRawTxHex(txId, options = {}) {
     if (!options.preferMempool) {

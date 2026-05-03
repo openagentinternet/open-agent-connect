@@ -1316,16 +1316,22 @@ function createDefaultCliDependencies(context) {
                 const balanceSnap = parsed.chain === 'btc'
                     ? await fetchBtcBalanceSnapshot(fromAddress)
                     : await fetchMvcBalanceSnapshot(fromAddress);
-                if (balanceSnap.confirmedSatoshis < totalRequired) {
-                    const balanceDisplay = `${balanceSnap.confirmedSatoshis} sats (${(balanceSnap.confirmedSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
-                    return (0, commandResult_1.commandFailed)('insufficient_balance', `Confirmed balance ${balanceDisplay} is below the required ${totalRequired} sats (${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency} + estimated fee ${estimatedFeeSatoshis} sats).`);
+                if (balanceSnap.totalSatoshis < totalRequired) {
+                    const balanceDisplay = `${balanceSnap.totalSatoshis} sats (${(balanceSnap.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
+                    const unconfirmedNote = balanceSnap.unconfirmedSatoshis > 0
+                        ? ` (includes ${balanceSnap.unconfirmedSatoshis} unconfirmed sats)`
+                        : '';
+                    return (0, commandResult_1.commandFailed)('insufficient_balance', `Total balance ${balanceDisplay}${unconfirmedNote} is below the required ${totalRequired} sats (${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency} + estimated fee ${estimatedFeeSatoshis} sats).`);
                 }
                 if (!input.confirm) {
-                    const currentBalanceDisplay = `${(balanceSnap.confirmedSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
+                    const currentBalanceDisplay = `${(balanceSnap.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
+                    const unconfirmedNote = balanceSnap.unconfirmedSatoshis > 0
+                        ? ` (includes ${balanceSnap.unconfirmedSatoshis} unconfirmed sats)`
+                        : '';
                     return (0, commandResult_1.commandAwaitingConfirmation)({
                         fromAddress,
-                        currentBalance: currentBalanceDisplay,
-                        currentBalanceSatoshis: balanceSnap.confirmedSatoshis,
+                        currentBalance: currentBalanceDisplay + unconfirmedNote,
+                        currentBalanceSatoshis: balanceSnap.totalSatoshis,
                         toAddress: input.toAddress,
                         amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
                         amountSatoshis: parsed.satoshis,
@@ -1368,7 +1374,7 @@ function createDefaultCliDependencies(context) {
                     if (lower.includes('insufficient') || lower.includes('not enough') || lower.includes('余额不足')) {
                         return (0, commandResult_1.commandFailed)('insufficient_balance', `Balance is insufficient: ${msg}`);
                     }
-                    return (0, commandResult_1.commandFailed)('transfer_broadcast_failed', `Transfer failed: ${msg}. Verify the recipient address is correct and your balance is confirmed. If UTXO inputs appear stale, wait a few minutes and retry.`);
+                    return (0, commandResult_1.commandFailed)('transfer_broadcast_failed', `Transfer failed: ${msg}. Verify the recipient address is correct and that you have enough total balance to cover the amount plus fees. If UTXO inputs appear stale, wait a few seconds and retry.`);
                 }
             },
         },

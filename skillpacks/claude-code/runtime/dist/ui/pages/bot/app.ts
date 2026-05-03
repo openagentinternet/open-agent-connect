@@ -6,176 +6,120 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
     title: 'Bot Management — Open Agent Connect',
     eyebrow: 'LLM Runtime Bindings',
     heading: 'Bot Management',
-    description: 'Discover local LLM runtimes and manage which MetaBot uses which LLM.',
+    description: 'Discover local LLM runtimes and manage MetaBot bindings.',
     panels: [],
     script: buildBotPageScript(),
   };
 }
 
 function buildBotPageScript(): string {
-  return "(function() {\n" +
-  "var q = function(s) { return document.querySelector(s); };\n" +
-  "var qq = function(s) { return document.querySelectorAll(s); };\n" +
+  return "var q=function(s){return document.querySelector(s)};\n" +
+  "var qq=function(s){return document.querySelectorAll(s)};\n" +
+  "var state={profiles:[],runtimes:[],bindings:[],preferredRuntimeId:null,selectedSlug:''};\n" +
   "\n" +
-  "var state = { profiles: [], runtimes: [], bindings: [], preferredRuntimeId: null, selectedSlug: '' };\n" +
+  "function api(url,opts){return fetch(url,opts).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()})}\n" +
+  "function ago(t){if(!t)return'never';var d=Date.now()-new Date(t).getTime();if(d<6e4)return'just now';if(d<36e5)return Math.floor(d/6e4)+'m ago';if(d<864e5)return Math.floor(d/36e5)+'h ago';return Math.floor(d/864e5)+'d ago'}\n" +
   "\n" +
-  "function hdot(h) { return '<span class=\"health-dot ' + (h||'unknown') + '\" title=\"' + (h||'unknown') + '\"></span>'; }\n" +
+  "function pill(h){var m={healthy:'online',degraded:'recent',unavailable:'offline'};var c=m[h]||'offline';return'<span class=\"status-pill status-'+c+'\"><span class=\"status-dot\"></span>'+h+'</span>'}\n" +
   "\n" +
-  "function api(url, opts) {\n" +
-  "  return fetch(url, opts).then(function(r) {\n" +
-  "    if (!r.ok) throw new Error('HTTP ' + r.status);\n" +
-  "    return r.json();\n" +
-  "  });\n" +
+  "function renderStats(){\n" +
+  "  q('[data-stat-runtimes]').textContent=state.runtimes.length||'—';\n" +
+  "  q('[data-stat-profiles]').textContent=state.profiles.length||'—';\n" +
+  "  q('[data-stat-bindings]').textContent=state.bindings.length||'—';\n" +
+  "  q('[data-stat-active]').textContent=state.selectedSlug||'—';\n" +
+  "  var b=q('[data-runtime-count-badge]');if(b)b.textContent=state.runtimes.length+' available';\n" +
   "}\n" +
   "\n" +
-  "function renderRuntimes() {\n" +
-  "  var p = q('[data-runtimes-panel]'); if (!p) return;\n" +
-  "  if (!state.runtimes.length) { p.innerHTML = '<p class=\"dim\">No runtimes discovered. Click Discover.</p>'; return; }\n" +
-  "  p.innerHTML = state.runtimes.map(function(r) {\n" +
-  "    return '<div class=\"runtime-card\" data-runtime-id=\"' + r.id + '\">' +\n" +
-  "      '<div class=\"flex-row\"><span class=\"name\">' + hdot(r.health) + (r.displayName||r.provider) + '</span>' +\n" +
-  "      '<span class=\"meta\">v' + (r.version||'?') + '</span></div>' +\n" +
-  "      '<div class=\"meta\">' + (r.binaryPath||'no binary') + ' · ' + (r.authState||'unknown') + '</div></div>';\n" +
-  "  }).join('');\n" +
+  "function renderRuntimes(){\n" +
+  "  var tb=q('[data-runtime-list]');if(!tb)return;\n" +
+  "  if(!state.runtimes.length){tb.innerHTML='<tr><td colspan=\"5\" class=\"table-empty\"><strong>No runtimes discovered</strong>Click discover to scan PATH.</td></tr>';return}\n" +
+  "  tb.innerHTML=state.runtimes.map(function(r){return'<tr>'+\n" +
+  "    '<td><div class=\"rt-name\">'+(r.displayName||r.provider)+'</div></td>'+\n" +
+  "    '<td><div class=\"rt-path\">'+(r.binaryPath||'—')+'</div></td>'+\n" +
+  "    '<td><span class=\"rt-version\">'+(r.version?'v'+r.version:'—')+'</span></td>'+\n" +
+  "    '<td><span class=\"rt-auth '+(r.authState==='authenticated'?'ok':'nope')+'\">'+(r.authState||'unknown')+'</span></td>'+\n" +
+  "    '<td>'+pill(r.health)+'</td></tr>'}).join('');\n" +
+  "  var b=q('[data-runtime-count-badge]');if(b)b.textContent=state.runtimes.length+' available';\n" +
   "}\n" +
   "\n" +
-  "function renderBindings() {\n" +
-  "  var p = q('[data-bindings-panel]'); var sl = q('[data-slug-label]');\n" +
-  "  if (!p) return;\n" +
-  "  if (sl) sl.textContent = state.selectedSlug ? 'Bindings for: ' + state.selectedSlug : '';\n" +
-  "  if (!state.selectedSlug) { p.innerHTML = '<p class=\"dim\">Select a profile to manage its bindings.</p>'; renderAdd(false); return; }\n" +
-  "  if (!state.bindings.length) { p.innerHTML = '<p class=\"dim\">No bindings. Add one below.</p>'; renderAdd(true); return; }\n" +
-  "  var h = '';\n" +
-  "  for (var i = 0; i < state.bindings.length; i++) {\n" +
-  "    var b = state.bindings[i];\n" +
-  "    var rn = b.llmRuntimeId;\n" +
-  "    var rt = state.runtimes.find(function(r) { return r.id === b.llmRuntimeId; });\n" +
-  "    if (rt) rn = rt.displayName || rt.provider;\n" +
-  "    h += '<div class=\"binding-row' + (b.enabled?'':' disabled-row') + '\" data-binding-id=\"' + b.id + '\">' +\n" +
-  "      '<span class=\"binding-role ' + b.role + '\">' + b.role + '</span>' +\n" +
-  "      '<span class=\"binding-runtime\">' + rn + '</span>' +\n" +
-  "      '<span class=\"meta\">priority=' + b.priority + '</span>' +\n" +
-  "      '<label class=\"toggle-label\"><input type=\"checkbox\" data-tog data-bid=\"' + b.id + '\"' + (b.enabled?' checked':'') + '> enabled</label>' +\n" +
-  "      '<button class=\"btn-sm\" data-del data-bid=\"' + b.id + '\">Remove</button></div>';\n" +
-  "  }\n" +
-  "  p.innerHTML = h;\n" +
-  "  qq('[data-tog]').forEach(function(cb) {\n" +
-  "    cb.addEventListener('change', function() {\n" +
-  "      var id = this.getAttribute('data-bid');\n" +
-  "      var b = state.bindings.find(function(x) { return x.id === id; });\n" +
-  "      if (b) { b.enabled = this.checked; saveBindings(); }\n" +
-  "    });\n" +
-  "  });\n" +
-  "  qq('[data-del]').forEach(function(btn) {\n" +
-  "    btn.addEventListener('click', function() {\n" +
-  "      var id = this.getAttribute('data-bid');\n" +
-  "      state.bindings = state.bindings.filter(function(x) { return x.id !== id; });\n" +
-  "      saveBindings();\n" +
-  "    });\n" +
-  "  });\n" +
-  "  renderAdd(true); renderPref();\n" +
+  "function renderBindings(){\n" +
+  "  var tb=q('[data-binding-list]');var w=q('[data-bindings-table-wrap]');var em=q('[data-no-bindings]');\n" +
+  "  var bdg=q('[data-binding-count-badge]');var pf=q('[data-preferred-label]');if(!tb)return;\n" +
+  "  if(!state.selectedSlug){if(w)w.style.display='none';if(em)em.style.display='none';if(bdg)bdg.textContent='—';if(pf)pf.textContent='';tb.innerHTML='';return}\n" +
+  "  if(pf){var prt=state.runtimes.find(function(r){return r.id===state.preferredRuntimeId});pf.textContent=prt?'preferred: '+(prt.displayName||prt.provider):'no preferred runtime'}\n" +
+  "  if(!state.bindings.length){\n" +
+  "    if(w)w.style.display='none';if(em)em.style.display='';if(bdg)bdg.textContent='0 bindings';tb.innerHTML='';renderPrefSelect();return}\n" +
+  "  if(w)w.style.display='';if(em)em.style.display='none';if(bdg)bdg.textContent=state.bindings.length+' binding'+(state.bindings.length>1?'s':'');\n" +
+  "  tb.innerHTML=state.bindings.map(function(b){\n" +
+  "    var rn=b.llmRuntimeId;var rt=state.runtimes.find(function(r){return r.id===b.llmRuntimeId});if(rt)rn=rt.displayName||rt.provider;\n" +
+  "    var ip=state.preferredRuntimeId===b.llmRuntimeId?' <span class=\"preferred-indicator\">★ preferred</span>':'';\n" +
+  "    return'<tr class=\"'+(b.enabled?'':'disabled-row')+'\" data-bid=\"'+b.id+'\">'+\n" +
+  "      '<td><span class=\"binding-role-badge '+b.role+'\">'+b.role+'</span></td>'+\n" +
+  "      '<td><span class=\"binding-runtime-name\">'+rn+ip+'</span></td>'+\n" +
+  "      '<td><span class=\"binding-priority\">'+b.priority+'</span></td>'+\n" +
+  "      '<td><span class=\"binding-last-used\">'+ago(b.lastUsedAt)+'</span></td>'+\n" +
+  "      '<td class=\"toggle-cell\" data-act=\"toggle\" data-bid=\"'+b.id+'\">'+(b.enabled?'✔':'✘')+'</td>'+\n" +
+  "      '<td><button class=\"btn btn-sm btn-danger\" data-act=\"delete\" data-bid=\"'+b.id+'\">remove</button></td></tr>'}).join('');\n" +
+  "  qq('[data-act=\"toggle\"]').forEach(function(el){el.addEventListener('click',function(){var id=this.getAttribute('data-bid');var b=state.bindings.find(function(x){return x.id===id});if(b){b.enabled=!b.enabled;saveBindings()}})});\n" +
+  "  qq('[data-act=\"delete\"]').forEach(function(el){el.addEventListener('click',function(){var id=this.getAttribute('data-bid');state.bindings=state.bindings.filter(function(x){return x.id!==id});saveBindings()})});\n" +
+  "  renderAddForm();renderPrefSelect();\n" +
   "}\n" +
   "\n" +
-  "function renderAdd(show) {\n" +
-  "  var p = q('[data-add-binding-panel]'); if (!p) return;\n" +
-  "  if (!show) { p.innerHTML = ''; return; }\n" +
-  "  var ropts = state.runtimes.map(function(r) {\n" +
-  "    return '<option value=\"' + r.id + '\">' + (r.displayName||r.provider) + ' (' + (r.health||'?') + ')</option>';\n" +
-  "  }).join('');\n" +
-  "  p.innerHTML = '<div class=\"add-binding-row\">' +\n" +
-  "    '<select data-nr>' + ropts + '</select>' +\n" +
-  "    '<select data-nrole><option value=\"primary\">primary</option><option value=\"fallback\">fallback</option><option value=\"reviewer\">reviewer</option><option value=\"specialist\">specialist</option></select>' +\n" +
-  "    '<input type=\"number\" data-npri value=\"0\" min=\"0\" style=\"width:60px\">' +\n" +
-  "    '<button class=\"btn\" data-add-btn>Add Binding</button></div>';\n" +
-  "  q('[data-add-btn]').addEventListener('click', function() {\n" +
-  "    var rid = q('[data-nr]').value; var role = q('[data-nrole]').value;\n" +
-  "    var pri = parseInt(q('[data-npri]').value,10)||0;\n" +
-  "    if (!rid) return;\n" +
-  "    var id = 'lb_' + state.selectedSlug + '_' + rid + '_' + role;\n" +
-  "    state.bindings = state.bindings.filter(function(b) { return !(b.llmRuntimeId===rid && b.role===role); });\n" +
+  "function renderAddForm(){\n" +
+  "  var s=q('[data-new-runtime]');if(!s)return;\n" +
+  "  s.innerHTML=state.runtimes.map(function(r){return'<option value=\"'+r.id+'\">'+(r.displayName||r.provider)+' ('+(r.health||'?')+')</option>'}).join('');\n" +
+  "}\n" +
+  "\n" +
+  "function renderPrefSelect(){\n" +
+  "  var s=q('[data-preferred-runtime]');if(!s)return;\n" +
+  "  s.innerHTML='<option value=\"\">(none — fall back to priority bindings)</option>'+state.runtimes.map(function(r){var sel=state.preferredRuntimeId===r.id?' selected':'';return'<option value=\"'+r.id+'\"'+sel+'>'+(r.displayName||r.provider)+'</option>'}).join('');\n" +
+  "}\n" +
+  "\n" +
+  "function renderProfileSelect(){\n" +
+  "  var s=q('[data-profile-select]');if(!s)return;\n" +
+  "  s.innerHTML='<option value=\"\">-- select a profile --</option>'+state.profiles.map(function(p){var sel=state.selectedSlug===p.slug?' selected':'';return'<option value=\"'+p.slug+'\"'+sel+'>'+p.name+' ('+p.slug+')</option>'}).join('');\n" +
+  "  s.addEventListener('change',function(){var slug=this.value;if(slug)loadProfile(slug)});\n" +
+  "}\n" +
+  "\n" +
+  "function loadRuntimes(){\n" +
+  "  var tb=q('[data-runtime-list]');if(tb)tb.innerHTML='<tr><td colspan=\"5\" class=\"table-empty\"><strong>Loading…</strong></td></tr>';\n" +
+  "  api('/api/llm/runtimes').then(function(r){state.runtimes=r.data.runtimes||[];renderRuntimes();renderStats();if(state.selectedSlug)renderBindings();else renderAddForm()}).catch(function(){if(tb)tb.innerHTML='<tr><td colspan=\"5\" class=\"table-empty\"><strong>Failed to load</strong>Is the daemon running?</td></tr>'})\n" +
+  "}\n" +
+  "\n" +
+  "function loadProfiles(){\n" +
+  "  api('/api/identity/profiles').then(function(r){state.profiles=r.data.profiles||[];renderProfileSelect();renderStats()}).catch(function(){})\n" +
+  "}\n" +
+  "\n" +
+  "function loadProfile(slug){\n" +
+  "  state.selectedSlug=slug;\n" +
+  "  var m=q('[data-profile-meta]');var p=state.profiles.find(function(x){return x.slug===slug});if(m)m.textContent=p?(p.globalMetaId||''):'';\n" +
+  "  api('/api/llm/bindings/'+encodeURIComponent(slug)).then(function(r){state.bindings=r.data.bindings||[];return api('/api/llm/preferred-runtime/'+encodeURIComponent(slug))}).then(function(pr){state.preferredRuntimeId=(pr.data&&pr.data.runtimeId)||null;renderBindings();renderStats()}).catch(function(){state.bindings=[];state.preferredRuntimeId=null;renderBindings();renderStats()})\n" +
+  "}\n" +
+  "\n" +
+  "function saveBindings(){\n" +
+  "  api('/api/llm/bindings/'+encodeURIComponent(state.selectedSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({bindings:state.bindings})}).then(function(){renderBindings();renderStats()}).catch(function(e){alert('Failed: '+e.message)})\n" +
+  "}\n" +
+  "\n" +
+  "function savePreferred(rid){\n" +
+  "  api('/api/llm/preferred-runtime/'+encodeURIComponent(state.selectedSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({runtimeId:rid||null})}).then(function(){state.preferredRuntimeId=rid;renderBindings()}).catch(function(e){alert('Failed: '+e.message)})\n" +
+  "}\n" +
+  "\n" +
+  "function discoverRuntimes(){\n" +
+  "  var btn=q('#discover-btn');btn.disabled=true;btn.textContent='scanning…';\n" +
+  "  api('/api/llm/runtimes/discover',{method:'POST'}).then(function(){return loadRuntimes()}).finally(function(){btn.disabled=false;btn.textContent='↻ discover'})\n" +
+  "}\n" +
+  "\n" +
+  "document.addEventListener('DOMContentLoaded',function(){\n" +
+  "  loadRuntimes();loadProfiles();\n" +
+  "  q('#discover-btn').addEventListener('click',discoverRuntimes);\n" +
+  "  q('#add-binding-btn').addEventListener('click',function(){\n" +
+  "    var rid=q('[data-new-runtime]').value;var role=q('[data-new-role]').value;var pri=parseInt(q('[data-new-priority]').value,10)||0;\n" +
+  "    if(!rid||!state.selectedSlug)return;\n" +
+  "    var id='lb_'+state.selectedSlug+'_'+rid+'_'+role;\n" +
+  "    state.bindings=state.bindings.filter(function(b){return!(b.llmRuntimeId===rid&&b.role===role)});\n" +
   "    state.bindings.push({id:id,metaBotSlug:state.selectedSlug,llmRuntimeId:rid,role:role,priority:pri,enabled:true,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});\n" +
   "    saveBindings();\n" +
   "  });\n" +
-  "}\n" +
-  "\n" +
-  "function renderPref() {\n" +
-  "  var p = q('[data-preferred-panel]'); if (!p) return;\n" +
-  "  var ropts = '<option value=\"\">(none)</option>' + state.runtimes.map(function(r) {\n" +
-  "    var sel = state.preferredRuntimeId === r.id ? ' selected' : '';\n" +
-  "    return '<option value=\"' + r.id + '\"' + sel + '>' + (r.displayName||r.provider) + '</option>';\n" +
-  "  }).join('');\n" +
-  "  p.innerHTML = '<div class=\"add-binding-row\"><label>Preferred Runtime: </label>' +\n" +
-  "    '<select data-pr>' + ropts + '</select>' +\n" +
-  "    '<button class=\"btn\" data-save-pr-btn>Save</button></div>';\n" +
-  "  q('[data-save-pr-btn]').addEventListener('click', function() {\n" +
-  "    savePref(q('[data-pr]').value || null);\n" +
-  "  });\n" +
-  "}\n" +
-  "\n" +
-  "function loadRuntimes() {\n" +
-  "  var p = q('[data-runtimes-panel]'); if (p) p.innerHTML = '<p class=\"dim\">Loading...</p>';\n" +
-  "  api('/api/llm/runtimes').then(function(r) {\n" +
-  "    state.runtimes = r.data.runtimes || [];\n" +
-  "    renderRuntimes();\n" +
-  "    if (state.selectedSlug) loadBindingsFor(state.selectedSlug);\n" +
-  "  }).catch(function() { if (p) p.innerHTML = '<p class=\"dim\">Failed to load runtimes.</p>'; });\n" +
-  "}\n" +
-  "\n" +
-  "function loadProfiles() {\n" +
-  "  api('/api/identity/profiles').then(function(r) {\n" +
-  "    state.profiles = r.data.profiles || [];\n" +
-  "    renderProfileSelector();\n" +
-  "  }).catch(function() {});\n" +
-  "}\n" +
-  "\n" +
-  "function loadBindingsFor(slug) {\n" +
-  "  state.selectedSlug = slug;\n" +
-  "  api('/api/llm/bindings/' + encodeURIComponent(slug)).then(function(r) {\n" +
-  "    state.bindings = r.data.bindings || [];\n" +
-  "    return api('/api/llm/preferred-runtime/' + encodeURIComponent(slug));\n" +
-  "  }).then(function(pr) {\n" +
-  "    state.preferredRuntimeId = (pr.data && pr.data.runtimeId) || null;\n" +
-  "    renderBindings();\n" +
-  "  }).catch(function() { state.bindings = []; state.preferredRuntimeId = null; renderBindings(); });\n" +
-  "}\n" +
-  "\n" +
-  "function saveBindings() {\n" +
-  "  api('/api/llm/bindings/' + encodeURIComponent(state.selectedSlug), {\n" +
-  "    method: 'PUT', headers: {'content-type':'application/json'},\n" +
-  "    body: JSON.stringify({bindings:state.bindings}),\n" +
-  "  }).then(function() { renderBindings(); }).catch(function(e) { alert('Failed to save: ' + e.message); });\n" +
-  "}\n" +
-  "\n" +
-  "function savePref(rid) {\n" +
-  "  api('/api/llm/preferred-runtime/' + encodeURIComponent(state.selectedSlug), {\n" +
-  "    method: 'PUT', headers: {'content-type':'application/json'},\n" +
-  "    body: JSON.stringify({runtimeId:rid}),\n" +
-  "  }).then(function() { state.preferredRuntimeId = rid; renderPref(); }).catch(function(e) { alert('Failed: ' + e.message); });\n" +
-  "}\n" +
-  "\n" +
-  "function discoverRuntimes() {\n" +
-  "  var btn = q('[data-discover-btn]'); btn.disabled = true; btn.textContent = 'Scanning...';\n" +
-  "  api('/api/llm/runtimes/discover', {method:'POST'}).then(function() { loadRuntimes(); }).finally(function() {\n" +
-  "    btn.disabled = false; btn.textContent = 'Discover Runtimes';\n" +
-  "  });\n" +
-  "}\n" +
-  "\n" +
-  "function renderProfileSelector() {\n" +
-  "  var c = q('[data-profile-selector]'); if (!c || !state.profiles.length) return;\n" +
-  "  var opts = state.profiles.map(function(p) {\n" +
-  "    var sel = state.selectedSlug === p.slug ? ' selected' : '';\n" +
-  "    return '<option value=\"' + p.slug + '\"' + sel + '>' + p.name + ' (' + p.slug + ')</option>';\n" +
-  "  }).join('');\n" +
-  "  c.innerHTML = '<label>MetaBot Profile: </label><select data-ps>' +\n" +
-  "    '<option value=\"\">-- select --</option>' + opts + '</select>';\n" +
-  "  q('[data-ps]').addEventListener('change', function() {\n" +
-  "    var slug = this.value; if (slug) loadBindingsFor(slug);\n" +
-  "  });\n" +
-  "}\n" +
-  "\n" +
-  "document.addEventListener('DOMContentLoaded', function() {\n" +
-  "  loadRuntimes(); loadProfiles();\n" +
-  "  q('[data-discover-btn]').addEventListener('click', discoverRuntimes);\n" +
-  "});\n" +
-  "})()";
+  "  q('#save-preferred-btn').addEventListener('click',function(){var val=q('[data-preferred-runtime]').value||null;savePreferred(val)});\n" +
+  "})";
 }

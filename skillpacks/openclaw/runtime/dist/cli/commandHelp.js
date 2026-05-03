@@ -573,7 +573,7 @@ const COMMAND_HELP_SPECS = [
         failureSemantics: [
             'Returns awaiting_confirmation with preview data (fromAddress, currentBalance, toAddress, amount, estimatedFee) when --confirm is omitted.',
             'Fails with invalid_argument when --to or --amount is missing, or the currency unit is not BTC or SPACE.',
-            'Fails with insufficient_balance when confirmed balance is below amount + estimated fee.',
+            'Fails with insufficient_balance when total balance (confirmed + unconfirmed) is below amount + estimated fee.',
             'Fails with transfer_broadcast_failed when the network rejects the transaction.',
         ],
         examples: [

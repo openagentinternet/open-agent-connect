@@ -92,7 +92,7 @@ Example — preview a SPACE transfer:
 
 The response has `state: "awaiting_confirmation"` and `data` containing:
 - `fromAddress` — sender address
-- `currentBalance` — current confirmed balance (e.g. `"0.001 BTC"`)
+- `currentBalance` — total spendable balance including both confirmed and unconfirmed UTXOs (e.g. `"0.001 BTC"`)
 - `toAddress` — recipient address
 - `amount` — exact amount to send
 - `estimatedFee` — estimated network fee
@@ -133,9 +133,9 @@ Always show the `explorerUrl` to the human so they can verify the transaction on
 
 ## Error Handling
 
-- **insufficient_balance** — show the current balance and tell the user how much more is needed.
+- **insufficient_balance** — show the current balance and tell the user how much more is needed. UTXOs are spendable regardless of confirmation status — the total balance is what determines whether a transfer can proceed.
 - **invalid_argument** — the address or amount format is wrong; ask the user to correct it.
-- **transfer_broadcast_failed** — the network rejected the transaction; show the error message and suggest waiting for UTXO confirmation before retrying.
+- **transfer_broadcast_failed** — the network rejected the transaction; show the error message. If the error mentions mempool conflict, wait a few seconds and retry — the conflict usually resolves on its own.
 
 ## In Scope
 
