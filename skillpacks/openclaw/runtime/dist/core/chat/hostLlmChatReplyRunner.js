@@ -6,6 +6,7 @@ exports.parseRunnerOutput = parseRunnerOutput;
 const defaultChatReplyRunner_1 = require("./defaultChatReplyRunner");
 const hostLlmExecutor_1 = require("../llm/hostLlmExecutor");
 const DEFAULT_TIMEOUT_MS = 120_000;
+const MAX_FALLBACK_ATTEMPTS = 5;
 const END_CONVERSATION_MARKER = '[END_CONVERSATION]';
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -78,8 +79,46 @@ function parseRunnerOutput(rawOutput) {
         content,
     };
 }
+async function tryExecute(resolver, metaBotSlug, prompt, timeoutMs, excludeRuntimeIds) {
+    // Re-resolve each attempt so we pick up the next candidate.
+    let resolved;
+    let attempts = 0;
+    do {
+        resolved = await resolver.resolveRuntime({ metaBotSlug });
+        // If the resolver picked a runtime we already failed on, skip it by marking
+        // it unavailable so the resolver walks past it on the next call.
+        if (resolved.runtime && excludeRuntimeIds.has(resolved.runtime.id)) {
+            // Force the runtime health to unavailable so the resolver skips it.
+            // This mutation is temporary — we restore a healthy runtime's health later.
+            await resolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => { });
+            resolved = { runtime: null };
+        }
+        attempts++;
+    } while (!resolved.runtime && attempts < MAX_FALLBACK_ATTEMPTS);
+    if (!resolved.runtime)
+        return null;
+    try {
+        const execResult = await (0, hostLlmExecutor_1.executeLlm)({
+            runtime: resolved.runtime,
+            prompt,
+            timeoutMs,
+        });
+        if (!execResult.ok) {
+            excludeRuntimeIds.add(resolved.runtime.id);
+            await resolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => { });
+            return null;
+        }
+        return { result: parseRunnerOutput(execResult.output), bindingId: resolved.bindingId };
+    }
+    catch {
+        excludeRuntimeIds.add(resolved.runtime.id);
+        await resolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => { });
+        return null;
+    }
+}
 function createHostLlmChatReplyRunner(options) {
     const runtimeResolver = options?.runtimeResolver;
+    const metaBotSlug = options?.metaBotSlug;
     const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const fallbackRunner = (0, defaultChatReplyRunner_1.createDefaultChatReplyRunner)();
     // If no resolver provided, fall back to template-only replies.
@@ -87,30 +126,20 @@ function createHostLlmChatReplyRunner(options) {
         return fallbackRunner;
     }
     return async (input) => {
-        const resolved = await runtimeResolver.resolveRuntime({
-            metaBotSlug: options.metaBotSlug,
-        });
-        if (!resolved.runtime) {
-            return fallbackRunner(input);
-        }
         const prompt = buildChatPrompt(input);
-        try {
-            const result = await (0, hostLlmExecutor_1.executeLlm)({
-                runtime: resolved.runtime,
-                prompt,
-                timeoutMs,
-            });
-            // Track lastUsedAt on the binding that was used.
-            if (resolved.bindingId) {
-                runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => { });
+        const excludeRuntimeIds = new Set();
+        // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
+        for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
+            const outcome = await tryExecute(runtimeResolver, metaBotSlug, prompt, timeoutMs, excludeRuntimeIds);
+            if (outcome) {
+                // Track lastUsedAt on the binding that was successfully used.
+                if (outcome.bindingId) {
+                    runtimeResolver.markBindingUsed(outcome.bindingId).catch(() => { });
+                }
+                return outcome.result;
             }
-            if (!result.ok) {
-                return fallbackRunner(input);
-            }
-            return parseRunnerOutput(result.output);
         }
-        catch {
-            return fallbackRunner(input);
-        }
+        // All runtimes failed — fall back to template-only reply.
+        return fallbackRunner(input);
     };
 }

@@ -75,5 +75,8 @@ function createLlmRuntimeResolver(options) {
         async markBindingUsed(bindingId) {
             await bindingStore.updateLastUsed(bindingId, new Date().toISOString());
         },
+        async markRuntimeUnavailable(runtimeId) {
+            await options.runtimeStore.updateHealth(runtimeId, 'unavailable');
+        },
     };
 }

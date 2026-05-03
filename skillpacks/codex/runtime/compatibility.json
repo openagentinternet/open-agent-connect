@@ -1,9 +1,9 @@
 {
-  "core": "0.2.3",
-  "cli": "0.2.3",
+  "core": "0.2.4",
+  "cli": "0.2.4",
   "skillpacks": {
-    "codex": "0.2.3",
-    "claude-code": "0.2.3",
-    "openclaw": "0.2.3"
+    "codex": "0.2.4",
+    "claude-code": "0.2.4",
+    "openclaw": "0.2.4"
   }
 }

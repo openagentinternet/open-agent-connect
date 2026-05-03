@@ -79,4 +79,4 @@ For a single machine dual terminal smoke, keep one provider terminal online with
 - Bundled compatibility copy: `runtime/compatibility.json`
 - Bundled shared installer: `runtime/shared-install.sh`
 - Host pack id: `openclaw`
-- Package version: `0.2.3`
+- Package version: `0.2.4`

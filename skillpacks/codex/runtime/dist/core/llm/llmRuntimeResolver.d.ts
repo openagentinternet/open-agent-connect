@@ -26,5 +26,6 @@ export interface LlmRuntimeResolver {
     resolveRuntime(input: ResolveRuntimeInput): Promise<ResolveRuntimeResult>;
     selectMetaBot(input: SelectMetaBotInput): Promise<SelectMetaBotResult | null>;
     markBindingUsed(bindingId: string): Promise<void>;
+    markRuntimeUnavailable(runtimeId: string): Promise<void>;
 }
 export declare function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): LlmRuntimeResolver;
