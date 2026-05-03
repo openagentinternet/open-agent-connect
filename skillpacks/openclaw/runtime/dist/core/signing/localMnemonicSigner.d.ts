@@ -33,6 +33,7 @@ export interface LocalMnemonicSignerBtcCreatePinResult {
     pinId: string;
     totalCost: number;
 }
+export declare function __clearPendingMvcSpentOutpointsForTests(): void;
 export interface WalletTransferExecuteInput {
     mnemonic: string;
     path: string;

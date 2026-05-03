@@ -1783,28 +1783,29 @@ async function serveCliDaemonProcess(context) {
         acceptPolicy: 'accept_all',
         defaultStrategyId: null,
     };
+    const handlers = (0, defaultHandlers_1.createDefaultMetabotDaemonHandlers)({
+        homeDir,
+        systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+        getDaemonRecord: () => daemonRecord,
+        secretStore,
+        signer,
+        chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+        socketPresenceApiBaseUrl,
+        socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+            ? 'assume_service_providers_online'
+            : 'throw',
+        identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
+        fetchPeerChatPublicKey,
+        callerReplyWaiter,
+        buyerRatingReplyRunner,
+        masterReplyWaiter,
+        servicePaymentExecutor,
+        requestMvcGasSubsidy,
+        autoReplyConfig: sharedAutoReplyConfig,
+    });
     const daemon = (0, daemon_1.createMetabotDaemon)({
         homeDirOrPaths: paths,
-        handlers: (0, defaultHandlers_1.createDefaultMetabotDaemonHandlers)({
-            homeDir,
-            systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
-            getDaemonRecord: () => daemonRecord,
-            secretStore,
-            signer,
-            chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
-            socketPresenceApiBaseUrl,
-            socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
-                ? 'assume_service_providers_online'
-                : 'throw',
-            identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
-            fetchPeerChatPublicKey,
-            callerReplyWaiter,
-            buyerRatingReplyRunner,
-            masterReplyWaiter,
-            servicePaymentExecutor,
-            requestMvcGasSubsidy,
-            autoReplyConfig: sharedAutoReplyConfig,
-        }),
+        handlers,
     });
     const host = DEFAULT_DAEMON_HOST;
     const explicitPort = parseDaemonPort(context.env.METABOT_DAEMON_PORT);
@@ -1899,6 +1900,17 @@ async function serveCliDaemonProcess(context) {
         onMessage: (profile, message) => {
             if (node_path_1.default.resolve(profile.homeDir) === node_path_1.default.resolve(homeDir)) {
                 void chatAutoReplyOrchestrator.handleInboundMessage(message);
+                const orderProtocolHandler = handlers.services?.handleInboundOrderProtocolMessage;
+                if (orderProtocolHandler) {
+                    void Promise.resolve(orderProtocolHandler({
+                        fromGlobalMetaId: message.fromGlobalMetaId,
+                        content: message.content,
+                        messagePinId: message.messagePinId,
+                        timestamp: message.timestamp,
+                    })).catch((error) => {
+                        console.warn('[A2A order protocol handler]', error instanceof Error ? error.message : String(error));
+                    });
+                }
             }
         },
         onError: (error) => {

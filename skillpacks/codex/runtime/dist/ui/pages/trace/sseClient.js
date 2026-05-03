@@ -538,6 +538,8 @@ let sessionDetail = null;
 let refreshTimer = null;
 let refreshInFlight = false;
 let detailLoadSeq = 0;
+let renderedDetailSignature = '';
+let renderedMessageCount = 0;
 
 const $ = (sel) => document.querySelector(sel);
 const qAll = (sel) => [...document.querySelectorAll(sel)];
@@ -561,6 +563,59 @@ function getInitialTraceSelection() {
     sessionId: normalizeText(params.get('sessionId')),
     traceId: normalizeText(params.get('traceId')),
   };
+}
+
+function stableStringify(value) {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return '[' + value.map(stableStringify).join(',') + ']';
+  }
+  return '{' + Object.keys(value).sort().map(function(key) {
+    return JSON.stringify(key) + ':' + stableStringify(value[key]);
+  }).join(',') + '}';
+}
+
+function buildMessageSignature(msg) {
+  return [
+    msg.id,
+    msg.timestamp,
+    msg.type,
+    msg.sender,
+    msg.content,
+    stableStringify(msg.metadata || null),
+  ].join('\\u001f');
+}
+
+function getMessageCount(detail) {
+  return detail && Array.isArray(detail.messages) ? detail.messages.length : 0;
+}
+
+function buildDetailRenderSignature(detail, profiles) {
+  if (!detail) return '';
+  return stableStringify({
+    sessionId: detail.sessionId,
+    traceId: detail.traceId,
+    role: detail.role,
+    state: detail.state,
+    localMetabotName: detail.localMetabotName,
+    localMetabotGlobalMetaId: detail.localMetabotGlobalMetaId,
+    localMetabotAvatar: detail.localMetabotAvatar,
+    peerGlobalMetaId: detail.peerGlobalMetaId,
+    peerName: detail.peerName,
+    peerAvatar: detail.peerAvatar,
+    servicePinId: detail.servicePinId,
+    localProfile: profiles && profiles.localProfile ? profiles.localProfile : null,
+    peerProfile: profiles && profiles.peerProfile ? profiles.peerProfile : null,
+    messages: (detail.messages || []).map(buildMessageSignature),
+  });
+}
+
+function isScrollNearBottom(scroll) {
+  if (!scroll) return true;
+  const distance = Number(scroll.scrollHeight || 0) - Number(scroll.scrollTop || 0) - Number(scroll.clientHeight || 0);
+  return distance <= 48;
 }
 
 function resolveInitialSessionId() {
@@ -622,6 +677,8 @@ async function renderSessionDetail() {
   const panel = $('[data-session-detail]');
   if (!panel) return;
   if (!sessionDetail) {
+    renderedDetailSignature = '';
+    renderedMessageCount = 0;
     panel.innerHTML = '<div class="detail-empty"><p>Select a session from the list to inspect it.</p></div>';
     return;
   }
@@ -630,6 +687,16 @@ async function renderSessionDetail() {
     resolveProfile(detail.localMetabotGlobalMetaId),
     resolveProfile(detail.peerGlobalMetaId),
   ]);
+  const nextDetailSignature = buildDetailRenderSignature(detail, { localProfile, peerProfile });
+  const nextMessageCount = getMessageCount(detail);
+  if (nextDetailSignature && nextDetailSignature === renderedDetailSignature) {
+    return;
+  }
+  const previousScroll = panel.querySelector('.messages-scroll');
+  const shouldStickToBottom = !renderedDetailSignature
+    || isScrollNearBottom(previousScroll)
+    || nextMessageCount > renderedMessageCount;
+  const previousScrollTop = previousScroll ? previousScroll.scrollTop : 0;
   const localName = detail.localMetabotName || localProfile.name || detail.localMetabotGlobalMetaId || 'Local';
   const peerName = detail.peerName
     || (peerProfile.name && peerProfile.name !== detail.peerGlobalMetaId
@@ -667,7 +734,11 @@ async function renderSessionDetail() {
 
   panel.innerHTML = headerHtml + '<div class="messages-scroll">' + messagesHtml + '</div>';
   const scroll = panel.querySelector('.messages-scroll');
-  if (scroll) scroll.scrollTop = scroll.scrollHeight;
+  if (scroll) {
+    scroll.scrollTop = shouldStickToBottom ? scroll.scrollHeight : previousScrollTop;
+  }
+  renderedDetailSignature = nextDetailSignature;
+  renderedMessageCount = nextMessageCount;
   panel.querySelectorAll('[data-tool-toggle]').forEach(btn => {
     btn.addEventListener('click', () => {
       const body = panel.querySelector('[data-tool-body="' + btn.dataset.toolToggle + '"]');
@@ -819,7 +890,11 @@ async function loadSessionDetail(sessionId, options) {
   const silent = options.silent === true;
   const sequence = ++detailLoadSeq;
   const panel = $('[data-session-detail]');
-  if (panel && !silent) panel.innerHTML = '<div class="detail-loading"><span class="mono">Loading session…</span></div>';
+  if (panel && !silent) {
+    renderedDetailSignature = '';
+    renderedMessageCount = 0;
+    panel.innerHTML = '<div class="detail-loading"><span class="mono">Loading session…</span></div>';
+  }
   try {
     const resp = await fetch('/api/trace/sessions/' + encodeURIComponent(sessionId));
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -830,6 +905,8 @@ async function loadSessionDetail(sessionId, options) {
   } catch (err) {
     if (sequence !== detailLoadSeq) return;
     sessionDetail = null;
+    renderedDetailSignature = '';
+    renderedMessageCount = 0;
     if (panel) panel.innerHTML = '<div class="detail-empty error-text"><p>Failed to load session: ' + escHtml(String(err)) + '</p></div>';
   }
 }
