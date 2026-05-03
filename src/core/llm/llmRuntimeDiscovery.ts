@@ -94,7 +94,9 @@ export async function discoverProvider(
 
   const version = await readExecutableVersion(binaryPath);
   const now = (options?.now ?? (() => new Date().toISOString()))();
-  const createId = options?.createId ?? (() => `llm_${provider.replace('-', '_')}_${Date.now()}`);
+  // Stable ID: same binary always gets same id, so rediscovery upserts instead of duplicating.
+  const defaultId = `llm_${provider.replace(/-/g, '_')}_${binaryPath}`;
+  const createId = options?.createId ?? (() => defaultId);
   const env = process.env;
   const authState =
     (provider === 'claude-code' && env.ANTHROPIC_API_KEY) ? 'authenticated' :
