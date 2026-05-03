@@ -29,9 +29,48 @@ function createElementStub() {
   };
 }
 
-async function runTraceScriptWithUrl(search) {
+function createDetailElementStub(options = {}) {
+  const element = createElementStub();
+  let html = '';
+  let scroll = options.scroll || { scrollTop: 0, scrollHeight: 0, clientHeight: 0 };
+  let renderCount = 0;
+  const createScroll = (previousScroll) => ({
+    scrollTop: options.nextScrollTop ?? previousScroll.scrollTop ?? 0,
+    scrollHeight: options.nextScrollHeight ?? previousScroll.scrollHeight ?? 0,
+    clientHeight: options.nextClientHeight ?? previousScroll.clientHeight ?? 0,
+  });
+  Object.defineProperty(element, 'innerHTML', {
+    get() {
+      return html;
+    },
+    set(value) {
+      html = String(value || '');
+      renderCount += 1;
+      if (html.includes('messages-scroll')) {
+        scroll = renderCount === 1 && options.scroll ? options.scroll : createScroll(scroll);
+      }
+    },
+  });
+  element.querySelector = (selector) => {
+    if (selector === '.messages-scroll') return scroll;
+    return null;
+  };
+  element.querySelectorAll = () => [];
+  return {
+    element,
+    get scroll() {
+      return scroll;
+    },
+    get renderCount() {
+      return renderCount;
+    },
+  };
+}
+
+async function runTraceScriptWithUrl(search, options = {}) {
   const list = createElementStub();
-  const detail = createElementStub();
+  const detailStub = createDetailElementStub(options.detail || {});
+  const detail = detailStub.element;
   const stats = new Map([
     ['[data-trace-total]', createElementStub()],
     ['[data-trace-caller]', createElementStub()],
@@ -39,6 +78,7 @@ async function runTraceScriptWithUrl(search) {
     ['[data-trace-last]', createElementStub()],
   ]);
   const fetchCalls = [];
+  let refreshCallback = null;
 
   const context = {
     console,
@@ -51,7 +91,8 @@ async function runTraceScriptWithUrl(search) {
     Error,
     encodeURIComponent,
     URLSearchParams,
-    setInterval() {
+    setInterval(callback) {
+      refreshCallback = callback;
       return 1;
     },
     clearInterval() {},
@@ -146,7 +187,8 @@ async function runTraceScriptWithUrl(search) {
   for (let i = 0; i < 20 && !/Forecast detail/.test(detail.innerHTML); i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  return { fetchCalls, detail, list };
+  runTraceScriptWithUrl.refreshCallback = refreshCallback;
+  return { fetchCalls, detail, list, detailScroll: detailStub.scroll, detailStub };
 }
 
 test('trace page URL with sessionId auto-loads that A2A session detail', async () => {
@@ -217,7 +259,8 @@ test('trace page includes a toast target for copy feedback', () => {
 
 test('trace page background refresh keeps the current detail while the next fetch is in flight', async () => {
   const list = createElementStub();
-  const detail = createElementStub();
+  const detailStub = createDetailElementStub();
+  const detail = detailStub.element;
   const stats = new Map([
     ['[data-trace-total]', createElementStub()],
     ['[data-trace-caller]', createElementStub()],
@@ -300,15 +343,32 @@ test('trace page background refresh keeps the current detail while the next fetc
               },
               localMetabotName: 'Caller',
               inspector: {
-                transcriptItems: [
-                  {
-                    id: `delivery-${detailFetchCount}`,
-                    timestamp: 1_777_000_001_000 + detailFetchCount,
-                    type: 'delivery',
-                    sender: 'provider',
-                    content: detailFetchCount > 1 ? '# Refreshed Forecast' : '# Initial Forecast',
-                  },
-                ],
+                transcriptItems: detailFetchCount > 1
+                  ? [
+                    {
+                      id: 'delivery-1',
+                      timestamp: 1_777_000_001_000,
+                      type: 'delivery',
+                      sender: 'provider',
+                      content: '# Initial Forecast',
+                    },
+                    {
+                      id: 'delivery-2',
+                      timestamp: 1_777_000_002_000,
+                      type: 'delivery',
+                      sender: 'provider',
+                      content: '# Refreshed Forecast',
+                    },
+                  ]
+                  : [
+                    {
+                      id: 'delivery-1',
+                      timestamp: 1_777_000_001_000,
+                      type: 'delivery',
+                      sender: 'provider',
+                      content: '# Initial Forecast',
+                    },
+                  ],
               },
             },
           }),
@@ -323,6 +383,9 @@ test('trace page background refresh keeps the current detail while the next fetc
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   const beforeRefresh = detail.innerHTML;
+  detailStub.scroll.scrollTop = 180;
+  detailStub.scroll.scrollHeight = 1000;
+  detailStub.scroll.clientHeight = 300;
   assert.ok(refreshCallback);
   const refreshPromise = refreshCallback();
   await Promise.resolve();
@@ -333,4 +396,256 @@ test('trace page background refresh keeps the current detail while the next fetc
   resolveSecondDetail();
   await refreshPromise;
   assert.match(detail.innerHTML, /Refreshed Forecast/);
+  assert.equal(detailStub.scroll.scrollTop, 1000);
+});
+
+test('trace page background refresh does not rerender unchanged details or reset historical scroll', async () => {
+  const scroll = { scrollTop: 120, scrollHeight: 900, clientHeight: 300 };
+  const { detail, detailScroll, detailStub } = await runTraceScriptWithUrl(
+    '?traceId=trace-weather-1&sessionId=session-weather-1',
+    { detail: { scroll } },
+  );
+  const initialHtml = detail.innerHTML;
+  const initialRenderCount = detailStub.renderCount;
+  assert.match(initialHtml, /Forecast detail/);
+
+  detailScroll.scrollTop = 240;
+  detailScroll.scrollHeight = 1200;
+  detailScroll.clientHeight = 300;
+
+  await runTraceScriptWithUrl.refreshCallback();
+
+  assert.equal(detail.innerHTML, initialHtml);
+  assert.equal(detailStub.renderCount, initialRenderCount);
+  assert.equal(detailScroll.scrollTop, 240);
+});
+
+test('trace page silent refresh recovers from a transient detail fetch error when payload is unchanged', async () => {
+  const list = createElementStub();
+  const detailStub = createDetailElementStub();
+  const detail = detailStub.element;
+  const stats = new Map([
+    ['[data-trace-total]', createElementStub()],
+    ['[data-trace-caller]', createElementStub()],
+    ['[data-trace-provider]', createElementStub()],
+    ['[data-trace-last]', createElementStub()],
+  ]);
+  let refreshCallback = null;
+  let detailFetchCount = 0;
+  const payload = {
+    data: {
+      session: {
+        sessionId: 'session-weather-1',
+        traceId: 'trace-weather-1',
+        role: 'caller',
+        state: 'completed',
+      },
+      localMetabotName: 'Caller',
+      inspector: {
+        transcriptItems: [
+          {
+            id: 'delivery-1',
+            timestamp: 1_777_000_001_000,
+            type: 'delivery',
+            sender: 'provider',
+            content: '# Stable Forecast',
+          },
+        ],
+      },
+    },
+  };
+
+  const context = {
+    console,
+    Date,
+    Map,
+    Set,
+    Number,
+    Promise,
+    String,
+    Error,
+    encodeURIComponent,
+    URLSearchParams,
+    setInterval(callback) {
+      refreshCallback = callback;
+      return 1;
+    },
+    clearInterval() {},
+    window: {
+      location: { search: '?traceId=trace-weather-1&sessionId=session-weather-1' },
+    },
+    document: {
+      readyState: 'complete',
+      addEventListener() {},
+      querySelector(selector) {
+        if (selector === '[data-session-list]') return list;
+        if (selector === '[data-session-detail]') return detail;
+        return stats.get(selector) ?? null;
+      },
+      querySelectorAll() {
+        return [];
+      },
+    },
+    fetch: async (url) => {
+      if (url === '/api/trace/sessions') {
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              sessions: [
+                {
+                  sessionId: 'session-weather-1',
+                  traceId: 'trace-weather-1',
+                  role: 'caller',
+                  state: 'completed',
+                  createdAt: 1_777_000_000_000,
+                  updatedAt: 1_777_000_001_000,
+                },
+              ],
+              stats: { totalCount: 1, callerCount: 1, providerCount: 0, lastUpdatedAt: 1_777_000_001_000 },
+            },
+          }),
+        };
+      }
+      if (url === '/api/trace/sessions/session-weather-1') {
+        detailFetchCount += 1;
+        if (detailFetchCount === 2) {
+          throw new Error('temporary detail failure');
+        }
+        return {
+          ok: true,
+          json: async () => payload,
+        };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    },
+  };
+
+  vm.runInNewContext(buildTraceInspectorScript(), context);
+  for (let i = 0; i < 20 && !/Stable Forecast/.test(detail.innerHTML); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.match(detail.innerHTML, /Stable Forecast/);
+
+  await refreshCallback();
+  assert.match(detail.innerHTML, /Failed to load session/);
+
+  await refreshCallback();
+  assert.match(detail.innerHTML, /Stable Forecast/);
+});
+
+test('trace page metadata-only message refresh preserves historical scroll position', async () => {
+  const list = createElementStub();
+  const detailStub = createDetailElementStub({
+    scroll: { scrollTop: 0, scrollHeight: 900, clientHeight: 300 },
+  });
+  const detail = detailStub.element;
+  const stats = new Map([
+    ['[data-trace-total]', createElementStub()],
+    ['[data-trace-caller]', createElementStub()],
+    ['[data-trace-provider]', createElementStub()],
+    ['[data-trace-last]', createElementStub()],
+  ]);
+  let refreshCallback = null;
+  let detailFetchCount = 0;
+
+  const context = {
+    console,
+    Date,
+    Map,
+    Set,
+    Number,
+    Promise,
+    String,
+    Error,
+    encodeURIComponent,
+    URLSearchParams,
+    setInterval(callback) {
+      refreshCallback = callback;
+      return 1;
+    },
+    clearInterval() {},
+    window: {
+      location: { search: '?traceId=trace-weather-1&sessionId=session-weather-1' },
+    },
+    document: {
+      readyState: 'complete',
+      addEventListener() {},
+      querySelector(selector) {
+        if (selector === '[data-session-list]') return list;
+        if (selector === '[data-session-detail]') return detail;
+        return stats.get(selector) ?? null;
+      },
+      querySelectorAll() {
+        return [];
+      },
+    },
+    fetch: async (url) => {
+      if (url === '/api/trace/sessions') {
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              sessions: [
+                {
+                  sessionId: 'session-weather-1',
+                  traceId: 'trace-weather-1',
+                  role: 'caller',
+                  state: 'completed',
+                  createdAt: 1_777_000_000_000,
+                  updatedAt: 1_777_000_001_000,
+                },
+              ],
+              stats: { totalCount: 1, callerCount: 1, providerCount: 0, lastUpdatedAt: 1_777_000_001_000 },
+            },
+          }),
+        };
+      }
+      if (url === '/api/trace/sessions/session-weather-1') {
+        detailFetchCount += 1;
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              session: {
+                sessionId: 'session-weather-1',
+                traceId: 'trace-weather-1',
+                role: 'caller',
+                state: 'completed',
+              },
+              localMetabotName: 'Caller',
+              inspector: {
+                transcriptItems: [
+                  {
+                    id: 'delivery-1',
+                    timestamp: 1_777_000_001_000,
+                    type: 'delivery',
+                    sender: 'provider',
+                    content: '# Forecast',
+                    metadata: detailFetchCount > 1
+                      ? { txid: '65a469a273a5d212975309c2eda54b1c6c9ece97cab6e60d07e23e349f41932b' }
+                      : null,
+                  },
+                ],
+              },
+            },
+          }),
+        };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    },
+  };
+
+  vm.runInNewContext(buildTraceInspectorScript(), context);
+  for (let i = 0; i < 20 && !/Forecast/.test(detail.innerHTML); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  detailStub.scroll.scrollTop = 180;
+  detailStub.scroll.scrollHeight = 900;
+  detailStub.scroll.clientHeight = 300;
+
+  await refreshCallback();
+
+  assert.match(detail.innerHTML, /txid: 65a469a2\.\.\.\./);
+  assert.equal(detailStub.scroll.scrollTop, 180);
 });
