@@ -183,3 +183,20 @@ test('markBindingUsed updates lastUsedAt', async () => {
   const state = await bindingStore.read();
   assert.equal(typeof state.bindings[0].lastUsedAt, 'string');
 });
+
+test('markRuntimeUnavailable sets health to unavailable', async () => {
+  const profileRoot = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const runtimeStore = createLlmRuntimeStore(paths);
+  const bindingStore = createLlmBindingStore(paths);
+  await runtimeStore.upsertRuntime(makeRuntime('r_claude', 'claude-code', 'healthy'));
+  const resolver = createLlmRuntimeResolver({ runtimeStore, bindingStore, getPreferredRuntimeId: async () => null });
+  await resolver.markRuntimeUnavailable('r_claude');
+  const state = await runtimeStore.read();
+  assert.equal(state.runtimes[0].health, 'unavailable');
+
+  // Verify the unavailable runtime is now skipped by resolution.
+  await runtimeStore.upsertRuntime(makeRuntime('r_codex', 'codex', 'healthy'));
+  const resolved = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
+  assert.equal(resolved.runtime.id, 'r_codex');
+});

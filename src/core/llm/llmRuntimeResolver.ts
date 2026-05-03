@@ -32,6 +32,7 @@ export interface LlmRuntimeResolver {
   resolveRuntime(input: ResolveRuntimeInput): Promise<ResolveRuntimeResult>;
   selectMetaBot(input: SelectMetaBotInput): Promise<SelectMetaBotResult | null>;
   markBindingUsed(bindingId: string): Promise<void>;
+  markRuntimeUnavailable(runtimeId: string): Promise<void>;
 }
 
 export function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): LlmRuntimeResolver {
@@ -115,6 +116,10 @@ export function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): Ll
 
     async markBindingUsed(bindingId) {
       await bindingStore.updateLastUsed(bindingId, new Date().toISOString());
+    },
+
+    async markRuntimeUnavailable(runtimeId) {
+      await options.runtimeStore.updateHealth(runtimeId, 'unavailable');
     },
   };
 }
