@@ -38,7 +38,7 @@ export interface CliDependencies {
     trace?: (input: { traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   network?: {
-    listServices?: (input: { online?: boolean; query?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     listBots?: (input: { online?: boolean; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
     listSources?: () => Awaitable<MetabotCommandResult<unknown>>;
     addSource?: (input: { baseUrl: string; label?: string }) => Awaitable<MetabotCommandResult<unknown>>;

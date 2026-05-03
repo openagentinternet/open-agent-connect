@@ -108,6 +108,13 @@ test('online service cache persists global service rows with rating aggregates a
   });
   assert.equal(results.length, 1);
   assert.equal(results[0].servicePinId, 'tarot-service-v2');
+
+  const allMatches = searchOnlineServiceCacheServices(persisted.services, {
+    query: '我想用塔罗牌占卜一下明天运程',
+    onlineOnly: true,
+  });
+  assert.equal(allMatches.length, 1);
+  assert.equal(allMatches[0].servicePinId, 'tarot-service-v2');
 });
 
 test('online service cache enforces a hard local service limit', () => {

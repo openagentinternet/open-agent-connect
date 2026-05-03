@@ -476,6 +476,7 @@ export function searchOnlineServiceCacheServices(
       const queryScore = scoreServiceForQuery(service, query);
       return {
         service,
+        queryScore,
         score:
           queryScore
           + (service.online ? 20 : 0)
@@ -483,7 +484,7 @@ export function searchOnlineServiceCacheServices(
           + Math.log1p(service.ratingCount),
       };
     })
-    .filter((entry) => !query || entry.score > (entry.service.online ? 20 : 0))
+    .filter((entry) => !query || entry.queryScore > 0)
     .sort((left, right) => {
       if (right.score !== left.score) {
         return right.score - left.score;

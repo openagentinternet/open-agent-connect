@@ -727,13 +727,17 @@ async function readRatingDetailSnapshot(input) {
 }
 function readCallRequest(rawInput) {
     const request = readObject(rawInput.request) ?? rawInput;
+    const rawRequest = normalizeText(request.rawRequest);
+    const serviceQuery = normalizeText(request.query ?? request.intent ?? rawInput.query ?? rawInput.intent);
+    const userTask = normalizeText(request.userTask) || rawRequest || serviceQuery;
     return {
         servicePinId: normalizeText(request.servicePinId),
         providerGlobalMetaId: normalizeText(request.providerGlobalMetaId),
         providerDaemonBaseUrl: normalizeText(request.providerDaemonBaseUrl ?? rawInput.providerDaemonBaseUrl),
-        userTask: normalizeText(request.userTask),
+        userTask,
         taskContext: normalizeText(request.taskContext),
-        rawRequest: normalizeText(request.rawRequest),
+        rawRequest,
+        serviceQuery,
         spendCap: readObject(request.spendCap),
         policyMode: request.policyMode,
         confirmed: request.confirmed === true || rawInput.confirmed === true,
@@ -1797,7 +1801,7 @@ async function fetchPeerChatPublicKey(globalMetaId, options = {}) {
     return null;
 }
 async function listRuntimeDirectoryServices(input) {
-    const selectCachedServices = async () => {
+    const selectCachedServices = async (fallbackUsed) => {
         const cache = await input.onlineServiceCacheStore?.read().catch(() => null);
         if (!cache || cache.services.length === 0) {
             return null;
@@ -1808,9 +1812,16 @@ async function listRuntimeDirectoryServices(input) {
                 onlineOnly: input.onlineOnly,
             }),
             discoverySource: 'cache',
-            fallbackUsed: true,
+            fallbackUsed,
         };
     };
+    if (input.cacheOnly) {
+        return (await selectCachedServices(false)) ?? {
+            services: [],
+            discoverySource: 'cache',
+            fallbackUsed: false,
+        };
+    }
     const localServices = input.state.services
         .filter((service) => service.available === 1)
         .map((service) => summarizeService(service));
@@ -1832,7 +1843,7 @@ async function listRuntimeDirectoryServices(input) {
         });
     }
     catch (error) {
-        const cached = await selectCachedServices();
+        const cached = await selectCachedServices(true);
         if (cached) {
             return cached;
         }
@@ -1846,7 +1857,7 @@ async function listRuntimeDirectoryServices(input) {
         resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
     });
     if (directory.fallbackUsed && mergedServices.length === 0) {
-        const cached = await selectCachedServices();
+        const cached = await selectCachedServices(true);
         if (cached) {
             return cached;
         }
@@ -5494,7 +5505,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
         },
         network: {
-            listServices: async ({ online, query }) => {
+            listServices: async ({ online, query, cached }) => {
                 const state = await runtimeStateStore.readState();
                 const directory = await listRuntimeDirectoryServices({
                     state,
@@ -5507,6 +5518,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     socketPresenceFailureMode: input.socketPresenceFailureMode,
                     onlineOnly: online === true,
                     query,
+                    cacheOnly: cached === true,
                 });
                 return (0, commandResult_1.commandSuccess)({
                     services: directory.services,
@@ -5766,7 +5778,33 @@ function createDefaultMetabotDaemonHandlers(input) {
                 if (!state.identity) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before calling services.');
                 }
-                const request = readCallRequest(rawInput);
+                let request = readCallRequest(rawInput);
+                let selectedFromCache = false;
+                let cachedSelectionServices = null;
+                if ((!request.servicePinId || !request.providerGlobalMetaId) && request.userTask) {
+                    const cache = await onlineServiceCacheStore.read().catch(() => null);
+                    const matches = cache
+                        ? (0, onlineServiceCache_1.searchOnlineServiceCacheServices)(cache.services, {
+                            query: request.serviceQuery || request.rawRequest || request.userTask,
+                            onlineOnly: true,
+                            limit: 1,
+                        })
+                        : [];
+                    const selected = matches[0];
+                    if (!selected) {
+                        return (0, commandResult_1.commandFailed)('cached_service_match_not_found', 'No cached online service matched this request. Refresh online services or provide servicePinId and providerGlobalMetaId.');
+                    }
+                    request = {
+                        ...request,
+                        servicePinId: normalizeText(selected.servicePinId),
+                        providerGlobalMetaId: normalizeText(selected.providerGlobalMetaId),
+                        providerDaemonBaseUrl: request.providerDaemonBaseUrl || normalizeText(selected.providerDaemonBaseUrl),
+                        taskContext: request.taskContext || `Selected cached online service: ${normalizeText(selected.displayName) || normalizeText(selected.serviceName)}`,
+                        confirmed: false,
+                    };
+                    selectedFromCache = true;
+                    cachedSelectionServices = [selected];
+                }
                 if (!request.servicePinId || !request.providerGlobalMetaId || !request.userTask) {
                     return (0, commandResult_1.commandFailed)('invalid_call_request', 'Call request must include servicePinId, providerGlobalMetaId, and userTask.');
                 }
@@ -5780,6 +5818,9 @@ function createDefaultMetabotDaemonHandlers(input) {
                         return remoteDirectory;
                     }
                     availableServices = remoteDirectory.services;
+                }
+                else if (cachedSelectionServices) {
+                    availableServices = cachedSelectionServices;
                 }
                 else {
                     const directory = await listRuntimeDirectoryServices({
@@ -5841,6 +5882,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         traceId: null,
                         providerGlobalMetaId: plan.service.providerGlobalMetaId,
                         serviceName: serviceDisplayName,
+                        selectedFromCache,
                         service: plan.service,
                         payment: plan.payment,
                         confirmation: plan.confirmation,
@@ -6248,8 +6290,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                         }),
                         data: {
                             traceId: trace.traceId,
+                            servicePinId: plan.service.servicePinId,
                             providerGlobalMetaId: plan.service.providerGlobalMetaId,
                             serviceName: serviceDisplayName,
+                            selectedFromCache,
                             service: plan.service,
                             payment: plan.payment,
                             confirmation: plan.confirmation,
@@ -6278,8 +6322,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 return (0, commandResult_1.commandSuccess)({
                     traceId: responseTrace.traceId,
+                    servicePinId: plan.service.servicePinId,
                     providerGlobalMetaId: plan.service.providerGlobalMetaId,
                     serviceName: serviceDisplayName,
+                    selectedFromCache,
                     service: plan.service,
                     payment: plan.payment,
                     confirmation: plan.confirmation,

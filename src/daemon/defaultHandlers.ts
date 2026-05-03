@@ -978,13 +978,17 @@ async function readRatingDetailSnapshot(input: {
 
 function readCallRequest(rawInput: Record<string, unknown>) {
   const request = readObject(rawInput.request) ?? rawInput;
+  const rawRequest = normalizeText(request.rawRequest);
+  const serviceQuery = normalizeText(request.query ?? request.intent ?? rawInput.query ?? rawInput.intent);
+  const userTask = normalizeText(request.userTask) || rawRequest || serviceQuery;
   return {
     servicePinId: normalizeText(request.servicePinId),
     providerGlobalMetaId: normalizeText(request.providerGlobalMetaId),
     providerDaemonBaseUrl: normalizeText(request.providerDaemonBaseUrl ?? rawInput.providerDaemonBaseUrl),
-    userTask: normalizeText(request.userTask),
+    userTask,
     taskContext: normalizeText(request.taskContext),
-    rawRequest: normalizeText(request.rawRequest),
+    rawRequest,
+    serviceQuery,
     spendCap: readObject(request.spendCap),
     policyMode: request.policyMode,
     confirmed: request.confirmed === true || rawInput.confirmed === true,
@@ -2390,12 +2394,13 @@ async function listRuntimeDirectoryServices(input: {
   socketPresenceFailureMode?: 'throw' | 'assume_service_providers_online';
   onlineOnly: boolean;
   query?: string | null;
+  cacheOnly?: boolean;
 }): Promise<{
   services: Array<Record<string, unknown>>;
   discoverySource: 'chain' | 'seeded' | 'cache';
   fallbackUsed: boolean;
 }> {
-  const selectCachedServices = async () => {
+  const selectCachedServices = async (fallbackUsed: boolean) => {
     const cache = await input.onlineServiceCacheStore?.read().catch(() => null);
     if (!cache || cache.services.length === 0) {
       return null;
@@ -2406,9 +2411,17 @@ async function listRuntimeDirectoryServices(input: {
         onlineOnly: input.onlineOnly,
       }) as unknown as Array<Record<string, unknown>>,
       discoverySource: 'cache' as const,
-      fallbackUsed: true,
+      fallbackUsed,
     };
   };
+
+  if (input.cacheOnly) {
+    return (await selectCachedServices(false)) ?? {
+      services: [],
+      discoverySource: 'cache',
+      fallbackUsed: false,
+    };
+  }
 
   const localServices = input.state.services
     .filter((service) => service.available === 1)
@@ -2431,7 +2444,7 @@ async function listRuntimeDirectoryServices(input: {
       onlineOnly: input.onlineOnly,
     });
   } catch (error) {
-    const cached = await selectCachedServices();
+    const cached = await selectCachedServices(true);
     if (cached) {
       return cached;
     }
@@ -2447,7 +2460,7 @@ async function listRuntimeDirectoryServices(input: {
   });
 
   if (directory.fallbackUsed && mergedServices.length === 0) {
-    const cached = await selectCachedServices();
+    const cached = await selectCachedServices(true);
     if (cached) {
       return cached;
     }
@@ -6703,7 +6716,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     },
     network: {
-      listServices: async ({ online, query }) => {
+      listServices: async ({ online, query, cached }) => {
         const state = await runtimeStateStore.readState();
         const directory = await listRuntimeDirectoryServices({
           state,
@@ -6716,6 +6729,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           socketPresenceFailureMode: input.socketPresenceFailureMode,
           onlineOnly: online === true,
           query,
+          cacheOnly: cached === true,
         });
 
         return commandSuccess({
@@ -7002,7 +7016,36 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before calling services.');
         }
 
-        const request = readCallRequest(rawInput);
+        let request = readCallRequest(rawInput);
+        let selectedFromCache = false;
+        let cachedSelectionServices: Array<Record<string, unknown>> | null = null;
+        if ((!request.servicePinId || !request.providerGlobalMetaId) && request.userTask) {
+          const cache = await onlineServiceCacheStore.read().catch(() => null);
+          const matches = cache
+            ? searchOnlineServiceCacheServices(cache.services, {
+                query: request.serviceQuery || request.rawRequest || request.userTask,
+                onlineOnly: true,
+                limit: 1,
+              })
+            : [];
+          const selected = matches[0] as unknown as Record<string, unknown> | undefined;
+          if (!selected) {
+            return commandFailed(
+              'cached_service_match_not_found',
+              'No cached online service matched this request. Refresh online services or provide servicePinId and providerGlobalMetaId.'
+            );
+          }
+          request = {
+            ...request,
+            servicePinId: normalizeText(selected.servicePinId),
+            providerGlobalMetaId: normalizeText(selected.providerGlobalMetaId),
+            providerDaemonBaseUrl: request.providerDaemonBaseUrl || normalizeText(selected.providerDaemonBaseUrl),
+            taskContext: request.taskContext || `Selected cached online service: ${normalizeText(selected.displayName) || normalizeText(selected.serviceName)}`,
+            confirmed: false,
+          };
+          selectedFromCache = true;
+          cachedSelectionServices = [selected];
+        }
         if (!request.servicePinId || !request.providerGlobalMetaId || !request.userTask) {
           return commandFailed(
             'invalid_call_request',
@@ -7020,6 +7063,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
             return remoteDirectory;
           }
           availableServices = remoteDirectory.services;
+        } else if (cachedSelectionServices) {
+          availableServices = cachedSelectionServices;
         } else {
           const directory = await listRuntimeDirectoryServices({
             state,
@@ -7088,6 +7133,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             traceId: null,
             providerGlobalMetaId: plan.service.providerGlobalMetaId,
             serviceName: serviceDisplayName,
+            selectedFromCache,
             service: plan.service,
             payment: plan.payment,
             confirmation: plan.confirmation,
@@ -7539,8 +7585,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
               }),
               data: {
                 traceId: trace.traceId,
+                servicePinId: plan.service.servicePinId,
                 providerGlobalMetaId: plan.service.providerGlobalMetaId,
                 serviceName: serviceDisplayName,
+                selectedFromCache,
                 service: plan.service,
                 payment: plan.payment,
                 confirmation: plan.confirmation,
@@ -7571,8 +7619,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         return commandSuccess({
           traceId: responseTrace.traceId,
+          servicePinId: plan.service.servicePinId,
           providerGlobalMetaId: plan.service.providerGlobalMetaId,
           serviceName: serviceDisplayName,
+          selectedFromCache,
           service: plan.service,
           payment: plan.payment,
           confirmation: plan.confirmation,

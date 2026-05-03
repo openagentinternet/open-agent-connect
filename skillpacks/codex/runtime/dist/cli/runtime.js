@@ -1261,6 +1261,9 @@ function createDefaultCliDependencies(context) {
                 if (typeof input.query === 'string' && input.query.trim()) {
                     query.set('query', input.query.trim());
                 }
+                if (input.cached === true) {
+                    query.set('cached', 'true');
+                }
                 const suffix = query.size ? `?${query.toString()}` : '';
                 return requestJson(context, 'GET', `/api/network/services${suffix}`);
             },

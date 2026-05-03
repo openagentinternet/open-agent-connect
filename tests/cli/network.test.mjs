@@ -134,6 +134,26 @@ test('runCli forwards network service query search text', async () => {
   assert.deepEqual(calls, [{ online: true, query: 'tarot tomorrow fortune' }]);
 });
 
+test('runCli forwards cache-only network service search', async () => {
+  const calls = [];
+
+  const exitCode = await runCli(['network', 'services', '--cached', '--online', '--query', 'tarot tomorrow fortune'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      network: {
+        listServices: async (input) => {
+          calls.push(input);
+          return commandSuccess({ services: [] });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ online: true, query: 'tarot tomorrow fortune', cached: true }]);
+});
+
 test('runCli dispatches `metabot network bots --online --limit` and renders a markdown table', async () => {
   const stdout = [];
   const calls = [];

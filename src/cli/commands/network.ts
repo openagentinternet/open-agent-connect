@@ -42,9 +42,12 @@ export async function runNetworkCommand(args: string[], context: CliRuntimeConte
     const limit = parsedLimit.limit ?? 20;
     const query = readFlagValue(args, '--query') ?? readFlagValue(args, '--search') ?? undefined;
 
-    const request: { online?: boolean; query?: string } = {
+    const request: { online?: boolean; query?: string; cached?: boolean } = {
       online: hasFlag(args, '--online') ? true : undefined,
     };
+    if (hasFlag(args, '--cached')) {
+      request.cached = true;
+    }
     if (query) {
       request.query = query;
     }

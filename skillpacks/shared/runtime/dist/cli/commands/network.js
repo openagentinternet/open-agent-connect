@@ -35,6 +35,9 @@ async function runNetworkCommand(args, context) {
         const request = {
             online: (0, helpers_1.hasFlag)(args, '--online') ? true : undefined,
         };
+        if ((0, helpers_1.hasFlag)(args, '--cached')) {
+            request.cached = true;
+        }
         if (query) {
             request.query = query;
         }

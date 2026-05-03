@@ -31,8 +31,9 @@ export const handleNetworkRoutes: RouteHandler = async (context) => {
     }
 
     const query = url.searchParams.get('query') ?? url.searchParams.get('q') ?? undefined;
-    const request: { online?: boolean; query?: string } = {
+    const request: { online?: boolean; query?: string; cached?: boolean } = {
       online: parseBoolean(url.searchParams.get('online')),
+      cached: parseBoolean(url.searchParams.get('cached')),
     };
     if (query) {
       request.query = query;

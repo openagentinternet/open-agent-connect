@@ -1683,6 +1683,103 @@ test('network services refreshes the global online service cache and reuses it w
   assert.equal(fromCache.payload.data.services[0].ratingAvg, 4);
 });
 
+test('network services --cached searches the local online service cache without refreshing chain data', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const servicesRoot = path.join(deriveSystemHome(homeDir), '.metabot', 'services');
+  await mkdir(servicesRoot, { recursive: true });
+  await writeFile(path.join(servicesRoot, 'services.json'), JSON.stringify({
+    version: 1,
+    services: [
+      {
+        servicePinId: 'cached-weather-service',
+        sourceServicePinId: 'cached-weather-service',
+        chainPinIds: ['cached-weather-service'],
+        providerGlobalMetaId: 'idq1weather',
+        providerMetaId: null,
+        providerAddress: null,
+        providerName: 'WeatherBot',
+        providerSkill: 'metabot-weather-oracle',
+        providerDaemonBaseUrl: null,
+        providerChatPublicKey: null,
+        serviceName: 'weather-oracle',
+        displayName: 'Weather Oracle',
+        description: 'Returns tomorrow weather.',
+        price: '0.00001',
+        currency: 'SPACE',
+        serviceIcon: null,
+        skillDocument: '# Weather Oracle',
+        inputType: 'text',
+        outputType: 'text',
+        endpoint: 'simplemsg',
+        paymentAddress: 'mvc-weather-payment',
+        available: true,
+        online: true,
+        lastSeenSec: 1_775_000_030,
+        lastSeenAt: 1_775_000_030_000,
+        lastSeenAgoSeconds: 12,
+        updatedAt: 1_775_000_000_000,
+        ratingAvg: 4.9,
+        ratingCount: 20,
+        cachedAt: 1_775_000_400_000,
+      },
+      {
+        servicePinId: 'cached-tarot-service',
+        sourceServicePinId: 'cached-tarot-service',
+        chainPinIds: ['cached-tarot-service'],
+        providerGlobalMetaId: 'idq1tarot',
+        providerMetaId: null,
+        providerAddress: null,
+        providerName: 'TarotBot',
+        providerSkill: 'metabot-tarot-reader',
+        providerDaemonBaseUrl: null,
+        providerChatPublicKey: null,
+        serviceName: 'tarot-reading',
+        displayName: '塔罗牌占卜',
+        description: '为明天运程、事业和情感提供塔罗牌占卜。',
+        price: '0',
+        currency: 'SPACE',
+        serviceIcon: null,
+        skillDocument: '# Tarot Reader',
+        inputType: 'text',
+        outputType: 'markdown',
+        endpoint: 'simplemsg',
+        paymentAddress: 'mvc-tarot-payment',
+        available: true,
+        online: true,
+        lastSeenSec: 1_775_000_031,
+        lastSeenAt: 1_775_000_031_000,
+        lastSeenAgoSeconds: 6,
+        updatedAt: 1_775_000_100_000,
+        ratingAvg: 4.8,
+        ratingCount: 10,
+        cachedAt: 1_775_000_400_000,
+      },
+    ],
+    totalServices: 2,
+    limit: 1000,
+    discoverySource: 'chain',
+    fallbackUsed: false,
+    lastSyncedAt: 1_775_000_400_000,
+    lastError: null,
+  }, null, 2), 'utf8');
+
+  const listed = await runCommand(
+    homeDir,
+    ['network', 'services', '--cached', '--online', '--query', '塔罗牌 明天运程'],
+    { METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9' }
+  );
+
+  assert.equal(listed.exitCode, 0);
+  assert.equal(listed.payload.ok, true);
+  assert.equal(listed.payload.data.discoverySource, 'cache');
+  assert.equal(listed.payload.data.fallbackUsed, false);
+  assert.equal(listed.payload.data.services.length, 1);
+  assert.equal(listed.payload.data.services[0].servicePinId, 'cached-tarot-service');
+  assert.equal(listed.payload.data.services[0].displayName, '塔罗牌占卜');
+});
+
 test('daemon-backed network services forwards --query and filters refreshed online service cache results', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer({
@@ -2887,6 +2984,179 @@ test('services call can resolve a cached online service when the chain directory
   assert.equal(called.payload.data.confirmation.requiresConfirmation, false);
   assert.equal(called.payload.data.confirmation.policyMode, 'confirm_paid_only');
   assert.equal(called.payload.data.confirmation.confirmationBypassed, true);
+});
+
+test('services call can select a cached free online service from a natural-language task', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  const providerChatPublicKey = '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf';
+  t.after(async () => stopDaemon(homeDir));
+
+  const servicesRoot = path.join(deriveSystemHome(homeDir), '.metabot', 'services');
+  await mkdir(servicesRoot, { recursive: true });
+  await writeFile(path.join(servicesRoot, 'services.json'), JSON.stringify({
+    version: 1,
+    services: [
+      {
+        servicePinId: 'cached-tarot-service',
+        sourceServicePinId: 'cached-tarot-service',
+        chainPinIds: ['cached-tarot-service'],
+        providerGlobalMetaId: 'idq1tarot',
+        providerMetaId: null,
+        providerAddress: null,
+        providerName: 'TarotBot',
+        providerSkill: 'metabot-tarot-reader',
+        providerDaemonBaseUrl: null,
+        providerChatPublicKey,
+        serviceName: 'tarot-reading',
+        displayName: '塔罗牌占卜',
+        description: '为明天运程、事业和情感提供塔罗牌占卜。',
+        price: '0',
+        currency: 'SPACE',
+        serviceIcon: null,
+        skillDocument: '# Tarot Reader',
+        inputType: 'text',
+        outputType: 'markdown',
+        endpoint: 'simplemsg',
+        paymentAddress: 'mvc-tarot-payment',
+        available: true,
+        online: true,
+        lastSeenSec: 1_775_000_031,
+        lastSeenAt: 1_775_000_031_000,
+        lastSeenAgoSeconds: 6,
+        updatedAt: 1_775_000_100_000,
+        ratingAvg: 4.8,
+        ratingCount: 10,
+        cachedAt: 1_775_000_400_000,
+      },
+    ],
+    totalServices: 1,
+    limit: 1000,
+    discoverySource: 'chain',
+    fallbackUsed: false,
+    lastSyncedAt: 1_775_000_400_000,
+    lastError: null,
+  }, null, 2), 'utf8');
+
+  const created = await runCommand(
+    homeDir,
+    ['identity', 'create', '--name', 'Alice'],
+    { METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9' }
+  );
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'intent-cache-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      userTask: '帮我使用塔罗牌占卜',
+      rawRequest: '帮我使用塔罗牌占卜',
+      taskContext: 'The user asked for a tarot reading in natural language.',
+      policyMode: 'confirm_paid_only',
+    },
+  }), 'utf8');
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    { METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9' }
+  );
+
+  assert.equal(called.exitCode, 2);
+  assert.equal(called.payload.ok, false);
+  assert.equal(called.payload.state, 'waiting');
+  assert.equal(called.payload.data.servicePinId, 'cached-tarot-service');
+  assert.equal(called.payload.data.serviceName, '塔罗牌占卜');
+  assert.equal(called.payload.data.providerGlobalMetaId, 'idq1tarot');
+  assert.equal(called.payload.data.selectedFromCache, true);
+  assert.equal(called.payload.data.confirmation.requiresConfirmation, false);
+  assert.equal(called.payload.data.confirmation.confirmationBypassed, true);
+});
+
+test('services call does not honor confirmed=true on natural-language cached paid selection', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const servicesRoot = path.join(deriveSystemHome(homeDir), '.metabot', 'services');
+  await mkdir(servicesRoot, { recursive: true });
+  await writeFile(path.join(servicesRoot, 'services.json'), JSON.stringify({
+    version: 1,
+    services: [
+      {
+        servicePinId: 'cached-paid-tarot-service',
+        sourceServicePinId: 'cached-paid-tarot-service',
+        chainPinIds: ['cached-paid-tarot-service'],
+        providerGlobalMetaId: 'idq1paidtarot',
+        providerMetaId: null,
+        providerAddress: null,
+        providerName: 'PaidTarotBot',
+        providerSkill: 'metabot-tarot-reader',
+        providerDaemonBaseUrl: null,
+        providerChatPublicKey: null,
+        serviceName: 'paid-tarot-reading',
+        displayName: '付费塔罗牌占卜',
+        description: '为明天运程、事业和情感提供付费塔罗牌占卜。',
+        price: '0.00001',
+        currency: 'SPACE',
+        serviceIcon: null,
+        skillDocument: '# Paid Tarot Reader',
+        inputType: 'text',
+        outputType: 'markdown',
+        endpoint: 'simplemsg',
+        paymentAddress: 'mvc-paid-tarot-payment',
+        available: true,
+        online: true,
+        lastSeenSec: 1_775_000_031,
+        lastSeenAt: 1_775_000_031_000,
+        lastSeenAgoSeconds: 6,
+        updatedAt: 1_775_000_100_000,
+        ratingAvg: 4.8,
+        ratingCount: 10,
+        cachedAt: 1_775_000_400_000,
+      },
+    ],
+    totalServices: 1,
+    limit: 1000,
+    discoverySource: 'chain',
+    fallbackUsed: false,
+    lastSyncedAt: 1_775_000_400_000,
+    lastError: null,
+  }, null, 2), 'utf8');
+
+  const created = await runCommand(
+    homeDir,
+    ['identity', 'create', '--name', 'Alice'],
+    { METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9' }
+  );
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'intent-paid-cache-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      userTask: '帮我使用付费塔罗牌占卜',
+      rawRequest: '帮我使用付费塔罗牌占卜',
+      taskContext: 'The user asked for a tarot reading in natural language.',
+      policyMode: 'confirm_paid_only',
+      confirmed: true,
+    },
+  }), 'utf8');
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    { METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9' }
+  );
+
+  assert.equal(called.exitCode, 0);
+  assert.equal(called.payload.ok, true);
+  assert.equal(called.payload.state, 'awaiting_confirmation');
+  assert.equal(called.payload.data.serviceName, '付费塔罗牌占卜');
+  assert.equal(called.payload.data.providerGlobalMetaId, 'idq1paidtarot');
+  assert.equal(called.payload.data.selectedFromCache, true);
+  assert.equal(called.payload.data.payment.amount, '0.00001');
+  assert.equal(called.payload.data.confirmation.requiresConfirmation, true);
+  assert.equal(called.payload.data.confirmRequest.request.servicePinId, 'cached-paid-tarot-service');
+  assert.equal(called.payload.data.confirmRequest.request.providerGlobalMetaId, 'idq1paidtarot');
+  assert.equal(called.payload.data.confirmRequest.request.confirmed, true);
+  assert.equal(called.payload.data.traceId, null);
 });
 
 test('paid confirm_paid_only service call returns confirmation preview before payment or order write', async (t) => {

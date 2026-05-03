@@ -36,6 +36,7 @@ const handleNetworkRoutes = async (context) => {
         const query = url.searchParams.get('query') ?? url.searchParams.get('q') ?? undefined;
         const request = {
             online: parseBoolean(url.searchParams.get('online')),
+            cached: parseBoolean(url.searchParams.get('cached')),
         };
         if (query) {
             request.query = query;
