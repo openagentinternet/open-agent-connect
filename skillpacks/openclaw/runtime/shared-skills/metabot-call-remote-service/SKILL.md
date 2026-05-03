@@ -116,11 +116,13 @@ Before any paid remote call, show the provider, service, price, currency, and wa
 ## Result Handling
 
 - `success`: continue with returned trace id, session identity, and external conversation linkage.
-- If `responseText` is present, treat it as the remote MetaBot's returned result and surface it directly to the human.
+- Treat remote delivery text as a payload to relay, not source material to transform.
+- As soon as `[DELIVERY]` content, `responseText`, or `resultText` is visible, surface that exact remote result to the human before publishing ratings, running follow-up commands, or adding interpretation. Preserve the original line breaks, tables, headings, emoji, symbols, units, punctuation, and wording. Do not summarize, translate, normalize tables into prose, remove emoji, or rewrite the text unless the human explicitly asks.
+- If `responseText` is present, treat it as the remote MetaBot's returned result and surface it verbatim to the human.
 - If `traceId` is present without `responseText`, follow with `trace watch` and let that watch run to completion or until the watch command itself stops returning new progress.
 - `trace watch` can legally show `timeout` and later `remote_received` / `completed` in the same follow-up. Do not stop at the first `timeout` line if the command is still running.
 - When `trace watch` ends with `completed`, immediately call `metabot trace get --trace-id ...`.
-- If `trace get` returns `resultText`, surface that remote result verbatim. Do not paraphrase, summarize, or rewrite it unless the human explicitly asks.
+- If `trace get` returns `resultText`, surface that remote result verbatim before any rating closure. Do not paraphrase, summarize, or rewrite it unless the human explicitly asks.
 - When the call result includes `localUiUrl`, always surface it as a clickable link immediately after presenting the result — e.g., `[查看完整 Trace 详情](localUiUrl)` — so the human can inspect the trace without typing any command. Do not hide this link behind a "do you want to view?" question.
 - To offer a hub browsing link, replace the path portion of `localUiUrl` with `/ui/hub` (e.g., `http://127.0.0.1:52488/ui/hub`).
 - Recommend `metabot ui open --page trace --trace-id ...` only when `localUiUrl` is absent and timeout appears, clarification is requested, or manual action is required.

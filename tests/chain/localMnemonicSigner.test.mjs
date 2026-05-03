@@ -3,7 +3,12 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
-const { createLocalMnemonicSigner } = require('../../dist/core/signing/localMnemonicSigner.js');
+const {
+  createLocalMnemonicSigner,
+  executeMvcTransfer,
+  __clearPendingMvcSpentOutpointsForTests,
+} = require('../../dist/core/signing/localMnemonicSigner.js');
+const { mvc } = require('meta-contract');
 const { BtcWallet, SignType } = require('@metalet/utxo-wallet-service');
 
 const FIXTURE_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
@@ -50,6 +55,15 @@ async function withMockedFetch(mockFetch, run) {
   } finally {
     global.fetch = originalFetch;
   }
+}
+
+function createMvcUtxo(txid, value = 100_000) {
+  return {
+    txid,
+    outIndex: 0,
+    value,
+    height: 1,
+  };
 }
 
 test('createLocalMnemonicSigner derives identity and private chat key material from the stored mnemonic', async () => {
@@ -109,6 +123,71 @@ test('createLocalMnemonicSigner writes an MVC pin through the injected transport
   assert.equal(result.path, '/protocols/simplebuzz');
   assert.equal(result.globalMetaId, EXPECTED_IDENTITY.globalMetaId);
   assert.equal(result.totalCost > 0, true);
+});
+
+test('MVC chain writes can spend local pending change after a just-broadcast payment', async () => {
+  __clearPendingMvcSpentOutpointsForTests?.();
+  try {
+    const spentTxid = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    const spentUtxo = createMvcUtxo(spentTxid);
+    const writePinBroadcasts = [];
+    const signer = createLocalMnemonicSigner({
+      secretStore: createSecretStore(),
+      mvcTransport: {
+        fetchUtxos: async () => [spentUtxo],
+        broadcastTx: async (rawTx) => {
+          const tx = new mvc.Transaction(rawTx);
+          const inputTxids = tx.inputs.map((input) => input.prevTxId.toString('hex'));
+          assert.equal(inputTxids.includes(spentTxid), false);
+          writePinBroadcasts.push({ rawTx, inputTxids });
+          return '2'.repeat(64);
+        },
+      },
+    });
+
+    await withMockedFetch(async (url, init) => {
+      const target = String(url);
+      if (target.includes('/wallet-api/v4/mvc/address/utxo-list')) {
+        return {
+          json: async () => ({
+            data: {
+              list: [spentUtxo],
+            },
+          }),
+        };
+      }
+      if (target.includes('/wallet-api/v3/tx/broadcast')) {
+        assert.equal(init?.method, 'POST');
+        return {
+          json: async () => ({
+            code: 0,
+            data: '1'.repeat(64),
+          }),
+        };
+      }
+      throw new Error(`unexpected fetch URL: ${target}`);
+    }, async () => {
+      await executeMvcTransfer({
+        mnemonic: FIXTURE_MNEMONIC,
+        path: FIXTURE_PATH,
+        toAddress: EXPECTED_IDENTITY.mvcAddress,
+        amountSatoshis: 1000,
+      });
+    });
+
+    const result = await signer.writePin({
+      path: '/protocols/simplemsg',
+      payload: '{"content":"[ORDER] weather"}',
+      contentType: 'application/json',
+      network: 'mvc',
+    });
+
+    assert.equal(result.pinId, `${'2'.repeat(64)}i0`);
+    assert.equal(writePinBroadcasts.length, 1);
+    assert.deepEqual(writePinBroadcasts[0].inputTxids, ['1'.repeat(64)]);
+  } finally {
+    __clearPendingMvcSpentOutpointsForTests?.();
+  }
 });
 
 test('createLocalMnemonicSigner writes a BTC pin through the injected btcCreatePin adapter', async () => {

@@ -48,6 +48,12 @@ export interface MetabotDaemonHttpHandlers {
     call?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     rate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     execute?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    handleInboundOrderProtocolMessage?: (input: {
+      fromGlobalMetaId: string;
+      content: string;
+      messagePinId?: string | null;
+      timestamp?: number | null;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

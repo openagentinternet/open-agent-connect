@@ -359,6 +359,52 @@ test('service rating retries provider follow-up simplemsg after a mempool confli
   assert.match(followup.content, /Great weather report/);
 });
 
+test('service rating retries skill-service-rate publish after a mempool conflict', async (t) => {
+  let ratingAttempts = 0;
+  const harness = await createServiceCallHarness(t, {
+    ratingFollowupRetryDelaysMs: [0],
+    writePin(input, { writes, identity }) {
+      if (input.path === '/protocols/skill-service-rate') {
+        ratingAttempts += 1;
+        if (ratingAttempts === 1) {
+          throw new Error('[-26]258: txn-mempool-conflict');
+        }
+      }
+      return {
+        txids: [`${input.path}-tx-${writes.length}`],
+        pinId: `${input.path}-pin-${writes.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      };
+    },
+  });
+  const sessionStateStore = await seedBuyerTraceForRating(harness);
+
+  const result = await harness.handlers.services.rate({
+    traceId: 'trace-rating-retry',
+    rate: 5,
+    comment: 'Great weather report.',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(ratingAttempts, 2);
+  assert.match(result.data.pinId, /\/protocols\/skill-service-rate-pin-/);
+  assert.equal(result.data.ratingMessageSent, true);
+
+  const sessionState = await sessionStateStore.readState();
+  const published = sessionState.transcriptItems.find(
+    (item) => item.metadata?.event === 'service_rating_published',
+  );
+  assert.ok(published);
+  assert.match(published.metadata.ratingPinId, /\/protocols\/skill-service-rate-pin-/);
+});
+
 test('service rating does not retry provider follow-up simplemsg for non-conflict tx rejection', async (t) => {
   let simplemsgAttempts = 0;
   const harness = await createServiceCallHarness(t, {

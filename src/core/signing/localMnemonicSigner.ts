@@ -26,6 +26,7 @@ const NET = 'livenet';
 const P2PKH_INPUT_SIZE = 148;
 const DEFAULT_BTC_WRITE_FEE_RATE = 2;
 const DEFAULT_METALET_TIMEOUT_MS = 1_500;
+const PENDING_MVC_SPENT_OUTPOINT_TTL_MS = 10 * 60 * 1000;
 
 interface MvcTransportUtxo {
   txid: string;
@@ -40,6 +41,15 @@ interface SelectedMvcUtxo {
   satoshis: number;
   address: string;
   height: number;
+}
+
+interface PendingMvcSpentOutpoint {
+  expiresAt: number;
+}
+
+interface PendingMvcAvailableUtxo {
+  utxo: SelectedMvcUtxo;
+  expiresAt: number;
 }
 
 export interface LocalMnemonicSignerMvcTransport {
@@ -74,6 +84,121 @@ export interface LocalMnemonicSignerBtcCreatePinResult {
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+const pendingMvcSpentOutpoints = new Map<string, PendingMvcSpentOutpoint>();
+const pendingMvcAvailableUtxos = new Map<string, PendingMvcAvailableUtxo>();
+
+function normalizeMvcOutpointTxid(value: string): string {
+  return normalizeText(value).toLowerCase();
+}
+
+function buildMvcOutpointKey(address: string, txId: string, outputIndex: number): string {
+  return [
+    normalizeText(address),
+    normalizeMvcOutpointTxid(txId),
+    String(outputIndex),
+  ].join(':');
+}
+
+function prunePendingMvcSpentOutpoints(now: number = Date.now()): void {
+  for (const [key, value] of pendingMvcSpentOutpoints.entries()) {
+    if (value.expiresAt <= now) {
+      pendingMvcSpentOutpoints.delete(key);
+    }
+  }
+  for (const [key, value] of pendingMvcAvailableUtxos.entries()) {
+    if (value.expiresAt <= now) {
+      pendingMvcAvailableUtxos.delete(key);
+    }
+  }
+}
+
+function rememberPendingMvcTransaction(input: {
+  address: string;
+  spentUtxos: SelectedMvcUtxo[];
+  createdUtxos: SelectedMvcUtxo[];
+  now?: number;
+}): void {
+  const now = input.now ?? Date.now();
+  prunePendingMvcSpentOutpoints(now);
+  const expiresAt = now + PENDING_MVC_SPENT_OUTPOINT_TTL_MS;
+  for (const utxo of input.spentUtxos) {
+    const key = buildMvcOutpointKey(input.address, utxo.txId, utxo.outputIndex);
+    pendingMvcSpentOutpoints.set(key, { expiresAt });
+    pendingMvcAvailableUtxos.delete(key);
+  }
+  for (const utxo of input.createdUtxos) {
+    if (utxo.satoshis < 600) {
+      continue;
+    }
+    const key = buildMvcOutpointKey(input.address, utxo.txId, utxo.outputIndex);
+    if (!pendingMvcSpentOutpoints.has(key)) {
+      pendingMvcAvailableUtxos.set(key, {
+        utxo,
+        expiresAt,
+      });
+    }
+  }
+}
+
+function resolveMvcSpendableUtxos(input: {
+  address: string;
+  utxos: SelectedMvcUtxo[];
+  now?: number;
+}): SelectedMvcUtxo[] {
+  const now = input.now ?? Date.now();
+  prunePendingMvcSpentOutpoints(now);
+  const merged = new Map<string, SelectedMvcUtxo>();
+  for (const utxo of input.utxos) {
+    merged.set(buildMvcOutpointKey(input.address, utxo.txId, utxo.outputIndex), utxo);
+  }
+  for (const [key, value] of pendingMvcAvailableUtxos.entries()) {
+    if (normalizeText(value.utxo.address) === normalizeText(input.address)) {
+      merged.set(key, value.utxo);
+    }
+  }
+  return [...merged.entries()]
+    .filter(([key]) => !pendingMvcSpentOutpoints.has(key))
+    .map(([, utxo]) => utxo);
+}
+
+function extractOwnedMvcOutputs(input: {
+  txid: string;
+  address: string;
+  outputs: Array<{ satoshis?: number; script?: { toAddress?: (network?: string) => unknown } }>;
+}): SelectedMvcUtxo[] {
+  const txId = normalizeMvcOutpointTxid(input.txid);
+  if (!txId) {
+    return [];
+  }
+
+  const owned: SelectedMvcUtxo[] = [];
+  input.outputs.forEach((output, outputIndex) => {
+    let outputAddress = '';
+    try {
+      const resolvedAddress = output.script?.toAddress?.(NET);
+      outputAddress = normalizeText(resolvedAddress == null ? '' : String(resolvedAddress));
+    } catch {
+      outputAddress = '';
+    }
+    const satoshis = Number(output.satoshis ?? 0);
+    if (outputAddress === normalizeText(input.address) && Number.isFinite(satoshis) && satoshis > 0) {
+      owned.push({
+        txId,
+        outputIndex,
+        satoshis,
+        address: input.address,
+        height: 0,
+      });
+    }
+  });
+  return owned;
+}
+
+export function __clearPendingMvcSpentOutpointsForTests(): void {
+  pendingMvcSpentOutpoints.clear();
+  pendingMvcAvailableUtxos.clear();
 }
 
 function getErrorMessage(error: unknown): string {
@@ -557,13 +682,16 @@ export async function executeMvcTransfer(input: WalletTransferExecuteInput): Pro
   const { privateKey, address } = buildMvcPrivateKey(input.mnemonic, input.path);
 
   const rawUtxos = await fetchMvcUtxos(address);
-  const utxos: SelectedMvcUtxo[] = rawUtxos.map((utxo) => ({
-    txId: utxo.txid,
-    outputIndex: utxo.outIndex,
-    satoshis: utxo.value,
+  const utxos: SelectedMvcUtxo[] = resolveMvcSpendableUtxos({
     address,
-    height: utxo.height,
-  }));
+    utxos: rawUtxos.map((utxo) => ({
+      txId: utxo.txid,
+      outputIndex: utxo.outIndex,
+      satoshis: utxo.value,
+      address,
+      height: utxo.height,
+    })),
+  });
 
   const SIMPLE_P2PKH_TX_BASE_SIZE = 96;
   const picked = pickMvcUtxos(utxos, input.amountSatoshis, feeRate, SIMPLE_P2PKH_TX_BASE_SIZE);
@@ -589,6 +717,15 @@ export async function executeMvcTransfer(input: WalletTransferExecuteInput): Pro
   }
 
   const txid = await broadcastMvcTx(txComposer.getRawHex());
+  rememberPendingMvcTransaction({
+    address,
+    spentUtxos: picked,
+    createdUtxos: extractOwnedMvcOutputs({
+      txid,
+      address,
+      outputs: txComposer.tx.outputs,
+    }),
+  });
   return { txid };
 }
 
@@ -687,13 +824,16 @@ export function createLocalMnemonicSigner(input: {
       const { privateKey, address } = buildMvcPrivateKey(identity.mnemonic, identity.path);
 
       const utxos = await mvcTransport.fetchUtxos(address);
-      const usableUtxos: SelectedMvcUtxo[] = utxos.map((utxo) => ({
-        txId: utxo.txid,
-        outputIndex: utxo.outIndex,
-        satoshis: utxo.value,
+      const usableUtxos: SelectedMvcUtxo[] = resolveMvcSpendableUtxos({
         address,
-        height: utxo.height,
-      }));
+        utxos: utxos.map((utxo) => ({
+          txId: utxo.txid,
+          outputIndex: utxo.outIndex,
+          satoshis: utxo.value,
+          address,
+          height: utxo.height,
+        })),
+      });
 
       const addressObject = new mvc.Address(address, mvc.Networks.livenet as never);
       const opReturnParts = buildMvcOpReturnParts(request);
@@ -726,6 +866,15 @@ export function createLocalMnemonicSigner(input: {
 
       const rawTx = txComposer.getRawHex();
       const txid = await mvcTransport.broadcastTx(rawTx);
+      rememberPendingMvcTransaction({
+        address,
+        spentUtxos: pickedUtxos,
+        createdUtxos: extractOwnedMvcOutputs({
+          txid,
+          address,
+          outputs: txComposer.tx.outputs,
+        }),
+      });
       const inputTotal = txComposer.tx.inputs.reduce((sum, current) => sum + (current.output?.satoshis || 0), 0);
       const outputTotal = txComposer.tx.outputs.reduce((sum, output) => sum + output.satoshis, 0);
 
