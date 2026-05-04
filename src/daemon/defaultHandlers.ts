@@ -79,6 +79,7 @@ import type { A2ASessionRecord, A2ATaskRunRecord } from '../core/a2a/sessionType
 import { buildTraceWatchEvents, serializeTraceWatchEvents } from '../core/a2a/watch/traceWatch';
 import { isTerminalTraceWatchStatus } from '../core/a2a/watch/watchEvents';
 import {
+  buildA2APeerSessionId,
   persistA2AConversationMessage,
   persistA2AConversationMessageBestEffort,
   type A2AConversationMessagePersister,
@@ -8460,6 +8461,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
             },
           },
         }, a2aConversationPersister);
+        let a2aSessionId = chatA2AStoreResult.message?.sessionId ?? null;
+        if (!a2aSessionId) {
+          try {
+            a2aSessionId = buildA2APeerSessionId(state.identity.globalMetaId, request.to);
+          } catch {
+            a2aSessionId = null;
+          }
+        }
         const structuredContent = describeStructuredPrivateChatContent(request.content);
 
         const traceId = `trace-private-${Date.now().toString(36)}`;
@@ -8532,11 +8541,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
           correlatedTraceId: structuredContent.traceId,
           a2aStorePersisted: chatA2AStoreResult.persisted,
           a2aStoreError: chatA2AStoreResult.errorMessage,
+          a2aSessionId,
           traceId: trace.traceId,
           localUiUrl: buildDaemonLocalUiUrl(
             input.getDaemonRecord(),
-            '/ui/chat-viewer',
-            { peer: request.to },
+            '/ui/trace',
+            a2aSessionId
+              ? { traceId: a2aSessionId, sessionId: a2aSessionId }
+              : { traceId: trace.traceId },
           ),
           transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
           traceMarkdownPath: artifacts.traceMarkdownPath,

@@ -6,9 +6,9 @@ const chatPersonaLoader_1 = require("./chatPersonaLoader");
 const conversationPersistence_1 = require("../a2a/conversationPersistence");
 const simplemsgClassifier_1 = require("../a2a/simplemsgClassifier");
 const DEFAULT_MAX_TURNS = 30;
-const DEFAULT_RECENT_MESSAGES_LIMIT = 20;
-const END_CONVERSATION_MARKER = '[END_CONVERSATION]';
-const CLOSING_SIGNAL = 'closing';
+const DEFAULT_MAX_IDLE_MS = 300_000;
+const DEFAULT_RECENT_MESSAGES_LIMIT = 60;
+const CLOSE_CONVERSATION_SIGNAL = 'Bye';
 const MAX_REPLIES_PER_MINUTE = 10;
 const MAX_REPLIES_PER_HOUR = 100;
 function normalizeText(value) {
@@ -49,9 +49,38 @@ function parseExtensions(content) {
     }
     return null;
 }
-function hasClosingSignal(message) {
-    const extensions = parseExtensions(message.content);
-    return normalizeText(extensions?.conversationSignal) === CLOSING_SIGNAL;
+function findFinalNonEmptyLineIndex(lines) {
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+        if (lines[index].trim()) {
+            return index;
+        }
+    }
+    return -1;
+}
+function hasFinalByeLine(value) {
+    const lines = value.split(/\r?\n/u);
+    const finalIndex = findFinalNonEmptyLineIndex(lines);
+    return finalIndex >= 0 && lines[finalIndex].trim().toLowerCase() === CLOSE_CONVERSATION_SIGNAL.toLowerCase();
+}
+function ensureFinalByeLine(value) {
+    const content = normalizeText(value);
+    if (!content) {
+        return CLOSE_CONVERSATION_SIGNAL;
+    }
+    const lines = content.split(/\r?\n/u);
+    const finalIndex = findFinalNonEmptyLineIndex(lines);
+    if (finalIndex >= 0 && lines[finalIndex].trim().toLowerCase() === CLOSE_CONVERSATION_SIGNAL.toLowerCase()) {
+        lines[finalIndex] = CLOSE_CONVERSATION_SIGNAL;
+        return lines.join('\n').trim();
+    }
+    return `${content}\n${CLOSE_CONVERSATION_SIGNAL}`;
+}
+async function shouldResetIdleTurnCount(input) {
+    const [latestMessage] = await input.stateStore.getRecentMessages(input.conversationId, 1);
+    if (!latestMessage || !Number.isFinite(latestMessage.timestamp)) {
+        return false;
+    }
+    return input.inboundTimestamp - latestMessage.timestamp > input.maxIdleMs;
 }
 function checkRateLimit(rateLimiter, now) {
     const oneMinuteAgo = now - 60_000;
@@ -122,6 +151,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             if (!peerGlobalMetaId)
                 return;
             const conversationId = buildConversationId(selfGlobalMetaId, peerGlobalMetaId);
+            const inboundTimestamp = message.timestamp || now;
             const simplemsgClassification = (0, simplemsgClassifier_1.classifySimplemsgContent)(message.content);
             // Step 1: Store the inbound message.
             let conversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId);
@@ -139,6 +169,21 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     updatedAt: now,
                 };
             }
+            const strategy = conversation.strategyId
+                ? await deps.strategyStore.getStrategy(conversation.strategyId)
+                : null;
+            const maxIdleMs = strategy?.maxIdleMs ?? DEFAULT_MAX_IDLE_MS;
+            if (await shouldResetIdleTurnCount({
+                stateStore: deps.stateStore,
+                conversationId: conversation.conversationId,
+                inboundTimestamp,
+                maxIdleMs,
+            })) {
+                conversation = {
+                    ...conversation,
+                    turnCount: 0,
+                };
+            }
             const inboundMessageRecord = {
                 conversationId: conversation.conversationId,
                 messageId: message.messagePinId || buildMessageId(now),
@@ -147,7 +192,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 content: message.content,
                 messagePinId: message.messagePinId,
                 extensions: parseExtensions(message.content),
-                timestamp: message.timestamp || now,
+                timestamp: inboundTimestamp,
             };
             await deps.stateStore.appendMessages([inboundMessageRecord]);
             conversation = {
@@ -178,8 +223,8 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             if (simplemsgClassification.kind === 'order_protocol') {
                 return;
             }
-            // Step 2: Check for closing signal from peer.
-            if (hasClosingSignal(message)) {
+            // Step 2: Check for the natural-language closing signal from peer.
+            if (hasFinalByeLine(message.content)) {
                 conversation = { ...conversation, state: 'closed', updatedAt: now };
                 await deps.stateStore.upsertConversation(conversation);
                 return;
@@ -189,10 +234,6 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 return;
             if (!checkRateLimit(rateLimiter, now))
                 return;
-            // Load strategy.
-            const strategy = conversation.strategyId
-                ? await deps.strategyStore.getStrategy(conversation.strategyId)
-                : null;
             const maxTurns = strategy?.maxTurns ?? DEFAULT_MAX_TURNS;
             // Step 4: Apply cooldown delay.
             const cooldownMs = getCooldownDelayMs(conversation.turnCount);
@@ -201,8 +242,8 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             }
             // Step 5: Check hard turn limit.
             if (conversation.turnCount >= maxTurns) {
-                const closingContent = 'It was great chatting with you. Let us continue another time!';
-                const closingReply = await sendReplyMessage(selfGlobalMetaId, peerGlobalMetaId, closingContent, { conversationSignal: CLOSING_SIGNAL });
+                const closingContent = ensureFinalByeLine('It was great chatting with you. Let us continue another time.');
+                const closingReply = await sendReplyMessage(selfGlobalMetaId, peerGlobalMetaId, closingContent, null);
                 const closingPinId = closingReply?.pinId ?? null;
                 const outboundRecord = {
                     conversationId: conversation.conversationId,
@@ -211,7 +252,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     senderGlobalMetaId: selfGlobalMetaId,
                     content: closingContent,
                     messagePinId: closingPinId,
-                    extensions: { conversationSignal: CLOSING_SIGNAL },
+                    extensions: null,
                     timestamp: getNow(),
                 };
                 await deps.stateStore.appendMessages([outboundRecord]);
@@ -238,7 +279,6 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 conversation = {
                     ...conversation,
                     state: 'closed',
-                    turnCount: conversation.turnCount + 1,
                     lastDirection: 'outbound',
                     updatedAt: getNow(),
                 };
@@ -265,16 +305,13 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             if (runnerResult.state === 'skip')
                 return;
             let replyContent = normalizeText(runnerResult.content);
-            let replyExtensions = runnerResult.extensions ?? null;
-            let shouldClose = runnerResult.state === 'end_conversation';
-            // Check for [END_CONVERSATION] marker in reply content.
-            if (replyContent.includes(END_CONVERSATION_MARKER)) {
-                replyContent = replyContent.replace(END_CONVERSATION_MARKER, '').trim();
-                shouldClose = true;
-            }
+            const shouldClose = runnerResult.state === 'end_conversation' || hasFinalByeLine(replyContent);
             if (shouldClose) {
-                replyExtensions = { ...(replyExtensions ?? {}), conversationSignal: CLOSING_SIGNAL };
+                replyContent = ensureFinalByeLine(replyContent);
             }
+            const replyExtensions = shouldClose
+                ? null
+                : runnerResult.extensions ?? null;
             if (!replyContent)
                 return;
             // Step 8: Send reply.
@@ -314,7 +351,6 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             conversation = {
                 ...conversation,
                 state: shouldClose ? 'closed' : 'active',
-                turnCount: conversation.turnCount + 1,
                 lastDirection: 'outbound',
                 updatedAt: getNow(),
             };

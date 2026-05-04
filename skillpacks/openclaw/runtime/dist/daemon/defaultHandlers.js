@@ -7030,6 +7030,15 @@ function createDefaultMetabotDaemonHandlers(input) {
                         },
                     },
                 }, a2aConversationPersister);
+                let a2aSessionId = chatA2AStoreResult.message?.sessionId ?? null;
+                if (!a2aSessionId) {
+                    try {
+                        a2aSessionId = (0, conversationPersistence_1.buildA2APeerSessionId)(state.identity.globalMetaId, request.to);
+                    }
+                    catch {
+                        a2aSessionId = null;
+                    }
+                }
                 const structuredContent = describeStructuredPrivateChatContent(request.content);
                 const traceId = `trace-private-${Date.now().toString(36)}`;
                 const trace = (0, sessionTrace_1.buildSessionTrace)({
@@ -7098,8 +7107,11 @@ function createDefaultMetabotDaemonHandlers(input) {
                     correlatedTraceId: structuredContent.traceId,
                     a2aStorePersisted: chatA2AStoreResult.persisted,
                     a2aStoreError: chatA2AStoreResult.errorMessage,
+                    a2aSessionId,
                     traceId: trace.traceId,
-                    localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/chat-viewer', { peer: request.to }),
+                    localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', a2aSessionId
+                        ? { traceId: a2aSessionId, sessionId: a2aSessionId }
+                        : { traceId: trace.traceId }),
                     transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
                     traceMarkdownPath: artifacts.traceMarkdownPath,
                     traceJsonPath: artifacts.traceJsonPath,

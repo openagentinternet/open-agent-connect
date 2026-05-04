@@ -35,6 +35,117 @@ function createIdentityPair() {
   };
 }
 
+async function withImmediateTimers(fn) {
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (callback, _ms, ...args) => {
+    if (typeof callback === 'function') {
+      callback(...args);
+    }
+    return {
+      ref() { return this; },
+      unref() { return this; },
+      [Symbol.toPrimitive]() { return 0; },
+    };
+  };
+  try {
+    return await fn();
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+}
+
+async function createAutoReplyHarness(options = {}) {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const localKeys = createIdentityPair();
+  const peerKeys = createIdentityPair();
+  const localGlobalMetaId = options.localGlobalMetaId ?? 'idq1localbot0000000000000000000000000';
+  const peerGlobalMetaId = options.peerGlobalMetaId ?? 'idq1peerbot00000000000000000000000000';
+  const writes = [];
+  const runnerInputs = [];
+  const stateStore = createPrivateChatStateStore(paths);
+  const strategyStore = createChatStrategyStore(paths);
+  const nowFn = typeof options.now === 'function'
+    ? options.now
+    : () => options.now ?? 1_770_000_000_000;
+
+  const orchestrator = createPrivateChatAutoReplyOrchestrator({
+    stateStore,
+    strategyStore,
+    paths,
+    signer: {
+      async getIdentity() {
+        throw new Error('not used');
+      },
+      async getPrivateChatIdentity() {
+        return {
+          globalMetaId: localGlobalMetaId,
+          chatPublicKey: localKeys.publicKeyHex,
+          privateKeyHex: localKeys.privateKeyHex,
+        };
+      },
+      async writePin(input) {
+        writes.push(input);
+        return {
+          txids: ['reply-tx-1'],
+          pinId: `reply-pin-${writes.length}`,
+          totalCost: 0,
+          network: 'mvc',
+          operation: 'create',
+          path: input.path,
+          contentType: input.contentType,
+          encoding: 'utf-8',
+          globalMetaId: localGlobalMetaId,
+          mvcAddress: 'mvc-local',
+        };
+      },
+    },
+    selfGlobalMetaId: async () => localGlobalMetaId,
+    resolvePeerChatPublicKey: async () => peerKeys.publicKeyHex,
+    replyRunner: async (input) => {
+      runnerInputs.push(input);
+      if (options.replyRunner) {
+        return options.replyRunner(input);
+      }
+      return options.replyResult ?? {
+        state: 'reply',
+        content: 'reply from LLM',
+      };
+    },
+    now: nowFn,
+  }, {
+    enabled: true,
+    acceptPolicy: 'accept_all',
+    defaultStrategyId: options.defaultStrategyId ?? null,
+  });
+
+  return {
+    paths,
+    localKeys,
+    peerKeys,
+    localGlobalMetaId,
+    peerGlobalMetaId,
+    writes,
+    runnerInputs,
+    stateStore,
+    strategyStore,
+    async handleInbound(overrides = {}) {
+      return orchestrator.handleInboundMessage({
+        fromGlobalMetaId: peerGlobalMetaId,
+        content: 'hello local bot',
+        messagePinId: 'incoming-pin-1',
+        fromChatPublicKey: peerKeys.publicKeyHex,
+        timestamp: nowFn(),
+        rawMessage: {
+          pinId: 'incoming-pin-1',
+          txid: 'incoming-tx-1',
+        },
+        ...overrides,
+      });
+    },
+  };
+}
+
 test('chatPersonaLoader returns empty strings when files do not exist', async () => {
   const { profileRoot } = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);
@@ -149,6 +260,7 @@ test('defaultChatReplyRunner returns end_conversation near max turns', () => {
   });
 
   assert.equal(result.state, 'end_conversation');
+  assert.match(result.content, /\nBye$/);
 });
 
 test('auto-reply persists inbound and outbound private chat messages to the unified A2A store', async () => {
@@ -230,6 +342,10 @@ test('auto-reply persists inbound and outbound private chat messages to the unif
   assert.equal(legacyMessages[0].content, 'hello local bot');
   assert.equal(legacyMessages[1].content, 'reply from LLM');
 
+  const privateChatConversation = await createPrivateChatStateStore(paths)
+    .getConversationByPeer(peerGlobalMetaId);
+  assert.equal(privateChatConversation.turnCount, 1);
+
   const conversation = await createA2AConversationStore({
     paths,
     local: {
@@ -257,6 +373,209 @@ test('auto-reply persists inbound and outbound private chat messages to the unif
   assert.equal(conversation.sessions.some(
     (session) => session.sessionId === incoming.sessionId && session.type === 'peer',
   ), true);
+});
+
+test('auto-reply injects the latest 60 private chat messages into the runner', async () => {
+  const harness = await createAutoReplyHarness({ now: 1_770_000_060_000 });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'outbound',
+    createdAt: 1_770_000_000_000,
+    updatedAt: 1_770_000_059_000,
+  });
+  await harness.stateStore.appendMessages(Array.from({ length: 59 }, (_, index) => ({
+    conversationId,
+    messageId: `history-${index + 1}`,
+    direction: index % 2 === 0 ? 'inbound' : 'outbound',
+    senderGlobalMetaId: index % 2 === 0 ? harness.peerGlobalMetaId : harness.localGlobalMetaId,
+    content: `history-${index + 1}`,
+    messagePinId: null,
+    extensions: null,
+    timestamp: 1_770_000_000_000 + index,
+  })));
+
+  await harness.handleInbound({
+    content: 'latest inbound',
+    messagePinId: 'incoming-pin-latest',
+  });
+
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.runnerInputs[0].recentMessages.length, 60);
+  assert.equal(harness.runnerInputs[0].recentMessages[0].content, 'history-1');
+  assert.equal(harness.runnerInputs[0].recentMessages.at(-1).content, 'latest inbound');
+});
+
+test('auto-reply resets inbound turn count after five idle minutes from the latest stored message on either side', async () => {
+  const now = 1_770_000_600_001;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.strategyStore.write({
+    strategies: [
+      { id: 'default', maxTurns: 30, maxIdleMs: 300_000, exitCriteria: '' },
+    ],
+  });
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: 'default',
+    state: 'active',
+    turnCount: 12,
+    lastDirection: 'outbound',
+    createdAt: now - 1_000_000,
+    updatedAt: now - 300_001,
+  });
+  await harness.stateStore.appendMessages([{
+    conversationId,
+    messageId: 'old-outbound',
+    direction: 'outbound',
+    senderGlobalMetaId: harness.localGlobalMetaId,
+    content: 'old outbound',
+    messagePinId: null,
+    extensions: null,
+    timestamp: now - 300_001,
+  }]);
+
+  await withImmediateTimers(() => harness.handleInbound({
+    content: 'new topic after idle',
+    messagePinId: 'incoming-pin-idle',
+  }));
+
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.runnerInputs[0].conversation.turnCount, 1);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.turnCount, 1);
+});
+
+test('auto-reply closes on inbound Bye final line without using legacy close extensions', async () => {
+  const harness = await createAutoReplyHarness();
+
+  await harness.handleInbound({
+    content: 'Thanks for the chat.\nbye',
+    messagePinId: 'incoming-pin-bye',
+  });
+
+  assert.equal(harness.runnerInputs.length, 0);
+  assert.equal(harness.writes.length, 0);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'closed');
+  assert.equal(conversation.turnCount, 1);
+});
+
+test('auto-reply does not treat extensions.conversationSignal closing as the close signal', async () => {
+  const harness = await createAutoReplyHarness();
+
+  await harness.handleInbound({
+    content: JSON.stringify({
+      content: 'I am wrapping up.',
+      extensions: { conversationSignal: 'closing' },
+    }),
+    messagePinId: 'incoming-pin-extension',
+  });
+
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.writes.length, 1);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'active');
+  assert.equal(conversation.turnCount, 1);
+});
+
+test('auto-reply persists visible outbound Bye and no close extension when the runner ends', async () => {
+  const harness = await createAutoReplyHarness({
+    replyResult: {
+      state: 'reply',
+      content: 'Thanks for the conversation.\nBye',
+    },
+  });
+
+  await harness.handleInbound({
+    content: 'That answers my question.',
+    messagePinId: 'incoming-pin-runner-bye',
+  });
+
+  const messages = await harness.stateStore.getRecentMessages(
+    `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`,
+    10,
+  );
+  const outbound = messages.find((message) => message.direction === 'outbound');
+  assert.ok(outbound);
+  assert.equal(outbound.content, 'Thanks for the conversation.\nBye');
+  assert.equal(outbound.extensions, null);
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'closed');
+  assert.equal(conversation.turnCount, 1);
+});
+
+test('auto-reply hard limit emits canonical visible Bye without close extensions', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 29,
+    lastDirection: 'inbound',
+    createdAt: now - 1_000_000,
+    updatedAt: now - 1_000,
+  });
+
+  await withImmediateTimers(() => harness.handleInbound({
+    content: 'one more question',
+    messagePinId: 'incoming-pin-limit',
+  }));
+
+  assert.equal(harness.runnerInputs.length, 0);
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const outbound = messages.find((message) => message.direction === 'outbound');
+  assert.ok(outbound);
+  assert.match(outbound.content, /\nBye$/);
+  assert.equal(outbound.extensions, null);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'closed');
+  assert.equal(conversation.turnCount, 30);
+});
+
+test('auto-reply passes inbound turn count above 20 through to the runner', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 20,
+    lastDirection: 'outbound',
+    createdAt: now - 1_000_000,
+    updatedAt: now - 1_000,
+  });
+
+  await withImmediateTimers(() => harness.handleInbound({
+    content: 'continue',
+    messagePinId: 'incoming-pin-21',
+  }));
+
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.runnerInputs[0].conversation.turnCount, 21);
 });
 
 test('auto-reply persists order protocol messages without sending ordinary private-chat replies', async () => {

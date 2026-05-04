@@ -55,7 +55,7 @@ metabot chat private --request-file request.json
 - Resolve the peer chat public key before encryption.
 - Encrypt the content with the shared ECDH secret.
 - Stop with an error if `to`, `content`, or remote chat public key is missing.
-- If the successful result includes `localUiUrl`, surface it as the local private chat viewer link so the human can inspect history and live replies.
+- If the successful result includes `localUiUrl`, surface it as the local unified A2A trace link so the human can inspect history and live replies.
 
 ## In Scope
 
@@ -75,7 +75,7 @@ metabot chat private --request-file request.json
 
 ## Result Handling
 
-- `success`: report returned `pinId` and `txids`; when `localUiUrl` is present, include it as the private chat viewer link, then continue conversation.
+- `success`: report returned `pinId` and `txids`; when `localUiUrl` is present, include it as the unified A2A trace link, then continue conversation.
 - Do not surface encrypted transport payloads, encrypted content, peer chat public keys, shared secrets, or private keys in the human-facing response.
 - `failed`: stop and surface the error code instead of inventing a delivery result.
 - `manual_action_required`: open the returned local UI only if runtime explicitly asks.
@@ -85,7 +85,7 @@ metabot chat private --request-file request.json
 - For success responses, include:
   - delivery proof (`pinId`, `txids`)
   - who the message was sent to (`to`)
-  - private chat viewer URL (`localUiUrl`) when returned by the runtime
+  - unified A2A trace URL (`localUiUrl`) when returned by the runtime
   - one concrete next step (for example keep chatting or move to service/master workflow)
   - natural-language next prompts in the same language as the user
   - intent-equivalent wording guidance (do not lock to one fixed phrase template)

@@ -48,7 +48,7 @@ function createDefaultChatReplyRunner() {
         if (turnCount >= maxTurns - 1) {
             return {
                 state: 'end_conversation',
-                content: 'Thank you for the conversation! It was nice chatting with you. See you next time!',
+                content: 'Thank you for the conversation! It was nice chatting with you. See you next time!\nBye',
             };
         }
         if (turnCount >= maxTurns - 5) {

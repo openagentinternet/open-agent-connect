@@ -998,6 +998,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'pinId',
       'txids',
       'traceId',
+      'a2aSessionId',
       'localUiUrl',
     ],
     failureSemantics: [

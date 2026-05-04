@@ -539,7 +539,8 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
   assert.match(chatContent, /same language as the user/i);
   assert.match(chatContent, /do not lock to one fixed phrase template/i);
   assert.match(chatContent, /localUiUrl/);
-  assert.match(chatContent, /private chat viewer/i);
+  assert.match(chatContent, /unified A2A trace/i);
+  assert.doesNotMatch(chatContent, /private chat viewer/i);
 
   const privateChatDeclarations = await readFile(
     path.join(sharedPackRoot(outputRoot), 'runtime', 'dist', 'core', 'chat', 'privateChat.d.ts'),

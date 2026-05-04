@@ -7,9 +7,30 @@ const defaultChatReplyRunner_1 = require("./defaultChatReplyRunner");
 const hostLlmExecutor_1 = require("../llm/hostLlmExecutor");
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_FALLBACK_ATTEMPTS = 5;
-const END_CONVERSATION_MARKER = '[END_CONVERSATION]';
+const CLOSE_CONVERSATION_SIGNAL = 'Bye';
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
+}
+function findFinalNonEmptyLineIndex(lines) {
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+        if (lines[index].trim()) {
+            return index;
+        }
+    }
+    return -1;
+}
+function hasFinalByeLine(value) {
+    const lines = value.split(/\r?\n/u);
+    const finalIndex = findFinalNonEmptyLineIndex(lines);
+    return finalIndex >= 0 && lines[finalIndex].trim().toLowerCase() === CLOSE_CONVERSATION_SIGNAL.toLowerCase();
+}
+function canonicalizeFinalByeLine(value) {
+    const lines = value.split(/\r?\n/u);
+    const finalIndex = findFinalNonEmptyLineIndex(lines);
+    if (finalIndex >= 0 && lines[finalIndex].trim().toLowerCase() === CLOSE_CONVERSATION_SIGNAL.toLowerCase()) {
+        lines[finalIndex] = CLOSE_CONVERSATION_SIGNAL;
+    }
+    return lines.join('\n').trim();
 }
 function buildChatPrompt(input) {
     const { conversation, recentMessages, persona, strategy } = input;
@@ -36,10 +57,13 @@ function buildChatPrompt(input) {
     strategyLines.push('- Keep replies concise and natural, 2-4 sentences per message.');
     strategyLines.push('- Do not repeat what you have already said.');
     strategyLines.push('- Actively steer the conversation toward the objective.');
+    if (conversation.turnCount > 20) {
+        strategyLines.push('- This private chat has passed 20 inbound turns; converge the topic and end naturally soon.');
+    }
     sections.push(strategyLines.join('\n'));
     const exitLines = [
         '## Exit Mechanism',
-        'When ANY of the following conditions are met, add [END_CONVERSATION] on a new line at the very end of your reply:',
+        `When ANY of the following conditions are met, add ${CLOSE_CONVERSATION_SIGNAL} on its own final line at the very end of your reply:`,
         '- The conversation objective has been achieved',
         '- The other party says goodbye or signals the end',
         '- There are no more valuable topics to discuss',
@@ -50,7 +74,7 @@ function buildChatPrompt(input) {
         '## Format Rules',
         '- Output ONLY the reply text itself, no prefixes, labels, or markdown formatting.',
         '- Reply in the same language the other party is using.',
-        '- If ending the conversation, write your farewell first, then [END_CONVERSATION] on a separate line.',
+        `- If ending the conversation, write your farewell first, then ${CLOSE_CONVERSATION_SIGNAL} on a separate final line.`,
     ].join('\n'));
     const selfName = 'Me';
     const peerName = conversation.peerName || 'Peer';
@@ -69,11 +93,8 @@ function parseRunnerOutput(rawOutput) {
     if (!output) {
         return { state: 'skip' };
     }
-    const hasEndMarker = output.includes(END_CONVERSATION_MARKER);
-    const content = output.replace(END_CONVERSATION_MARKER, '').trim();
-    if (!content) {
-        return { state: 'end_conversation', content: 'Thank you for the conversation. See you next time!' };
-    }
+    const content = canonicalizeFinalByeLine(output);
+    const hasEndMarker = hasFinalByeLine(content);
     return {
         state: hasEndMarker ? 'end_conversation' : 'reply',
         content,

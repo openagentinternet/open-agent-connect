@@ -903,6 +903,21 @@ test('GET /ui/chat-viewer serves the built-in private chat viewer shell', async 
   assert.match(html, /afterIndex/);
 });
 
+test('GET /ui/trace navigation omits Chat Viewer while legacy direct route remains available', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/trace`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.doesNotMatch(html, />Chat Viewer(?: \*)?</);
+  assert.doesNotMatch(html, /href="\/ui\/chat-viewer"/);
+
+  const legacyResponse = await fetch(`${server.baseUrl}/ui/chat-viewer?peer=gm-remote-bob`);
+  assert.equal(legacyResponse.status, 200);
+});
+
 test('GET /ui/chat/idframework/components/id-chat-msg-list.js serves the standalone-capable IDFramework component', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
