@@ -403,10 +403,12 @@ To cut a release:
 5. Commit the version bump and regenerated artifacts, then push `main`.
 6. Push the tag from the same commit: `git tag v{version} && git push origin v{version}`.
 
-The release workflow requires a repository secret named `NPM_TOKEN`. When the
-tag workflow runs, it verifies that the tag, `package.json`, and
+The npm package uses npm Trusted Publisher for GitHub Actions. The npm package
+settings must trust `openagentinternet/open-agent-connect` with workflow file
+`release.yml`, and `.github/workflows/release.yml` must keep `id-token: write`.
+When the tag workflow runs, it verifies that the tag, `package.json`, and
 `release/compatibility.json` all agree, then publishes the GitHub Release assets
-and publishes the same version to npm.
+and publishes the same version to npm through OIDC.
 
 ## A Note on Open Agent Internet
 

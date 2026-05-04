@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
@@ -59,7 +59,5 @@ jobs:
           if npm view "open-agent-connect@$PACKAGE_VERSION" version >/dev/null 2>&1; then
             echo "open-agent-connect@$PACKAGE_VERSION is already published; skipping npm publish."
           else
-            npm publish --access public --provenance
+            npm publish --access public
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -48,7 +48,9 @@ test('release workflow publishes GitHub release assets and npm package from the 
   assert.match(workflow, /push:\s*\n\s+tags:\s*\n\s+- 'v\*\.\*\.\*'/);
   assert.match(workflow, /contents:\s+write/);
   assert.match(workflow, /id-token:\s+write/);
-  assert.match(workflow, /NODE_AUTH_TOKEN:\s+\$\{\{\s*secrets\.NPM_TOKEN\s*\}\}/);
+  assert.doesNotMatch(workflow, /NODE_AUTH_TOKEN/);
+  assert.doesNotMatch(workflow, /NPM_TOKEN/);
+  assert.match(workflow, /node-version:\s+'24'/);
   assert.match(workflow, /npm ci/);
   assert.match(workflow, /npm run build/);
   assert.match(workflow, /npm run build:skillpacks/);
@@ -57,7 +59,8 @@ test('release workflow publishes GitHub release assets and npm package from the 
   assert.match(workflow, /gh release upload "\$RELEASE_TAG"/);
   assert.match(workflow, /--clobber/);
   assert.match(workflow, /npm view "open-agent-connect@\$PACKAGE_VERSION" version/);
-  assert.match(workflow, /npm publish --access public --provenance/);
+  assert.match(workflow, /npm publish --access public/);
+  assert.doesNotMatch(workflow, /--provenance/);
   assert.match(workflow, /gh release create "\$RELEASE_TAG"/);
 });
 
@@ -78,7 +81,10 @@ test('release documentation explains the tag-driven GitHub and npm publish path'
   for (const content of [readme, agentInstructions]) {
     assert.match(content, /node scripts\/verify-release-version\.mjs v\{version\}/);
     assert.match(content, /git tag v\{version\}/);
-    assert.match(content, /NPM_TOKEN/);
+    assert.doesNotMatch(content, /NPM_TOKEN/);
+    assert.match(content, /Trusted Publisher/i);
+    assert.match(content, /openagentinternet\/open-agent-connect/);
+    assert.match(content, /release\.yml/);
     assert.match(content, /publishes the same version to npm/i);
     assert.match(content, /Do not run .*npm publish/i);
   }

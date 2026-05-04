@@ -16,7 +16,7 @@
 
 Releases are automated via GitHub Actions. Do not run `npm run build:packs`, `gh release create`, or `npm publish` manually unless you are explicitly recovering a failed release.
 
-The release workflow also publishes the npm package. The GitHub repository must have an `NPM_TOKEN` secret with permission to publish `open-agent-connect`.
+The release workflow also publishes the npm package through npm Trusted Publisher. The npm package settings must trust `openagentinternet/open-agent-connect` with workflow file `release.yml`, and `.github/workflows/release.yml` must keep `id-token: write`.
 
 To cut a release:
 1. Bump `"version"` in `package.json` and all fields in `release/compatibility.json` to the new version.
