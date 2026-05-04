@@ -143,6 +143,7 @@ async function tryExecute(
   const resolved = await resolver.resolveRuntime({ metaBotSlug });
   if (!resolved.runtime) return null;
   if (excludeRuntimeIds.has(resolved.runtime.id)) return null;
+  if (resolved.runtime.health !== 'healthy') return null;
 
   try {
     const sessionId = await llmExecutor.execute({

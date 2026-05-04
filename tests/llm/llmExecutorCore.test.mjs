@@ -177,6 +177,45 @@ test('LlmExecutor starts a session, streams events, injects skills, and persists
   assert.match(injected, /Test Skill/);
 });
 
+test('LlmExecutor cancel preserves completed session history', async () => {
+  const base = await createTempDir();
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: path.join(base, 'skills'),
+    backends: {
+      custom: () => ({
+        provider: 'custom',
+        async execute() {
+          return {
+            status: 'completed',
+            output: 'already done',
+            durationMs: 3,
+          };
+        },
+      }),
+    },
+  });
+
+  const sessionId = await executor.execute({
+    runtimeId: runtime.id,
+    runtime,
+    prompt: 'Complete quickly',
+  });
+
+  await collectEvents(executor.streamEvents(sessionId));
+  const completed = await executor.getSession(sessionId);
+  assert.equal(completed.status, 'completed');
+  assert.equal(completed.result.output, 'already done');
+
+  await executor.cancel(sessionId);
+  const afterCancel = await executor.getSession(sessionId);
+
+  assert.equal(afterCancel.status, 'completed');
+  assert.equal(afterCancel.result.status, 'completed');
+  assert.equal(afterCancel.result.output, 'already done');
+});
+
 test('OpenClaw backend is a safe unsupported stub for Phase 1', async () => {
   const backend = createOpenClawBackend('/bin/openclaw');
   const emitted = [];

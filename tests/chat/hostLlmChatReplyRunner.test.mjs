@@ -299,3 +299,39 @@ test('host LLM chat runner falls back when the injected executor fails', async (
   assert.match(result.content, /Thanks for/);
   assert.deepEqual(resolverCalls.markRuntimeUnavailable, ['llm-runtime-1']);
 });
+
+test('host LLM chat runner skips unavailable runtimes before executing', async () => {
+  const runtime = {
+    id: 'llm-runtime-unavailable',
+    provider: 'codex',
+    displayName: 'Codex',
+    binaryPath: '/bin/codex',
+    authState: 'authenticated',
+    health: 'unavailable',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  let executeCalls = 0;
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime),
+    llmExecutor: {
+      async execute() {
+        executeCalls += 1;
+        throw new Error('unavailable runtime should not execute');
+      },
+      async getSession() {
+        throw new Error('unavailable runtime should not poll');
+      },
+    },
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+  });
+
+  const result = await runner(makeInput());
+
+  assert.equal(executeCalls, 0);
+  assert.equal(result.state, 'reply');
+  assert.match(result.content, /Thanks for/);
+});

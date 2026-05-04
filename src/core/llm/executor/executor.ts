@@ -99,6 +99,14 @@ export class LlmExecutor {
   }
 
   async cancel(sessionId: string): Promise<void> {
+    const session = await this.sessionManager.get(sessionId);
+    if (!session) {
+      throw new Error(`LLM session not found: ${sessionId}`);
+    }
+    if (isTerminalStatus(session.status) || session.result) {
+      return;
+    }
+
     const running = this.running.get(sessionId);
     if (running) running.controller.abort();
     await this.sessionManager.update(sessionId, {
