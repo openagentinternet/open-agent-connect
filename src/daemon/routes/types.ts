@@ -96,6 +96,11 @@ export interface MetabotDaemonHttpHandlers {
     removeBinding?: (input: { bindingId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     getPreferredRuntime?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
     setPreferredRuntime?: (input: { slug: string; runtimeId: string | null }) => Awaitable<MetabotCommandResult<unknown>>;
+    execute?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    getSession?: (input: { sessionId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    cancelSession?: (input: { sessionId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    listSessions?: (input: { limit: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    streamSessionEvents?: (input: { sessionId: string }) => AsyncIterable<unknown> | Promise<AsyncIterable<unknown>>;
   };
 }
 

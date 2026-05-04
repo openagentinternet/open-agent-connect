@@ -49,6 +49,9 @@ test('resolveMetabotPaths returns the v2 manager and runtime graph for a profile
       masterPublishedStatePath: paths.masterPublishedStatePath,
       directorySeedsPath: paths.directorySeedsPath,
       daemonLockPath: paths.daemonLockPath,
+      llmExecutorRoot: paths.llmExecutorRoot,
+      llmExecutorSessionsRoot: paths.llmExecutorSessionsRoot,
+      llmExecutorTranscriptsRoot: paths.llmExecutorTranscriptsRoot,
     },
     {
       systemHomeDir: '/tmp/system-home',
@@ -91,6 +94,9 @@ test('resolveMetabotPaths returns the v2 manager and runtime graph for a profile
       masterPublishedStatePath: '/tmp/system-home/.metabot/profiles/charles-zhang/.runtime/state/master-service-state.json',
       directorySeedsPath: '/tmp/system-home/.metabot/profiles/charles-zhang/.runtime/state/directory-seeds.json',
       daemonLockPath: '/tmp/system-home/.metabot/profiles/charles-zhang/.runtime/locks/daemon.lock',
+      llmExecutorRoot: '/tmp/system-home/.metabot/LLM/executor',
+      llmExecutorSessionsRoot: '/tmp/system-home/.metabot/LLM/executor/sessions',
+      llmExecutorTranscriptsRoot: '/tmp/system-home/.metabot/LLM/executor/transcripts',
     }
   );
 });

@@ -67,6 +67,12 @@ import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
 import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
 import { discoverLlmRuntimes } from '../core/llm/llmRuntimeDiscovery';
+import {
+  LlmExecutor,
+  claudeBackendFactory,
+  codexBackendFactory,
+  openClawBackendFactory,
+} from '../core/llm/executor';
 import { runSystemUpdate } from '../core/system/update';
 import { runSystemUninstall } from '../core/system/uninstall';
 import type { CliDependencies, CliRuntimeContext } from './types';
@@ -2251,6 +2257,16 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     acceptPolicy: 'accept_all' as const,
     defaultStrategyId: null as string | null,
   };
+  const llmExecutor = new LlmExecutor({
+    sessionsRoot: paths.llmExecutorSessionsRoot,
+    transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+    skillsRoot: paths.skillsRoot,
+    backends: {
+      codex: codexBackendFactory,
+      'claude-code': claudeBackendFactory,
+      openclaw: openClawBackendFactory,
+    },
+  });
 
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
@@ -2271,6 +2287,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     servicePaymentExecutor,
     requestMvcGasSubsidy,
     autoReplyConfig: sharedAutoReplyConfig,
+    llmExecutor,
   });
 
   const daemon = createMetabotDaemon({
@@ -2391,6 +2408,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
     replyRunner: createHostLlmChatReplyRunner({
       runtimeResolver: llmResolver,
+      llmExecutor,
       metaBotSlug,
     }),
   }, sharedAutoReplyConfig);

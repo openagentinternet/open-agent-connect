@@ -25,6 +25,11 @@ async function startServer(options = {}) {
     networkServices: [],
     networkBots: [],
     chatConversation: [],
+    llmExecute: [],
+    llmGetSession: [],
+    llmCancelSession: [],
+    llmListSessions: [],
+    llmStreamSessionEvents: [],
   };
 
   const server = createHttpServer({
@@ -240,6 +245,64 @@ async function startServer(options = {}) {
           nextPollAfterIndex: 8,
           serverTime: 1776836184230,
         });
+      },
+    },
+    llm: {
+      execute: async (input) => {
+        calls.llmExecute.push(input);
+        return commandSuccess({
+          sessionId: 'llm-session-1',
+          status: 'starting',
+        });
+      },
+      getSession: async (input) => {
+        calls.llmGetSession.push(input);
+        return commandSuccess({
+          sessionId: input.sessionId,
+          status: 'completed',
+          runtimeId: 'llm-runtime-1',
+          provider: 'codex',
+          prompt: 'Say hello',
+          result: {
+            status: 'completed',
+            output: 'Hello',
+            durationMs: 42,
+          },
+          createdAt: '2026-05-05T00:00:00.000Z',
+          completedAt: '2026-05-05T00:00:01.000Z',
+        });
+      },
+      cancelSession: async (input) => {
+        calls.llmCancelSession.push(input);
+        return commandSuccess({ status: 'cancelled' });
+      },
+      listSessions: async (input) => {
+        calls.llmListSessions.push(input);
+        return commandSuccess({
+          sessions: [
+            {
+              sessionId: 'llm-session-1',
+              status: 'completed',
+              runtimeId: 'llm-runtime-1',
+              provider: 'codex',
+              prompt: 'Say hello',
+              createdAt: '2026-05-05T00:00:00.000Z',
+            },
+          ],
+        });
+      },
+      streamSessionEvents: async function* (input) {
+        calls.llmStreamSessionEvents.push(input);
+        yield { type: 'status', status: 'running', sessionId: input.sessionId };
+        yield { type: 'text', content: 'Hello' };
+        yield {
+          type: 'result',
+          result: {
+            status: 'completed',
+            output: 'Hello',
+            durationMs: 42,
+          },
+        };
       },
     },
     ui: useBuiltInUiPages
@@ -474,6 +537,104 @@ test('POST /api/buzz/post parses the JSON body and forwards it to buzz.post', as
       attachments: ['metafile://file-pin-1.png'],
     },
   });
+});
+
+test('POST /api/llm/execute forwards the request and returns an accepted session id', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const request = {
+    runtimeId: 'llm-runtime-1',
+    prompt: 'Say hello',
+    systemPrompt: 'Be concise.',
+    skills: ['metabot-post-buzz'],
+    metaBotSlug: 'alice',
+  };
+
+  const response = await fetch(`${server.baseUrl}/api/llm/execute`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 202);
+  assert.deepEqual(server.calls.llmExecute, [request]);
+  assert.deepEqual(payload, {
+    ok: true,
+    state: 'success',
+    data: {
+      sessionId: 'llm-session-1',
+      status: 'starting',
+    },
+  });
+});
+
+test('GET /api/llm/sessions/:id returns the session JSON envelope', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/sessions/llm-session-1`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.llmGetSession, [{ sessionId: 'llm-session-1' }]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.sessionId, 'llm-session-1');
+  assert.equal(payload.data.result.output, 'Hello');
+});
+
+test('GET /api/llm/sessions/:id streams session events when SSE is accepted', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/sessions/llm-session-1`, {
+    headers: {
+      accept: 'text/event-stream',
+    },
+  });
+  const body = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'text/event-stream; charset=utf-8');
+  assert.deepEqual(server.calls.llmGetSession, [{ sessionId: 'llm-session-1' }]);
+  assert.deepEqual(server.calls.llmStreamSessionEvents, [{ sessionId: 'llm-session-1' }]);
+  assert.match(body, /data: {"type":"status","status":"running","sessionId":"llm-session-1"}/);
+  assert.match(body, /data: {"type":"text","content":"Hello"}/);
+  assert.match(body, /data: {"type":"result","result":{"status":"completed","output":"Hello","durationMs":42}}/);
+});
+
+test('POST /api/llm/sessions/:id/cancel forwards cancellation', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/sessions/llm-session-1/cancel`, {
+    method: 'POST',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.llmCancelSession, [{ sessionId: 'llm-session-1' }]);
+  assert.deepEqual(payload, {
+    ok: true,
+    state: 'success',
+    data: { status: 'cancelled' },
+  });
+});
+
+test('GET /api/llm/sessions forwards a clamped limit to the handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/sessions?limit=500`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.llmListSessions, [{ limit: 100 }]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.sessions[0].sessionId, 'llm-session-1');
 });
 
 test('GET /api/network/services forwards query filters to network.listServices', async (t) => {

@@ -5,6 +5,7 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const {
   buildChatPrompt,
+  createHostLlmChatReplyRunner,
   parseRunnerOutput,
 } = require('../../dist/core/chat/hostLlmChatReplyRunner.js');
 
@@ -169,4 +170,132 @@ test('parseRunnerOutput handles only Bye as visible close content', () => {
 test('buildChatPrompt ends with Reply now:', () => {
   const prompt = buildChatPrompt(makeInput());
   assert.ok(prompt.endsWith('Reply now:'));
+});
+
+function createFakeRuntimeResolver(runtime, calls = {}) {
+  return {
+    async resolveRuntime(input) {
+      calls.resolveRuntime = [...(calls.resolveRuntime ?? []), input];
+      return { runtime, bindingId: 'binding-1' };
+    },
+    async selectMetaBot(input) {
+      calls.selectMetaBot = [...(calls.selectMetaBot ?? []), input];
+      return null;
+    },
+    async markBindingUsed(bindingId) {
+      calls.markBindingUsed = [...(calls.markBindingUsed ?? []), bindingId];
+    },
+    async markRuntimeUnavailable(runtimeId) {
+      calls.markRuntimeUnavailable = [...(calls.markRuntimeUnavailable ?? []), runtimeId];
+    },
+  };
+}
+
+test('host LLM chat runner executes through the injected LLM executor', async () => {
+  const runtime = {
+    id: 'llm-runtime-1',
+    provider: 'codex',
+    displayName: 'Codex',
+    binaryPath: '/bin/codex',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  const resolverCalls = {};
+  const executorCalls = [];
+  let getSessionCalls = 0;
+  const llmExecutor = {
+    async execute(request) {
+      executorCalls.push(request);
+      return 'llm-session-1';
+    },
+    async getSession(sessionId) {
+      getSessionCalls += 1;
+      if (getSessionCalls === 1) {
+        return { sessionId, status: 'running' };
+      }
+      return {
+        sessionId,
+        status: 'completed',
+        result: {
+          status: 'completed',
+          output: 'I can help with TypeScript and Open Agent Connect.',
+          durationMs: 12,
+        },
+      };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime, resolverCalls),
+    llmExecutor,
+    metaBotSlug: 'alice',
+    timeoutMs: 321,
+    pollIntervalMs: 1,
+  });
+
+  const result = await runner(makeInput());
+
+  assert.deepEqual(result, {
+    state: 'reply',
+    content: 'I can help with TypeScript and Open Agent Connect.',
+  });
+  assert.equal(getSessionCalls, 2);
+  assert.equal(executorCalls.length, 1);
+  assert.equal(executorCalls[0].runtimeId, 'llm-runtime-1');
+  assert.equal(executorCalls[0].runtime, runtime);
+  assert.equal(executorCalls[0].timeout, 321);
+  assert.equal(executorCalls[0].metaBotSlug, 'alice');
+  assert.match(executorCalls[0].prompt, /Reply now:/);
+  assert.deepEqual(resolverCalls.resolveRuntime, [{ metaBotSlug: 'alice' }]);
+  assert.deepEqual(resolverCalls.markBindingUsed, ['binding-1']);
+});
+
+test('host LLM chat runner falls back when the injected executor fails', async () => {
+  const runtime = {
+    id: 'llm-runtime-1',
+    provider: 'codex',
+    displayName: 'Codex',
+    binaryPath: '/bin/codex',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  const resolverCalls = {};
+  const llmExecutor = {
+    async execute() {
+      return 'llm-session-failed';
+    },
+    async getSession(sessionId) {
+      return {
+        sessionId,
+        status: 'failed',
+        result: {
+          status: 'failed',
+          output: '',
+          error: 'backend failed',
+          durationMs: 1,
+        },
+      };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime, resolverCalls),
+    llmExecutor,
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+  });
+
+  const result = await runner(makeInput());
+
+  assert.equal(result.state, 'reply');
+  assert.match(result.content, /Thanks for/);
+  assert.deepEqual(resolverCalls.markRuntimeUnavailable, ['llm-runtime-1']);
 });
