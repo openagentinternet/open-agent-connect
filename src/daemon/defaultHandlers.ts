@@ -3905,6 +3905,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
   const pendingMasterReplyContinuations = new Map<string, Promise<void>>();
+  const pendingBuyerRatingPublishes = new Map<string, Promise<MetabotCommandResult<Record<string, unknown>>>>();
   let masterTriggerMemoryState = createMasterTriggerMemoryState();
   const masterAutoPrepareCounts = new Map<string, number>();
   let lastMasterAutoPreparedAt: number | null = null;
@@ -4389,6 +4390,33 @@ export function createDefaultMetabotDaemonHandlers(input: {
     comment: string;
     network?: string;
   }): Promise<MetabotCommandResult<Record<string, unknown>>> {
+    const traceId = normalizeText(request.traceId);
+    if (!traceId) {
+      return publishBuyerServiceRatingUnlocked(request);
+    }
+
+    const pending = pendingBuyerRatingPublishes.get(traceId);
+    if (pending) {
+      return pending;
+    }
+
+    const publish = publishBuyerServiceRatingUnlocked({ ...request, traceId });
+    pendingBuyerRatingPublishes.set(traceId, publish);
+    try {
+      return await publish;
+    } finally {
+      if (pendingBuyerRatingPublishes.get(traceId) === publish) {
+        pendingBuyerRatingPublishes.delete(traceId);
+      }
+    }
+  }
+
+  async function publishBuyerServiceRatingUnlocked(request: {
+    traceId: string;
+    rate: number;
+    comment: string;
+    network?: string;
+  }): Promise<MetabotCommandResult<Record<string, unknown>>> {
     const state = await runtimeStateStore.readState();
     if (!state.identity) {
       return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing service ratings.');
@@ -4412,6 +4440,37 @@ export function createDefaultMetabotDaemonHandlers(input: {
         'service_rating_trace_incomplete',
         'Trace is missing service or payment metadata required for skill-service-rate.'
       );
+    }
+
+    const existingSessionState = await sessionStateStore.readState();
+    const existingSessions = existingSessionState.sessions.filter((entry) => entry.traceId === request.traceId);
+    const existingSessionIds = new Set(existingSessions.map((entry) => entry.sessionId));
+    const existingClosure = extractTraceRatingClosure({
+      trace,
+      transcriptItems: existingSessionState.transcriptItems.filter((entry) => existingSessionIds.has(entry.sessionId)),
+      ratingDetail: null,
+    });
+    if (existingClosure.ratingPublished && existingClosure.ratingPinId) {
+      return commandSuccess({
+        traceId: request.traceId,
+        path: '/protocols/skill-service-rate',
+        pinId: existingClosure.ratingPinId,
+        txids: [],
+        rate: String(existingClosure.ratingValue ?? request.rate),
+        comment: existingClosure.ratingComment ?? request.comment,
+        serviceId,
+        servicePaidTx,
+        serverBot,
+        serviceSkill: normalizeText(trace.order?.serviceName),
+        ratingMessageSent: existingClosure.ratingMessageSent ?? false,
+        ratingMessagePinId: existingClosure.ratingMessagePinId,
+        ratingMessageError: existingClosure.ratingMessageError,
+        a2aStorePersisted: null,
+        a2aStoreError: null,
+        traceJsonPath: trace.artifacts.traceJsonPath,
+        traceMarkdownPath: trace.artifacts.traceMarkdownPath,
+        transcriptMarkdownPath: trace.artifacts.transcriptMarkdownPath,
+      });
     }
 
     const directory = await listRuntimeDirectoryServices({
