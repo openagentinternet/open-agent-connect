@@ -296,18 +296,137 @@ rl.on('line', (line) => {
   assert.match(result.error, /exited before turn completion/i);
 });
 
+test('Codex backend treats agentMessage final_answer completion as turn completion', async () => {
+  const base = await createTempDir();
+  const binaryPath = await writeExecutableScript(base, 'fake-codex-final-answer.js', `#!/usr/bin/env node
+const readline = require('node:readline');
+const rl = readline.createInterface({ input: process.stdin });
+const threadId = 'thread-final-answer';
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+rl.on('line', (line) => {
+  const request = JSON.parse(line);
+  if (request.method === 'initialize') {
+    send({ jsonrpc: '2.0', id: request.id, result: { protocolVersion: 'test' } });
+    return;
+  }
+  if (request.method === 'thread/start') {
+    send({ jsonrpc: '2.0', id: request.id, result: { thread: { id: threadId } } });
+    return;
+  }
+  if (request.method === 'turn/start') {
+    send({ jsonrpc: '2.0', id: request.id, result: { turn: { id: 'turn-final-answer' } } });
+    send({ jsonrpc: '2.0', method: 'turn/started', params: { threadId, turn: { id: 'turn-final-answer' } } });
+    send({ jsonrpc: '2.0', method: 'item/agentMessage/delta', params: { threadId, itemId: 'msg-1', delta: 'Done' } });
+    send({ jsonrpc: '2.0', method: 'item/completed', params: { threadId, item: { id: 'msg-1', type: 'agentMessage', phase: 'final_answer' } } });
+    setTimeout(() => process.exit(0), 20);
+  }
+});
+`);
+
+  const backend = createCodexBackend(binaryPath);
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_codex',
+      runtime: { ...runtime, provider: 'codex', binaryPath },
+      prompt: 'hello codex',
+      cwd: base,
+      timeout: 1_000,
+      semanticInactivityTimeout: 1_000,
+    },
+    { emit: () => {} },
+    new AbortController().signal,
+  );
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.output, 'Done');
+});
+
+test('Codex backend returns timeout promptly when the child ignores SIGTERM', { timeout: 4_000 }, async () => {
+  const base = await createTempDir();
+  const binaryPath = await writeExecutableScript(base, 'fake-codex-ignore-sigterm.js', `#!/usr/bin/env node
+const readline = require('node:readline');
+process.on('SIGTERM', () => {});
+const keepAlive = setInterval(() => {}, 100);
+const rl = readline.createInterface({ input: process.stdin });
+const threadId = 'thread-timeout';
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+rl.on('line', (line) => {
+  const request = JSON.parse(line);
+  if (request.method === 'initialize') {
+    send({ jsonrpc: '2.0', id: request.id, result: { protocolVersion: 'test' } });
+    return;
+  }
+  if (request.method === 'thread/start') {
+    send({ jsonrpc: '2.0', id: request.id, result: { thread: { id: threadId } } });
+    return;
+  }
+  if (request.method === 'turn/start') {
+    send({ jsonrpc: '2.0', id: request.id, result: { turn: { id: 'turn-timeout' } } });
+    send({ jsonrpc: '2.0', method: 'turn/started', params: { threadId, turn: { id: 'turn-timeout' } } });
+    setTimeout(() => {
+      clearInterval(keepAlive);
+      process.exit(0);
+    }, 2_000);
+  }
+});
+`);
+
+  const backend = createCodexBackend(binaryPath);
+  const startedAt = Date.now();
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_codex',
+      runtime: { ...runtime, provider: 'codex', binaryPath },
+      prompt: 'timeout',
+      cwd: base,
+      timeout: 300,
+      semanticInactivityTimeout: 1_000,
+    },
+    { emit: () => {} },
+    new AbortController().signal,
+  );
+
+  assert.equal(result.status, 'timeout');
+  assert.match(result.error, /timed out/i);
+  assert.ok(Date.now() - startedAt < 1_000);
+});
+
+test('Codex backend returns failed session result when spawn emits an error', async () => {
+  const base = await createTempDir();
+  const missingBinary = path.join(base, 'missing-codex');
+  const backend = createCodexBackend(missingBinary);
+
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_codex',
+      runtime: { ...runtime, provider: 'codex', binaryPath: missingBinary },
+      prompt: 'spawn should fail',
+      cwd: base,
+      timeout: 500,
+    },
+    { emit: () => {} },
+    new AbortController().signal,
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.match(result.error, /ENOENT|spawn/i);
+});
+
 test('Claude backend speaks stream-json, filters blocked args, and returns streamed output', async () => {
   const base = await createTempDir();
   const argsPath = path.join(base, 'args.json');
   const inputPath = path.join(base, 'input.jsonl');
   const binaryPath = await writeExecutableScript(base, 'fake-claude.js', `#!/usr/bin/env node
 const fs = require('node:fs');
+const readline = require('node:readline');
 fs.writeFileSync(process.env.FAKE_CLAUDE_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
-let stdin = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => { stdin += chunk; });
-process.stdin.on('end', () => {
-  fs.writeFileSync(process.env.FAKE_CLAUDE_INPUT_PATH, stdin);
+const rl = readline.createInterface({ input: process.stdin });
+rl.once('line', (line) => {
+  fs.writeFileSync(process.env.FAKE_CLAUDE_INPUT_PATH, line + '\\n');
   function send(message) {
     process.stdout.write(JSON.stringify(message) + '\\n');
   }
@@ -324,6 +443,7 @@ process.stdin.on('end', () => {
     { type: 'text', text: 'Claude' }
   ] } });
   send({ type: 'result', session_id: 'claude-session-1', result: 'Hello Claude', duration_ms: 123 });
+  setTimeout(() => process.exit(0), 10);
 });
 `);
 
@@ -371,4 +491,92 @@ process.stdin.on('end', () => {
   assert.equal(events.some((event) => event.type === 'thinking' && event.content === 'checking'), true);
   assert.equal(events.some((event) => event.type === 'tool_use' && event.tool === 'Read'), true);
   assert.equal(events.some((event) => event.type === 'tool_result' && event.output === 'ok'), true);
+});
+
+test('Claude backend allows control_request messages before closing stdin', async () => {
+  const base = await createTempDir();
+  const responsesPath = path.join(base, 'responses.jsonl');
+  const binaryPath = await writeExecutableScript(base, 'fake-claude-control.js', `#!/usr/bin/env node
+const fs = require('node:fs');
+const readline = require('node:readline');
+const rl = readline.createInterface({ input: process.stdin });
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+let sawUser = false;
+rl.on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.type === 'user') {
+    sawUser = true;
+    send({ type: 'system', session_id: 'claude-control-session' });
+    send({ type: 'control_request', request_id: 'control-1', request: { subtype: 'tool_use', tool_name: 'Bash', input: { command: 'pwd' } } });
+    return;
+  }
+  if (message.type === 'control_response') {
+    fs.appendFileSync(process.env.FAKE_CLAUDE_RESPONSES_PATH, line + '\\n');
+    send({ type: 'assistant', message: { content: [{ type: 'text', text: 'Allowed' }] } });
+    send({ type: 'result', session_id: 'claude-control-session', result: 'Allowed', duration_ms: 12 });
+    setTimeout(() => process.exit(0), 10);
+  }
+});
+setTimeout(() => {
+  if (sawUser) process.exit(2);
+}, 600);
+`);
+
+  const backend = createClaudeBackend(binaryPath, { FAKE_CLAUDE_RESPONSES_PATH: responsesPath });
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_claude',
+      runtime: { ...runtime, provider: 'claude-code', binaryPath },
+      prompt: 'needs approval',
+      cwd: base,
+      timeout: 2_000,
+    },
+    { emit: () => {} },
+    new AbortController().signal,
+  );
+
+  const response = JSON.parse((await fs.readFile(responsesPath, 'utf8')).trim());
+  assert.equal(result.status, 'completed');
+  assert.equal(result.output, 'Allowed');
+  assert.equal(response.type, 'control_response');
+  assert.equal(response.response.request_id, 'control-1');
+  assert.equal(response.response.response.behavior, 'allow');
+  assert.deepEqual(response.response.response.updatedInput, { command: 'pwd' });
+});
+
+test('Claude backend returns timeout promptly when the child ignores SIGTERM', { timeout: 4_000 }, async () => {
+  const base = await createTempDir();
+  const binaryPath = await writeExecutableScript(base, 'fake-claude-ignore-sigterm.js', `#!/usr/bin/env node
+const readline = require('node:readline');
+process.on('SIGTERM', () => {});
+const keepAlive = setInterval(() => {}, 100);
+const rl = readline.createInterface({ input: process.stdin });
+rl.once('line', () => {
+  process.stdout.write(JSON.stringify({ type: 'system', session_id: 'claude-timeout-session' }) + '\\n');
+  setTimeout(() => {
+    clearInterval(keepAlive);
+    process.exit(0);
+  }, 2_000);
+});
+`);
+
+  const backend = createClaudeBackend(binaryPath);
+  const startedAt = Date.now();
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_claude',
+      runtime: { ...runtime, provider: 'claude-code', binaryPath },
+      prompt: 'timeout',
+      cwd: base,
+      timeout: 300,
+    },
+    { emit: () => {} },
+    new AbortController().signal,
+  );
+
+  assert.equal(result.status, 'timeout');
+  assert.match(result.error, /timed out/i);
+  assert.ok(Date.now() - startedAt < 1_000);
 });

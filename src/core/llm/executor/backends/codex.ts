@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import type { LlmExecutionEvent, LlmExecutionRequest, LlmExecutionResult, LlmEventEmitter, LlmTokenUsage } from '../types';
-import { buildProcessEnv, filterBlockedArgs, stringifyError, type LlmBackend, type LlmBackendFactory } from './backend';
+import { buildProcessEnv, filterBlockedArgs, shutdownChildProcess, stringifyError, type LlmBackend, type LlmBackendFactory } from './backend';
 
 const DEFAULT_TIMEOUT_MS = 1_200_000;
 const DEFAULT_SEMANTIC_INACTIVITY_TIMEOUT_MS = 600_000;
@@ -84,6 +84,13 @@ function getItemKind(params: unknown): string {
   return getString(params.type) ?? getString(params.kind) ?? '';
 }
 
+function getItemPhase(params: unknown): string {
+  if (!isRecord(params)) return '';
+  const item = params.item;
+  if (isRecord(item)) return getString(item.phase) ?? '';
+  return getString(params.phase) ?? '';
+}
+
 function getCommandInput(params: unknown): Record<string, unknown> {
   if (!isRecord(params)) return {};
   const item = params.item;
@@ -135,6 +142,9 @@ export function createCodexBackend(binaryPath: string, env?: Record<string, stri
 
       const childExit = new Promise<number | null>((resolve) => {
         child.on('close', (code) => resolve(code));
+      });
+      const childError = new Promise<Error>((resolve) => {
+        child.once('error', (error) => resolve(error));
       });
 
       const turnDone = new Promise<void>((resolve) => {
@@ -200,6 +210,8 @@ export function createCodexBackend(binaryPath: string, env?: Record<string, stri
               emitSemantic({ type: 'tool_result', tool: 'exec_command', callId: getItemId(params), output: getCompletedOutput(params) });
             } else if (kind === 'fileChange') {
               emitSemantic({ type: 'tool_result', tool: 'patch_apply', callId: getItemId(params), output: getCompletedOutput(params) });
+            } else if (kind === 'agentMessage' && getItemPhase(params) === 'final_answer') {
+              if (turnStarted) resolveOnce();
             }
             return;
           }
@@ -286,7 +298,14 @@ export function createCodexBackend(binaryPath: string, env?: Record<string, stri
 
           if (message.id !== undefined && message.method) {
             const result = message.method.includes('requestApproval') ? { decision: 'accept' } : {};
-            child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result })}\n`);
+            try {
+              child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result })}\n`);
+            } catch (error) {
+              finalStatus = 'failed';
+              finalError = stringifyError(error);
+              emitter.emit({ type: 'error', message: finalError });
+              settled = true;
+            }
             return;
           }
 
@@ -309,12 +328,22 @@ export function createCodexBackend(binaryPath: string, env?: Record<string, stri
         nextId += 1;
         return new Promise((resolve, reject) => {
           pending.set(id, { resolve, reject });
-          child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+          try {
+            child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+          } catch (error) {
+            pending.delete(id);
+            reject(error instanceof Error ? error : new Error(stringifyError(error)));
+          }
         });
       };
 
       const notifyRpc = (method: string, params: Record<string, unknown> = {}) => {
-        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
+        try {
+          child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
+        } catch (error) {
+          finalStatus = 'failed';
+          finalError = stringifyError(error);
+        }
       };
 
       const timeoutMs = request.timeout ?? DEFAULT_TIMEOUT_MS;
@@ -360,8 +389,13 @@ export function createCodexBackend(binaryPath: string, env?: Record<string, stri
           timeout.then(() => ({ type: 'terminal' as const })),
           abort.then(() => ({ type: 'terminal' as const })),
           childExit.then(() => ({ type: 'exit' as const })),
+          childError.then((error) => ({ type: 'error' as const, error })),
         ]);
         if (completion.type === 'value') return completion.value;
+        if (completion.type === 'error') {
+          finalStatus = 'failed';
+          finalError = stringifyError(completion.error);
+        }
         if (completion.type === 'exit' && !settled) {
           finalStatus = 'failed';
           finalError = `codex process exited before ${phase}`;
@@ -417,7 +451,12 @@ export function createCodexBackend(binaryPath: string, env?: Record<string, stri
           timeout.then(() => 'timeout' as const),
           abort.then(() => 'abort' as const),
           childExit.then(() => 'exit' as const),
+          childError.then(() => 'error' as const),
         ]);
+        if (completion === 'error') {
+          finalStatus = 'failed';
+          finalError = finalError ?? 'codex process error';
+        }
         if (completion === 'exit' && !settled) {
           finalStatus = 'failed';
           finalError = 'codex process exited before turn completion';
@@ -439,7 +478,10 @@ export function createCodexBackend(binaryPath: string, env?: Record<string, stri
         } catch {
           // Best effort.
         }
-        await childExit;
+        await shutdownChildProcess(child, childExit, {
+          terminate: finalStatus !== 'completed',
+          graceMs: finalStatus === 'completed' ? 2_000 : 250,
+        });
       }
 
       if (stderr.trim() && finalStatus !== 'completed') {

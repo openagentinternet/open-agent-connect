@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import type { LlmExecutionRequest, LlmExecutionResult, LlmEventEmitter, LlmTokenUsage } from '../types';
-import { buildProcessEnv, filterBlockedArgs, stringifyError, type LlmBackend, type LlmBackendFactory } from './backend';
+import { buildProcessEnv, filterBlockedArgs, shutdownChildProcess, stringifyError, type LlmBackend, type LlmBackendFactory } from './backend';
 
 const DEFAULT_TIMEOUT_MS = 1_200_000;
 const CLAUDE_USAGE_KEY = 'claude-code';
@@ -110,6 +110,13 @@ export function createClaudeBackend(binaryPath: string, env?: Record<string, str
       const childExit = new Promise<number | null>((resolve) => {
         child.on('close', (code) => resolve(code));
       });
+      const childError = new Promise<Error>((resolve) => {
+        child.once('error', (error) => resolve(error));
+      });
+
+      const writeJsonLine = (message: Record<string, unknown>): void => {
+        child.stdin.write(`${JSON.stringify(message)}\n`);
+      };
 
       const stdoutDone = new Promise<void>((resolve) => {
         child.stdout.setEncoding('utf8');
@@ -125,6 +132,30 @@ export function createClaudeBackend(binaryPath: string, env?: Record<string, str
           }
 
           const type = typeof message.type === 'string' ? message.type : '';
+          if (type === 'control_request') {
+            const request = isRecord(message.request) ? message.request : {};
+            const requestId = typeof message.request_id === 'string' ? message.request_id : '';
+            const input = isRecord(request.input) ? request.input : {};
+            try {
+              writeJsonLine({
+                type: 'control_response',
+                response: {
+                  subtype: 'success',
+                  request_id: requestId,
+                  response: {
+                    behavior: 'allow',
+                    updatedInput: input,
+                  },
+                },
+              });
+            } catch (error) {
+              status = 'failed';
+              errorMessage = stringifyError(error);
+              emitter.emit({ type: 'error', message: errorMessage });
+            }
+            return;
+          }
+
           if (type === 'system') {
             sessionId = typeof message.session_id === 'string' ? message.session_id : sessionId;
             emitter.emit({ type: 'status', status: 'running', sessionId });
@@ -183,6 +214,11 @@ export function createClaudeBackend(binaryPath: string, env?: Record<string, str
               status = 'failed';
               errorMessage = resultOutput ?? 'claude execution failed';
             }
+            try {
+              child.stdin.end();
+            } catch {
+              // Best effort.
+            }
             return;
           }
 
@@ -199,41 +235,60 @@ export function createClaudeBackend(binaryPath: string, env?: Record<string, str
       });
 
       const timeoutMs = request.timeout ?? DEFAULT_TIMEOUT_MS;
-      const timeout = setTimeout(() => {
-        status = 'timeout';
-        errorMessage = `claude timed out after ${timeoutMs}ms`;
-        try {
-          child.kill('SIGTERM');
-        } catch {
-          // Best effort.
-        }
-      }, timeoutMs);
+      let timeoutHandle: NodeJS.Timeout | undefined;
+      const timeout = new Promise<void>((resolve) => {
+        timeoutHandle = setTimeout(() => {
+          status = 'timeout';
+          errorMessage = `claude timed out after ${timeoutMs}ms`;
+          try {
+            child.kill('SIGTERM');
+          } catch {
+            // Best effort.
+          }
+          resolve();
+        }, timeoutMs);
+      });
 
-      signal.addEventListener('abort', () => {
-        status = 'cancelled';
-        errorMessage = 'claude execution cancelled';
-        try {
-          child.kill('SIGTERM');
-        } catch {
-          // Best effort.
+      const abort = new Promise<void>((resolve) => {
+        if (signal.aborted) {
+          status = 'cancelled';
+          errorMessage = 'claude execution cancelled';
+          resolve();
+          return;
         }
-      }, { once: true });
+        signal.addEventListener('abort', () => {
+          status = 'cancelled';
+          errorMessage = 'claude execution cancelled';
+          try {
+            child.kill('SIGTERM');
+          } catch {
+            // Best effort.
+          }
+          resolve();
+        }, { once: true });
+      });
 
       try {
-        child.stdin.write(`${JSON.stringify({
+        writeJsonLine({
           type: 'user',
           message: {
             role: 'user',
             content: [{ type: 'text', text: request.prompt }],
           },
-        })}\n`);
-        child.stdin.end();
+        });
 
-        await stdoutDone;
-        const exitCode = await childExit;
-        if (exitCode !== 0 && status === 'completed') {
+        const completion = await Promise.race([
+          Promise.all([stdoutDone, childExit]).then(([, exitCode]) => ({ type: 'exit' as const, exitCode })),
+          timeout.then(() => ({ type: 'terminal' as const })),
+          abort.then(() => ({ type: 'terminal' as const })),
+          childError.then((error) => ({ type: 'error' as const, error })),
+        ]);
+        if (completion.type === 'error') {
           status = 'failed';
-          errorMessage = `claude exited with code ${exitCode ?? 'unknown'}`;
+          errorMessage = stringifyError(completion.error);
+        } else if (completion.type === 'exit' && completion.exitCode !== 0 && status === 'completed') {
+          status = 'failed';
+          errorMessage = `claude exited with code ${completion.exitCode ?? 'unknown'}`;
         }
       } catch (error) {
         if (status === 'completed') {
@@ -241,7 +296,16 @@ export function createClaudeBackend(binaryPath: string, env?: Record<string, str
           errorMessage = stringifyError(error);
         }
       } finally {
-        clearTimeout(timeout);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        try {
+          child.stdin.end();
+        } catch {
+          // Best effort.
+        }
+        await shutdownChildProcess(child, childExit, {
+          terminate: status !== 'completed',
+          graceMs: status === 'completed' ? 2_000 : 250,
+        });
       }
 
       if (stderr.trim() && status !== 'completed') {
