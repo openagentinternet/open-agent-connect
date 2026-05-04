@@ -9,9 +9,12 @@ test('README exposes the unified install guide as the primary install entrypoint
   const readme = await readFile(path.join(REPO_ROOT, 'README.md'), 'utf8');
 
   assert.match(readme, /Unified install guide/i);
+  assert.match(readme, /Recommended terminal install/i);
+  assert.match(readme, /npm i -g open-agent-connect/);
+  assert.match(readme, /oac install/);
   assert.match(readme, /docs\/install\/open-agent-connect\.md/);
   assert.match(readme, /Read https:\/\/github\.com\/openagentinternet\/open-agent-connect\/blob\/main\/docs\/install\/open-agent-connect\.md/i);
-  assert.match(readme, /End users do not need to clone this repository or build it\s+locally/i);
+  assert.match(readme, /agent-readable guide are equivalent by final installed state/i);
   assert.match(readme, /Claude Code-compatible install path/i);
   assert.match(readme, /docs\/install\/uninstall-open-agent-connect\.md/);
 });
@@ -23,7 +26,9 @@ test('unified install guide defines the remote GitHub install and host bind flow
   );
 
   assert.match(guide, /does not need to clone this repository/i);
-  assert.match(guide, /do not run `npm install`, `npm run build`, or `npm run build:skillpacks`/i);
+  assert.match(guide, /do not run `npm run build` or `npm run build:skillpacks` for end-user installation/i);
+  assert.match(guide, /do not run `npm install` from a source checkout for end-user installation/i);
+  assert.match(guide, /do use `npm i -g open-agent-connect` for the recommended npm package path/i);
   assert.match(guide, /OAC_HOST:=claude-code/);
   assert.match(guide, /github\.com\/\$OAC_REPO\/releases\/latest\/download\/oac-\$\{OAC_HOST_PACK\}\.tar\.gz/);
   assert.match(guide, /OAC_TMP_DIR\/\$OAC_HOST_PACK/);
