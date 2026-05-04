@@ -29,7 +29,6 @@ const NAV_ITEMS = [
     { page: 'bot', label: 'Bot' },
     { page: 'trace', label: 'Trace' },
     { page: 'refund', label: 'Refund' },
-    { page: 'chat-viewer', label: 'Chat Viewer' },
 ];
 const HIDDEN_UI_PAGES = new Set(['publish', 'my-services']);
 function escapeHtml(value) {

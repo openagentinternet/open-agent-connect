@@ -71,9 +71,23 @@ test('buildChatPrompt includes conversation strategy with turn count', () => {
 
 test('buildChatPrompt includes exit mechanism', () => {
   const prompt = buildChatPrompt(makeInput());
+  const legacyMarker = '[END' + '_CONVERSATION]';
   assert.ok(prompt.includes('## Exit Mechanism'));
-  assert.ok(prompt.includes('[END_CONVERSATION]'));
+  assert.ok(prompt.includes('Bye'));
+  assert.ok(prompt.includes('on its own final line'));
+  assert.ok(!prompt.includes(legacyMarker));
   assert.ok(prompt.includes('turn 5 of 30'));
+});
+
+test('buildChatPrompt tells long conversations to converge and end naturally after inbound turn 20', () => {
+  const prompt = buildChatPrompt(makeInput({
+    conversation: {
+      ...makeInput().conversation,
+      turnCount: 21,
+    },
+  }));
+  assert.ok(prompt.includes('converge'));
+  assert.ok(prompt.includes('end naturally'));
 });
 
 test('buildChatPrompt includes chat history with names', () => {
@@ -123,10 +137,10 @@ test('parseRunnerOutput returns reply for normal text', () => {
   assert.equal(result.content, 'Hello! I am happy to chat with you.');
 });
 
-test('parseRunnerOutput detects [END_CONVERSATION] marker', () => {
-  const result = parseRunnerOutput('Goodbye! It was nice chatting.\n[END_CONVERSATION]');
+test('parseRunnerOutput detects Bye only on the final non-empty line', () => {
+  const result = parseRunnerOutput('Goodbye! It was nice chatting.\nBye');
   assert.equal(result.state, 'end_conversation');
-  assert.equal(result.content, 'Goodbye! It was nice chatting.');
+  assert.equal(result.content, 'Goodbye! It was nice chatting.\nBye');
 });
 
 test('parseRunnerOutput returns skip for empty output', () => {
@@ -134,16 +148,22 @@ test('parseRunnerOutput returns skip for empty output', () => {
   assert.equal(result.state, 'skip');
 });
 
-test('parseRunnerOutput handles [END_CONVERSATION] inline', () => {
-  const result = parseRunnerOutput('See you later! [END_CONVERSATION]');
-  assert.equal(result.state, 'end_conversation');
-  assert.equal(result.content, 'See you later!');
+test('parseRunnerOutput ignores inline Bye text as a close signal', () => {
+  const result = parseRunnerOutput('See you later! Bye');
+  assert.equal(result.state, 'reply');
+  assert.equal(result.content, 'See you later! Bye');
 });
 
-test('parseRunnerOutput handles only [END_CONVERSATION] with no content', () => {
-  const result = parseRunnerOutput('[END_CONVERSATION]');
+test('parseRunnerOutput canonicalizes case-insensitive final Bye', () => {
+  const result = parseRunnerOutput('See you later.\nbye');
   assert.equal(result.state, 'end_conversation');
-  assert.ok(result.content); // fallback farewell
+  assert.equal(result.content, 'See you later.\nBye');
+});
+
+test('parseRunnerOutput handles only Bye as visible close content', () => {
+  const result = parseRunnerOutput('Bye');
+  assert.equal(result.state, 'end_conversation');
+  assert.equal(result.content, 'Bye');
 });
 
 test('buildChatPrompt ends with Reply now:', () => {

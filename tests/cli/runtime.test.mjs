@@ -3724,13 +3724,13 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
   assert.equal(Object.hasOwn(sent.payload.data, 'peerChatPublicKey'), false);
   assert.doesNotMatch(JSON.stringify(sent.payload.data), /"encrypt":"ecdh"/);
   assert.match(sent.payload.data.traceJsonPath, /\/\.runtime\/exports\/traces\/.*\.json$/);
-  assert.match(
-    sent.payload.data.localUiUrl,
-    /\/ui\/chat-viewer\?peer=/
-  );
+  assert.equal(typeof sent.payload.data.a2aSessionId, 'string');
+  assert.ok(sent.payload.data.a2aSessionId.length > 0);
+  assert.doesNotMatch(sent.payload.data.localUiUrl, /\/ui\/chat-viewer/);
   const viewerUrl = new URL(sent.payload.data.localUiUrl);
-  assert.equal(viewerUrl.pathname, '/ui/chat-viewer');
-  assert.equal(viewerUrl.searchParams.get('peer'), created.payload.data.globalMetaId);
+  assert.equal(viewerUrl.pathname, '/ui/trace');
+  assert.equal(viewerUrl.searchParams.get('traceId'), sent.payload.data.a2aSessionId);
+  assert.equal(viewerUrl.searchParams.get('sessionId'), sent.payload.data.a2aSessionId);
 
   const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', sent.payload.data.traceId]);
 
@@ -3760,6 +3760,7 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
   assert.equal(chatMessage.direction, 'outgoing');
   assert.equal(chatMessage.kind, 'private_chat');
   assert.equal(chatMessage.protocolTag, null);
+  assert.equal(chatMessage.sessionId, sent.payload.data.a2aSessionId);
   assert.equal(chatMessage.pinId, sent.payload.data.pinId);
   assert.deepEqual(chatMessage.txids, sent.payload.data.txids);
   assert.equal(chatMessage.replyPinId, 'reply-pin-1');

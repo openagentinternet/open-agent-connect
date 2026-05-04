@@ -28,7 +28,6 @@ const NAV_ITEMS: Array<{ page: MetabotUiPageName; label: string }> = [
   { page: 'bot', label: 'Bot' },
   { page: 'trace', label: 'Trace' },
   { page: 'refund', label: 'Refund' },
-  { page: 'chat-viewer', label: 'Chat Viewer' },
 ];
 
 const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>(['publish', 'my-services']);
