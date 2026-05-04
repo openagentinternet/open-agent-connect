@@ -90,10 +90,7 @@ function detectHost(env: NodeJS.ProcessEnv): ConcreteSkillHost {
       `Multiple host environments detected: ${detected.join(', ')}. Rerun with --host <codex|claude-code|openclaw>.`,
     );
   }
-  throw new NpmInstallError(
-    'install_host_unresolved',
-    'Cannot detect target host. Rerun with --host <codex|claude-code|openclaw>.',
-  );
+  return 'codex';
 }
 
 function resolveHost(input: NpmInstallInput, env: NodeJS.ProcessEnv): ConcreteSkillHost {
@@ -154,7 +151,13 @@ async function copySharedSkills(input: {
     const sourceSkillRoot = path.join(sourceRoot, skillName);
     await fs.rm(targetSkillRoot, { recursive: true, force: true });
     await fs.mkdir(targetSkillRoot, { recursive: true });
-    await fs.cp(sourceSkillRoot, targetSkillRoot, { recursive: true });
+    await fs.cp(sourceSkillRoot, targetSkillRoot, {
+      recursive: true,
+      filter: (sourcePath) => {
+        const segments = path.relative(sourceSkillRoot, sourcePath).split(path.sep);
+        return !segments.includes('evals') && path.basename(sourcePath) !== '.DS_Store';
+      },
+    });
     await fs.writeFile(
       path.join(targetSkillRoot, 'SKILL.md'),
       await renderSharedSkill(input.packageRoot, skillName),

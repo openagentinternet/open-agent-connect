@@ -12,6 +12,7 @@ test('README exposes the unified install guide as the primary install entrypoint
   assert.match(readme, /Recommended terminal install/i);
   assert.match(readme, /npm i -g open-agent-connect/);
   assert.match(readme, /oac install/);
+  assert.match(readme, /bare command uses `codex` when no host-specific environment signal is\s+available/i);
   assert.match(readme, /docs\/install\/open-agent-connect\.md/);
   assert.match(readme, /Read https:\/\/github\.com\/openagentinternet\/open-agent-connect\/blob\/main\/docs\/install\/open-agent-connect\.md/i);
   assert.match(readme, /agent-readable guide are equivalent by final installed state/i);
@@ -29,6 +30,7 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.match(guide, /do not run `npm run build` or `npm run build:skillpacks` for end-user installation/i);
   assert.match(guide, /do not run `npm install` from a source checkout for end-user installation/i);
   assert.match(guide, /do use `npm i -g open-agent-connect` for the recommended npm package path/i);
+  assert.match(guide, /bare\s+`oac install` defaults to `codex`/i);
   assert.match(guide, /OAC_HOST:=claude-code/);
   assert.match(guide, /github\.com\/\$OAC_REPO\/releases\/latest\/download\/oac-\$\{OAC_HOST_PACK\}\.tar\.gz/);
   assert.match(guide, /OAC_TMP_DIR\/\$OAC_HOST_PACK/);

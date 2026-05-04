@@ -56,6 +56,14 @@ test('runOac installs shared skills, metabot shim, and codex host bindings for a
   const sharedSkillFile = path.join(sharedSkillPath, 'SKILL.md');
   const metabotShimPath = path.join(systemHome, '.metabot', 'bin', 'metabot');
   const hostSkillPath = path.join(systemHome, '.codex', 'skills', 'metabot-ask-master');
+  const evalsPath = path.join(
+    systemHome,
+    '.metabot',
+    'skills',
+    'metabot-call-remote-service',
+    'evals',
+    'evals.json',
+  );
 
   assert.equal(result.exitCode, 0);
   assert.equal(result.payload.ok, true);
@@ -68,6 +76,7 @@ test('runOac installs shared skills, metabot shim, and codex host bindings for a
   const shim = await fs.readFile(metabotShimPath, 'utf8');
   assert.match(shim, /dist\/cli\/main\.js/);
   await assertSymlinkPointsTo(hostSkillPath, sharedSkillPath);
+  await assert.rejects(fs.stat(evalsPath), { code: 'ENOENT' });
 });
 
 test('runOac auto-detects codex when CODEX_HOME is the only host signal', async (t) => {
@@ -82,6 +91,21 @@ test('runOac auto-detects codex when CODEX_HOME is the only host signal', async 
   assert.equal(result.payload.data.host, 'codex');
   await assertSymlinkPointsTo(
     path.join(codexHome, 'skills', 'metabot-ask-master'),
+    path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'),
+  );
+});
+
+test('runOac defaults to codex when no host signal is present', async (t) => {
+  const { systemHome } = await createSystemHome('oac-install-default-codex-');
+  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
+
+  const result = await runOacCli(systemHome, ['install']);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.host, 'codex');
+  await assertSymlinkPointsTo(
+    path.join(systemHome, '.codex', 'skills', 'metabot-ask-master'),
     path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'),
   );
 });

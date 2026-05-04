@@ -108,7 +108,9 @@ This installs the `Open Agent Connect` package, then runs the local installer
 that writes the shared MetaBot runtime assets, binds `metabot-*` skills into the
 current host, verifies the result, and hands you into first use.
 
-If host detection is ambiguous, choose the host explicitly:
+The bare command uses `codex` when no host-specific environment signal is
+available. For `Claude Code`, `OpenClaw`, or any ambiguous machine, choose the
+host explicitly:
 
 ```bash
 oac install --host codex

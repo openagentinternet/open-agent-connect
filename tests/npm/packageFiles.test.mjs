@@ -33,6 +33,12 @@ function assertExcludesPrefix(paths, prefix) {
   }
 }
 
+function assertExcludesSegment(paths, segment) {
+  for (const filePath of paths) {
+    assert.equal(filePath.includes(segment), false, `expected npm pack to exclude ${segment}, found ${filePath}`);
+  }
+}
+
 test('npm package includes runtime install inputs and excludes generated/development-only artifacts', async () => {
   const pack = await readPackDryRun();
   const paths = pathsFromPack(pack);
@@ -53,6 +59,7 @@ test('npm package includes runtime install inputs and excludes generated/develop
   assertExcludesPrefix(paths, 'skillpacks/claude-code/runtime/node_modules/');
   assertExcludesPrefix(paths, 'skillpacks/openclaw/runtime/node_modules/');
   assertExcludesPrefix(paths, '.github/');
+  assertExcludesSegment(paths, '/evals/');
 
   assert.ok(
     pack.size < MAX_PACKED_SIZE_BYTES,

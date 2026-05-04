@@ -15,7 +15,7 @@
   },
   "files": [
     "dist/",
-    "SKILLs/",
+    "SKILLs/*/SKILL.md",
     "skillpacks/common/templates/",
     "src/ui/",
     "docs/install/open-agent-connect.md",

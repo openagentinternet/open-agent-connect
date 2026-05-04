@@ -135,7 +135,9 @@ uses the package's `oac install` command to install shared runtime assets and
 bind the selected host.
 
 If the current host is clearly detectable, `oac install` can choose it
-automatically. For deterministic agent execution, pass `--host` explicitly.
+automatically. If no host-specific environment signal is available, bare
+`oac install` defaults to `codex`. For deterministic agent execution, pass
+`--host` explicitly.
 
 ```bash
 set -euo pipefail
