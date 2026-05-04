@@ -3,10 +3,10 @@
 This is the single normative install guide for `Open Agent Connect`.
 
 This guide is written for a local agent that is reading it from GitHub. The user
-does not need to clone this repository, run `npm install`, or build the project
-from source. The local agent should download the packaged host skillpack from
-GitHub, run the bundled installer, verify the runtime, and then hand the user
-into first use.
+does not need to clone this repository or build the project from source. The
+local agent should prefer the npm package install path, verify the runtime, and
+then hand the user into first use. If npm is unavailable or a pinned release
+archive is required, use the GitHub release-pack fallback in this guide.
 
 Recommended user prompt:
 
@@ -22,7 +22,8 @@ Read https://raw.githubusercontent.com/openagentinternet/open-agent-connect/main
 
 Use this document for:
 
-- remote GitHub-based end-user installation
+- npm-based end-user installation
+- remote GitHub release-pack fallback installation
 - shared runtime installation
 - host skill binding for `Codex`, `Claude Code`, and `OpenClaw`
 - Claude Code-compatible fallback binding for other local agent hosts
@@ -48,13 +49,16 @@ then explain what the user can do next in natural language.
 - fail fast on command errors
 - prefer idempotent operations
 - do not assume this repository exists locally
-- do not run `npm install`, `npm run build`, or `npm run build:skillpacks` for end-user installation
+- do not run `npm run build` or `npm run build:skillpacks` for end-user installation
+- do not run `npm install` from a source checkout for end-user installation
+- do use `npm i -g open-agent-connect` for the recommended npm package path
 - do not ask for confirmation unless a required dependency is missing or a command fails unexpectedly
 - keep CLI execution internal where possible, then give the user natural-language next steps
 
 ## Supported Operating Environments
 
-The packaged installer is a POSIX shell installer.
+The recommended installer is the npm package plus the `oac install` command.
+The fallback release-pack installer is a POSIX shell installer.
 
 Supported execution environments:
 
@@ -70,8 +74,9 @@ to run the install from WSL2 or Git Bash with Node.js available.
 Before running install commands, verify:
 
 - `node` exists and version is `>=20 <25`
-- either `curl` or `wget` exists
-- `tar` exists
+- `npm` exists for the recommended npm path
+- either `curl` or `wget` exists for the release-pack fallback
+- `tar` exists for the release-pack fallback
 - at least one target host mode can be chosen
 
 Node version check:
@@ -82,6 +87,19 @@ node -e 'const major=Number(process.versions.node.split(".")[0]); if (major < 20
 
 If Node.js is missing or outside the supported range, stop and ask the user to
 install Node.js 20, 22, or 24 before continuing.
+
+For the recommended npm path, also verify:
+
+```bash
+command -v npm >/dev/null 2>&1 || {
+  echo "npm is required for the recommended install path." >&2
+  exit 1
+}
+```
+
+If npm is missing and the user can install npm, stop and ask them to install npm
+with Node.js. If npm is not available due to environment policy, use the GitHub
+release-pack fallback below.
 
 ## Choose Host Mode
 
@@ -110,11 +128,79 @@ Host-native roots used by the built-in binder:
 - `Claude Code`: `${CLAUDE_HOME:-$HOME/.claude}/skills`
 - `OpenClaw`: `${OPENCLAW_HOME:-$HOME/.openclaw}/skills`
 
-## Remote Install From GitHub
+## Recommended NPM Install
+
+Run this from any working directory. It installs the npm package globally, then
+uses the package's `oac install` command to install shared runtime assets and
+bind the selected host.
+
+If the current host is clearly detectable, `oac install` can choose it
+automatically. For deterministic agent execution, pass `--host` explicitly.
+
+```bash
+set -euo pipefail
+
+: "${OAC_HOST:=claude-code}"
+
+case "$OAC_HOST" in
+  codex|claude-code|openclaw)
+    ;;
+  *)
+    echo "Unsupported OAC_HOST '$OAC_HOST'. Use codex, claude-code, or openclaw." >&2
+    echo "For Claude Code-compatible hosts, set OAC_HOST=claude-code." >&2
+    exit 1
+    ;;
+esac
+
+command -v node >/dev/null 2>&1 || {
+  echo "Node.js is required. Install Node.js 20, 22, or 24." >&2
+  exit 1
+}
+node -e 'const major=Number(process.versions.node.split(".")[0]); if (major < 20 || major >= 25) { console.error(`Node.js ${process.versions.node} is unsupported. Install Node.js 20, 22, or 24.`); process.exit(1); }'
+
+command -v npm >/dev/null 2>&1 || {
+  echo "npm is required for the recommended Open Agent Connect install path." >&2
+  exit 1
+}
+
+npm i -g open-agent-connect
+oac install --host "$OAC_HOST"
+oac doctor --host "$OAC_HOST"
+
+export PATH="$HOME/.metabot/bin:$PATH"
+command -v metabot
+metabot --help >/dev/null
+metabot identity --help >/dev/null
+
+if metabot identity who >/tmp/open-agent-connect-identity.json 2>/tmp/open-agent-connect-identity.err; then
+  metabot doctor
+else
+  echo "Open Agent Connect core install is complete, but no active MetaBot identity exists yet."
+fi
+```
+
+This installs:
+
+- shared MetaBot skills under `~/.metabot/skills/`
+- the primary CLI shim under `~/.metabot/bin/metabot`
+- host-native `metabot-*` skill symlinks for the chosen host mode
+
+The npm path and the fallback release-pack path are equivalent by final
+installed state. Both should leave `metabot` runnable, shared skills installed
+under `~/.metabot/skills/`, and the chosen host bound to those skills.
+
+If the CLI is not on `PATH`, export:
+
+```bash
+export PATH="$HOME/.metabot/bin:$PATH"
+```
+
+## GitHub Release-Pack Fallback
 
 Run this from any working directory. It downloads a temporary copy of the
 GitHub archive, extracts the packaged host skillpack, and runs the bundled
-installer.
+installer. Use this path when npm is unavailable, when a pinned `OAC_VERSION`
+archive is required, or when debugging release-pack installation specifically.
 
 Set `OAC_HOST` to one of `codex`, `claude-code`, or `openclaw` before running.
 For unsupported but Claude Code-compatible platforms, set `OAC_HOST=claude-code`.
@@ -187,7 +273,7 @@ else
 fi
 ```
 
-This installs:
+This fallback installs:
 
 - shared MetaBot skills under `~/.metabot/skills/`
 - the primary CLI shim under `~/.metabot/bin/metabot`
@@ -244,12 +330,16 @@ Run:
 
 ```bash
 export PATH="$HOME/.metabot/bin:$PATH"
+if command -v oac >/dev/null 2>&1; then
+  oac doctor --host "${OAC_HOST:-claude-code}"
+fi
 metabot --help
 metabot identity --help
 ```
 
 Base install success criteria:
 
+- if `oac` is available, `oac doctor` reports the selected host, shared skills, metabot shim, and host bindings
 - `metabot` and `metabot identity` help commands run successfully
 - shared skill files exist under `~/.metabot/skills/`
 - related host `metabot-*` bindings exist for the selected host

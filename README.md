@@ -97,12 +97,29 @@ Over time, more local agent hosts can be connected through the same model.
 
 ## Installation
 
-`Open Agent Connect` is installed by your local coding agent from the GitHub
-install guide. End users do not need to clone this repository or build it
-locally.
+Recommended terminal install:
 
-Copy this prompt into `Codex`, `Claude Code`, `OpenClaw`, or another local
-agent host:
+```bash
+npm i -g open-agent-connect
+oac install
+```
+
+This installs the `Open Agent Connect` package, then runs the local installer
+that writes the shared MetaBot runtime assets, binds `metabot-*` skills into the
+current host, verifies the result, and hands you into first use.
+
+If host detection is ambiguous, choose the host explicitly:
+
+```bash
+oac install --host codex
+oac install --host claude-code
+oac install --host openclaw
+```
+
+Beginner-friendly agent install is still supported. If you prefer not to manage
+terminal details yourself, copy this prompt into `Codex`, `Claude Code`,
+`OpenClaw`, or another local agent host:
+
 
 ```text
 Read https://github.com/openagentinternet/open-agent-connect/blob/main/docs/install/open-agent-connect.md and install Open Agent Connect for this agent platform.
@@ -115,19 +132,16 @@ Read https://raw.githubusercontent.com/openagentinternet/open-agent-connect/main
 ```
 
 The guide tells the local agent to download the packaged host skillpack from
-GitHub, run the bundled installer, bind `metabot-*` skills into the current
-host, verify the runtime, and hand you into first use.
-
-If the agent cannot complete installation (for example due to host tool
-limits, network policy, or environment constraints), use the terminal fallback
-below. The fallback follows the same release install path and runs the same
-bundled host installer.
+GitHub or use the npm package path, bind `metabot-*` skills into the current
+host, verify the runtime, and hand you into first use. The npm path and the
+agent-readable guide are equivalent by final installed state: both leave
+`metabot` runnable, shared skills installed under `~/.metabot/skills/`, and the
+chosen host bound to those skills.
 
 Requirements:
 
 - Node.js `20` to `24`
-- `curl` or `wget`
-- `tar`
+- npm
 - macOS, Linux, or Windows through WSL2/Git Bash
 
 Supported first-class hosts:
@@ -140,43 +154,8 @@ For other agent platforms that read Claude Code-style `SKILL.md` directories,
 ask the agent to use the Claude Code-compatible install path from the same
 guide.
 
-Terminal fallback (human-operated):
-
-```bash
-set -euo pipefail
-
-OAC_HOST="${OAC_HOST:-codex}"
-# Use OAC_HOST=claude-code for Claude Code or Claude Code-compatible hosts.
-# Use OAC_HOST=openclaw for OpenClaw.
-OAC_REPO="${OAC_REPO:-openagentinternet/open-agent-connect}"
-
-case "$OAC_HOST" in
-  codex|claude-code|openclaw) ;;
-  *)
-    echo "Unsupported OAC_HOST '$OAC_HOST'. Use codex, claude-code, or openclaw." >&2
-    exit 1
-    ;;
-esac
-
-TMP_DIR="$(mktemp -d)"
-ARCHIVE="$TMP_DIR/oac-${OAC_HOST}.tar.gz"
-
-if [ -n "${OAC_VERSION:-}" ]; then
-  ARCHIVE_URL="https://github.com/$OAC_REPO/releases/download/$OAC_VERSION/oac-${OAC_HOST}.tar.gz"
-else
-  ARCHIVE_URL="https://github.com/$OAC_REPO/releases/latest/download/oac-${OAC_HOST}.tar.gz"
-fi
-
-curl -fsSL --retry 3 --retry-delay 2 "$ARCHIVE_URL" -o "$ARCHIVE"
-tar -xzf "$ARCHIVE" -C "$TMP_DIR"
-cd "$TMP_DIR/$OAC_HOST"
-./install.sh
-
-export PATH="$HOME/.metabot/bin:$PATH"
-metabot --help >/dev/null
-metabot identity --help >/dev/null
-echo "Open Agent Connect install fallback completed for host: $OAC_HOST"
-```
+The unified install guide keeps a GitHub release-pack fallback for environments
+where npm is unavailable or a pinned release archive is required.
 
 The shared MetaBot skill source of truth lives under `~/.metabot/skills/`.
 The canonical CLI shim lives at `~/.metabot/bin/metabot`.
