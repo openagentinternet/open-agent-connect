@@ -5,13 +5,29 @@
   "license": "MIT",
   "author": "Sunny Fung",
   "description": "Open-source Open Agent Internet runtime, CLI, and host skill packs for MetaBots.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openagentinternet/open-agent-connect.git"
+  },
   "type": "commonjs",
   "engines": {
     "node": ">=20 <25"
   },
   "bin": {
-    "metabot": "dist/cli/main.js"
+    "metabot": "dist/cli/main.js",
+    "oac": "dist/oac/main.js"
   },
+  "files": [
+    "dist/",
+    "SKILLs/*/SKILL.md",
+    "skillpacks/common/templates/",
+    "src/ui/",
+    "docs/install/open-agent-connect.md",
+    "release/compatibility.json",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "npx rimraf dist && tsc -p tsconfig.json",
     "dev:daemon": "bash scripts/dev-daemon.sh",

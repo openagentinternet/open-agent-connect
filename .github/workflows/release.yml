@@ -10,23 +10,56 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build runtime
+        run: npm run build
+
+      - name: Build skillpacks
+        run: npm run build:skillpacks
+
+      - name: Verify release version
+        run: node scripts/verify-release-version.mjs "${{ github.ref_name }}"
 
       - name: Build release packs
         run: node scripts/build-release-packs.mjs
 
       - name: Publish GitHub Release
         run: |
-          gh release create "${{ github.ref_name }}" \
-            release/packs/oac-codex.tar.gz \
-            release/packs/oac-claude-code.tar.gz \
-            release/packs/oac-openclaw.tar.gz \
-            --title "${{ github.ref_name }}" \
-            --generate-notes
+          RELEASE_TAG="${{ github.ref_name }}"
+          ASSETS=(
+            release/packs/oac-codex.tar.gz
+            release/packs/oac-claude-code.tar.gz
+            release/packs/oac-openclaw.tar.gz
+          )
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${ASSETS[@]}" \
+              --title "$RELEASE_TAG" \
+              --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish npm package
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if npm view "open-agent-connect@$PACKAGE_VERSION" version >/dev/null 2>&1; then
+            echo "open-agent-connect@$PACKAGE_VERSION is already published; skipping npm publish."
+          else
+            npm publish --access public --provenance
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -5,6 +5,10 @@
   "license": "MIT",
   "author": "Sunny Fung",
   "description": "Open-source Open Agent Internet runtime, CLI, and host skill packs for MetaBots.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openagentinternet/open-agent-connect.git"
+  },
   "type": "commonjs",
   "engines": {
     "node": ">=20 <25"

@@ -14,13 +14,16 @@
 
 ## Releasing a New Version
 
-Releases are automated via GitHub Actions. Do not run `npm run build:packs` or `gh release create` manually.
+Releases are automated via GitHub Actions. Do not run `npm run build:packs`, `gh release create`, or `npm publish` manually unless you are explicitly recovering a failed release.
+
+The release workflow also publishes the npm package. The GitHub repository must have an `NPM_TOKEN` secret with permission to publish `open-agent-connect`.
 
 To cut a release:
 1. Bump `"version"` in `package.json` and all fields in `release/compatibility.json` to the new version.
 2. Run `npm run build && npm run build:skillpacks` to rebuild all artifacts.
 3. Run `npm test` and confirm it passes.
-4. Commit the version bump and regenerated artifacts, push to `main`.
-5. Push the version tag: `git tag v{version} && git push origin v{version}`.
+4. Run `node scripts/verify-release-version.mjs v{version}` and confirm it passes.
+5. Commit the version bump and regenerated artifacts, push to `main`.
+6. Push the version tag from the same commit: `git tag v{version} && git push origin v{version}`.
 
-Pushing the tag triggers CI (`.github/workflows/release.yml`) which builds `release/packs/oac-{host}.tar.gz` and publishes the GitHub Release automatically. The install guide at `docs/install/open-agent-connect.md` always points to `releases/latest/download/`, so no doc update is needed for version bumps.
+Pushing the tag triggers CI (`.github/workflows/release.yml`) which verifies the tag matches `package.json` and `release/compatibility.json`, builds `release/packs/oac-{host}.tar.gz`, publishes the GitHub Release, and publishes the same version to npm. The install guide at `docs/install/open-agent-connect.md` always points to `releases/latest/download/`, so no doc update is needed for version bumps.

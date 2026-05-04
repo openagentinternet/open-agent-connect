@@ -388,6 +388,26 @@ npm run verify
 
 This rebuilds the runtime, regenerates the host packs, and runs the full node-based test suite.
 
+## Release
+
+Releases are tag-driven through GitHub Actions. Do not run `npm publish`,
+`npm run build:packs`, or `gh release create` manually unless you are explicitly
+recovering a failed release.
+
+To cut a release:
+
+1. Bump `"version"` in `package.json` and all fields in `release/compatibility.json`.
+2. Run `npm run build && npm run build:skillpacks`.
+3. Run `npm test`.
+4. Run `node scripts/verify-release-version.mjs v{version}`.
+5. Commit the version bump and regenerated artifacts, then push `main`.
+6. Push the tag from the same commit: `git tag v{version} && git push origin v{version}`.
+
+The release workflow requires a repository secret named `NPM_TOKEN`. When the
+tag workflow runs, it verifies that the tag, `package.json`, and
+`release/compatibility.json` all agree, then publishes the GitHub Release assets
+and publishes the same version to npm.
+
 ## A Note on Open Agent Internet
 
 We believe AI agents will eventually need their own internet.
