@@ -41,6 +41,18 @@
       }
       .profile-select:focus { outline: none; border-color: var(--accent); }
       .profile-meta { font-size: 11px; font-family: var(--mono); color: var(--dim); margin-left: 12px; }
+      .health-summary {
+        display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px;
+        font-family: var(--mono); font-size: 11px; color: var(--muted);
+      }
+      .health-summary span {
+        padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+        background: var(--surface2);
+      }
+      .exec-session { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+      .exec-runtime { font-size: 12px; color: var(--text); white-space: nowrap; }
+      .exec-prompt { font-size: 12px; color: var(--muted); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .exec-duration { font-family: var(--mono); font-size: 11px; color: var(--dim); white-space: nowrap; }
     </style>
   </head>
   <body>
@@ -58,6 +70,18 @@
           <div class="stat-card">
             <div class="stat-label">Runtimes</div>
             <div class="stat-value green" data-stat-runtimes>—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Healthy</div>
+            <div class="stat-value green" data-stat-healthy>—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Attention</div>
+            <div class="stat-value amber" data-stat-attention>—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Executions</div>
+            <div class="stat-value accent" data-stat-executions>—</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">Profiles</div>
@@ -89,6 +113,9 @@
           <span class="section-spacer"></span>
           <button class="btn btn-sm" id="discover-btn">↻ discover</button>
         </div>
+        <div class="health-summary" data-health-summary>
+          <span>health data loading</span>
+        </div>
         <div class="table-wrap" style="margin-bottom:24px">
           <table class="data-table">
             <thead>
@@ -102,6 +129,29 @@
             </thead>
             <tbody data-runtime-list>
               <tr><td colspan="5" class="table-empty"><strong>No runtimes discovered</strong>Click discover to scan PATH for available LLM binaries.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="section-header">
+          <span class="section-title">EXECUTION HISTORY</span>
+          <span class="section-badge purple" data-execution-count-badge>—</span>
+          <span class="section-spacer"></span>
+          <button class="btn btn-sm" id="refresh-history-btn">refresh</button>
+        </div>
+        <div class="table-wrap" style="margin-bottom:24px">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Session</th>
+                <th>Runtime</th>
+                <th>Status</th>
+                <th>Duration</th>
+                <th>Prompt</th>
+              </tr>
+            </thead>
+            <tbody data-execution-history-list>
+              <tr><td colspan="5" class="table-empty"><strong>No executions yet</strong>Recent LLM Executor sessions will appear here.</td></tr>
             </tbody>
           </table>
         </div>

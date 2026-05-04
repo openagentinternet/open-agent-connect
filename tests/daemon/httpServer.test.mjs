@@ -30,6 +30,8 @@ async function startServer(options = {}) {
     llmCancelSession: [],
     llmListSessions: [],
     llmStreamSessionEvents: [],
+    llmListRuntimes: [],
+    llmDiscoverRuntimes: [],
   };
 
   const server = createHttpServer({
@@ -303,6 +305,59 @@ async function startServer(options = {}) {
             durationMs: 42,
           },
         };
+      },
+      listRuntimes: async () => {
+        calls.llmListRuntimes.push({});
+        return commandSuccess({
+          version: 1,
+          runtimes: [
+            {
+              id: 'llm-runtime-1',
+              provider: 'codex',
+              displayName: 'Codex',
+              binaryPath: '/bin/codex',
+              authState: 'authenticated',
+              health: 'healthy',
+              capabilities: ['streaming'],
+              lastSeenAt: '2026-05-05T00:00:00.000Z',
+              createdAt: '2026-05-05T00:00:00.000Z',
+              updatedAt: '2026-05-05T00:00:00.000Z',
+            },
+            {
+              id: 'llm-runtime-2',
+              provider: 'claude-code',
+              displayName: 'Claude Code',
+              binaryPath: '/bin/claude',
+              authState: 'unknown',
+              health: 'unavailable',
+              capabilities: ['streaming'],
+              lastSeenAt: '2026-05-04T00:00:00.000Z',
+              createdAt: '2026-05-04T00:00:00.000Z',
+              updatedAt: '2026-05-04T00:00:00.000Z',
+            },
+          ],
+        });
+      },
+      discoverRuntimes: async () => {
+        calls.llmDiscoverRuntimes.push({});
+        return commandSuccess({
+          discovered: 1,
+          runtimes: [
+            {
+              id: 'llm-runtime-1',
+              provider: 'codex',
+              displayName: 'Codex',
+              binaryPath: '/bin/codex',
+              authState: 'authenticated',
+              health: 'healthy',
+              capabilities: ['streaming'],
+              lastSeenAt: '2026-05-05T00:00:00.000Z',
+              createdAt: '2026-05-05T00:00:00.000Z',
+              updatedAt: '2026-05-05T00:00:00.000Z',
+            },
+          ],
+          errors: [],
+        });
       },
     },
     ui: useBuiltInUiPages
@@ -635,6 +690,57 @@ test('GET /api/llm/sessions forwards a clamped limit to the handler', async (t) 
   assert.deepEqual(server.calls.llmListSessions, [{ limit: 100 }]);
   assert.equal(payload.ok, true);
   assert.equal(payload.data.sessions[0].sessionId, 'llm-session-1');
+});
+
+test('GET /api/llm/runtimes returns runtime health rows for the bot page', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/runtimes`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.llmListRuntimes, [{}]);
+  assert.equal(payload.ok, true);
+  assert.deepEqual(
+    payload.data.runtimes.map((runtime) => `${runtime.id}:${runtime.health}`),
+    ['llm-runtime-1:healthy', 'llm-runtime-2:unavailable'],
+  );
+});
+
+test('POST /api/llm/runtimes/discover forwards runtime rediscovery for the bot page', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/runtimes/discover`, {
+    method: 'POST',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.llmDiscoverRuntimes, [{}]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.discovered, 1);
+  assert.equal(payload.data.runtimes[0].id, 'llm-runtime-1');
+});
+
+test('GET /ui/bot renders runtime health, execution history, and rediscovery controls', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/bot`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /data-stat-healthy/);
+  assert.match(html, /data-stat-attention/);
+  assert.match(html, /data-health-summary/);
+  assert.match(html, /EXECUTION HISTORY/);
+  assert.match(html, /data-execution-history-list/);
+  assert.match(html, /data-execution-count-badge/);
+  assert.match(html, /id="refresh-history-btn"/);
+  assert.ok(html.includes("api('/api/llm/sessions?limit=10'"));
+  assert.ok(html.includes("api('/api/llm/runtimes/discover'"));
 });
 
 test('GET /api/network/services forwards query filters to network.listServices', async (t) => {
