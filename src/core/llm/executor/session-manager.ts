@@ -14,11 +14,35 @@ export function isSafeLlmSessionId(sessionId: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(sessionId);
 }
 
+let atomicWriteSequence = 0;
+const sessionOperationQueues = new Map<string, Promise<void>>();
+
 function sessionPath(root: string, sessionId: string): string {
   if (!isSafeLlmSessionId(sessionId)) {
     throw new Error(`Invalid LLM session id: ${sessionId}`);
   }
   return path.join(root, `${sessionId}.json`);
+}
+
+function nextAtomicWriteSuffix(): string {
+  atomicWriteSequence += 1;
+  return `${process.pid}.${Date.now()}.${atomicWriteSequence}`;
+}
+
+function queueSessionOperation<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+  const previous = sessionOperationQueues.get(filePath) ?? Promise.resolve();
+  const run = previous.then(operation, operation);
+  const pending = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  sessionOperationQueues.set(filePath, pending);
+  pending.then(() => {
+    if (sessionOperationQueues.get(filePath) === pending) {
+      sessionOperationQueues.delete(filePath);
+    }
+  }, () => undefined);
+  return run;
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
@@ -27,27 +51,43 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
     return JSON.parse(raw) as T;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    return null;
+    if (error instanceof SyntaxError) {
+      throw new Error(`Malformed LLM session JSON: ${filePath}`);
+    }
+    throw error;
   }
 }
 
-async function writeSession(root: string, record: LlmSessionRecord): Promise<void> {
-  await fs.mkdir(root, { recursive: true });
-  await fs.writeFile(sessionPath(root, record.sessionId), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+async function writeSessionFile(filePath: string, record: LlmSessionRecord): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tempPath = `${filePath}.${nextAtomicWriteSuffix()}.tmp`;
+  try {
+    await fs.writeFile(tempPath, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+    await fs.rename(tempPath, filePath);
+  } catch (error) {
+    await fs.rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 export function createFileSessionManager(sessionsRoot: string): SessionManager {
   return {
     async create(record) {
-      await writeSession(sessionsRoot, record);
+      const filePath = sessionPath(sessionsRoot, record.sessionId);
+      await queueSessionOperation(filePath, async () => {
+        await writeSessionFile(filePath, record);
+      });
     },
 
     async update(sessionId, patch) {
-      const current = await this.get(sessionId);
-      if (!current) {
-        throw new Error(`LLM session not found: ${sessionId}`);
-      }
-      await writeSession(sessionsRoot, { ...current, ...patch, sessionId });
+      const filePath = sessionPath(sessionsRoot, sessionId);
+      await queueSessionOperation(filePath, async () => {
+        const current = await readJsonFile<LlmSessionRecord>(filePath);
+        if (!current) {
+          throw new Error(`LLM session not found: ${sessionId}`);
+        }
+        await writeSessionFile(filePath, { ...current, ...patch, sessionId });
+      });
     },
 
     async get(sessionId) {
@@ -72,11 +112,14 @@ export function createFileSessionManager(sessionsRoot: string): SessionManager {
     },
 
     async delete(sessionId) {
-      try {
-        await fs.unlink(sessionPath(sessionsRoot, sessionId));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
+      const filePath = sessionPath(sessionsRoot, sessionId);
+      await queueSessionOperation(filePath, async () => {
+        try {
+          await fs.unlink(filePath);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      });
     },
   };
 }

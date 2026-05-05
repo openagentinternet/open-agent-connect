@@ -90,6 +90,140 @@ test('file session manager persists, updates, lists, and deletes session records
   assert.equal(await manager.get('session-a'), null);
 });
 
+test('file session manager keeps a session readable while an update write is in flight', async () => {
+  const root = path.join(await createTempDir(), 'sessions');
+  const manager = createFileSessionManager(root);
+  const sessionId = 'session-readable';
+
+  await manager.create({
+    sessionId,
+    status: 'starting',
+    runtimeId: 'runtime-1',
+    provider: 'codex',
+    prompt: 'initial',
+    createdAt: '2026-05-05T11:00:00.000Z',
+  });
+
+  const originalWriteFile = fs.writeFile;
+  let intercepted = false;
+  let releaseWrite = () => {};
+  let markInvalidWritten = () => {};
+  const invalidWritten = new Promise((resolve) => {
+    markInvalidWritten = resolve;
+  });
+  const writeReleased = new Promise((resolve) => {
+    releaseWrite = resolve;
+  });
+
+  fs.writeFile = async function patchedWriteFile(file, data, options) {
+    const filePath = String(file);
+    if (!intercepted && filePath.includes(`${sessionId}.json`)) {
+      intercepted = true;
+      await originalWriteFile.call(fs, file, '{', options);
+      markInvalidWritten();
+      await writeReleased;
+    }
+    return originalWriteFile.call(fs, file, data, options);
+  };
+
+  let updatePromise;
+  try {
+    updatePromise = manager.update(sessionId, { providerSessionId: 'provider-session-1' });
+    await invalidWritten;
+    const duringUpdate = await manager.get(sessionId);
+    releaseWrite();
+    await updatePromise;
+
+    assert.ok(duringUpdate, 'existing session should remain readable during an in-flight update write');
+    assert.equal(duringUpdate.sessionId, sessionId);
+
+    const afterUpdate = await manager.get(sessionId);
+    assert.equal(afterUpdate.providerSessionId, 'provider-session-1');
+  } finally {
+    fs.writeFile = originalWriteFile;
+    releaseWrite();
+    if (updatePromise) await updatePromise.catch(() => undefined);
+  }
+});
+
+test('file session manager serializes concurrent updates without dropping fields', async () => {
+  const root = path.join(await createTempDir(), 'sessions');
+  const manager = createFileSessionManager(root);
+  const sessionId = 'session-merge';
+
+  await manager.create({
+    sessionId,
+    status: 'starting',
+    runtimeId: 'runtime-1',
+    provider: 'codex',
+    prompt: 'initial',
+    createdAt: '2026-05-05T11:00:00.000Z',
+  });
+
+  const originalReadFile = fs.readFile;
+  let gateActive = true;
+  let blockedReads = 0;
+  let releaseReads = () => {};
+  let resolveReadWindow = () => {};
+  const readWindow = new Promise((resolve) => {
+    resolveReadWindow = resolve;
+  });
+  const readsReleased = new Promise((resolve) => {
+    releaseReads = resolve;
+  });
+  const readWindowTimer = setTimeout(() => {
+    resolveReadWindow();
+  }, 25);
+
+  fs.readFile = async function patchedReadFile(file, options) {
+    const filePath = String(file);
+    if (gateActive && filePath.endsWith(`${sessionId}.json`) && blockedReads < 2) {
+      const raw = await originalReadFile.call(fs, file, options);
+      blockedReads += 1;
+      if (blockedReads === 2) {
+        clearTimeout(readWindowTimer);
+        resolveReadWindow();
+      }
+      await readsReleased;
+      return raw;
+    }
+    return originalReadFile.call(fs, file, options);
+  };
+
+  let firstUpdate;
+  let secondUpdate;
+  try {
+    firstUpdate = manager.update(sessionId, { providerSessionId: 'provider-session-1' });
+    secondUpdate = manager.update(sessionId, {
+      status: 'completed',
+      result: {
+        status: 'completed',
+        output: 'done',
+        durationMs: 12,
+      },
+      completedAt: '2026-05-05T11:00:12.000Z',
+    });
+    await readWindow;
+    gateActive = false;
+    releaseReads();
+    await Promise.all([firstUpdate, secondUpdate]);
+
+    const loaded = await manager.get(sessionId);
+    assert.equal(loaded.status, 'completed');
+    assert.equal(loaded.providerSessionId, 'provider-session-1');
+    assert.equal(loaded.result.output, 'done');
+  } finally {
+    clearTimeout(readWindowTimer);
+    fs.readFile = originalReadFile;
+    gateActive = false;
+    releaseReads();
+    await Promise.all([
+      firstUpdate?.catch(() => undefined),
+      secondUpdate?.catch(() => undefined),
+    ]);
+  }
+});
+
 test('skill injector copies requested skills into provider-native skill roots', async () => {
   const base = await createTempDir();
   const skillsRoot = path.join(base, 'skills');
