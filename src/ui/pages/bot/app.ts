@@ -19,12 +19,15 @@ function buildBotPageScript(): string {
   "\n" +
   "function api(url,opts){return fetch(url,opts).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()})}\n" +
   "function ago(t){if(!t)return'never';var d=Date.now()-new Date(t).getTime();if(d<6e4)return'just now';if(d<36e5)return Math.floor(d/6e4)+'m ago';if(d<864e5)return Math.floor(d/36e5)+'h ago';return Math.floor(d/864e5)+'d ago'}\n" +
+  "function fmtTime(t){if(!t)return'—';var d=new Date(t);if(Number.isNaN(d.getTime()))return'—';return d.toLocaleString()}\n" +
   "function esc(v){return String(v==null?'':v).replace(/[&<>\"']/g,function(c){if(c==='&')return'&amp;';if(c==='<')return'&lt;';if(c==='>')return'&gt;';if(c==='\"')return'&quot;';return'&#39;'})}\n" +
   "\n" +
   "function pill(h){var m={healthy:'online',degraded:'recent',unavailable:'offline'};var c=m[h]||'offline';return'<span class=\"status-pill status-'+c+'\"><span class=\"status-dot\"></span>'+esc(h)+'</span>'}\n" +
   "function statusPill(s){var m={completed:'online',running:'recent',starting:'recent',failed:'offline',timeout:'offline',cancelled:'offline'};var c=m[s]||'offline';return'<span class=\"status-pill status-'+c+'\"><span class=\"status-dot\"></span>'+esc(s||'unknown')+'</span>'}\n" +
-  "function shortText(v){v=(v||'').replace(/\\s+/g,' ').trim();if(!v)return'—';return v.length>120?v.slice(0,117)+'...':v}\n" +
-  "function duration(s){var d=s&&s.result&&typeof s.result.durationMs==='number'?s.result.durationMs:null;return d===null?'—':d+'ms'}\n" +
+  "function shortText(v,n){n=n||120;v=(v||'').replace(/\\s+/g,' ').trim();if(!v)return'—';return v.length>n?v.slice(0,Math.max(0,n-3))+'...':v}\n" +
+  "function clampBlock(v){v=String(v==null?'':v).trim();if(!v)return'—';return v.length>500?v.slice(0,500)+'...':v}\n" +
+  "function duration(s){var d=s&&s.result&&typeof s.result.durationMs==='number'?s.result.durationMs:null;if(d===null&&s&&s.startedAt&&s.completedAt){var a=new Date(s.startedAt).getTime();var b=new Date(s.completedAt).getTime();if(Number.isFinite(a)&&Number.isFinite(b)&&b>=a)d=b-a}return d===null?'—':d+'ms'}\n" +
+  "function resultSummary(s){if(!s||!s.result)return'—';if(s.result.output)return s.result.output;if(s.result.error)return s.result.error;return s.result.status||'—'}\n" +
   "\n" +
   "function renderStats(){\n" +
   "  var healthy=state.runtimes.filter(function(r){return r.health==='healthy'}).length;\n" +
@@ -57,16 +60,29 @@ function buildBotPageScript(): string {
   "function renderExecutionHistory(){\n" +
   "  var tb=q('[data-execution-history-list]');var bdg=q('[data-execution-count-badge]');if(!tb)return;\n" +
   "  if(bdg)bdg.textContent=state.sessions.length+' recent';\n" +
-  "  if(!state.sessions.length){tb.innerHTML='<tr><td colspan=\"5\" class=\"table-empty\"><strong>No executions yet</strong>Recent LLM Executor sessions will appear here.</td></tr>';return}\n" +
-  "  tb.innerHTML=state.sessions.map(function(s){\n" +
+  "  if(!state.sessions.length){tb.innerHTML='<tr><td colspan=\"8\" class=\"table-empty\"><strong>No executions yet</strong>Recent LLM Executor sessions will appear here.</td></tr>';return}\n" +
+  "  tb.innerHTML=state.sessions.map(function(s,i){\n" +
+  "    var detailId='exec-detail-'+i;\n" +
   "    var rt=state.runtimes.find(function(r){return r.id===s.runtimeId});var rn=rt?(rt.displayName||rt.provider):(s.provider||s.runtimeId||'—');\n" +
+  "    var provider=s.provider||(rt&&rt.provider)||'—';\n" +
+  "    var metabot=s.metaBotSlug||'—';\n" +
   "    return'<tr>'+\n" +
-  "      '<td><span class=\"exec-session\">'+esc(s.sessionId||'—')+'</span></td>'+\n" +
+  "      '<td><span class=\"exec-time\">'+esc(fmtTime(s.startedAt||s.createdAt))+'</span></td>'+\n" +
+  "      '<td><span class=\"exec-metabot\">'+esc(metabot)+'</span></td>'+\n" +
+  "      '<td><span class=\"exec-provider\">'+esc(provider)+'</span></td>'+\n" +
   "      '<td><span class=\"exec-runtime\">'+esc(rn)+'</span></td>'+\n" +
   "      '<td>'+statusPill(s.status)+'</td>'+\n" +
   "      '<td><span class=\"exec-duration\">'+duration(s)+'</span></td>'+\n" +
-  "      '<td><div class=\"exec-prompt\">'+esc(shortText(s.prompt))+'</div></td></tr>'\n" +
+  "      '<td><div class=\"exec-prompt\">'+esc(shortText(s.prompt,120))+'</div></td>'+\n" +
+  "      '<td><button class=\"btn btn-sm exec-detail-toggle\" data-act=\"toggle-exec\" data-detail=\"'+detailId+'\" aria-expanded=\"false\">details</button></td></tr>'+\n" +
+  "      '<tr class=\"exec-detail-row\" id=\"'+detailId+'\" hidden><td colspan=\"8\"><div class=\"exec-detail\">'+\n" +
+  "        '<div><div class=\"exec-detail-label\">Session</div><pre>'+esc(s.sessionId||'—')+'</pre></div>'+\n" +
+  "        '<div><div class=\"exec-detail-label\">Output / Error</div><pre>'+esc(clampBlock(resultSummary(s)))+'</pre></div>'+\n" +
+  "        '<div><div class=\"exec-detail-label\">Full Prompt</div><pre>'+esc(clampBlock(s.prompt))+'</pre></div>'+\n" +
+  "        '<div><div class=\"exec-detail-label\">Runtime</div><pre>'+esc((s.runtimeId||'—')+'\\n'+provider)+'</pre></div>'+\n" +
+  "      '</div></td></tr>'\n" +
   "  }).join('');\n" +
+  "  qq('[data-act=\"toggle-exec\"]').forEach(function(el){el.addEventListener('click',function(){var id=this.getAttribute('data-detail');var row=document.getElementById(id);if(!row)return;var open=row.hasAttribute('hidden');if(open){row.removeAttribute('hidden');this.setAttribute('aria-expanded','true')}else{row.setAttribute('hidden','');this.setAttribute('aria-expanded','false')}})});\n" +
   "}\n" +
   "\n" +
   "function renderBindings(){\n" +
@@ -114,8 +130,8 @@ function buildBotPageScript(): string {
   "}\n" +
   "\n" +
   "function loadExecutionHistory(){\n" +
-  "  var tb=q('[data-execution-history-list]');if(tb)tb.innerHTML='<tr><td colspan=\"5\" class=\"table-empty\"><strong>Loading…</strong></td></tr>';\n" +
-  "  return api('/api/llm/sessions?limit=10').then(function(r){state.sessions=r.data.sessions||[];renderExecutionHistory();renderStats()}).catch(function(){state.sessions=[];renderStats();if(tb)tb.innerHTML='<tr><td colspan=\"5\" class=\"table-empty\"><strong>Failed to load</strong>Execution history is unavailable.</td></tr>'})\n" +
+  "  var tb=q('[data-execution-history-list]');if(tb)tb.innerHTML='<tr><td colspan=\"8\" class=\"table-empty\"><strong>Loading…</strong></td></tr>';\n" +
+  "  return api('/api/llm/sessions?limit=20').then(function(r){state.sessions=r.data.sessions||[];renderExecutionHistory();renderStats()}).catch(function(){state.sessions=[];renderStats();if(tb)tb.innerHTML='<tr><td colspan=\"8\" class=\"table-empty\"><strong>Failed to load</strong>Execution history is unavailable.</td></tr>'})\n" +
   "}\n" +
   "\n" +
   "function loadProfiles(){\n" +

@@ -9140,8 +9140,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
       discoverRuntimes: async () => {
         const result = await discoverLlmRuntimes({ env: process.env });
         const runtimeStore = createLlmRuntimeStore(input.homeDir);
+        const previous = await runtimeStore.read();
+        const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
         for (const runtime of result.runtimes) {
           await runtimeStore.upsertRuntime(runtime);
+        }
+        for (const runtime of previous.runtimes) {
+          if (runtime.provider === 'custom') continue;
+          if (!discoveredRuntimeIds.has(runtime.id) && runtime.health !== 'unavailable') {
+            await runtimeStore.updateHealth(runtime.id, 'unavailable');
+          }
         }
         const updated = await runtimeStore.read();
         return commandSuccess({ discovered: result.runtimes.length, runtimes: updated.runtimes, errors: result.errors });

@@ -250,7 +250,7 @@ test('host LLM chat runner executes through the injected LLM executor', async ()
   assert.equal(executorCalls[0].timeout, 321);
   assert.equal(executorCalls[0].metaBotSlug, 'alice');
   assert.match(executorCalls[0].prompt, /Reply now:/);
-  assert.deepEqual(resolverCalls.resolveRuntime, [{ metaBotSlug: 'alice' }]);
+  assert.deepEqual(resolverCalls.resolveRuntime, [{ metaBotSlug: 'alice', excludeRuntimeIds: [] }]);
   assert.deepEqual(resolverCalls.markBindingUsed, ['binding-1']);
 });
 
@@ -334,4 +334,77 @@ test('host LLM chat runner skips unavailable runtimes before executing', async (
   assert.equal(executeCalls, 0);
   assert.equal(result.state, 'reply');
   assert.match(result.content, /Thanks for/);
+});
+
+test('host LLM chat runner skips degraded runtimes and reaches a healthy fallback', async () => {
+  const degradedRuntime = {
+    id: 'llm-runtime-degraded',
+    provider: 'codex',
+    displayName: 'Codex stale',
+    binaryPath: '/bin/codex',
+    authState: 'authenticated',
+    health: 'degraded',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-04T00:00:00.000Z',
+    createdAt: '2026-05-04T00:00:00.000Z',
+    updatedAt: '2026-05-04T00:00:00.000Z',
+  };
+  const healthyRuntime = {
+    ...degradedRuntime,
+    id: 'llm-runtime-healthy',
+    displayName: 'Codex healthy',
+    health: 'healthy',
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  const resolverCalls = [];
+  const executorCalls = [];
+  const runtimeResolver = {
+    async resolveRuntime(input) {
+      resolverCalls.push(input);
+      if ((input.excludeRuntimeIds ?? []).includes(degradedRuntime.id)) {
+        return { runtime: healthyRuntime, bindingId: 'binding-healthy' };
+      }
+      return { runtime: degradedRuntime, bindingId: 'binding-degraded' };
+    },
+    async selectMetaBot() {
+      return null;
+    },
+    async markBindingUsed() {},
+    async markRuntimeUnavailable() {},
+  };
+  const llmExecutor = {
+    async execute(request) {
+      executorCalls.push(request);
+      return 'llm-session-healthy';
+    },
+    async getSession(sessionId) {
+      return {
+        sessionId,
+        status: 'completed',
+        result: {
+          status: 'completed',
+          output: 'Healthy fallback reply.',
+          durationMs: 9,
+        },
+      };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver,
+    llmExecutor,
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+  });
+
+  const result = await runner(makeInput());
+
+  assert.deepEqual(result, { state: 'reply', content: 'Healthy fallback reply.' });
+  assert.equal(executorCalls.length, 1);
+  assert.equal(executorCalls[0].runtimeId, healthyRuntime.id);
+  assert.deepEqual(resolverCalls, [
+    { metaBotSlug: 'alice', excludeRuntimeIds: [] },
+    { metaBotSlug: 'alice', excludeRuntimeIds: [degradedRuntime.id] },
+  ]);
 });

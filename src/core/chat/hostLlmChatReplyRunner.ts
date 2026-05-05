@@ -140,10 +140,16 @@ async function tryExecute(
   pollIntervalMs: number,
   excludeRuntimeIds: Set<string>,
 ): Promise<{ result: ChatReplyRunnerResult; bindingId?: string } | null> {
-  const resolved = await resolver.resolveRuntime({ metaBotSlug });
+  const resolved = await resolver.resolveRuntime({
+    metaBotSlug,
+    excludeRuntimeIds: Array.from(excludeRuntimeIds),
+  });
   if (!resolved.runtime) return null;
   if (excludeRuntimeIds.has(resolved.runtime.id)) return null;
-  if (resolved.runtime.health !== 'healthy') return null;
+  if (resolved.runtime.health !== 'healthy') {
+    excludeRuntimeIds.add(resolved.runtime.id);
+    return null;
+  }
 
   try {
     const sessionId = await llmExecutor.execute({

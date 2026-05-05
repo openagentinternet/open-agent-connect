@@ -12,5 +12,5 @@ export { LlmExecutor } from './executor';
 export { createClaudeBackend, claudeBackendFactory } from './backends/claude';
 export { createCodexBackend, codexBackendFactory } from './backends/codex';
 export { createOpenClawBackend, openClawBackendFactory } from './backends/openclaw';
-export { createFileSessionManager, type SessionManager } from './session-manager';
+export { createFileSessionManager, isSafeLlmSessionId, type SessionManager } from './session-manager';
 export { injectSkills, resolveProviderSkillRoot, type SkillInjectionResult, type SkillInjectorInput } from './skill-injector';

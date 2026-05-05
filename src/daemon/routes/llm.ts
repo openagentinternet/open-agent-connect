@@ -1,4 +1,5 @@
 import { commandFailed } from '../../core/contracts/commandResult';
+import { isSafeLlmSessionId } from '../../core/llm/executor';
 import type { RouteHandler } from './types';
 
 function normalizeLimit(value: string | null): number {
@@ -9,6 +10,20 @@ function normalizeLimit(value: string | null): number {
 
 function acceptsSse(header: string | null): boolean {
   return (header ?? '').toLowerCase().includes('text/event-stream');
+}
+
+function decodeSafeSessionId(segment: string): string | null {
+  let sessionId: string;
+  try {
+    sessionId = decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+  return isSafeLlmSessionId(sessionId) ? sessionId : null;
+}
+
+function sendInvalidSessionId(context: Parameters<RouteHandler>[0]): void {
+  context.sendJson(400, commandFailed('invalid_llm_session_id', 'Invalid LLM session id.'));
 }
 
 async function streamEventsAsSse(context: Parameters<RouteHandler>[0], sessionId: string): Promise<void> {
@@ -66,7 +81,11 @@ export const handleLlmRoutes: RouteHandler = async (context) => {
   // POST /api/llm/sessions/:id/cancel
   const sessionCancelMatch = url.pathname.match(/^\/api\/llm\/sessions\/([^/]+)\/cancel$/);
   if (sessionCancelMatch && req.method === 'POST') {
-    const sessionId = decodeURIComponent(sessionCancelMatch[1]);
+    const sessionId = decodeSafeSessionId(sessionCancelMatch[1]);
+    if (!sessionId) {
+      sendInvalidSessionId(context);
+      return true;
+    }
     const result = handlers.llm?.cancelSession
       ? await handlers.llm.cancelSession({ sessionId })
       : commandFailed('not_implemented', 'LLM session cancel handler not configured.');
@@ -77,7 +96,11 @@ export const handleLlmRoutes: RouteHandler = async (context) => {
   // GET /api/llm/sessions/:id
   const sessionMatch = url.pathname.match(/^\/api\/llm\/sessions\/([^/]+)$/);
   if (sessionMatch && req.method === 'GET') {
-    const sessionId = decodeURIComponent(sessionMatch[1]);
+    const sessionId = decodeSafeSessionId(sessionMatch[1]);
+    if (!sessionId) {
+      sendInvalidSessionId(context);
+      return true;
+    }
     const result = handlers.llm?.getSession
       ? await handlers.llm.getSession({ sessionId })
       : commandFailed('not_implemented', 'LLM session handler not configured.');

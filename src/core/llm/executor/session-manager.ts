@@ -10,7 +10,14 @@ export interface SessionManager {
   delete(sessionId: string): Promise<void>;
 }
 
+export function isSafeLlmSessionId(sessionId: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(sessionId);
+}
+
 function sessionPath(root: string, sessionId: string): string {
+  if (!isSafeLlmSessionId(sessionId)) {
+    throw new Error(`Invalid LLM session id: ${sessionId}`);
+  }
   return path.join(root, `${sessionId}.json`);
 }
 

@@ -641,6 +641,19 @@ test('GET /api/llm/sessions/:id returns the session JSON envelope', async (t) =>
   assert.equal(payload.data.result.output, 'Hello');
 });
 
+test('GET /api/llm/sessions/:id rejects unsafe encoded session ids', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/sessions/%2e%2e%2fsecret`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'invalid_llm_session_id');
+  assert.deepEqual(server.calls.llmGetSession, []);
+});
+
 test('GET /api/llm/sessions/:id streams session events when SSE is accepted', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
@@ -677,6 +690,21 @@ test('POST /api/llm/sessions/:id/cancel forwards cancellation', async (t) => {
     state: 'success',
     data: { status: 'cancelled' },
   });
+});
+
+test('POST /api/llm/sessions/:id/cancel rejects unsafe encoded session ids', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/sessions/%2e%2e%2fsecret/cancel`, {
+    method: 'POST',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'invalid_llm_session_id');
+  assert.deepEqual(server.calls.llmCancelSession, []);
 });
 
 test('GET /api/llm/sessions forwards a clamped limit to the handler', async (t) => {
@@ -738,8 +766,15 @@ test('GET /ui/bot renders runtime health, execution history, and rediscovery con
   assert.match(html, /EXECUTION HISTORY/);
   assert.match(html, /data-execution-history-list/);
   assert.match(html, /data-execution-count-badge/);
+  assert.match(html, /<th>Time<\/th>/);
+  assert.match(html, /<th>MetaBot<\/th>/);
+  assert.match(html, /<th>Provider<\/th>/);
+  assert.match(html, /<th>Details<\/th>/);
+  assert.match(html, /exec-detail/);
+  assert.match(html, /data-act="toggle-exec"/);
+  assert.match(html, /bot-table-scroll/);
   assert.match(html, /id="refresh-history-btn"/);
-  assert.ok(html.includes("api('/api/llm/sessions?limit=10'"));
+  assert.ok(html.includes("api('/api/llm/sessions?limit=20'"));
   assert.ok(html.includes("api('/api/llm/runtimes/discover'"));
 });
 
