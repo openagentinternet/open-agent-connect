@@ -772,10 +772,26 @@ test('GET /ui/bot renders runtime health, execution history, and rediscovery con
   assert.match(html, /<th>Details<\/th>/);
   assert.match(html, /exec-detail/);
   assert.match(html, /data-act="toggle-exec"/);
+  assert.match(html, /running:'active'/);
+  assert.match(html, /starting:'active'/);
   assert.match(html, /bot-table-scroll/);
   assert.match(html, /id="refresh-history-btn"/);
   assert.ok(html.includes("api('/api/llm/sessions?limit=20'"));
   assert.ok(html.includes("api('/api/llm/runtimes/discover'"));
+});
+
+test('GET /ui/shared.css keeps active status animated and the topbar narrow-safe', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/shared.css`);
+  const css = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/css/i);
+  assert.match(css, /\.status-active \.status-dot\s*\{[^}]*animation: pulse/s);
+  assert.match(css, /\.topbar-nav\s*\{[^}]*min-width: 0[^}]*overflow-x: auto/s);
+  assert.match(css, /\.topbar-title\s*\{\s*display: none;\s*\}/);
 });
 
 test('GET /api/network/services forwards query filters to network.listServices', async (t) => {
