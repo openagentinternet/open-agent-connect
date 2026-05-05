@@ -58,6 +58,7 @@ import { createA2ASimplemsgListenerManager } from '../core/a2a/simplemsgListener
 import { createSocketIoMetaWebMasterReplyWaiter, type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
 import { parseMasterResponse } from '../core/master/masterMessageSchema';
 import { createPrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
+import { createPrivateChatAutoReplyBackfillLoop } from '../core/chat/privateChatAutoReplyBackfill';
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
@@ -67,6 +68,12 @@ import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
 import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
 import { discoverLlmRuntimes } from '../core/llm/llmRuntimeDiscovery';
+import {
+  LlmExecutor,
+  claudeBackendFactory,
+  codexBackendFactory,
+  openClawBackendFactory,
+} from '../core/llm/executor';
 import { runSystemUpdate } from '../core/system/update';
 import { runSystemUninstall } from '../core/system/uninstall';
 import type { CliDependencies, CliRuntimeContext } from './types';
@@ -2251,6 +2258,16 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     acceptPolicy: 'accept_all' as const,
     defaultStrategyId: null as string | null,
   };
+  const llmExecutor = new LlmExecutor({
+    sessionsRoot: paths.llmExecutorSessionsRoot,
+    transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+    skillsRoot: paths.skillsRoot,
+    backends: {
+      codex: codexBackendFactory,
+      'claude-code': claudeBackendFactory,
+      openclaw: openClawBackendFactory,
+    },
+  });
 
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
@@ -2271,6 +2288,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     servicePaymentExecutor,
     requestMvcGasSubsidy,
     autoReplyConfig: sharedAutoReplyConfig,
+    llmExecutor,
   });
 
   const daemon = createMetabotDaemon({
@@ -2391,9 +2409,24 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
     replyRunner: createHostLlmChatReplyRunner({
       runtimeResolver: llmResolver,
+      llmExecutor,
       metaBotSlug,
     }),
   }, sharedAutoReplyConfig);
+  const chatAutoReplyBackfill = createPrivateChatAutoReplyBackfillLoop({
+    paths,
+    stateStore: chatStateStore,
+    selfGlobalMetaId: async () => {
+      const state = await runtimeStore.readState();
+      return state.identity?.globalMetaId ?? null;
+    },
+    getLocalPrivateChatIdentity: async () => signer.getPrivateChatIdentity(),
+    resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+    handleInboundMessage: async (message) => chatAutoReplyOrchestrator.handleInboundMessage(message),
+    onError: (error) => {
+      console.warn('[private chat auto-reply backfill]', error.message);
+    },
+  });
 
   const daemonConfig = await createConfigStore(paths).read();
   const simplemsgListener = createA2ASimplemsgListenerManager({
@@ -2401,7 +2434,9 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
     onMessage: (profile, message) => {
       if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
-        void chatAutoReplyOrchestrator.handleInboundMessage(message);
+        void chatAutoReplyOrchestrator.handleInboundMessage(message).catch((error) => {
+          console.warn('[private chat auto-reply]', error instanceof Error ? error.message : String(error));
+        });
         const orderProtocolHandler = handlers.services?.handleInboundOrderProtocolMessage;
         if (orderProtocolHandler) {
           void Promise.resolve(orderProtocolHandler({
@@ -2421,6 +2456,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   });
   if (daemonConfig.a2a.simplemsgListenerEnabled) {
     await simplemsgListener.start();
+    chatAutoReplyBackfill.start();
   }
 
   let shuttingDown = false;
@@ -2428,6 +2464,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     if (shuttingDown) return;
     shuttingDown = true;
     simplemsgListener.stop();
+    chatAutoReplyBackfill.stop();
     providerHeartbeatLoop.stop();
     clearInterval(onlineServiceCacheInterval);
     await runtimeStore.clearDaemon(process.pid);

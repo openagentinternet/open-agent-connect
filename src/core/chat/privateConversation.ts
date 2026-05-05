@@ -45,6 +45,19 @@ export interface FetchPrivateHistoryInput {
   limit: number;
 }
 
+export interface FetchPrivateHistoryPageInput {
+  selfGlobalMetaId: string;
+  peerGlobalMetaId: string;
+  startIndex?: number;
+  limit: number;
+}
+
+export interface PrivateChatHistoryPage {
+  rows: unknown[];
+  total: number | null;
+  nextTimestamp: number | null;
+}
+
 export type FetchPrivateHistory = (
   input: FetchPrivateHistoryInput
 ) => Promise<unknown[]>;
@@ -118,21 +131,39 @@ function extractList(rawData: unknown): unknown[] {
   return [];
 }
 
-export async function fetchPrivateChatHistory(input: FetchPrivateHistoryInput & {
+function extractHistoryPage(rawData: unknown): PrivateChatHistoryPage {
+  const rows = extractList(rawData);
+  const record = readObject(rawData);
+  const data = readObject(record?.data);
+  const totalCandidate = data?.total ?? record?.total;
+  const nextTimestampCandidate = data?.nextTimestamp ?? record?.nextTimestamp;
+  const total = Number(totalCandidate);
+  const nextTimestamp = Number(nextTimestampCandidate);
+  return {
+    rows,
+    total: Number.isFinite(total) && total >= 0 ? Math.floor(total) : null,
+    nextTimestamp: Number.isFinite(nextTimestamp) ? Math.floor(nextTimestamp) : null,
+  };
+}
+
+export async function fetchPrivateChatHistoryPage(input: FetchPrivateHistoryPageInput & {
   fetchImpl?: typeof fetch;
   idChatApiBaseUrl?: string;
-}): Promise<unknown[]> {
+}): Promise<PrivateChatHistoryPage> {
   const selfGlobalMetaId = normalizeText(input.selfGlobalMetaId);
   const peerGlobalMetaId = normalizeText(input.peerGlobalMetaId);
   if (!selfGlobalMetaId || !peerGlobalMetaId) {
     throw new Error('selfGlobalMetaId and peerGlobalMetaId are required');
   }
 
+  const startIndex = Number(input.startIndex);
   const fetchImpl = getFetchImpl(input.fetchImpl);
   const url = new URL(`${normalizeBaseUrl(input.idChatApiBaseUrl)}/private-chat-list-by-index`);
   url.searchParams.set('metaId', selfGlobalMetaId);
   url.searchParams.set('otherMetaId', peerGlobalMetaId);
-  url.searchParams.set('startIndex', String((input.afterIndex ?? -1) + 1));
+  url.searchParams.set('startIndex', String(Number.isFinite(startIndex) && startIndex >= 0
+    ? Math.floor(startIndex)
+    : 0));
   url.searchParams.set('size', String(normalizeConversationLimit(input.limit)));
 
   const response = await fetchImpl(url.toString(), {
@@ -145,7 +176,28 @@ export async function fetchPrivateChatHistory(input: FetchPrivateHistoryInput & 
     throw new Error(`history_fetch_http_${response.status}`);
   }
 
-  return extractList(await response.json());
+  return extractHistoryPage(await response.json());
+}
+
+export async function fetchPrivateChatHistory(input: FetchPrivateHistoryInput & {
+  fetchImpl?: typeof fetch;
+  idChatApiBaseUrl?: string;
+}): Promise<unknown[]> {
+  const selfGlobalMetaId = normalizeText(input.selfGlobalMetaId);
+  const peerGlobalMetaId = normalizeText(input.peerGlobalMetaId);
+  if (!selfGlobalMetaId || !peerGlobalMetaId) {
+    throw new Error('selfGlobalMetaId and peerGlobalMetaId are required');
+  }
+
+  const page = await fetchPrivateChatHistoryPage({
+    selfGlobalMetaId,
+    peerGlobalMetaId,
+    startIndex: (input.afterIndex ?? -1) + 1,
+    limit: input.limit,
+    fetchImpl: input.fetchImpl,
+    idChatApiBaseUrl: input.idChatApiBaseUrl,
+  });
+  return page.rows;
 }
 
 function readObject(value: unknown): Record<string, unknown> | null {

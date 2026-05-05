@@ -53,6 +53,9 @@ export interface MetabotPaths {
   llmBindingsPath: string;
   llmSecretsRoot: string;
   preferredLlmRuntimePath: string;
+  llmExecutorRoot: string;
+  llmExecutorSessionsRoot: string;
+  llmExecutorTranscriptsRoot: string;
 
   // Temporary compatibility aliases for untouched later-task modules.
   baseRoot: string;
@@ -130,6 +133,9 @@ function buildMetabotPaths(input: {
   llmBindingsPath: string;
   llmSecretsRoot: string;
   preferredLlmRuntimePath: string;
+  llmExecutorRoot: string;
+  llmExecutorSessionsRoot: string;
+  llmExecutorTranscriptsRoot: string;
 }): MetabotPaths {
   const evolutionRoot = path.join(input.runtimeRoot, 'evolution');
   const a2aRoot = path.join(input.runtimeRoot, 'A2A');
@@ -194,6 +200,9 @@ function buildMetabotPaths(input: {
     llmBindingsPath: input.llmBindingsPath,
     llmSecretsRoot: input.llmSecretsRoot,
     preferredLlmRuntimePath: input.preferredLlmRuntimePath,
+    llmExecutorRoot: input.llmExecutorRoot,
+    llmExecutorSessionsRoot: input.llmExecutorSessionsRoot,
+    llmExecutorTranscriptsRoot: input.llmExecutorTranscriptsRoot,
 
     // Temporary compatibility aliases for untouched later-task modules.
     baseRoot: input.metabotRoot,
@@ -216,6 +225,7 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
   const exportsRoot = path.join(runtimeRoot, 'exports');
   const stateRoot = path.join(runtimeRoot, 'state');
   const locksRoot = path.join(runtimeRoot, 'locks');
+  const llmExecutorRoot = path.join(metabotRoot, 'LLM', 'executor');
 
   return buildMetabotPaths({
     systemHomeDir,
@@ -251,5 +261,8 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     llmBindingsPath: path.join(profileRoot, 'llmbindings.json'),
     llmSecretsRoot: path.join(metabotRoot, 'LLM', 'secrets'),
     preferredLlmRuntimePath: path.join(profileRoot, 'preferred-llm-runtime.json'),
+    llmExecutorRoot,
+    llmExecutorSessionsRoot: path.join(llmExecutorRoot, 'sessions'),
+    llmExecutorTranscriptsRoot: path.join(llmExecutorRoot, 'transcripts'),
   });
 }

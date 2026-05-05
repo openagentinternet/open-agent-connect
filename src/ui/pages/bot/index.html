@@ -41,6 +41,41 @@
       }
       .profile-select:focus { outline: none; border-color: var(--accent); }
       .profile-meta { font-size: 11px; font-family: var(--mono); color: var(--dim); margin-left: 12px; }
+      .health-summary {
+        display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px;
+        font-family: var(--mono); font-size: 11px; color: var(--muted);
+      }
+      .health-summary span {
+        padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+        background: var(--surface2);
+      }
+      .bot-table-scroll { overflow-x: auto; overflow-y: hidden; }
+      .bot-table-scroll .data-table { min-width: 820px; }
+      .exec-table { min-width: 1080px; }
+      .exec-time, .exec-provider, .exec-metabot { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+      .exec-session { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+      .exec-runtime { font-size: 12px; color: var(--text); white-space: nowrap; }
+      .exec-prompt { font-size: 12px; color: var(--muted); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .exec-duration { font-family: var(--mono); font-size: 11px; color: var(--dim); white-space: nowrap; }
+      .exec-detail-toggle { white-space: nowrap; }
+      .exec-detail-row td { background: var(--surface2); border-top: 0; padding: 0 12px 12px; }
+      .exec-detail {
+        display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px;
+        border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg);
+        padding: 12px;
+      }
+      .exec-detail-label {
+        font-family: var(--mono); font-size: 10px; text-transform: uppercase;
+        letter-spacing: .06em; color: var(--dim); margin-bottom: 6px;
+      }
+      .exec-detail pre {
+        margin: 0; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+        font-family: var(--mono); font-size: 11px; line-height: 1.45; color: var(--text);
+      }
+      @media (max-width: 720px) {
+        .profile-select { width: 100%; min-width: 0; }
+        .exec-detail { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>
@@ -58,6 +93,18 @@
           <div class="stat-card">
             <div class="stat-label">Runtimes</div>
             <div class="stat-value green" data-stat-runtimes>—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Healthy</div>
+            <div class="stat-value green" data-stat-healthy>—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Attention</div>
+            <div class="stat-value amber" data-stat-attention>—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Executions</div>
+            <div class="stat-value accent" data-stat-executions>—</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">Profiles</div>
@@ -89,7 +136,10 @@
           <span class="section-spacer"></span>
           <button class="btn btn-sm" id="discover-btn">↻ discover</button>
         </div>
-        <div class="table-wrap" style="margin-bottom:24px">
+        <div class="health-summary" data-health-summary>
+          <span>health data loading</span>
+        </div>
+        <div class="table-wrap bot-table-scroll" style="margin-bottom:24px">
           <table class="data-table">
             <thead>
               <tr>
@@ -107,6 +157,32 @@
         </div>
 
         <div class="section-header">
+          <span class="section-title">EXECUTION HISTORY</span>
+          <span class="section-badge purple" data-execution-count-badge>—</span>
+          <span class="section-spacer"></span>
+          <button class="btn btn-sm" id="refresh-history-btn">refresh</button>
+        </div>
+        <div class="table-wrap bot-table-scroll" style="margin-bottom:24px">
+          <table class="data-table exec-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>MetaBot</th>
+                <th>Provider</th>
+                <th>Runtime</th>
+                <th>Status</th>
+                <th>Duration</th>
+                <th>Prompt</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody data-execution-history-list>
+              <tr><td colspan="8" class="table-empty"><strong>No executions yet</strong>Recent LLM Executor sessions will appear here.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="section-header">
           <span class="section-title">BINDINGS</span>
           <span class="section-badge accent" data-binding-count-badge>—</span>
           <span class="section-spacer"></span>
@@ -116,7 +192,7 @@
           <div class="card-title">No bindings yet</div>
           <div class="card-subtitle">Select a profile and add bindings below to connect this MetaBot to an LLM runtime.</div>
         </div>
-        <div class="table-wrap" style="margin-bottom:14px" data-bindings-table-wrap>
+        <div class="table-wrap bot-table-scroll" style="margin-bottom:14px" data-bindings-table-wrap>
           <table class="data-table">
             <thead>
               <tr>

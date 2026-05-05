@@ -31,6 +31,7 @@ import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
 import { discoverLlmRuntimes } from '../core/llm/llmRuntimeDiscovery';
 import { normalizeLlmBinding } from '../core/llm/llmTypes';
+import type { LlmExecutor, LlmExecutionRequest } from '../core/llm/executor';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 import { buildPublishedService } from '../core/services/publishService';
 import { publishServiceToChain } from '../core/services/servicePublishChain';
@@ -199,6 +200,54 @@ function normalizeRetryDelays(value: unknown, fallback: number[]): number[] {
     .map((entry) => Number(entry))
     .filter((entry) => Number.isFinite(entry) && entry >= 0)
     .map((entry) => Math.trunc(entry));
+}
+
+function normalizePositiveInteger(value: unknown): number | undefined {
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.trunc(parsed);
+}
+
+function normalizeStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const normalized = value
+    .map((entry) => normalizeText(entry))
+    .filter(Boolean);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === 'string') {
+      result[key] = entry;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function buildLlmExecutionRequest(body: Record<string, unknown>, runtime: LlmExecutionRequest['runtime']): LlmExecutionRequest | null {
+  const runtimeId = normalizeText(body.runtimeId);
+  const prompt = normalizeText(body.prompt);
+  if (!runtimeId || !prompt) return null;
+
+  return {
+    runtimeId,
+    runtime,
+    prompt,
+    systemPrompt: normalizeText(body.systemPrompt) || undefined,
+    maxTurns: normalizePositiveInteger(body.maxTurns),
+    timeout: normalizePositiveInteger(body.timeout),
+    semanticInactivityTimeout: normalizePositiveInteger(body.semanticInactivityTimeout),
+    cwd: normalizeText(body.cwd) || undefined,
+    skills: normalizeStringArray(body.skills),
+    resumeSessionId: normalizeText(body.resumeSessionId) || undefined,
+    model: normalizeText(body.model) || undefined,
+    metaBotSlug: normalizeText(body.metaBotSlug) || undefined,
+    env: normalizeStringRecord(body.env),
+    extraArgs: normalizeStringArray(body.extraArgs),
+  };
 }
 
 async function writePinRetryingMempoolConflict(input: {
@@ -3817,6 +3866,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     options: RequestMvcGasSubsidyOptions
   ) => Promise<RequestMvcGasSubsidyResult>;
   autoReplyConfig?: PrivateChatAutoReplyConfig;
+  llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
 }): MetabotDaemonHttpHandlers {
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   const signer = input.signer ?? createLocalMnemonicSigner({ secretStore });
@@ -3857,6 +3907,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   /** Serializes buyer auto-rating per trace so inbound simplemsg + socket continuation cannot publish duplicates. */
   const buyerAutoRatingPublishChains = new Map<string, Promise<void>>();
   const pendingMasterReplyContinuations = new Map<string, Promise<void>>();
+  const pendingBuyerRatingPublishes = new Map<string, Promise<MetabotCommandResult<Record<string, unknown>>>>();
   let masterTriggerMemoryState = createMasterTriggerMemoryState();
   const masterAutoPrepareCounts = new Map<string, number>();
   let lastMasterAutoPreparedAt: number | null = null;
@@ -4341,6 +4392,33 @@ export function createDefaultMetabotDaemonHandlers(input: {
     comment: string;
     network?: string;
   }): Promise<MetabotCommandResult<Record<string, unknown>>> {
+    const traceId = normalizeText(request.traceId);
+    if (!traceId) {
+      return publishBuyerServiceRatingUnlocked(request);
+    }
+
+    const pending = pendingBuyerRatingPublishes.get(traceId);
+    if (pending) {
+      return pending;
+    }
+
+    const publish = publishBuyerServiceRatingUnlocked({ ...request, traceId });
+    pendingBuyerRatingPublishes.set(traceId, publish);
+    try {
+      return await publish;
+    } finally {
+      if (pendingBuyerRatingPublishes.get(traceId) === publish) {
+        pendingBuyerRatingPublishes.delete(traceId);
+      }
+    }
+  }
+
+  async function publishBuyerServiceRatingUnlocked(request: {
+    traceId: string;
+    rate: number;
+    comment: string;
+    network?: string;
+  }): Promise<MetabotCommandResult<Record<string, unknown>>> {
     const state = await runtimeStateStore.readState();
     if (!state.identity) {
       return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing service ratings.');
@@ -4364,6 +4442,37 @@ export function createDefaultMetabotDaemonHandlers(input: {
         'service_rating_trace_incomplete',
         'Trace is missing service or payment metadata required for skill-service-rate.'
       );
+    }
+
+    const existingSessionState = await sessionStateStore.readState();
+    const existingSessions = existingSessionState.sessions.filter((entry) => entry.traceId === request.traceId);
+    const existingSessionIds = new Set(existingSessions.map((entry) => entry.sessionId));
+    const existingClosure = extractTraceRatingClosure({
+      trace,
+      transcriptItems: existingSessionState.transcriptItems.filter((entry) => existingSessionIds.has(entry.sessionId)),
+      ratingDetail: null,
+    });
+    if (existingClosure.ratingPublished && existingClosure.ratingPinId) {
+      return commandSuccess({
+        traceId: request.traceId,
+        path: '/protocols/skill-service-rate',
+        pinId: existingClosure.ratingPinId,
+        txids: [],
+        rate: String(existingClosure.ratingValue ?? request.rate),
+        comment: existingClosure.ratingComment ?? request.comment,
+        serviceId,
+        servicePaidTx,
+        serverBot,
+        serviceSkill: normalizeText(trace.order?.serviceName),
+        ratingMessageSent: existingClosure.ratingMessageSent ?? false,
+        ratingMessagePinId: existingClosure.ratingMessagePinId,
+        ratingMessageError: existingClosure.ratingMessageError,
+        a2aStorePersisted: null,
+        a2aStoreError: null,
+        traceJsonPath: trace.artifacts.traceJsonPath,
+        traceMarkdownPath: trace.artifacts.traceMarkdownPath,
+        transcriptMarkdownPath: trace.artifacts.transcriptMarkdownPath,
+      });
     }
 
     const directory = await listRuntimeDirectoryServices({
@@ -8985,6 +9094,61 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     },
     llm: {
+      execute: async (body) => {
+        if (!input.llmExecutor) {
+          return commandFailed('llm_executor_not_configured', 'LLM executor is not configured.');
+        }
+        const runtimeId = normalizeText(body.runtimeId);
+        const runtimeStore = createLlmRuntimeStore(input.homeDir);
+        const runtimeState = await runtimeStore.read();
+        const runtime = runtimeState.runtimes.find((entry) => entry.id === runtimeId);
+        if (!runtime) {
+          return commandFailed('llm_runtime_not_found', `LLM runtime not found: ${runtimeId || '<missing>'}`);
+        }
+        if (runtime.health !== 'healthy') {
+          return commandFailed('llm_runtime_unhealthy', `LLM runtime is not healthy: ${runtimeId}`);
+        }
+        const request = buildLlmExecutionRequest(body, runtime);
+        if (!request) {
+          return commandFailed('invalid_llm_execute_request', 'runtimeId and prompt are required.');
+        }
+        try {
+          const sessionId = await input.llmExecutor.execute(request);
+          return commandSuccess({ sessionId, status: 'starting' });
+        } catch (error) {
+          return commandFailed('llm_execute_failed', error instanceof Error ? error.message : String(error));
+        }
+      },
+      getSession: async ({ sessionId }) => {
+        if (!input.llmExecutor) {
+          return commandFailed('llm_executor_not_configured', 'LLM executor is not configured.');
+        }
+        const session = await input.llmExecutor.getSession(sessionId);
+        if (!session) {
+          return commandFailed('llm_session_not_found', `LLM session not found: ${sessionId}`);
+        }
+        return commandSuccess(session);
+      },
+      cancelSession: async ({ sessionId }) => {
+        if (!input.llmExecutor) {
+          return commandFailed('llm_executor_not_configured', 'LLM executor is not configured.');
+        }
+        await input.llmExecutor.cancel(sessionId);
+        return commandSuccess({ status: 'cancelled' });
+      },
+      listSessions: async ({ limit }) => {
+        if (!input.llmExecutor) {
+          return commandFailed('llm_executor_not_configured', 'LLM executor is not configured.');
+        }
+        const sessions = await input.llmExecutor.listSessions(limit);
+        return commandSuccess({ sessions });
+      },
+      streamSessionEvents: async ({ sessionId }) => {
+        if (!input.llmExecutor) {
+          return (async function* emptyStream() {})();
+        }
+        return input.llmExecutor.streamEvents(sessionId);
+      },
       listRuntimes: async () => {
         const runtimeStore = createLlmRuntimeStore(input.homeDir);
         const state = await runtimeStore.read();
@@ -8993,8 +9157,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
       discoverRuntimes: async () => {
         const result = await discoverLlmRuntimes({ env: process.env });
         const runtimeStore = createLlmRuntimeStore(input.homeDir);
+        const previous = await runtimeStore.read();
+        const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
         for (const runtime of result.runtimes) {
           await runtimeStore.upsertRuntime(runtime);
+        }
+        for (const runtime of previous.runtimes) {
+          if (runtime.provider === 'custom') continue;
+          if (!discoveredRuntimeIds.has(runtime.id) && runtime.health !== 'unavailable') {
+            await runtimeStore.updateHealth(runtime.id, 'unavailable');
+          }
         }
         const updated = await runtimeStore.read();
         return commandSuccess({ discovered: result.runtimes.length, runtimes: updated.runtimes, errors: result.errors });

@@ -1,6 +1,6 @@
 import { createDefaultChatReplyRunner } from './defaultChatReplyRunner';
-import { executeLlm } from '../llm/hostLlmExecutor';
-import type { LlmRuntimeResolver, ResolveRuntimeResult } from '../llm/llmRuntimeResolver';
+import type { LlmRuntimeResolver } from '../llm/llmRuntimeResolver';
+import type { LlmExecutionRequest, LlmSessionRecord } from '../llm/executor';
 import type {
   ChatReplyRunner,
   ChatReplyRunnerInput,
@@ -8,8 +8,14 @@ import type {
 } from './privateChatTypes';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_POLL_INTERVAL_MS = 500;
 const MAX_FALLBACK_ATTEMPTS = 5;
 const CLOSE_CONVERSATION_SIGNAL = 'Bye';
+
+type ChatLlmExecutor = {
+  execute(request: LlmExecutionRequest): Promise<string>;
+  getSession(sessionId: string): Promise<LlmSessionRecord | null>;
+};
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -127,62 +133,76 @@ function parseRunnerOutput(rawOutput: string): ChatReplyRunnerResult {
 
 async function tryExecute(
   resolver: LlmRuntimeResolver,
+  llmExecutor: ChatLlmExecutor,
   metaBotSlug: string | undefined,
   prompt: string,
   timeoutMs: number,
+  pollIntervalMs: number,
   excludeRuntimeIds: Set<string>,
 ): Promise<{ result: ChatReplyRunnerResult; bindingId?: string } | null> {
-  // Re-resolve each attempt so we pick up the next candidate.
-  let resolved: ResolveRuntimeResult;
-  let attempts = 0;
-  do {
-    resolved = await resolver.resolveRuntime({ metaBotSlug });
-    // If the resolver picked a runtime we already failed on, skip it by marking
-    // it unavailable so the resolver walks past it on the next call.
-    if (resolved.runtime && excludeRuntimeIds.has(resolved.runtime.id)) {
-      // Force the runtime health to unavailable so the resolver skips it.
-      // This mutation is temporary — we restore a healthy runtime's health later.
-      await resolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
-      resolved = { runtime: null };
-    }
-    attempts++;
-  } while (!resolved.runtime && attempts < MAX_FALLBACK_ATTEMPTS);
-
+  const resolved = await resolver.resolveRuntime({
+    metaBotSlug,
+    excludeRuntimeIds: Array.from(excludeRuntimeIds),
+  });
   if (!resolved.runtime) return null;
+  if (excludeRuntimeIds.has(resolved.runtime.id)) return null;
+  if (resolved.runtime.health !== 'healthy') {
+    excludeRuntimeIds.add(resolved.runtime.id);
+    return null;
+  }
 
   try {
-    const execResult = await executeLlm({
+    const sessionId = await llmExecutor.execute({
+      runtimeId: resolved.runtime.id,
       runtime: resolved.runtime,
       prompt,
-      timeoutMs,
+      timeout: timeoutMs,
+      metaBotSlug,
     });
 
-    if (!execResult.ok) {
-      excludeRuntimeIds.add(resolved.runtime.id);
-      await resolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
-      return null;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() <= deadline) {
+      const session = await llmExecutor.getSession(sessionId);
+      const result = session?.result;
+      if (result) {
+        if (result.status === 'completed') {
+          return { result: parseRunnerOutput(result.output), bindingId: resolved.bindingId };
+        }
+        excludeRuntimeIds.add(resolved.runtime.id);
+        await resolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
+        return null;
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }
 
-    return { result: parseRunnerOutput(execResult.output), bindingId: resolved.bindingId };
-  } catch {
     excludeRuntimeIds.add(resolved.runtime.id);
     await resolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
+    return null;
+  } catch {
+    if (!excludeRuntimeIds.has(resolved.runtime.id)) {
+      excludeRuntimeIds.add(resolved.runtime.id);
+      await resolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
+    }
     return null;
   }
 }
 
 export function createHostLlmChatReplyRunner(options?: {
   runtimeResolver?: LlmRuntimeResolver;
+  llmExecutor?: ChatLlmExecutor;
   metaBotSlug?: string;
   timeoutMs?: number;
+  pollIntervalMs?: number;
 }): ChatReplyRunner {
   const runtimeResolver = options?.runtimeResolver;
+  const llmExecutor = options?.llmExecutor;
   const metaBotSlug = options?.metaBotSlug;
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const pollIntervalMs = options?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const fallbackRunner = createDefaultChatReplyRunner();
 
   // If no resolver provided, fall back to template-only replies.
-  if (!runtimeResolver) {
+  if (!runtimeResolver || !llmExecutor) {
     return fallbackRunner;
   }
 
@@ -192,7 +212,7 @@ export function createHostLlmChatReplyRunner(options?: {
 
     // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
     for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
-      const outcome = await tryExecute(runtimeResolver, metaBotSlug, prompt, timeoutMs, excludeRuntimeIds);
+      const outcome = await tryExecute(runtimeResolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds);
       if (outcome) {
         // Track lastUsedAt on the binding that was successfully used.
         if (outcome.bindingId) {

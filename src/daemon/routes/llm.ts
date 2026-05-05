@@ -1,8 +1,120 @@
 import { commandFailed } from '../../core/contracts/commandResult';
+import { isSafeLlmSessionId } from '../../core/llm/executor';
 import type { RouteHandler } from './types';
+
+function normalizeLimit(value: string | null): number {
+  const parsed = value ? Number.parseInt(value, 10) : 20;
+  if (!Number.isFinite(parsed) || parsed <= 0) return 20;
+  return Math.min(100, Math.max(1, parsed));
+}
+
+function acceptsSse(header: string | null): boolean {
+  return (header ?? '').toLowerCase().includes('text/event-stream');
+}
+
+function decodeSafeSessionId(segment: string): string | null {
+  let sessionId: string;
+  try {
+    sessionId = decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+  return isSafeLlmSessionId(sessionId) ? sessionId : null;
+}
+
+function sendInvalidSessionId(context: Parameters<RouteHandler>[0]): void {
+  context.sendJson(400, commandFailed('invalid_llm_session_id', 'Invalid LLM session id.'));
+}
+
+async function streamEventsAsSse(context: Parameters<RouteHandler>[0], sessionId: string): Promise<void> {
+  const stream = context.handlers.llm?.streamSessionEvents
+    ? await context.handlers.llm.streamSessionEvents({ sessionId })
+    : null;
+  if (!stream) {
+    context.sendJson(404, commandFailed('llm_session_stream_not_found', `LLM session stream not found: ${sessionId}`));
+    return;
+  }
+
+  const { req, res } = context;
+  let closed = false;
+  req.on('close', () => {
+    closed = true;
+  });
+
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+  });
+  res.write('retry: 3000\n\n');
+
+  for await (const event of stream) {
+    if (closed) break;
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  }
+  if (!closed) res.end();
+}
 
 export const handleLlmRoutes: RouteHandler = async (context) => {
   const { req, url, handlers } = context;
+
+  // POST /api/llm/execute
+  if (url.pathname === '/api/llm/execute' && req.method === 'POST') {
+    const body = await context.readJsonBody();
+    const result = handlers.llm?.execute
+      ? await handlers.llm.execute(body)
+      : commandFailed('not_implemented', 'LLM execute handler not configured.');
+    context.sendJson(result.ok ? 202 : 400, result);
+    return true;
+  }
+
+  // GET /api/llm/sessions
+  if (url.pathname === '/api/llm/sessions' && req.method === 'GET') {
+    const limit = normalizeLimit(url.searchParams.get('limit'));
+    const result = handlers.llm?.listSessions
+      ? await handlers.llm.listSessions({ limit })
+      : commandFailed('not_implemented', 'LLM session list handler not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
+  // POST /api/llm/sessions/:id/cancel
+  const sessionCancelMatch = url.pathname.match(/^\/api\/llm\/sessions\/([^/]+)\/cancel$/);
+  if (sessionCancelMatch && req.method === 'POST') {
+    const sessionId = decodeSafeSessionId(sessionCancelMatch[1]);
+    if (!sessionId) {
+      sendInvalidSessionId(context);
+      return true;
+    }
+    const result = handlers.llm?.cancelSession
+      ? await handlers.llm.cancelSession({ sessionId })
+      : commandFailed('not_implemented', 'LLM session cancel handler not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
+  // GET /api/llm/sessions/:id
+  const sessionMatch = url.pathname.match(/^\/api\/llm\/sessions\/([^/]+)$/);
+  if (sessionMatch && req.method === 'GET') {
+    const sessionId = decodeSafeSessionId(sessionMatch[1]);
+    if (!sessionId) {
+      sendInvalidSessionId(context);
+      return true;
+    }
+    const result = handlers.llm?.getSession
+      ? await handlers.llm.getSession({ sessionId })
+      : commandFailed('not_implemented', 'LLM session handler not configured.');
+    if (!result.ok) {
+      context.sendJson(404, result);
+      return true;
+    }
+    if (acceptsSse(req.headers.accept ?? null)) {
+      await streamEventsAsSse(context, sessionId);
+      return true;
+    }
+    context.sendJson(200, result);
+    return true;
+  }
 
   // GET /api/llm/runtimes
   if (url.pathname === '/api/llm/runtimes' && req.method === 'GET') {

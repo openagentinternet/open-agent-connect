@@ -25,6 +25,13 @@ async function startServer(options = {}) {
     networkServices: [],
     networkBots: [],
     chatConversation: [],
+    llmExecute: [],
+    llmGetSession: [],
+    llmCancelSession: [],
+    llmListSessions: [],
+    llmStreamSessionEvents: [],
+    llmListRuntimes: [],
+    llmDiscoverRuntimes: [],
   };
 
   const server = createHttpServer({
@@ -239,6 +246,117 @@ async function startServer(options = {}) {
           ],
           nextPollAfterIndex: 8,
           serverTime: 1776836184230,
+        });
+      },
+    },
+    llm: {
+      execute: async (input) => {
+        calls.llmExecute.push(input);
+        return commandSuccess({
+          sessionId: 'llm-session-1',
+          status: 'starting',
+        });
+      },
+      getSession: async (input) => {
+        calls.llmGetSession.push(input);
+        return commandSuccess({
+          sessionId: input.sessionId,
+          status: 'completed',
+          runtimeId: 'llm-runtime-1',
+          provider: 'codex',
+          prompt: 'Say hello',
+          result: {
+            status: 'completed',
+            output: 'Hello',
+            durationMs: 42,
+          },
+          createdAt: '2026-05-05T00:00:00.000Z',
+          completedAt: '2026-05-05T00:00:01.000Z',
+        });
+      },
+      cancelSession: async (input) => {
+        calls.llmCancelSession.push(input);
+        return commandSuccess({ status: 'cancelled' });
+      },
+      listSessions: async (input) => {
+        calls.llmListSessions.push(input);
+        return commandSuccess({
+          sessions: [
+            {
+              sessionId: 'llm-session-1',
+              status: 'completed',
+              runtimeId: 'llm-runtime-1',
+              provider: 'codex',
+              prompt: 'Say hello',
+              createdAt: '2026-05-05T00:00:00.000Z',
+            },
+          ],
+        });
+      },
+      streamSessionEvents: async function* (input) {
+        calls.llmStreamSessionEvents.push(input);
+        yield { type: 'status', status: 'running', sessionId: input.sessionId };
+        yield { type: 'text', content: 'Hello' };
+        yield {
+          type: 'result',
+          result: {
+            status: 'completed',
+            output: 'Hello',
+            durationMs: 42,
+          },
+        };
+      },
+      listRuntimes: async () => {
+        calls.llmListRuntimes.push({});
+        return commandSuccess({
+          version: 1,
+          runtimes: [
+            {
+              id: 'llm-runtime-1',
+              provider: 'codex',
+              displayName: 'Codex',
+              binaryPath: '/bin/codex',
+              authState: 'authenticated',
+              health: 'healthy',
+              capabilities: ['streaming'],
+              lastSeenAt: '2026-05-05T00:00:00.000Z',
+              createdAt: '2026-05-05T00:00:00.000Z',
+              updatedAt: '2026-05-05T00:00:00.000Z',
+            },
+            {
+              id: 'llm-runtime-2',
+              provider: 'claude-code',
+              displayName: 'Claude Code',
+              binaryPath: '/bin/claude',
+              authState: 'unknown',
+              health: 'unavailable',
+              capabilities: ['streaming'],
+              lastSeenAt: '2026-05-04T00:00:00.000Z',
+              createdAt: '2026-05-04T00:00:00.000Z',
+              updatedAt: '2026-05-04T00:00:00.000Z',
+            },
+          ],
+        });
+      },
+      discoverRuntimes: async () => {
+        calls.llmDiscoverRuntimes.push({});
+        return commandSuccess({
+          discovered: 1,
+          runtimes: [
+            {
+              id: 'llm-runtime-1',
+              provider: 'codex',
+              displayName: 'Codex',
+              binaryPath: '/bin/codex',
+              authState: 'authenticated',
+              health: 'healthy',
+              capabilities: ['streaming'],
+              lastSeenAt: '2026-05-05T00:00:00.000Z',
+              createdAt: '2026-05-05T00:00:00.000Z',
+              updatedAt: '2026-05-05T00:00:00.000Z',
+            },
+          ],
+          errors: [],
         });
       },
     },
@@ -474,6 +592,206 @@ test('POST /api/buzz/post parses the JSON body and forwards it to buzz.post', as
       attachments: ['metafile://file-pin-1.png'],
     },
   });
+});
+
+test('POST /api/llm/execute forwards the request and returns an accepted session id', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const request = {
+    runtimeId: 'llm-runtime-1',
+    prompt: 'Say hello',
+    systemPrompt: 'Be concise.',
+    skills: ['metabot-post-buzz'],
+    metaBotSlug: 'alice',
+  };
+
+  const response = await fetch(`${server.baseUrl}/api/llm/execute`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 202);
+  assert.deepEqual(server.calls.llmExecute, [request]);
+  assert.deepEqual(payload, {
+    ok: true,
+    state: 'success',
+    data: {
+      sessionId: 'llm-session-1',
+      status: 'starting',
+    },
+  });
+});
+
+test('GET /api/llm/sessions/:id returns the session JSON envelope', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/sessions/llm-session-1`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.llmGetSession, [{ sessionId: 'llm-session-1' }]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.sessionId, 'llm-session-1');
+  assert.equal(payload.data.result.output, 'Hello');
+});
+
+test('GET /api/llm/sessions/:id rejects unsafe encoded session ids', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/sessions/%2e%2e%2fsecret`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'invalid_llm_session_id');
+  assert.deepEqual(server.calls.llmGetSession, []);
+});
+
+test('GET /api/llm/sessions/:id streams session events when SSE is accepted', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/sessions/llm-session-1`, {
+    headers: {
+      accept: 'text/event-stream',
+    },
+  });
+  const body = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'text/event-stream; charset=utf-8');
+  assert.deepEqual(server.calls.llmGetSession, [{ sessionId: 'llm-session-1' }]);
+  assert.deepEqual(server.calls.llmStreamSessionEvents, [{ sessionId: 'llm-session-1' }]);
+  assert.match(body, /data: {"type":"status","status":"running","sessionId":"llm-session-1"}/);
+  assert.match(body, /data: {"type":"text","content":"Hello"}/);
+  assert.match(body, /data: {"type":"result","result":{"status":"completed","output":"Hello","durationMs":42}}/);
+});
+
+test('POST /api/llm/sessions/:id/cancel forwards cancellation', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/sessions/llm-session-1/cancel`, {
+    method: 'POST',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.llmCancelSession, [{ sessionId: 'llm-session-1' }]);
+  assert.deepEqual(payload, {
+    ok: true,
+    state: 'success',
+    data: { status: 'cancelled' },
+  });
+});
+
+test('POST /api/llm/sessions/:id/cancel rejects unsafe encoded session ids', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/sessions/%2e%2e%2fsecret/cancel`, {
+    method: 'POST',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'invalid_llm_session_id');
+  assert.deepEqual(server.calls.llmCancelSession, []);
+});
+
+test('GET /api/llm/sessions forwards a clamped limit to the handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/sessions?limit=500`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.llmListSessions, [{ limit: 100 }]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.sessions[0].sessionId, 'llm-session-1');
+});
+
+test('GET /api/llm/runtimes returns runtime health rows for the bot page', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/runtimes`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.llmListRuntimes, [{}]);
+  assert.equal(payload.ok, true);
+  assert.deepEqual(
+    payload.data.runtimes.map((runtime) => `${runtime.id}:${runtime.health}`),
+    ['llm-runtime-1:healthy', 'llm-runtime-2:unavailable'],
+  );
+});
+
+test('POST /api/llm/runtimes/discover forwards runtime rediscovery for the bot page', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/runtimes/discover`, {
+    method: 'POST',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.llmDiscoverRuntimes, [{}]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.discovered, 1);
+  assert.equal(payload.data.runtimes[0].id, 'llm-runtime-1');
+});
+
+test('GET /ui/bot renders runtime health, execution history, and rediscovery controls', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/bot`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /data-stat-healthy/);
+  assert.match(html, /data-stat-attention/);
+  assert.match(html, /data-health-summary/);
+  assert.match(html, /EXECUTION HISTORY/);
+  assert.match(html, /data-execution-history-list/);
+  assert.match(html, /data-execution-count-badge/);
+  assert.match(html, /<th>Time<\/th>/);
+  assert.match(html, /<th>MetaBot<\/th>/);
+  assert.match(html, /<th>Provider<\/th>/);
+  assert.match(html, /<th>Details<\/th>/);
+  assert.match(html, /exec-detail/);
+  assert.match(html, /data-act="toggle-exec"/);
+  assert.match(html, /running:'active'/);
+  assert.match(html, /starting:'active'/);
+  assert.match(html, /bot-table-scroll/);
+  assert.match(html, /id="refresh-history-btn"/);
+  assert.ok(html.includes("api('/api/llm/sessions?limit=20'"));
+  assert.ok(html.includes("api('/api/llm/runtimes/discover'"));
+});
+
+test('GET /ui/shared.css keeps active status animated and the topbar narrow-safe', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/shared.css`);
+  const css = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/css/i);
+  assert.match(css, /\.status-active \.status-dot\s*\{[^}]*animation: pulse/s);
+  assert.match(css, /\.topbar-nav\s*\{[^}]*min-width: 0[^}]*overflow-x: auto/s);
+  assert.match(css, /\.topbar-title\s*\{\s*display: none;\s*\}/);
 });
 
 test('GET /api/network/services forwards query filters to network.listServices', async (t) => {

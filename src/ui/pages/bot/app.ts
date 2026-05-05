@@ -15,31 +15,74 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return "var q=function(s){return document.querySelector(s)};\n" +
   "var qq=function(s){return document.querySelectorAll(s)};\n" +
-  "var state={profiles:[],runtimes:[],bindings:[],preferredRuntimeId:null,selectedSlug:''};\n" +
+  "var state={profiles:[],runtimes:[],bindings:[],sessions:[],preferredRuntimeId:null,selectedSlug:''};\n" +
   "\n" +
   "function api(url,opts){return fetch(url,opts).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()})}\n" +
   "function ago(t){if(!t)return'never';var d=Date.now()-new Date(t).getTime();if(d<6e4)return'just now';if(d<36e5)return Math.floor(d/6e4)+'m ago';if(d<864e5)return Math.floor(d/36e5)+'h ago';return Math.floor(d/864e5)+'d ago'}\n" +
+  "function fmtTime(t){if(!t)return'—';var d=new Date(t);if(Number.isNaN(d.getTime()))return'—';return d.toLocaleString()}\n" +
+  "function esc(v){return String(v==null?'':v).replace(/[&<>\"']/g,function(c){if(c==='&')return'&amp;';if(c==='<')return'&lt;';if(c==='>')return'&gt;';if(c==='\"')return'&quot;';return'&#39;'})}\n" +
   "\n" +
-  "function pill(h){var m={healthy:'online',degraded:'recent',unavailable:'offline'};var c=m[h]||'offline';return'<span class=\"status-pill status-'+c+'\"><span class=\"status-dot\"></span>'+h+'</span>'}\n" +
+  "function pill(h){var m={healthy:'online',degraded:'recent',unavailable:'offline'};var c=m[h]||'offline';return'<span class=\"status-pill status-'+c+'\"><span class=\"status-dot\"></span>'+esc(h)+'</span>'}\n" +
+  "function statusPill(s){var m={completed:'online',running:'active',starting:'active',failed:'offline',timeout:'offline',cancelled:'offline'};var c=m[s]||'offline';return'<span class=\"status-pill status-'+c+'\"><span class=\"status-dot\"></span>'+esc(s||'unknown')+'</span>'}\n" +
+  "function shortText(v,n){n=n||120;v=(v||'').replace(/\\s+/g,' ').trim();if(!v)return'—';return v.length>n?v.slice(0,Math.max(0,n-3))+'...':v}\n" +
+  "function clampBlock(v){v=String(v==null?'':v).trim();if(!v)return'—';return v.length>500?v.slice(0,500)+'...':v}\n" +
+  "function duration(s){var d=s&&s.result&&typeof s.result.durationMs==='number'?s.result.durationMs:null;if(d===null&&s&&s.startedAt&&s.completedAt){var a=new Date(s.startedAt).getTime();var b=new Date(s.completedAt).getTime();if(Number.isFinite(a)&&Number.isFinite(b)&&b>=a)d=b-a}return d===null?'—':d+'ms'}\n" +
+  "function resultSummary(s){if(!s||!s.result)return'—';if(s.result.output)return s.result.output;if(s.result.error)return s.result.error;return s.result.status||'—'}\n" +
   "\n" +
   "function renderStats(){\n" +
+  "  var healthy=state.runtimes.filter(function(r){return r.health==='healthy'}).length;\n" +
+  "  var degraded=state.runtimes.filter(function(r){return r.health==='degraded'}).length;\n" +
+  "  var unavailable=state.runtimes.filter(function(r){return r.health==='unavailable'}).length;\n" +
+  "  var attention=degraded+unavailable;\n" +
   "  q('[data-stat-runtimes]').textContent=state.runtimes.length||'—';\n" +
+  "  q('[data-stat-healthy]').textContent=healthy;\n" +
+  "  var att=q('[data-stat-attention]');att.textContent=attention;att.className='stat-value '+(attention?'amber':'green');\n" +
+  "  q('[data-stat-executions]').textContent=state.sessions.length||'0';\n" +
   "  q('[data-stat-profiles]').textContent=state.profiles.length||'—';\n" +
   "  q('[data-stat-bindings]').textContent=state.bindings.length||'—';\n" +
   "  q('[data-stat-active]').textContent=state.selectedSlug||'—';\n" +
   "  var b=q('[data-runtime-count-badge]');if(b)b.textContent=state.runtimes.length+' available';\n" +
+  "  var hs=q('[data-health-summary]');if(hs)hs.innerHTML='<span>'+healthy+' healthy</span><span>'+degraded+' degraded</span><span>'+unavailable+' unavailable</span>';\n" +
   "}\n" +
   "\n" +
   "function renderRuntimes(){\n" +
   "  var tb=q('[data-runtime-list]');if(!tb)return;\n" +
   "  if(!state.runtimes.length){tb.innerHTML='<tr><td colspan=\"5\" class=\"table-empty\"><strong>No runtimes discovered</strong>Click discover to scan PATH.</td></tr>';return}\n" +
   "  tb.innerHTML=state.runtimes.map(function(r){return'<tr>'+\n" +
-  "    '<td><div class=\"rt-name\">'+(r.displayName||r.provider)+'</div></td>'+\n" +
-  "    '<td><div class=\"rt-path\">'+(r.binaryPath||'—')+'</div></td>'+\n" +
-  "    '<td><span class=\"rt-version\">'+(r.version?'v'+r.version:'—')+'</span></td>'+\n" +
-  "    '<td><span class=\"rt-auth '+(r.authState==='authenticated'?'ok':'nope')+'\">'+(r.authState||'unknown')+'</span></td>'+\n" +
+  "    '<td><div class=\"rt-name\">'+esc(r.displayName||r.provider||'—')+'</div></td>'+\n" +
+  "    '<td><div class=\"rt-path\">'+esc(r.binaryPath||'—')+'</div></td>'+\n" +
+  "    '<td><span class=\"rt-version\">'+esc(r.version?'v'+r.version:'—')+'</span></td>'+\n" +
+  "    '<td><span class=\"rt-auth '+(r.authState==='authenticated'?'ok':'nope')+'\">'+esc(r.authState||'unknown')+'</span></td>'+\n" +
   "    '<td>'+pill(r.health)+'</td></tr>'}).join('');\n" +
   "  var b=q('[data-runtime-count-badge]');if(b)b.textContent=state.runtimes.length+' available';\n" +
+  "}\n" +
+  "\n" +
+  "function renderExecutionHistory(){\n" +
+  "  var tb=q('[data-execution-history-list]');var bdg=q('[data-execution-count-badge]');if(!tb)return;\n" +
+  "  if(bdg)bdg.textContent=state.sessions.length+' recent';\n" +
+  "  if(!state.sessions.length){tb.innerHTML='<tr><td colspan=\"8\" class=\"table-empty\"><strong>No executions yet</strong>Recent LLM Executor sessions will appear here.</td></tr>';return}\n" +
+  "  tb.innerHTML=state.sessions.map(function(s,i){\n" +
+  "    var detailId='exec-detail-'+i;\n" +
+  "    var rt=state.runtimes.find(function(r){return r.id===s.runtimeId});var rn=rt?(rt.displayName||rt.provider):(s.provider||s.runtimeId||'—');\n" +
+  "    var provider=s.provider||(rt&&rt.provider)||'—';\n" +
+  "    var metabot=s.metaBotSlug||'—';\n" +
+  "    return'<tr>'+\n" +
+  "      '<td><span class=\"exec-time\">'+esc(fmtTime(s.startedAt||s.createdAt))+'</span></td>'+\n" +
+  "      '<td><span class=\"exec-metabot\">'+esc(metabot)+'</span></td>'+\n" +
+  "      '<td><span class=\"exec-provider\">'+esc(provider)+'</span></td>'+\n" +
+  "      '<td><span class=\"exec-runtime\">'+esc(rn)+'</span></td>'+\n" +
+  "      '<td>'+statusPill(s.status)+'</td>'+\n" +
+  "      '<td><span class=\"exec-duration\">'+duration(s)+'</span></td>'+\n" +
+  "      '<td><div class=\"exec-prompt\">'+esc(shortText(s.prompt,120))+'</div></td>'+\n" +
+  "      '<td><button class=\"btn btn-sm exec-detail-toggle\" data-act=\"toggle-exec\" data-detail=\"'+detailId+'\" aria-expanded=\"false\">details</button></td></tr>'+\n" +
+  "      '<tr class=\"exec-detail-row\" id=\"'+detailId+'\" hidden><td colspan=\"8\"><div class=\"exec-detail\">'+\n" +
+  "        '<div><div class=\"exec-detail-label\">Session</div><pre>'+esc(s.sessionId||'—')+'</pre></div>'+\n" +
+  "        '<div><div class=\"exec-detail-label\">Output / Error</div><pre>'+esc(clampBlock(resultSummary(s)))+'</pre></div>'+\n" +
+  "        '<div><div class=\"exec-detail-label\">Full Prompt</div><pre>'+esc(clampBlock(s.prompt))+'</pre></div>'+\n" +
+  "        '<div><div class=\"exec-detail-label\">Runtime</div><pre>'+esc((s.runtimeId||'—')+'\\n'+provider)+'</pre></div>'+\n" +
+  "      '</div></td></tr>'\n" +
+  "  }).join('');\n" +
+  "  qq('[data-act=\"toggle-exec\"]').forEach(function(el){el.addEventListener('click',function(){var id=this.getAttribute('data-detail');var row=document.getElementById(id);if(!row)return;var open=row.hasAttribute('hidden');if(open){row.removeAttribute('hidden');this.setAttribute('aria-expanded','true')}else{row.setAttribute('hidden','');this.setAttribute('aria-expanded','false')}})});\n" +
   "}\n" +
   "\n" +
   "function renderBindings(){\n" +
@@ -53,13 +96,13 @@ function buildBotPageScript(): string {
   "  tb.innerHTML=state.bindings.map(function(b){\n" +
   "    var rn=b.llmRuntimeId;var rt=state.runtimes.find(function(r){return r.id===b.llmRuntimeId});if(rt)rn=rt.displayName||rt.provider;\n" +
   "    var ip=state.preferredRuntimeId===b.llmRuntimeId?' <span class=\"preferred-indicator\">★ preferred</span>':'';\n" +
-  "    return'<tr class=\"'+(b.enabled?'':'disabled-row')+'\" data-bid=\"'+b.id+'\">'+\n" +
-  "      '<td><span class=\"binding-role-badge '+b.role+'\">'+b.role+'</span></td>'+\n" +
-  "      '<td><span class=\"binding-runtime-name\">'+rn+ip+'</span></td>'+\n" +
-  "      '<td><span class=\"binding-priority\">'+b.priority+'</span></td>'+\n" +
-  "      '<td><span class=\"binding-last-used\">'+ago(b.lastUsedAt)+'</span></td>'+\n" +
-  "      '<td class=\"toggle-cell\" data-act=\"toggle\" data-bid=\"'+b.id+'\">'+(b.enabled?'✔':'✘')+'</td>'+\n" +
-  "      '<td><button class=\"btn btn-sm btn-danger\" data-act=\"delete\" data-bid=\"'+b.id+'\">remove</button></td></tr>'}).join('');\n" +
+  "    return'<tr class=\"'+(b.enabled?'':'disabled-row')+'\" data-bid=\"'+esc(b.id)+'\">'+\n" +
+  "      '<td><span class=\"binding-role-badge '+esc(b.role)+'\">'+esc(b.role)+'</span></td>'+\n" +
+  "      '<td><span class=\"binding-runtime-name\">'+esc(rn)+ip+'</span></td>'+\n" +
+  "      '<td><span class=\"binding-priority\">'+esc(b.priority)+'</span></td>'+\n" +
+  "      '<td><span class=\"binding-last-used\">'+esc(ago(b.lastUsedAt))+'</span></td>'+\n" +
+  "      '<td class=\"toggle-cell\" data-act=\"toggle\" data-bid=\"'+esc(b.id)+'\">'+(b.enabled?'✔':'✘')+'</td>'+\n" +
+  "      '<td><button class=\"btn btn-sm btn-danger\" data-act=\"delete\" data-bid=\"'+esc(b.id)+'\">remove</button></td></tr>'}).join('');\n" +
   "  qq('[data-act=\"toggle\"]').forEach(function(el){el.addEventListener('click',function(){var id=this.getAttribute('data-bid');var b=state.bindings.find(function(x){return x.id===id});if(b){b.enabled=!b.enabled;saveBindings()}})});\n" +
   "  qq('[data-act=\"delete\"]').forEach(function(el){el.addEventListener('click',function(){var id=this.getAttribute('data-bid');state.bindings=state.bindings.filter(function(x){return x.id!==id});saveBindings()})});\n" +
   "  renderAddForm();renderPrefSelect();\n" +
@@ -67,23 +110,28 @@ function buildBotPageScript(): string {
   "\n" +
   "function renderAddForm(){\n" +
   "  var s=q('[data-new-runtime]');if(!s)return;\n" +
-  "  s.innerHTML=state.runtimes.map(function(r){return'<option value=\"'+r.id+'\">'+(r.displayName||r.provider)+' ('+(r.health||'?')+')</option>'}).join('');\n" +
+  "  s.innerHTML=state.runtimes.map(function(r){return'<option value=\"'+esc(r.id)+'\">'+esc(r.displayName||r.provider||r.id)+' ('+esc(r.health||'?')+')</option>'}).join('');\n" +
   "}\n" +
   "\n" +
   "function renderPrefSelect(){\n" +
   "  var s=q('[data-preferred-runtime]');if(!s)return;\n" +
-  "  s.innerHTML='<option value=\"\">(none — fall back to priority bindings)</option>'+state.runtimes.map(function(r){var sel=state.preferredRuntimeId===r.id?' selected':'';return'<option value=\"'+r.id+'\"'+sel+'>'+(r.displayName||r.provider)+'</option>'}).join('');\n" +
+  "  s.innerHTML='<option value=\"\">(none — fall back to priority bindings)</option>'+state.runtimes.map(function(r){var sel=state.preferredRuntimeId===r.id?' selected':'';return'<option value=\"'+esc(r.id)+'\"'+sel+'>'+esc(r.displayName||r.provider||r.id)+'</option>'}).join('');\n" +
   "}\n" +
   "\n" +
   "function renderProfileSelect(){\n" +
   "  var s=q('[data-profile-select]');if(!s)return;\n" +
-  "  s.innerHTML='<option value=\"\">-- select a profile --</option>'+state.profiles.map(function(p){var sel=state.selectedSlug===p.slug?' selected':'';return'<option value=\"'+p.slug+'\"'+sel+'>'+p.name+' ('+p.slug+')</option>'}).join('');\n" +
+  "  s.innerHTML='<option value=\"\">-- select a profile --</option>'+state.profiles.map(function(p){var sel=state.selectedSlug===p.slug?' selected':'';return'<option value=\"'+esc(p.slug)+'\"'+sel+'>'+esc(p.name)+' ('+esc(p.slug)+')</option>'}).join('');\n" +
   "  s.addEventListener('change',function(){var slug=this.value;if(slug)loadProfile(slug)});\n" +
   "}\n" +
   "\n" +
   "function loadRuntimes(){\n" +
   "  var tb=q('[data-runtime-list]');if(tb)tb.innerHTML='<tr><td colspan=\"5\" class=\"table-empty\"><strong>Loading…</strong></td></tr>';\n" +
-  "  api('/api/llm/runtimes').then(function(r){state.runtimes=r.data.runtimes||[];renderRuntimes();renderStats();if(state.selectedSlug)renderBindings();else renderAddForm()}).catch(function(){if(tb)tb.innerHTML='<tr><td colspan=\"5\" class=\"table-empty\"><strong>Failed to load</strong>Is the daemon running?</td></tr>'})\n" +
+  "  return api('/api/llm/runtimes').then(function(r){state.runtimes=r.data.runtimes||[];renderRuntimes();renderExecutionHistory();renderStats();if(state.selectedSlug)renderBindings();else renderAddForm()}).catch(function(){if(tb)tb.innerHTML='<tr><td colspan=\"5\" class=\"table-empty\"><strong>Failed to load</strong>Is the daemon running?</td></tr>'})\n" +
+  "}\n" +
+  "\n" +
+  "function loadExecutionHistory(){\n" +
+  "  var tb=q('[data-execution-history-list]');if(tb)tb.innerHTML='<tr><td colspan=\"8\" class=\"table-empty\"><strong>Loading…</strong></td></tr>';\n" +
+  "  return api('/api/llm/sessions?limit=20').then(function(r){state.sessions=r.data.sessions||[];renderExecutionHistory();renderStats()}).catch(function(){state.sessions=[];renderStats();if(tb)tb.innerHTML='<tr><td colspan=\"8\" class=\"table-empty\"><strong>Failed to load</strong>Execution history is unavailable.</td></tr>'})\n" +
   "}\n" +
   "\n" +
   "function loadProfiles(){\n" +
@@ -110,8 +158,9 @@ function buildBotPageScript(): string {
   "}\n" +
   "\n" +
   "document.addEventListener('DOMContentLoaded',function(){\n" +
-  "  loadRuntimes();loadProfiles();\n" +
+  "  loadRuntimes();loadExecutionHistory();loadProfiles();\n" +
   "  q('#discover-btn').addEventListener('click',discoverRuntimes);\n" +
+  "  q('#refresh-history-btn').addEventListener('click',loadExecutionHistory);\n" +
   "  q('#add-binding-btn').addEventListener('click',function(){\n" +
   "    var rid=q('[data-new-runtime]').value;var role=q('[data-new-role]').value;var pri=parseInt(q('[data-new-priority]').value,10)||0;\n" +
   "    if(!rid||!state.selectedSlug)return;\n" +
@@ -121,5 +170,6 @@ function buildBotPageScript(): string {
   "    saveBindings();\n" +
   "  });\n" +
   "  q('#save-preferred-btn').addEventListener('click',function(){var val=q('[data-preferred-runtime]').value||null;savePreferred(val)});\n" +
+  "  setInterval(function(){loadRuntimes();loadExecutionHistory()},15000);\n" +
   "})";
 }

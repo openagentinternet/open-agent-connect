@@ -77,6 +77,27 @@ test('resolveRuntime skips explicit runtime when unavailable', async () => {
   assert.equal(resolved.runtime.id, 'r_codex');
 });
 
+test('resolveRuntime skips explicit and preferred runtimes in excludeRuntimeIds', async () => {
+  const profileRoot = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const runtimeStore = createLlmRuntimeStore(paths);
+  const bindingStore = createLlmBindingStore(paths);
+  await runtimeStore.upsertRuntime(makeRuntime('r_claude', 'claude-code'));
+  await runtimeStore.upsertRuntime(makeRuntime('r_codex', 'codex'));
+  await bindingStore.upsertBinding(makeBinding('b1', 'test-slug', 'r_claude', 'primary', 0, true));
+  const resolver = createLlmRuntimeResolver({
+    runtimeStore,
+    bindingStore,
+    getPreferredRuntimeId: async () => 'r_claude',
+  });
+  const resolved = await resolver.resolveRuntime({
+    metaBotSlug: 'test-slug',
+    explicitRuntimeId: 'r_claude',
+    excludeRuntimeIds: ['r_claude'],
+  });
+  assert.equal(resolved.runtime.id, 'r_codex');
+});
+
 test('resolveRuntime uses preferred runtime when available', async () => {
   const profileRoot = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);
