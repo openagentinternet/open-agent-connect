@@ -22,6 +22,7 @@
     "SKILLs/*/SKILL.md",
     "skillpacks/common/templates/",
     "src/ui/",
+    "scripts/oac-dev-mode.sh",
     "docs/install/open-agent-connect.md",
     "release/compatibility.json",
     "README.md",
@@ -31,6 +32,7 @@
   "scripts": {
     "build": "npx rimraf dist && tsc -p tsconfig.json",
     "dev:daemon": "bash scripts/dev-daemon.sh",
+    "dev:mode": "bash scripts/oac-dev-mode.sh",
     "build:skillpacks": "node scripts/build-metabot-skillpacks.mjs",
     "build:packs": "node scripts/build-release-packs.mjs",
     "test": "npm run build && node --test --test-concurrency=1 $(find tests -name '*.test.mjs' ! -path 'tests/cli/runtime.test.mjs' -print) && node --test --test-concurrency=1 tests/cli/runtime.test.mjs",
