@@ -3854,6 +3854,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const getDaemonRecord = input.getDaemonRecord;
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
+  /** Serializes buyer auto-rating per trace so inbound simplemsg + socket continuation cannot publish duplicates. */
+  const buyerAutoRatingPublishChains = new Map<string, Promise<void>>();
   const pendingMasterReplyContinuations = new Map<string, Promise<void>>();
   let masterTriggerMemoryState = createMasterTriggerMemoryState();
   const masterAutoPrepareCounts = new Map<string, number>();
@@ -4607,49 +4609,64 @@ export function createDefaultMetabotDaemonHandlers(input: {
     trace: SessionTraceRecord;
     reply: AwaitMetaWebServiceReplyResult;
   }): Promise<void> {
-    const ratingRequestText = input.reply.state === 'completed'
-      ? normalizeText(input.reply.ratingRequestText)
-      : '';
-    if (!ratingRequestText) {
+    const traceKey = normalizeText(input.trace.traceId);
+    if (!traceKey) {
       return;
     }
+    const previous = buyerAutoRatingPublishChains.get(traceKey) ?? Promise.resolve();
+    const job = previous.catch(() => {}).then(async () => {
+      const ratingRequestText = input.reply.state === 'completed'
+        ? normalizeText(input.reply.ratingRequestText)
+        : '';
+      if (!ratingRequestText) {
+        return;
+      }
 
-    const runtimeState = await runtimeStateStore.readState();
-    const trace = runtimeState.traces.find((entry) => entry.traceId === input.trace.traceId) ?? input.trace;
-    const sessionState = await sessionStateStore.readState();
-    const sessions = sessionState.sessions.filter((entry) => entry.traceId === trace.traceId);
-    const sessionIds = new Set(sessions.map((entry) => entry.sessionId));
-    const transcriptItems = sessionState.transcriptItems
-      .filter((entry) => sessionIds.has(entry.sessionId))
-      .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
-    const ratingClosure = extractTraceRatingClosure({
-      trace,
-      transcriptItems,
-      ratingDetail: null,
+      const runtimeState = await runtimeStateStore.readState();
+      const trace = runtimeState.traces.find((entry) => entry.traceId === input.trace.traceId) ?? input.trace;
+      const sessionState = await sessionStateStore.readState();
+      const sessions = sessionState.sessions.filter((entry) => entry.traceId === trace.traceId);
+      const sessionIds = new Set(sessions.map((entry) => entry.sessionId));
+      const transcriptItems = sessionState.transcriptItems
+        .filter((entry) => sessionIds.has(entry.sessionId))
+        .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
+      const ratingClosure = extractTraceRatingClosure({
+        trace,
+        transcriptItems,
+        ratingDetail: null,
+      });
+      if (ratingClosure.ratingPublished) {
+        return;
+      }
+
+      const persona = await loadChatPersona(runtimeStateStore.paths);
+      const rating = await generateBuyerServiceRating({
+        replyRunner: buyerRatingReplyRunner,
+        persona,
+        traceId: trace.traceId,
+        providerGlobalMetaId: normalizeText(trace.a2a?.providerGlobalMetaId) || normalizeText(trace.session.peerGlobalMetaId),
+        providerName: normalizeText(trace.a2a?.providerName) || normalizeText(trace.session.peerName),
+        originalRequest: normalizeText((trace.order as Record<string, unknown> | null | undefined)?.requestText),
+        serviceResult: input.reply.state === 'completed' ? input.reply.responseText : null,
+        expectedOutputType: normalizeText((trace.order as Record<string, unknown> | null | undefined)?.outputType),
+        ratingRequestText,
+        transcriptItems,
+      });
+      await publishBuyerServiceRating({
+        traceId: trace.traceId,
+        rate: rating.rate,
+        comment: rating.comment,
+        network: 'mvc',
+      });
     });
-    if (ratingClosure.ratingPublished) {
-      return;
+    buyerAutoRatingPublishChains.set(traceKey, job);
+    try {
+      await job;
+    } finally {
+      if (buyerAutoRatingPublishChains.get(traceKey) === job) {
+        buyerAutoRatingPublishChains.delete(traceKey);
+      }
     }
-
-    const persona = await loadChatPersona(runtimeStateStore.paths);
-    const rating = await generateBuyerServiceRating({
-      replyRunner: buyerRatingReplyRunner,
-      persona,
-      traceId: trace.traceId,
-      providerGlobalMetaId: normalizeText(trace.a2a?.providerGlobalMetaId) || normalizeText(trace.session.peerGlobalMetaId),
-      providerName: normalizeText(trace.a2a?.providerName) || normalizeText(trace.session.peerName),
-      originalRequest: normalizeText((trace.order as Record<string, unknown> | null | undefined)?.requestText),
-      serviceResult: input.reply.state === 'completed' ? input.reply.responseText : null,
-      expectedOutputType: normalizeText((trace.order as Record<string, unknown> | null | undefined)?.outputType),
-      ratingRequestText,
-      transcriptItems,
-    });
-    await publishBuyerServiceRating({
-      traceId: trace.traceId,
-      rate: rating.rate,
-      comment: rating.comment,
-      network: 'mvc',
-    });
   }
 
   function findBuyerTraceForInboundOrderProtocol(input: {

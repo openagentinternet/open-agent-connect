@@ -973,6 +973,204 @@ test('inbound NeedsRating order protocol auto-rates the matching buyer trace', a
   assert.equal(traceResult.data.ratingMessageSent, true);
 });
 
+test('parallel inbound NeedsRating handlers publish only one skill-service-rate pin', async () => {
+  const { systemHomeDir, homeDir } = await createProfileFixture();
+  await seedUnifiedConversation(homeDir);
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+  const trace = buildSessionTrace({
+    traceId: 'legacy-trace-parallel-needs-rating',
+    channel: 'a2a',
+    exportRoot: runtimeStateStore.paths.exportsRoot,
+    createdAt: BASE_TIME,
+    session: {
+      id: 'session-parallel-needs-rating',
+      title: 'Weather Oracle Call',
+      type: 'a2a',
+      metabotId: 1,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+      peerName: 'Remote Bot',
+      externalConversationId: null,
+    },
+    order: {
+      id: 'order-parallel-needs-rating',
+      role: 'buyer',
+      serviceId: 'service-pin-1',
+      serviceName: 'Weather Oracle',
+      orderPinId: `${ORDER_TXID}i0`,
+      orderTxid: ORDER_TXID,
+      orderTxids: [ORDER_TXID],
+      paymentTxid: PAYMENT_TXID,
+      orderReference: null,
+      paymentCurrency: 'SPACE',
+      paymentAmount: '0.00005',
+    },
+    a2a: {
+      sessionId: 'legacy-session-parallel-needs-rating',
+      taskRunId: 'legacy-run-parallel-needs-rating',
+      role: 'caller',
+      publicStatus: 'requesting_remote',
+      latestEvent: 'request_sent',
+      taskRunState: 'queued',
+      callerGlobalMetaId: LOCAL_GLOBAL_META_ID,
+      providerGlobalMetaId: PEER_GLOBAL_META_ID,
+      providerName: 'Remote Bot',
+      servicePinId: 'service-pin-1',
+    },
+  });
+  await runtimeStateStore.writeState({
+    identity: {
+      metabotId: 1,
+      name: 'Alice',
+      createdAt: BASE_TIME,
+      path: '/MetaBot/Alice',
+      publicKey: 'alice-public-key',
+      chatPublicKey: 'local-chat-public-key',
+      mvcAddress: 'mvc-alice',
+      btcAddress: 'btc-alice',
+      dogeAddress: 'doge-alice',
+      metaId: 'metaid-alice',
+      globalMetaId: LOCAL_GLOBAL_META_ID,
+    },
+    services: [],
+    traces: [trace],
+  });
+  const store = createSessionStateStore(homeDir);
+  await store.writeState({
+    version: 1,
+    sessions: [
+      {
+        sessionId: 'legacy-session-parallel-needs-rating',
+        traceId: 'legacy-trace-parallel-needs-rating',
+        role: 'caller',
+        state: 'requesting_remote',
+        createdAt: BASE_TIME,
+        updatedAt: BASE_TIME + 10,
+        callerGlobalMetaId: LOCAL_GLOBAL_META_ID,
+        providerGlobalMetaId: PEER_GLOBAL_META_ID,
+        servicePinId: 'service-pin-1',
+        currentTaskRunId: 'legacy-run-parallel-needs-rating',
+        latestTaskRunState: 'queued',
+      },
+    ],
+    taskRuns: [
+      {
+        runId: 'legacy-run-parallel-needs-rating',
+        sessionId: 'legacy-session-parallel-needs-rating',
+        state: 'queued',
+        createdAt: BASE_TIME,
+        updatedAt: BASE_TIME + 10,
+        startedAt: null,
+        completedAt: null,
+        failureCode: null,
+        failureReason: null,
+        clarificationRounds: [],
+      },
+    ],
+    transcriptItems: [
+      {
+        id: 'legacy-user-parallel-rating',
+        sessionId: 'legacy-session-parallel-needs-rating',
+        taskRunId: 'legacy-run-parallel-needs-rating',
+        timestamp: BASE_TIME,
+        type: 'user_task',
+        sender: 'caller',
+        content: 'Tell me tomorrow weather',
+        metadata: {
+          paymentTxid: PAYMENT_TXID,
+        },
+      },
+    ],
+    cursors: { caller: null, provider: null },
+    publicStatusSnapshots: [
+      {
+        sessionId: 'legacy-session-parallel-needs-rating',
+        taskRunId: 'legacy-run-parallel-needs-rating',
+        status: 'requesting_remote',
+        mapped: true,
+        rawEvent: 'request_sent',
+        resolvedAt: BASE_TIME + 1,
+      },
+    ],
+  });
+  const writes = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
+    chainApiBaseUrl: 'http://127.0.0.1:9',
+    socketPresenceFailureMode: 'assume_service_providers_online',
+    fetchPeerChatPublicKey: async () => '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+    buyerRatingReplyRunner: async () => ({
+      state: 'reply',
+      content: '评分：5分。并行请求只应落一条链上评价。',
+    }),
+    signer: {
+      async getIdentity() {
+        return {
+          name: 'Alice',
+          publicKey: 'alice-public-key',
+          mvcAddress: 'mvc-alice',
+          btcAddress: 'btc-alice',
+          dogeAddress: 'doge-alice',
+          metaId: 'metaid-alice',
+          globalMetaId: LOCAL_GLOBAL_META_ID,
+        };
+      },
+      async getPrivateChatIdentity() {
+        return {
+          globalMetaId: LOCAL_GLOBAL_META_ID,
+          privateKeyHex: '1'.repeat(64),
+          chatPublicKey: 'local-chat-public-key',
+        };
+      },
+      async writePin(input) {
+        writes.push(input);
+        const index = writes.length;
+        const pathPart = String(input.path || '').includes('skill-service-rate')
+          ? 'skill-service-rate'
+          : 'simplemsg';
+        return {
+          txids: [`${pathPart}-tx-${index}`],
+          pinId: `${pathPart}-pin-${index}`,
+          totalCost: 0,
+          network: 'mvc',
+          operation: 'create',
+          path: input.path,
+          contentType: input.contentType,
+          encoding: input.encoding || 'utf-8',
+          globalMetaId: LOCAL_GLOBAL_META_ID,
+          mvcAddress: 'mvc-alice',
+        };
+      },
+    },
+  });
+
+  const ratingBody = `[NeedsRating:${ORDER_TXID}] Please rate this service.`;
+  await Promise.all([
+    handlers.services.handleInboundOrderProtocolMessage({
+      fromGlobalMetaId: PEER_GLOBAL_META_ID,
+      content: ratingBody,
+      messagePinId: 'needs-rating-parallel-a',
+      timestamp: BASE_TIME + 80,
+    }),
+    handlers.services.handleInboundOrderProtocolMessage({
+      fromGlobalMetaId: PEER_GLOBAL_META_ID,
+      content: ratingBody,
+      messagePinId: 'needs-rating-parallel-b',
+      timestamp: BASE_TIME + 81,
+    }),
+    handlers.services.handleInboundOrderProtocolMessage({
+      fromGlobalMetaId: PEER_GLOBAL_META_ID,
+      content: ratingBody,
+      messagePinId: 'needs-rating-parallel-c',
+      timestamp: BASE_TIME + 82,
+    }),
+  ]);
+
+  assert.equal(writes.filter((entry) => entry.path === '/protocols/skill-service-rate').length, 1);
+  assert.equal(writes.filter((entry) => entry.path === '/protocols/simplemsg').length, 1);
+});
+
 test('legacy trace detail prefers scoped on-chain simplemsg history over local synthetic bubbles', async () => {
   const { systemHomeDir, homeDir } = await createProfileFixture();
   const runtimeStateStore = createRuntimeStateStore(homeDir);
