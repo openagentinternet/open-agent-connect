@@ -392,8 +392,18 @@ export async function updateMetabotProfile(
   }
   const writeProviderBindings = await buildProviderBindingWrite({
     profile: current,
-    primaryProvider: input.primaryProvider === undefined ? undefined : validateProvider(input.primaryProvider),
-    fallbackProvider: input.fallbackProvider === undefined ? undefined : validateProvider(input.fallbackProvider),
+    primaryProvider: input.primaryProvider === undefined
+      ? undefined
+      : (() => {
+        const provider = validateProvider(input.primaryProvider);
+        return provider === (current.primaryProvider ?? null) ? undefined : provider;
+      })(),
+    fallbackProvider: input.fallbackProvider === undefined
+      ? undefined
+      : (() => {
+        const provider = validateProvider(input.fallbackProvider);
+        return provider === (current.fallbackProvider ?? null) ? undefined : provider;
+      })(),
   });
 
   if (name !== undefined && name !== current.name) {

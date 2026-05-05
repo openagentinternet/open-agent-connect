@@ -14,6 +14,7 @@ import { handleServicesRoutes } from './routes/services';
 import { handleTraceRoutes } from './routes/trace';
 import { handleUiRoutes } from './routes/ui';
 import { handleLlmRoutes } from './routes/llm';
+import { handleBotRoutes } from './routes/bot';
 import type { MetabotDaemonHttpHandlers, RouteContext, RouteHandler } from './routes/types';
 
 const JSON_BODY_LIMIT_BYTES = 1024 * 1024;
@@ -32,6 +33,7 @@ const ROUTES: RouteHandler[] = [
   handleTraceRoutes,
   handleUiRoutes,
   handleLlmRoutes,
+  handleBotRoutes,
 ];
 
 function sendJson(res: http.ServerResponse, status: number, payload: unknown): void {
