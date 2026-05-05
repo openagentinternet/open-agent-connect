@@ -83,6 +83,45 @@ test('legacy manager records are normalized and persisted in the v2 profile shap
   assert.deepEqual(persisted, state);
 });
 
+test('profile reads tolerate a transient partial manager index write', async () => {
+  const systemHome = await createSystemHome();
+  const managerPaths = resolveIdentityManagerPaths(systemHome);
+  const canonicalHome = path.join(systemHome, '.metabot', 'profiles', 'charles-zhang');
+  await mkdir(managerPaths.managerRoot, { recursive: true });
+  await writeFile(managerPaths.profilesPath, '', 'utf8');
+
+  const validState = {
+    profiles: [{
+      name: 'Charles Zhang',
+      slug: 'charles-zhang',
+      aliases: ['Charles Zhang', 'charles zhang', 'charles-zhang'],
+      homeDir: canonicalHome,
+      globalMetaId: 'idq-charles',
+      mvcAddress: 'mvc-charles',
+      createdAt: 1_770_000_000_000,
+      updatedAt: 1_770_000_000_100,
+    }],
+  };
+
+  const repairWrite = new Promise((resolve, reject) => {
+    setTimeout(async () => {
+      try {
+        await writeFile(managerPaths.profilesPath, `${JSON.stringify(validState, null, 2)}\n`, 'utf8');
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    }, 20);
+  });
+
+  try {
+    const state = await readIdentityProfilesState(systemHome);
+    assert.deepEqual(state, validState);
+  } finally {
+    await repairWrite;
+  }
+});
+
 test('existing profile upserts preserve the stable slug and canonical home when matched by identity fields', async () => {
   const systemHome = await createSystemHome();
   const managerPaths = resolveIdentityManagerPaths(systemHome);

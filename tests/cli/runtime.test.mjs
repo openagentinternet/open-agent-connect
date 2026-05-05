@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -30,6 +30,10 @@ const NETWORK_DIRECTORY_SCOPE_HASH = JSON.stringify({
   localUiOpen: true,
   remoteDelegation: false,
 });
+const TEST_JSON_READ_RETRIES = 5;
+const TEST_JSON_READ_DELAY_MS = 10;
+
+let testAtomicWriteSequence = 0;
 
 function parseLastJson(chunks) {
   return JSON.parse(chunks.join('').trim());
@@ -64,6 +68,36 @@ function metabotPaths(homeDir) {
   return resolveMetabotPaths(homeDir);
 }
 
+async function readJsonFileWithTransientRetry(filePath, fallback) {
+  for (let attempt = 0; attempt <= TEST_JSON_READ_RETRIES; attempt += 1) {
+    try {
+      return JSON.parse(await readFile(filePath, 'utf8'));
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        return fallback;
+      }
+      if (error instanceof SyntaxError && attempt < TEST_JSON_READ_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, TEST_JSON_READ_DELAY_MS));
+        continue;
+      }
+      throw error;
+    }
+  }
+  return fallback;
+}
+
+async function writeFileAtomic(filePath, content) {
+  testAtomicWriteSequence += 1;
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.${testAtomicWriteSequence}.tmp`;
+  try {
+    await writeFile(tempPath, content, 'utf8');
+    await rename(tempPath, filePath);
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
 async function ensureIndexedProfileHome(homeDir) {
   const systemHome = deriveSystemHome(homeDir);
   const managerRoot = path.join(systemHome, '.metabot', 'manager');
@@ -71,14 +105,7 @@ async function ensureIndexedProfileHome(homeDir) {
   const activeHomePath = path.join(managerRoot, 'active-home.json');
   await mkdir(managerRoot, { recursive: true });
 
-  let profilesState = { profiles: [] };
-  try {
-    profilesState = JSON.parse(await readFile(profilesPath, 'utf8'));
-  } catch (error) {
-    if (error?.code !== 'ENOENT') {
-      throw error;
-    }
-  }
+  const profilesState = await readJsonFileWithTransientRetry(profilesPath, { profiles: [] });
 
   const normalizedHomeDir = path.resolve(homeDir);
   const existingProfiles = Array.isArray(profilesState?.profiles) ? profilesState.profiles : [];
@@ -91,13 +118,12 @@ async function ensureIndexedProfileHome(homeDir) {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
-    await writeFile(profilesPath, `${JSON.stringify({ profiles: existingProfiles }, null, 2)}\n`, 'utf8');
+    await writeFileAtomic(profilesPath, `${JSON.stringify({ profiles: existingProfiles }, null, 2)}\n`);
   }
 
-  await writeFile(
+  await writeFileAtomic(
     activeHomePath,
     `${JSON.stringify({ homeDir: normalizedHomeDir, updatedAt: Date.now() }, null, 2)}\n`,
-    'utf8',
   );
 }
 
