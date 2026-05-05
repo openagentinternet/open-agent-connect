@@ -135,8 +135,8 @@ export class LlmExecutor {
     return this.sessionManager.get(sessionId);
   }
 
-  async listSessions(limit?: number): Promise<LlmSessionRecord[]> {
-    return this.sessionManager.list(limit);
+  async listSessions(limit?: number, options?: { metaBotSlug?: string }): Promise<LlmSessionRecord[]> {
+    return this.sessionManager.list(limit, options);
   }
 
   async *streamEvents(sessionId: string): AsyncIterable<LlmExecutionEvent> {

@@ -9356,12 +9356,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if (!input.llmExecutor) {
           return commandFailed('llm_executor_not_configured', 'LLM executor is not configured.');
         }
-        const sessions = await input.llmExecutor.listSessions(limit);
         const normalizedSlug = normalizeText(slug);
+        const sessions = await input.llmExecutor.listSessions(limit, normalizedSlug ? { metaBotSlug: normalizedSlug } : undefined);
         return commandSuccess({
-          sessions: normalizedSlug
-            ? sessions.filter((session) => session.metaBotSlug === normalizedSlug)
-            : sessions,
+          sessions,
         });
       },
     },

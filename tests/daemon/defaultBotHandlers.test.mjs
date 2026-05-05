@@ -273,31 +273,40 @@ test('default bot stats and sessions aggregate executor history by MetaBot slug'
   const listSessionCalls = [];
   const sessions = [
     {
-      sessionId: 'session-1',
+      sessionId: 'session-bob-1',
       status: 'completed',
       runtimeId: 'runtime-codex',
       provider: 'codex',
-      metaBotSlug: 'alice-bot',
-      prompt: 'One',
-      createdAt: '2026-05-06T00:00:00.000Z',
+      metaBotSlug: 'bob-bot',
+      prompt: 'Bob one',
+      createdAt: '2026-05-06T00:03:00.000Z',
     },
     {
-      sessionId: 'session-2',
+      sessionId: 'session-bob-2',
       status: 'failed',
       runtimeId: 'runtime-codex',
       provider: 'codex',
+      metaBotSlug: 'bob-bot',
+      prompt: 'Bob two',
+      createdAt: '2026-05-06T00:02:00.000Z',
+    },
+    {
+      sessionId: 'session-alice-1',
+      status: 'completed',
+      runtimeId: 'runtime-claude',
+      provider: 'codex',
       metaBotSlug: 'alice-bot',
-      prompt: 'Two',
+      prompt: 'Alice one',
       createdAt: '2026-05-06T00:01:00.000Z',
     },
     {
-      sessionId: 'session-3',
-      status: 'completed',
+      sessionId: 'session-alice-2',
+      status: 'failed',
       runtimeId: 'runtime-claude',
       provider: 'claude-code',
-      metaBotSlug: 'bob-bot',
-      prompt: 'Three',
-      createdAt: '2026-05-06T00:02:00.000Z',
+      metaBotSlug: 'alice-bot',
+      prompt: 'Alice two',
+      createdAt: '2026-05-06T00:00:00.000Z',
     },
   ];
   const handlers = createDefaultMetabotDaemonHandlers({
@@ -308,30 +317,36 @@ test('default bot stats and sessions aggregate executor history by MetaBot slug'
       execute: async () => 'unused',
       getSession: async () => null,
       cancel: async () => undefined,
-      listSessions: async (limit) => {
-        listSessionCalls.push(limit);
-        return sessions.slice(0, limit);
+      listSessions: async (limit, options) => {
+        listSessionCalls.push({ limit, options });
+        const scoped = options?.metaBotSlug
+          ? sessions.filter((session) => session.metaBotSlug === options.metaBotSlug)
+          : sessions;
+        return scoped.slice(0, limit);
       },
       streamEvents: async function* () {},
     },
   });
 
   const stats = await handlers.bot.getStats();
-  const aliceSessions = await handlers.bot.listSessions({ slug: 'alice-bot', limit: 50 });
+  const aliceSessions = await handlers.bot.listSessions({ slug: 'alice-bot', limit: 2 });
 
   assert.equal(stats.ok, true);
   assert.deepEqual(stats.data, {
     botCount: 2,
     healthyRuntimes: 1,
-    totalExecutions: 3,
-    successRate: 67,
+    totalExecutions: 4,
+    successRate: 50,
   });
   assert.equal(aliceSessions.ok, true);
   assert.deepEqual(
     aliceSessions.data.sessions.map((session) => session.sessionId),
-    ['session-1', 'session-2'],
+    ['session-alice-1', 'session-alice-2'],
   );
-  assert.deepEqual(listSessionCalls, [1000, 50]);
+  assert.deepEqual(listSessionCalls, [
+    { limit: 1000, options: undefined },
+    { limit: 2, options: { metaBotSlug: 'alice-bot' } },
+  ]);
 });
 
 test('default bot runtime handlers expose the shared LLM runtime store', async (t) => {

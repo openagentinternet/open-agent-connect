@@ -1202,7 +1202,7 @@ test('GET /api/bot/sessions forwards slug and clamped limit to the MetaBot sessi
   assert.equal(payload.data.sessions[0].metaBotSlug, 'alice-bot');
 });
 
-test('GET /ui/bot renders runtime health, execution history, and rediscovery controls', async (t) => {
+test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
@@ -1210,24 +1210,39 @@ test('GET /ui/bot renders runtime health, execution history, and rediscovery con
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  assert.match(html, /data-stat-healthy/);
-  assert.match(html, /data-stat-attention/);
-  assert.match(html, /data-health-summary/);
-  assert.match(html, /EXECUTION HISTORY/);
+  assert.match(html, /data-stat-bots/);
+  assert.match(html, /data-stat-runtimes/);
+  assert.match(html, /data-stat-executions/);
+  assert.match(html, /data-stat-success/);
+  assert.match(html, /data-metabot-list/);
+  assert.match(html, /data-act="add-metabot"/);
+  assert.match(html, /data-tab="info"/);
+  assert.match(html, /data-tab="history"/);
+  assert.match(html, /data-info-content/);
   assert.match(html, /data-execution-history-list/);
-  assert.match(html, /data-execution-count-badge/);
   assert.match(html, /<th>Time<\/th>/);
-  assert.match(html, /<th>MetaBot<\/th>/);
   assert.match(html, /<th>Provider<\/th>/);
+  assert.match(html, /<th>Runtime<\/th>/);
+  assert.match(html, /<th>Status<\/th>/);
   assert.match(html, /<th>Details<\/th>/);
   assert.match(html, /exec-detail/);
-  assert.match(html, /data-act="toggle-exec"/);
-  assert.match(html, /running:'active'/);
-  assert.match(html, /starting:'active'/);
-  assert.match(html, /bot-table-scroll/);
-  assert.match(html, /id="refresh-history-btn"/);
-  assert.ok(html.includes("api('/api/llm/sessions?limit=20'"));
-  assert.ok(html.includes("api('/api/llm/runtimes/discover'"));
+  assert.match(html, /copy-toast/);
+  assert.ok(html.includes("api('/api/bot/stats'"));
+  assert.ok(html.includes("api('/api/bot/profiles'"));
+  assert.ok(html.includes("api('/api/bot/runtimes'"));
+  assert.ok(html.includes("api('/api/bot/sessions?slug='+encodeURIComponent"));
+  assert.ok(!html.includes("api('/api/bot/sessions?limit=50'"));
+  assert.ok(html.includes("api('/api/bot/profiles/'+encodeURIComponent"));
+  assert.match(html, /r\.health==='healthy'\|\|r\.health==='degraded'/);
+  assert.ok(!html.includes(" / unavailable"));
+  assert.match(html, /max-height:\s*220px/);
+  assert.match(html, /✓ Saved/);
+  assert.doesNotMatch(html, /profile-select/);
+  assert.doesNotMatch(html, /data-new-role/);
+  assert.doesNotMatch(html, /reviewer/i);
+  assert.doesNotMatch(html, /specialist/i);
+  assert.doesNotMatch(html, /preferred runtime/i);
+  assert.doesNotMatch(html, /data-binding-list/);
 });
 
 test('GET /ui/shared.css keeps active status animated and the topbar narrow-safe', async (t) => {

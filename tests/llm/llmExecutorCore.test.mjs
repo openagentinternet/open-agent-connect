@@ -90,6 +90,55 @@ test('file session manager persists, updates, lists, and deletes session records
   assert.equal(await manager.get('session-a'), null);
 });
 
+test('file session manager filters by MetaBot slug before applying the limit', async () => {
+  const root = path.join(await createTempDir(), 'sessions');
+  const manager = createFileSessionManager(root);
+
+  await manager.create({
+    sessionId: 'session-bob-new',
+    status: 'completed',
+    runtimeId: 'runtime-1',
+    provider: 'codex',
+    metaBotSlug: 'bob-bot',
+    prompt: 'bob latest',
+    createdAt: '2026-05-05T12:03:00.000Z',
+  });
+  await manager.create({
+    sessionId: 'session-bob-old',
+    status: 'completed',
+    runtimeId: 'runtime-1',
+    provider: 'codex',
+    metaBotSlug: 'bob-bot',
+    prompt: 'bob second',
+    createdAt: '2026-05-05T12:02:00.000Z',
+  });
+  await manager.create({
+    sessionId: 'session-alice-new',
+    status: 'completed',
+    runtimeId: 'runtime-1',
+    provider: 'codex',
+    metaBotSlug: 'alice-bot',
+    prompt: 'alice latest',
+    createdAt: '2026-05-05T12:01:00.000Z',
+  });
+  await manager.create({
+    sessionId: 'session-alice-old',
+    status: 'failed',
+    runtimeId: 'runtime-1',
+    provider: 'codex',
+    metaBotSlug: 'alice-bot',
+    prompt: 'alice second',
+    createdAt: '2026-05-05T12:00:00.000Z',
+  });
+
+  const listed = await manager.list(2, { metaBotSlug: 'alice-bot' });
+
+  assert.deepEqual(
+    listed.map((record) => record.sessionId),
+    ['session-alice-new', 'session-alice-old'],
+  );
+});
+
 test('file session manager keeps a session readable while an update write is in flight', async () => {
   const root = path.join(await createTempDir(), 'sessions');
   const manager = createFileSessionManager(root);
