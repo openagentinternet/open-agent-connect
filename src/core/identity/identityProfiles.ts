@@ -9,6 +9,10 @@ import {
 const MANAGER_DIR = 'manager';
 const PROFILES_FILE = 'identity-profiles.json';
 const ACTIVE_HOME_FILE = 'active-home.json';
+const TRANSIENT_JSON_READ_RETRIES = 5;
+const TRANSIENT_JSON_READ_DELAY_MS = 10;
+
+let atomicWriteSequence = 0;
 
 export interface IdentityManagerPaths {
   managerRoot: string;
@@ -175,16 +179,23 @@ function normalizeProfilesState(systemHomeDir: string, value: unknown): Identity
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
-  try {
-    const raw = await fsp.readFile(filePath, 'utf8');
-    return JSON.parse(raw) as T;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      return null;
+  for (let attempt = 0; attempt <= TRANSIENT_JSON_READ_RETRIES; attempt += 1) {
+    try {
+      const raw = await fsp.readFile(filePath, 'utf8');
+      return JSON.parse(raw) as T;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {
+        return null;
+      }
+      if (error instanceof SyntaxError && attempt < TRANSIENT_JSON_READ_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, TRANSIENT_JSON_READ_DELAY_MS));
+        continue;
+      }
+      throw error;
     }
-    throw error;
   }
+  return null;
 }
 
 async function ensureManagerRoot(paths: IdentityManagerPaths): Promise<void> {
@@ -193,6 +204,22 @@ async function ensureManagerRoot(paths: IdentityManagerPaths): Promise<void> {
 
 function serializeProfilesState(state: IdentityProfilesState): string {
   return `${JSON.stringify(state, null, 2)}\n`;
+}
+
+function createAtomicWriteTempPath(filePath: string): string {
+  atomicWriteSequence += 1;
+  return `${filePath}.${process.pid}.${Date.now()}.${atomicWriteSequence}.tmp`;
+}
+
+async function writeFileAtomic(filePath: string, content: string): Promise<void> {
+  const tempPath = createAtomicWriteTempPath(filePath);
+  try {
+    await fsp.writeFile(tempPath, content, 'utf8');
+    await fsp.rename(tempPath, filePath);
+  } catch (error) {
+    await fsp.rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 export function resolveIdentityManagerPaths(systemHomeDir: string): IdentityManagerPaths {
@@ -215,7 +242,7 @@ export async function readIdentityProfilesState(systemHomeDir: string): Promise<
   const parsed = await readJsonFile<unknown>(paths.profilesPath);
   const normalized = normalizeProfilesState(systemHomeDir, parsed);
   if (parsed !== null && JSON.stringify(parsed) !== JSON.stringify(normalized)) {
-    await fsp.writeFile(paths.profilesPath, serializeProfilesState(normalized), 'utf8');
+    await writeFileAtomic(paths.profilesPath, serializeProfilesState(normalized));
   }
   return normalized;
 }
@@ -227,7 +254,7 @@ async function writeIdentityProfilesState(
   const paths = resolveIdentityManagerPaths(systemHomeDir);
   await ensureManagerRoot(paths);
   const normalized = normalizeProfilesState(systemHomeDir, state);
-  await fsp.writeFile(paths.profilesPath, serializeProfilesState(normalized), 'utf8');
+  await writeFileAtomic(paths.profilesPath, serializeProfilesState(normalized));
   return normalized;
 }
 
@@ -375,10 +402,9 @@ export async function setActiveMetabotHome(input: {
 
   const paths = resolveIdentityManagerPaths(input.systemHomeDir);
   await ensureManagerRoot(paths);
-  await fsp.writeFile(
+  await writeFileAtomic(
     paths.activeHomePath,
     `${JSON.stringify({ homeDir, updatedAt: now() }, null, 2)}\n`,
-    'utf8',
   );
   return homeDir;
 }
