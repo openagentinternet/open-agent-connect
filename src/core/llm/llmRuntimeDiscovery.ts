@@ -4,8 +4,9 @@ import path from 'node:path';
 import {
   SUPPORTED_LLM_PROVIDERS,
   HOST_BINARY_MAP,
+  PROVIDER_DISPLAY_NAMES,
 } from './llmTypes';
-import type { LlmRuntime, LlmProvider } from './llmTypes';
+import type { LlmRuntime, LlmProvider, LlmAuthState } from './llmTypes';
 
 export interface DiscoveryInput {
   env?: NodeJS.ProcessEnv;
@@ -41,11 +42,15 @@ export async function findExecutableInPath(name: string, pathDirs?: string[]): P
   return null;
 }
 
-export async function readExecutableVersion(binaryPath: string, timeoutMs = 5_000): Promise<string | undefined> {
+export async function readExecutableVersion(
+  binaryPath: string,
+  timeoutMs = 5_000,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string | undefined> {
   return new Promise((resolve) => {
     const child = spawn(binaryPath, ['--version'], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: process.env,
+      env,
       shell: false,
     });
 
@@ -79,10 +84,28 @@ export async function readExecutableVersion(binaryPath: string, timeoutMs = 5_00
   });
 }
 
+function detectAuthState(provider: LlmProvider, env: NodeJS.ProcessEnv): LlmAuthState {
+  const checks: Record<string, string> = {
+    'claude-code': 'ANTHROPIC_API_KEY',
+    'codex': 'OPENAI_API_KEY',
+    'copilot': 'GITHUB_TOKEN',
+    'gemini': 'GEMINI_API_KEY',
+    'kimi': 'KIMI_API_KEY',
+  };
+  const envVar = checks[provider];
+  if (envVar && env[envVar]) {
+    return 'authenticated';
+  }
+  if (provider === 'opencode' && (env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY)) {
+    return 'authenticated';
+  }
+  return 'unknown';
+}
+
 export async function discoverProvider(
   provider: LlmProvider,
   pathDirs: string[],
-  options?: { createId?: () => string; now?: () => string },
+  options?: { createId?: () => string; now?: () => string; env?: NodeJS.ProcessEnv },
 ): Promise<LlmRuntime | null> {
   if (provider === 'custom') return null; // Custom runtimes are registered manually.
 
@@ -92,27 +115,18 @@ export async function discoverProvider(
   const binaryPath = await findExecutableInPath(binaryName, pathDirs);
   if (!binaryPath) return null;
 
-  const version = await readExecutableVersion(binaryPath);
+  const env = options?.env ?? process.env;
+  const version = await readExecutableVersion(binaryPath, 5_000, env);
   const now = (options?.now ?? (() => new Date().toISOString()))();
   // Stable ID: same binary always gets same id, so rediscovery upserts instead of duplicating.
   const defaultId = `llm_${provider.replace(/-/g, '_')}_${binaryPath}`;
   const createId = options?.createId ?? (() => defaultId);
-  const env = process.env;
-  const authState =
-    (provider === 'claude-code' && env.ANTHROPIC_API_KEY) ? 'authenticated' :
-    (provider === 'codex' && env.OPENAI_API_KEY) ? 'authenticated' :
-    'unknown';
-
-  const displayNames: Record<string, string> = {
-    'claude-code': 'Claude Code',
-    'codex': 'Codex',
-    'openclaw': 'OpenClaw',
-  };
+  const authState = detectAuthState(provider, env);
 
   return {
     id: createId(),
     provider,
-    displayName: displayNames[provider] ?? provider,
+    displayName: PROVIDER_DISPLAY_NAMES[provider] ?? provider,
     binaryPath,
     version,
     authState,
@@ -136,6 +150,7 @@ export async function discoverLlmRuntimes(input?: DiscoveryInput): Promise<Disco
       const runtime = await discoverProvider(provider, pathDirs, {
         createId: input?.createId,
         now: input?.now,
+        env: input?.env ?? process.env,
       });
       if (runtime) {
         runtimes.push(runtime);
