@@ -15,6 +15,9 @@ const {
   createCursorBackend,
   createFileSessionManager,
   createGeminiBackend,
+  createHermesBackend,
+  createKimiBackend,
+  createKiroBackend,
   createOpenClawBackend,
   createOpenCodeBackend,
   createPiBackend,
@@ -45,6 +48,107 @@ async function collectEvents(iterable) {
 
 async function assertSameRealpath(actualPath, expectedPath) {
   assert.equal(await fs.realpath(actualPath), await fs.realpath(expectedPath));
+}
+
+function fakeAcpServerSource() {
+  return `#!/usr/bin/env node
+const fs = require('node:fs');
+const readline = require('node:readline');
+
+const recordPath = process.env.FAKE_ACP_RECORD_PATH;
+const provider = process.env.FAKE_ACP_PROVIDER || 'hermes';
+const toolTitle = process.env.FAKE_ACP_TOOL_TITLE || 'terminal: pwd';
+const toolName = process.env.FAKE_ACP_TOOL_NAME || '';
+const sessionId = process.env.FAKE_ACP_SESSION_ID || provider + '-session-new';
+const record = {
+  argv: process.argv.slice(2),
+  env: { HERMES_YOLO_MODE: process.env.HERMES_YOLO_MODE || '' },
+  requests: [],
+  permissionResponses: []
+};
+let pendingPromptId = null;
+let activeSessionId = sessionId;
+
+function save() {
+  if (recordPath) fs.writeFileSync(recordPath, JSON.stringify(record, null, 2));
+}
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+function response(id, result) {
+  send({ jsonrpc: '2.0', id, result });
+}
+function errorResponse(id, message) {
+  send({ jsonrpc: '2.0', id, error: { code: -32000, message } });
+}
+function notify(update) {
+  send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: activeSessionId, update } });
+}
+function completePrompt(id) {
+  if (process.env.FAKE_ACP_STDERR_ONLY_ERROR === '1') {
+    process.stderr.write('Error: HTTP 400: provider model unsupported\\n');
+    response(id, { stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } });
+    save();
+    process.exit(0);
+  }
+  notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: provider + ' text ' } });
+  notify({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: provider + ' thinking' } });
+  notify({ sessionUpdate: 'tool_call', toolCallId: 'tool-acp', name: toolName, title: toolTitle, kind: 'execute', rawInput: { command: 'pwd' } });
+  notify({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-acp', status: 'completed', title: toolTitle, kind: 'execute', rawOutput: 'tool ok' });
+  notify({ sessionUpdate: 'usage_update', usage: { inputTokens: 2, outputTokens: 3, cachedReadTokens: 1 } });
+  notify({ sessionUpdate: 'turn_end', stopReason: 'end_turn', usage: { inputTokens: 4, outputTokens: 5, cachedReadTokens: 1 } });
+  response(id, { stopReason: 'end_turn', usage: { inputTokens: 4, outputTokens: 5, cachedReadTokens: 1 } });
+  save();
+  process.exit(0);
+}
+
+save();
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  if (!line.trim()) return;
+  const message = JSON.parse(line);
+
+  if (message.id === 900 && !message.method) {
+    record.permissionResponses.push(message.result);
+    save();
+    if (pendingPromptId !== null) completePrompt(pendingPromptId);
+    return;
+  }
+
+  if (!message.method) return;
+  record.requests.push({ method: message.method, params: message.params });
+  save();
+
+  if (message.method === 'initialize') {
+    response(message.id, { protocolVersion: 1 });
+    return;
+  }
+  if (message.method === 'session/new') {
+    activeSessionId = sessionId;
+    response(message.id, { sessionId });
+    return;
+  }
+  if (message.method === 'session/resume' || message.method === 'session/load') {
+    activeSessionId = message.params.sessionId;
+    response(message.id, { sessionId: activeSessionId });
+    return;
+  }
+  if (message.method === 'session/set_model') {
+    if (process.env.FAKE_ACP_FAIL_SET_MODEL === '1') {
+      errorResponse(message.id, 'set model rejected');
+    } else {
+      response(message.id, {});
+    }
+    return;
+  }
+  if (message.method === 'session/prompt') {
+    pendingPromptId = message.id;
+    send({ jsonrpc: '2.0', id: 900, method: 'session/request_permission', params: { sessionId: activeSessionId } });
+    return;
+  }
+  errorResponse(message.id, 'unexpected method ' + message.method);
+});
+`;
 }
 
 const runtime = {
@@ -1564,4 +1668,194 @@ rl.once('line', () => {
   assert.equal(result.status, 'timeout');
   assert.match(result.error, /timed out/i);
   assert.ok(Date.now() - startedAt < 1_000);
+});
+
+const acpProviderCases = [
+  {
+    label: 'Hermes',
+    provider: 'hermes',
+    createBackend: createHermesBackend,
+    expectedArgs: ['acp', '--debug'],
+    resumeMethod: 'session/resume',
+    toolTitle: 'terminal: pwd',
+    expectedTool: 'terminal',
+    expectsYoloEnv: true,
+  },
+  {
+    label: 'Kimi',
+    provider: 'kimi',
+    createBackend: createKimiBackend,
+    expectedArgs: ['acp', '--debug'],
+    resumeMethod: 'session/resume',
+    toolTitle: 'Run command: pwd',
+    expectedTool: 'terminal',
+    expectsYoloEnv: false,
+  },
+  {
+    label: 'Kiro',
+    provider: 'kiro',
+    createBackend: createKiroBackend,
+    expectedArgs: ['acp', '--trust-all-tools', '--debug'],
+    resumeMethod: 'session/load',
+    toolTitle: 'Run command: pwd',
+    expectedTool: 'terminal',
+    expectsYoloEnv: false,
+  },
+];
+
+test('ACP backends launch, create sessions, set model, prompt, stream events, and approve permissions', async () => {
+  for (const providerCase of acpProviderCases) {
+    const base = await createTempDir();
+    const recordPath = path.join(base, `${providerCase.provider}-record.json`);
+    const binaryPath = await writeExecutableScript(base, `fake-${providerCase.provider}-acp.js`, fakeAcpServerSource());
+    const backend = providerCase.createBackend(binaryPath, {
+      FAKE_ACP_RECORD_PATH: recordPath,
+      FAKE_ACP_PROVIDER: providerCase.provider,
+      FAKE_ACP_TOOL_TITLE: providerCase.toolTitle,
+      FAKE_ACP_SESSION_ID: `${providerCase.provider}-session-new`,
+    });
+    const events = [];
+    const result = await backend.execute(
+      {
+        runtimeId: `llm_${providerCase.provider}`,
+        runtime: { ...runtime, provider: providerCase.provider, binaryPath },
+        prompt: `${providerCase.provider} prompt`,
+        systemPrompt: `${providerCase.provider} system`,
+        cwd: base,
+        model: `${providerCase.provider}-model`,
+        extraArgs: providerCase.provider === 'kiro'
+          ? ['acp', '--trust-all-tools', '--trust-tools', 'blocked', '-a', '--debug']
+          : ['acp', '--debug'],
+      },
+      { emit: (event) => events.push(event) },
+      new AbortController().signal,
+    );
+
+    const record = JSON.parse(await fs.readFile(recordPath, 'utf8'));
+    assert.deepEqual(record.argv, providerCase.expectedArgs);
+    assert.equal(record.env.HERMES_YOLO_MODE, providerCase.expectsYoloEnv ? '1' : '');
+
+    const initialize = record.requests.find((entry) => entry.method === 'initialize');
+    assert.equal(initialize.params.protocolVersion, 1);
+    assert.equal(initialize.params.clientInfo.name, 'multica-agent-sdk');
+
+    const sessionNew = record.requests.find((entry) => entry.method === 'session/new');
+    assert.ok(sessionNew);
+    await assertSameRealpath(sessionNew.params.cwd, base);
+    assert.deepEqual(sessionNew.params.mcpServers, []);
+    if (providerCase.provider === 'hermes') {
+      assert.equal(sessionNew.params.model, `${providerCase.provider}-model`);
+    } else {
+      assert.equal(sessionNew.params.model, undefined);
+    }
+
+    const setModel = record.requests.find((entry) => entry.method === 'session/set_model');
+    assert.equal(setModel.params.sessionId, `${providerCase.provider}-session-new`);
+    assert.equal(setModel.params.modelId, `${providerCase.provider}-model`);
+
+    const prompt = record.requests.find((entry) => entry.method === 'session/prompt');
+    assert.equal(prompt.params.sessionId, `${providerCase.provider}-session-new`);
+    assert.match(prompt.params.prompt[0].text, new RegExp(`${providerCase.provider} system\\n\\n---\\n\\n${providerCase.provider} prompt`));
+    if (providerCase.provider === 'kiro') {
+      assert.deepEqual(prompt.params.content, prompt.params.prompt);
+    }
+
+    assert.equal(record.permissionResponses[0].outcome.optionId, 'approve_for_session');
+    assert.equal(result.status, 'completed');
+    assert.equal(result.output, `${providerCase.provider} text `);
+    assert.equal(result.providerSessionId, `${providerCase.provider}-session-new`);
+    assert.equal(result.usage[`${providerCase.provider}-model`].inputTokens, 6);
+    assert.equal(result.usage[`${providerCase.provider}-model`].outputTokens, 8);
+    assert.deepEqual(events.filter((event) => event.type === 'text').map((event) => event.content), [`${providerCase.provider} text `]);
+    assert.equal(events.some((event) => event.type === 'thinking' && event.content === `${providerCase.provider} thinking`), true);
+    assert.equal(events.some((event) => event.type === 'tool_use' && event.tool === providerCase.expectedTool && event.callId === 'tool-acp' && event.input.command === 'pwd'), true);
+    assert.equal(events.some((event) => event.type === 'tool_result' && event.callId === 'tool-acp' && event.output === 'tool ok'), true);
+  }
+});
+
+test('ACP backends resume sessions with provider-specific methods', async () => {
+  for (const providerCase of acpProviderCases) {
+    const base = await createTempDir();
+    const recordPath = path.join(base, `${providerCase.provider}-resume-record.json`);
+    const binaryPath = await writeExecutableScript(base, `fake-${providerCase.provider}-resume-acp.js`, fakeAcpServerSource());
+    const backend = providerCase.createBackend(binaryPath, {
+      FAKE_ACP_RECORD_PATH: recordPath,
+      FAKE_ACP_PROVIDER: providerCase.provider,
+      FAKE_ACP_TOOL_TITLE: providerCase.toolTitle,
+    });
+    const result = await backend.execute(
+      {
+        runtimeId: `llm_${providerCase.provider}`,
+        runtime: { ...runtime, provider: providerCase.provider, binaryPath },
+        prompt: `${providerCase.provider} resume`,
+        cwd: base,
+        resumeSessionId: `${providerCase.provider}-existing-session`,
+      },
+      { emit: () => {} },
+      new AbortController().signal,
+    );
+
+    const record = JSON.parse(await fs.readFile(recordPath, 'utf8'));
+    const resume = record.requests.find((entry) => entry.method === providerCase.resumeMethod);
+    assert.ok(resume, `${providerCase.provider} should call ${providerCase.resumeMethod}`);
+    assert.equal(resume.params.sessionId, `${providerCase.provider}-existing-session`);
+    if (providerCase.provider === 'kiro') {
+      assert.deepEqual(resume.params.mcpServers, []);
+    }
+    assert.equal(record.requests.some((entry) => entry.method === 'session/set_model'), false);
+    assert.equal(result.status, 'completed');
+    assert.equal(result.providerSessionId, `${providerCase.provider}-existing-session`);
+  }
+});
+
+test('ACP backend fails when session model switch is rejected', async () => {
+  const base = await createTempDir();
+  const recordPath = path.join(base, 'hermes-set-model-fail-record.json');
+  const binaryPath = await writeExecutableScript(base, 'fake-hermes-set-model-fail.js', fakeAcpServerSource());
+  const backend = createHermesBackend(binaryPath, {
+    FAKE_ACP_RECORD_PATH: recordPath,
+    FAKE_ACP_PROVIDER: 'hermes',
+    FAKE_ACP_FAIL_SET_MODEL: '1',
+  });
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_hermes',
+      runtime: { ...runtime, provider: 'hermes', binaryPath },
+      prompt: 'prompt',
+      cwd: base,
+      model: 'bad-model',
+    },
+    { emit: () => {} },
+    new AbortController().signal,
+  );
+
+  const record = JSON.parse(await fs.readFile(recordPath, 'utf8'));
+  assert.equal(record.requests.some((entry) => entry.method === 'session/prompt'), false);
+  assert.equal(result.status, 'failed');
+  assert.match(result.error, /bad-model/);
+  assert.equal(result.providerSessionId, 'hermes-session-new');
+});
+
+test('ACP backend surfaces provider stderr errors when output is empty', async () => {
+  const base = await createTempDir();
+  const recordPath = path.join(base, 'hermes-stderr-record.json');
+  const binaryPath = await writeExecutableScript(base, 'fake-hermes-stderr-error.js', fakeAcpServerSource());
+  const backend = createHermesBackend(binaryPath, {
+    FAKE_ACP_RECORD_PATH: recordPath,
+    FAKE_ACP_PROVIDER: 'hermes',
+    FAKE_ACP_STDERR_ONLY_ERROR: '1',
+  });
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_hermes',
+      runtime: { ...runtime, provider: 'hermes', binaryPath },
+      prompt: 'stderr error',
+      cwd: base,
+    },
+    { emit: () => {} },
+    new AbortController().signal,
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.match(result.error, /HTTP 400/);
 });
