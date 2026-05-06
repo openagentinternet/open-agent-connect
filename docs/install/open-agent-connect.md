@@ -105,12 +105,14 @@ release-pack fallback below.
 
 Choose exactly one initial host mode:
 
-| Current agent platform | Host mode |
-| --- | --- |
-| Codex | `codex` |
-| Claude Code | `claude-code` |
-| OpenClaw | `openclaw` |
+
+| Current agent platform                  | Host mode     |
+| --------------------------------------- | ------------- |
+| Codex                                   | `codex`       |
+| Claude Code                             | `claude-code` |
+| OpenClaw                                | `openclaw`    |
 | Other Claude Code-compatible agent host | `claude-code` |
+
 
 For non-`Codex`, non-`Claude Code`, and non-`OpenClaw` platforms such as hosts
 that read Claude Code-style `SKILL.md` directories, use the `claude-code` host
