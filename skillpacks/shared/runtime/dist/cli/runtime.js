@@ -49,6 +49,7 @@ const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
 const metawebMasterReplyWaiter_1 = require("../core/master/metawebMasterReplyWaiter");
 const masterMessageSchema_1 = require("../core/master/masterMessageSchema");
 const privateChatAutoReply_1 = require("../core/chat/privateChatAutoReply");
+const privateChatAutoReplyBackfill_1 = require("../core/chat/privateChatAutoReplyBackfill");
 const privateChatStateStore_1 = require("../core/chat/privateChatStateStore");
 const chatStrategyStore_1 = require("../core/chat/chatStrategyStore");
 const hostLlmChatReplyRunner_1 = require("../core/chat/hostLlmChatReplyRunner");
@@ -57,6 +58,7 @@ const llmRuntimeStore_1 = require("../core/llm/llmRuntimeStore");
 const llmBindingStore_1 = require("../core/llm/llmBindingStore");
 const llmRuntimeResolver_1 = require("../core/llm/llmRuntimeResolver");
 const llmRuntimeDiscovery_1 = require("../core/llm/llmRuntimeDiscovery");
+const executor_1 = require("../core/llm/executor");
 const update_1 = require("../core/system/update");
 const uninstall_1 = require("../core/system/uninstall");
 const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
@@ -1838,6 +1840,16 @@ async function serveCliDaemonProcess(context) {
         acceptPolicy: 'accept_all',
         defaultStrategyId: null,
     };
+    const llmExecutor = new executor_1.LlmExecutor({
+        sessionsRoot: paths.llmExecutorSessionsRoot,
+        transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+        skillsRoot: paths.skillsRoot,
+        backends: {
+            codex: executor_1.codexBackendFactory,
+            'claude-code': executor_1.claudeBackendFactory,
+            openclaw: executor_1.openClawBackendFactory,
+        },
+    });
     const handlers = (0, defaultHandlers_1.createDefaultMetabotDaemonHandlers)({
         homeDir,
         systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
@@ -1857,6 +1869,7 @@ async function serveCliDaemonProcess(context) {
         servicePaymentExecutor,
         requestMvcGasSubsidy,
         autoReplyConfig: sharedAutoReplyConfig,
+        llmExecutor,
     });
     const daemon = (0, daemon_1.createMetabotDaemon)({
         homeDirOrPaths: paths,
@@ -1971,16 +1984,33 @@ async function serveCliDaemonProcess(context) {
         resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
         replyRunner: (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)({
             runtimeResolver: llmResolver,
+            llmExecutor,
             metaBotSlug,
         }),
     }, sharedAutoReplyConfig);
+    const chatAutoReplyBackfill = (0, privateChatAutoReplyBackfill_1.createPrivateChatAutoReplyBackfillLoop)({
+        paths,
+        stateStore: chatStateStore,
+        selfGlobalMetaId: async () => {
+            const state = await runtimeStore.readState();
+            return state.identity?.globalMetaId ?? null;
+        },
+        getLocalPrivateChatIdentity: async () => signer.getPrivateChatIdentity(),
+        resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+        handleInboundMessage: async (message) => chatAutoReplyOrchestrator.handleInboundMessage(message),
+        onError: (error) => {
+            console.warn('[private chat auto-reply backfill]', error.message);
+        },
+    });
     const daemonConfig = await (0, configStore_1.createConfigStore)(paths).read();
     const simplemsgListener = (0, simplemsgListener_1.createA2ASimplemsgListenerManager)({
         systemHomeDir: paths.systemHomeDir,
         resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
         onMessage: (profile, message) => {
             if (node_path_1.default.resolve(profile.homeDir) === node_path_1.default.resolve(homeDir)) {
-                void chatAutoReplyOrchestrator.handleInboundMessage(message);
+                void chatAutoReplyOrchestrator.handleInboundMessage(message).catch((error) => {
+                    console.warn('[private chat auto-reply]', error instanceof Error ? error.message : String(error));
+                });
                 const orderProtocolHandler = handlers.services?.handleInboundOrderProtocolMessage;
                 if (orderProtocolHandler) {
                     void Promise.resolve(orderProtocolHandler({
@@ -2000,6 +2030,7 @@ async function serveCliDaemonProcess(context) {
     });
     if (daemonConfig.a2a.simplemsgListenerEnabled) {
         await simplemsgListener.start();
+        chatAutoReplyBackfill.start();
     }
     let shuttingDown = false;
     const shutdown = async (exitCode) => {
@@ -2007,6 +2038,7 @@ async function serveCliDaemonProcess(context) {
             return;
         shuttingDown = true;
         simplemsgListener.stop();
+        chatAutoReplyBackfill.stop();
         providerHeartbeatLoop.stop();
         clearInterval(onlineServiceCacheInterval);
         await runtimeStore.clearDaemon(process.pid);

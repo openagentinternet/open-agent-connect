@@ -12,9 +12,10 @@ export interface DiscoveryResult {
     }>;
 }
 export declare function findExecutableInPath(name: string, pathDirs?: string[]): Promise<string | null>;
-export declare function readExecutableVersion(binaryPath: string, timeoutMs?: number): Promise<string | undefined>;
+export declare function readExecutableVersion(binaryPath: string, timeoutMs?: number, env?: NodeJS.ProcessEnv): Promise<string | undefined>;
 export declare function discoverProvider(provider: LlmProvider, pathDirs: string[], options?: {
     createId?: () => string;
     now?: () => string;
+    env?: NodeJS.ProcessEnv;
 }): Promise<LlmRuntime | null>;
 export declare function discoverLlmRuntimes(input?: DiscoveryInput): Promise<DiscoveryResult>;

@@ -21,6 +21,7 @@ const llmRuntimeStore_1 = require("../core/llm/llmRuntimeStore");
 const llmBindingStore_1 = require("../core/llm/llmBindingStore");
 const llmRuntimeDiscovery_1 = require("../core/llm/llmRuntimeDiscovery");
 const llmTypes_1 = require("../core/llm/llmTypes");
+const metabotProfileManager_1 = require("../core/bot/metabotProfileManager");
 const servicePublishChain_1 = require("../core/services/servicePublishChain");
 const providerConsole_1 = require("../core/provider/providerConsole");
 const providerPresenceState_1 = require("../core/provider/providerPresenceState");
@@ -102,6 +103,201 @@ function normalizeRetryDelays(value, fallback) {
         .map((entry) => Number(entry))
         .filter((entry) => Number.isFinite(entry) && entry >= 0)
         .map((entry) => Math.trunc(entry));
+}
+function normalizePositiveInteger(value) {
+    const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0)
+        return undefined;
+    return Math.trunc(parsed);
+}
+function normalizeStringArray(value) {
+    if (!Array.isArray(value))
+        return undefined;
+    const normalized = value
+        .map((entry) => normalizeText(entry))
+        .filter(Boolean);
+    return normalized.length > 0 ? normalized : undefined;
+}
+function normalizeStringRecord(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        return undefined;
+    const result = {};
+    for (const [key, entry] of Object.entries(value)) {
+        if (typeof entry === 'string') {
+            result[key] = entry;
+        }
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
+}
+function buildLlmExecutionRequest(body, runtime) {
+    const runtimeId = normalizeText(body.runtimeId);
+    const prompt = normalizeText(body.prompt);
+    if (!runtimeId || !prompt)
+        return null;
+    return {
+        runtimeId,
+        runtime,
+        prompt,
+        systemPrompt: normalizeText(body.systemPrompt) || undefined,
+        maxTurns: normalizePositiveInteger(body.maxTurns),
+        timeout: normalizePositiveInteger(body.timeout),
+        semanticInactivityTimeout: normalizePositiveInteger(body.semanticInactivityTimeout),
+        cwd: normalizeText(body.cwd) || undefined,
+        skills: normalizeStringArray(body.skills),
+        resumeSessionId: normalizeText(body.resumeSessionId) || undefined,
+        model: normalizeText(body.model) || undefined,
+        metaBotSlug: normalizeText(body.metaBotSlug) || undefined,
+        env: normalizeStringRecord(body.env),
+        extraArgs: normalizeStringArray(body.extraArgs),
+    };
+}
+function hasOwnField(input, field) {
+    return Object.prototype.hasOwnProperty.call(input, field);
+}
+function normalizeMetabotProviderInput(value) {
+    if (value === null)
+        return null;
+    const provider = normalizeText(value);
+    if (!provider)
+        return null;
+    if (!(0, llmTypes_1.isLlmProvider)(provider) || provider === 'custom') {
+        throw new Error(`Unsupported LLM provider: ${provider}`);
+    }
+    return provider;
+}
+function buildMetabotUpdateInput(input) {
+    const update = {};
+    if (hasOwnField(input, 'name')) {
+        update.name = normalizeText(input.name);
+        if (!update.name) {
+            throw new Error('MetaBot name is required.');
+        }
+    }
+    if (hasOwnField(input, 'role')) {
+        update.role = typeof input.role === 'string' ? input.role : '';
+    }
+    if (hasOwnField(input, 'soul')) {
+        update.soul = typeof input.soul === 'string' ? input.soul : '';
+    }
+    if (hasOwnField(input, 'goal')) {
+        update.goal = typeof input.goal === 'string' ? input.goal : '';
+    }
+    if (hasOwnField(input, 'avatarDataUrl')) {
+        update.avatarDataUrl = normalizeText(input.avatarDataUrl);
+        const avatarValidation = (0, metabotProfileManager_1.validateAvatarDataUrl)(update.avatarDataUrl);
+        if (!avatarValidation.valid) {
+            throw new Error(avatarValidation.error ?? 'Invalid avatar data URL.');
+        }
+    }
+    if (hasOwnField(input, 'primaryProvider')) {
+        update.primaryProvider = normalizeMetabotProviderInput(input.primaryProvider);
+    }
+    if (hasOwnField(input, 'fallbackProvider')) {
+        update.fallbackProvider = normalizeMetabotProviderInput(input.fallbackProvider);
+    }
+    return update;
+}
+function buildMetabotCreateInput(input) {
+    const name = normalizeText(input.name);
+    if (!name) {
+        throw new Error('MetaBot name is required.');
+    }
+    const createInput = { name };
+    if (hasOwnField(input, 'role')) {
+        createInput.role = typeof input.role === 'string' ? input.role : '';
+    }
+    if (hasOwnField(input, 'soul')) {
+        createInput.soul = typeof input.soul === 'string' ? input.soul : '';
+    }
+    if (hasOwnField(input, 'goal')) {
+        createInput.goal = typeof input.goal === 'string' ? input.goal : '';
+    }
+    if (hasOwnField(input, 'avatarDataUrl')) {
+        createInput.avatarDataUrl = normalizeText(input.avatarDataUrl);
+        const avatarValidation = (0, metabotProfileManager_1.validateAvatarDataUrl)(createInput.avatarDataUrl);
+        if (!avatarValidation.valid) {
+            throw new Error(avatarValidation.error ?? 'Invalid avatar data URL.');
+        }
+    }
+    if (hasOwnField(input, 'primaryProvider')) {
+        createInput.primaryProvider = normalizeMetabotProviderInput(input.primaryProvider);
+    }
+    if (hasOwnField(input, 'fallbackProvider')) {
+        createInput.fallbackProvider = normalizeMetabotProviderInput(input.fallbackProvider);
+    }
+    return createInput;
+}
+function calculateMetabotChangedFields(current, update) {
+    const changedFields = [];
+    if (update.name !== undefined && update.name !== current.name)
+        changedFields.push('name');
+    if (update.role !== undefined && update.role !== current.role)
+        changedFields.push('role');
+    if (update.soul !== undefined && update.soul !== current.soul)
+        changedFields.push('soul');
+    if (update.goal !== undefined && update.goal !== current.goal)
+        changedFields.push('goal');
+    if (update.avatarDataUrl !== undefined && (update.avatarDataUrl || undefined) !== current.avatarDataUrl) {
+        changedFields.push('avatar');
+    }
+    if (update.primaryProvider !== undefined && update.primaryProvider !== (current.primaryProvider ?? null)) {
+        changedFields.push('primaryProvider');
+    }
+    if (update.fallbackProvider !== undefined && update.fallbackProvider !== (current.fallbackProvider ?? null)) {
+        changedFields.push('fallbackProvider');
+    }
+    return changedFields;
+}
+function buildMetabotChainProfile(current, update) {
+    return {
+        ...current,
+        name: update.name ?? current.name,
+        role: update.role ?? current.role,
+        soul: update.soul ?? current.soul,
+        goal: update.goal ?? current.goal,
+        ...(update.avatarDataUrl !== undefined
+            ? (update.avatarDataUrl ? { avatarDataUrl: update.avatarDataUrl } : { avatarDataUrl: undefined })
+            : {}),
+        primaryProvider: update.primaryProvider !== undefined ? update.primaryProvider : (current.primaryProvider ?? null),
+        fallbackProvider: update.fallbackProvider !== undefined ? update.fallbackProvider : (current.fallbackProvider ?? null),
+    };
+}
+function calculateMetabotCreateChainFields(input) {
+    const changedFields = [];
+    if (input.role !== undefined
+        || input.soul !== undefined
+        || input.goal !== undefined
+        || input.primaryProvider !== undefined
+        || input.fallbackProvider !== undefined) {
+        changedFields.push('role');
+    }
+    if (normalizeText(input.avatarDataUrl)) {
+        changedFields.push('avatar');
+    }
+    return changedFields;
+}
+async function validateMetabotProviderAvailability(profile, update) {
+    const requestedProviders = [];
+    if (update.primaryProvider !== undefined
+        && update.primaryProvider !== null
+        && update.primaryProvider !== (profile.primaryProvider ?? null)) {
+        requestedProviders.push(update.primaryProvider);
+    }
+    if (update.fallbackProvider !== undefined
+        && update.fallbackProvider !== null
+        && update.fallbackProvider !== (profile.fallbackProvider ?? null)) {
+        requestedProviders.push(update.fallbackProvider);
+    }
+    if (requestedProviders.length === 0) {
+        return;
+    }
+    const runtimeState = await (0, llmRuntimeStore_1.createLlmRuntimeStore)((0, paths_1.resolveMetabotPaths)(profile.homeDir)).read();
+    for (const provider of requestedProviders) {
+        const available = runtimeState.runtimes.some((runtime) => (runtime.provider === provider && runtime.health !== 'unavailable'));
+        if (!available) {
+            throw new Error(`No available runtime found for provider: ${provider}`);
+        }
+    }
 }
 async function writePinRetryingMempoolConflict(input) {
     for (let attempt = 0;; attempt += 1) {
@@ -2943,7 +3139,10 @@ function createDefaultMetabotDaemonHandlers(input) {
     const getDaemonRecord = input.getDaemonRecord;
     // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
     const pendingCallerReplyContinuations = new Map();
+    /** Serializes buyer auto-rating per trace so inbound simplemsg + socket continuation cannot publish duplicates. */
+    const buyerAutoRatingPublishChains = new Map();
     const pendingMasterReplyContinuations = new Map();
+    const pendingBuyerRatingPublishes = new Map();
     let masterTriggerMemoryState = (0, masterTriggerEngine_1.createMasterTriggerMemoryState)();
     const masterAutoPrepareCounts = new Map();
     let lastMasterAutoPreparedAt = null;
@@ -3329,7 +3528,39 @@ function createDefaultMetabotDaemonHandlers(input) {
             homeDir: profile.homeDir,
         });
     }
+    function createSignerForProfileHome(profileHomeDir) {
+        const normalizedProfileHomeDir = node_path_1.default.resolve(profileHomeDir);
+        if (normalizedProfileHomeDir === node_path_1.default.resolve(input.homeDir)) {
+            return signer;
+        }
+        if (input.createSignerForHome) {
+            return input.createSignerForHome(normalizedProfileHomeDir);
+        }
+        return (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
+            secretStore: (0, fileSecretStore_1.createFileSecretStore)(normalizedProfileHomeDir),
+        });
+    }
     async function publishBuyerServiceRating(request) {
+        const traceId = normalizeText(request.traceId);
+        if (!traceId) {
+            return publishBuyerServiceRatingUnlocked(request);
+        }
+        const pending = pendingBuyerRatingPublishes.get(traceId);
+        if (pending) {
+            return pending;
+        }
+        const publish = publishBuyerServiceRatingUnlocked({ ...request, traceId });
+        pendingBuyerRatingPublishes.set(traceId, publish);
+        try {
+            return await publish;
+        }
+        finally {
+            if (pendingBuyerRatingPublishes.get(traceId) === publish) {
+                pendingBuyerRatingPublishes.delete(traceId);
+            }
+        }
+    }
+    async function publishBuyerServiceRatingUnlocked(request) {
         const state = await runtimeStateStore.readState();
         if (!state.identity) {
             return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before publishing service ratings.');
@@ -3348,6 +3579,36 @@ function createDefaultMetabotDaemonHandlers(input) {
         const serverBot = normalizeText(trace.session.peerGlobalMetaId ?? trace.a2a?.providerGlobalMetaId);
         if (!serviceId || !servicePrice || !serviceCurrency || !servicePaidTx || !serverBot) {
             return (0, commandResult_1.commandFailed)('service_rating_trace_incomplete', 'Trace is missing service or payment metadata required for skill-service-rate.');
+        }
+        const existingSessionState = await sessionStateStore.readState();
+        const existingSessions = existingSessionState.sessions.filter((entry) => entry.traceId === request.traceId);
+        const existingSessionIds = new Set(existingSessions.map((entry) => entry.sessionId));
+        const existingClosure = extractTraceRatingClosure({
+            trace,
+            transcriptItems: existingSessionState.transcriptItems.filter((entry) => existingSessionIds.has(entry.sessionId)),
+            ratingDetail: null,
+        });
+        if (existingClosure.ratingPublished && existingClosure.ratingPinId) {
+            return (0, commandResult_1.commandSuccess)({
+                traceId: request.traceId,
+                path: '/protocols/skill-service-rate',
+                pinId: existingClosure.ratingPinId,
+                txids: [],
+                rate: String(existingClosure.ratingValue ?? request.rate),
+                comment: existingClosure.ratingComment ?? request.comment,
+                serviceId,
+                servicePaidTx,
+                serverBot,
+                serviceSkill: normalizeText(trace.order?.serviceName),
+                ratingMessageSent: existingClosure.ratingMessageSent ?? false,
+                ratingMessagePinId: existingClosure.ratingMessagePinId,
+                ratingMessageError: existingClosure.ratingMessageError,
+                a2aStorePersisted: null,
+                a2aStoreError: null,
+                traceJsonPath: trace.artifacts.traceJsonPath,
+                traceMarkdownPath: trace.artifacts.traceMarkdownPath,
+                transcriptMarkdownPath: trace.artifacts.transcriptMarkdownPath,
+            });
         }
         const directory = await listRuntimeDirectoryServices({
             state,
@@ -3575,47 +3836,63 @@ function createDefaultMetabotDaemonHandlers(input) {
         });
     }
     async function autoPublishBuyerRatingForReply(input) {
-        const ratingRequestText = input.reply.state === 'completed'
-            ? normalizeText(input.reply.ratingRequestText)
-            : '';
-        if (!ratingRequestText) {
+        const traceKey = normalizeText(input.trace.traceId);
+        if (!traceKey) {
             return;
         }
-        const runtimeState = await runtimeStateStore.readState();
-        const trace = runtimeState.traces.find((entry) => entry.traceId === input.trace.traceId) ?? input.trace;
-        const sessionState = await sessionStateStore.readState();
-        const sessions = sessionState.sessions.filter((entry) => entry.traceId === trace.traceId);
-        const sessionIds = new Set(sessions.map((entry) => entry.sessionId));
-        const transcriptItems = sessionState.transcriptItems
-            .filter((entry) => sessionIds.has(entry.sessionId))
-            .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
-        const ratingClosure = extractTraceRatingClosure({
-            trace,
-            transcriptItems,
-            ratingDetail: null,
+        const previous = buyerAutoRatingPublishChains.get(traceKey) ?? Promise.resolve();
+        const job = previous.catch(() => { }).then(async () => {
+            const ratingRequestText = input.reply.state === 'completed'
+                ? normalizeText(input.reply.ratingRequestText)
+                : '';
+            if (!ratingRequestText) {
+                return;
+            }
+            const runtimeState = await runtimeStateStore.readState();
+            const trace = runtimeState.traces.find((entry) => entry.traceId === input.trace.traceId) ?? input.trace;
+            const sessionState = await sessionStateStore.readState();
+            const sessions = sessionState.sessions.filter((entry) => entry.traceId === trace.traceId);
+            const sessionIds = new Set(sessions.map((entry) => entry.sessionId));
+            const transcriptItems = sessionState.transcriptItems
+                .filter((entry) => sessionIds.has(entry.sessionId))
+                .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
+            const ratingClosure = extractTraceRatingClosure({
+                trace,
+                transcriptItems,
+                ratingDetail: null,
+            });
+            if (ratingClosure.ratingPublished) {
+                return;
+            }
+            const persona = await (0, chatPersonaLoader_1.loadChatPersona)(runtimeStateStore.paths);
+            const rating = await (0, callerRating_1.generateBuyerServiceRating)({
+                replyRunner: buyerRatingReplyRunner,
+                persona,
+                traceId: trace.traceId,
+                providerGlobalMetaId: normalizeText(trace.a2a?.providerGlobalMetaId) || normalizeText(trace.session.peerGlobalMetaId),
+                providerName: normalizeText(trace.a2a?.providerName) || normalizeText(trace.session.peerName),
+                originalRequest: normalizeText(trace.order?.requestText),
+                serviceResult: input.reply.state === 'completed' ? input.reply.responseText : null,
+                expectedOutputType: normalizeText(trace.order?.outputType),
+                ratingRequestText,
+                transcriptItems,
+            });
+            await publishBuyerServiceRating({
+                traceId: trace.traceId,
+                rate: rating.rate,
+                comment: rating.comment,
+                network: 'mvc',
+            });
         });
-        if (ratingClosure.ratingPublished) {
-            return;
+        buyerAutoRatingPublishChains.set(traceKey, job);
+        try {
+            await job;
         }
-        const persona = await (0, chatPersonaLoader_1.loadChatPersona)(runtimeStateStore.paths);
-        const rating = await (0, callerRating_1.generateBuyerServiceRating)({
-            replyRunner: buyerRatingReplyRunner,
-            persona,
-            traceId: trace.traceId,
-            providerGlobalMetaId: normalizeText(trace.a2a?.providerGlobalMetaId) || normalizeText(trace.session.peerGlobalMetaId),
-            providerName: normalizeText(trace.a2a?.providerName) || normalizeText(trace.session.peerName),
-            originalRequest: normalizeText(trace.order?.requestText),
-            serviceResult: input.reply.state === 'completed' ? input.reply.responseText : null,
-            expectedOutputType: normalizeText(trace.order?.outputType),
-            ratingRequestText,
-            transcriptItems,
-        });
-        await publishBuyerServiceRating({
-            traceId: trace.traceId,
-            rate: rating.rate,
-            comment: rating.comment,
-            network: 'mvc',
-        });
+        finally {
+            if (buyerAutoRatingPublishChains.get(traceKey) === job) {
+                buyerAutoRatingPublishChains.delete(traceKey);
+            }
+        }
     }
     function findBuyerTraceForInboundOrderProtocol(input) {
         const providerGlobalMetaId = normalizeText(input.providerGlobalMetaId);
@@ -7489,7 +7766,225 @@ function createDefaultMetabotDaemonHandlers(input) {
                 return (0, commandResult_1.commandFailed)('session_not_found', `A2A session not found: ${normalizedSessionId}`);
             },
         },
-        llm: {
+        bot: {
+            getStats: async () => {
+                const profiles = await (0, identityProfiles_1.listIdentityProfiles)(normalizedSystemHomeDir).catch(() => []);
+                const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
+                const runtimeState = await runtimeStore.read();
+                const sessions = input.llmExecutor
+                    ? await input.llmExecutor.listSessions(1000)
+                    : [];
+                const totalExecutions = sessions.length;
+                const completedExecutions = sessions.filter((session) => session.status === 'completed').length;
+                return (0, commandResult_1.commandSuccess)({
+                    botCount: profiles.length,
+                    healthyRuntimes: runtimeState.runtimes.filter((runtime) => runtime.health === 'healthy').length,
+                    totalExecutions,
+                    successRate: totalExecutions > 0
+                        ? Math.round((completedExecutions / totalExecutions) * 100)
+                        : 0,
+                });
+            },
+            listProfiles: async () => {
+                const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(normalizedSystemHomeDir);
+                return (0, commandResult_1.commandSuccess)({ profiles });
+            },
+            getProfile: async ({ slug }) => {
+                const profile = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);
+                if (!profile) {
+                    return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+                }
+                return (0, commandResult_1.commandSuccess)({ profile });
+            },
+            createProfile: async (body) => {
+                let createInput;
+                try {
+                    createInput = buildMetabotCreateInput(body);
+                }
+                catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    return /name is required/i.test(message)
+                        ? (0, commandResult_1.commandFailed)('missing_name', 'MetaBot name is required.')
+                        : (0, commandResult_1.commandFailed)('invalid_metabot_profile_create', message);
+                }
+                const name = createInput.name;
+                const profiles = await (0, identityProfiles_1.listIdentityProfiles)(normalizedSystemHomeDir).catch(() => []);
+                const resolvedHome = (0, profileWorkspace_1.resolveIdentityCreateProfileHome)({
+                    systemHomeDir: normalizedSystemHomeDir,
+                    requestedName: name,
+                    profiles,
+                });
+                if (resolvedHome.status !== 'resolved') {
+                    return (0, commandResult_1.commandFailed)('name_taken', resolvedHome.message);
+                }
+                const profileHomeDir = resolvedHome.homeDir;
+                const profileRuntimeStateStore = (0, runtimeStateStore_1.createRuntimeStateStore)(profileHomeDir);
+                const profileSecretStore = (0, fileSecretStore_1.createFileSecretStore)(profileHomeDir);
+                const profileSigner = createSignerForProfileHome(profileHomeDir);
+                const providerValidationProfile = (0, metabotProfileManager_1.buildMetabotProfileDraftFromIdentity)({
+                    ...createInput,
+                    homeDir: profileHomeDir,
+                    globalMetaId: 'pending',
+                    mvcAddress: 'pending',
+                });
+                try {
+                    await validateMetabotProviderAvailability(providerValidationProfile, {
+                        primaryProvider: createInput.primaryProvider,
+                        fallbackProvider: createInput.fallbackProvider,
+                    });
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('invalid_metabot_profile_create', error instanceof Error ? error.message : String(error));
+                }
+                try {
+                    const bootstrap = await (0, bootstrapFlow_1.runBootstrapFlow)({
+                        request: {
+                            name,
+                        },
+                        createMetabot: (0, localIdentityBootstrap_1.createLocalMetabotStep)({
+                            runtimeStateStore: profileRuntimeStateStore,
+                            secretStore: profileSecretStore,
+                        }),
+                        requestSubsidy: (0, localIdentityBootstrap_1.createMetabotSubsidyStep)({
+                            runtimeStateStore: profileRuntimeStateStore,
+                            requestMvcGasSubsidy: input.requestMvcGasSubsidy,
+                        }),
+                        syncIdentityToChain: (0, localIdentityBootstrap_1.createLocalIdentitySyncStep)({
+                            runtimeStateStore: profileRuntimeStateStore,
+                            signer: profileSigner,
+                            stepDelayMs: input.identitySyncStepDelayMs,
+                        }),
+                    });
+                    const nextState = await profileRuntimeStateStore.readState();
+                    const identity = nextState.identity;
+                    if (!bootstrap.success || !identity) {
+                        await node_fs_1.promises.rm(profileHomeDir, { recursive: true, force: true });
+                        return (0, commandResult_1.commandFailed)('identity_bootstrap_failed', bootstrap.error ?? 'MetaBot identity bootstrap failed before the identity was ready.');
+                    }
+                    const chainProfile = (0, metabotProfileManager_1.buildMetabotProfileDraftFromIdentity)({
+                        ...createInput,
+                        homeDir: profileHomeDir,
+                        globalMetaId: identity.globalMetaId,
+                        mvcAddress: identity.mvcAddress,
+                    });
+                    const profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(profileSigner, chainProfile, calculateMetabotCreateChainFields(createInput), {
+                        delayMs: input.identitySyncStepDelayMs,
+                        operation: 'create',
+                    });
+                    const profile = await (0, metabotProfileManager_1.createMetabotProfileFromIdentity)(normalizedSystemHomeDir, {
+                        ...createInput,
+                        homeDir: profileHomeDir,
+                        globalMetaId: identity.globalMetaId,
+                        mvcAddress: identity.mvcAddress,
+                    });
+                    return (0, commandResult_1.commandSuccess)({
+                        profile,
+                        identity,
+                        chainWrites: [...(bootstrap.sync?.chainWrites ?? []), ...profileChainWrites],
+                        subsidy: bootstrap.subsidy,
+                    });
+                }
+                catch (error) {
+                    await (0, metabotProfileManager_1.deleteMetabotProfile)(normalizedSystemHomeDir, resolvedHome.slug)
+                        .catch(() => node_fs_1.promises.rm(profileHomeDir, { recursive: true, force: true }))
+                        .catch(() => undefined);
+                    const message = error instanceof Error ? error.message : String(error);
+                    if (/already exists|ambiguous|duplicate/i.test(message)) {
+                        return (0, commandResult_1.commandFailed)('name_taken', message);
+                    }
+                    return (0, commandResult_1.commandFailed)('metabot_profile_create_failed', message);
+                }
+            },
+            updateProfile: async (body) => {
+                const slug = normalizeText(body.slug);
+                const current = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);
+                if (!current) {
+                    return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${slug || '<missing>'}`);
+                }
+                let update;
+                try {
+                    update = buildMetabotUpdateInput(body);
+                    if (update.name !== undefined && update.name !== current.name) {
+                        const profiles = await (0, identityProfiles_1.listIdentityProfiles)(normalizedSystemHomeDir).catch(() => []);
+                        const duplicate = (0, profileNameResolution_1.resolveProfileNameMatch)(update.name, profiles.filter((profile) => profile.slug !== current.slug));
+                        if (duplicate.status === 'matched' && duplicate.matchType !== 'ranked') {
+                            return (0, commandResult_1.commandFailed)('name_taken', `MetaBot name already exists: ${update.name}`);
+                        }
+                    }
+                    await validateMetabotProviderAvailability(current, update);
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('invalid_metabot_profile_update', error instanceof Error ? error.message : String(error));
+                }
+                const changedFields = calculateMetabotChangedFields(current, update);
+                let chainWrites = [];
+                if (changedFields.length > 0 && !current.globalMetaId) {
+                    return (0, commandResult_1.commandFailed)('chain_identity_missing', 'This MetaBot has no chained identity yet, so profile changes cannot be saved safely.');
+                }
+                if (changedFields.length > 0) {
+                    try {
+                        const profileSigner = createSignerForProfileHome(current.homeDir);
+                        chainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(profileSigner, buildMetabotChainProfile(current, update), changedFields);
+                    }
+                    catch (error) {
+                        return (0, commandResult_1.commandFailed)('chain_sync_failed', `Chain sync failed: ${error instanceof Error ? error.message : String(error)}`);
+                    }
+                }
+                try {
+                    const profile = await (0, metabotProfileManager_1.updateMetabotProfile)(normalizedSystemHomeDir, slug, update);
+                    return (0, commandResult_1.commandSuccess)({ profile, chainWrites });
+                }
+                catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    if (/not found/i.test(message)) {
+                        return (0, commandResult_1.commandFailed)('profile_not_found', message);
+                    }
+                    return (0, commandResult_1.commandFailed)('metabot_profile_update_failed', message);
+                }
+            },
+            getWallet: async ({ slug }) => {
+                try {
+                    const wallet = await (0, metabotProfileManager_1.getMetabotWalletInfo)(normalizedSystemHomeDir, slug);
+                    return (0, commandResult_1.commandSuccess)({ wallet });
+                }
+                catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    if (/not found/i.test(message)) {
+                        return (0, commandResult_1.commandFailed)('profile_not_found', message);
+                    }
+                    return (0, commandResult_1.commandFailed)('metabot_wallet_unavailable', message);
+                }
+            },
+            getBackup: async ({ slug }) => {
+                try {
+                    const backup = await (0, metabotProfileManager_1.getMetabotMnemonicBackup)(normalizedSystemHomeDir, slug);
+                    return (0, commandResult_1.commandSuccess)({ backup });
+                }
+                catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    if (/not found/i.test(message)) {
+                        return (0, commandResult_1.commandFailed)('profile_not_found', message);
+                    }
+                    return (0, commandResult_1.commandFailed)('metabot_backup_unavailable', message);
+                }
+            },
+            deleteProfile: async ({ slug }) => {
+                try {
+                    const result = await (0, metabotProfileManager_1.deleteMetabotProfile)(normalizedSystemHomeDir, slug);
+                    return (0, commandResult_1.commandSuccess)({
+                        deleted: true,
+                        profile: result.profile,
+                        removedExecutorSessions: result.removedExecutorSessions,
+                    });
+                }
+                catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    if (/not found/i.test(message)) {
+                        return (0, commandResult_1.commandFailed)('profile_not_found', message);
+                    }
+                    return (0, commandResult_1.commandFailed)('metabot_profile_delete_failed', message);
+                }
+            },
             listRuntimes: async () => {
                 const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
                 const state = await runtimeStore.read();
@@ -7498,8 +7993,108 @@ function createDefaultMetabotDaemonHandlers(input) {
             discoverRuntimes: async () => {
                 const result = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: process.env });
                 const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
+                const previous = await runtimeStore.read();
+                const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
                 for (const runtime of result.runtimes) {
                     await runtimeStore.upsertRuntime(runtime);
+                }
+                for (const runtime of previous.runtimes) {
+                    if (runtime.provider === 'custom')
+                        continue;
+                    if (!discoveredRuntimeIds.has(runtime.id) && runtime.health !== 'unavailable') {
+                        await runtimeStore.updateHealth(runtime.id, 'unavailable');
+                    }
+                }
+                const updated = await runtimeStore.read();
+                return (0, commandResult_1.commandSuccess)({ discovered: result.runtimes.length, runtimes: updated.runtimes, errors: result.errors });
+            },
+            listSessions: async ({ slug, limit }) => {
+                if (!input.llmExecutor) {
+                    return (0, commandResult_1.commandFailed)('llm_executor_not_configured', 'LLM executor is not configured.');
+                }
+                const normalizedSlug = normalizeText(slug);
+                const sessions = await input.llmExecutor.listSessions(limit, normalizedSlug ? { metaBotSlug: normalizedSlug } : undefined);
+                return (0, commandResult_1.commandSuccess)({
+                    sessions,
+                });
+            },
+        },
+        llm: {
+            execute: async (body) => {
+                if (!input.llmExecutor) {
+                    return (0, commandResult_1.commandFailed)('llm_executor_not_configured', 'LLM executor is not configured.');
+                }
+                const runtimeId = normalizeText(body.runtimeId);
+                const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
+                const runtimeState = await runtimeStore.read();
+                const runtime = runtimeState.runtimes.find((entry) => entry.id === runtimeId);
+                if (!runtime) {
+                    return (0, commandResult_1.commandFailed)('llm_runtime_not_found', `LLM runtime not found: ${runtimeId || '<missing>'}`);
+                }
+                if (runtime.health !== 'healthy') {
+                    return (0, commandResult_1.commandFailed)('llm_runtime_unhealthy', `LLM runtime is not healthy: ${runtimeId}`);
+                }
+                const request = buildLlmExecutionRequest(body, runtime);
+                if (!request) {
+                    return (0, commandResult_1.commandFailed)('invalid_llm_execute_request', 'runtimeId and prompt are required.');
+                }
+                try {
+                    const sessionId = await input.llmExecutor.execute(request);
+                    return (0, commandResult_1.commandSuccess)({ sessionId, status: 'starting' });
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('llm_execute_failed', error instanceof Error ? error.message : String(error));
+                }
+            },
+            getSession: async ({ sessionId }) => {
+                if (!input.llmExecutor) {
+                    return (0, commandResult_1.commandFailed)('llm_executor_not_configured', 'LLM executor is not configured.');
+                }
+                const session = await input.llmExecutor.getSession(sessionId);
+                if (!session) {
+                    return (0, commandResult_1.commandFailed)('llm_session_not_found', `LLM session not found: ${sessionId}`);
+                }
+                return (0, commandResult_1.commandSuccess)(session);
+            },
+            cancelSession: async ({ sessionId }) => {
+                if (!input.llmExecutor) {
+                    return (0, commandResult_1.commandFailed)('llm_executor_not_configured', 'LLM executor is not configured.');
+                }
+                await input.llmExecutor.cancel(sessionId);
+                return (0, commandResult_1.commandSuccess)({ status: 'cancelled' });
+            },
+            listSessions: async ({ limit }) => {
+                if (!input.llmExecutor) {
+                    return (0, commandResult_1.commandFailed)('llm_executor_not_configured', 'LLM executor is not configured.');
+                }
+                const sessions = await input.llmExecutor.listSessions(limit);
+                return (0, commandResult_1.commandSuccess)({ sessions });
+            },
+            streamSessionEvents: async ({ sessionId }) => {
+                if (!input.llmExecutor) {
+                    return (async function* emptyStream() { })();
+                }
+                return input.llmExecutor.streamEvents(sessionId);
+            },
+            listRuntimes: async () => {
+                const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
+                const state = await runtimeStore.read();
+                return (0, commandResult_1.commandSuccess)(state);
+            },
+            discoverRuntimes: async () => {
+                const result = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: process.env });
+                const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
+                const previous = await runtimeStore.read();
+                const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
+                for (const runtime of result.runtimes) {
+                    await runtimeStore.upsertRuntime(runtime);
+                }
+                for (const runtime of previous.runtimes) {
+                    if (runtime.provider === 'custom')
+                        continue;
+                    if (!discoveredRuntimeIds.has(runtime.id) && runtime.health !== 'unavailable') {
+                        await runtimeStore.updateHealth(runtime.id, 'unavailable');
+                    }
                 }
                 const updated = await runtimeStore.read();
                 return (0, commandResult_1.commandSuccess)({ discovered: result.runtimes.length, runtimes: updated.runtimes, errors: result.errors });

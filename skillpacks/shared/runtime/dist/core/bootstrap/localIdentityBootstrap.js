@@ -187,6 +187,7 @@ function createLocalIdentitySyncStep(input) {
         }
         let currentState = await input.runtimeStateStore.readState();
         const currentIdentity = currentState.identity;
+        const chainWrites = [];
         if (!currentIdentity) {
             return {
                 success: false,
@@ -197,6 +198,7 @@ function createLocalIdentitySyncStep(input) {
         if (currentIdentity.syncState === 'synced') {
             return {
                 success: true,
+                chainWrites,
             };
         }
         if (!currentIdentity.namePinId) {
@@ -208,6 +210,7 @@ function createLocalIdentitySyncStep(input) {
                     payload: currentIdentity.name || context.request.name || 'MetaBot',
                     network: 'mvc',
                 });
+                chainWrites.push(nameResult);
                 currentState = await input.runtimeStateStore.updateState((nextState) => ({
                     ...nextState,
                     identity: nextState.identity
@@ -253,6 +256,7 @@ function createLocalIdentitySyncStep(input) {
             }));
             return {
                 success: true,
+                chainWrites,
             };
         }
         const chatPublicKey = normalizeText(identityForChat.chatPublicKey);
@@ -267,6 +271,7 @@ function createLocalIdentitySyncStep(input) {
                 success: false,
                 error,
                 canSkip: true,
+                chainWrites,
             };
         }
         try {
@@ -277,6 +282,7 @@ function createLocalIdentitySyncStep(input) {
                 payload: chatPublicKey,
                 network: 'mvc',
             });
+            chainWrites.push(chatResult);
             await updateIdentityRecord(input.runtimeStateStore, (identity) => ({
                 ...identity,
                 chatPublicKeyPinId: chatResult.pinId,
@@ -285,6 +291,7 @@ function createLocalIdentitySyncStep(input) {
             }));
             return {
                 success: true,
+                chainWrites,
             };
         }
         catch (error) {
@@ -298,6 +305,7 @@ function createLocalIdentitySyncStep(input) {
                 success: false,
                 error: message,
                 canSkip: true,
+                chainWrites,
             };
         }
     };

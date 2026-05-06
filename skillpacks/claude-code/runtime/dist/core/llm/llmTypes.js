@@ -1,19 +1,52 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.HOST_SEARCH_ORDER = exports.HOST_BINARY_MAP = exports.SUPPORTED_LLM_PROVIDERS = void 0;
+exports.HOST_SEARCH_ORDER = exports.PROVIDER_DISPLAY_NAMES = exports.HOST_BINARY_MAP = exports.SUPPORTED_LLM_PROVIDERS = void 0;
 exports.isLlmProvider = isLlmProvider;
 exports.isLlmBindingRole = isLlmBindingRole;
 exports.normalizeLlmRuntime = normalizeLlmRuntime;
 exports.normalizeLlmBinding = normalizeLlmBinding;
 exports.normalizeLlmRuntimesState = normalizeLlmRuntimesState;
 exports.normalizeLlmBindingsState = normalizeLlmBindingsState;
-exports.SUPPORTED_LLM_PROVIDERS = ['claude-code', 'codex', 'openclaw'];
+exports.SUPPORTED_LLM_PROVIDERS = [
+    'claude-code',
+    'codex',
+    'copilot',
+    'opencode',
+    'openclaw',
+    'hermes',
+    'gemini',
+    'pi',
+    'cursor',
+    'kimi',
+    'kiro',
+];
 exports.HOST_BINARY_MAP = {
     'claude-code': 'claude',
     'codex': 'codex',
+    'copilot': 'gh',
+    'opencode': 'opencode',
     'openclaw': 'openclaw',
+    'hermes': 'hermes',
+    'gemini': 'gemini',
+    'pi': 'pi',
+    'cursor': 'cursor-agent',
+    'kimi': 'kimi',
+    'kiro': 'kiro-cli',
 };
-exports.HOST_SEARCH_ORDER = ['claude-code', 'codex', 'openclaw'];
+exports.PROVIDER_DISPLAY_NAMES = {
+    'claude-code': 'Claude Code',
+    'codex': 'Codex (OpenAI)',
+    'copilot': 'GitHub Copilot CLI',
+    'opencode': 'OpenCode',
+    'openclaw': 'OpenClaw',
+    'hermes': 'Hermes',
+    'gemini': 'Gemini CLI',
+    'pi': 'Pi',
+    'cursor': 'Cursor Agent',
+    'kimi': 'Kimi',
+    'kiro': 'Kiro CLI',
+};
+exports.HOST_SEARCH_ORDER = [...exports.SUPPORTED_LLM_PROVIDERS];
 // ---- normalizers ----
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -42,7 +75,7 @@ function normalizeOptionalString(value) {
 }
 // ---- type guards ----
 function isLlmProvider(value) {
-    return typeof value === 'string' && ['claude-code', 'codex', 'openclaw', 'custom'].includes(value);
+    return typeof value === 'string' && [...exports.SUPPORTED_LLM_PROVIDERS, 'custom'].includes(value);
 }
 function isLlmAuthState(value) {
     return typeof value === 'string' && ['unknown', 'authenticated', 'unauthenticated'].includes(value);

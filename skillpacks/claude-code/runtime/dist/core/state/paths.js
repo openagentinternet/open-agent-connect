@@ -90,6 +90,9 @@ function buildMetabotPaths(input) {
         llmBindingsPath: input.llmBindingsPath,
         llmSecretsRoot: input.llmSecretsRoot,
         preferredLlmRuntimePath: input.preferredLlmRuntimePath,
+        llmExecutorRoot: input.llmExecutorRoot,
+        llmExecutorSessionsRoot: input.llmExecutorSessionsRoot,
+        llmExecutorTranscriptsRoot: input.llmExecutorTranscriptsRoot,
         // Temporary compatibility aliases for untouched later-task modules.
         baseRoot: input.metabotRoot,
         exportRoot: input.exportsRoot,
@@ -105,6 +108,7 @@ function resolveMetabotPaths(homeDir) {
     const exportsRoot = node_path_1.default.join(runtimeRoot, 'exports');
     const stateRoot = node_path_1.default.join(runtimeRoot, 'state');
     const locksRoot = node_path_1.default.join(runtimeRoot, 'locks');
+    const llmExecutorRoot = node_path_1.default.join(metabotRoot, 'LLM', 'executor');
     return buildMetabotPaths({
         systemHomeDir,
         metabotRoot,
@@ -139,5 +143,8 @@ function resolveMetabotPaths(homeDir) {
         llmBindingsPath: node_path_1.default.join(profileRoot, 'llmbindings.json'),
         llmSecretsRoot: node_path_1.default.join(metabotRoot, 'LLM', 'secrets'),
         preferredLlmRuntimePath: node_path_1.default.join(profileRoot, 'preferred-llm-runtime.json'),
+        llmExecutorRoot,
+        llmExecutorSessionsRoot: node_path_1.default.join(llmExecutorRoot, 'sessions'),
+        llmExecutorTranscriptsRoot: node_path_1.default.join(llmExecutorRoot, 'transcripts'),
     });
 }

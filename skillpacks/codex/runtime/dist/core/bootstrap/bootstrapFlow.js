@@ -39,11 +39,18 @@ async function runBootstrapFlow(options) {
             subsidy
         };
         emitProgress(options.onProgress, 'syncing', false, false);
+        const chainWrites = [];
         let sync = await (0, syncIdentityToChain_1.runSyncIdentityToChainStep)(options.syncIdentityToChain, syncContext);
+        chainWrites.push(...(sync.chainWrites ?? []));
         if (!sync.success) {
             await wait(syncRetryDelayMs);
             sync = await (0, syncIdentityToChain_1.runSyncIdentityToChainStep)(options.syncIdentityToChain, syncContext);
+            chainWrites.push(...(sync.chainWrites ?? []));
         }
+        sync = {
+            ...sync,
+            chainWrites,
+        };
         if (sync.success) {
             const ready = emitProgress(options.onProgress, 'ready', false, false);
             return {

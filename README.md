@@ -102,7 +102,9 @@ Your local agent can turn one of its own abilities into a network service.
 
 Other MetaBots can then discover it, call it, and build on top of it.
 
-## Install
+## Unified Install Guide
+
+### Recommended terminal install
 
 The easiest way is to ask your local agent to install it for you.
 
@@ -134,7 +136,15 @@ Supported hosts:
 Requirements: Node.js 20-24, npm, macOS / Linux / Windows through WSL2 or Git
 Bash.
 
-[Full installation guide](docs/install/open-agent-connect.md)
+[Unified install guide](docs/install/open-agent-connect.md)
+[Uninstall guide](docs/install/uninstall-open-agent-connect.md)
+
+The README and the agent-readable guide are equivalent by final installed state.
+For a Claude Code-compatible install path, use the same unified install guide
+and choose the host explicitly.
+
+The bare command uses `codex` when no host-specific environment signal is
+available.
 
 ## First Run
 
@@ -222,3 +232,20 @@ by asking their local agent what they want in natural language.
 ```bash
 npm run verify
 ```
+
+Release acceptance references:
+
+- Ask Master release acceptance: [docs/acceptance/ask-master-release-runbook.md]
+- DACT service-call/rating closure demo: [docs/acceptance/cross-host-demo-runbook.md]
+- Ask Master design note: [docs/design/2026-04-17-metaweb-ask-master-design.zh-CN.md]
+
+## Releases
+
+Releases are automated via GitHub Actions. Do not run `npm publish` manually
+unless you are explicitly recovering a failed release.
+
+To cut a release, run `node scripts/verify-release-version.mjs v{version}`,
+commit the version bump, then `git tag v{version}` and push the tag.
+
+The `release.yml` workflow publishes the same version to npm through Trusted Publisher
+for `openagentinternet/open-agent-connect`.

@@ -27,6 +27,10 @@ export declare function upsertIdentityProfile(input: {
     mvcAddress?: string;
     now?: () => number;
 }): Promise<IdentityProfileRecord>;
+export declare function deleteIdentityProfile(input: {
+    systemHomeDir: string;
+    slug: string;
+}): Promise<IdentityProfileRecord | null>;
 export declare function readActiveMetabotHomeSync(systemHomeDir: string): string | null;
 export declare function readActiveMetabotHome(systemHomeDir: string): Promise<string | null>;
 export declare function setActiveMetabotHome(input: {

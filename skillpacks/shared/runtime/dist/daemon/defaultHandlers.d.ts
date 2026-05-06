@@ -1,4 +1,5 @@
 import { createRuntimeStateStore, type RuntimeDaemonRecord } from '../core/state/runtimeStateStore';
+import type { LlmExecutor } from '../core/llm/executor';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 import type { SessionTraceRecord } from '../core/chat/sessionTrace';
 import { exportSessionArtifacts } from '../core/chat/transcriptExport';
@@ -49,5 +50,7 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     buyerRatingReplyRunner?: ChatReplyRunner;
     onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
     requestMvcGasSubsidy?: (options: RequestMvcGasSubsidyOptions) => Promise<RequestMvcGasSubsidyResult>;
+    createSignerForHome?: (homeDir: string) => Signer;
     autoReplyConfig?: PrivateChatAutoReplyConfig;
+    llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
 }): MetabotDaemonHttpHandlers;

@@ -33,6 +33,17 @@ export interface FetchPrivateHistoryInput {
     afterIndex?: number;
     limit: number;
 }
+export interface FetchPrivateHistoryPageInput {
+    selfGlobalMetaId: string;
+    peerGlobalMetaId: string;
+    startIndex?: number;
+    limit: number;
+}
+export interface PrivateChatHistoryPage {
+    rows: unknown[];
+    total: number | null;
+    nextTimestamp: number | null;
+}
 export type FetchPrivateHistory = (input: FetchPrivateHistoryInput) => Promise<unknown[]>;
 export interface PrivateConversationResponse {
     ok: true;
@@ -44,6 +55,10 @@ export interface PrivateConversationResponse {
 }
 export declare function normalizeConversationLimit(value: unknown): number;
 export declare function normalizeConversationAfterIndex(value: unknown): number | undefined;
+export declare function fetchPrivateChatHistoryPage(input: FetchPrivateHistoryPageInput & {
+    fetchImpl?: typeof fetch;
+    idChatApiBaseUrl?: string;
+}): Promise<PrivateChatHistoryPage>;
 export declare function fetchPrivateChatHistory(input: FetchPrivateHistoryInput & {
     fetchImpl?: typeof fetch;
     idChatApiBaseUrl?: string;

@@ -9,6 +9,7 @@ export interface LlmRuntimeResolverOptions {
 export interface ResolveRuntimeInput {
     metaBotSlug?: string;
     explicitRuntimeId?: string;
+    excludeRuntimeIds?: string[];
 }
 export interface ResolveRuntimeResult {
     runtime: LlmRuntime | null;

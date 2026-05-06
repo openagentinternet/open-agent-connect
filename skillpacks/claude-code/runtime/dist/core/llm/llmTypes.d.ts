@@ -1,9 +1,10 @@
-export type LlmProvider = 'claude-code' | 'codex' | 'openclaw' | 'custom';
+export type LlmProvider = 'claude-code' | 'codex' | 'copilot' | 'opencode' | 'openclaw' | 'hermes' | 'gemini' | 'pi' | 'cursor' | 'kimi' | 'kiro' | 'custom';
 export type LlmAuthState = 'unknown' | 'authenticated' | 'unauthenticated';
 export type LlmHealth = 'healthy' | 'degraded' | 'unavailable';
 export type LlmBindingRole = 'primary' | 'fallback' | 'reviewer' | 'specialist';
 export declare const SUPPORTED_LLM_PROVIDERS: LlmProvider[];
 export declare const HOST_BINARY_MAP: Record<string, string>;
+export declare const PROVIDER_DISPLAY_NAMES: Record<string, string>;
 export declare const HOST_SEARCH_ORDER: LlmProvider[];
 export interface LlmRuntime {
     id: string;

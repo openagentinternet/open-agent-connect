@@ -6,45 +6,781 @@
     <title>__PAGE_TITLE__</title>
     <link rel="stylesheet" href="/ui/shared.css" />
     <style>
-      .rt-name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
-      .rt-path { font-size: 11px; font-family: var(--mono); color: var(--dim); word-break: break-all; }
-      .rt-version { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
-      .rt-auth { font-family: var(--mono); font-size: 11px; white-space: nowrap; }
-      .rt-auth.ok { color: var(--green); }
-      .rt-auth.nope { color: var(--dim); }
-      .binding-role-badge {
-        display: inline-block; font-family: var(--mono); font-size: 10px; font-weight: 500;
-        text-transform: uppercase; letter-spacing: .06em; padding: 2px 8px; border-radius: 4px;
+      .bot-shell {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
       }
-      .binding-role-badge.primary    { background: var(--green-dim);  color: var(--green); }
-      .binding-role-badge.fallback   { background: var(--amber-dim);  color: var(--amber); }
-      .binding-role-badge.reviewer   { background: var(--accent-dim); color: var(--accent); }
-      .binding-role-badge.specialist { background: var(--purple-dim); color: var(--purple); }
-      .binding-runtime-name { font-size: 13px; font-weight: 500; color: var(--text); }
-      .binding-priority { font-family: var(--mono); font-size: 11px; color: var(--dim); }
-      .binding-last-used { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
-      .disabled-row td { opacity: .4; }
-      .binding-form-row {
-        display: flex; align-items: flex-end; gap: 10px; padding: 14px 16px;
-        background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
-        margin-bottom: 14px; flex-wrap: wrap;
+      .bot-shell [hidden] {
+        display: none !important;
       }
-      .binding-form-row select, .binding-form-row input {
-        background: var(--bg); border: 1px solid var(--border2); border-radius: var(--radius-sm);
-        padding: 8px 12px; color: var(--text); font-family: var(--sans); font-size: 13px;
+
+      .bot-stats {
+        display: flex;
+        gap: 12px;
+        padding: 16px 24px 0;
+        flex-shrink: 0;
+        flex-wrap: wrap;
       }
-      .binding-form-row select:focus, .binding-form-row input:focus { outline: none; border-color: var(--accent); }
-      .preferred-indicator { font-family: var(--mono); font-size: 10px; color: var(--accent); white-space: nowrap; }
-      .profile-select {
-        background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius-sm);
-        padding: 9px 12px; color: var(--text); font-family: var(--sans); font-size: 13px; min-width: 280px;
+      .bot-stats .stat-card {
+        flex: 1;
+        min-width: 126px;
       }
-      .profile-select:focus { outline: none; border-color: var(--accent); }
-      .profile-meta { font-size: 11px; font-family: var(--mono); color: var(--dim); margin-left: 12px; }
+
+      .bot-workspace {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+        margin: 16px 24px 24px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        background: var(--surface);
+      }
+
+      .metabot-panel {
+        width: 304px;
+        flex-shrink: 0;
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--surface);
+      }
+      .metabot-panel-header {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .metabot-panel-title {
+        font-size: 11px;
+        font-family: var(--mono);
+        font-weight: 500;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        flex: 1;
+      }
+      .metabot-panel-count {
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--dim);
+      }
+      .metabot-list-scroll {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+      }
+      .metabot-list-scroll::-webkit-scrollbar,
+      .tab-content::-webkit-scrollbar,
+      .history-scroll::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+      }
+      .metabot-list-scroll::-webkit-scrollbar-track,
+      .tab-content::-webkit-scrollbar-track,
+      .history-scroll::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .metabot-list-scroll::-webkit-scrollbar-thumb,
+      .tab-content::-webkit-scrollbar-thumb,
+      .history-scroll::-webkit-scrollbar-thumb {
+        background: var(--border2);
+        border-radius: 2px;
+      }
+
+      .metabot-item {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        transition: background .1s;
+        outline: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .metabot-item:hover {
+        background: var(--surface2);
+      }
+      .metabot-item.selected {
+        background: var(--surface3);
+        border-left: 2px solid var(--accent);
+        padding-left: 14px;
+      }
+      .metabot-item.selected:hover {
+        background: var(--surface3);
+      }
+      .metabot-avatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        object-fit: cover;
+        flex-shrink: 0;
+        background: var(--surface2);
+        border: 1px solid var(--border2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-family: var(--mono);
+        color: var(--dim);
+        overflow: hidden;
+      }
+      .metabot-avatar img,
+      .info-avatar-preview img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .metabot-item-info {
+        min-width: 0;
+        flex: 1;
+      }
+      .metabot-item-name {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .metabot-item-id-row {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-top: 2px;
+      }
+      .metabot-item-id {
+        font-size: 10px;
+        font-family: var(--mono);
+        color: var(--dim);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .icon-btn {
+        width: 24px;
+        height: 24px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        padding: 0;
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        flex-shrink: 0;
+        transition: color .12s, background .12s, border-color .12s;
+      }
+      .icon-btn:hover {
+        color: var(--text);
+        background: var(--surface2);
+        border-color: var(--border2);
+      }
+      .metabot-panel-footer {
+        padding: 10px 16px;
+        border-top: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .metabot-panel-footer .btn {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .detail-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        min-width: 0;
+        background: var(--bg);
+      }
+      .detail-empty,
+      .detail-loading {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        font-size: 13px;
+        flex-direction: column;
+        gap: 8px;
+        padding: 32px;
+        text-align: center;
+      }
+      .detail-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        flex-shrink: 0;
+      }
+      .detail-title {
+        min-width: 0;
+        flex: 1;
+      }
+      .detail-title strong {
+        display: block;
+        font-size: 13px;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .detail-title span {
+        display: block;
+        margin-top: 2px;
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--dim);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .detail-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      .tab-bar {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        flex-shrink: 0;
+        padding: 0 12px;
+      }
+      .tab-btn {
+        padding: 12px 16px;
+        font-size: 12px;
+        font-family: var(--mono);
+        font-weight: 500;
+        color: var(--muted);
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        cursor: pointer;
+        transition: color .15s, border-color .15s;
+        white-space: nowrap;
+      }
+      .tab-btn:hover {
+        color: var(--text);
+      }
+      .tab-btn.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
+      .tab-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px 24px;
+        min-height: 0;
+      }
+      .tab-panel {
+        display: none;
+      }
+      .tab-panel.active {
+        display: block;
+      }
+
+      .info-avatar-section {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 20px;
+      }
+      .info-avatar-preview {
+        width: 72px;
+        height: 72px;
+        border-radius: 50%;
+        object-fit: cover;
+        background: var(--surface2);
+        border: 1px dashed var(--border2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        font-family: var(--mono);
+        color: var(--dim);
+        overflow: hidden;
+        flex-shrink: 0;
+      }
+      .info-avatar-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+      .info-id-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 20px;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--dim);
+        min-width: 0;
+      }
+      .info-id-row code {
+        background: var(--surface2);
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        overflow-wrap: anywhere;
+        word-break: break-all;
+        min-width: 0;
+      }
+      .info-form-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 16px;
+      }
+      .info-form-grid .field-full {
+        grid-column: 1 / -1;
+      }
+      .info-form-grid textarea {
+        min-height: 88px;
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .info-save-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+      }
+      .save-status {
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--muted);
+      }
+      .save-status.success {
+        color: var(--green);
+      }
+      .save-status.error {
+        color: var(--red);
+      }
+      .save-status.saving {
+        color: var(--amber);
+      }
+      .provider-field {
+        position: relative;
+      }
+      .provider-picker {
+        position: relative;
+      }
+      .provider-trigger,
+      .provider-option {
+        width: 100%;
+        min-height: 36px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text);
+        font-size: 12px;
+        padding: 7px 9px;
+        cursor: pointer;
+        text-align: left;
+      }
+      .provider-trigger:hover,
+      .provider-option:hover {
+        background: var(--surface2);
+        border-color: var(--border2);
+      }
+      .provider-trigger span:nth-child(2),
+      .provider-option span:nth-child(2) {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+      }
+      .provider-caret {
+        margin-left: auto;
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 10px;
+      }
+      .provider-logo {
+        width: 18px;
+        height: 18px;
+        border-radius: 5px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--mono);
+        font-size: 8px;
+        font-weight: 600;
+        flex-shrink: 0;
+        color: #fff;
+        background: #475569;
+      }
+      .provider-logo svg {
+        width: 14px;
+        height: 14px;
+        display: block;
+      }
+      .provider-logo-codex {
+        background: #111827;
+      }
+      .provider-logo-claude-code {
+        background: #d97757;
+      }
+      .provider-logo-openclaw {
+        background: #e8453a;
+      }
+      .provider-logo-opencode {
+        background: #656363;
+      }
+      .provider-logo-cursor {
+        background: #43413c;
+      }
+      .provider-logo-kimi,
+      .provider-logo-kiro {
+        background: #7048e8;
+      }
+      .provider-menu {
+        position: absolute;
+        z-index: 20;
+        top: calc(100% + 4px);
+        left: 0;
+        right: 0;
+        display: grid;
+        gap: 4px;
+        max-height: 220px;
+        overflow-y: auto;
+        padding: 6px;
+        border: 1px solid var(--border2);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        box-shadow: 0 14px 32px rgba(15,23,42,.16);
+      }
+      .provider-option[selected] {
+        border-color: var(--accent);
+        background: var(--surface3);
+      }
+      .provider-empty {
+        padding: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .history-scroll {
+        overflow: auto;
+      }
+      .history-scroll .table-wrap {
+        overflow-x: auto;
+        overflow-y: hidden;
+      }
+      .exec-table {
+        width: 100%;
+        min-width: 860px;
+        table-layout: fixed;
+      }
+      .exec-table th:nth-child(1),
+      .exec-table td:nth-child(1) { width: 150px; }
+      .exec-table th:nth-child(2),
+      .exec-table td:nth-child(2) { width: 110px; }
+      .exec-table th:nth-child(3),
+      .exec-table td:nth-child(3) { width: 130px; }
+      .exec-table th:nth-child(4),
+      .exec-table td:nth-child(4) { width: 120px; }
+      .exec-table th:nth-child(5),
+      .exec-table td:nth-child(5) { width: 92px; }
+      .exec-table th:nth-child(7),
+      .exec-table td:nth-child(7) { width: 96px; }
+      .exec-time,
+      .exec-provider,
+      .exec-duration {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .exec-runtime {
+        font-size: 12px;
+        color: var(--text);
+        white-space: nowrap;
+      }
+      .exec-prompt {
+        font-size: 12px;
+        color: var(--muted);
+        max-width: 300px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .exec-detail-row td {
+        background: var(--surface2);
+        border-top: 0;
+        padding: 0 12px 12px;
+      }
+      .exec-detail {
+        display: grid;
+        grid-template-columns: minmax(0,1fr) minmax(0,1fr);
+        gap: 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg);
+        padding: 12px;
+      }
+      .exec-detail-label {
+        font-family: var(--mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: var(--dim);
+        margin-bottom: 6px;
+      }
+      .exec-detail pre {
+        margin: 0;
+        max-height: 180px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.45;
+        color: var(--text);
+      }
+
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,.62);
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      .modal-overlay.hidden {
+        display: none;
+      }
+      .modal-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 22px;
+        width: 440px;
+        max-width: 100%;
+      }
+      .modal-box-wide {
+        width: 620px;
+      }
+      .modal-title-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      .modal-title {
+        font-size: 15px;
+        font-family: var(--mono);
+        font-weight: 500;
+        color: var(--text);
+        flex: 1;
+      }
+      .modal-body {
+        display: grid;
+        gap: 14px;
+      }
+      .modal-note {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .modal-section-title {
+        margin-top: 2px;
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+      }
+      .modal-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        margin-top: 20px;
+      }
+      .identity-result,
+      .wallet-row,
+      .txid-row,
+      .delete-target {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        justify-content: space-between;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        padding: 10px 12px;
+        min-width: 0;
+      }
+      .identity-result > div,
+      .wallet-row > div,
+      .txid-row > div {
+        min-width: 0;
+        display: grid;
+        gap: 4px;
+      }
+      .identity-result span,
+      .wallet-row span,
+      .delete-target span,
+      .txid-path {
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+      }
+      .identity-result code,
+      .wallet-row code,
+      .txid-row code {
+        color: var(--text);
+        font-family: var(--mono);
+        font-size: 11px;
+        overflow-wrap: anywhere;
+        word-break: break-all;
+      }
+      .txid-list {
+        display: grid;
+        gap: 8px;
+      }
+      .warning-panel {
+        border: 1px solid rgba(245,158,11,.34);
+        background: rgba(245,158,11,.08);
+        border-radius: var(--radius-sm);
+        padding: 12px;
+        display: grid;
+        gap: 6px;
+        color: var(--text);
+      }
+      .warning-panel strong {
+        font-size: 13px;
+      }
+      .warning-panel span {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .warning-panel.danger {
+        border-color: rgba(239,68,68,.36);
+        background: rgba(239,68,68,.08);
+      }
+      .mnemonic-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0,1fr));
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .mnemonic-word {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        padding: 8px;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        min-width: 0;
+      }
+      .mnemonic-word span {
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 10px;
+        width: 18px;
+        flex-shrink: 0;
+      }
+      .mnemonic-word code {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .copy-toast {
+        position: fixed;
+        right: 24px;
+        bottom: 24px;
+        z-index: 120;
+        padding: 8px 12px;
+        border-radius: var(--radius-sm);
+        background: rgba(16,24,40,.94);
+        color: #fff;
+        font-size: 12px;
+        font-family: var(--mono);
+        text-align: center;
+        box-shadow: 0 8px 22px rgba(0,0,0,.22);
+        opacity: 0;
+        transform: translateY(8px);
+        pointer-events: none;
+        transition: opacity .16s, transform .16s;
+      }
+      .copy-toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      @media (max-width: 768px) {
+        .bot-stats {
+          padding: 12px 16px 0;
+        }
+        .bot-workspace {
+          margin: 12px 16px 16px;
+          flex-direction: column;
+        }
+        .metabot-panel {
+          width: 100%;
+          border-right: none;
+          border-bottom: 1px solid var(--border);
+          max-height: 220px;
+        }
+        .detail-panel {
+          min-height: 320px;
+        }
+        .detail-header {
+          align-items: flex-start;
+          flex-wrap: wrap;
+        }
+        .detail-actions {
+          width: 100%;
+          justify-content: flex-start;
+        }
+        .tab-content {
+          padding: 16px;
+        }
+        .info-form-grid,
+        .exec-detail,
+        .mnemonic-grid {
+          grid-template-columns: 1fr;
+        }
+        .info-id-row {
+          align-items: flex-start;
+          flex-wrap: wrap;
+        }
+      }
     </style>
   </head>
   <body>
-    <div class="shell">
+    <div class="bot-shell">
       <header class="topbar">
         <a class="topbar-logo" href="/ui/hub">MetaBot</a>
         <div class="topbar-sep"></div>
@@ -53,123 +789,116 @@
         <nav class="topbar-nav">__PAGE_NAV__</nav>
       </header>
 
-      <main class="content">
-        <div class="stats-row">
-          <div class="stat-card">
-            <div class="stat-label">Runtimes</div>
-            <div class="stat-value green" data-stat-runtimes>—</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Profiles</div>
-            <div class="stat-value" data-stat-profiles>—</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Total Bindings</div>
-            <div class="stat-value accent" data-stat-bindings>—</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Active Profile</div>
-            <div class="stat-value sm" data-stat-active>—</div>
-          </div>
+      <div class="bot-stats">
+        <div class="stat-card">
+          <div class="stat-label">Bots</div>
+          <div class="stat-value accent" data-stat-bots>-</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-label">Runtimes</div>
+          <div class="stat-value green" data-stat-runtimes>-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Executions</div>
+          <div class="stat-value" data-stat-executions>-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Success Rate</div>
+          <div class="stat-value" data-stat-success>-</div>
+        </div>
+      </div>
 
-        <div class="section-header">
-          <span class="section-title">PROFILE</span>
-        </div>
-        <div style="margin-bottom:20px">
-          <select class="profile-select" data-profile-select>
-            <option value="">-- select a profile --</option>
-          </select>
-          <span class="profile-meta" data-profile-meta></span>
-        </div>
-
-        <div class="section-header">
-          <span class="section-title">LLM RUNTIMES</span>
-          <span class="section-badge green" data-runtime-count-badge>0 available</span>
-          <span class="section-spacer"></span>
-          <button class="btn btn-sm" id="discover-btn">↻ discover</button>
-        </div>
-        <div class="table-wrap" style="margin-bottom:24px">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Runtime</th>
-                <th>Binary Path</th>
-                <th>Version</th>
-                <th>Auth</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody data-runtime-list>
-              <tr><td colspan="5" class="table-empty"><strong>No runtimes discovered</strong>Click discover to scan PATH for available LLM binaries.</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="section-header">
-          <span class="section-title">BINDINGS</span>
-          <span class="section-badge accent" data-binding-count-badge>—</span>
-          <span class="section-spacer"></span>
-          <span class="section-meta" data-preferred-label></span>
-        </div>
-        <div class="card" data-no-bindings style="display:none">
-          <div class="card-title">No bindings yet</div>
-          <div class="card-subtitle">Select a profile and add bindings below to connect this MetaBot to an LLM runtime.</div>
-        </div>
-        <div class="table-wrap" style="margin-bottom:14px" data-bindings-table-wrap>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Role</th>
-                <th>Runtime</th>
-                <th>Priority</th>
-                <th>Last Used</th>
-                <th>Enabled</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody data-binding-list></tbody>
-          </table>
-        </div>
-
-        <div class="section-header">
-          <span class="section-title">ADD BINDING</span>
-        </div>
-        <div class="binding-form-row">
-          <div style="display:flex;flex-direction:column;gap:6px">
-            <div style="font-size:11px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Runtime</div>
-            <select data-new-runtime style="min-width:200px"></select>
+      <main class="bot-workspace">
+        <aside class="metabot-panel" aria-label="MetaBot list">
+          <div class="metabot-panel-header">
+            <span class="metabot-panel-title">MetaBots</span>
+            <span class="metabot-panel-count" data-metabot-count>0</span>
           </div>
-          <div style="display:flex;flex-direction:column;gap:6px">
-            <div style="font-size:11px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Role</div>
-            <select data-new-role>
-              <option value="primary">primary</option>
-              <option value="fallback">fallback</option>
-              <option value="reviewer">reviewer</option>
-              <option value="specialist">specialist</option>
-            </select>
+          <div class="metabot-list-scroll">
+            <div data-metabot-list>
+              <div class="session-empty">
+                <p>No MetaBots yet</p>
+              </div>
+            </div>
           </div>
-          <div style="display:flex;flex-direction:column;gap:6px">
-            <div style="font-size:11px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Priority</div>
-            <input type="number" data-new-priority value="0" min="0" style="width:80px" />
+          <div class="metabot-panel-footer">
+            <button class="btn btn-primary" data-act="add-metabot">+ Add MetaBot</button>
           </div>
-          <button class="btn btn-primary" id="add-binding-btn">+ Add Binding</button>
-        </div>
+        </aside>
 
-        <div class="section-header">
-          <span class="section-title">PREFERRED RUNTIME</span>
-        </div>
-        <div class="binding-form-row">
-          <div style="display:flex;flex-direction:column;gap:6px;flex:1">
-            <div style="font-size:11px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Default Runtime</div>
-            <select data-preferred-runtime style="max-width:320px">
-              <option value="">(none — fall back to priority bindings)</option>
-            </select>
+        <section class="detail-panel" aria-label="MetaBot detail">
+          <div class="detail-header" data-detail-header hidden>
+            <div class="metabot-avatar" data-detail-avatar>MB</div>
+            <div class="detail-title">
+              <strong data-detail-name>-</strong>
+              <span data-detail-id>-</span>
+            </div>
+            <div class="detail-actions">
+              <button class="btn btn-sm" data-act="open-wallet">Wallet</button>
+              <button class="btn btn-sm btn-danger" data-act="open-delete">Delete</button>
+              <button class="btn btn-sm" data-act="open-backup">Backup</button>
+              <button class="btn btn-sm" data-act="discover-runtimes" title="Refresh detected local runtimes">Refresh Runtimes</button>
+            </div>
           </div>
-          <button class="btn" id="save-preferred-btn">Save Preferred</button>
-        </div>
+          <div class="tab-bar" data-tab-bar hidden>
+            <button class="tab-btn active" data-tab="info">Basic Info</button>
+            <button class="tab-btn" data-tab="history">Execution History</button>
+          </div>
+          <div class="tab-content" data-tab-content hidden>
+            <div class="tab-panel active" data-tab-panel="info">
+              <div data-info-content></div>
+            </div>
+            <div class="tab-panel" data-tab-panel="history">
+              <div class="history-scroll">
+                <div class="table-wrap">
+                  <table class="data-table exec-table">
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Provider</th>
+                        <th>Runtime</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Prompt</th>
+                        <th>Details</th>
+                      </tr>
+                    </thead>
+                    <tbody data-execution-history-list>
+                      <tr>
+                        <td colspan="7" class="table-empty"><strong>No executions yet for this MetaBot</strong></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="detail-empty" data-detail-empty>
+            <span class="mono">Select a MetaBot</span>
+          </div>
+        </section>
       </main>
     </div>
+
+    <div class="modal-overlay hidden" data-modal="add-metabot" role="dialog" aria-modal="true" aria-labelledby="add-metabot-title">
+      <div class="modal-box">
+        <div class="modal-title" id="add-metabot-title">Add MetaBot</div>
+        <div class="modal-body">
+          <div class="field">
+            <label for="new-metabot-name">Name</label>
+            <input id="new-metabot-name" type="text" data-field="new-name" maxlength="60" autocomplete="off" />
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" data-act="cancel-add">Cancel</button>
+          <button class="btn btn-primary" data-act="confirm-add">Create</button>
+        </div>
+        <div class="save-status" data-add-status></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay hidden" data-modal-root role="dialog" aria-modal="true"></div>
+    <div class="copy-toast" data-copy-toast role="status" aria-live="polite"></div>
     <script>__PAGE_SCRIPT__</script>
   </body>
 </html>

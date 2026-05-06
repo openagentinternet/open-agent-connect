@@ -13,10 +13,13 @@ function createLlmRuntimeResolver(options) {
             if (runtimes.length === 0)
                 return { runtime: null };
             const runtimeById = new Map(runtimes.map((r) => [r.id, r]));
+            const excludedRuntimeIds = new Set(input.excludeRuntimeIds ?? []);
+            const isExcluded = (runtime) => excludedRuntimeIds.has(runtime.id);
+            const isSelectable = (runtime) => !isExcluded(runtime) && runtime.health !== 'unavailable';
             // 1. Explicit runtimeId — use it directly.
             if (input.explicitRuntimeId) {
                 const rt = runtimeById.get(input.explicitRuntimeId);
-                if (rt && rt.health !== 'unavailable')
+                if (rt && isSelectable(rt))
                     return { runtime: rt };
             }
             // 2. Preferred runtime for this MetaBot slug.
@@ -24,7 +27,7 @@ function createLlmRuntimeResolver(options) {
                 const preferredId = await getPreferredRuntimeId(input.metaBotSlug);
                 if (preferredId) {
                     const rt = runtimeById.get(preferredId);
-                    if (rt && rt.health !== 'unavailable')
+                    if (rt && isSelectable(rt))
                         return { runtime: rt };
                 }
                 // 3. Enabled bindings sorted by priority → first healthy.
@@ -32,17 +35,17 @@ function createLlmRuntimeResolver(options) {
                 bindings.sort((a, b) => a.priority - b.priority);
                 for (const binding of bindings) {
                     const rt = runtimeById.get(binding.llmRuntimeId);
-                    if (rt && rt.health !== 'unavailable') {
+                    if (rt && isSelectable(rt)) {
                         return { runtime: rt, bindingId: binding.id };
                     }
                 }
             }
             // 4. First healthy runtime.
-            const healthy = runtimes.find((r) => r.health === 'healthy');
+            const healthy = runtimes.find((r) => !isExcluded(r) && r.health === 'healthy');
             if (healthy)
                 return { runtime: healthy };
             // 5. First any runtime (absolute fallback).
-            return { runtime: runtimes[0] };
+            return { runtime: runtimes.find((r) => !isExcluded(r)) ?? null };
         },
         async selectMetaBot(input) {
             const runtimes = await loadRuntimes();

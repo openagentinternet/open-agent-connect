@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.normalizeConversationLimit = normalizeConversationLimit;
 exports.normalizeConversationAfterIndex = normalizeConversationAfterIndex;
+exports.fetchPrivateChatHistoryPage = fetchPrivateChatHistoryPage;
 exports.fetchPrivateChatHistory = fetchPrivateChatHistory;
 exports.buildPrivateConversationResponse = buildPrivateConversationResponse;
 const node_crypto_1 = require("node:crypto");
@@ -58,17 +59,34 @@ function extractList(rawData) {
         return record.items;
     return [];
 }
-async function fetchPrivateChatHistory(input) {
+function extractHistoryPage(rawData) {
+    const rows = extractList(rawData);
+    const record = readObject(rawData);
+    const data = readObject(record?.data);
+    const totalCandidate = data?.total ?? record?.total;
+    const nextTimestampCandidate = data?.nextTimestamp ?? record?.nextTimestamp;
+    const total = Number(totalCandidate);
+    const nextTimestamp = Number(nextTimestampCandidate);
+    return {
+        rows,
+        total: Number.isFinite(total) && total >= 0 ? Math.floor(total) : null,
+        nextTimestamp: Number.isFinite(nextTimestamp) ? Math.floor(nextTimestamp) : null,
+    };
+}
+async function fetchPrivateChatHistoryPage(input) {
     const selfGlobalMetaId = normalizeText(input.selfGlobalMetaId);
     const peerGlobalMetaId = normalizeText(input.peerGlobalMetaId);
     if (!selfGlobalMetaId || !peerGlobalMetaId) {
         throw new Error('selfGlobalMetaId and peerGlobalMetaId are required');
     }
+    const startIndex = Number(input.startIndex);
     const fetchImpl = getFetchImpl(input.fetchImpl);
     const url = new URL(`${normalizeBaseUrl(input.idChatApiBaseUrl)}/private-chat-list-by-index`);
     url.searchParams.set('metaId', selfGlobalMetaId);
     url.searchParams.set('otherMetaId', peerGlobalMetaId);
-    url.searchParams.set('startIndex', String((input.afterIndex ?? -1) + 1));
+    url.searchParams.set('startIndex', String(Number.isFinite(startIndex) && startIndex >= 0
+        ? Math.floor(startIndex)
+        : 0));
     url.searchParams.set('size', String(normalizeConversationLimit(input.limit)));
     const response = await fetchImpl(url.toString(), {
         method: 'GET',
@@ -79,7 +97,23 @@ async function fetchPrivateChatHistory(input) {
     if (!response.ok) {
         throw new Error(`history_fetch_http_${response.status}`);
     }
-    return extractList(await response.json());
+    return extractHistoryPage(await response.json());
+}
+async function fetchPrivateChatHistory(input) {
+    const selfGlobalMetaId = normalizeText(input.selfGlobalMetaId);
+    const peerGlobalMetaId = normalizeText(input.peerGlobalMetaId);
+    if (!selfGlobalMetaId || !peerGlobalMetaId) {
+        throw new Error('selfGlobalMetaId and peerGlobalMetaId are required');
+    }
+    const page = await fetchPrivateChatHistoryPage({
+        selfGlobalMetaId,
+        peerGlobalMetaId,
+        startIndex: (input.afterIndex ?? -1) + 1,
+        limit: input.limit,
+        fetchImpl: input.fetchImpl,
+        idChatApiBaseUrl: input.idChatApiBaseUrl,
+    });
+    return page.rows;
 }
 function readObject(value) {
     return value && typeof value === 'object' && !Array.isArray(value)

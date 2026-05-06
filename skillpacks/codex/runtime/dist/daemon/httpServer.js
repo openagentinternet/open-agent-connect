@@ -20,6 +20,7 @@ const services_1 = require("./routes/services");
 const trace_1 = require("./routes/trace");
 const ui_1 = require("./routes/ui");
 const llm_1 = require("./routes/llm");
+const bot_1 = require("./routes/bot");
 const JSON_BODY_LIMIT_BYTES = 1024 * 1024;
 const ROUTES = [
     buzz_1.handleBuzzRoutes,
@@ -35,6 +36,7 @@ const ROUTES = [
     trace_1.handleTraceRoutes,
     ui_1.handleUiRoutes,
     llm_1.handleLlmRoutes,
+    bot_1.handleBotRoutes,
 ];
 function sendJson(res, status, payload) {
     const body = `${JSON.stringify(payload, null, 2)}\n`;

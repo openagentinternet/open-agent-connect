@@ -49,6 +49,9 @@ export interface MetabotPaths {
     llmBindingsPath: string;
     llmSecretsRoot: string;
     preferredLlmRuntimePath: string;
+    llmExecutorRoot: string;
+    llmExecutorSessionsRoot: string;
+    llmExecutorTranscriptsRoot: string;
     baseRoot: string;
     exportRoot: string;
 }
