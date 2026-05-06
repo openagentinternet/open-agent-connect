@@ -12,7 +12,7 @@ test('README exposes the unified install guide as the primary install entrypoint
   assert.match(readme, /Recommended terminal install/i);
   assert.match(readme, /npm i -g open-agent-connect/);
   assert.match(readme, /oac install/);
-  assert.match(readme, /bare command uses `codex` when no host-specific environment signal is\s+available/i);
+  assert.match(readme, /bare command binds the shared\s+`~\/\.agents\/skills` root and detected platform roots/i);
   assert.match(readme, /docs\/install\/open-agent-connect\.md/);
   assert.match(readme, /Read https:\/\/github\.com\/openagentinternet\/open-agent-connect\/blob\/main\/docs\/install\/open-agent-connect\.md/i);
   assert.match(readme, /agent-readable guide are equivalent by final installed state/i);
@@ -30,7 +30,7 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.match(guide, /do not run `npm run build` or `npm run build:skillpacks` for end-user installation/i);
   assert.match(guide, /do not run `npm install` from a source checkout for end-user installation/i);
   assert.match(guide, /do use `npm i -g open-agent-connect` for the recommended npm package path/i);
-  assert.match(guide, /bare\s+`oac install` defaults to `codex`/i);
+  assert.match(guide, /bare `oac install` binds\s+`~\/\.agents\/skills` and detected platform roots/i);
   assert.match(guide, /OAC_HOST:=claude-code/);
   assert.match(guide, /github\.com\/\$OAC_REPO\/releases\/latest\/download\/oac-\$\{OAC_HOST_PACK\}\.tar\.gz/);
   assert.match(guide, /OAC_TMP_DIR\/\$OAC_HOST_PACK/);
@@ -58,6 +58,36 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.match(guide, /preserve MetaBot identities, mnemonics, private keys, profile names, and\s+wallet-related local data/i);
   assert.doesNotMatch(guide, /manual host acceptance checklist/i);
   assert.doesNotMatch(guide, /metabot identity create --name "Alice"/);
+});
+
+test('unified install guide documents registry-driven bare install and force host binding', async () => {
+  const readme = await readFile(path.join(REPO_ROOT, 'README.md'), 'utf8');
+  const guide = await readFile(
+    path.join(REPO_ROOT, 'docs', 'install', 'open-agent-connect.md'),
+    'utf8'
+  );
+
+  for (const content of [readme, guide]) {
+    assert.match(content, /npm i -g open-agent-connect && oac install/);
+    assert.match(content, /supported platforms/i);
+    assert.match(content, /~\/\.metabot\/skills/i);
+    assert.match(content, /host roots contain symlinks/i);
+    assert.match(content, /~\/\.metabot\/skills\/metabot-\*/);
+    assert.match(content, /~\/\.agents\/skills/i);
+    assert.match(content, /platformRegistry\.ts/);
+  }
+
+  assert.match(guide, /bare `oac install` binds\s+`~\/\.agents\/skills` and detected platform roots/i);
+  assert.match(guide, /`--host` is only needed when forcing a platform root before that platform home exists/i);
+  assert.match(guide, /oac install --host openclaw/);
+  assert.match(guide, /advanced force-bind/i);
+  assert.match(guide, /runtime discovery and `\/ui\/bot` logos come from `platformRegistry\.ts`/i);
+
+  assert.doesNotMatch(readme, /oac install --host codex/);
+  assert.doesNotMatch(readme, /choose the host explicitly/i);
+  assert.doesNotMatch(guide, /For unsupported but Claude Code-compatible platforms, set `?OAC_HOST=claude-code`?/);
+  assert.doesNotMatch(guide, /For Claude Code-compatible hosts, set OAC_HOST=claude-code/);
+  assert.doesNotMatch(guide, /For agent platforms outside `Codex`, `Claude Code`, and `OpenClaw`, first use:\s*```bash\s*OAC_HOST=claude-code/s);
 });
 
 test('uninstall guide defines safe, test cleanup, and danger-zone tiers', async () => {
