@@ -1298,6 +1298,9 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.match(html, /data-stat-success/);
   assert.match(html, /data-metabot-list/);
   assert.match(html, /data-act="add-metabot"/);
+  assert.ok(html.indexOf('data-act="open-wallet"') < html.indexOf('data-act="discover-runtimes"'));
+  assert.ok(html.indexOf('data-act="open-delete"') < html.indexOf('data-act="discover-runtimes"'));
+  assert.ok(html.indexOf('data-act="open-backup"') < html.indexOf('data-act="discover-runtimes"'));
   assert.match(html, /data-tab="info"/);
   assert.match(html, /data-tab="history"/);
   assert.match(html, /data-info-content/);
@@ -1318,7 +1321,10 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.match(html, /r\.health==='healthy'\|\|r\.health==='degraded'/);
   assert.ok(!html.includes(" / unavailable"));
   assert.match(html, /max-height:\s*220px/);
-  assert.match(html, /✓ Saved/);
+  assert.match(html, /MetaBot Created On-Chain/);
+  assert.match(html, /Profile Updated On-Chain/);
+  assert.doesNotMatch(html, /✓ Saved/);
+  assert.match(html, /data-modal-root/);
   assert.doesNotMatch(html, /profile-select/);
   assert.doesNotMatch(html, /data-new-role/);
   assert.doesNotMatch(html, /reviewer/i);

@@ -244,6 +244,13 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      .detail-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
       .tab-bar {
         display: flex;
         border-bottom: 1px solid var(--border);
@@ -367,6 +374,110 @@
       .save-status.saving {
         color: var(--amber);
       }
+      .provider-field {
+        position: relative;
+      }
+      .provider-picker {
+        position: relative;
+      }
+      .provider-trigger,
+      .provider-option {
+        width: 100%;
+        min-height: 36px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text);
+        font-size: 12px;
+        padding: 7px 9px;
+        cursor: pointer;
+        text-align: left;
+      }
+      .provider-trigger:hover,
+      .provider-option:hover {
+        background: var(--surface2);
+        border-color: var(--border2);
+      }
+      .provider-trigger span:nth-child(2),
+      .provider-option span:nth-child(2) {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+      }
+      .provider-caret {
+        margin-left: auto;
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 10px;
+      }
+      .provider-logo {
+        width: 18px;
+        height: 18px;
+        border-radius: 5px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--mono);
+        font-size: 8px;
+        font-weight: 600;
+        flex-shrink: 0;
+        color: #fff;
+        background: #475569;
+      }
+      .provider-logo svg {
+        width: 14px;
+        height: 14px;
+        display: block;
+      }
+      .provider-logo-codex {
+        background: #111827;
+      }
+      .provider-logo-claude-code {
+        background: #d97757;
+      }
+      .provider-logo-openclaw {
+        background: #e8453a;
+      }
+      .provider-logo-opencode {
+        background: #656363;
+      }
+      .provider-logo-cursor {
+        background: #43413c;
+      }
+      .provider-logo-kimi,
+      .provider-logo-kiro {
+        background: #7048e8;
+      }
+      .provider-menu {
+        position: absolute;
+        z-index: 20;
+        top: calc(100% + 4px);
+        left: 0;
+        right: 0;
+        display: grid;
+        gap: 4px;
+        max-height: 220px;
+        overflow-y: auto;
+        padding: 6px;
+        border: 1px solid var(--border2);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        box-shadow: 0 14px 32px rgba(15,23,42,.16);
+      }
+      .provider-option[selected] {
+        border-color: var(--accent);
+        background: var(--surface3);
+      }
+      .provider-empty {
+        padding: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
 
       .history-scroll {
         overflow: auto;
@@ -468,22 +579,142 @@
         width: 440px;
         max-width: 100%;
       }
+      .modal-box-wide {
+        width: 620px;
+      }
+      .modal-title-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
       .modal-title {
         font-size: 15px;
         font-family: var(--mono);
         font-weight: 500;
         color: var(--text);
-        margin-bottom: 18px;
+        flex: 1;
       }
       .modal-body {
         display: grid;
         gap: 14px;
+      }
+      .modal-note {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .modal-section-title {
+        margin-top: 2px;
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: .06em;
       }
       .modal-actions {
         display: flex;
         gap: 10px;
         justify-content: flex-end;
         margin-top: 20px;
+      }
+      .identity-result,
+      .wallet-row,
+      .txid-row,
+      .delete-target {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        justify-content: space-between;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        padding: 10px 12px;
+        min-width: 0;
+      }
+      .identity-result > div,
+      .wallet-row > div,
+      .txid-row > div {
+        min-width: 0;
+        display: grid;
+        gap: 4px;
+      }
+      .identity-result span,
+      .wallet-row span,
+      .delete-target span,
+      .txid-path {
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+      }
+      .identity-result code,
+      .wallet-row code,
+      .txid-row code {
+        color: var(--text);
+        font-family: var(--mono);
+        font-size: 11px;
+        overflow-wrap: anywhere;
+        word-break: break-all;
+      }
+      .txid-list {
+        display: grid;
+        gap: 8px;
+      }
+      .warning-panel {
+        border: 1px solid rgba(245,158,11,.34);
+        background: rgba(245,158,11,.08);
+        border-radius: var(--radius-sm);
+        padding: 12px;
+        display: grid;
+        gap: 6px;
+        color: var(--text);
+      }
+      .warning-panel strong {
+        font-size: 13px;
+      }
+      .warning-panel span {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .warning-panel.danger {
+        border-color: rgba(239,68,68,.36);
+        background: rgba(239,68,68,.08);
+      }
+      .mnemonic-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0,1fr));
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .mnemonic-word {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        padding: 8px;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        min-width: 0;
+      }
+      .mnemonic-word span {
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 10px;
+        width: 18px;
+        flex-shrink: 0;
+      }
+      .mnemonic-word code {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .copy-toast {
         position: fixed;
@@ -529,11 +760,16 @@
           align-items: flex-start;
           flex-wrap: wrap;
         }
+        .detail-actions {
+          width: 100%;
+          justify-content: flex-start;
+        }
         .tab-content {
           padding: 16px;
         }
         .info-form-grid,
-        .exec-detail {
+        .exec-detail,
+        .mnemonic-grid {
           grid-template-columns: 1fr;
         }
         .info-id-row {
@@ -597,7 +833,12 @@
               <strong data-detail-name>-</strong>
               <span data-detail-id>-</span>
             </div>
-            <button class="btn btn-sm" data-act="discover-runtimes" title="Refresh detected local runtimes">Refresh Runtimes</button>
+            <div class="detail-actions">
+              <button class="btn btn-sm" data-act="open-wallet">Wallet</button>
+              <button class="btn btn-sm btn-danger" data-act="open-delete">Delete</button>
+              <button class="btn btn-sm" data-act="open-backup">Backup</button>
+              <button class="btn btn-sm" data-act="discover-runtimes" title="Refresh detected local runtimes">Refresh Runtimes</button>
+            </div>
           </div>
           <div class="tab-bar" data-tab-bar hidden>
             <button class="tab-btn active" data-tab="info">Basic Info</button>
@@ -656,6 +897,7 @@
       </div>
     </div>
 
+    <div class="modal-overlay hidden" data-modal-root role="dialog" aria-modal="true"></div>
     <div class="copy-toast" data-copy-toast role="status" aria-live="polite"></div>
     <script>__PAGE_SCRIPT__</script>
   </body>
