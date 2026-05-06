@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
+  deleteIdentityProfile,
   listIdentityProfiles,
   upsertIdentityProfile,
 } from '../identity/identityProfiles';
@@ -12,6 +13,9 @@ import {
 import { resolveMetabotPaths } from '../state/paths';
 import { createLlmBindingStore } from '../llm/llmBindingStore';
 import { createLlmRuntimeStore } from '../llm/llmRuntimeStore';
+import { createFileSecretStore } from '../secrets/fileSecretStore';
+import type { LocalIdentitySecrets } from '../secrets/secretStore';
+import { createRuntimeStateStore } from '../state/runtimeStateStore';
 import {
   isLlmProvider,
   normalizeLlmBinding,
@@ -47,6 +51,14 @@ export interface CreateMetabotInput {
   soul?: string;
   goal?: string;
   avatarDataUrl?: string;
+  primaryProvider?: LlmProvider | null;
+  fallbackProvider?: LlmProvider | null;
+}
+
+export interface CreateMetabotFromIdentityInput extends CreateMetabotInput {
+  homeDir: string;
+  globalMetaId: string;
+  mvcAddress: string;
 }
 
 export interface UpdateMetabotInfoInput {
@@ -61,6 +73,27 @@ export interface UpdateMetabotInfoInput {
 
 export interface SyncMetabotInfoToChainOptions {
   delayMs?: number;
+  operation?: 'create' | 'modify';
+}
+
+export interface MetabotWalletInfo {
+  slug: string;
+  name: string;
+  addresses: {
+    btc: string;
+    mvc: string;
+  };
+}
+
+export interface MetabotMnemonicBackup {
+  slug: string;
+  name: string;
+  words: string[];
+}
+
+export interface DeleteMetabotProfileResult {
+  profile: IdentityProfileRecord;
+  removedExecutorSessions: string[];
 }
 
 function normalizeText(value: unknown): string {
@@ -74,6 +107,12 @@ function resolveAvatarPath(homeDir: string): string {
 function avatarMimeType(dataUrl: string): string {
   const match = dataUrl.match(/^data:([^;,]+);base64,/i);
   return match?.[1]?.toLowerCase() ?? 'image/png';
+}
+
+function isSafeLocalFileStem(value: string): boolean {
+  if (!value || value === '.' || value === '..') return false;
+  if (value.includes('/') || value.includes('\\')) return false;
+  return path.basename(value) === value;
 }
 
 function estimateDataUrlBytes(dataUrl: string): number {
@@ -309,6 +348,182 @@ export async function createMetabotProfile(
   return buildMetabotProfileFull(profile);
 }
 
+export function buildMetabotProfileDraftFromIdentity(input: CreateMetabotFromIdentityInput): MetabotProfileFull {
+  const name = normalizeText(input.name);
+  const homeDir = path.resolve(normalizeText(input.homeDir));
+  const globalMetaId = normalizeText(input.globalMetaId);
+  const mvcAddress = normalizeText(input.mvcAddress);
+  if (!name) {
+    throw new Error('MetaBot name is required.');
+  }
+  if (!homeDir || !globalMetaId || !mvcAddress) {
+    throw new Error('A chained MetaBot profile requires homeDir, globalMetaId, and mvcAddress.');
+  }
+  const avatar = input.avatarDataUrl !== undefined ? normalizeText(input.avatarDataUrl) : undefined;
+  if (avatar !== undefined) {
+    const validation = validateAvatarDataUrl(avatar);
+    if (!validation.valid) {
+      throw new Error(validation.error);
+    }
+  }
+  const slug = path.basename(homeDir);
+  return {
+    name,
+    slug,
+    aliases: [slug],
+    homeDir,
+    globalMetaId,
+    mvcAddress,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    role: normalizeText(input.role) || DEFAULT_ROLE,
+    soul: normalizeText(input.soul) || DEFAULT_SOUL,
+    goal: normalizeText(input.goal) || DEFAULT_GOAL,
+    ...(avatar ? { avatarDataUrl: avatar } : {}),
+    primaryProvider: input.primaryProvider === undefined ? null : validateProvider(input.primaryProvider),
+    fallbackProvider: input.fallbackProvider === undefined ? null : validateProvider(input.fallbackProvider),
+  };
+}
+
+export async function createMetabotProfileFromIdentity(
+  systemHomeDir: string,
+  input: CreateMetabotFromIdentityInput,
+): Promise<MetabotProfileFull> {
+  const draft = buildMetabotProfileDraftFromIdentity(input);
+
+  await ensureProfileWorkspace({
+    homeDir: draft.homeDir,
+    name: draft.name,
+  });
+  const paths = resolveMetabotPaths(draft.homeDir);
+  await Promise.all([
+    writeTextFile(paths.roleMdPath, draft.role),
+    writeTextFile(paths.soulMdPath, draft.soul),
+    writeTextFile(paths.goalMdPath, draft.goal),
+  ]);
+  if (draft.avatarDataUrl) {
+    await writeTextFile(resolveAvatarPath(draft.homeDir), draft.avatarDataUrl);
+  }
+
+  const profile = await upsertIdentityProfile({
+    systemHomeDir,
+    name: draft.name,
+    homeDir: draft.homeDir,
+    globalMetaId: draft.globalMetaId,
+    mvcAddress: draft.mvcAddress,
+  });
+  const fullProfile = await buildMetabotProfileFull(profile);
+  const writeProviderBindings = await buildProviderBindingWrite({
+    profile: fullProfile,
+    primaryProvider: input.primaryProvider === undefined ? undefined : draft.primaryProvider ?? null,
+    fallbackProvider: input.fallbackProvider === undefined ? undefined : draft.fallbackProvider ?? null,
+  });
+  if (writeProviderBindings) {
+    await writeProviderBindings();
+  }
+  return buildMetabotProfileFull(profile);
+}
+
+export async function getMetabotWalletInfo(systemHomeDir: string, slug: string): Promise<MetabotWalletInfo> {
+  const profile = await getMetabotProfile(systemHomeDir, slug);
+  if (!profile) {
+    throw new Error(`MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+  }
+  const secretStore = createFileSecretStore(profile.homeDir);
+  const [secrets, runtimeState] = await Promise.all([
+    secretStore.readIdentitySecrets<LocalIdentitySecrets>(),
+    createRuntimeStateStore(profile.homeDir).readState(),
+  ]);
+  const identity = runtimeState.identity;
+  return {
+    slug: profile.slug,
+    name: profile.name,
+    addresses: {
+      btc: normalizeText(secrets?.btcAddress) || normalizeText(identity?.btcAddress),
+      mvc: normalizeText(secrets?.mvcAddress) || normalizeText(identity?.mvcAddress) || profile.mvcAddress,
+    },
+  };
+}
+
+export async function getMetabotMnemonicBackup(systemHomeDir: string, slug: string): Promise<MetabotMnemonicBackup> {
+  const profile = await getMetabotProfile(systemHomeDir, slug);
+  if (!profile) {
+    throw new Error(`MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+  }
+  const secrets = await createFileSecretStore(profile.homeDir).readIdentitySecrets<LocalIdentitySecrets>();
+  const mnemonic = normalizeText(secrets?.mnemonic);
+  if (!mnemonic) {
+    throw new Error('Mnemonic backup is unavailable for this MetaBot.');
+  }
+  return {
+    slug: profile.slug,
+    name: profile.name,
+    words: mnemonic.split(/\s+/).filter(Boolean),
+  };
+}
+
+async function deleteLlmExecutorSessionsForSlug(profile: IdentityProfileRecord): Promise<string[]> {
+  const paths = resolveMetabotPaths(profile.homeDir);
+  const removed: string[] = [];
+  let entries: string[];
+  try {
+    entries = await fs.readdir(paths.llmExecutorSessionsRoot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return removed;
+    }
+    throw error;
+  }
+
+  await Promise.all(entries.map(async (entry) => {
+    if (!entry.endsWith('.json')) return;
+    const filePath = path.join(paths.llmExecutorSessionsRoot, entry);
+    let parsed: { sessionId?: unknown; metaBotSlug?: unknown } | null = null;
+    try {
+      parsed = JSON.parse(await fs.readFile(filePath, 'utf8')) as { sessionId?: unknown; metaBotSlug?: unknown };
+    } catch {
+      return;
+    }
+    if (normalizeText(parsed.metaBotSlug) !== profile.slug) return;
+    const entrySessionId = entry.replace(/\.json$/, '');
+    const parsedSessionId = normalizeText(parsed.sessionId);
+    const sessionId = isSafeLocalFileStem(parsedSessionId)
+      ? parsedSessionId
+      : entrySessionId;
+    await fs.rm(filePath, { force: true });
+    if (isSafeLocalFileStem(sessionId)) {
+      await fs.rm(path.join(paths.llmExecutorTranscriptsRoot, `${sessionId}.log`), { force: true });
+    }
+    removed.push(sessionId);
+  }));
+  return removed.sort();
+}
+
+export async function deleteMetabotProfile(
+  systemHomeDir: string,
+  slug: string,
+): Promise<DeleteMetabotProfileResult> {
+  const profile = await getMetabotProfile(systemHomeDir, slug);
+  if (!profile) {
+    throw new Error(`MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+  }
+
+  const removedExecutorSessions = await deleteLlmExecutorSessionsForSlug(profile);
+  await fs.rm(profile.homeDir, { recursive: true, force: true });
+  const deleted = await deleteIdentityProfile({
+    systemHomeDir,
+    slug: profile.slug,
+  });
+  if (!deleted) {
+    throw new Error(`MetaBot profile not found: ${profile.slug}`);
+  }
+
+  return {
+    profile: deleted,
+    removedExecutorSessions,
+  };
+}
+
 async function buildProviderBindingWrite(input: {
   profile: MetabotProfileFull;
   primaryProvider?: LlmProvider | null;
@@ -455,12 +670,13 @@ export async function syncMetabotInfoToChain(
   }
 
   const delayMs = options.delayMs ?? CHAIN_SYNC_DELAY_MS;
+  const operation = options.operation ?? 'modify';
   const changed = new Set(changedFields);
   const results: ChainWriteResult[] = [];
 
   if (changed.has('name')) {
     results.push(await signer.writePin({
-      operation: 'modify',
+      operation,
       path: '/info/name',
       encryption: '0',
       version: '1.0',
@@ -471,17 +687,18 @@ export async function syncMetabotInfoToChain(
     }));
   }
 
-  if (changed.has('avatar') && normalizeText(profile.avatarDataUrl)) {
+  if (changed.has('avatar')) {
     if (results.length > 0) {
       await sleep(delayMs);
     }
+    const avatarPayload = normalizeText(profile.avatarDataUrl);
     results.push(await signer.writePin({
-      operation: 'modify',
+      operation,
       path: '/info/avatar',
       encryption: '0',
       version: '1.0',
-      contentType: avatarMimeType(profile.avatarDataUrl ?? ''),
-      payload: profile.avatarDataUrl ?? '',
+      contentType: avatarPayload ? avatarMimeType(avatarPayload) : 'text/plain',
+      payload: avatarPayload,
       encoding: 'utf-8',
       network: 'mvc',
     }));
@@ -492,7 +709,7 @@ export async function syncMetabotInfoToChain(
       await sleep(delayMs);
     }
     results.push(await signer.writePin({
-      operation: 'modify',
+      operation,
       path: '/info/bio',
       encryption: '0',
       version: '1.0',

@@ -43,6 +43,9 @@ async function startServer(options = {}) {
     botProfile: [],
     botCreateProfile: [],
     botUpdateProfile: [],
+    botWallet: [],
+    botBackup: [],
+    botDeleteProfile: [],
     botListRuntimes: [],
     botDiscoverRuntimes: [],
     botListSessions: [],
@@ -522,6 +525,46 @@ async function startServer(options = {}) {
             goal: input.goal ?? 'Ship useful work.',
             primaryProvider: input.primaryProvider ?? 'codex',
             fallbackProvider: input.fallbackProvider ?? null,
+          },
+          chainWrites: [
+            {
+              txids: ['tx-profile-update-1'],
+              pinId: 'pin-profile-update-1',
+              path: '/info/name',
+            },
+          ],
+        });
+      },
+      getWallet: async (input) => {
+        calls.botWallet.push(input);
+        return commandSuccess({
+          wallet: {
+            slug: input.slug,
+            name: 'Alice Bot',
+            addresses: {
+              btc: 'btc-address-alice',
+              mvc: 'mvc-address-alice',
+            },
+          },
+        });
+      },
+      getBackup: async (input) => {
+        calls.botBackup.push(input);
+        return commandSuccess({
+          backup: {
+            slug: input.slug,
+            name: 'Alice Bot',
+            words: ['abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'about'],
+          },
+        });
+      },
+      deleteProfile: async (input) => {
+        calls.botDeleteProfile.push(input);
+        return commandSuccess({
+          deleted: true,
+          profile: {
+            slug: input.slug,
+            name: 'Alice Bot',
           },
         });
       },
@@ -1169,6 +1212,45 @@ test('PUT /api/bot/profiles/:slug does not let the JSON body override the path s
   assert.equal(response.status, 200);
   assert.deepEqual(server.calls.botUpdateProfile, [{ slug: 'alice-bot', name: 'Alice Updated' }]);
   assert.equal(payload.data.profile.slug, 'alice-bot');
+});
+
+test('GET /api/bot/profiles/:slug/wallet forwards to the MetaBot wallet handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/wallet`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botWallet, [{ slug: 'alice-bot' }]);
+  assert.equal(payload.data.wallet.addresses.btc, 'btc-address-alice');
+  assert.equal(payload.data.wallet.addresses.mvc, 'mvc-address-alice');
+});
+
+test('GET /api/bot/profiles/:slug/backup forwards to the MetaBot backup handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/backup`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botBackup, [{ slug: 'alice-bot' }]);
+  assert.equal(payload.data.backup.words.length, 12);
+});
+
+test('DELETE /api/bot/profiles/:slug forwards to the MetaBot delete handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot`, {
+    method: 'DELETE',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botDeleteProfile, [{ slug: 'alice-bot' }]);
+  assert.equal(payload.data.deleted, true);
 });
 
 test('GET and POST /api/bot/runtimes use the MetaBot runtime handlers', async (t) => {

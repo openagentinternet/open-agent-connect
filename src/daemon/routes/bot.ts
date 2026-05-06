@@ -51,6 +51,26 @@ export const handleBotRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  const walletMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/wallet$/);
+  if (walletMatch && req.method === 'GET') {
+    const slug = normalizeSlug(walletMatch[1]);
+    const result = handlers.bot?.getWallet
+      ? await handlers.bot.getWallet({ slug })
+      : commandFailed('not_implemented', 'MetaBot wallet handler not configured.');
+    context.sendJson(result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400, result);
+    return true;
+  }
+
+  const backupMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/backup$/);
+  if (backupMatch && req.method === 'GET') {
+    const slug = normalizeSlug(backupMatch[1]);
+    const result = handlers.bot?.getBackup
+      ? await handlers.bot.getBackup({ slug })
+      : commandFailed('not_implemented', 'MetaBot backup handler not configured.');
+    context.sendJson(result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400, result);
+    return true;
+  }
+
   const profileMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)$/);
   if (profileMatch && req.method === 'GET') {
     const slug = normalizeSlug(profileMatch[1]);
@@ -67,6 +87,16 @@ export const handleBotRoutes: RouteHandler = async (context) => {
     const result = handlers.bot?.updateProfile
       ? await handlers.bot.updateProfile({ ...body, slug })
       : commandFailed('not_implemented', 'MetaBot profile update handler not configured.');
+    const status = result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400;
+    context.sendJson(status, result);
+    return true;
+  }
+
+  if (profileMatch && req.method === 'DELETE') {
+    const slug = normalizeSlug(profileMatch[1]);
+    const result = handlers.bot?.deleteProfile
+      ? await handlers.bot.deleteProfile({ slug })
+      : commandFailed('not_implemented', 'MetaBot profile delete handler not configured.');
     const status = result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400;
     context.sendJson(status, result);
     return true;

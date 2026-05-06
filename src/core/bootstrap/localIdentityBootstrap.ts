@@ -262,6 +262,7 @@ export function createLocalIdentitySyncStep(input: {
 
     let currentState = await input.runtimeStateStore.readState();
     const currentIdentity = currentState.identity;
+    const chainWrites: BootstrapSyncResult['chainWrites'] = [];
     if (!currentIdentity) {
       return {
         success: false,
@@ -273,6 +274,7 @@ export function createLocalIdentitySyncStep(input: {
     if (currentIdentity.syncState === 'synced') {
       return {
         success: true,
+        chainWrites,
       };
     }
 
@@ -285,6 +287,7 @@ export function createLocalIdentitySyncStep(input: {
           payload: currentIdentity.name || context.request.name || 'MetaBot',
           network: 'mvc',
         });
+        chainWrites.push(nameResult);
         currentState = await input.runtimeStateStore.updateState((nextState) => ({
           ...nextState,
           identity: nextState.identity
@@ -332,6 +335,7 @@ export function createLocalIdentitySyncStep(input: {
       }));
       return {
         success: true,
+        chainWrites,
       };
     }
 
@@ -347,6 +351,7 @@ export function createLocalIdentitySyncStep(input: {
         success: false,
         error,
         canSkip: true,
+        chainWrites,
       };
     }
 
@@ -358,6 +363,7 @@ export function createLocalIdentitySyncStep(input: {
         payload: chatPublicKey,
         network: 'mvc',
       });
+      chainWrites.push(chatResult);
       await updateIdentityRecord(input.runtimeStateStore, (identity) => ({
         ...identity,
         chatPublicKeyPinId: chatResult.pinId,
@@ -366,6 +372,7 @@ export function createLocalIdentitySyncStep(input: {
       }));
       return {
         success: true,
+        chainWrites,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -378,6 +385,7 @@ export function createLocalIdentitySyncStep(input: {
         success: false,
         error: message,
         canSkip: true,
+        chainWrites,
       };
     }
   };

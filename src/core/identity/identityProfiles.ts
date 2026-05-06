@@ -332,6 +332,34 @@ export async function upsertIdentityProfile(input: {
   return updated;
 }
 
+export async function deleteIdentityProfile(input: {
+  systemHomeDir: string;
+  slug: string;
+}): Promise<IdentityProfileRecord | null> {
+  const slug = normalizeText(input.slug);
+  if (!slug) {
+    throw new Error('Identity profile delete requires a non-empty slug.');
+  }
+
+  const current = await readIdentityProfilesState(input.systemHomeDir);
+  const deleted = current.profiles.find((profile) => profile.slug === slug) ?? null;
+  if (!deleted) {
+    return null;
+  }
+
+  await writeIdentityProfilesState(input.systemHomeDir, {
+    profiles: current.profiles.filter((profile) => profile.slug !== slug),
+  });
+
+  const paths = resolveIdentityManagerPaths(input.systemHomeDir);
+  const activeHome = parseActiveHomePayload(await readJsonFile<unknown>(paths.activeHomePath));
+  if (activeHome && path.resolve(activeHome) === path.resolve(deleted.homeDir)) {
+    await fsp.rm(paths.activeHomePath, { force: true });
+  }
+
+  return deleted;
+}
+
 function parseActiveHomePayload(value: unknown): string | null {
   const record = normalizeRecord(value);
   if (!record) {

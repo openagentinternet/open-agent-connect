@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { access, mkdir } from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
 
@@ -10,7 +12,8 @@ const {
   getMetabotProfile,
   updateMetabotProfile,
 } = require('../../dist/core/bot/metabotProfileManager.js');
-const { upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
+const { listIdentityProfiles, upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
+const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 
@@ -39,6 +42,32 @@ function makeSigner(writePin) {
   };
 }
 
+function makeChainedCreateOverrides(writeCalls = []) {
+  return {
+    identitySyncStepDelayMs: 0,
+    requestMvcGasSubsidy: async (input) => ({
+      success: true,
+      step1: { address: input.mvcAddress },
+      step2: { txid: 'subsidy-tx-1' },
+    }),
+    createSignerForHome: () => makeSigner(async (input) => {
+      writeCalls.push(input);
+      return {
+        txids: [`create-tx-${writeCalls.length}`],
+        pinId: `create-pin-${writeCalls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gm-created',
+        mvcAddress: 'mvc-created',
+      };
+    }),
+  };
+}
+
 test('default bot handlers create, list, and fetch MetaBot profiles', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-');
   t.after(async () => {
@@ -50,6 +79,7 @@ test('default bot handlers create, list, and fetch MetaBot profiles', async (t) 
     homeDir,
     systemHomeDir,
     getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
   });
 
   const created = await handlers.bot.createProfile({
@@ -78,6 +108,7 @@ test('default bot createProfile rejects missing or duplicate names', async (t) =
     homeDir,
     systemHomeDir,
     getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
   });
 
   const missing = await handlers.bot.createProfile({ name: '  ' });
@@ -91,7 +122,234 @@ test('default bot createProfile rejects missing or duplicate names', async (t) =
   assert.equal(duplicate.code, 'name_taken');
 });
 
-test('default bot updateProfile skips chain sync for local-only profiles and saves locally', async (t) => {
+test('default bot createProfile bootstraps a chained identity before indexing the local profile', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const writeCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    identitySyncStepDelayMs: 0,
+    getDaemonRecord: () => null,
+    requestMvcGasSubsidy: async (input) => ({
+      success: true,
+      step1: { address: input.mvcAddress },
+      step2: { txid: 'subsidy-tx-1' },
+    }),
+    createSignerForHome: () => makeSigner(async (input) => {
+      writeCalls.push(input);
+      return {
+        txids: [`tx-${writeCalls.length}`],
+        pinId: `pin-${writeCalls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gm-chain-bot',
+        mvcAddress: 'mvc-chain-bot',
+      };
+    }),
+  });
+
+  const result = await handlers.bot.createProfile({
+    name: 'Chain Bot',
+    role: 'Role after chain.',
+    avatarDataUrl: 'data:image/png;base64,ZmFrZQ==',
+  });
+  const stored = await getMetabotProfile(systemHomeDir, 'chain-bot');
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.slug, 'chain-bot');
+  assert.match(result.data.profile.globalMetaId, /^idq/);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/avatar', '/info/bio']);
+  assert.deepEqual(writeCalls.map((call) => call.operation), ['create', 'create', 'create', 'create']);
+  assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['tx-1', 'tx-2', 'tx-3', 'tx-4']);
+  assert.equal(stored.role, 'Role after chain.');
+  assert.equal(stored.avatarDataUrl, 'data:image/png;base64,ZmFrZQ==');
+  assert.equal(stored.globalMetaId, result.data.profile.globalMetaId);
+});
+
+test('default bot createProfile writes requested profile fields to chain before local profile files', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'chain-first-draft-bot');
+  const targetPaths = resolveMetabotPaths(targetHomeDir);
+  const writeCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    identitySyncStepDelayMs: 0,
+    getDaemonRecord: () => null,
+    requestMvcGasSubsidy: async (input) => ({
+      success: true,
+      step1: { address: input.mvcAddress },
+      step2: { txid: 'subsidy-tx-1' },
+    }),
+    createSignerForHome: () => makeSigner(async (input) => {
+      writeCalls.push(input);
+      if (input.path === '/info/bio') {
+        assert.deepEqual(await listIdentityProfiles(systemHomeDir), []);
+        await assert.rejects(() => access(targetPaths.roleMdPath), /ENOENT/);
+        await assert.rejects(() => access(path.join(targetHomeDir, 'avatar.txt')), /ENOENT/);
+      }
+      return {
+        txids: [`chain-first-tx-${writeCalls.length}`],
+        pinId: `chain-first-pin-${writeCalls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gm-chain-first-draft',
+        mvcAddress: 'mvc-chain-first-draft',
+      };
+    }),
+  });
+
+  const result = await handlers.bot.createProfile({
+    name: 'Chain First Draft Bot',
+    role: 'Chain first role.',
+    avatarDataUrl: 'data:image/png;base64,ZmFrZQ==',
+  });
+  const stored = await getMetabotProfile(systemHomeDir, 'chain-first-draft-bot');
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/avatar', '/info/bio']);
+  assert.equal(stored.role, 'Chain first role.');
+  assert.equal(stored.avatarDataUrl, 'data:image/png;base64,ZmFrZQ==');
+});
+
+test('default bot createProfile persists requested provider fields after chain bio write', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'provider-create-bot');
+  await createLlmRuntimeStore(targetHomeDir).write({
+    version: 1,
+    runtimes: [
+      runtime('codex', 'runtime-codex', 'healthy'),
+      runtime('claude-code', 'runtime-claude', 'degraded'),
+    ],
+  });
+  const bioPayloads = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    identitySyncStepDelayMs: 0,
+    getDaemonRecord: () => null,
+    requestMvcGasSubsidy: async (input) => ({
+      success: true,
+      step1: { address: input.mvcAddress },
+      step2: { txid: 'subsidy-tx-1' },
+    }),
+    createSignerForHome: () => makeSigner(async (input) => {
+      if (input.path === '/info/bio') {
+        bioPayloads.push(JSON.parse(input.payload));
+      }
+      return {
+        txids: [`provider-create-tx-${bioPayloads.length + 1}`],
+        pinId: `provider-create-pin-${bioPayloads.length + 1}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gm-provider-create',
+        mvcAddress: 'mvc-provider-create',
+      };
+    }),
+  });
+
+  const result = await handlers.bot.createProfile({
+    name: 'Provider Create Bot',
+    primaryProvider: 'codex',
+    fallbackProvider: 'claude-code',
+  });
+  const bindingState = await createLlmBindingStore(result.data.profile.homeDir).read();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.primaryProvider, 'codex');
+  assert.equal(result.data.profile.fallbackProvider, 'claude-code');
+  assert.deepEqual(bioPayloads.at(-1), {
+    role: 'I am a helpful AI assistant.',
+    soul: 'Friendly and professional.',
+    goal: 'Help users accomplish their tasks effectively.',
+    primaryProvider: 'codex',
+    fallbackProvider: 'claude-code',
+  });
+  assert.deepEqual(
+    bindingState.bindings.map((binding) => [binding.role, binding.llmRuntimeId]).sort(),
+    [
+      ['fallback', 'runtime-claude'],
+      ['primary', 'runtime-codex'],
+    ],
+  );
+});
+
+test('default bot createProfile removes pending local files when subsidy or chain bootstrap fails', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'failed-bot');
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    identitySyncStepDelayMs: 0,
+    getDaemonRecord: () => null,
+    requestMvcGasSubsidy: async () => ({
+      success: false,
+      error: 'subsidy unavailable',
+    }),
+    createSignerForHome: () => makeSigner(async () => {
+      throw new Error('chain sync should not run after subsidy failure');
+    }),
+  });
+
+  const result = await handlers.bot.createProfile({ name: 'Failed Bot' });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'identity_bootstrap_failed');
+  assert.deepEqual(await listIdentityProfiles(systemHomeDir), []);
+  await assert.rejects(() => access(targetHomeDir), /ENOENT/);
+});
+
+test('default bot createProfile removes post-chain local files when manager indexing fails', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'index-fails-bot');
+  await mkdir(path.join(systemHomeDir, '.metabot', 'manager', 'identity-profiles.json'), { recursive: true });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+  });
+
+  const result = await handlers.bot.createProfile({ name: 'Index Fails Bot' });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'metabot_profile_create_failed');
+  await assert.rejects(() => access(targetHomeDir), /ENOENT/);
+});
+
+test('default bot updateProfile rejects local-only profiles before saving local fields', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -114,10 +372,12 @@ test('default bot updateProfile skips chain sync for local-only profiles and sav
     name: 'Local Bot Updated',
     role: 'Local edits only.',
   });
+  const afterFailure = await getMetabotProfile(systemHomeDir, profile.slug);
 
-  assert.equal(result.ok, true);
-  assert.equal(result.data.profile.name, 'Local Bot Updated');
-  assert.equal(result.data.profile.role, 'Local edits only.');
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'chain_identity_missing');
+  assert.equal(afterFailure.name, 'Local Bot');
+  assert.equal(afterFailure.role, 'I am a helpful AI assistant.');
   assert.deepEqual(signerCalls, []);
 });
 
@@ -128,6 +388,13 @@ test('default bot updateProfile allows full-form saves when unchanged providers 
   });
   const systemHomeDir = deriveSystemHome(homeDir);
   const profile = await createMetabotProfile(systemHomeDir, { name: 'Runtime Drift Bot' });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-runtime-drift-bot',
+    mvcAddress: 'mvc-runtime-drift-bot',
+  });
   await createLlmRuntimeStore(profile.homeDir).write({
     version: 1,
     runtimes: [
@@ -147,6 +414,18 @@ test('default bot updateProfile allows full-form saves when unchanged providers 
     homeDir,
     systemHomeDir,
     getDaemonRecord: () => null,
+    createSignerForHome: () => makeSigner(async (input) => ({
+      txids: ['runtime-drift-save-tx'],
+      pinId: 'runtime-drift-save-pin',
+      totalCost: 1,
+      network: 'mvc',
+      operation: input.operation,
+      path: input.path,
+      contentType: input.contentType,
+      encoding: input.encoding ?? 'utf-8',
+      globalMetaId: 'gm-runtime-drift-bot',
+      mvcAddress: 'mvc-runtime-drift-bot',
+    })),
   });
 
   const result = await handlers.bot.updateProfile({
@@ -200,6 +479,110 @@ test('default bot updateProfile returns chain_sync_failed before saving local fi
   assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name']);
   assert.equal(afterFailure.name, 'Chained Bot');
   assert.equal(afterFailure.role, 'Original role.');
+});
+
+test('default bot updateProfile returns chain write txids after saving a chained profile', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const profile = await createMetabotProfile(systemHomeDir, {
+    name: 'Chained Save Bot',
+    role: 'Original role.',
+  });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-chained-save-bot',
+    mvcAddress: 'addr-chained-save-bot',
+  });
+  const writeCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async (input) => {
+      writeCalls.push(input);
+      return {
+        txids: [`save-tx-${writeCalls.length}`],
+        pinId: `save-pin-${writeCalls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gm-chained-save-bot',
+        mvcAddress: 'addr-chained-save-bot',
+      };
+    }),
+  });
+
+  const result = await handlers.bot.updateProfile({
+    slug: profile.slug,
+    name: 'Chained Save Updated',
+    role: 'Updated on chain first.',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.name, 'Chained Save Updated');
+  assert.equal(result.data.profile.role, 'Updated on chain first.');
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/bio']);
+  assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['save-tx-1', 'save-tx-2']);
+});
+
+test('default bot updateProfile writes an avatar clear to chain before removing the local avatar', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const profile = await createMetabotProfile(systemHomeDir, {
+    name: 'Avatar Clear Bot',
+    avatarDataUrl: 'data:image/png;base64,ZmFrZQ==',
+  });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-avatar-clear-bot',
+    mvcAddress: 'addr-avatar-clear-bot',
+  });
+  const writeCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async (input) => {
+      writeCalls.push(input);
+      return {
+        txids: [`avatar-clear-tx-${writeCalls.length}`],
+        pinId: `avatar-clear-pin-${writeCalls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gm-avatar-clear-bot',
+        mvcAddress: 'addr-avatar-clear-bot',
+      };
+    }),
+  });
+
+  const result = await handlers.bot.updateProfile({
+    slug: profile.slug,
+    avatarDataUrl: '',
+  });
+  const updated = await getMetabotProfile(systemHomeDir, profile.slug);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/avatar']);
+  assert.equal(writeCalls[0].payload, '');
+  assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['avatar-clear-tx-1']);
+  assert.equal(updated.avatarDataUrl, undefined);
 });
 
 test('default bot updateProfile uses the selected profile signer for non-active chained profiles', async (t) => {

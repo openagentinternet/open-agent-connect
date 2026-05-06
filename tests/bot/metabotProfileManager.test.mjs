@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -8,14 +8,26 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const {
   createMetabotProfile,
+  deleteMetabotProfile,
   getMetabotProfile,
+  getMetabotMnemonicBackup,
+  getMetabotWalletInfo,
   listMetabotProfiles,
   syncMetabotInfoToChain,
   updateMetabotProfile,
   validateAvatarDataUrl,
 } = require('../../dist/core/bot/metabotProfileManager.js');
+const {
+  readActiveMetabotHome,
+  resolveIdentityManagerPaths,
+  setActiveMetabotHome,
+  upsertIdentityProfile,
+} = require('../../dist/core/identity/identityProfiles.js');
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
+const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretStore.js');
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+
+const FIXTURE_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
 async function createSystemHome() {
   return await mkdtemp(path.join(os.tmpdir(), 'oac-metabot-manager-'));
@@ -325,4 +337,122 @@ test('syncMetabotInfoToChain skips local-only profiles without a globalMetaId', 
   }, ['name']);
 
   assert.deepEqual(results, []);
+});
+
+test('getMetabotWalletInfo and getMetabotMnemonicBackup expose selected profile wallet data', async () => {
+  const systemHomeDir = await createSystemHome();
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Wallet Bot' });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: created.name,
+    homeDir: created.homeDir,
+    globalMetaId: 'gm-wallet-bot',
+    mvcAddress: 'mvc-profile-address',
+  });
+  await createFileSecretStore(created.homeDir).writeIdentitySecrets({
+    mnemonic: FIXTURE_MNEMONIC,
+    path: "m/44'/10001'/0'/0/0",
+    mvcAddress: 'mvc-secret-address',
+    btcAddress: 'btc-secret-address',
+    globalMetaId: 'gm-wallet-bot',
+  });
+
+  const wallet = await getMetabotWalletInfo(systemHomeDir, created.slug);
+  const backup = await getMetabotMnemonicBackup(systemHomeDir, created.slug);
+
+  assert.equal(wallet.slug, created.slug);
+  assert.equal(wallet.name, 'Wallet Bot');
+  assert.deepEqual(wallet.addresses, {
+    mvc: 'mvc-secret-address',
+    btc: 'btc-secret-address',
+  });
+  assert.deepEqual(backup.words, FIXTURE_MNEMONIC.split(' '));
+});
+
+test('deleteMetabotProfile removes manager records, active profile pointer, profile files, and executor sessions for the slug', async () => {
+  const systemHomeDir = await createSystemHome();
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Delete Bot' });
+  await setActiveMetabotHome({
+    systemHomeDir,
+    homeDir: created.homeDir,
+  });
+  const paths = resolveMetabotPaths(created.homeDir);
+  const sessionPath = path.join(paths.llmExecutorSessionsRoot, 'session-delete-bot.json');
+  const transcriptPath = path.join(paths.llmExecutorTranscriptsRoot, 'session-delete-bot.log');
+  await mkdir(paths.llmExecutorSessionsRoot, { recursive: true });
+  await mkdir(paths.llmExecutorTranscriptsRoot, { recursive: true });
+  await writeFile(sessionPath, `${JSON.stringify({
+    sessionId: 'session-delete-bot',
+    metaBotSlug: created.slug,
+  }, null, 2)}\n`, 'utf8');
+  await writeFile(transcriptPath, 'delete bot transcript\n', 'utf8');
+
+  const deleted = await deleteMetabotProfile(systemHomeDir, created.slug);
+
+  assert.equal(deleted.profile.slug, created.slug);
+  assert.deepEqual(await listMetabotProfiles(systemHomeDir), []);
+  assert.equal(await readActiveMetabotHome(systemHomeDir), null);
+  await assert.rejects(() => access(created.homeDir), /ENOENT/);
+  await assert.rejects(() => access(sessionPath), /ENOENT/);
+  await assert.rejects(() => access(transcriptPath), /ENOENT/);
+});
+
+test('deleteMetabotProfile does not let unsafe session ids delete transcripts outside the transcript directory', async () => {
+  const systemHomeDir = await createSystemHome();
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Unsafe Delete Bot' });
+  const paths = resolveMetabotPaths(created.homeDir);
+  const outsideTranscriptPath = path.join(systemHomeDir, 'outside-delete-target.log');
+  const unsafeSessionId = path.relative(paths.llmExecutorTranscriptsRoot, outsideTranscriptPath).replace(/\.log$/, '');
+  const sessionPath = path.join(paths.llmExecutorSessionsRoot, 'unsafe-delete-bot.json');
+  await mkdir(paths.llmExecutorSessionsRoot, { recursive: true });
+  await mkdir(paths.llmExecutorTranscriptsRoot, { recursive: true });
+  await writeFile(sessionPath, `${JSON.stringify({
+    sessionId: unsafeSessionId,
+    metaBotSlug: created.slug,
+  }, null, 2)}\n`, 'utf8');
+  await writeFile(outsideTranscriptPath, 'must stay\n', 'utf8');
+
+  const deleted = await deleteMetabotProfile(systemHomeDir, created.slug);
+
+  assert.equal(deleted.profile.slug, created.slug);
+  assert.deepEqual(deleted.removedExecutorSessions, ['unsafe-delete-bot']);
+  assert.equal(await readFile(outsideTranscriptPath, 'utf8'), 'must stay\n');
+});
+
+test('deleteMetabotProfile keeps the manager record retryable when profile directory removal fails', { skip: process.platform === 'win32' }, async () => {
+  const systemHomeDir = await createSystemHome();
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Retry Delete Bot' });
+  const profilesRoot = path.dirname(created.homeDir);
+  await chmod(profilesRoot, 0o500);
+
+  try {
+    await assert.rejects(() => deleteMetabotProfile(systemHomeDir, created.slug));
+  } finally {
+    await chmod(profilesRoot, 0o700);
+  }
+
+  const stillIndexed = await getMetabotProfile(systemHomeDir, created.slug);
+  assert.equal(stillIndexed.slug, created.slug);
+  await access(created.homeDir);
+});
+
+test('deleteMetabotProfile remains retryable when manager index deletion fails after local data removal', { skip: process.platform === 'win32' }, async () => {
+  const systemHomeDir = await createSystemHome();
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Index Retry Bot' });
+  const managerPaths = resolveIdentityManagerPaths(systemHomeDir);
+  await chmod(managerPaths.managerRoot, 0o500);
+
+  try {
+    await assert.rejects(() => deleteMetabotProfile(systemHomeDir, created.slug));
+  } finally {
+    await chmod(managerPaths.managerRoot, 0o700);
+  }
+
+  const stillIndexed = await getMetabotProfile(systemHomeDir, created.slug);
+  assert.equal(stillIndexed.slug, created.slug);
+  await assert.rejects(() => access(created.homeDir), /ENOENT/);
+
+  const retry = await deleteMetabotProfile(systemHomeDir, created.slug);
+  assert.equal(retry.profile.slug, created.slug);
+  assert.deepEqual(await listMetabotProfiles(systemHomeDir), []);
 });
