@@ -1347,6 +1347,18 @@ test('GET /ui/shared.css keeps active status animated and the topbar narrow-safe
   assert.match(css, /\.topbar-title\s*\{\s*display: none;\s*\}/);
 });
 
+test('GET /ui/assets/platforms/codex.svg serves a platform logo asset', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/assets/platforms/codex.svg`);
+  const svg = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /image\/svg\+xml/i);
+  assert.match(svg, /<svg\b/i);
+});
+
 test('GET /api/network/services forwards query filters to network.listServices', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());

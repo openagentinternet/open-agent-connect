@@ -12,6 +12,14 @@ import type { MetabotUiPageName, RouteHandler } from './types';
 import { handleBundledMetaAppRoutes } from './uiMetaApps';
 
 const UI_ROUTE_PREFIX = '/ui/';
+const PLATFORM_ASSET_PREFIX = '/ui/assets/platforms/';
+const PLATFORM_ASSET_CONTENT_TYPES: Record<string, string> = {
+  '.svg': 'image/svg+xml; charset=utf-8',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+};
 
 const PAGE_BUILDERS: Record<MetabotUiPageName, () => LocalUiPageDefinition> = {
   'hub': buildHubPageDefinition,
@@ -94,6 +102,47 @@ async function renderBuiltInPage(page: MetabotUiPageName): Promise<string> {
     .replace(/__PAGE_SCRIPT__/g, definition.script);
 }
 
+async function servePlatformAsset(context: Parameters<RouteHandler>[0]): Promise<boolean> {
+  const { req, url } = context;
+  if (!url.pathname.startsWith(PLATFORM_ASSET_PREFIX)) {
+    return false;
+  }
+
+  if (req.method !== 'GET') {
+    context.sendMethodNotAllowed(['GET']);
+    return true;
+  }
+
+  const filename = decodeURIComponent(url.pathname.slice(PLATFORM_ASSET_PREFIX.length));
+  if (filename !== path.basename(filename)) {
+    context.sendJson(400, { ok: false, state: 'failed', code: 'bad_request', message: 'Invalid platform asset path.' });
+    return true;
+  }
+
+  const ext = path.extname(filename).toLowerCase();
+  const contentType = PLATFORM_ASSET_CONTENT_TYPES[ext];
+  if (!contentType) {
+    context.sendJson(404, { ok: false, state: 'failed', code: 'not_found', message: 'Platform asset not found.' });
+    return true;
+  }
+
+  const candidates = [
+    path.resolve(__dirname, '../../ui/assets/platforms', filename),
+    path.resolve(__dirname, '../../../src/ui/assets/platforms', filename),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const body = await fs.readFile(candidate);
+      context.res.writeHead(200, { 'Content-Type': contentType });
+      context.res.end(body);
+      return true;
+    } catch { /* try next */ }
+  }
+
+  context.sendJson(404, { ok: false, state: 'failed', code: 'not_found', message: 'Platform asset not found.' });
+  return true;
+}
+
 export const handleUiRoutes: RouteHandler = async (context) => {
   const { req, url, handlers } = context;
 
@@ -116,6 +165,10 @@ export const handleUiRoutes: RouteHandler = async (context) => {
       } catch { /* try next */ }
     }
     context.sendJson(404, { ok: false, state: 'failed', code: 'not_found', message: 'shared.css not found' });
+    return true;
+  }
+
+  if (await servePlatformAsset(context)) {
     return true;
   }
 
