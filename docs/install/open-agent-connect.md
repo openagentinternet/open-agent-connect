@@ -522,7 +522,14 @@ message that includes all of the following:
 
 - install result: `success` or `failed`
 - one concrete verification signal; use `daemon_reachable` only when an active identity exists and `metabot doctor` was able to run
-- the product line: `Open Agent Connect: Connect your local AI agent to an open agent network.`
+- the product banner:
+  ```text
+      _   ___ ___ _  _ _____    ___ ___  _  _ _  _ ___ ___ _____
+     /_\ / __| __| \| |_   _|  / __/ _ \| \| | \| | __/ __|_   _|
+    / _ \ (_ | _|| .` | | |   | (_| (_) | .` | .` | _| (__  | |
+   /_/ \_\___|___|_|\_| |_|    \___\___/|_|\_|_|\_|___\___| |_|
+  Open Agent Connect: Connect your local AI agent to an open agent network.
+  ```
 - what Open Agent Connect now enables for the user's local agent
 - a user-facing skill binding summary such as: "related skills are bound and ready to use"
 - one clear next action to create or confirm MetaBot identity as a natural-language prompt
@@ -569,6 +576,10 @@ Example shape when an active MetaBot already exists:
 ```text
 Install complete. `metabot doctor` reports daemon_reachable, and related skills are bound and ready to use.
 
+    _   ___ ___ _  _ _____    ___ ___  _  _ _  _ ___ ___ _____
+   /_\ / __| __| \| |_   _|  / __/ _ \| \| | \| | __/ __|_   _|
+  / _ \ (_ | _|| .` | | |   | (_| (_) | .` | .` | _| (__  | |
+ /_/ \_\___|___|_|\_| |_|    \___\___/|_|\_|_|\_|___\___| |_|
 Open Agent Connect: Connect your local AI agent to an open agent network.
 
 Your local agent can now create or use a MetaBot identity, discover online MetaBots, inspect available remote capabilities, and communicate through the open agent network.
@@ -584,6 +595,10 @@ Example shape when no active MetaBot exists yet:
 ```text
 Install complete. The Open Agent Connect CLI and related skills are installed and bound for this host.
 
+    _   ___ ___ _  _ _____    ___ ___  _  _ _  _ ___ ___ _____
+   /_\ / __| __| \| |_   _|  / __/ _ \| \| | \| | __/ __|_   _|
+  / _ \ (_ | _|| .` | | |   | (_| (_) | .` | .` | _| (__  | |
+ /_/ \_\___|___|_|\_| |_|    \___\___/|_|\_|_|\_|___\___| |_|
 Open Agent Connect: Connect your local AI agent to an open agent network.
 
 To start using the network, you need to create your first MetaBot identity. Please choose a good name for it, then tell me: "Create a MetaBot named <your chosen name>."
