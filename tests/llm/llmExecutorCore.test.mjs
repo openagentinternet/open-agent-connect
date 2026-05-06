@@ -26,6 +26,7 @@ const {
   createRegistryBackendFactories,
   injectSkills,
   openClawBackendFactory,
+  resolveProviderSkillRoot,
 } = require('../../dist/core/llm/executor/index.js');
 const {
   getPlatformDefinition,
@@ -460,6 +461,46 @@ test('skill injector copies requested skills into provider-native skill roots', 
   const copiedScript = await fs.readFile(path.join(cwd, '.claude', 'skills', 'metabot-post-buzz', 'scripts', 'post.mjs'), 'utf8');
   assert.match(copiedSkill, /Post Buzz/);
   assert.match(copiedScript, /export/);
+});
+
+test('skill injector resolves provider roots from registry project skill roots', async () => {
+  const base = await createTempDir();
+  const cwd = path.join(base, 'work');
+
+  assert.equal(resolveProviderSkillRoot('claude-code', cwd), path.join(cwd, '.claude', 'skills'));
+  assert.equal(resolveProviderSkillRoot('codex', cwd), path.join(cwd, '.codex', 'skills'));
+  assert.equal(resolveProviderSkillRoot('openclaw', cwd), path.join(cwd, '.openclaw', 'skills'));
+  assert.equal(resolveProviderSkillRoot('gemini', cwd), path.join(cwd, '.gemini', 'skills'));
+  assert.equal(resolveProviderSkillRoot('hermes', cwd), path.join(cwd, '.agent_context', 'skills'));
+  assert.equal(resolveProviderSkillRoot('unknown-provider', cwd), path.join(cwd, '.agent_context', 'skills'));
+});
+
+test('skill injector copies Gemini skills into registry project root and falls back without one', async () => {
+  const base = await createTempDir();
+  const skillsRoot = path.join(base, 'skills');
+  const cwd = path.join(base, 'work');
+  await fs.mkdir(path.join(skillsRoot, 'metabot-test-skill'), { recursive: true });
+  await fs.writeFile(path.join(skillsRoot, 'metabot-test-skill', 'SKILL.md'), '# Test Skill\n', 'utf8');
+
+  const geminiResult = await injectSkills({
+    skills: ['metabot-test-skill'],
+    skillsRoot,
+    provider: 'gemini',
+    cwd,
+  });
+  assert.deepEqual(geminiResult.injected, ['metabot-test-skill']);
+  const geminiSkill = await fs.readFile(path.join(cwd, '.gemini', 'skills', 'metabot-test-skill', 'SKILL.md'), 'utf8');
+  assert.match(geminiSkill, /Test Skill/);
+
+  const hermesResult = await injectSkills({
+    skills: ['metabot-test-skill'],
+    skillsRoot,
+    provider: 'hermes',
+    cwd,
+  });
+  assert.deepEqual(hermesResult.injected, ['metabot-test-skill']);
+  const fallbackSkill = await fs.readFile(path.join(cwd, '.agent_context', 'skills', 'metabot-test-skill', 'SKILL.md'), 'utf8');
+  assert.match(fallbackSkill, /Test Skill/);
 });
 
 test('LlmExecutor starts a session, streams events, injects skills, and persists the terminal result', async () => {
