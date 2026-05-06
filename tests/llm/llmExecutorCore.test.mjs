@@ -9,6 +9,8 @@ const require = createRequire(import.meta.url);
 
 const {
   LlmExecutor,
+  claudeBackendFactory,
+  codexBackendFactory,
   createClaudeBackend,
   createCodexBackend,
   createCopilotBackend,
@@ -21,10 +23,13 @@ const {
   createOpenClawBackend,
   createOpenCodeBackend,
   createPiBackend,
+  createRegistryBackendFactories,
   injectSkills,
+  openClawBackendFactory,
 } = require('../../dist/core/llm/executor/index.js');
 const {
   getPlatformDefinition,
+  getRuntimePlatforms,
 } = require('../../dist/core/platform/platformRegistry.js');
 
 async function createTempDir(prefix = 'metabot-llm-executor-') {
@@ -181,6 +186,30 @@ test('registry preserves Claude Code and Codex executor metadata', async () => {
   assert.equal(codex.executor.backendFactoryExport, 'codexBackendFactory');
   assert.equal(codex.executor.launchCommand, 'codex app-server --listen stdio://');
   assert.equal(codex.executor.multicaReferencePath, 'agent/codex.go');
+});
+
+test('registry backend factory helper covers every managed provider and CLI runtime uses it', async () => {
+  assert.equal(typeof createRegistryBackendFactories, 'function');
+
+  const factories = createRegistryBackendFactories();
+  const platformIds = getRuntimePlatforms().map((platform) => platform.id);
+  assert.deepEqual(Object.keys(factories), platformIds);
+  assert.equal(factories['claude-code'], claudeBackendFactory);
+  assert.equal(factories.codex, codexBackendFactory);
+  assert.equal(factories.openclaw, openClawBackendFactory);
+
+  const base = await createTempDir();
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: path.join(base, 'skills'),
+    backends: factories,
+  });
+  assert.ok(executor);
+
+  const runtimeSource = await fs.readFile(path.resolve('src/cli/runtime.ts'), 'utf8');
+  assert.match(runtimeSource, /createRegistryBackendFactories\(\)/);
+  assert.doesNotMatch(runtimeSource, /backends:\s*\{\s*codex:\s*codexBackendFactory,\s*['"]claude-code['"]:\s*claudeBackendFactory,\s*openclaw:\s*openClawBackendFactory,\s*\}/s);
 });
 
 test('file session manager persists, updates, lists, and deletes session records', async () => {

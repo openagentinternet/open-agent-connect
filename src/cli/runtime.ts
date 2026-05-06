@@ -70,9 +70,7 @@ import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
 import { discoverLlmRuntimes } from '../core/llm/llmRuntimeDiscovery';
 import {
   LlmExecutor,
-  claudeBackendFactory,
-  codexBackendFactory,
-  openClawBackendFactory,
+  createRegistryBackendFactories,
 } from '../core/llm/executor';
 import { runSystemUpdate } from '../core/system/update';
 import { runSystemUninstall } from '../core/system/uninstall';
@@ -2262,11 +2260,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     sessionsRoot: paths.llmExecutorSessionsRoot,
     transcriptsRoot: paths.llmExecutorTranscriptsRoot,
     skillsRoot: paths.skillsRoot,
-    backends: {
-      codex: codexBackendFactory,
-      'claude-code': claudeBackendFactory,
-      openclaw: openClawBackendFactory,
-    },
+    backends: createRegistryBackendFactories(),
   });
 
   const handlers = createDefaultMetabotDaemonHandlers({
