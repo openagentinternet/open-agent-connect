@@ -15,6 +15,9 @@ const {
   createOpenClawBackend,
   injectSkills,
 } = require('../../dist/core/llm/executor/index.js');
+const {
+  getPlatformDefinition,
+} = require('../../dist/core/platform/platformRegistry.js');
 
 async function createTempDir(prefix = 'metabot-llm-executor-') {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -47,6 +50,25 @@ const runtime = {
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };
+
+test('registry preserves Claude Code and Codex executor metadata', async () => {
+  const claude = getPlatformDefinition('claude-code');
+  const codex = getPlatformDefinition('codex');
+
+  assert.equal(claude.id, 'claude-code');
+  assert.equal(claude.displayName, 'Claude Code');
+  assert.equal(claude.executor.kind, 'claude-stream-json');
+  assert.equal(claude.executor.backendFactoryExport, 'claudeBackendFactory');
+  assert.equal(claude.executor.launchCommand, 'claude -p --output-format stream-json');
+  assert.equal(claude.executor.multicaReferencePath, 'agent/claude.go');
+
+  assert.equal(codex.id, 'codex');
+  assert.equal(codex.displayName, 'Codex (OpenAI)');
+  assert.equal(codex.executor.kind, 'codex-app-server');
+  assert.equal(codex.executor.backendFactoryExport, 'codexBackendFactory');
+  assert.equal(codex.executor.launchCommand, 'codex app-server --listen stdio://');
+  assert.equal(codex.executor.multicaReferencePath, 'agent/codex.go');
+});
 
 test('file session manager persists, updates, lists, and deletes session records', async () => {
   const root = path.join(await createTempDir(), 'sessions');
