@@ -290,12 +290,12 @@ test('runCli prints skills resolve help for `metabot skills resolve --help`', as
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot skills resolve --skill <skill-name> --format <json\|markdown> \[--host <codex\|claude-code\|openclaw>\]/m);
+  assert.match(output, /^Usage:\s+metabot skills resolve --skill <skill-name> --format <json\|markdown> \[--host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro>\]/m);
   assert.match(output, /^Required flags:/m);
   assert.match(output, /--skill <skill-name>\s+Base skill id to resolve, such as metabot-network-manage\./m);
   assert.match(output, /--format <json\|markdown>\s+Output shape to render\./m);
   assert.match(output, /^Optional flags:/m);
-  assert.match(output, /--host <codex\|claude-code\|openclaw>\s+Optional compatibility override\./m);
+  assert.match(output, /--host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro>\s+Optional compatibility override\./m);
   assert.match(output, /^Success shape:/m);
   assert.match(output, /requestedHost/);
   assert.match(output, /resolutionMode/);
@@ -315,7 +315,7 @@ test('runCli prints machine-readable skills resolve help for `metabot skills res
   assert.deepEqual(output.commandPath, ['skills', 'resolve']);
   assert.equal(output.command, 'metabot skills resolve');
   assert.equal(output.summary, 'Render one resolved skill contract using the shared-default host or an explicit compatibility host override.');
-  assert.equal(output.usage, 'metabot skills resolve --skill <skill-name> --format <json|markdown> [--host <codex|claude-code|openclaw>]');
+  assert.equal(output.usage, 'metabot skills resolve --skill <skill-name> --format <json|markdown> [--host <claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro>]');
   assert.deepEqual(output.requiredFlags, [
     {
       flag: '--skill',
@@ -331,7 +331,7 @@ test('runCli prints machine-readable skills resolve help for `metabot skills res
   assert.deepEqual(output.optionalFlags, [
     {
       flag: '--host',
-      value: '<codex|claude-code|openclaw>',
+      value: '<claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro>',
       description: 'Optional compatibility override. Omit to render the shared-default contract.',
     },
     {

@@ -1,4 +1,5 @@
 import { commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
+import { SUPPORTED_PLATFORM_IDS } from '../core/platform/platformRegistry';
 import type { CliRuntimeContext } from './types';
 
 export interface CommandHelpFlag {
@@ -160,6 +161,9 @@ const HELP_JSON_FLAG: CommandHelpFlag = {
   description: 'Emit machine-readable help JSON instead of text.',
 };
 
+const PLATFORM_HOST_VALUE = `<${SUPPORTED_PLATFORM_IDS.join('|')}>`;
+const PLATFORM_HOST_TEXT = SUPPORTED_PLATFORM_IDS.join(', ');
+
 const CHAIN_BTC_MVC_FLAG: CommandHelpFlag = {
   flag: '--chain',
   value: '<mvc|btc>',
@@ -229,9 +233,9 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['host', 'bind-skills'],
     summary: 'Project shared MetaBot skills into one host-native skills root.',
-    usage: 'metabot host bind-skills --host <codex|claude-code|openclaw>',
+    usage: `metabot host bind-skills --host ${PLATFORM_HOST_VALUE}`,
     requiredFlags: [
-      { flag: '--host', value: '<codex|claude-code|openclaw>', description: 'Target host whose native skills root should receive shared MetaBot symlinks.' },
+      { flag: '--host', value: PLATFORM_HOST_VALUE, description: 'Target host whose native skills root should receive shared MetaBot symlinks.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
     successFields: [
@@ -243,7 +247,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'unchangedEntries',
     ],
     failureSemantics: [
-      'Fails with invalid_argument when --host is not one of codex, claude-code, or openclaw.',
+      `Fails with invalid_argument when --host is not one of ${PLATFORM_HOST_TEXT}.`,
       'Fails with shared_skills_missing when ~/.metabot/skills has no shared metabot-* directories to bind.',
       'Fails with host_skill_root_unresolved and returns host plus the attempted hostSkillRoot path.',
       'Fails with host_skill_bind_failed and returns sourceSharedSkillPath plus destinationHostPath.',
@@ -270,13 +274,13 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['skills', 'resolve'],
     summary: 'Render one resolved skill contract using the shared-default host or an explicit compatibility host override.',
-    usage: 'metabot skills resolve --skill <skill-name> --format <json|markdown> [--host <codex|claude-code|openclaw>]',
+    usage: `metabot skills resolve --skill <skill-name> --format <json|markdown> [--host ${PLATFORM_HOST_VALUE}]`,
     requiredFlags: [
       { flag: '--skill', value: '<skill-name>', description: 'Base skill id to resolve, such as metabot-network-manage.' },
       { flag: '--format', value: '<json|markdown>', description: 'Output shape to render.' },
     ],
     optionalFlags: [
-      { flag: '--host', value: '<codex|claude-code|openclaw>', description: 'Optional compatibility override. Omit to render the shared-default contract.' },
+      { flag: '--host', value: PLATFORM_HOST_VALUE, description: 'Optional compatibility override. Omit to render the shared-default contract.' },
       HELP_JSON_FLAG,
     ],
     successFields: [
@@ -285,7 +289,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     failureSemantics: [
       'Fails when --skill or --format is omitted.',
-      'Fails when --host is present but not one of codex, claude-code, or openclaw.',
+      `Fails when --host is present but not one of ${PLATFORM_HOST_TEXT}.`,
     ],
     examples: [
       'metabot skills resolve --skill metabot-network-manage --format markdown',

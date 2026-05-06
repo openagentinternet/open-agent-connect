@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 export type PlatformId =
   | 'claude-code'
   | 'codex'
@@ -365,4 +367,28 @@ export function getInstallSkillRoots(): InstallSkillRoot[] {
       .map((root) => ({ ...root, platformId: platform.id })),
   );
   return [sharedAgentsSkillRoot, ...roots];
+}
+
+function normalizeOptionalEnvPath(value: string | undefined): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export function resolvePlatformSkillRootPath(
+  root: PlatformSkillRoot,
+  systemHomeDir: string,
+  env: NodeJS.ProcessEnv = {},
+): string {
+  if (root.homeEnv) {
+    const homeOverride = normalizeOptionalEnvPath(env[root.homeEnv]);
+    if (homeOverride) {
+      return path.resolve(homeOverride, 'skills');
+    }
+  }
+  if (root.path === '~') {
+    return path.resolve(systemHomeDir);
+  }
+  if (root.path.startsWith('~/')) {
+    return path.resolve(systemHomeDir, root.path.slice(2));
+  }
+  return path.resolve(systemHomeDir, root.path);
 }

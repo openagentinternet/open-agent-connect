@@ -2,13 +2,10 @@ import { commandFailed, type MetabotCommandResult } from '../../core/contracts/c
 import { commandMissingFlag, commandUnknownSubcommand, readFlagValue } from './helpers';
 import type { CliRuntimeContext } from '../types';
 import type { ConcreteSkillHost, SkillRenderFormat } from '../../core/skills/skillContractTypes';
+import { SUPPORTED_PLATFORM_IDS, isPlatformId } from '../../core/platform/platformRegistry';
 
-const SUPPORTED_HOSTS: ConcreteSkillHost[] = ['codex', 'claude-code', 'openclaw'];
+const SUPPORTED_HOSTS: ConcreteSkillHost[] = [...SUPPORTED_PLATFORM_IDS];
 const SUPPORTED_FORMATS: SkillRenderFormat[] = ['json', 'markdown'];
-
-function isSupportedHost(value: string): value is ConcreteSkillHost {
-  return SUPPORTED_HOSTS.includes(value as ConcreteSkillHost);
-}
 
 function isSupportedFormat(value: string): value is SkillRenderFormat {
   return SUPPORTED_FORMATS.includes(value as SkillRenderFormat);
@@ -29,13 +26,13 @@ export async function runSkillsCommand(args: string[], context: CliRuntimeContex
     return commandMissingFlag('--skill');
   }
   const host = readFlagValue(args, '--host');
-  if (host && !isSupportedHost(host)) {
+  if (host && !isPlatformId(host)) {
     return commandFailed(
       'invalid_argument',
       `Unsupported --host value: ${host}. Supported values: ${SUPPORTED_HOSTS.join(', ')}.`,
     );
   }
-  const resolvedHost: ConcreteSkillHost | undefined = host && isSupportedHost(host) ? host : undefined;
+  const resolvedHost: ConcreteSkillHost | undefined = host && isPlatformId(host) ? host : undefined;
 
   const format = readFlagValue(args, '--format');
   if (!format) {

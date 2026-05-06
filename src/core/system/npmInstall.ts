@@ -1,11 +1,13 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../contracts/commandResult';
-import { bindHostSkills } from '../host/hostSkillBinding';
-import type { ConcreteSkillHost } from '../skills/skillContractTypes';
+import { bindPlatformSkills, type BoundPlatformSkillRootResult } from '../host/hostSkillBinding';
 import { CLI_VERSION } from '../../cli/version';
+import { SUPPORTED_PLATFORM_IDS, isPlatformId, resolvePlatformSkillRootPath } from '../platform/platformRegistry';
+import { getInstallSkillRoots, getPlatformSkillRoots } from '../platform/platformRegistry';
+import type { PlatformId } from '../platform/platformRegistry';
 
-const SUPPORTED_HOSTS: ConcreteSkillHost[] = ['codex', 'claude-code', 'openclaw'];
+const SUPPORTED_HOSTS: PlatformId[] = [...SUPPORTED_PLATFORM_IDS];
 
 export interface NpmInstallContext {
   env: NodeJS.ProcessEnv;
@@ -18,14 +20,17 @@ export interface NpmInstallInput {
 }
 
 export interface NpmInstallResult {
-  host: ConcreteSkillHost;
+  host?: PlatformId;
   packageRoot: string;
   sharedSkillRoot: string;
   metabotShimPath: string;
   installedSkills: string[];
-  hostSkillRoot: string;
-  boundSkills: string[];
+  boundRoots: BoundPlatformSkillRootResult[];
+  skippedRoots: BoundPlatformSkillRootResult[];
+  failedRoots: BoundPlatformSkillRootResult[];
   version: string;
+  hostSkillRoot?: string;
+  boundSkills?: string[];
 }
 
 class NpmInstallError extends Error {
@@ -50,51 +55,18 @@ function resolvePackageRoot(context: NpmInstallContext): string {
   return path.resolve(context.packageRoot ?? path.join(__dirname, '..', '..', '..'));
 }
 
-function isSupportedHost(value: string): value is ConcreteSkillHost {
-  return SUPPORTED_HOSTS.includes(value as ConcreteSkillHost);
-}
-
-function resolveRequestedHost(host: string | undefined): ConcreteSkillHost | null {
+function resolveRequestedHost(host: string | undefined): PlatformId | undefined {
   const normalized = normalizeText(host);
   if (!normalized) {
-    return null;
+    return undefined;
   }
-  if (!isSupportedHost(normalized)) {
+  if (!isPlatformId(normalized)) {
     throw new NpmInstallError(
       'invalid_argument',
       `Unsupported --host value: ${normalized}. Supported values: ${SUPPORTED_HOSTS.join(', ')}.`,
     );
   }
   return normalized;
-}
-
-function hostSignalPresent(env: NodeJS.ProcessEnv, host: ConcreteSkillHost): boolean {
-  switch (host) {
-    case 'codex':
-      return Boolean(normalizeText(env.CODEX_HOME));
-    case 'claude-code':
-      return Boolean(normalizeText(env.CLAUDE_HOME));
-    case 'openclaw':
-      return Boolean(normalizeText(env.OPENCLAW_HOME));
-  }
-}
-
-function detectHost(env: NodeJS.ProcessEnv): ConcreteSkillHost {
-  const detected = SUPPORTED_HOSTS.filter((host) => hostSignalPresent(env, host));
-  if (detected.length === 1) {
-    return detected[0];
-  }
-  if (detected.length > 1) {
-    throw new NpmInstallError(
-      'install_host_ambiguous',
-      `Multiple host environments detected: ${detected.join(', ')}. Rerun with --host <codex|claude-code|openclaw>.`,
-    );
-  }
-  return 'codex';
-}
-
-function resolveHost(input: NpmInstallInput, env: NodeJS.ProcessEnv): ConcreteSkillHost {
-  return resolveRequestedHost(input.host) ?? detectHost(env);
 }
 
 async function listSourceSkills(packageRoot: string): Promise<string[]> {
@@ -191,17 +163,6 @@ async function writeMetabotShim(input: {
   return metabotShimPath;
 }
 
-function resolveHostHomeDir(systemHomeDir: string, host: ConcreteSkillHost, env: NodeJS.ProcessEnv): string {
-  switch (host) {
-    case 'codex':
-      return path.resolve(normalizeText(env.CODEX_HOME) || path.join(systemHomeDir, '.codex'));
-    case 'claude-code':
-      return path.resolve(normalizeText(env.CLAUDE_HOME) || path.join(systemHomeDir, '.claude'));
-    case 'openclaw':
-      return path.resolve(normalizeText(env.OPENCLAW_HOME) || path.join(systemHomeDir, '.openclaw'));
-  }
-}
-
 async function assertFileExists(filePath: string, code: string, message: string): Promise<void> {
   try {
     const stat = await fs.stat(filePath);
@@ -213,16 +174,17 @@ async function assertFileExists(filePath: string, code: string, message: string)
   }
 }
 
-async function verifyHostBindings(input: {
-  hostSkillRoot: string;
+async function verifyRootBindings(input: {
+  root: BoundPlatformSkillRootResult;
   sharedSkillRoot: string;
   installedSkills: string[];
-}): Promise<string[]> {
+  forced: boolean;
+}): Promise<BoundPlatformSkillRootResult> {
   const missing: string[] = [];
   const boundSkills: string[] = [];
 
   for (const skillName of input.installedSkills) {
-    const hostSkillPath = path.join(input.hostSkillRoot, skillName);
+    const hostSkillPath = path.join(input.root.hostSkillRoot, skillName);
     const sharedSkillPath = path.join(input.sharedSkillRoot, skillName);
     try {
       const stat = await fs.lstat(hostSkillPath);
@@ -241,18 +203,71 @@ async function verifyHostBindings(input: {
     }
   }
 
-  if (missing.length > 0) {
+  if (missing.length > 0 && input.forced) {
     throw new NpmInstallError(
       'doctor_host_bindings_missing',
-      `Missing host bindings for ${missing.join(', ')} under ${input.hostSkillRoot}. Run oac install --host <codex|claude-code|openclaw>.`,
+      `Missing host bindings for ${missing.join(', ')} under ${input.root.hostSkillRoot}. Run oac install --host <${SUPPORTED_HOSTS.join('|')}>.`,
     );
   }
 
-  return boundSkills;
+  if (missing.length > 0) {
+    return { ...input.root, status: 'skipped', reason: 'bindings_missing', boundSkills: [] };
+  }
+
+  return { ...input.root, status: 'bound', boundSkills };
+}
+
+async function parentExists(hostSkillRoot: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(path.dirname(hostSkillRoot));
+    return stat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+async function expectedDoctorRoots(input: {
+  host?: PlatformId;
+  systemHomeDir: string;
+  env: NodeJS.ProcessEnv;
+}): Promise<BoundPlatformSkillRootResult[]> {
+  const roots = input.host
+    ? getPlatformSkillRoots(input.host)
+      .filter((root) => root.kind === 'global')
+      .map((root) => ({ ...root, platformId: input.host as PlatformId }))
+    : getInstallSkillRoots();
+
+  const results: BoundPlatformSkillRootResult[] = [];
+  for (const root of roots) {
+    const hostSkillRoot = resolvePlatformSkillRootPath(root, input.systemHomeDir, input.env);
+    if (!input.host && root.autoBind === 'when-parent-exists' && !(await parentExists(hostSkillRoot))) {
+      results.push({
+        platformId: root.platformId,
+        rootId: root.id,
+        hostSkillRoot,
+        status: 'skipped',
+        reason: 'parent_missing',
+        boundSkills: [],
+        replacedEntries: [],
+        unchangedEntries: [],
+      });
+      continue;
+    }
+    results.push({
+      platformId: root.platformId,
+      rootId: root.id,
+      hostSkillRoot,
+      status: 'bound',
+      boundSkills: [],
+      replacedEntries: [],
+      unchangedEntries: [],
+    });
+  }
+  return results;
 }
 
 async function verifyInstalledState(input: {
-  host: ConcreteSkillHost;
+  host?: PlatformId;
   packageRoot: string;
   systemHomeDir: string;
   env: NodeJS.ProcessEnv;
@@ -260,30 +275,43 @@ async function verifyInstalledState(input: {
   const installedSkills = await listSourceSkills(input.packageRoot);
   const sharedSkillRoot = path.join(input.systemHomeDir, '.metabot', 'skills');
   const metabotShimPath = path.join(input.systemHomeDir, '.metabot', 'bin', 'metabot');
-  const hostSkillRoot = path.join(
-    resolveHostHomeDir(input.systemHomeDir, input.host, input.env),
-    'skills',
-  );
 
   for (const skillName of installedSkills) {
     await assertFileExists(
       path.join(sharedSkillRoot, skillName, 'SKILL.md'),
       'doctor_shared_skills_missing',
-      `Missing shared skill ${skillName} under ${sharedSkillRoot}. Run oac install --host <codex|claude-code|openclaw>.`,
+      `Missing shared skill ${skillName} under ${sharedSkillRoot}. Run oac install.`,
     );
   }
 
   await assertFileExists(
     metabotShimPath,
     'doctor_metabot_shim_missing',
-    `Missing metabot shim at ${metabotShimPath}. Run oac install --host <codex|claude-code|openclaw>.`,
+    `Missing metabot shim at ${metabotShimPath}. Run oac install.`,
   );
 
-  const boundSkills = await verifyHostBindings({
-    hostSkillRoot,
-    sharedSkillRoot,
-    installedSkills,
+  const roots = await expectedDoctorRoots({
+    host: input.host,
+    systemHomeDir: input.systemHomeDir,
+    env: input.env,
   });
+  const verifiedRoots: BoundPlatformSkillRootResult[] = [];
+  for (const root of roots) {
+    if (root.status === 'skipped') {
+      verifiedRoots.push(root);
+      continue;
+    }
+    verifiedRoots.push(await verifyRootBindings({
+      root,
+      sharedSkillRoot,
+      installedSkills,
+      forced: Boolean(input.host) || root.platformId === 'shared-agents',
+    }));
+  }
+
+  const boundRoots = verifiedRoots.filter((root) => root.status === 'bound');
+  const skippedRoots = verifiedRoots.filter((root) => root.status === 'skipped');
+  const hostPrimaryRoot = input.host ? boundRoots.find((root) => root.platformId === input.host) : undefined;
 
   return {
     host: input.host,
@@ -291,9 +319,24 @@ async function verifyInstalledState(input: {
     sharedSkillRoot,
     metabotShimPath,
     installedSkills,
-    hostSkillRoot,
-    boundSkills,
+    boundRoots,
+    skippedRoots,
+    failedRoots: [],
+    hostSkillRoot: hostPrimaryRoot?.hostSkillRoot,
+    boundSkills: hostPrimaryRoot?.boundSkills,
     version: CLI_VERSION,
+  };
+}
+
+function splitRootResults(results: BoundPlatformSkillRootResult[]): {
+  boundRoots: BoundPlatformSkillRootResult[];
+  skippedRoots: BoundPlatformSkillRootResult[];
+  failedRoots: BoundPlatformSkillRootResult[];
+} {
+  return {
+    boundRoots: results.filter((root) => root.status === 'bound'),
+    skippedRoots: results.filter((root) => root.status === 'skipped'),
+    failedRoots: results.filter((root) => root.status === 'failed'),
   };
 }
 
@@ -302,7 +345,7 @@ export async function runNpmInstall(
   context: NpmInstallContext,
 ): Promise<MetabotCommandResult<NpmInstallResult>> {
   try {
-    const host = resolveHost(input, context.env);
+    const host = resolveRequestedHost(input.host);
     const systemHomeDir = resolveSystemHomeDir(context.env);
     const packageRoot = resolvePackageRoot(context);
     const { sharedSkillRoot, installedSkills } = await copySharedSkills({
@@ -313,11 +356,14 @@ export async function runNpmInstall(
       packageRoot,
       systemHomeDir,
     });
-    const binding = await bindHostSkills({
+    const results = await bindPlatformSkills({
       systemHomeDir,
       host,
       env: context.env,
+      mode: host ? 'force-platform' : 'auto',
     });
+    const split = splitRootResults(results);
+    const hostPrimaryRoot = host ? split.boundRoots.find((root) => root.platformId === host) : undefined;
 
     return commandSuccess({
       host,
@@ -325,8 +371,9 @@ export async function runNpmInstall(
       sharedSkillRoot,
       metabotShimPath,
       installedSkills,
-      hostSkillRoot: binding.hostSkillRoot,
-      boundSkills: binding.boundSkills,
+      ...split,
+      hostSkillRoot: hostPrimaryRoot?.hostSkillRoot,
+      boundSkills: hostPrimaryRoot?.boundSkills,
       version: CLI_VERSION,
     });
   } catch (error) {
@@ -342,7 +389,7 @@ export async function runNpmDoctor(
   context: NpmInstallContext,
 ): Promise<MetabotCommandResult<NpmInstallResult>> {
   try {
-    const host = resolveHost(input, context.env);
+    const host = resolveRequestedHost(input.host);
     const systemHomeDir = resolveSystemHomeDir(context.env);
     const packageRoot = resolvePackageRoot(context);
     return commandSuccess(await verifyInstalledState({

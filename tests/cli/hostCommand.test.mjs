@@ -68,6 +68,8 @@ function hostHomeEnvName(host) {
       return 'CLAUDE_HOME';
     case 'openclaw':
       return 'OPENCLAW_HOME';
+    case 'gemini':
+      return '';
     default:
       throw new Error(`Unsupported host for env resolution: ${host}`);
   }
@@ -81,6 +83,8 @@ function defaultHostHome(systemHome, host) {
       return path.join(systemHome, '.claude');
     case 'openclaw':
       return path.join(systemHome, '.openclaw');
+    case 'gemini':
+      return path.join(systemHome, '.gemini');
     default:
       throw new Error(`Unsupported host for default path resolution: ${host}`);
   }
@@ -88,7 +92,7 @@ function defaultHostHome(systemHome, host) {
 
 function expectedHostSkillRoot(systemHome, host, overrides = {}) {
   const envName = hostHomeEnvName(host);
-  const hostHome = overrides[envName] || defaultHostHome(systemHome, host);
+  const hostHome = envName ? overrides[envName] || defaultHostHome(systemHome, host) : defaultHostHome(systemHome, host);
   return path.join(hostHome, 'skills');
 }
 
@@ -134,14 +138,13 @@ for (const host of ['codex', 'claude-code', 'openclaw']) {
 
     assert.equal(result.exitCode, 0);
     assert.equal(result.payload.ok, true);
-    assert.deepEqual(result.payload.data, {
-      host,
-      hostSkillRoot: expectedHostSkillRoot(systemHome, host),
-      sharedSkillRoot: path.join(systemHome, '.metabot', 'skills'),
-      boundSkills: ['metabot-ask-master', 'metabot-network-directory'],
-      replacedEntries: [],
-      unchangedEntries: [],
-    });
+    assert.equal(result.payload.data.host, host);
+    assert.equal(result.payload.data.hostSkillRoot, expectedHostSkillRoot(systemHome, host));
+    assert.equal(result.payload.data.sharedSkillRoot, path.join(systemHome, '.metabot', 'skills'));
+    assert.deepEqual(result.payload.data.boundSkills, ['metabot-ask-master', 'metabot-network-directory']);
+    assert.deepEqual(result.payload.data.replacedEntries, []);
+    assert.deepEqual(result.payload.data.unchangedEntries, []);
+    assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === host && root.status === 'bound'));
 
     await assertSymlinkPointsTo(
       path.join(expectedHostSkillRoot(systemHome, host), 'metabot-ask-master'),
@@ -149,6 +152,22 @@ for (const host of ['codex', 'claude-code', 'openclaw']) {
     );
   });
 }
+
+test('runCli supports registry-derived `metabot host bind-skills --host gemini`', async (t) => {
+  const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-gemini-');
+  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
+
+  const sharedSkillRoot = await createSharedSkill(systemHome, 'metabot-ask-master');
+  const result = await runHostCli(homeDir, ['host', 'bind-skills', '--host', 'gemini']);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === 'gemini' && root.status === 'bound'));
+  await assertSymlinkPointsTo(
+    path.join(expectedHostSkillRoot(systemHome, 'gemini'), 'metabot-ask-master'),
+    sharedSkillRoot,
+  );
+});
 
 test('runCli treats whitespace-only host home overrides as empty and falls back to the default host home', async (t) => {
   const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-whitespace-home-');
@@ -207,7 +226,7 @@ test('runCli prints machine-readable help for `metabot host bind-skills --help -
   const output = JSON.parse(stdout.join(''));
   assert.deepEqual(output.commandPath, ['host', 'bind-skills']);
   assert.equal(output.command, 'metabot host bind-skills');
-  assert.equal(output.usage, 'metabot host bind-skills --host <codex|claude-code|openclaw>');
+  assert.equal(output.usage, 'metabot host bind-skills --host <claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro>');
   assert.ok(output.successFields.includes('hostSkillRoot'));
   assert.ok(output.failureSemantics.includes('Fails with shared_skills_missing when ~/.metabot/skills has no shared metabot-* directories to bind.'));
 });
@@ -222,7 +241,7 @@ test('runCli rejects unsupported explicit hosts for `metabot host bind-skills`',
   assert.equal(result.payload.ok, false);
   assert.equal(result.payload.code, 'invalid_argument');
   assert.match(result.payload.message, /Unsupported --host value: shared/);
-  assert.match(result.payload.message, /codex, claude-code, openclaw/);
+  assert.match(result.payload.message, /claude-code, codex, copilot/);
 });
 
 test('runCli returns shared_skills_missing when no shared metabot skills are installed', async (t) => {
@@ -335,22 +354,24 @@ test('runCli returns an idempotent bind-skills success envelope shape', async (t
 
   assert.equal(first.exitCode, 0);
   assert.equal(second.exitCode, 0);
-  assert.deepEqual(first.payload.data, {
-    host: 'codex',
-    hostSkillRoot: expectedHostSkillRoot(systemHome, 'codex'),
-    sharedSkillRoot: path.join(systemHome, '.metabot', 'skills'),
-    boundSkills: ['metabot-ask-master'],
-    replacedEntries: [],
-    unchangedEntries: [],
-  });
-  assert.deepEqual(second.payload.data, {
-    host: 'codex',
-    hostSkillRoot: expectedHostSkillRoot(systemHome, 'codex'),
-    sharedSkillRoot: path.join(systemHome, '.metabot', 'skills'),
-    boundSkills: ['metabot-ask-master'],
-    replacedEntries: [],
-    unchangedEntries: ['metabot-ask-master'],
-  });
+  assert.equal(first.payload.data.host, 'codex');
+  assert.equal(first.payload.data.hostSkillRoot, expectedHostSkillRoot(systemHome, 'codex'));
+  assert.equal(first.payload.data.sharedSkillRoot, path.join(systemHome, '.metabot', 'skills'));
+  assert.deepEqual(first.payload.data.boundSkills, ['metabot-ask-master']);
+  assert.deepEqual(first.payload.data.replacedEntries, []);
+  assert.deepEqual(first.payload.data.unchangedEntries, []);
+  assert.ok(first.payload.data.boundRoots.some((root) => root.platformId === 'codex' && root.status === 'bound'));
+  assert.equal(second.payload.data.host, 'codex');
+  assert.equal(second.payload.data.hostSkillRoot, expectedHostSkillRoot(systemHome, 'codex'));
+  assert.equal(second.payload.data.sharedSkillRoot, path.join(systemHome, '.metabot', 'skills'));
+  assert.deepEqual(second.payload.data.boundSkills, ['metabot-ask-master']);
+  assert.deepEqual(second.payload.data.replacedEntries, []);
+  assert.deepEqual(second.payload.data.unchangedEntries, ['metabot-ask-master']);
+  assert.ok(second.payload.data.boundRoots.some((root) =>
+    root.platformId === 'codex'
+      && root.status === 'bound'
+      && root.unchangedEntries.includes('metabot-ask-master')
+  ));
 
   await assertSymlinkPointsTo(
     path.join(expectedHostSkillRoot(systemHome, 'codex'), 'metabot-ask-master'),

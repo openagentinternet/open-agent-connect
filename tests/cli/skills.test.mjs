@@ -151,6 +151,25 @@ test('runCli supports `metabot skills resolve --skill metabot-network-directory 
   assert.equal(result.payload.data.contract.skillName, 'metabot-network-directory');
 });
 
+test('runCli supports registry-derived `metabot skills resolve --host gemini`', async () => {
+  const homeDir = createProfileHome('metabot-cli-skills-gemini-json-');
+  const result = await runSkillsCli(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-network-directory',
+    '--host',
+    'gemini',
+    '--format',
+    'json',
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.host, 'gemini');
+  assert.equal(result.payload.data.requestedHost, 'gemini');
+});
+
 test('runCli supports `metabot skills resolve --skill metabot-network-manage --format json`', async () => {
   const homeDir = createProfileHome('metabot-cli-skills-no-host-json-');
   const result = await runSkillsCli(homeDir, [
@@ -204,7 +223,7 @@ test('runCli rejects unsupported explicit hosts for `metabot skills resolve`', a
   assert.equal(result.payload.ok, false);
   assert.equal(result.payload.code, 'invalid_argument');
   assert.match(result.payload.message, /Unsupported --host value: shared/);
-  assert.match(result.payload.message, /codex, claude-code, openclaw/);
+  assert.match(result.payload.message, /claude-code, codex, copilot/);
 });
 
 test('runCli supports `metabot skills resolve --skill metabot-ask-master --host codex --format markdown`', async () => {

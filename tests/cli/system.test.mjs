@@ -160,11 +160,26 @@ test('runCli safe uninstall removes guarded symlinks and keeps profiles', async 
   t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
 
   const hostSkillRoot = path.join(systemHome, '.codex', 'skills');
+  const sharedAgentsRoot = path.join(systemHome, '.agents', 'skills');
+  const geminiRoot = path.join(systemHome, '.gemini', 'skills');
   await fs.mkdir(hostSkillRoot, { recursive: true });
+  await fs.mkdir(sharedAgentsRoot, { recursive: true });
+  await fs.mkdir(geminiRoot, { recursive: true });
   const guarded = path.join(hostSkillRoot, 'metabot-identity-manage');
+  const sharedGuarded = path.join(sharedAgentsRoot, 'metabot-ask-master');
+  const geminiGuarded = path.join(geminiRoot, 'metabot-network-directory');
   const unguarded = path.join(hostSkillRoot, 'metabot-custom');
+  const externalMetabotLink = path.join(hostSkillRoot, 'metabot-external');
+  const nativeFile = path.join(geminiRoot, 'native-helper');
+  const externalHome = path.join(systemHome, '.external-home');
+  const externalSkill = path.join(externalHome, '.metabot', 'skills', 'metabot-external');
+  await fs.mkdir(externalSkill, { recursive: true });
   await fs.symlink(path.join(systemHome, '.metabot', 'skills', 'metabot-identity-manage'), guarded);
+  await fs.symlink(path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'), sharedGuarded);
+  await fs.symlink(path.join(systemHome, '.metabot', 'skills', 'metabot-network-directory'), geminiGuarded);
   await fs.symlink(path.join(systemHome, '.other', 'skills', 'metabot-custom'), unguarded);
+  await fs.symlink(externalSkill, externalMetabotLink);
+  await fs.writeFile(nativeFile, 'native helper\n', 'utf8');
 
   const cliShimPath = path.join(systemHome, '.metabot', 'bin', 'metabot');
   await fs.mkdir(path.dirname(cliShimPath), { recursive: true });
@@ -179,8 +194,12 @@ test('runCli safe uninstall removes guarded symlinks and keeps profiles', async 
   const profilesStat = await fs.stat(path.join(systemHome, '.metabot', 'profiles'));
   assert.equal(profilesStat.isDirectory(), true);
   await assert.rejects(fs.lstat(guarded), { code: 'ENOENT' });
+  await assert.rejects(fs.lstat(sharedGuarded), { code: 'ENOENT' });
+  await assert.rejects(fs.lstat(geminiGuarded), { code: 'ENOENT' });
   const unguardedStat = await fs.lstat(unguarded);
   assert.equal(unguardedStat.isSymbolicLink(), true);
+  assert.equal((await fs.lstat(externalMetabotLink)).isSymbolicLink(), true);
+  assert.equal(await fs.readFile(nativeFile, 'utf8'), 'native helper\n');
 });
 
 test('runCli update without host fails when multiple installpacks exist', async (t) => {
@@ -242,4 +261,3 @@ test('runCli update maps invalid archive/install failure to install_failed', asy
   assert.equal(result.payload.ok, false);
   assert.equal(result.payload.code, 'install_failed');
 });
-
