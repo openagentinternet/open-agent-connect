@@ -102,6 +102,19 @@ export interface MetabotDaemonHttpHandlers {
     listSessions?: (input: { limit: number }) => Awaitable<MetabotCommandResult<unknown>>;
     streamSessionEvents?: (input: { sessionId: string }) => AsyncIterable<unknown> | Promise<AsyncIterable<unknown>>;
   };
+  bot?: {
+    getStats?: () => Awaitable<MetabotCommandResult<unknown>>;
+    listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;
+    getProfile?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    createProfile?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    updateProfile?: (input: { slug: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    getWallet?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    getBackup?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    deleteProfile?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    listRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
+    discoverRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
+    listSessions?: (input: { slug?: string; limit: number }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
 }
 
 export interface RouteContext {

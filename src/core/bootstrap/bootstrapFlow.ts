@@ -91,11 +91,18 @@ export async function runBootstrapFlow<TRequest extends BootstrapCreateRequest, 
     };
     emitProgress(options.onProgress, 'syncing', false, false);
 
+    const chainWrites: NonNullable<BootstrapSyncResult['chainWrites']> = [];
     let sync = await runSyncIdentityToChainStep(options.syncIdentityToChain, syncContext);
+    chainWrites.push(...(sync.chainWrites ?? []));
     if (!sync.success) {
       await wait(syncRetryDelayMs);
       sync = await runSyncIdentityToChainStep(options.syncIdentityToChain, syncContext);
+      chainWrites.push(...(sync.chainWrites ?? []));
     }
+    sync = {
+      ...sync,
+      chainWrites,
+    };
 
     if (sync.success) {
       const ready = emitProgress(options.onProgress, 'ready', false, false);

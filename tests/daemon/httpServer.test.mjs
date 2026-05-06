@@ -14,6 +14,7 @@ async function startServer(options = {}) {
   const useBuiltInUiPages = options.useBuiltInUiPages === true;
   const calls = {
     identity: [],
+    identityProfiles: [],
     chain: [],
     file: [],
     buzz: [],
@@ -32,6 +33,22 @@ async function startServer(options = {}) {
     llmStreamSessionEvents: [],
     llmListRuntimes: [],
     llmDiscoverRuntimes: [],
+    llmListBindings: [],
+    llmUpsertBindings: [],
+    llmRemoveBinding: [],
+    llmGetPreferredRuntime: [],
+    llmSetPreferredRuntime: [],
+    botStats: [],
+    botProfiles: [],
+    botProfile: [],
+    botCreateProfile: [],
+    botUpdateProfile: [],
+    botWallet: [],
+    botBackup: [],
+    botDeleteProfile: [],
+    botListRuntimes: [],
+    botDiscoverRuntimes: [],
+    botListSessions: [],
   };
 
   const server = createHttpServer({
@@ -55,6 +72,19 @@ async function startServer(options = {}) {
           name: input.name,
           globalMetaId: 'gm-local-alice',
           subsidyState: 'claimed',
+        });
+      },
+      listProfiles: async () => {
+        calls.identityProfiles.push({});
+        return commandSuccess({
+          profiles: [
+            {
+              name: 'Alice',
+              slug: 'alice',
+              homeDir: '/tmp/alice',
+              globalMetaId: 'gm-local-alice',
+            },
+          ],
         });
       },
     },
@@ -359,6 +389,242 @@ async function startServer(options = {}) {
           errors: [],
         });
       },
+      listBindings: async (input) => {
+        calls.llmListBindings.push(input);
+        return commandSuccess({
+          version: 1,
+          bindings: [
+            {
+              id: 'binding-primary',
+              metaBotSlug: input.slug,
+              llmRuntimeId: 'llm-runtime-1',
+              role: 'primary',
+              priority: 0,
+              enabled: true,
+              createdAt: '2026-05-05T00:00:00.000Z',
+              updatedAt: '2026-05-05T00:00:00.000Z',
+            },
+          ],
+        });
+      },
+      upsertBindings: async (input) => {
+        calls.llmUpsertBindings.push(input);
+        return commandSuccess({
+          version: 2,
+          bindings: input.bindings,
+        });
+      },
+      removeBinding: async (input) => {
+        calls.llmRemoveBinding.push(input);
+        return commandSuccess({
+          removed: input.bindingId,
+        });
+      },
+      getPreferredRuntime: async (input) => {
+        calls.llmGetPreferredRuntime.push(input);
+        return commandSuccess({
+          runtimeId: 'llm-runtime-1',
+        });
+      },
+      setPreferredRuntime: async (input) => {
+        calls.llmSetPreferredRuntime.push(input);
+        return commandSuccess({
+          runtimeId: input.runtimeId,
+        });
+      },
+    },
+    bot: {
+      getStats: async () => {
+        calls.botStats.push({});
+        return commandSuccess({
+          botCount: 2,
+          healthyRuntimes: 1,
+          totalExecutions: 5,
+          successRate: 80,
+        });
+      },
+      listProfiles: async () => {
+        calls.botProfiles.push({});
+        return commandSuccess({
+          profiles: [
+            {
+              name: 'Alice Bot',
+              slug: 'alice-bot',
+              aliases: ['alice-bot'],
+              homeDir: '/tmp/alice',
+              globalMetaId: 'gm-alice',
+              mvcAddress: 'addr-alice',
+              createdAt: 1776836000000,
+              updatedAt: 1776836100000,
+              role: 'Assistant',
+              soul: 'Practical',
+              goal: 'Ship useful work.',
+              primaryProvider: 'codex',
+              fallbackProvider: null,
+            },
+          ],
+        });
+      },
+      getProfile: async (input) => {
+        calls.botProfile.push(input);
+        if (input.slug === 'missing') {
+          return commandFailed('profile_not_found', 'Profile not found: missing');
+        }
+        return commandSuccess({
+          profile: {
+            name: 'Alice Bot',
+            slug: input.slug,
+            aliases: [input.slug],
+            homeDir: '/tmp/alice',
+            globalMetaId: 'gm-alice',
+            mvcAddress: 'addr-alice',
+            createdAt: 1776836000000,
+            updatedAt: 1776836100000,
+            role: 'Assistant',
+            soul: 'Practical',
+            goal: 'Ship useful work.',
+            primaryProvider: 'codex',
+            fallbackProvider: null,
+          },
+        });
+      },
+      createProfile: async (input) => {
+        calls.botCreateProfile.push(input);
+        return commandSuccess({
+          profile: {
+            name: input.name,
+            slug: 'new-bot',
+            aliases: ['new-bot'],
+            homeDir: '/tmp/new-bot',
+            globalMetaId: '',
+            mvcAddress: '',
+            createdAt: 1776836200000,
+            updatedAt: 1776836200000,
+            role: input.role ?? 'Assistant',
+            soul: input.soul ?? '',
+            goal: input.goal ?? '',
+            primaryProvider: null,
+            fallbackProvider: null,
+          },
+        });
+      },
+      updateProfile: async (input) => {
+        calls.botUpdateProfile.push(input);
+        return commandSuccess({
+          profile: {
+            name: input.name ?? 'Alice Bot',
+            slug: input.slug,
+            aliases: [input.slug],
+            homeDir: '/tmp/alice',
+            globalMetaId: 'gm-alice',
+            mvcAddress: 'addr-alice',
+            createdAt: 1776836000000,
+            updatedAt: 1776836300000,
+            role: input.role ?? 'Assistant',
+            soul: input.soul ?? 'Practical',
+            goal: input.goal ?? 'Ship useful work.',
+            primaryProvider: input.primaryProvider ?? 'codex',
+            fallbackProvider: input.fallbackProvider ?? null,
+          },
+          chainWrites: [
+            {
+              txids: ['tx-profile-update-1'],
+              pinId: 'pin-profile-update-1',
+              path: '/info/name',
+            },
+          ],
+        });
+      },
+      getWallet: async (input) => {
+        calls.botWallet.push(input);
+        return commandSuccess({
+          wallet: {
+            slug: input.slug,
+            name: 'Alice Bot',
+            addresses: {
+              btc: 'btc-address-alice',
+              mvc: 'mvc-address-alice',
+            },
+          },
+        });
+      },
+      getBackup: async (input) => {
+        calls.botBackup.push(input);
+        return commandSuccess({
+          backup: {
+            slug: input.slug,
+            name: 'Alice Bot',
+            words: ['abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'abandon', 'about'],
+          },
+        });
+      },
+      deleteProfile: async (input) => {
+        calls.botDeleteProfile.push(input);
+        return commandSuccess({
+          deleted: true,
+          profile: {
+            slug: input.slug,
+            name: 'Alice Bot',
+          },
+        });
+      },
+      listRuntimes: async () => {
+        calls.botListRuntimes.push({});
+        return commandSuccess({
+          version: 1,
+          runtimes: [
+            {
+              id: 'llm-runtime-1',
+              provider: 'codex',
+              displayName: 'Codex',
+              binaryPath: '/bin/codex',
+              authState: 'authenticated',
+              health: 'healthy',
+              capabilities: ['streaming'],
+              lastSeenAt: '2026-05-05T00:00:00.000Z',
+              createdAt: '2026-05-05T00:00:00.000Z',
+              updatedAt: '2026-05-05T00:00:00.000Z',
+            },
+          ],
+        });
+      },
+      discoverRuntimes: async () => {
+        calls.botDiscoverRuntimes.push({});
+        return commandSuccess({
+          discovered: 1,
+          runtimes: [
+            {
+              id: 'llm-runtime-1',
+              provider: 'codex',
+              displayName: 'Codex',
+              binaryPath: '/bin/codex',
+              authState: 'authenticated',
+              health: 'healthy',
+              capabilities: ['streaming'],
+              lastSeenAt: '2026-05-05T00:00:00.000Z',
+              createdAt: '2026-05-05T00:00:00.000Z',
+              updatedAt: '2026-05-05T00:00:00.000Z',
+            },
+          ],
+          errors: [],
+        });
+      },
+      listSessions: async (input) => {
+        calls.botListSessions.push(input);
+        return commandSuccess({
+          sessions: [
+            {
+              sessionId: 'llm-session-1',
+              status: 'completed',
+              runtimeId: 'llm-runtime-1',
+              provider: 'codex',
+              metaBotSlug: input.slug,
+              prompt: 'Say hello',
+              createdAt: '2026-05-05T00:00:00.000Z',
+            },
+          ],
+        });
+      },
     },
     ui: useBuiltInUiPages
       ? undefined
@@ -465,6 +731,19 @@ test('POST /api/identity/create parses the JSON body and forwards it to identity
       subsidyState: 'claimed',
     },
   });
+});
+
+test('GET /api/identity/profiles remains available for compatibility', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/identity/profiles`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.identityProfiles, [{}]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.profiles[0].slug, 'alice');
 });
 
 test('POST /api/chain/write parses the JSON body and forwards it to chain.write', async (t) => {
@@ -752,7 +1031,260 @@ test('POST /api/llm/runtimes/discover forwards runtime rediscovery for the bot p
   assert.equal(payload.data.runtimes[0].id, 'llm-runtime-1');
 });
 
-test('GET /ui/bot renders runtime health, execution history, and rediscovery controls', async (t) => {
+test('GET and PUT /api/llm/bindings/:slug remain available for compatibility', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const listResponse = await fetch(`${server.baseUrl}/api/llm/bindings/alice-bot`);
+  const listPayload = await listResponse.json();
+  const bindings = [
+    {
+      id: 'binding-primary',
+      metaBotSlug: 'ignored-by-route',
+      llmRuntimeId: 'llm-runtime-1',
+      role: 'primary',
+      priority: 0,
+      enabled: true,
+    },
+  ];
+  const putResponse = await fetch(`${server.baseUrl}/api/llm/bindings/alice-bot`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ bindings }),
+  });
+  const putPayload = await putResponse.json();
+
+  assert.equal(listResponse.status, 200);
+  assert.deepEqual(server.calls.llmListBindings, [{ slug: 'alice-bot' }]);
+  assert.equal(listPayload.data.bindings[0].metaBotSlug, 'alice-bot');
+  assert.equal(putResponse.status, 200);
+  assert.deepEqual(server.calls.llmUpsertBindings, [{ slug: 'alice-bot', bindings }]);
+  assert.equal(putPayload.data.version, 2);
+});
+
+test('DELETE /api/llm/bindings/:id/delete remains available for compatibility', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/bindings/binding-primary/delete`, {
+    method: 'DELETE',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.llmRemoveBinding, [{ bindingId: 'binding-primary' }]);
+  assert.equal(payload.data.removed, 'binding-primary');
+});
+
+test('GET and PUT /api/llm/preferred-runtime/:slug remain available for compatibility', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const getResponse = await fetch(`${server.baseUrl}/api/llm/preferred-runtime/alice-bot`);
+  const getPayload = await getResponse.json();
+  const putResponse = await fetch(`${server.baseUrl}/api/llm/preferred-runtime/alice-bot`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ runtimeId: 'llm-runtime-2' }),
+  });
+  const putPayload = await putResponse.json();
+
+  assert.equal(getResponse.status, 200);
+  assert.deepEqual(server.calls.llmGetPreferredRuntime, [{ slug: 'alice-bot' }]);
+  assert.equal(getPayload.data.runtimeId, 'llm-runtime-1');
+  assert.equal(putResponse.status, 200);
+  assert.deepEqual(server.calls.llmSetPreferredRuntime, [{ slug: 'alice-bot', runtimeId: 'llm-runtime-2' }]);
+  assert.equal(putPayload.data.runtimeId, 'llm-runtime-2');
+});
+
+test('GET /api/bot/stats forwards to the MetaBot stats handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/stats`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botStats, [{}]);
+  assert.deepEqual(payload.data, {
+    botCount: 2,
+    healthyRuntimes: 1,
+    totalExecutions: 5,
+    successRate: 80,
+  });
+});
+
+test('GET /api/bot/profiles forwards to the MetaBot profile list handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botProfiles, [{}]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.profiles[0].slug, 'alice-bot');
+});
+
+test('GET /api/bot/profiles/:slug returns one MetaBot profile or a 404', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot`);
+  const payload = await response.json();
+  const missingResponse = await fetch(`${server.baseUrl}/api/bot/profiles/missing`);
+  const missingPayload = await missingResponse.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.data.profile.slug, 'alice-bot');
+  assert.equal(missingResponse.status, 404);
+  assert.equal(missingPayload.code, 'profile_not_found');
+  assert.deepEqual(server.calls.botProfile, [{ slug: 'alice-bot' }, { slug: 'missing' }]);
+});
+
+test('POST /api/bot/profiles validates and forwards MetaBot creation', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const missingResponse = await fetch(`${server.baseUrl}/api/bot/profiles`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '   ' }),
+  });
+  const missingPayload = await missingResponse.json();
+
+  const request = {
+    name: 'New Bot',
+    role: 'Assistant',
+    soul: 'Focused',
+    goal: 'Help the operator.',
+  };
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+
+  assert.equal(missingResponse.status, 400);
+  assert.equal(missingPayload.code, 'missing_name');
+  assert.equal(response.status, 201);
+  assert.deepEqual(server.calls.botCreateProfile, [request]);
+  assert.equal(payload.data.profile.slug, 'new-bot');
+});
+
+test('PUT /api/bot/profiles/:slug forwards MetaBot profile updates', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const request = {
+    name: 'Alice Updated',
+    role: 'Writes careful code.',
+    fallbackProvider: null,
+  };
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botUpdateProfile, [{ slug: 'alice-bot', ...request }]);
+  assert.equal(payload.data.profile.name, 'Alice Updated');
+});
+
+test('PUT /api/bot/profiles/:slug does not let the JSON body override the path slug', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      slug: 'bob-bot',
+      name: 'Alice Updated',
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botUpdateProfile, [{ slug: 'alice-bot', name: 'Alice Updated' }]);
+  assert.equal(payload.data.profile.slug, 'alice-bot');
+});
+
+test('GET /api/bot/profiles/:slug/wallet forwards to the MetaBot wallet handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/wallet`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botWallet, [{ slug: 'alice-bot' }]);
+  assert.equal(payload.data.wallet.addresses.btc, 'btc-address-alice');
+  assert.equal(payload.data.wallet.addresses.mvc, 'mvc-address-alice');
+});
+
+test('GET /api/bot/profiles/:slug/backup forwards to the MetaBot backup handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/backup`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botBackup, [{ slug: 'alice-bot' }]);
+  assert.equal(payload.data.backup.words.length, 12);
+});
+
+test('DELETE /api/bot/profiles/:slug forwards to the MetaBot delete handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot`, {
+    method: 'DELETE',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botDeleteProfile, [{ slug: 'alice-bot' }]);
+  assert.equal(payload.data.deleted, true);
+});
+
+test('GET and POST /api/bot/runtimes use the MetaBot runtime handlers', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const listResponse = await fetch(`${server.baseUrl}/api/bot/runtimes`);
+  const listPayload = await listResponse.json();
+  const discoverResponse = await fetch(`${server.baseUrl}/api/bot/runtimes/discover`, {
+    method: 'POST',
+  });
+  const discoverPayload = await discoverResponse.json();
+
+  assert.equal(listResponse.status, 200);
+  assert.equal(discoverResponse.status, 200);
+  assert.deepEqual(server.calls.botListRuntimes, [{}]);
+  assert.deepEqual(server.calls.botDiscoverRuntimes, [{}]);
+  assert.equal(listPayload.data.runtimes[0].provider, 'codex');
+  assert.equal(discoverPayload.data.discovered, 1);
+});
+
+test('GET /api/bot/sessions forwards slug and clamped limit to the MetaBot sessions handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/sessions?slug=alice-bot&limit=500`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botListSessions, [{ slug: 'alice-bot', limit: 100 }]);
+  assert.equal(payload.data.sessions[0].metaBotSlug, 'alice-bot');
+});
+
+test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
@@ -760,24 +1292,45 @@ test('GET /ui/bot renders runtime health, execution history, and rediscovery con
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  assert.match(html, /data-stat-healthy/);
-  assert.match(html, /data-stat-attention/);
-  assert.match(html, /data-health-summary/);
-  assert.match(html, /EXECUTION HISTORY/);
+  assert.match(html, /data-stat-bots/);
+  assert.match(html, /data-stat-runtimes/);
+  assert.match(html, /data-stat-executions/);
+  assert.match(html, /data-stat-success/);
+  assert.match(html, /data-metabot-list/);
+  assert.match(html, /data-act="add-metabot"/);
+  assert.ok(html.indexOf('data-act="open-wallet"') < html.indexOf('data-act="discover-runtimes"'));
+  assert.ok(html.indexOf('data-act="open-delete"') < html.indexOf('data-act="discover-runtimes"'));
+  assert.ok(html.indexOf('data-act="open-backup"') < html.indexOf('data-act="discover-runtimes"'));
+  assert.match(html, /data-tab="info"/);
+  assert.match(html, /data-tab="history"/);
+  assert.match(html, /data-info-content/);
   assert.match(html, /data-execution-history-list/);
-  assert.match(html, /data-execution-count-badge/);
   assert.match(html, /<th>Time<\/th>/);
-  assert.match(html, /<th>MetaBot<\/th>/);
   assert.match(html, /<th>Provider<\/th>/);
+  assert.match(html, /<th>Runtime<\/th>/);
+  assert.match(html, /<th>Status<\/th>/);
   assert.match(html, /<th>Details<\/th>/);
   assert.match(html, /exec-detail/);
-  assert.match(html, /data-act="toggle-exec"/);
-  assert.match(html, /running:'active'/);
-  assert.match(html, /starting:'active'/);
-  assert.match(html, /bot-table-scroll/);
-  assert.match(html, /id="refresh-history-btn"/);
-  assert.ok(html.includes("api('/api/llm/sessions?limit=20'"));
-  assert.ok(html.includes("api('/api/llm/runtimes/discover'"));
+  assert.match(html, /copy-toast/);
+  assert.ok(html.includes("api('/api/bot/stats'"));
+  assert.ok(html.includes("api('/api/bot/profiles'"));
+  assert.ok(html.includes("api('/api/bot/runtimes'"));
+  assert.ok(html.includes("api('/api/bot/sessions?slug='+encodeURIComponent"));
+  assert.ok(!html.includes("api('/api/bot/sessions?limit=50'"));
+  assert.ok(html.includes("api('/api/bot/profiles/'+encodeURIComponent"));
+  assert.match(html, /r\.health==='healthy'\|\|r\.health==='degraded'/);
+  assert.ok(!html.includes(" / unavailable"));
+  assert.match(html, /max-height:\s*220px/);
+  assert.match(html, /MetaBot Created On-Chain/);
+  assert.match(html, /Profile Updated On-Chain/);
+  assert.doesNotMatch(html, /✓ Saved/);
+  assert.match(html, /data-modal-root/);
+  assert.doesNotMatch(html, /profile-select/);
+  assert.doesNotMatch(html, /data-new-role/);
+  assert.doesNotMatch(html, /reviewer/i);
+  assert.doesNotMatch(html, /specialist/i);
+  assert.doesNotMatch(html, /preferred runtime/i);
+  assert.doesNotMatch(html, /data-binding-list/);
 });
 
 test('GET /ui/shared.css keeps active status animated and the topbar narrow-safe', async (t) => {

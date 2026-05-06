@@ -6,7 +6,7 @@ export interface SessionManager {
   create(record: LlmSessionRecord): Promise<void>;
   update(sessionId: string, patch: Partial<LlmSessionRecord>): Promise<void>;
   get(sessionId: string): Promise<LlmSessionRecord | null>;
-  list(limit?: number): Promise<LlmSessionRecord[]>;
+  list(limit?: number, options?: { metaBotSlug?: string }): Promise<LlmSessionRecord[]>;
   delete(sessionId: string): Promise<void>;
 }
 
@@ -94,7 +94,7 @@ export function createFileSessionManager(sessionsRoot: string): SessionManager {
       return readJsonFile<LlmSessionRecord>(sessionPath(sessionsRoot, sessionId));
     },
 
-    async list(limit = 20) {
+    async list(limit = 20, options = {}) {
       try {
         const entries = await fs.readdir(sessionsRoot, { withFileTypes: true });
         const records: LlmSessionRecord[] = [];
@@ -104,7 +104,10 @@ export function createFileSessionManager(sessionsRoot: string): SessionManager {
           if (record) records.push(record);
         }
         records.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-        return records.slice(0, Math.max(0, limit));
+        const scopedRecords = options.metaBotSlug
+          ? records.filter((record) => record.metaBotSlug === options.metaBotSlug)
+          : records;
+        return scopedRecords.slice(0, Math.max(0, limit));
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
         throw error;

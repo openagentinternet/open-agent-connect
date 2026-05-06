@@ -30,8 +30,29 @@ import { resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
 import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
 import { discoverLlmRuntimes } from '../core/llm/llmRuntimeDiscovery';
-import { normalizeLlmBinding } from '../core/llm/llmTypes';
+import {
+  isLlmProvider,
+  normalizeLlmBinding,
+} from '../core/llm/llmTypes';
+import type { LlmProvider } from '../core/llm/llmTypes';
 import type { LlmExecutor, LlmExecutionRequest } from '../core/llm/executor';
+import {
+  buildMetabotProfileDraftFromIdentity,
+  createMetabotProfileFromIdentity,
+  deleteMetabotProfile,
+  getMetabotProfile,
+  getMetabotMnemonicBackup,
+  getMetabotWalletInfo,
+  listMetabotProfiles,
+  syncMetabotInfoToChain,
+  updateMetabotProfile,
+  validateAvatarDataUrl,
+} from '../core/bot/metabotProfileManager';
+import type {
+  CreateMetabotInput,
+  MetabotProfileFull,
+  UpdateMetabotInfoInput,
+} from '../core/bot/metabotProfileManager';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 import { buildPublishedService } from '../core/services/publishService';
 import { publishServiceToChain } from '../core/services/servicePublishChain';
@@ -47,7 +68,7 @@ import { sendPrivateChat } from '../core/chat/privateChat';
 import { loadChatPersona } from '../core/chat/chatPersonaLoader';
 import { createDefaultChatReplyRunner } from '../core/chat/defaultChatReplyRunner';
 import type { ChatReplyRunner } from '../core/chat/privateChatTypes';
-import type { ChainWriteRequest } from '../core/chain/writePin';
+import type { ChainWriteRequest, ChainWriteResult } from '../core/chain/writePin';
 import {
   buildPrivateConversationResponse,
   normalizeConversationAfterIndex,
@@ -248,6 +269,173 @@ function buildLlmExecutionRequest(body: Record<string, unknown>, runtime: LlmExe
     env: normalizeStringRecord(body.env),
     extraArgs: normalizeStringArray(body.extraArgs),
   };
+}
+
+function hasOwnField(input: Record<string, unknown>, field: string): boolean {
+  return Object.prototype.hasOwnProperty.call(input, field);
+}
+
+function normalizeMetabotProviderInput(value: unknown): LlmProvider | null {
+  if (value === null) return null;
+  const provider = normalizeText(value);
+  if (!provider) return null;
+  if (!isLlmProvider(provider) || provider === 'custom') {
+    throw new Error(`Unsupported LLM provider: ${provider}`);
+  }
+  return provider;
+}
+
+function buildMetabotUpdateInput(input: Record<string, unknown>): UpdateMetabotInfoInput {
+  const update: UpdateMetabotInfoInput = {};
+  if (hasOwnField(input, 'name')) {
+    update.name = normalizeText(input.name);
+    if (!update.name) {
+      throw new Error('MetaBot name is required.');
+    }
+  }
+  if (hasOwnField(input, 'role')) {
+    update.role = typeof input.role === 'string' ? input.role : '';
+  }
+  if (hasOwnField(input, 'soul')) {
+    update.soul = typeof input.soul === 'string' ? input.soul : '';
+  }
+  if (hasOwnField(input, 'goal')) {
+    update.goal = typeof input.goal === 'string' ? input.goal : '';
+  }
+  if (hasOwnField(input, 'avatarDataUrl')) {
+    update.avatarDataUrl = normalizeText(input.avatarDataUrl);
+    const avatarValidation = validateAvatarDataUrl(update.avatarDataUrl);
+    if (!avatarValidation.valid) {
+      throw new Error(avatarValidation.error ?? 'Invalid avatar data URL.');
+    }
+  }
+  if (hasOwnField(input, 'primaryProvider')) {
+    update.primaryProvider = normalizeMetabotProviderInput(input.primaryProvider);
+  }
+  if (hasOwnField(input, 'fallbackProvider')) {
+    update.fallbackProvider = normalizeMetabotProviderInput(input.fallbackProvider);
+  }
+  return update;
+}
+
+function buildMetabotCreateInput(input: Record<string, unknown>): CreateMetabotInput {
+  const name = normalizeText(input.name);
+  if (!name) {
+    throw new Error('MetaBot name is required.');
+  }
+  const createInput: CreateMetabotInput = { name };
+  if (hasOwnField(input, 'role')) {
+    createInput.role = typeof input.role === 'string' ? input.role : '';
+  }
+  if (hasOwnField(input, 'soul')) {
+    createInput.soul = typeof input.soul === 'string' ? input.soul : '';
+  }
+  if (hasOwnField(input, 'goal')) {
+    createInput.goal = typeof input.goal === 'string' ? input.goal : '';
+  }
+  if (hasOwnField(input, 'avatarDataUrl')) {
+    createInput.avatarDataUrl = normalizeText(input.avatarDataUrl);
+    const avatarValidation = validateAvatarDataUrl(createInput.avatarDataUrl);
+    if (!avatarValidation.valid) {
+      throw new Error(avatarValidation.error ?? 'Invalid avatar data URL.');
+    }
+  }
+  if (hasOwnField(input, 'primaryProvider')) {
+    createInput.primaryProvider = normalizeMetabotProviderInput(input.primaryProvider);
+  }
+  if (hasOwnField(input, 'fallbackProvider')) {
+    createInput.fallbackProvider = normalizeMetabotProviderInput(input.fallbackProvider);
+  }
+  return createInput;
+}
+
+function calculateMetabotChangedFields(
+  current: MetabotProfileFull,
+  update: UpdateMetabotInfoInput,
+): string[] {
+  const changedFields: string[] = [];
+  if (update.name !== undefined && update.name !== current.name) changedFields.push('name');
+  if (update.role !== undefined && update.role !== current.role) changedFields.push('role');
+  if (update.soul !== undefined && update.soul !== current.soul) changedFields.push('soul');
+  if (update.goal !== undefined && update.goal !== current.goal) changedFields.push('goal');
+  if (update.avatarDataUrl !== undefined && (update.avatarDataUrl || undefined) !== current.avatarDataUrl) {
+    changedFields.push('avatar');
+  }
+  if (update.primaryProvider !== undefined && update.primaryProvider !== (current.primaryProvider ?? null)) {
+    changedFields.push('primaryProvider');
+  }
+  if (update.fallbackProvider !== undefined && update.fallbackProvider !== (current.fallbackProvider ?? null)) {
+    changedFields.push('fallbackProvider');
+  }
+  return changedFields;
+}
+
+function buildMetabotChainProfile(
+  current: MetabotProfileFull,
+  update: UpdateMetabotInfoInput,
+): MetabotProfileFull {
+  return {
+    ...current,
+    name: update.name ?? current.name,
+    role: update.role ?? current.role,
+    soul: update.soul ?? current.soul,
+    goal: update.goal ?? current.goal,
+    ...(update.avatarDataUrl !== undefined
+      ? (update.avatarDataUrl ? { avatarDataUrl: update.avatarDataUrl } : { avatarDataUrl: undefined })
+      : {}),
+    primaryProvider: update.primaryProvider !== undefined ? update.primaryProvider : (current.primaryProvider ?? null),
+    fallbackProvider: update.fallbackProvider !== undefined ? update.fallbackProvider : (current.fallbackProvider ?? null),
+  };
+}
+
+function calculateMetabotCreateChainFields(input: CreateMetabotInput): string[] {
+  const changedFields: string[] = [];
+  if (
+    input.role !== undefined
+    || input.soul !== undefined
+    || input.goal !== undefined
+    || input.primaryProvider !== undefined
+    || input.fallbackProvider !== undefined
+  ) {
+    changedFields.push('role');
+  }
+  if (normalizeText(input.avatarDataUrl)) {
+    changedFields.push('avatar');
+  }
+  return changedFields;
+}
+
+async function validateMetabotProviderAvailability(
+  profile: MetabotProfileFull,
+  update: UpdateMetabotInfoInput,
+): Promise<void> {
+  const requestedProviders: LlmProvider[] = [];
+  if (
+    update.primaryProvider !== undefined
+    && update.primaryProvider !== null
+    && update.primaryProvider !== (profile.primaryProvider ?? null)
+  ) {
+    requestedProviders.push(update.primaryProvider);
+  }
+  if (
+    update.fallbackProvider !== undefined
+    && update.fallbackProvider !== null
+    && update.fallbackProvider !== (profile.fallbackProvider ?? null)
+  ) {
+    requestedProviders.push(update.fallbackProvider);
+  }
+  if (requestedProviders.length === 0) {
+    return;
+  }
+  const runtimeState = await createLlmRuntimeStore(resolveMetabotPaths(profile.homeDir)).read();
+  for (const provider of requestedProviders) {
+    const available = runtimeState.runtimes.some((runtime) => (
+      runtime.provider === provider && runtime.health !== 'unavailable'
+    ));
+    if (!available) {
+      throw new Error(`No available runtime found for provider: ${provider}`);
+    }
+  }
 }
 
 async function writePinRetryingMempoolConflict(input: {
@@ -3865,6 +4053,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   requestMvcGasSubsidy?: (
     options: RequestMvcGasSubsidyOptions
   ) => Promise<RequestMvcGasSubsidyResult>;
+  createSignerForHome?: (homeDir: string) => Signer;
   autoReplyConfig?: PrivateChatAutoReplyConfig;
   llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
 }): MetabotDaemonHttpHandlers {
@@ -4383,6 +4572,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
     await setActiveMetabotHome({
       systemHomeDir: normalizedSystemHomeDir,
       homeDir: profile.homeDir,
+    });
+  }
+
+  function createSignerForProfileHome(profileHomeDir: string): Signer {
+    const normalizedProfileHomeDir = path.resolve(profileHomeDir);
+    if (normalizedProfileHomeDir === path.resolve(input.homeDir)) {
+      return signer;
+    }
+    if (input.createSignerForHome) {
+      return input.createSignerForHome(normalizedProfileHomeDir);
+    }
+    return createLocalMnemonicSigner({
+      secretStore: createFileSecretStore(normalizedProfileHomeDir),
     });
   }
 
@@ -9091,6 +9293,264 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         return commandFailed('session_not_found', `A2A session not found: ${normalizedSessionId}`);
+      },
+    },
+    bot: {
+      getStats: async () => {
+        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        const runtimeStore = createLlmRuntimeStore(input.homeDir);
+        const runtimeState = await runtimeStore.read();
+        const sessions = input.llmExecutor
+          ? await input.llmExecutor.listSessions(1000)
+          : [];
+        const totalExecutions = sessions.length;
+        const completedExecutions = sessions.filter((session) => session.status === 'completed').length;
+        return commandSuccess({
+          botCount: profiles.length,
+          healthyRuntimes: runtimeState.runtimes.filter((runtime) => runtime.health === 'healthy').length,
+          totalExecutions,
+          successRate: totalExecutions > 0
+            ? Math.round((completedExecutions / totalExecutions) * 100)
+            : 0,
+        });
+      },
+      listProfiles: async () => {
+        const profiles = await listMetabotProfiles(normalizedSystemHomeDir);
+        return commandSuccess({ profiles });
+      },
+      getProfile: async ({ slug }) => {
+        const profile = await getMetabotProfile(normalizedSystemHomeDir, slug);
+        if (!profile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+        }
+        return commandSuccess({ profile });
+      },
+      createProfile: async (body) => {
+        let createInput: CreateMetabotInput;
+        try {
+          createInput = buildMetabotCreateInput(body);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return /name is required/i.test(message)
+            ? commandFailed('missing_name', 'MetaBot name is required.')
+            : commandFailed('invalid_metabot_profile_create', message);
+        }
+        const name = createInput.name;
+        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        const resolvedHome = resolveIdentityCreateProfileHome({
+          systemHomeDir: normalizedSystemHomeDir,
+          requestedName: name,
+          profiles,
+        });
+        if (resolvedHome.status !== 'resolved') {
+          return commandFailed('name_taken', resolvedHome.message);
+        }
+
+        const profileHomeDir = resolvedHome.homeDir;
+        const profileRuntimeStateStore = createRuntimeStateStore(profileHomeDir);
+        const profileSecretStore = createFileSecretStore(profileHomeDir);
+        const profileSigner = createSignerForProfileHome(profileHomeDir);
+        const providerValidationProfile = buildMetabotProfileDraftFromIdentity({
+          ...createInput,
+          homeDir: profileHomeDir,
+          globalMetaId: 'pending',
+          mvcAddress: 'pending',
+        });
+        try {
+          await validateMetabotProviderAvailability(providerValidationProfile, {
+            primaryProvider: createInput.primaryProvider,
+            fallbackProvider: createInput.fallbackProvider,
+          });
+        } catch (error) {
+          return commandFailed('invalid_metabot_profile_create', error instanceof Error ? error.message : String(error));
+        }
+        try {
+          const bootstrap = await runBootstrapFlow({
+            request: {
+              name,
+            },
+            createMetabot: createLocalMetabotStep({
+              runtimeStateStore: profileRuntimeStateStore,
+              secretStore: profileSecretStore,
+            }),
+            requestSubsidy: createMetabotSubsidyStep({
+              runtimeStateStore: profileRuntimeStateStore,
+              requestMvcGasSubsidy: input.requestMvcGasSubsidy,
+            }),
+            syncIdentityToChain: createLocalIdentitySyncStep({
+              runtimeStateStore: profileRuntimeStateStore,
+              signer: profileSigner,
+              stepDelayMs: input.identitySyncStepDelayMs,
+            }),
+          });
+          const nextState = await profileRuntimeStateStore.readState();
+          const identity = nextState.identity;
+          if (!bootstrap.success || !identity) {
+            await fs.rm(profileHomeDir, { recursive: true, force: true });
+            return commandFailed(
+              'identity_bootstrap_failed',
+              bootstrap.error ?? 'MetaBot identity bootstrap failed before the identity was ready.'
+              );
+          }
+          const chainProfile = buildMetabotProfileDraftFromIdentity({
+            ...createInput,
+            homeDir: profileHomeDir,
+            globalMetaId: identity.globalMetaId,
+            mvcAddress: identity.mvcAddress,
+          });
+          const profileChainWrites = await syncMetabotInfoToChain(
+            profileSigner,
+            chainProfile,
+            calculateMetabotCreateChainFields(createInput),
+            {
+              delayMs: input.identitySyncStepDelayMs,
+              operation: 'create',
+            },
+          );
+          const profile = await createMetabotProfileFromIdentity(normalizedSystemHomeDir, {
+            ...createInput,
+            homeDir: profileHomeDir,
+            globalMetaId: identity.globalMetaId,
+            mvcAddress: identity.mvcAddress,
+          });
+          return commandSuccess({
+            profile,
+            identity,
+            chainWrites: [...(bootstrap.sync?.chainWrites ?? []), ...profileChainWrites],
+            subsidy: bootstrap.subsidy,
+          });
+        } catch (error) {
+          await deleteMetabotProfile(normalizedSystemHomeDir, resolvedHome.slug)
+            .catch(() => fs.rm(profileHomeDir, { recursive: true, force: true }))
+            .catch(() => undefined);
+          const message = error instanceof Error ? error.message : String(error);
+          if (/already exists|ambiguous|duplicate/i.test(message)) {
+            return commandFailed('name_taken', message);
+          }
+          return commandFailed('metabot_profile_create_failed', message);
+        }
+      },
+      updateProfile: async (body) => {
+        const slug = normalizeText(body.slug);
+        const current = await getMetabotProfile(normalizedSystemHomeDir, slug);
+        if (!current) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${slug || '<missing>'}`);
+        }
+
+        let update: UpdateMetabotInfoInput;
+        try {
+          update = buildMetabotUpdateInput(body);
+          if (update.name !== undefined && update.name !== current.name) {
+            const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+            const duplicate = resolveProfileNameMatch(update.name, profiles.filter((profile) => profile.slug !== current.slug));
+            if (duplicate.status === 'matched' && duplicate.matchType !== 'ranked') {
+              return commandFailed('name_taken', `MetaBot name already exists: ${update.name}`);
+            }
+          }
+          await validateMetabotProviderAvailability(current, update);
+        } catch (error) {
+          return commandFailed('invalid_metabot_profile_update', error instanceof Error ? error.message : String(error));
+        }
+
+        const changedFields = calculateMetabotChangedFields(current, update);
+        let chainWrites: ChainWriteResult[] = [];
+        if (changedFields.length > 0 && !current.globalMetaId) {
+          return commandFailed(
+            'chain_identity_missing',
+            'This MetaBot has no chained identity yet, so profile changes cannot be saved safely.'
+          );
+        }
+        if (changedFields.length > 0) {
+          try {
+            const profileSigner = createSignerForProfileHome(current.homeDir);
+            chainWrites = await syncMetabotInfoToChain(profileSigner, buildMetabotChainProfile(current, update), changedFields);
+          } catch (error) {
+            return commandFailed('chain_sync_failed', `Chain sync failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+
+        try {
+          const profile = await updateMetabotProfile(normalizedSystemHomeDir, slug, update);
+          return commandSuccess({ profile, chainWrites });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (/not found/i.test(message)) {
+            return commandFailed('profile_not_found', message);
+          }
+          return commandFailed('metabot_profile_update_failed', message);
+        }
+      },
+      getWallet: async ({ slug }) => {
+        try {
+          const wallet = await getMetabotWalletInfo(normalizedSystemHomeDir, slug);
+          return commandSuccess({ wallet });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (/not found/i.test(message)) {
+            return commandFailed('profile_not_found', message);
+          }
+          return commandFailed('metabot_wallet_unavailable', message);
+        }
+      },
+      getBackup: async ({ slug }) => {
+        try {
+          const backup = await getMetabotMnemonicBackup(normalizedSystemHomeDir, slug);
+          return commandSuccess({ backup });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (/not found/i.test(message)) {
+            return commandFailed('profile_not_found', message);
+          }
+          return commandFailed('metabot_backup_unavailable', message);
+        }
+      },
+      deleteProfile: async ({ slug }) => {
+        try {
+          const result = await deleteMetabotProfile(normalizedSystemHomeDir, slug);
+          return commandSuccess({
+            deleted: true,
+            profile: result.profile,
+            removedExecutorSessions: result.removedExecutorSessions,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (/not found/i.test(message)) {
+            return commandFailed('profile_not_found', message);
+          }
+          return commandFailed('metabot_profile_delete_failed', message);
+        }
+      },
+      listRuntimes: async () => {
+        const runtimeStore = createLlmRuntimeStore(input.homeDir);
+        const state = await runtimeStore.read();
+        return commandSuccess(state);
+      },
+      discoverRuntimes: async () => {
+        const result = await discoverLlmRuntimes({ env: process.env });
+        const runtimeStore = createLlmRuntimeStore(input.homeDir);
+        const previous = await runtimeStore.read();
+        const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
+        for (const runtime of result.runtimes) {
+          await runtimeStore.upsertRuntime(runtime);
+        }
+        for (const runtime of previous.runtimes) {
+          if (runtime.provider === 'custom') continue;
+          if (!discoveredRuntimeIds.has(runtime.id) && runtime.health !== 'unavailable') {
+            await runtimeStore.updateHealth(runtime.id, 'unavailable');
+          }
+        }
+        const updated = await runtimeStore.read();
+        return commandSuccess({ discovered: result.runtimes.length, runtimes: updated.runtimes, errors: result.errors });
+      },
+      listSessions: async ({ slug, limit }) => {
+        if (!input.llmExecutor) {
+          return commandFailed('llm_executor_not_configured', 'LLM executor is not configured.');
+        }
+        const normalizedSlug = normalizeText(slug);
+        const sessions = await input.llmExecutor.listSessions(limit, normalizedSlug ? { metaBotSlug: normalizedSlug } : undefined);
+        return commandSuccess({
+          sessions,
+        });
       },
     },
     llm: {

@@ -1,17 +1,63 @@
-export type LlmProvider = 'claude-code' | 'codex' | 'openclaw' | 'custom';
+export type LlmProvider =
+  | 'claude-code'
+  | 'codex'
+  | 'copilot'
+  | 'opencode'
+  | 'openclaw'
+  | 'hermes'
+  | 'gemini'
+  | 'pi'
+  | 'cursor'
+  | 'kimi'
+  | 'kiro'
+  | 'custom';
 export type LlmAuthState = 'unknown' | 'authenticated' | 'unauthenticated';
 export type LlmHealth = 'healthy' | 'degraded' | 'unavailable';
 export type LlmBindingRole = 'primary' | 'fallback' | 'reviewer' | 'specialist';
 
-export const SUPPORTED_LLM_PROVIDERS: LlmProvider[] = ['claude-code', 'codex', 'openclaw'];
+export const SUPPORTED_LLM_PROVIDERS: LlmProvider[] = [
+  'claude-code',
+  'codex',
+  'copilot',
+  'opencode',
+  'openclaw',
+  'hermes',
+  'gemini',
+  'pi',
+  'cursor',
+  'kimi',
+  'kiro',
+];
 
 export const HOST_BINARY_MAP: Record<string, string> = {
   'claude-code': 'claude',
   'codex': 'codex',
+  'copilot': 'gh',
+  'opencode': 'opencode',
   'openclaw': 'openclaw',
+  'hermes': 'hermes',
+  'gemini': 'gemini',
+  'pi': 'pi',
+  'cursor': 'cursor-agent',
+  'kimi': 'kimi',
+  'kiro': 'kiro-cli',
 };
 
-export const HOST_SEARCH_ORDER: LlmProvider[] = ['claude-code', 'codex', 'openclaw'];
+export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  'claude-code': 'Claude Code',
+  'codex': 'Codex (OpenAI)',
+  'copilot': 'GitHub Copilot CLI',
+  'opencode': 'OpenCode',
+  'openclaw': 'OpenClaw',
+  'hermes': 'Hermes',
+  'gemini': 'Gemini CLI',
+  'pi': 'Pi',
+  'cursor': 'Cursor Agent',
+  'kimi': 'Kimi',
+  'kiro': 'Kiro CLI',
+};
+
+export const HOST_SEARCH_ORDER: LlmProvider[] = [...SUPPORTED_LLM_PROVIDERS];
 
 export interface LlmRuntime {
   id: string;
@@ -87,7 +133,7 @@ function normalizeOptionalString(value: unknown): string | undefined {
 // ---- type guards ----
 
 export function isLlmProvider(value: unknown): value is LlmProvider {
-  return typeof value === 'string' && ['claude-code', 'codex', 'openclaw', 'custom'].includes(value);
+  return typeof value === 'string' && [...SUPPORTED_LLM_PROVIDERS, 'custom'].includes(value as LlmProvider);
 }
 
 function isLlmAuthState(value: unknown): value is LlmAuthState {
