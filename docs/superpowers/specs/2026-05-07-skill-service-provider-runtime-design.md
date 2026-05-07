@@ -1,7 +1,7 @@
 # Skill-Service Provider Runtime Design
 
 Date: 2026-05-07
-Status: Draft for human review
+Status: Spec for implementation planning
 
 ## Context for the Implementer
 
@@ -716,12 +716,13 @@ The whole project is accepted only when all phase gates pass and these end-to-en
 - Final acceptance includes real-chain evidence for service publish, service discovery/readback, private delivery/rating messages, refund request creation, and refund finalization or documented settlement blocker.
 - Every implementation phase has its own commit and on-chain development diary.
 
-## Open Questions
+## Implementation Directives
 
-- Should the first implementation select the current active MetaBot automatically for CLI publish, or require `--metabot <slug>` to avoid accidental publishes from the wrong identity?
-- Should project skill roots be read relative to the implementation worktree cwd, the MetaBot execution workspace, or a per-MetaBot workspace directory once provider executions are isolated?
-- Which non-text artifact types should be supported in the first OAC provider implementation: text-only first, or IDBots parity for image/video/audio/other from the start?
-- Should seller-side automatic refund settlement run in the background daemon loop, or only when a pending refund is observed through private-chat/order state refresh?
+- Require CLI commands that publish, inspect, or settle provider services to resolve the active local MetaBot by default and support an explicit `--metabot <slug>` override. If no active MetaBot can be resolved, fail with a stable machine-readable error before chain writes or settlement actions.
+- Resolve project skill roots relative to the provider execution workspace used for the LLM run. Until a dedicated per-MetaBot execution workspace exists, use the implementation worktree cwd consistently and record the selected cwd in local diagnostics only.
+- Support text delivery first for the LLM-backed provider runner. Preserve the prompt and lifecycle shape needed for image, video, audio, and other artifact delivery, but gate non-text delivery behind explicit validation/upload support before claiming IDBots parity for those output types.
+- Run seller-side automatic refund settlement from the daemon when a matching pending refund request is observed through private-chat/order state refresh or chain-state refresh. Keep an explicit CLI/UI manual settlement action for blocked or retryable cases.
+- Treat every directive in this section as an implementation requirement. Do not ask the next development session to reinterpret these decisions as product questions.
 
 ## Review Gate
 
