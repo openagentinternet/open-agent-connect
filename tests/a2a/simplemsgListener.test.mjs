@@ -185,6 +185,41 @@ test('simplemsg listener manager creates one listener identity per local profile
   assert.equal(harness.sockets.every((socket) => socket.disconnected), true);
 });
 
+test('simplemsg listener starts on the primary endpoint and falls back to the secondary endpoint on connect_error', async (t) => {
+  const systemHomeDir = await createSystemHome(t);
+  const alphaKeys = createIdentityPair();
+  await createProfile(systemHomeDir, {
+    name: 'Alpha Bot',
+    slug: 'alpha-bot',
+    globalMetaId: 'idq1alpha0000000000000000000000000000',
+    keys: alphaKeys,
+  });
+
+  const harness = createSocketHarness();
+  const manager = createA2ASimplemsgListenerManager({
+    systemHomeDir,
+    socketClientFactory: harness.socketClientFactory,
+    socketEndpoints: [
+      { url: 'wss://api.idchat.io', path: '/socket/socket.io' },
+      { url: 'wss://www.show.now', path: '/socket/socket.io' },
+    ],
+  });
+
+  await manager.start();
+
+  assert.equal(harness.sockets.length, 1);
+  assert.equal(harness.sockets[0].endpoint.url, 'wss://api.idchat.io');
+
+  await harness.sockets[0].emitServer('connect_error', new Error('primary unavailable'));
+
+  assert.equal(harness.sockets[0].disconnected, true);
+  assert.equal(harness.sockets.length, 2);
+  assert.equal(harness.sockets[1].endpoint.url, 'wss://www.show.now');
+
+  manager.stop();
+  assert.equal(harness.sockets.every((socket) => socket.disconnected), true);
+});
+
 test('simplemsg listener manager skips profiles with missing secrets without blocking valid profiles', async (t) => {
   const systemHomeDir = await createSystemHome(t);
   const alphaKeys = createIdentityPair();

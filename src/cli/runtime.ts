@@ -21,13 +21,14 @@ import {
   listIdentityProfiles,
   readActiveMetabotHome,
   setActiveMetabotHome,
+  type IdentityProfileRecord,
 } from '../core/identity/identityProfiles';
 import { resolveIdentityCreateProfileHome } from '../core/identity/profileWorkspace';
 import { resolveProfileNameMatch } from '../core/identity/profileNameResolution';
 import { renderResolvedSkillContract } from '../core/skills/skillResolver';
 import type { ConcreteSkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
 import type { SkillActiveVariantRef } from '../core/evolution/types';
-import { resolveMetabotPaths } from '../core/state/paths';
+import { resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
 import {
   normalizeSystemHomeDir as normalizeSelectedSystemHomeDir,
   resolveMetabotHomeSelectionSync,
@@ -62,12 +63,20 @@ import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { createA2ASimplemsgListenerManager } from '../core/a2a/simplemsgListener';
 import { createSocketIoMetaWebMasterReplyWaiter, type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
 import { parseMasterResponse } from '../core/master/masterMessageSchema';
-import { createPrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
+import {
+  createPrivateChatAutoReplyOrchestrator,
+  type PrivateChatAutoReplyDependencies,
+  type PrivateChatAutoReplyOrchestrator,
+} from '../core/chat/privateChatAutoReply';
 import { createPrivateChatAutoReplyBackfillLoop } from '../core/chat/privateChatAutoReplyBackfill';
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
-import type { ChatReplyRunner } from '../core/chat/privateChatTypes';
+import type {
+  ChatReplyRunner,
+  PrivateChatAutoReplyConfig,
+  PrivateChatInboundMessage,
+} from '../core/chat/privateChatTypes';
 import { createTestServicePaymentExecutor } from '../core/payments/servicePayment';
 import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
@@ -1082,6 +1091,106 @@ function createCliSigner(context: CliRuntimeContext, homeDir: string): Signer {
     return createTestChainWriteSigner(baseSigner);
   }
   return baseSigner;
+}
+
+export interface PrivateChatAutoReplyProfileDispatcher {
+  handleInboundMessage(
+    profile: IdentityProfileRecord,
+    message: PrivateChatInboundMessage,
+  ): Promise<void>;
+}
+
+export interface PrivateChatAutoReplyProfileDispatcherOptions {
+  autoReplyConfig: PrivateChatAutoReplyConfig;
+  resolvePeerChatPublicKey: (globalMetaId: string) => Promise<string | null>;
+  llmExecutor: Pick<LlmExecutor, 'execute' | 'getSession'>;
+  createSignerForHome?: (homeDir: string) => Signer;
+  createReplyRunnerForProfile?: (input: {
+    paths: MetabotPaths;
+    metaBotSlug: string;
+    runtimeResolver: ReturnType<typeof createLlmRuntimeResolver>;
+    llmExecutor: Pick<LlmExecutor, 'execute' | 'getSession'>;
+  }) => ChatReplyRunner;
+  createOrchestrator?: (
+    deps: PrivateChatAutoReplyDependencies,
+    config: PrivateChatAutoReplyConfig,
+  ) => PrivateChatAutoReplyOrchestrator;
+}
+
+export function createPrivateChatAutoReplyProfileDispatcher(
+  input: PrivateChatAutoReplyProfileDispatcherOptions,
+): PrivateChatAutoReplyProfileDispatcher {
+  const orchestrators = new Map<string, PrivateChatAutoReplyOrchestrator>();
+  const createOrchestrator = input.createOrchestrator ?? createPrivateChatAutoReplyOrchestrator;
+
+  function getOrCreateOrchestrator(profile: IdentityProfileRecord): PrivateChatAutoReplyOrchestrator | null {
+    const profileHomeDir = normalizeEnvText(profile.homeDir);
+    if (!profileHomeDir) return null;
+    const cacheKey = path.resolve(profileHomeDir);
+    const existing = orchestrators.get(cacheKey);
+    if (existing) return existing;
+
+    const profilePaths = resolveMetabotPaths(profileHomeDir);
+    const profileRuntimeStore = createRuntimeStateStore(profilePaths);
+    const profileSigner = input.createSignerForHome
+      ? input.createSignerForHome(profileHomeDir)
+      : createLocalMnemonicSigner({
+        secretStore: createFileSecretStore(profileHomeDir),
+        adapters: createDefaultChainAdapterRegistry(),
+      });
+    const profileRuntimeStoreForLlm = createLlmRuntimeStore(profilePaths);
+    const profileBindingStore = createLlmBindingStore(profilePaths);
+    const profileRuntimeResolver = createLlmRuntimeResolver({
+      runtimeStore: profileRuntimeStoreForLlm,
+      bindingStore: profileBindingStore,
+      getPreferredRuntimeId: async () => {
+        try {
+          const raw = await fs.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+          const data = JSON.parse(raw) as { runtimeId?: string | null };
+          return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+        } catch {
+          return null;
+        }
+      },
+    });
+    const metaBotSlug = path.basename(profilePaths.profileRoot);
+    const replyRunner = input.createReplyRunnerForProfile
+      ? input.createReplyRunnerForProfile({
+        paths: profilePaths,
+        metaBotSlug,
+        runtimeResolver: profileRuntimeResolver,
+        llmExecutor: input.llmExecutor,
+      })
+      : createHostLlmChatReplyRunner({
+        runtimeResolver: profileRuntimeResolver,
+        llmExecutor: input.llmExecutor,
+        metaBotSlug,
+      });
+    const profileGlobalMetaId = normalizeEnvText(profile.globalMetaId);
+    const orchestrator = createOrchestrator({
+      stateStore: createPrivateChatStateStore(profilePaths),
+      strategyStore: createChatStrategyStore(profilePaths),
+      paths: profilePaths,
+      signer: profileSigner,
+      selfGlobalMetaId: async () => {
+        const state = await profileRuntimeStore.readState().catch(() => null);
+        return (state?.identity?.globalMetaId ?? profileGlobalMetaId) || null;
+      },
+      resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
+      replyRunner,
+    }, input.autoReplyConfig);
+
+    orchestrators.set(cacheKey, orchestrator);
+    return orchestrator;
+  }
+
+  return {
+    async handleInboundMessage(profile, message) {
+      const orchestrator = getOrCreateOrchestrator(profile);
+      if (!orchestrator) return;
+      await orchestrator.handleInboundMessage(message);
+    },
+  };
 }
 
 function createTestSubsidyRequester(): (
@@ -2328,16 +2437,21 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       console.warn('[private chat auto-reply backfill]', error.message);
     },
   });
+  const profileAutoReplyDispatcher = createPrivateChatAutoReplyProfileDispatcher({
+    autoReplyConfig: sharedAutoReplyConfig,
+    resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+    llmExecutor,
+  });
 
   const daemonConfig = await createConfigStore(paths).read();
   const simplemsgListener = createA2ASimplemsgListenerManager({
     systemHomeDir: paths.systemHomeDir,
     resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
     onMessage: (profile, message) => {
+      void profileAutoReplyDispatcher.handleInboundMessage(profile, message).catch((error) => {
+        console.warn('[private chat auto-reply]', error instanceof Error ? error.message : String(error));
+      });
       if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
-        void chatAutoReplyOrchestrator.handleInboundMessage(message).catch((error) => {
-          console.warn('[private chat auto-reply]', error instanceof Error ? error.message : String(error));
-        });
         const orderProtocolHandler = handlers.services?.handleInboundOrderProtocolMessage;
         if (orderProtocolHandler) {
           void Promise.resolve(orderProtocolHandler({
