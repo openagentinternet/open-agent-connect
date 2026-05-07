@@ -55,7 +55,7 @@ export async function runSystemCommand(
     if (host && !isSupportedHost(host)) {
       return commandFailed(
         'invalid_argument',
-        `Unsupported --host value: ${host}. Supported values: ${SUPPORTED_HOSTS.join(', ')}.`,
+        `Unsupported --host value: ${host}. Legacy release-pack update supports only: ${SUPPORTED_HOSTS.join(', ')}. Omit --host for the npm-first registry-driven update path.`,
       );
     }
     const version = readFlagValue(args, '--target-version') || undefined;
@@ -92,4 +92,3 @@ export async function runSystemCommand(
 
   return commandUnknownSubcommand(`system ${args.join(' ')}`.trim());
 }
-

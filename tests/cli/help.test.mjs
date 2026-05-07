@@ -145,6 +145,22 @@ test('runCli prints system group help with update and uninstall subcommands', as
   assert.match(output, /^\s+uninstall\s+/m);
 });
 
+test('runCli prints system update help with npm-first and legacy host-pack semantics', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['system', 'update', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot system update \[--host <codex\|claude-code\|openclaw>\] \[--target-version <tag>\] \[--dry-run\]/m);
+  assert.match(output, /npm-first package update and registry-driven oac install/i);
+  assert.match(output, /Legacy release-pack update target/i);
+  assert.match(output, /npm i -g open-agent-connect@<version> and then oac install/i);
+});
+
 test('runCli prints system uninstall help with preservation and token confirmation semantics', async () => {
   const stdout = [];
 

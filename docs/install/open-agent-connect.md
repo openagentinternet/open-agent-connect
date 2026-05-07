@@ -639,18 +639,39 @@ after installation, use:
 
 ## Update
 
-Prefer the built-in update command:
+For normal registry-driven installs, prefer the built-in update command without
+`--host`:
 
 ```bash
 metabot system update
+```
+
+This runs the npm-first update path:
+
+```bash
+npm i -g open-agent-connect@latest
+oac install
+```
+
+The second step is important: it refreshes the shared runtime assets and reruns
+registry-driven platform binding for all supported platforms, including newly
+detected platform homes.
+
+To update to a pinned package version:
+
+```bash
+metabot system update --target-version v0.2.7
 ```
 
 Notes:
 
 - defaults to latest release
 - designed for non-interactive scheduling (for example cron)
-- use `--host` when multiple installed host packs exist
 - use `--dry-run` to preview planned update actions
+- `--host` is legacy release-pack update mode for `codex`, `claude-code`, and
+  `openclaw` compatibility packs only
+- do not use `--host` for the 11-platform npm-first install path; omit it so
+  `oac install` can rebind all registry roots
 
 ## Uninstall
 

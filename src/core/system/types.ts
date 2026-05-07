@@ -9,13 +9,15 @@ export interface SystemUpdateInput {
 }
 
 export interface SystemUpdateResult {
-  host: SystemHost;
+  updateMode: 'npm' | 'release-pack';
+  host: SystemHost | null;
   requestedVersion: string;
   resolvedVersion: string | null;
   previousVersion: string | null;
   outcome: 'updated' | 'no_update';
-  downloadUrl: string;
-  installpackPath: string;
+  downloadUrl?: string | null;
+  installpackPath?: string | null;
+  packageSpec?: string | null;
   dryRun: boolean;
 }
 
@@ -47,4 +49,3 @@ export class SystemCommandError extends Error {
 }
 
 export const SUPPORTED_SYSTEM_HOSTS: SystemHost[] = ['codex', 'claude-code', 'openclaw'];
-

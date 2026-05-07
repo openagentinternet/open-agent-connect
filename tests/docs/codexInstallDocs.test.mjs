@@ -55,6 +55,10 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.match(guide, /do not auto-create a default identity such as `Alice`/i);
   assert.match(guide, /docs\/acceptance\/open-agent-connect-host-bind-checklist\.md/);
   assert.match(guide, /docs\/install\/uninstall-open-agent-connect\.md/);
+  assert.match(guide, /metabot system update/);
+  assert.match(guide, /npm i -g open-agent-connect@latest/);
+  assert.match(guide, /registry-driven platform binding for all supported platforms/i);
+  assert.match(guide, /`--host` is legacy release-pack update mode/i);
   assert.match(guide, /preserve MetaBot identities, mnemonics, private keys, profile names, and\s+wallet-related local data/i);
   assert.doesNotMatch(guide, /manual host acceptance checklist/i);
   assert.doesNotMatch(guide, /metabot identity create --name "Alice"/);
