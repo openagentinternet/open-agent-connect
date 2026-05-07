@@ -96,6 +96,62 @@ function buildDogeWallet(mnemonic: string, path: string): DogeWallet {
   });
 }
 
+// ---- P2SH commit-reveal inscription helpers (ported from DogeInscribe) ----
+
+function pushData(data: Buffer): Buffer {
+  const len = data.length;
+  if (len === 0) {
+    return Buffer.from([bitcoin.opcodes.OP_0]);
+  }
+  if (len < 76) {
+    return Buffer.concat([Buffer.from([len]), data]);
+  }
+  if (len <= 0xff) {
+    return Buffer.concat([Buffer.from([bitcoin.opcodes.OP_PUSHDATA1, len]), data]);
+  }
+  if (len <= 0xffff) {
+    const lenBuf = Buffer.alloc(2);
+    lenBuf.writeUInt16LE(len);
+    return Buffer.concat([Buffer.from([bitcoin.opcodes.OP_PUSHDATA2]), lenBuf, data]);
+  }
+  const lenBuf = Buffer.alloc(4);
+  lenBuf.writeUInt32LE(len);
+  return Buffer.concat([Buffer.from([bitcoin.opcodes.OP_PUSHDATA4]), lenBuf, data]);
+}
+
+interface InscriptionData {
+  operation: string;
+  path: string;
+  contentType: string;
+  encryption: string;
+  version: string;
+  body: string | Buffer;
+  revealAddr: string;
+  encoding?: BufferEncoding;
+}
+
+function buildMetaIdInscriptionScript(data: InscriptionData): Buffer {
+  const body =
+    typeof data.body === 'string'
+      ? Buffer.from(data.body, data.encoding || 'utf8')
+      : data.body || Buffer.alloc(0);
+  const bodyParts: Buffer[] = [];
+  for (let i = 0; i < body.length; i += MAX_CHUNK_LEN) {
+    bodyParts.push(body.slice(i, Math.min(i + MAX_CHUNK_LEN, body.length)));
+  }
+  if (bodyParts.length === 0) bodyParts.push(Buffer.alloc(0));
+
+  const chunks: Buffer[] = [];
+  chunks.push(pushData(Buffer.from('metaid')));
+  chunks.push(pushData(Buffer.from(data.operation)));
+  chunks.push(pushData(Buffer.from(data.contentType || 'text/plain')));
+  chunks.push(pushData(Buffer.from(data.encryption || '0')));
+  chunks.push(pushData(Buffer.from(data.version || '0.0.1')));
+  chunks.push(pushData(Buffer.from(data.path || '')));
+  for (const part of bodyParts) chunks.push(pushData(part));
+  return Buffer.concat(chunks);
+}
+
 // ---- DOGE ChainAdapter ----
 
 export const dogeChainAdapter: ChainAdapter = {
