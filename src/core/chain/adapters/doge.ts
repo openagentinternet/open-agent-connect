@@ -4,6 +4,8 @@ import {
   DogeWallet,
   SignType,
 } from '@metalet/utxo-wallet-service';
+import * as bitcoin from 'bitcoinjs-lib';
+import ECPairFactory from 'ecpair';
 import type { ChainWriteNetwork } from '../writePin';
 import { parseAddressIndexFromPath } from '../../identity/deriveIdentity';
 import type {
