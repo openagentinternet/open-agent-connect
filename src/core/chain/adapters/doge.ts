@@ -560,24 +560,24 @@ export const dogeChainAdapter: ChainAdapter = {
       throw new Error(`DOGE transfer amount must be at least ${DOGE_DUST_LIMIT} satoshis (0.01 DOGE).`);
     }
 
-    const signResult = wallet.signTx(SignType.SEND, {
+    const signResult = await wallet.signTransaction({
       utxos: utxos.map((utxo) => ({
         txId: utxo.txId,
         outputIndex: utxo.outputIndex,
         satoshis: utxo.satoshis,
         address: utxo.address,
-        rawTx: utxo.rawTx,
-        confirmed: (utxo as { confirmed?: boolean }).confirmed,
+        rawTx: utxo.rawTx ?? '',
       })),
-      toInfo: {
+      outputs: [{
         address: input.toAddress,
         satoshis: input.amountSatoshis,
-      },
+      }],
       feeRate,
-    } as never) as unknown as { rawTx?: string; fee?: number };
+      changeAddress: address,
+    });
 
     const rawTx = normalizeText(signResult?.rawTx);
-    if (!rawTx) throw new Error('DOGE signTx(SEND) returned no raw transaction.');
+    if (!rawTx) throw new Error('DOGE signTransaction returned no raw transaction.');
 
     return { rawTx, fee: Number(signResult.fee ?? 0) };
   },

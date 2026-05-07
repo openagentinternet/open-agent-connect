@@ -311,11 +311,12 @@ export const btcChainAdapter: ChainAdapter = {
         rawTx: utxo.rawTx,
         confirmed: (utxo as { confirmed?: boolean }).confirmed,
       })),
-      toInfo: {
+      outputs: [{
         address: input.toAddress,
         satoshis: input.amountSatoshis,
-      },
+      }],
       feeRate,
+      changeAddress: address,
     } as never) as unknown as { rawTx?: string; fee?: number };
 
     const rawTx = normalizeText(signResult?.rawTx);
