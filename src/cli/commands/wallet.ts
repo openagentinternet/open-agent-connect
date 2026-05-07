@@ -2,8 +2,6 @@ import { commandFailed, type MetabotCommandResult } from '../../core/contracts/c
 import { commandUnknownSubcommand } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
-type WalletBalanceChain = 'all' | 'mvc' | 'btc';
-
 function readStringFlag(args: string[], flag: string): string | null {
   const index = args.indexOf(flag);
   if (index === -1) return null;
@@ -11,8 +9,14 @@ function readStringFlag(args: string[], flag: string): string | null {
   return typeof value === 'string' && !value.startsWith('--') ? value : null;
 }
 
+/**
+ * Read --chain flag with dynamic validation against the adapter registry.
+ * The supported chains are read from the wallet balance handler's metadata
+ * or validated at runtime. For CLI command parsing, we accept any non-empty
+ * chain name and let the handler validate it.
+ */
 function readWalletBalanceChainFlag(args: string[]): {
-  chain: WalletBalanceChain;
+  chain: string;
   error: MetabotCommandResult<never> | null;
 } {
   const index = args.indexOf('--chain');
@@ -24,25 +28,25 @@ function readWalletBalanceChainFlag(args: string[]): {
   if (typeof rawValue !== 'string' || rawValue.startsWith('--')) {
     return {
       chain: 'all',
-      error: commandFailed('invalid_flag', 'Missing value for --chain. Supported values: all, mvc, btc.'),
+      error: commandFailed('invalid_flag', 'Missing value for --chain.'),
     };
   }
 
   const normalized = rawValue.trim().toLowerCase();
-  if (normalized !== 'all' && normalized !== 'mvc' && normalized !== 'btc') {
+  if (!normalized) {
     return {
       chain: 'all',
-      error: commandFailed(
-        'invalid_flag',
-        `Unsupported --chain value: ${rawValue}. Supported values: all, mvc, btc.`
-      ),
+      error: commandFailed('invalid_flag', 'Empty --chain value.'),
     };
   }
 
   return { chain: normalized, error: null };
 }
 
-export async function runWalletCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
+export async function runWalletCommand(
+  args: string[],
+  context: CliRuntimeContext,
+): Promise<MetabotCommandResult<unknown>> {
   if (args[0] === 'balance') {
     const chainFlag = readWalletBalanceChainFlag(args);
     if (chainFlag.error) {
@@ -80,4 +84,3 @@ export async function runWalletCommand(args: string[], context: CliRuntimeContex
 
   return commandUnknownSubcommand(`wallet ${args.join(' ')}`.trim());
 }
-

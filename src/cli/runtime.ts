@@ -45,10 +45,15 @@ import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState'
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
 import {
   createLocalMnemonicSigner,
-  executeMvcTransfer,
-  executeBtcTransfer,
+  executeTransfer,
 } from '../core/signing/localMnemonicSigner';
-import { normalizeChainWriteRequest } from '../core/chain/writePin';
+import { normalizeChainWriteRequest, type ChainWriteNetwork } from '../core/chain/writePin';
+import { createChainAdapterRegistry } from '../core/chain/adapters/registry';
+import { mvcChainAdapter } from '../core/chain/adapters/mvc';
+import { btcChainAdapter } from '../core/chain/adapters/btc';
+import { dogeChainAdapter } from '../core/chain/adapters/doge';
+import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
+import type { ChainAdapter } from '../core/chain/adapters/types';
 import type { Signer } from '../core/signing/signer';
 import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain } from '../daemon/defaultHandlers';
@@ -95,7 +100,6 @@ const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
-const MAX_MVC_BALANCE_QUERY_PAGES = 200;
 let cachedDaemonRuntimeFingerprint: string | null = null;
 
 type EvolutionPublishFailureCode =
@@ -135,33 +139,6 @@ interface MetaletEnvelope<T> {
   data?: T;
 }
 
-interface MetaletMvcUtxoListItem {
-  flag?: string;
-  value?: number;
-  height?: number;
-}
-
-interface WalletMvcBalanceSnapshot {
-  chain: 'mvc';
-  address: string;
-  totalSatoshis: number;
-  confirmedSatoshis: number;
-  unconfirmedSatoshis: number;
-  utxoCount: number;
-  totalMvc: number;
-}
-
-interface WalletBtcBalanceSnapshot {
-  chain: 'btc';
-  address: string;
-  totalSatoshis: number;
-  confirmedSatoshis: number;
-  unconfirmedSatoshis: number;
-  totalBtc: number;
-  confirmedBtc: number;
-  unconfirmedBtc: number;
-}
-
 function normalizeBaseUrl(value: string | undefined): string {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   return trimmed || DEFAULT_DAEMON_BASE_URL;
@@ -185,126 +162,53 @@ async function fetchMetaletData<T>(url: string): Promise<T> {
   return (payload?.data ?? null) as T;
 }
 
-async function fetchMvcBalanceSnapshot(address: string): Promise<WalletMvcBalanceSnapshot> {
-  let flag = '';
-  let totalSatoshis = 0;
-  let confirmedSatoshis = 0;
-  let unconfirmedSatoshis = 0;
-  let utxoCount = 0;
-
-  for (let page = 0; page < MAX_MVC_BALANCE_QUERY_PAGES; page += 1) {
-    const params = new URLSearchParams({
-      address,
-      net: CHAIN_NET,
-      ...(flag ? { flag } : {}),
-    });
-    const data = await fetchMetaletData<{ list?: MetaletMvcUtxoListItem[] }>(
-      `${METALET_HOST}/wallet-api/v4/mvc/address/utxo-list?${params}`,
-    );
-    const list = Array.isArray(data?.list) ? data.list : [];
-    if (!list.length) {
-      break;
-    }
-
-    for (const utxo of list) {
-      const satoshis = Math.max(0, Math.floor(toFiniteNumber(utxo.value)));
-      totalSatoshis += satoshis;
-      utxoCount += 1;
-      if (toFiniteNumber(utxo.height) > 0) {
-        confirmedSatoshis += satoshis;
-      } else {
-        unconfirmedSatoshis += satoshis;
-      }
-    }
-
-    const nextFlag = normalizeEnvText(list[list.length - 1]?.flag);
-    if (!nextFlag || nextFlag === flag) {
-      break;
-    }
-    flag = nextFlag;
-  }
-
-  return {
-    chain: 'mvc',
-    address,
-    totalSatoshis,
-    confirmedSatoshis,
-    unconfirmedSatoshis,
-    utxoCount,
-    totalMvc: totalSatoshis / 1e8,
-  };
-}
-
-async function fetchBtcBalanceSnapshot(address: string): Promise<WalletBtcBalanceSnapshot> {
-  const params = new URLSearchParams({
-    address,
-    net: CHAIN_NET,
-  });
-  const data = await fetchMetaletData<{
-    balance?: number;
-    safeBalance?: number;
-    pendingBalance?: number;
-  }>(`${METALET_HOST}/wallet-api/v3/address/btc-balance?${params}`);
-
-  const totalBtc = Math.max(0, toFiniteNumber(data?.balance));
-  const confirmedBtc = Math.max(0, toFiniteNumber(data?.safeBalance ?? data?.balance));
-  const unconfirmedBtc = toFiniteNumber(data?.pendingBalance);
-
-  return {
-    chain: 'btc',
-    address,
-    totalSatoshis: Math.round(totalBtc * 1e8),
-    confirmedSatoshis: Math.round(confirmedBtc * 1e8),
-    unconfirmedSatoshis: Math.round(unconfirmedBtc * 1e8),
-    totalBtc,
-    confirmedBtc,
-    unconfirmedBtc,
-  };
+function createDefaultChainAdapterRegistry(): ChainAdapterRegistry {
+  return createChainAdapterRegistry([
+    mvcChainAdapter,
+    btcChainAdapter,
+    dogeChainAdapter,
+  ]);
 }
 
 interface ParsedTransferAmount {
-  chain: 'mvc' | 'btc';
-  currency: 'BTC' | 'SPACE';
+  chain: string;
+  currency: string;
   satoshis: number;
+  adapter: ChainAdapter;
 }
 
-function parseTransferAmount(raw: string): ParsedTransferAmount {
-  const match = raw.trim().match(/^([\d.]+)\s*(btc|space)$/i);
+/**
+ * Parse a transfer amount string like "0.01DOGE", "0.00001BTC", "1SPACE".
+ * DOGE amounts: unit is DOGE (1 DOGE = 1e8 satoshis).
+ * BTC amounts: unit is BTC (1 BTC = 1e8 satoshis).
+ * SPACE amounts: unit is SPACE (1 SPACE = 1e8 satoshis).
+ */
+function parseTransferAmount(raw: string, adapters: ChainAdapterRegistry): ParsedTransferAmount {
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^([\d.]+)\s*(btc|space|doge)$/i);
   if (!match) {
-    const hasUnit = /[a-z]/i.test(raw.trim());
+    const hasUnit = /[a-z]/i.test(trimmed);
     if (!hasUnit) {
-      throw new Error('Missing currency unit. Append BTC or SPACE to the amount. Example: 0.00001BTC or 1SPACE.');
+      throw new Error('Missing currency unit. Append BTC, SPACE, or DOGE to the amount. Example: 0.00001BTC, 1SPACE, or 0.01DOGE.');
     }
-    throw new Error(`Unsupported currency unit in "${raw}". Supported units: BTC, SPACE.`);
+    throw new Error(`Unsupported currency unit in "${raw}". Supported units: BTC, SPACE, DOGE.`);
   }
   const amount = parseFloat(match[1]);
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error(`Invalid amount "${match[1]}". Must be a positive number.`);
   }
-  const unit = match[2].toUpperCase() as 'BTC' | 'SPACE';
+  const unit = match[2].toUpperCase();
+  const chain = unit === 'BTC' ? 'btc' : unit === 'DOGE' ? 'doge' : 'mvc';
+  const adapter = adapters.get(chain);
+  if (!adapter) {
+    throw new Error(`No adapter registered for chain "${chain}".`);
+  }
   return {
-    chain: unit === 'BTC' ? 'btc' : 'mvc',
+    chain,
     currency: unit,
     satoshis: Math.round(amount * 1e8),
+    adapter,
   };
-}
-
-async function fetchTransferFeeRate(chain: 'mvc' | 'btc'): Promise<number> {
-  const defaultRate = chain === 'btc' ? 2 : 1;
-  try {
-    const url = chain === 'btc'
-      ? `${METALET_HOST}/wallet-api/v3/btc/fee/summary?net=${CHAIN_NET}`
-      : `${METALET_HOST}/wallet-api/v4/mvc/fee/summary?net=${CHAIN_NET}`;
-    const response = await fetch(url);
-    const json = await response.json() as { code?: number; data?: { list?: Array<{ title?: string; feeRate?: number }> } };
-    if (json?.code !== 0) return defaultRate;
-    const list = json?.data?.list ?? [];
-    const avg = list.find((t) => /avg/i.test(String(t?.title ?? '')));
-    const rate = toFiniteNumber(avg?.feeRate ?? list[0]?.feeRate);
-    return rate > 0 ? rate : defaultRate;
-  } catch {
-    return defaultRate;
-  }
 }
 
 function parseDaemonPort(value: string | undefined): number | null {
@@ -1174,7 +1078,8 @@ function mapEvolutionRuntimeError(error: unknown): { code: EvolutionRuntimeFailu
 
 function createCliSigner(context: CliRuntimeContext, homeDir: string): Signer {
   const secretStore = createFileSecretStore(homeDir);
-  const baseSigner = createLocalMnemonicSigner({ secretStore });
+  const adapters = createDefaultChainAdapterRegistry();
+  const baseSigner = createLocalMnemonicSigner({ secretStore, adapters });
   if (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1') {
     return createTestChainWriteSigner(baseSigner);
   }
@@ -1668,29 +1573,33 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           );
         }
 
-        const targetChains = input.chain === 'all'
-          ? ['mvc', 'btc'] as const
+        const adapters = createDefaultChainAdapterRegistry();
+
+        const allChains = Array.from(adapters.keys());
+        const targetChains: string[] = input.chain === 'all'
+          ? allChains
           : [input.chain];
 
+        // Validate all chains are registered
+        for (const chain of targetChains) {
+          if (!adapters.has(chain as ChainWriteNetwork)) {
+            return commandFailed(
+              'invalid_flag',
+              `Unsupported --chain value: ${chain}. Supported values: all, ${Array.from(adapters.keys()).join(', ')}.`
+            );
+          }
+        }
+
         try {
-          const balances: {
-            mvc?: WalletMvcBalanceSnapshot;
-            btc?: WalletBtcBalanceSnapshot;
-          } = {};
+          const balances: Record<string, unknown> = {};
           for (const chain of targetChains) {
-            if (chain === 'mvc') {
-              const mvcAddress = normalizeEnvText(state.identity.mvcAddress);
-              if (!mvcAddress) {
-                return commandFailed('identity_address_missing', 'Current identity has no mvcAddress.');
-              }
-              balances.mvc = await fetchMvcBalanceSnapshot(mvcAddress);
-              continue;
+            const adapter = adapters.get(chain as ChainWriteNetwork)!;
+            const address = state.identity.addresses[chain] ?? state.identity.mvcAddress;
+            if (!address) {
+              return commandFailed('identity_address_missing', `Current identity has no address for chain "${chain}".`);
             }
-            const btcAddress = normalizeEnvText(state.identity.btcAddress);
-            if (!btcAddress) {
-              return commandFailed('identity_address_missing', 'Current identity has no btcAddress.');
-            }
-            balances.btc = await fetchBtcBalanceSnapshot(btcAddress);
+            const balance = await adapter.fetchBalance(address);
+            balances[chain] = balance;
           }
 
           return commandSuccess({
@@ -1713,37 +1622,38 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           return commandFailed('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
         }
 
+        const adapters = createDefaultChainAdapterRegistry();
+
         let parsed: ParsedTransferAmount;
         try {
-          parsed = parseTransferAmount(input.amountRaw);
+          parsed = parseTransferAmount(input.amountRaw, adapters);
         } catch (error) {
           return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
         }
 
-        const minSatoshis = parsed.chain === 'btc' ? 546 : 600;
+        const adapter = parsed.adapter;
+        const minSatoshis = adapter.minTransferSatoshis;
         if (parsed.satoshis < minSatoshis) {
           return commandFailed('invalid_argument', `Amount is below the minimum of ${minSatoshis} satoshis for ${parsed.currency}.`);
         }
 
-        const fromAddress = parsed.chain === 'btc'
-          ? normalizeEnvText(state.identity.btcAddress)
-          : normalizeEnvText(state.identity.mvcAddress);
+        const fromAddress = state.identity.addresses[parsed.chain] ?? state.identity.mvcAddress;
         if (!fromAddress) {
-          return commandFailed('identity_address_missing', `Current identity has no ${parsed.chain === 'btc' ? 'btcAddress' : 'mvcAddress'}.`);
+          return commandFailed('identity_address_missing', `Current identity has no address for chain "${parsed.chain}".`);
         }
 
-        const feeRate = await fetchTransferFeeRate(parsed.chain);
-        const estimatedFeeSatoshis = Math.ceil(392 * feeRate);
+        const feeRate = await adapter.fetchFeeRate();
+        // Rough fee estimate: ~392 bytes * feeRate for sat/byte chains, adjusted for sat/KB chains
+        const feePerByte = adapter.feeRateUnit === 'sat/KB' ? feeRate / 1000 : feeRate;
+        const estimatedFeeSatoshis = Math.ceil(392 * feePerByte);
         const totalRequired = parsed.satoshis + estimatedFeeSatoshis;
 
-        const balanceSnap = parsed.chain === 'btc'
-          ? await fetchBtcBalanceSnapshot(fromAddress)
-          : await fetchMvcBalanceSnapshot(fromAddress);
+        const balance = await adapter.fetchBalance(fromAddress);
 
-        if (balanceSnap.totalSatoshis < totalRequired) {
-          const balanceDisplay = `${balanceSnap.totalSatoshis} sats (${(balanceSnap.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
-          const unconfirmedNote = balanceSnap.unconfirmedSatoshis > 0
-            ? ` (includes ${balanceSnap.unconfirmedSatoshis} unconfirmed sats)`
+        if (balance.totalSatoshis < totalRequired) {
+          const balanceDisplay = `${balance.totalSatoshis} sats (${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
+          const unconfirmedNote = balance.unconfirmedSatoshis > 0
+            ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
             : '';
           return commandFailed(
             'insufficient_balance',
@@ -1752,14 +1662,14 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
 
         if (!input.confirm) {
-          const currentBalanceDisplay = `${(balanceSnap.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
-          const unconfirmedNote = balanceSnap.unconfirmedSatoshis > 0
-            ? ` (includes ${balanceSnap.unconfirmedSatoshis} unconfirmed sats)`
+          const currentBalanceDisplay = `${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
+          const unconfirmedNote = balance.unconfirmedSatoshis > 0
+            ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
             : '';
           return commandAwaitingConfirmation({
             fromAddress,
             currentBalance: currentBalanceDisplay + unconfirmedNote,
-            currentBalanceSatoshis: balanceSnap.totalSatoshis,
+            currentBalanceSatoshis: balance.totalSatoshis,
             toAddress: input.toAddress,
             amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
             amountSatoshis: parsed.satoshis,
@@ -1778,20 +1688,15 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
 
         try {
-          const transferInput = {
+          const result = await executeTransfer(adapter, {
             mnemonic: secrets.mnemonic,
             path: secrets.path ?? state.identity.path ?? "m/44'/10001'/0'/0/0",
             toAddress: input.toAddress,
             amountSatoshis: parsed.satoshis,
             feeRate,
-          };
-          const result = parsed.chain === 'btc'
-            ? await executeBtcTransfer(transferInput)
-            : await executeMvcTransfer(transferInput);
+          });
 
-          const explorerUrl = parsed.chain === 'btc'
-            ? `https://mempool.space/tx/${result.txid}`
-            : `https://www.mvcscan.com/tx/${result.txid}`;
+          const explorerUrl = `${adapter.explorerBaseUrl}/tx/${result.txid}`;
 
           return commandSuccess({
             txid: result.txid,
@@ -2236,7 +2141,8 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const paths = resolveMetabotPaths(homeDir);
   let daemonRecord: RuntimeDaemonRecord | null = null;
   const secretStore = createFileSecretStore(homeDir);
-  const baseSigner = createLocalMnemonicSigner({ secretStore });
+  const adapters = createDefaultChainAdapterRegistry();
+  const baseSigner = createLocalMnemonicSigner({ secretStore, adapters });
   const signer = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
     ? createTestChainWriteSigner(baseSigner)
     : baseSigner;
@@ -2275,6 +2181,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     getDaemonRecord: () => daemonRecord,
     secretStore,
     signer,
+    adapters,
     chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
     socketPresenceApiBaseUrl,
     socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
