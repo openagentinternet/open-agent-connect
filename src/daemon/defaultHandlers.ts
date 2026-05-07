@@ -56,6 +56,8 @@ import type {
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 import { buildPublishedService } from '../core/services/publishService';
 import { publishServiceToChain } from '../core/services/servicePublishChain';
+import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
+import { validateServicePublishProviderSkill } from '../core/services/servicePublishValidation';
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
@@ -4076,6 +4078,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   });
   const configStore = createConfigStore(input.homeDir);
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
+  const llmRuntimeStore = createLlmRuntimeStore(input.homeDir);
+  const llmBindingStore = createLlmBindingStore(input.homeDir);
   const masterStateStore = createPublishedMasterStateStore(input.homeDir);
   const pendingMasterAskStateStore = createPendingMasterAskStateStore(input.homeDir);
   const masterSuggestStateStore = createMasterSuggestStateStore(input.homeDir);
@@ -7698,6 +7702,45 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     },
     services: {
+      listPublishSkills: async () => {
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before listing publishable skills.');
+        }
+
+        const metaBotSlug = path.basename(input.homeDir);
+        const catalog = createPlatformSkillCatalog({
+          runtimeStore: llmRuntimeStore,
+          bindingStore: llmBindingStore,
+          systemHomeDir: runtimeStateStore.paths.systemHomeDir,
+          projectRoot: runtimeStateStore.paths.profileRoot,
+          env: process.env,
+        });
+        const result = await catalog.listPrimaryRuntimeSkills({ metaBotSlug });
+        if (!result.ok) {
+          return commandFailed(result.code, result.message);
+        }
+
+        return commandSuccess({
+          metaBotSlug,
+          identity: {
+            metabotId: state.identity.metabotId,
+            name: state.identity.name,
+            globalMetaId: state.identity.globalMetaId,
+          },
+          runtime: {
+            id: result.runtime.id,
+            provider: result.runtime.provider,
+            displayName: result.runtime.displayName,
+            health: result.runtime.health,
+            version: result.runtime.version,
+            logoPath: result.runtime.logoPath,
+          },
+          platform: result.platform,
+          skills: result.skills,
+          rootDiagnostics: result.rootDiagnostics,
+        });
+      },
       publish: async (rawInput) => {
         const state = await runtimeStateStore.readState();
         if (!state.identity) {
@@ -7716,6 +7759,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         if (!serviceName || !displayName || !description || !providerSkill || !price || !currency || !outputType) {
           return commandFailed('invalid_service_payload', 'Service payload is missing one or more required fields.');
+        }
+
+        const metaBotSlug = path.basename(input.homeDir);
+        const validation = await validateServicePublishProviderSkill({
+          metaBotSlug,
+          providerSkill,
+          runtimeStore: llmRuntimeStore,
+          bindingStore: llmBindingStore,
+          systemHomeDir: runtimeStateStore.paths.systemHomeDir,
+          projectRoot: runtimeStateStore.paths.profileRoot,
+          env: process.env,
+        });
+        if (!validation.ok) {
+          return commandFailed(validation.code, validation.message);
         }
 
         try {

@@ -21,6 +21,7 @@ async function startServer(options = {}) {
     master: [],
     masterTrace: [],
     services: [],
+    publishSkills: [],
     serviceExecutions: [],
     trace: [],
     networkServices: [],
@@ -173,6 +174,24 @@ async function startServer(options = {}) {
       },
     },
     services: {
+      listPublishSkills: async () => {
+        calls.publishSkills.push({});
+        return commandSuccess({
+          metaBotSlug: 'alice',
+          runtime: {
+            id: 'runtime-codex',
+            provider: 'codex',
+            displayName: 'Codex',
+            health: 'healthy',
+          },
+          skills: [
+            {
+              skillName: 'metabot-weather-oracle',
+              platformId: 'codex',
+            },
+          ],
+        });
+      },
       call: async (input) => {
         calls.services.push(input);
         if (input.request?.servicePinId === 'service-refund') {
@@ -1606,6 +1625,23 @@ test('POST /api/services/publish forwards the JSON payload to services.publish',
       displayName: 'Weather Oracle',
     },
   });
+});
+
+test('GET /api/services/publish/skills forwards to services.listPublishSkills', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/services/publish/skills`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.publishSkills, [{}]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.runtime.provider, 'codex');
+  assert.deepEqual(
+    payload.data.skills.map((skill) => skill.skillName),
+    ['metabot-weather-oracle'],
+  );
 });
 
 test('GET /api/trace/:traceId forwards the route parameter to trace.getTrace', async (t) => {

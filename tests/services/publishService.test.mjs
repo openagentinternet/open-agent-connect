@@ -52,6 +52,12 @@ test('buildPublishedService preserves payload content and provider identity sema
     endpoint: 'simplemsg',
     paymentAddress: '1seller-payment-address',
   });
+  assert.equal('runtimeId' in result.payload, false);
+  assert.equal('runtimeProvider' in result.payload, false);
+  assert.equal('binaryPath' in result.payload, false);
+  assert.equal('cwd' in result.payload, false);
+  assert.equal('model' in result.payload, false);
+  assert.equal('skillRootPath' in result.payload, false);
   assert.equal(result.record.available, 1);
   assert.equal(result.record.providerGlobalMetaId, 'seller-global-metaid');
   assert.equal(result.record.skillDocument, '# Tarot Reading');

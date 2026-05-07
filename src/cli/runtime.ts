@@ -73,6 +73,7 @@ import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
 import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
 import { discoverLlmRuntimes } from '../core/llm/llmRuntimeDiscovery';
+import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
 import {
   LlmExecutor,
   createRegistryBackendFactories,
@@ -1542,6 +1543,47 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     },
     services: {
       publish: async (input) => requestJson(context, 'POST', '/api/services/publish', input),
+      listPublishSkills: async () => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const runtimeStateStore = createRuntimeStateStore(homeDir);
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before listing publishable skills.');
+        }
+
+        const paths = resolveMetabotPaths(homeDir);
+        const metaBotSlug = path.basename(paths.profileRoot);
+        const catalog = createPlatformSkillCatalog({
+          runtimeStore: createLlmRuntimeStore(paths),
+          bindingStore: createLlmBindingStore(paths),
+          systemHomeDir: paths.systemHomeDir,
+          projectRoot: paths.profileRoot,
+          env: context.env,
+        });
+        const result = await catalog.listPrimaryRuntimeSkills({ metaBotSlug });
+        if (!result.ok) {
+          return commandFailed(result.code, result.message);
+        }
+        return commandSuccess({
+          metaBotSlug,
+          identity: {
+            metabotId: state.identity.metabotId,
+            name: state.identity.name,
+            globalMetaId: state.identity.globalMetaId,
+          },
+          runtime: {
+            id: result.runtime.id,
+            provider: result.runtime.provider,
+            displayName: result.runtime.displayName,
+            health: result.runtime.health,
+            version: result.runtime.version,
+            logoPath: result.runtime.logoPath,
+          },
+          platform: result.platform,
+          skills: result.skills,
+          rootDiagnostics: result.rootDiagnostics,
+        });
+      },
       call: async (input) => requestJson(context, 'POST', '/api/services/call', input),
       rate: async (input) => requestJson(context, 'POST', '/api/services/rate', input),
     },
