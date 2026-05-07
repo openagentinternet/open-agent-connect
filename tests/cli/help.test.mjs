@@ -176,6 +176,38 @@ test('runCli prints system uninstall help with preservation and token confirmati
   assert.match(output, /DELETE_OPEN_AGENT_CONNECT_IDENTITY_AND_SECRETS/);
 });
 
+test('runCli prints services group help with publish skill listing', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['services', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot services <subcommand>/m);
+  assert.match(output, /publish-skills\s+List primary-runtime skills available for service publishing\./);
+});
+
+test('runCli prints leaf help text for `metabot services publish-skills --help`', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['services', 'publish-skills', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot services publish-skills/m);
+  assert.match(output, /Lists skills from the active MetaBot primary runtime only/i);
+  assert.match(output, /metaBotSlug/m);
+  assert.match(output, /runtime/m);
+  assert.match(output, /skills/m);
+  assert.match(output, /primary runtime is missing/i);
+});
+
 test('runCli prints leaf help text for `metabot services call --help` with request and result semantics', async () => {
   const stdout = [];
 

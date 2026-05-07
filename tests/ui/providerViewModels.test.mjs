@@ -32,6 +32,138 @@ test('buildPublishPageViewModel shows the local provider identity that will publ
   ]);
 });
 
+test('buildPublishPageViewModel exposes primary runtime catalog availability for publishing', () => {
+  const model = buildPublishPageViewModel({
+    providerSummary: {
+      identity: {
+        name: 'Alice Weather Bot',
+        globalMetaId: 'idq1aliceweatherprovider000000000000000000000000000000',
+        mvcAddress: '1AliceWeatherProviderAddress11111111111111',
+      },
+    },
+    publishSkills: {
+      metaBotSlug: 'alice-weather-bot',
+      identity: {
+        name: 'Alice Weather Bot',
+        globalMetaId: 'idq1aliceweatherprovider000000000000000000000000000000',
+      },
+      runtime: {
+        id: 'runtime-codex',
+        provider: 'codex',
+        displayName: 'Codex',
+        health: 'healthy',
+        version: '0.2.7',
+      },
+      platform: {
+        id: 'codex',
+        displayName: 'Codex',
+      },
+      skills: [
+        {
+          skillName: 'metabot-weather-oracle',
+          title: 'Weather Oracle',
+          description: 'Returns one concise forecast.',
+        },
+      ],
+      rootDiagnostics: [
+        {
+          rootId: 'codex-home',
+          status: 'readable',
+          absolutePath: '/tmp/alice/.codex/skills',
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(model.providerCard.rows, [
+    { label: 'Provider Name', value: 'Alice Weather Bot' },
+    { label: 'MetaBot Slug', value: 'alice-weather-bot' },
+    {
+      label: 'Provider GlobalMetaId',
+      value: 'idq1aliceweatherprovider000000000000000000000000000000',
+    },
+    {
+      label: 'Payment Address',
+      value: '1AliceWeatherProviderAddress11111111111111',
+    },
+  ]);
+  assert.equal(model.runtimeCard.title, 'Primary Runtime');
+  assert.match(model.runtimeCard.summary, /healthy primary runtime/i);
+  assert.deepEqual(model.runtimeCard.rows, [
+    { label: 'Runtime', value: 'Codex' },
+    { label: 'Provider', value: 'codex' },
+    { label: 'Health', value: 'healthy' },
+    { label: 'Version', value: '0.2.7' },
+    { label: 'Readable Roots', value: '1 / 1' },
+  ]);
+  assert.deepEqual(model.skills, [
+    {
+      value: 'metabot-weather-oracle',
+      label: 'metabot-weather-oracle',
+      title: 'Weather Oracle',
+      description: 'Returns one concise forecast.',
+    },
+  ]);
+  assert.deepEqual(model.availability, {
+    canPublish: true,
+    reasonCode: 'ready',
+    message: 'Ready to publish with the selected primary runtime skill.',
+  });
+});
+
+test('buildPublishPageViewModel disables publishing when primary runtime or skill roots are unavailable', () => {
+  const missingRuntime = buildPublishPageViewModel({
+    providerSummary: {
+      identity: {
+        name: 'Alice Weather Bot',
+        globalMetaId: 'idq1aliceweatherprovider000000000000000000000000000000',
+      },
+    },
+    publishSkillsError: {
+      code: 'primary_runtime_missing',
+      message: 'The selected MetaBot has no enabled primary runtime binding.',
+    },
+  });
+
+  assert.equal(missingRuntime.availability.canPublish, false);
+  assert.equal(missingRuntime.availability.reasonCode, 'primary_runtime_missing');
+  assert.match(missingRuntime.runtimeCard.summary, /no enabled primary runtime/i);
+
+  const unreadableRoots = buildPublishPageViewModel({
+    providerSummary: {
+      identity: {
+        name: 'Alice Weather Bot',
+        globalMetaId: 'idq1aliceweatherprovider000000000000000000000000000000',
+      },
+    },
+    publishSkills: {
+      metaBotSlug: 'alice-weather-bot',
+      runtime: {
+        id: 'runtime-codex',
+        provider: 'codex',
+        displayName: 'Codex',
+        health: 'healthy',
+      },
+      platform: {
+        id: 'codex',
+        displayName: 'Codex',
+      },
+      skills: [],
+      rootDiagnostics: [
+        {
+          rootId: 'codex-home',
+          status: 'missing',
+          absolutePath: '/tmp/alice/.codex/skills',
+        },
+      ],
+    },
+  });
+
+  assert.equal(unreadableRoots.availability.canPublish, false);
+  assert.equal(unreadableRoots.availability.reasonCode, 'primary_skill_roots_unreadable');
+  assert.match(unreadableRoots.availability.message, /No readable primary runtime skill roots/i);
+});
+
 test('buildPublishPageViewModel shows the publish result with the real chain pin, price, and output type', () => {
   const model = buildPublishPageViewModel({
     publishResult: {

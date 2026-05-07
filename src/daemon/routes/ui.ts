@@ -34,11 +34,12 @@ const PAGE_BUILDERS: Record<MetabotUiPageName, () => LocalUiPageDefinition> = {
 const NAV_ITEMS: Array<{ page: MetabotUiPageName; label: string }> = [
   { page: 'hub', label: 'Hub' },
   { page: 'bot', label: 'Bot' },
+  { page: 'publish', label: 'Publish' },
   { page: 'trace', label: 'Trace' },
   { page: 'refund', label: 'Refund' },
 ];
 
-const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>(['publish', 'my-services']);
+const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>(['my-services']);
 
 function escapeHtml(value: string): string {
   return value

@@ -1855,16 +1855,22 @@ test('GET /ui/chat/idframework/components/id-chat-msg-list.js serves the standal
   assert.match(javascript, /snapshot\.viewerMode === 'standalone'\s*\?\s*null/);
 });
 
-test('GET /ui/publish is intentionally hidden from direct UI route exposure', async (t) => {
+test('GET /ui/publish serves the primary-runtime-aware publish console', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
   const response = await fetch(`${server.baseUrl}/ui/publish`);
-  const payload = await response.json();
+  const html = await response.text();
 
-  assert.equal(response.status, 404);
-  assert.equal(payload.ok, false);
-  assert.equal(payload.code, 'not_found');
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /Publish Service/);
+  assert.match(html, /data-provider-skill-select/);
+  assert.match(html, /\/api\/services\/publish\/skills/);
+  assert.doesNotMatch(html, /name="runtimeId"/);
+  assert.doesNotMatch(html, /name="llmRuntimeId"/);
+  assert.doesNotMatch(html, /runtime picker/i);
+  assert.match(html, /href="\/ui\/publish"/);
 });
 
 test('GET /ui/my-services is intentionally hidden from direct UI route exposure', async (t) => {

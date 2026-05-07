@@ -868,6 +868,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot services <subcommand>',
     subcommands: [
       { name: 'publish', summary: 'Publish one paid capability to chain.' },
+      { name: 'publish-skills', summary: 'List primary-runtime skills available for service publishing.' },
       { name: 'call', summary: 'Delegate one task to a remote MetaBot service.' },
       { name: 'rate', summary: 'Publish one buyer-side service rating after delivery.' },
     ],
@@ -903,6 +904,27 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot services publish --payload-file service-payload.json',
     ],
     optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['services', 'publish-skills'],
+    summary: 'Lists skills from the active MetaBot primary runtime only.',
+    usage: 'metabot services publish-skills',
+    successFields: [
+      'metaBotSlug',
+      'identity',
+      'runtime',
+      'platform',
+      'skills',
+      'rootDiagnostics',
+    ],
+    failureSemantics: [
+      'Fails before chain writes when no identity exists, the primary runtime is missing, or the primary runtime is unavailable.',
+      'Fallback runtime skills are intentionally excluded from this list.',
+    ],
+    examples: [
+      'metabot services publish-skills',
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
   },
   {
     commandPath: ['services', 'call'],
