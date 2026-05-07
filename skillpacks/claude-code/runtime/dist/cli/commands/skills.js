@@ -3,11 +3,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runSkillsCommand = runSkillsCommand;
 const commandResult_1 = require("../../core/contracts/commandResult");
 const helpers_1 = require("./helpers");
-const SUPPORTED_HOSTS = ['codex', 'claude-code', 'openclaw'];
+const platformRegistry_1 = require("../../core/platform/platformRegistry");
+const SUPPORTED_HOSTS = [...platformRegistry_1.SUPPORTED_PLATFORM_IDS];
 const SUPPORTED_FORMATS = ['json', 'markdown'];
-function isSupportedHost(value) {
-    return SUPPORTED_HOSTS.includes(value);
-}
 function isSupportedFormat(value) {
     return SUPPORTED_FORMATS.includes(value);
 }
@@ -24,10 +22,10 @@ async function runSkillsCommand(args, context) {
         return (0, helpers_1.commandMissingFlag)('--skill');
     }
     const host = (0, helpers_1.readFlagValue)(args, '--host');
-    if (host && !isSupportedHost(host)) {
+    if (host && !(0, platformRegistry_1.isPlatformId)(host)) {
         return (0, commandResult_1.commandFailed)('invalid_argument', `Unsupported --host value: ${host}. Supported values: ${SUPPORTED_HOSTS.join(', ')}.`);
     }
-    const resolvedHost = host && isSupportedHost(host) ? host : undefined;
+    const resolvedHost = host && (0, platformRegistry_1.isPlatformId)(host) ? host : undefined;
     const format = (0, helpers_1.readFlagValue)(args, '--format');
     if (!format) {
         return (0, helpers_1.commandMissingFlag)('--format');

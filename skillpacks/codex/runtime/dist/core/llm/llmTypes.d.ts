@@ -1,4 +1,5 @@
-export type LlmProvider = 'claude-code' | 'codex' | 'copilot' | 'opencode' | 'openclaw' | 'hermes' | 'gemini' | 'pi' | 'cursor' | 'kimi' | 'kiro' | 'custom';
+import type { PlatformId } from '../platform/platformRegistry';
+export type LlmProvider = PlatformId | 'custom';
 export type LlmAuthState = 'unknown' | 'authenticated' | 'unauthenticated';
 export type LlmHealth = 'healthy' | 'degraded' | 'unavailable';
 export type LlmBindingRole = 'primary' | 'fallback' | 'reviewer' | 'specialist';
@@ -12,6 +13,7 @@ export interface LlmRuntime {
     displayName: string;
     binaryPath?: string;
     version?: string;
+    logoPath?: string;
     authState: LlmAuthState;
     health: LlmHealth;
     capabilities: string[];

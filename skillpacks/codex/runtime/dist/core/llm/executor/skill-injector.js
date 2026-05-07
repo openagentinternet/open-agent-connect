@@ -7,16 +7,15 @@ exports.resolveProviderSkillRoot = resolveProviderSkillRoot;
 exports.injectSkills = injectSkills;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
-const PROVIDER_SKILL_ROOTS = {
-    'claude-code': (cwd) => node_path_1.default.join(cwd, '.claude', 'skills'),
-    codex: (cwd) => node_path_1.default.join(cwd, '.codex', 'skills'),
-    openclaw: (cwd) => node_path_1.default.join(cwd, '.openclaw', 'skills'),
-};
+const platformRegistry_1 = require("../../platform/platformRegistry");
+const FALLBACK_SKILL_ROOT = node_path_1.default.join('.agent_context', 'skills');
 function resolveProviderSkillRoot(provider, cwd) {
-    const resolver = PROVIDER_SKILL_ROOTS[provider];
-    if (resolver)
-        return resolver(cwd);
-    return node_path_1.default.join(cwd, '.agent_context', 'skills');
+    if ((0, platformRegistry_1.isPlatformId)(provider)) {
+        const projectRoot = (0, platformRegistry_1.getProjectSkillRoot)(provider);
+        if (projectRoot)
+            return node_path_1.default.resolve(cwd, projectRoot.path);
+    }
+    return node_path_1.default.resolve(cwd, FALLBACK_SKILL_ROOT);
 }
 function assertSafeSkillName(skillName) {
     if (!skillName || skillName.includes('/') || skillName.includes('\\') || skillName.includes('..')) {

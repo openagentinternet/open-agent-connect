@@ -1844,11 +1844,7 @@ async function serveCliDaemonProcess(context) {
         sessionsRoot: paths.llmExecutorSessionsRoot,
         transcriptsRoot: paths.llmExecutorTranscriptsRoot,
         skillsRoot: paths.skillsRoot,
-        backends: {
-            codex: executor_1.codexBackendFactory,
-            'claude-code': executor_1.claudeBackendFactory,
-            openclaw: executor_1.openClawBackendFactory,
-        },
+        backends: (0, executor_1.createRegistryBackendFactories)(),
     });
     const handlers = (0, defaultHandlers_1.createDefaultMetabotDaemonHandlers)({
         homeDir,

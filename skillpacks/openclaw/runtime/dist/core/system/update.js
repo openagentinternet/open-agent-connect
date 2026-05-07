@@ -9,8 +9,19 @@ const node_os_1 = __importDefault(require("node:os"));
 const node_path_1 = __importDefault(require("node:path"));
 const node_child_process_1 = require("node:child_process");
 const types_1 = require("./types");
+const NPM_PACKAGE_NAME = 'open-agent-connect';
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
+}
+function normalizeNpmVersionSpecifier(version) {
+    const normalized = normalizeText(version);
+    if (!normalized || normalized === 'latest') {
+        return 'latest';
+    }
+    return /^v\d+\.\d+\.\d+(?:[-+].*)?$/.test(normalized) ? normalized.slice(1) : normalized;
+}
+function buildNpmPackageSpec(version) {
+    return `${NPM_PACKAGE_NAME}@${normalizeNpmVersionSpecifier(version)}`;
 }
 function buildReleaseDownloadUrl(host, version) {
     const normalizedVersion = normalizeText(version);
@@ -30,30 +41,6 @@ async function readInstalledVersion(systemHomeDir, host) {
     catch {
         return null;
     }
-}
-async function resolveHost(systemHomeDir, requestedHost) {
-    if (requestedHost) {
-        return requestedHost;
-    }
-    const installpacksRoot = node_path_1.default.join(systemHomeDir, '.metabot', 'installpacks');
-    let entries = [];
-    try {
-        const dirents = await node_fs_1.promises.readdir(installpacksRoot, { withFileTypes: true });
-        entries = dirents.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-    }
-    catch {
-        entries = [];
-    }
-    const detected = entries.filter((name) => {
-        return types_1.SUPPORTED_SYSTEM_HOSTS.includes(name);
-    });
-    if (detected.length === 1) {
-        return detected[0];
-    }
-    if (detected.length === 0) {
-        throw new types_1.SystemCommandError('update_host_unresolved', 'Cannot resolve update target host. No installed host pack found. Pass --host <codex|claude-code|openclaw>.');
-    }
-    throw new types_1.SystemCommandError('update_host_ambiguous', `Multiple installed host packs found: ${detected.join(', ')}. Pass --host to choose one.`, true);
 }
 async function runCommand(command, args, options) {
     await new Promise((resolve, reject) => {
@@ -89,13 +76,56 @@ async function readExtractedVersion(extractedHostDir) {
     }
 }
 async function runSystemUpdate(input) {
-    const host = await resolveHost(input.systemHomeDir, input.host);
     const requestedVersion = normalizeText(input.version) || 'latest';
+    if (!input.host) {
+        const packageSpec = buildNpmPackageSpec(requestedVersion);
+        if (input.dryRun) {
+            return {
+                updateMode: 'npm',
+                host: null,
+                requestedVersion,
+                resolvedVersion: null,
+                previousVersion: null,
+                outcome: 'no_update',
+                packageSpec,
+                dryRun: true,
+            };
+        }
+        const updateEnv = {
+            ...input.env,
+            HOME: input.systemHomeDir,
+        };
+        try {
+            await runCommand('npm', ['i', '-g', packageSpec], {
+                cwd: input.systemHomeDir,
+                env: updateEnv,
+            });
+            await runCommand('oac', ['install'], {
+                cwd: input.systemHomeDir,
+                env: updateEnv,
+            });
+            return {
+                updateMode: 'npm',
+                host: null,
+                requestedVersion,
+                resolvedVersion: null,
+                previousVersion: null,
+                outcome: 'updated',
+                packageSpec,
+                dryRun: false,
+            };
+        }
+        catch (error) {
+            throw new types_1.SystemCommandError('install_failed', error instanceof Error ? error.message : String(error));
+        }
+    }
+    const host = input.host;
     const downloadUrl = buildReleaseDownloadUrl(host, requestedVersion);
     const previousVersion = await readInstalledVersion(input.systemHomeDir, host);
     const installpackPath = node_path_1.default.join(input.systemHomeDir, '.metabot', 'installpacks', host);
     if (input.dryRun) {
         return {
+            updateMode: 'release-pack',
             host,
             requestedVersion,
             resolvedVersion: previousVersion,
@@ -141,6 +171,7 @@ async function runSystemUpdate(input) {
             ? 'no_update'
             : 'updated';
         return {
+            updateMode: 'release-pack',
             host,
             requestedVersion,
             resolvedVersion,

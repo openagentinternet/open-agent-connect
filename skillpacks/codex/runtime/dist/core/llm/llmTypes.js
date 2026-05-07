@@ -7,46 +7,11 @@ exports.normalizeLlmRuntime = normalizeLlmRuntime;
 exports.normalizeLlmBinding = normalizeLlmBinding;
 exports.normalizeLlmRuntimesState = normalizeLlmRuntimesState;
 exports.normalizeLlmBindingsState = normalizeLlmBindingsState;
-exports.SUPPORTED_LLM_PROVIDERS = [
-    'claude-code',
-    'codex',
-    'copilot',
-    'opencode',
-    'openclaw',
-    'hermes',
-    'gemini',
-    'pi',
-    'cursor',
-    'kimi',
-    'kiro',
-];
-exports.HOST_BINARY_MAP = {
-    'claude-code': 'claude',
-    'codex': 'codex',
-    'copilot': 'gh',
-    'opencode': 'opencode',
-    'openclaw': 'openclaw',
-    'hermes': 'hermes',
-    'gemini': 'gemini',
-    'pi': 'pi',
-    'cursor': 'cursor-agent',
-    'kimi': 'kimi',
-    'kiro': 'kiro-cli',
-};
-exports.PROVIDER_DISPLAY_NAMES = {
-    'claude-code': 'Claude Code',
-    'codex': 'Codex (OpenAI)',
-    'copilot': 'GitHub Copilot CLI',
-    'opencode': 'OpenCode',
-    'openclaw': 'OpenClaw',
-    'hermes': 'Hermes',
-    'gemini': 'Gemini CLI',
-    'pi': 'Pi',
-    'cursor': 'Cursor Agent',
-    'kimi': 'Kimi',
-    'kiro': 'Kiro CLI',
-};
-exports.HOST_SEARCH_ORDER = [...exports.SUPPORTED_LLM_PROVIDERS];
+const platformRegistry_1 = require("../platform/platformRegistry");
+exports.SUPPORTED_LLM_PROVIDERS = [...platformRegistry_1.SUPPORTED_PLATFORM_IDS];
+exports.HOST_BINARY_MAP = (0, platformRegistry_1.getPlatformBinaryMap)();
+exports.PROVIDER_DISPLAY_NAMES = (0, platformRegistry_1.getPlatformDisplayNames)();
+exports.HOST_SEARCH_ORDER = (0, platformRegistry_1.getPlatformSearchOrder)();
 // ---- normalizers ----
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -75,7 +40,7 @@ function normalizeOptionalString(value) {
 }
 // ---- type guards ----
 function isLlmProvider(value) {
-    return typeof value === 'string' && [...exports.SUPPORTED_LLM_PROVIDERS, 'custom'].includes(value);
+    return (0, platformRegistry_1.isPlatformId)(value) || value === 'custom';
 }
 function isLlmAuthState(value) {
     return typeof value === 'string' && ['unknown', 'authenticated', 'unauthenticated'].includes(value);
@@ -104,6 +69,7 @@ function normalizeLlmRuntime(value) {
         displayName: normalizeText(r.displayName) || provider,
         binaryPath: normalizeOptionalString(r.binaryPath),
         version: normalizeOptionalString(r.version),
+        logoPath: normalizeOptionalString(r.logoPath),
         authState: isLlmAuthState(r.authState) ? r.authState : 'unknown',
         health: isLlmHealth(r.health) ? r.health : 'healthy',
         capabilities: normalizeStringArray(r.capabilities),

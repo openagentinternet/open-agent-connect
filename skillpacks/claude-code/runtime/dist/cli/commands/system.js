@@ -47,7 +47,7 @@ async function runSystemCommand(args, context) {
         }
         const host = (0, helpers_1.readFlagValue)(args, '--host');
         if (host && !isSupportedHost(host)) {
-            return (0, commandResult_1.commandFailed)('invalid_argument', `Unsupported --host value: ${host}. Supported values: ${SUPPORTED_HOSTS.join(', ')}.`);
+            return (0, commandResult_1.commandFailed)('invalid_argument', `Unsupported --host value: ${host}. Legacy release-pack update supports only: ${SUPPORTED_HOSTS.join(', ')}. Omit --host for the npm-first registry-driven update path.`);
         }
         const version = (0, helpers_1.readFlagValue)(args, '--target-version') || undefined;
         return handler({

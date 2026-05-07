@@ -12,7 +12,7 @@ export interface DiscoveryResult {
     }>;
 }
 export declare function findExecutableInPath(name: string, pathDirs?: string[]): Promise<string | null>;
-export declare function readExecutableVersion(binaryPath: string, timeoutMs?: number, env?: NodeJS.ProcessEnv): Promise<string | undefined>;
+export declare function readExecutableVersion(binaryPath: string, versionArgs?: string[], timeoutMs?: number, env?: NodeJS.ProcessEnv): Promise<string | undefined>;
 export declare function discoverProvider(provider: LlmProvider, pathDirs: string[], options?: {
     createId?: () => string;
     now?: () => string;

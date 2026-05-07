@@ -7,6 +7,7 @@ exports.runSystemUninstall = runSystemUninstall;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const types_1 = require("./types");
+const platformRegistry_1 = require("../platform/platformRegistry");
 const FULL_ERASE_TOKEN = 'DELETE_OPEN_AGENT_CONNECT_IDENTITY_AND_SECRETS';
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -31,16 +32,9 @@ async function readJsonFile(filePath) {
     }
 }
 function resolveBuiltInHostRoots(systemHomeDir, env) {
-    const codexHome = normalizeText(env.CODEX_HOME) || node_path_1.default.join(systemHomeDir, '.codex');
-    const claudeHome = normalizeText(env.CLAUDE_HOME) || node_path_1.default.join(systemHomeDir, '.claude');
-    const openclawHome = normalizeText(env.OPENCLAW_HOME) || node_path_1.default.join(systemHomeDir, '.openclaw');
-    return [
-        node_path_1.default.join(codexHome, 'skills'),
-        node_path_1.default.join(claudeHome, 'skills'),
-        node_path_1.default.join(openclawHome, 'skills'),
-    ];
+    return (0, platformRegistry_1.getInstallSkillRoots)().map((root) => (0, platformRegistry_1.resolvePlatformSkillRootPath)(root, systemHomeDir, env));
 }
-async function removeGuardedHostSymlinks(hostSkillRoot) {
+async function removeGuardedHostSymlinks(hostSkillRoot, sharedSkillRoot) {
     try {
         const dirents = await node_fs_1.promises.readdir(hostSkillRoot, { withFileTypes: true });
         const removed = [];
@@ -56,7 +50,8 @@ async function removeGuardedHostSymlinks(hostSkillRoot) {
             catch {
                 continue;
             }
-            if (!target.includes('.metabot/skills/metabot-')) {
+            const resolvedTarget = node_path_1.default.resolve(node_path_1.default.dirname(linkPath), target);
+            if (node_path_1.default.dirname(resolvedTarget) !== sharedSkillRoot) {
                 continue;
             }
             await node_fs_1.promises.rm(linkPath, { force: true });
@@ -99,9 +94,10 @@ async function stopDaemonBestEffort(systemHomeDir) {
 async function runTier1Uninstall(systemHomeDir, env) {
     const daemonStatus = await stopDaemonBestEffort(systemHomeDir);
     const roots = resolveBuiltInHostRoots(systemHomeDir, env);
+    const sharedSkillRoot = node_path_1.default.join(systemHomeDir, '.metabot', 'skills');
     const removedHostBindings = [];
     for (const root of roots) {
-        const removed = await removeGuardedHostSymlinks(root);
+        const removed = await removeGuardedHostSymlinks(root, sharedSkillRoot);
         removedHostBindings.push(...removed);
     }
     const cliShimPath = node_path_1.default.join(systemHomeDir, '.metabot', 'bin', 'metabot');

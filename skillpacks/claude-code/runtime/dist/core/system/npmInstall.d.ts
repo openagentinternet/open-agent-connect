@@ -1,5 +1,6 @@
 import { type MetabotCommandResult } from '../contracts/commandResult';
-import type { ConcreteSkillHost } from '../skills/skillContractTypes';
+import { type BoundPlatformSkillRootResult } from '../host/hostSkillBinding';
+import type { PlatformId } from '../platform/platformRegistry';
 export interface NpmInstallContext {
     env: NodeJS.ProcessEnv;
     cwd: string;
@@ -9,14 +10,17 @@ export interface NpmInstallInput {
     host?: string;
 }
 export interface NpmInstallResult {
-    host: ConcreteSkillHost;
+    host?: PlatformId;
     packageRoot: string;
     sharedSkillRoot: string;
     metabotShimPath: string;
     installedSkills: string[];
-    hostSkillRoot: string;
-    boundSkills: string[];
+    boundRoots: BoundPlatformSkillRootResult[];
+    skippedRoots: BoundPlatformSkillRootResult[];
+    failedRoots: BoundPlatformSkillRootResult[];
     version: string;
+    hostSkillRoot?: string;
+    boundSkills?: string[];
 }
 export declare function runNpmInstall(input: NpmInstallInput, context: NpmInstallContext): Promise<MetabotCommandResult<NpmInstallResult>>;
 export declare function runNpmDoctor(input: NpmInstallInput, context: NpmInstallContext): Promise<MetabotCommandResult<NpmInstallResult>>;
