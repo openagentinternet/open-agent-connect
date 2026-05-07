@@ -260,6 +260,158 @@ function selectUtxos(
   throw new Error(`Insufficient funds: need ${targetAmount}, have ${totalInput}`);
 }
 
+function signP2PKHInput(
+  tx: bitcoin.Transaction,
+  inputIndex: number,
+  keyPair: { publicKey: Buffer; sign(hash: Buffer): Buffer },
+  prevOutputScript: Buffer
+): Buffer {
+  const sigHash = tx.hashForSignature(
+    inputIndex,
+    prevOutputScript,
+    bitcoin.Transaction.SIGHASH_ALL
+  );
+  const signature = keyPair.sign(sigHash);
+  const signatureDER = bitcoin.script.signature.encode(
+    signature,
+    bitcoin.Transaction.SIGHASH_ALL
+  );
+  return Buffer.concat([
+    pushData(signatureDER),
+    pushData(keyPair.publicKey),
+  ]);
+}
+
+function signP2SHInput(
+  tx: bitcoin.Transaction,
+  inputIndex: number,
+  tempKeyPair: { publicKey: Buffer; sign(hash: Buffer): Buffer },
+  lockScript: Buffer,
+  inscriptionScript: Buffer
+): Buffer {
+  const sigHash = tx.hashForSignature(inputIndex, lockScript, bitcoin.Transaction.SIGHASH_ALL);
+  const signature = tempKeyPair.sign(sigHash);
+  const signatureDER = bitcoin.script.signature.encode(
+    signature,
+    bitcoin.Transaction.SIGHASH_ALL
+  );
+  return Buffer.concat([
+    inscriptionScript,
+    pushData(signatureDER),
+    pushData(lockScript),
+  ]);
+}
+
+interface ECPairInstance {
+  fromWIF(wifString: string, network?: bitcoin.Network): { publicKey: Buffer; sign(hash: Buffer): Buffer };
+  makeRandom(options?: { network?: bitcoin.Network }): { publicKey: Buffer; sign(hash: Buffer): Buffer };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildDogeInscriptionTxs(
+  metaidData: InscriptionData,
+  utxos: ChainUtxo[],
+  walletKeyPair: { publicKey: Buffer; sign(hash: Buffer): Buffer },
+  feeRate: number,
+  changeAddress: string,
+  network: bitcoin.Network,
+  revealOutValue: number,
+  ecpairInstance: ECPairInstance
+): {
+  commitTx: bitcoin.Transaction;
+  revealTx: bitcoin.Transaction;
+  commitFee: number;
+  revealFee: number;
+} {
+  const tempKeyPair = ecpairInstance.makeRandom({ network });
+  const inscriptionScript = buildMetaIdInscriptionScript(metaidData);
+  const lockScript = buildLockScript(tempKeyPair.publicKey, inscriptionScript);
+  const p2shOutputScript = buildP2SHOutputScript(lockScript);
+  const estimatedUnlockSize = inscriptionScript.length + 72 + lockScript.length + 10;
+
+  const commitTx = new bitcoin.Transaction();
+  commitTx.version = 2;
+  commitTx.addOutput(p2shOutputScript, INSCRIPTION_OUTPUT_VALUE);
+
+  const { selectedUtxos: commitUtxos, fee: commitFee, totalInput: commitTotalInput } =
+    selectUtxos(utxos, INSCRIPTION_OUTPUT_VALUE, feeRate, 2, 0);
+
+  for (const utxo of commitUtxos) {
+    commitTx.addInput(Buffer.from(utxo.txId, 'hex').reverse(), utxo.outputIndex);
+  }
+  const commitChange = commitTotalInput - INSCRIPTION_OUTPUT_VALUE - commitFee;
+  if (commitChange >= P2SH_DUST_LIMIT) {
+    commitTx.addOutput(
+      buildP2PKHOutputScript(changeAddress, network),
+      commitChange
+    );
+  }
+  for (let i = 0; i < commitUtxos.length; i++) {
+    const utxo = commitUtxos[i];
+    const prevScript = buildP2PKHOutputScript(utxo.address, network);
+    const sig = signP2PKHInput(commitTx, i, walletKeyPair, prevScript);
+    commitTx.setInputScript(i, sig);
+  }
+
+  const revealTx = new bitcoin.Transaction();
+  revealTx.version = 2;
+  const commitTxId = commitTx.getId();
+  revealTx.addInput(Buffer.from(commitTxId, 'hex').reverse(), 0);
+  revealTx.addOutput(
+    buildP2PKHOutputScript(metaidData.revealAddr, network),
+    revealOutValue
+  );
+
+  const availableUtxos = utxos.filter(
+    (u) => !commitUtxos.some((c) => c.txId === u.txId && c.outputIndex === u.outputIndex)
+  );
+  if (commitChange >= P2SH_DUST_LIMIT) {
+    availableUtxos.push({
+      txId: commitTxId,
+      outputIndex: commitTx.outs.length - 1,
+      satoshis: commitChange,
+      address: changeAddress,
+      height: 0,
+    });
+  }
+
+  const { selectedUtxos: revealUtxos, fee: revealFee, totalInput: revealTotalInput } =
+    selectUtxos(
+      availableUtxos,
+      revealOutValue - INSCRIPTION_OUTPUT_VALUE,
+      feeRate,
+      2,
+      estimatedUnlockSize
+    );
+  for (const utxo of revealUtxos) {
+    revealTx.addInput(Buffer.from(utxo.txId, 'hex').reverse(), utxo.outputIndex);
+  }
+  const revealChange =
+    INSCRIPTION_OUTPUT_VALUE + revealTotalInput - revealOutValue - revealFee;
+  if (revealChange >= P2SH_DUST_LIMIT) {
+    revealTx.addOutput(
+      buildP2PKHOutputScript(changeAddress, network),
+      revealChange
+    );
+  }
+  for (let i = 0; i < revealUtxos.length; i++) {
+    const utxo = revealUtxos[i];
+    const prevScript = buildP2PKHOutputScript(utxo.address, network);
+    const sig = signP2PKHInput(revealTx, i + 1, walletKeyPair, prevScript);
+    revealTx.setInputScript(i + 1, sig);
+  }
+  const unlockScript = signP2SHInput(
+    revealTx,
+    0,
+    tempKeyPair,
+    lockScript,
+    inscriptionScript
+  );
+  revealTx.setInputScript(0, unlockScript);
+
+  return { commitTx, revealTx, commitFee, revealFee };
+}
+
 // ---- DOGE ChainAdapter ----
 
 export const dogeChainAdapter: ChainAdapter = {
@@ -431,29 +583,34 @@ export const dogeChainAdapter: ChainAdapter = {
   },
 
   async buildInscription(input: ChainInscriptionInput): Promise<ChainInscriptionResult> {
-    const feeRate = Number.isFinite(input.feeRate) && Number(input.feeRate) > 0
-      ? input.feeRate! : await this.fetchFeeRate();
-    const wallet = buildDogeWallet(input.identity.mnemonic, input.identity.path);
-    const address = wallet.getAddress();
-    const utxos = await this.fetchUtxos(address);
-    if (!utxos.length) {
-      throw new Error('MetaBot DOGE balance is insufficient for this chain write.');
-    }
+    try {
+      const feeRate = Number.isFinite(input.feeRate) && Number(input.feeRate) > 0
+        ? input.feeRate! : await this.fetchFeeRate();
+      const wallet = buildDogeWallet(input.identity.mnemonic, input.identity.path);
+      const address = wallet.getAddress();
+      const privateKeyWIF = wallet.getPrivateKey();
+      const network = wallet.getNetwork() as unknown as bitcoin.Network;
 
-    const payloadBody = input.request.encoding === 'base64'
-      ? Buffer.from(input.request.payload, 'base64').toString('utf-8')
-      : input.request.payload;
-    const signResult = wallet.signTx(SignType.INSCRIBE_METAIDPIN, {
-      utxos: utxos.map((utxo) => ({
-        txId: utxo.txId,
-        outputIndex: utxo.outputIndex,
-        satoshis: utxo.satoshis,
-        address: utxo.address,
-        rawTx: utxo.rawTx,
-        confirmed: (utxo as { confirmed?: boolean }).confirmed,
-      })),
-      feeRate,
-      metaidDataList: [{
+      // Initialize ECC library
+      const ecc = await import('@bitcoinerlab/secp256k1');
+      bitcoin.initEccLib(ecc.default);
+      const ECPairInstance = ECPairFactory(ecc.default);
+
+      // Create wallet key pair from private key WIF
+      const walletKeyPair = ECPairInstance.fromWIF(privateKeyWIF, DOGE_NETWORK);
+
+      // Fetch UTXOs
+      const utxos = await this.fetchUtxos(address);
+      if (!utxos.length) {
+        throw new Error('MetaBot DOGE balance is insufficient for this chain write.');
+      }
+
+      // Build inscription data from the normalized request
+      const payloadBody = input.request.encoding === 'base64'
+        ? Buffer.from(input.request.payload, 'base64')
+        : Buffer.from(input.request.payload, 'utf-8');
+
+      const metaidData: InscriptionData = {
         operation: input.request.operation,
         path: input.request.path,
         contentType: input.request.contentType,
@@ -461,35 +618,35 @@ export const dogeChainAdapter: ChainAdapter = {
         version: input.request.version,
         body: payloadBody,
         revealAddr: address,
-      }],
-    } as never) as unknown as {
-      commitTx?: { rawTx?: string; fee?: number };
-      revealTxs?: Array<{ rawTx?: string; fee?: number }>;
-    };
+        encoding: input.request.encoding === 'base64' ? 'base64' : 'utf-8',
+      };
 
-    const commitTx = signResult.commitTx;
-    if (!commitTx?.rawTx) throw new Error('DOGE signTx returned no commit transaction.');
+      // Build commit + reveal transactions using custom bitcoinjs-lib logic
+      const { commitTx, revealTx, commitFee, revealFee } = buildDogeInscriptionTxs(
+        metaidData,
+        utxos,
+        walletKeyPair,
+        feeRate,
+        address,
+        network,
+        INSCRIPTION_OUTPUT_VALUE,
+        ECPairInstance
+      );
 
-    const revealTxs = Array.isArray(signResult.revealTxs) ? signResult.revealTxs : [];
-    const firstReveal = revealTxs[0];
-    if (!firstReveal?.rawTx) throw new Error('DOGE inscription produced no reveal transaction.');
+      const signedRawTxs = [commitTx.toHex(), revealTx.toHex()];
+      const revealIndices = [1];
+      const totalCost = commitFee + revealFee;
 
-    let totalCost = Number(commitTx.fee ?? 0);
-    const signedRawTxs: string[] = [commitTx.rawTx];
-    const revealIndices: number[] = [];
-    for (const reveal of revealTxs) {
-      const rawTx = normalizeText(reveal?.rawTx);
-      if (!rawTx) throw new Error('DOGE signTx returned an empty reveal transaction.');
-      revealIndices.push(signedRawTxs.length);
-      signedRawTxs.push(rawTx);
-      totalCost += Number(reveal?.fee ?? 0);
+      return {
+        signedRawTxs,
+        revealIndices,
+        totalCost: Number.isFinite(totalCost) ? totalCost : 0,
+      };
+    } catch (err) {
+      throw new Error(
+        `DOGE buildInscription failed: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
-
-    return {
-      signedRawTxs,
-      revealIndices,
-      totalCost: Number.isFinite(totalCost) ? totalCost : 0,
-    };
   },
 };
 
