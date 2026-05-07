@@ -1,4 +1,6 @@
-export type SkillHost = 'shared' | 'codex' | 'claude-code' | 'openclaw';
+import type { PlatformId } from '../platform/platformRegistry';
+
+export type SkillHost = 'shared' | PlatformId;
 export type ConcreteSkillHost = Exclude<SkillHost, 'shared'>;
 export type SkillRenderFormat = 'json' | 'markdown';
 export type SkillResolutionSource = 'base' | 'merged';

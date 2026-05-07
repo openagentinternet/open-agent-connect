@@ -1,11 +1,36 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import {
+  getInstallSkillRoots,
+  getPlatformSkillRoots,
+  isPlatformId,
+  resolvePlatformSkillRootPath,
+} from '../platform/platformRegistry';
+import type { InstallSkillRoot, PlatformId } from '../platform/platformRegistry';
 import type { ConcreteSkillHost } from '../skills/skillContractTypes';
 
 export interface BindHostSkillsInput {
   systemHomeDir: string;
   host: ConcreteSkillHost;
   env?: NodeJS.ProcessEnv;
+}
+
+export interface BindPlatformSkillsInput {
+  systemHomeDir: string;
+  env?: NodeJS.ProcessEnv;
+  host?: PlatformId;
+  mode: 'auto' | 'force-platform';
+}
+
+export interface BoundPlatformSkillRootResult {
+  platformId: PlatformId | 'shared-agents';
+  rootId: string;
+  hostSkillRoot: string;
+  status: 'bound' | 'skipped' | 'failed';
+  reason?: string;
+  boundSkills: string[];
+  replacedEntries: string[];
+  unchangedEntries: string[];
 }
 
 export interface BoundHostSkillsResult {
@@ -15,6 +40,9 @@ export interface BoundHostSkillsResult {
   boundSkills: string[];
   replacedEntries: string[];
   unchangedEntries: string[];
+  boundRoots?: BoundPlatformSkillRootResult[];
+  skippedRoots?: BoundPlatformSkillRootResult[];
+  failedRoots?: BoundPlatformSkillRootResult[];
 }
 
 export class HostSkillBindingError extends Error {
@@ -33,26 +61,16 @@ export class HostSkillBindingError extends Error {
   }
 }
 
-function normalizeOptionalEnvPath(value: string | undefined): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function resolveHostHomeDir(systemHomeDir: string, host: ConcreteSkillHost, env: NodeJS.ProcessEnv = {}): string {
-  switch (host) {
-    case 'codex':
-      return path.resolve(normalizeOptionalEnvPath(env.CODEX_HOME) || path.join(systemHomeDir, '.codex'));
-    case 'claude-code':
-      return path.resolve(normalizeOptionalEnvPath(env.CLAUDE_HOME) || path.join(systemHomeDir, '.claude'));
-    case 'openclaw':
-      return path.resolve(normalizeOptionalEnvPath(env.OPENCLAW_HOME) || path.join(systemHomeDir, '.openclaw'));
-  }
-}
-
 function toRelativeSymlinkTarget(destinationPath: string, sourcePath: string): string {
   return path.relative(path.dirname(destinationPath), sourcePath) || '.';
 }
 
-async function ensureHostSkillRoot(host: ConcreteSkillHost, hostSkillRoot: string): Promise<void> {
+async function ensureHostSkillRoot(input: {
+  platformId: PlatformId | 'shared-agents';
+  rootId: string;
+  hostSkillRoot: string;
+}): Promise<void> {
+  const { platformId, rootId, hostSkillRoot } = input;
   try {
     await fs.mkdir(hostSkillRoot, { recursive: true });
     const stat = await fs.stat(hostSkillRoot);
@@ -62,9 +80,11 @@ async function ensureHostSkillRoot(host: ConcreteSkillHost, hostSkillRoot: strin
   } catch (error) {
     throw new HostSkillBindingError(
       'host_skill_root_unresolved',
-      `Unable to resolve the ${host} host skill root: ${hostSkillRoot}`,
+      `Unable to resolve the ${platformId} skill root: ${hostSkillRoot}`,
       {
-        host,
+        host: platformId,
+        platformId,
+        rootId,
         hostSkillRoot,
         reason: error instanceof Error ? error.message : String(error),
       },
@@ -250,22 +270,48 @@ async function bindOneSkill(input: {
   }
 }
 
-export async function bindHostSkills(input: BindHostSkillsInput): Promise<BoundHostSkillsResult> {
-  const systemHomeDir = path.resolve(input.systemHomeDir);
-  const sharedSkillRoot = path.join(systemHomeDir, '.metabot', 'skills');
-  const boundSkills = await listSharedMetabotSkills(sharedSkillRoot);
-  if (boundSkills.length === 0) {
-    throw new HostSkillBindingError(
-      'shared_skills_missing',
-      `No shared metabot-* skills were found under ${sharedSkillRoot}.`,
-      {
-        sharedSkillRoot,
-      },
-    );
+async function parentExists(hostSkillRoot: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(path.dirname(hostSkillRoot));
+    return stat.isDirectory();
+  } catch {
+    return false;
   }
+}
 
-  const hostSkillRoot = path.join(resolveHostHomeDir(systemHomeDir, input.host, input.env), 'skills');
-  await ensureHostSkillRoot(input.host, hostSkillRoot);
+function rootResult(input: {
+  root: InstallSkillRoot;
+  hostSkillRoot: string;
+  status: BoundPlatformSkillRootResult['status'];
+  reason?: string;
+  boundSkills?: string[];
+  replacedEntries?: string[];
+  unchangedEntries?: string[];
+}): BoundPlatformSkillRootResult {
+  return {
+    platformId: input.root.platformId,
+    rootId: input.root.id,
+    hostSkillRoot: input.hostSkillRoot,
+    status: input.status,
+    reason: input.reason,
+    boundSkills: input.boundSkills ?? [],
+    replacedEntries: input.replacedEntries ?? [],
+    unchangedEntries: input.unchangedEntries ?? [],
+  };
+}
+
+async function bindOneRoot(input: {
+  root: InstallSkillRoot;
+  hostSkillRoot: string;
+  sharedSkillRoot: string;
+  boundSkills: string[];
+}): Promise<BoundPlatformSkillRootResult> {
+  const { root, hostSkillRoot, sharedSkillRoot, boundSkills } = input;
+  await ensureHostSkillRoot({
+    platformId: root.platformId,
+    rootId: root.id,
+    hostSkillRoot,
+  });
 
   const bindingPlan = await Promise.all(boundSkills.map(async (skillName) => {
     const sourceSharedSkillPath = path.join(sharedSkillRoot, skillName);
@@ -302,12 +348,110 @@ export async function bindHostSkills(input: BindHostSkillsInput): Promise<BoundH
     });
   }
 
-  return {
-    host: input.host,
+  return rootResult({
+    root,
     hostSkillRoot,
-    sharedSkillRoot,
+    status: 'bound',
     boundSkills,
     replacedEntries,
     unchangedEntries,
+  });
+}
+
+function getRootsForInput(input: BindPlatformSkillsInput): InstallSkillRoot[] {
+  if (input.mode === 'force-platform') {
+    if (!input.host || !isPlatformId(input.host)) {
+      throw new HostSkillBindingError(
+        'host_skill_root_unresolved',
+        'A valid host is required for force-platform skill binding.',
+        { host: input.host },
+      );
+    }
+    return getPlatformSkillRoots(input.host)
+      .filter((root) => root.kind === 'global')
+      .map((root) => ({ ...root, platformId: input.host as PlatformId }));
+  }
+  return getInstallSkillRoots();
+}
+
+export async function bindPlatformSkills(input: BindPlatformSkillsInput): Promise<BoundPlatformSkillRootResult[]> {
+  const systemHomeDir = path.resolve(input.systemHomeDir);
+  const sharedSkillRoot = path.join(systemHomeDir, '.metabot', 'skills');
+  const boundSkills = await listSharedMetabotSkills(sharedSkillRoot);
+  if (boundSkills.length === 0) {
+    throw new HostSkillBindingError(
+      'shared_skills_missing',
+      `No shared metabot-* skills were found under ${sharedSkillRoot}.`,
+      {
+        sharedSkillRoot,
+      },
+    );
+  }
+
+  const roots = getRootsForInput(input);
+  const results: BoundPlatformSkillRootResult[] = [];
+  for (const root of roots) {
+    const hostSkillRoot = resolvePlatformSkillRootPath(root, systemHomeDir, input.env);
+    if (input.mode === 'auto' && root.autoBind === 'when-parent-exists' && !(await parentExists(hostSkillRoot))) {
+      results.push(rootResult({
+        root,
+        hostSkillRoot,
+        status: 'skipped',
+        reason: 'parent_missing',
+      }));
+      continue;
+    }
+    if (input.mode === 'auto' && root.autoBind === 'manual') {
+      results.push(rootResult({
+        root,
+        hostSkillRoot,
+        status: 'skipped',
+        reason: 'manual',
+      }));
+      continue;
+    }
+
+    try {
+      results.push(await bindOneRoot({ root, hostSkillRoot, sharedSkillRoot, boundSkills }));
+    } catch (error) {
+      if (error instanceof HostSkillBindingError) {
+        const failed = rootResult({
+          root,
+          hostSkillRoot,
+          status: 'failed',
+          reason: error.message,
+        });
+        if (input.mode === 'force-platform' || root.autoBind === 'always') {
+          throw error;
+        }
+        results.push(failed);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return results;
+}
+
+export async function bindHostSkills(input: BindHostSkillsInput): Promise<BoundHostSkillsResult> {
+  const systemHomeDir = path.resolve(input.systemHomeDir);
+  const results = await bindPlatformSkills({
+    systemHomeDir,
+    host: input.host,
+    env: input.env,
+    mode: 'force-platform',
+  });
+  const firstBound = results.find((result) => result.status === 'bound');
+  return {
+    host: input.host,
+    hostSkillRoot: firstBound?.hostSkillRoot ?? '',
+    sharedSkillRoot: path.join(systemHomeDir, '.metabot', 'skills'),
+    boundSkills: firstBound?.boundSkills ?? [],
+    replacedEntries: firstBound?.replacedEntries ?? [],
+    unchangedEntries: firstBound?.unchangedEntries ?? [],
+    boundRoots: results.filter((result) => result.status === 'bound'),
+    skippedRoots: results.filter((result) => result.status === 'skipped'),
+    failedRoots: results.filter((result) => result.status === 'failed'),
   };
 }

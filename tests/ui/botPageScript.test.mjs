@@ -140,6 +140,9 @@ test('bot page sends provider changes only after the provider picker is touched'
 });
 
 test('bot page renders provider pickers with icons and only exposes none for fallback', () => {
+  const definition = buildBotPageDefinition();
+  assert.doesNotMatch(definition.script, /var icons=\{/);
+
   const context = {
     document: {
       querySelector: () => null,
@@ -148,24 +151,27 @@ test('bot page renders provider pickers with icons and only exposes none for fal
     },
   };
 
-  vm.runInNewContext(buildBotPageDefinition().script, context);
+  vm.runInNewContext(definition.script, context);
   context.state.runtimes = [
     {
       id: 'runtime-codex',
       provider: 'codex',
       displayName: 'Codex',
+      logoPath: '/ui/assets/platforms/codex.svg',
       health: 'healthy',
     },
     {
       id: 'runtime-claude',
       provider: 'claude-code',
       displayName: 'Claude Code',
+      logoPath: '/ui/assets/platforms/claude-code.svg',
       health: 'degraded',
     },
     {
       id: 'runtime-openclaw',
       provider: 'openclaw',
       displayName: 'OpenClaw',
+      logoPath: '/ui/assets/platforms/openclaw.svg',
       health: 'unavailable',
     },
   ];
@@ -176,10 +182,13 @@ test('bot page renders provider pickers with icons and only exposes none for fal
   assert.doesNotMatch(primaryPicker, /data-provider-option="none"/);
   assert.match(primaryPicker, /data-provider-picker="primaryProvider"/);
   assert.match(primaryPicker, /data-provider-icon="codex"/);
+  assert.match(primaryPicker, /<img src="\/ui\/assets\/platforms\/codex\.svg" alt="" loading="lazy" \/>/);
   assert.match(primaryPicker, /data-provider-icon="claude-code"/);
+  assert.match(primaryPicker, /<img src="\/ui\/assets\/platforms\/claude-code\.svg" alt="" loading="lazy" \/>/);
   assert.match(primaryPicker, /data-provider-value="codex"[^>]*selected/);
   assert.doesNotMatch(primaryPicker, /data-provider-icon="openclaw"/);
   assert.match(fallbackPicker, /data-provider-option="none"/);
+  assert.match(fallbackPicker, /<img src="\/ui\/assets\/platforms\/generic\.svg" alt="" loading="lazy" \/>/);
   assert.match(fallbackPicker, /data-provider-icon="claude-code"/);
   assert.doesNotMatch(fallbackPicker, /data-provider-icon="openclaw"/);
 });

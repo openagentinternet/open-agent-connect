@@ -3,15 +3,28 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import {
-  SUPPORTED_SYSTEM_HOSTS,
   type SystemHost,
   SystemCommandError,
   type SystemUpdateInput,
   type SystemUpdateResult,
 } from './types';
 
+const NPM_PACKAGE_NAME = 'open-agent-connect';
+
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeNpmVersionSpecifier(version: string): string {
+  const normalized = normalizeText(version);
+  if (!normalized || normalized === 'latest') {
+    return 'latest';
+  }
+  return /^v\d+\.\d+\.\d+(?:[-+].*)?$/.test(normalized) ? normalized.slice(1) : normalized;
+}
+
+function buildNpmPackageSpec(version: string): string {
+  return `${NPM_PACKAGE_NAME}@${normalizeNpmVersionSpecifier(version)}`;
 }
 
 function buildReleaseDownloadUrl(host: SystemHost, version: string): string {
@@ -39,40 +52,6 @@ async function readInstalledVersion(systemHomeDir: string, host: SystemHost): Pr
   } catch {
     return null;
   }
-}
-
-async function resolveHost(systemHomeDir: string, requestedHost?: SystemHost): Promise<SystemHost> {
-  if (requestedHost) {
-    return requestedHost;
-  }
-
-  const installpacksRoot = path.join(systemHomeDir, '.metabot', 'installpacks');
-  let entries: string[] = [];
-  try {
-    const dirents = await fs.readdir(installpacksRoot, { withFileTypes: true });
-    entries = dirents.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-  } catch {
-    entries = [];
-  }
-
-  const detected = entries.filter((name): name is SystemHost => {
-    return SUPPORTED_SYSTEM_HOSTS.includes(name as SystemHost);
-  });
-
-  if (detected.length === 1) {
-    return detected[0];
-  }
-  if (detected.length === 0) {
-    throw new SystemCommandError(
-      'update_host_unresolved',
-      'Cannot resolve update target host. No installed host pack found. Pass --host <codex|claude-code|openclaw>.',
-    );
-  }
-  throw new SystemCommandError(
-    'update_host_ambiguous',
-    `Multiple installed host packs found: ${detected.join(', ')}. Pass --host to choose one.`,
-    true,
-  );
 }
 
 async function runCommand(command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }): Promise<void> {
@@ -110,14 +89,61 @@ async function readExtractedVersion(extractedHostDir: string): Promise<string | 
 }
 
 export async function runSystemUpdate(input: SystemUpdateInput): Promise<SystemUpdateResult> {
-  const host = await resolveHost(input.systemHomeDir, input.host);
   const requestedVersion = normalizeText(input.version) || 'latest';
+  if (!input.host) {
+    const packageSpec = buildNpmPackageSpec(requestedVersion);
+    if (input.dryRun) {
+      return {
+        updateMode: 'npm',
+        host: null,
+        requestedVersion,
+        resolvedVersion: null,
+        previousVersion: null,
+        outcome: 'no_update',
+        packageSpec,
+        dryRun: true,
+      };
+    }
+
+    const updateEnv = {
+      ...input.env,
+      HOME: input.systemHomeDir,
+    };
+    try {
+      await runCommand('npm', ['i', '-g', packageSpec], {
+        cwd: input.systemHomeDir,
+        env: updateEnv,
+      });
+      await runCommand('oac', ['install'], {
+        cwd: input.systemHomeDir,
+        env: updateEnv,
+      });
+      return {
+        updateMode: 'npm',
+        host: null,
+        requestedVersion,
+        resolvedVersion: null,
+        previousVersion: null,
+        outcome: 'updated',
+        packageSpec,
+        dryRun: false,
+      };
+    } catch (error) {
+      throw new SystemCommandError(
+        'install_failed',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  const host = input.host;
   const downloadUrl = buildReleaseDownloadUrl(host, requestedVersion);
   const previousVersion = await readInstalledVersion(input.systemHomeDir, host);
   const installpackPath = path.join(input.systemHomeDir, '.metabot', 'installpacks', host);
 
   if (input.dryRun) {
     return {
+      updateMode: 'release-pack',
       host,
       requestedVersion,
       resolvedVersion: previousVersion,
@@ -175,6 +201,7 @@ export async function runSystemUpdate(input: SystemUpdateInput): Promise<SystemU
       : 'updated';
 
     return {
+      updateMode: 'release-pack',
       host,
       requestedVersion,
       resolvedVersion,
@@ -196,4 +223,3 @@ export async function runSystemUpdate(input: SystemUpdateInput): Promise<SystemU
     await fs.rm(tmpRoot, { recursive: true, force: true });
   }
 }
-

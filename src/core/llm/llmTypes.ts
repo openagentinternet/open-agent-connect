@@ -1,63 +1,26 @@
+import {
+  SUPPORTED_PLATFORM_IDS,
+  getPlatformBinaryMap,
+  getPlatformDisplayNames,
+  getPlatformSearchOrder,
+  isPlatformId,
+} from '../platform/platformRegistry';
+import type { PlatformId } from '../platform/platformRegistry';
+
 export type LlmProvider =
-  | 'claude-code'
-  | 'codex'
-  | 'copilot'
-  | 'opencode'
-  | 'openclaw'
-  | 'hermes'
-  | 'gemini'
-  | 'pi'
-  | 'cursor'
-  | 'kimi'
-  | 'kiro'
+  | PlatformId
   | 'custom';
 export type LlmAuthState = 'unknown' | 'authenticated' | 'unauthenticated';
 export type LlmHealth = 'healthy' | 'degraded' | 'unavailable';
 export type LlmBindingRole = 'primary' | 'fallback' | 'reviewer' | 'specialist';
 
-export const SUPPORTED_LLM_PROVIDERS: LlmProvider[] = [
-  'claude-code',
-  'codex',
-  'copilot',
-  'opencode',
-  'openclaw',
-  'hermes',
-  'gemini',
-  'pi',
-  'cursor',
-  'kimi',
-  'kiro',
-];
+export const SUPPORTED_LLM_PROVIDERS: LlmProvider[] = [...SUPPORTED_PLATFORM_IDS];
 
-export const HOST_BINARY_MAP: Record<string, string> = {
-  'claude-code': 'claude',
-  'codex': 'codex',
-  'copilot': 'gh',
-  'opencode': 'opencode',
-  'openclaw': 'openclaw',
-  'hermes': 'hermes',
-  'gemini': 'gemini',
-  'pi': 'pi',
-  'cursor': 'cursor-agent',
-  'kimi': 'kimi',
-  'kiro': 'kiro-cli',
-};
+export const HOST_BINARY_MAP: Record<string, string> = getPlatformBinaryMap();
 
-export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  'claude-code': 'Claude Code',
-  'codex': 'Codex (OpenAI)',
-  'copilot': 'GitHub Copilot CLI',
-  'opencode': 'OpenCode',
-  'openclaw': 'OpenClaw',
-  'hermes': 'Hermes',
-  'gemini': 'Gemini CLI',
-  'pi': 'Pi',
-  'cursor': 'Cursor Agent',
-  'kimi': 'Kimi',
-  'kiro': 'Kiro CLI',
-};
+export const PROVIDER_DISPLAY_NAMES: Record<string, string> = getPlatformDisplayNames();
 
-export const HOST_SEARCH_ORDER: LlmProvider[] = [...SUPPORTED_LLM_PROVIDERS];
+export const HOST_SEARCH_ORDER: LlmProvider[] = getPlatformSearchOrder();
 
 export interface LlmRuntime {
   id: string;
@@ -65,6 +28,7 @@ export interface LlmRuntime {
   displayName: string;
   binaryPath?: string;
   version?: string;
+  logoPath?: string;
   authState: LlmAuthState;
   health: LlmHealth;
   capabilities: string[];
@@ -133,7 +97,7 @@ function normalizeOptionalString(value: unknown): string | undefined {
 // ---- type guards ----
 
 export function isLlmProvider(value: unknown): value is LlmProvider {
-  return typeof value === 'string' && [...SUPPORTED_LLM_PROVIDERS, 'custom'].includes(value as LlmProvider);
+  return isPlatformId(value) || value === 'custom';
 }
 
 function isLlmAuthState(value: unknown): value is LlmAuthState {
@@ -168,6 +132,7 @@ export function normalizeLlmRuntime(value: unknown): LlmRuntime | null {
     displayName: normalizeText(r.displayName) || provider,
     binaryPath: normalizeOptionalString(r.binaryPath),
     version: normalizeOptionalString(r.version),
+    logoPath: normalizeOptionalString(r.logoPath),
     authState: isLlmAuthState(r.authState) ? r.authState : 'unknown',
     health: isLlmHealth(r.health) ? r.health : 'healthy',
     capabilities: normalizeStringArray(r.capabilities),

@@ -2,10 +2,10 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
-  SUPPORTED_LLM_PROVIDERS,
-  HOST_BINARY_MAP,
-  PROVIDER_DISPLAY_NAMES,
-} from './llmTypes';
+  getPlatformDefinition,
+  getRuntimePlatforms,
+  isPlatformId,
+} from '../platform/platformRegistry';
 import type { LlmRuntime, LlmProvider, LlmAuthState } from './llmTypes';
 
 export interface DiscoveryInput {
@@ -44,11 +44,12 @@ export async function findExecutableInPath(name: string, pathDirs?: string[]): P
 
 export async function readExecutableVersion(
   binaryPath: string,
+  versionArgs: string[] = ['--version'],
   timeoutMs = 5_000,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string | undefined> {
   return new Promise((resolve) => {
-    const child = spawn(binaryPath, ['--version'], {
+    const child = spawn(binaryPath, versionArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
       shell: false,
@@ -84,19 +85,8 @@ export async function readExecutableVersion(
   });
 }
 
-function detectAuthState(provider: LlmProvider, env: NodeJS.ProcessEnv): LlmAuthState {
-  const checks: Record<string, string> = {
-    'claude-code': 'ANTHROPIC_API_KEY',
-    'codex': 'OPENAI_API_KEY',
-    'copilot': 'GITHUB_TOKEN',
-    'gemini': 'GEMINI_API_KEY',
-    'kimi': 'KIMI_API_KEY',
-  };
-  const envVar = checks[provider];
-  if (envVar && env[envVar]) {
-    return 'authenticated';
-  }
-  if (provider === 'opencode' && (env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY)) {
+function detectAuthState(authEnv: string[], env: NodeJS.ProcessEnv): LlmAuthState {
+  if (authEnv.some((envVar) => Boolean(env[envVar]))) {
     return 'authenticated';
   }
   return 'unknown';
@@ -108,30 +98,39 @@ export async function discoverProvider(
   options?: { createId?: () => string; now?: () => string; env?: NodeJS.ProcessEnv },
 ): Promise<LlmRuntime | null> {
   if (provider === 'custom') return null; // Custom runtimes are registered manually.
+  if (!isPlatformId(provider)) return null;
 
-  const binaryName = HOST_BINARY_MAP[provider];
-  if (!binaryName) return null;
-
-  const binaryPath = await findExecutableInPath(binaryName, pathDirs);
+  const platform = getPlatformDefinition(provider);
+  let binaryPath: string | null = null;
+  for (const binaryName of platform.runtime.binaryNames) {
+    binaryPath = await findExecutableInPath(binaryName, pathDirs);
+    if (binaryPath) break;
+  }
   if (!binaryPath) return null;
 
   const env = options?.env ?? process.env;
-  const version = await readExecutableVersion(binaryPath, 5_000, env);
+  const version = await readExecutableVersion(
+    binaryPath,
+    platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'],
+    5_000,
+    env,
+  );
   const now = (options?.now ?? (() => new Date().toISOString()))();
   // Stable ID: same binary always gets same id, so rediscovery upserts instead of duplicating.
   const defaultId = `llm_${provider.replace(/-/g, '_')}_${binaryPath}`;
   const createId = options?.createId ?? (() => defaultId);
-  const authState = detectAuthState(provider, env);
+  const authState = detectAuthState(platform.runtime.authEnv, env);
 
   return {
     id: createId(),
     provider,
-    displayName: PROVIDER_DISPLAY_NAMES[provider] ?? provider,
+    displayName: platform.displayName,
     binaryPath,
     version,
+    logoPath: platform.logoPath,
     authState,
     health: 'healthy',
-    capabilities: ['tool-use'],
+    capabilities: [...platform.runtime.capabilities],
     lastSeenAt: now,
     createdAt: now,
     updatedAt: now,
@@ -145,9 +144,9 @@ export async function discoverLlmRuntimes(input?: DiscoveryInput): Promise<Disco
 
   // Discover each supported provider. Run in sequence to keep it simple;
   // the binary spawns are the slow part, and they're already async.
-  for (const provider of SUPPORTED_LLM_PROVIDERS) {
+  for (const platform of getRuntimePlatforms()) {
     try {
-      const runtime = await discoverProvider(provider, pathDirs, {
+      const runtime = await discoverProvider(platform.id, pathDirs, {
         createId: input?.createId,
         now: input?.now,
         env: input?.env ?? process.env,
@@ -157,7 +156,7 @@ export async function discoverLlmRuntimes(input?: DiscoveryInput): Promise<Disco
       }
     } catch (err) {
       errors.push({
-        provider,
+        provider: platform.id,
         message: err instanceof Error ? err.message : String(err),
       });
     }

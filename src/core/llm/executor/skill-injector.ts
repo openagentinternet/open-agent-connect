@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { getProjectSkillRoot, isPlatformId } from '../../platform/platformRegistry';
 
 export interface SkillInjectorInput {
   skills: string[];
@@ -13,16 +14,14 @@ export interface SkillInjectionResult {
   errors: Array<{ skill: string; error: string }>;
 }
 
-const PROVIDER_SKILL_ROOTS: Record<string, (cwd: string) => string> = {
-  'claude-code': (cwd) => path.join(cwd, '.claude', 'skills'),
-  codex: (cwd) => path.join(cwd, '.codex', 'skills'),
-  openclaw: (cwd) => path.join(cwd, '.openclaw', 'skills'),
-};
+const FALLBACK_SKILL_ROOT = path.join('.agent_context', 'skills');
 
 export function resolveProviderSkillRoot(provider: string, cwd: string): string {
-  const resolver = PROVIDER_SKILL_ROOTS[provider];
-  if (resolver) return resolver(cwd);
-  return path.join(cwd, '.agent_context', 'skills');
+  if (isPlatformId(provider)) {
+    const projectRoot = getProjectSkillRoot(provider);
+    if (projectRoot) return path.resolve(cwd, projectRoot.path);
+  }
+  return path.resolve(cwd, FALLBACK_SKILL_ROOT);
 }
 
 function assertSafeSkillName(skillName: string): void {

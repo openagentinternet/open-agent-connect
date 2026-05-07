@@ -1,13 +1,10 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { ConcreteSkillHost } from '../../core/skills/skillContractTypes';
+import { SUPPORTED_PLATFORM_IDS, isPlatformId } from '../../core/platform/platformRegistry';
 import { commandMissingFlag, commandUnknownSubcommand, readFlagValue } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
-const SUPPORTED_HOSTS: ConcreteSkillHost[] = ['codex', 'claude-code', 'openclaw'];
-
-function isSupportedHost(value: string): value is ConcreteSkillHost {
-  return SUPPORTED_HOSTS.includes(value as ConcreteSkillHost);
-}
+const SUPPORTED_HOSTS: ConcreteSkillHost[] = [...SUPPORTED_PLATFORM_IDS];
 
 export async function runHostCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   if (args[0] !== 'bind-skills') {
@@ -23,7 +20,7 @@ export async function runHostCommand(args: string[], context: CliRuntimeContext)
   if (!host) {
     return commandMissingFlag('--host');
   }
-  if (!isSupportedHost(host)) {
+  if (!isPlatformId(host)) {
     return commandFailed(
       'invalid_argument',
       `Unsupported --host value: ${host}. Supported values: ${SUPPORTED_HOSTS.join(', ')}.`,

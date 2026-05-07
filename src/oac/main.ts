@@ -2,7 +2,10 @@
 
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
 import { runNpmDoctor, runNpmInstall } from '../core/system/npmInstall';
+import { runSystemUninstall } from '../core/system/uninstall';
+import { SystemCommandError } from '../core/system/types';
 import { CLI_VERSION } from '../cli/version';
+import { SUPPORTED_PLATFORM_IDS } from '../core/platform/platformRegistry';
 
 export interface OacContext {
   stdout?: Pick<NodeJS.WriteStream, 'write'>;
@@ -46,6 +49,10 @@ function readFlagValue(args: string[], flag: string): string | undefined {
   return value && !value.startsWith('-') ? value : undefined;
 }
 
+function hasFlag(args: string[], flag: string): boolean {
+  return args.includes(flag);
+}
+
 function versionRequested(args: string[]): boolean {
   return args.includes('--version') || args.includes('-v');
 }
@@ -55,18 +62,55 @@ function helpRequested(args: string[]): boolean {
 }
 
 function renderHelp(): string {
+  const hostList = SUPPORTED_PLATFORM_IDS.join('|');
   return [
     'Usage: oac <command>',
     'Summary: Open Agent Connect installer and local maintenance CLI.',
     'Commands:',
-    '  install  Install shared MetaBot runtime assets and bind host skills.',
+    '  install  Install shared MetaBot runtime assets and auto-bind detected platform skills.',
     '  doctor   Verify the npm-installed Open Agent Connect runtime state.',
+    '  uninstall  Remove OAC shim and guarded host skill symlinks.',
     'Optional flags:',
-    '  --host <codex|claude-code|openclaw>  Target host for install or doctor.',
+    `  --host <${hostList}>  Force one platform root for install or doctor.`,
     '  --version, -v  Print the oac CLI version.',
     '  --help, -h  Print this help text.',
+    'Primary flow:',
+    '  oac install',
+    '  oac doctor',
+    `  oac install --host <${hostList}>`,
     '',
   ].join('\n');
+}
+
+async function runOacUninstall(
+  args: string[],
+  context: ResolvedOacContext,
+): Promise<MetabotCommandResult<unknown>> {
+  const confirmToken = readFlagValue(args, '--confirm-token');
+  const all = hasFlag(args, '--all');
+  if (confirmToken && !all) {
+    return commandFailed(
+      'invalid_argument',
+      '--confirm-token can only be used together with --all.',
+    );
+  }
+  try {
+    const result = await runSystemUninstall({
+      systemHomeDir: context.env.HOME || process.env.HOME || context.cwd,
+      all,
+      confirmToken,
+      env: context.env,
+    });
+    return commandSuccess(result);
+  } catch (error) {
+    if (error instanceof SystemCommandError) {
+      return commandFailed(error.code, error.message);
+    }
+    return commandFailed(
+      'uninstall_failed',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 function rawStdoutHandledResult(): MetabotCommandResult<unknown> & {
@@ -99,6 +143,9 @@ export async function runOac(argv: string[], contextInput: OacContext = {}): Pro
           break;
         case 'doctor':
           result = await runNpmDoctor({ host }, context);
+          break;
+        case 'uninstall':
+          result = await runOacUninstall(rest, context);
           break;
         case undefined:
           result = commandFailed('missing_command', 'No command provided.');

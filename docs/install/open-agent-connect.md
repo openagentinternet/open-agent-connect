@@ -25,7 +25,7 @@ Use this document for:
 - npm-based end-user installation
 - remote GitHub release-pack fallback installation
 - shared runtime installation
-- host skill binding for `Codex`, `Claude Code`, and `OpenClaw`
+- platform skill binding for all supported platforms
 - Claude Code-compatible fallback binding for other local agent hosts
 - post-install verification
 - first-run identity handoff
@@ -77,7 +77,7 @@ Before running install commands, verify:
 - `npm` exists for the recommended npm path
 - either `curl` or `wget` exists for the release-pack fallback
 - `tar` exists for the release-pack fallback
-- at least one target host mode can be chosen
+- at least one supported platform root or the shared `~/.agents/skills` root can be bound
 
 Node version check:
 
@@ -101,60 +101,74 @@ If npm is missing and the user can install npm, stop and ask them to install npm
 with Node.js. If npm is not available due to environment policy, use the GitHub
 release-pack fallback below.
 
-## Choose Host Mode
+## Supported Platforms And Binding Model
 
-Choose exactly one initial host mode:
+The recommended installer is registry-driven. `platformRegistry.ts` is the
+single source for supported platforms, platform display names, binaries, skill
+roots, runtime discovery metadata, executor metadata, and `/ui/bot` logo paths.
+Runtime discovery and `/ui/bot` logos come from `platformRegistry.ts`.
 
+Supported platforms:
 
-| Current agent platform                  | Host mode     |
-| --------------------------------------- | ------------- |
-| Codex                                   | `codex`       |
-| Claude Code                             | `claude-code` |
-| OpenClaw                                | `openclaw`    |
-| Other Claude Code-compatible agent host | `claude-code` |
+- `claude-code` - Claude Code
+- `codex` - Codex
+- `copilot` - GitHub Copilot CLI
+- `opencode` - OpenCode
+- `openclaw` - OpenClaw
+- `hermes` - Hermes
+- `gemini` - Gemini CLI
+- `pi` - Pi
+- `cursor` - Cursor Agent
+- `kimi` - Kimi
+- `kiro` - Kiro CLI
 
+Skills are installed once under `~/.metabot/skills`. Host roots contain symlinks
+pointing to `~/.metabot/skills/metabot-*`. Bare `oac install` binds
+`~/.agents/skills` and detected platform roots. A platform root is detected when
+its parent home directory already exists or when the platform root is the shared
+standard `~/.agents/skills`.
 
-For non-`Codex`, non-`Claude Code`, and non-`OpenClaw` platforms such as hosts
-that read Claude Code-style `SKILL.md` directories, use the `claude-code` host
-mode first. This installs the shared runtime and projects `metabot-*` skill
-symlinks in the Claude Code-compatible layout.
+Use bare install for normal users:
 
-If the host has its own documented skill directory and does not read
-`${CLAUDE_HOME:-$HOME/.claude}/skills`, complete the install with
-`claude-code` mode and then create Claude Code-style symlinks from
-`~/.metabot/skills/metabot-*` into that host's documented skill root.
+```bash
+npm i -g open-agent-connect && oac install
+```
+
+`--host` is only needed when forcing a platform root before that platform home exists.
+Treat this as advanced force-bind usage, not the primary install path.
+Example:
+
+```bash
+oac install --host openclaw
+```
 
 Host-native roots used by the built-in binder:
 
 - `Codex`: `${CODEX_HOME:-$HOME/.codex}/skills`
 - `Claude Code`: `${CLAUDE_HOME:-$HOME/.claude}/skills`
 - `OpenClaw`: `${OPENCLAW_HOME:-$HOME/.openclaw}/skills`
+- `GitHub Copilot CLI`: `${COPILOT_HOME:-$HOME/.copilot}/skills`
+- `OpenCode`: `$HOME/.config/opencode/skills` and `$HOME/.claude/skills`
+- `Hermes`: `$HOME/.hermes/skills`
+- `Gemini CLI`: `$HOME/.gemini/skills`
+- `Pi`: `$HOME/.pi/agent/skills`
+- `Cursor Agent`: `$HOME/.cursor/skills`
+- `Kimi`: `$HOME/.kimi/skills` and `$HOME/.config/agents/skills`
+- `Kiro CLI`: `$HOME/.kiro/skills`
+- Shared standard root: `$HOME/.agents/skills`
 
 ## Recommended NPM Install
 
 Run this from any working directory. It installs the npm package globally, then
 uses the package's `oac install` command to install shared runtime assets and
-bind the selected host.
+bind `~/.agents/skills` plus any detected platform roots.
 
-If the current host is clearly detectable, `oac install` can choose it
-automatically. If no host-specific environment signal is available, bare
-`oac install` defaults to `codex`. For deterministic agent execution, pass
-`--host` explicitly.
+Bare `oac install` is the primary install path. It does not force a single
+host. Use `--host` only for advanced force-bind cases where you intentionally
+want to create or verify one platform root before that platform home exists.
 
 ```bash
 set -euo pipefail
-
-: "${OAC_HOST:=claude-code}"
-
-case "$OAC_HOST" in
-  codex|claude-code|openclaw)
-    ;;
-  *)
-    echo "Unsupported OAC_HOST '$OAC_HOST'. Use codex, claude-code, or openclaw." >&2
-    echo "For Claude Code-compatible hosts, set OAC_HOST=claude-code." >&2
-    exit 1
-    ;;
-esac
 
 command -v node >/dev/null 2>&1 || {
   echo "Node.js is required. Install Node.js 20, 22, or 24." >&2
@@ -167,9 +181,8 @@ command -v npm >/dev/null 2>&1 || {
   exit 1
 }
 
-npm i -g open-agent-connect
-oac install --host "$OAC_HOST"
-oac doctor --host "$OAC_HOST"
+npm i -g open-agent-connect && oac install
+oac doctor
 
 export PATH="$HOME/.metabot/bin:$PATH"
 command -v metabot
@@ -187,11 +200,12 @@ This installs:
 
 - shared MetaBot skills under `~/.metabot/skills/`
 - the primary CLI shim under `~/.metabot/bin/metabot`
-- host-native `metabot-*` skill symlinks for the chosen host mode
+- `metabot-*` skill symlinks under `~/.agents/skills`
+- host-native `metabot-*` skill symlinks for detected platform roots
 
 The npm path and the fallback release-pack path are equivalent by final
 installed state. Both should leave `metabot` runnable, shared skills installed
-under `~/.metabot/skills/`, and the chosen host bound to those skills.
+under `~/.metabot/skills/`, and supported host roots bound to those skills.
 
 If the CLI is not on `PATH`, export:
 
@@ -206,8 +220,11 @@ GitHub archive, extracts the packaged host skillpack, and runs the bundled
 installer. Use this path when npm is unavailable, when a pinned `OAC_VERSION`
 archive is required, or when debugging release-pack installation specifically.
 
-Set `OAC_HOST` to one of `codex`, `claude-code`, or `openclaw` before running.
-For unsupported but Claude Code-compatible platforms, set `OAC_HOST=claude-code`.
+Release packs are host-specific compatibility artifacts for `codex`,
+`claude-code`, and `openclaw`. They are not the primary path for registry-driven
+multi-platform install. For all supported platforms, prefer the npm path above.
+Use a release pack only when npm is unavailable or when explicitly debugging one
+of those compatibility packs.
 
 ```bash
 set -euo pipefail
@@ -220,8 +237,8 @@ case "$OAC_HOST" in
     OAC_HOST_PACK="$OAC_HOST"
     ;;
   *)
-    echo "Unsupported OAC_HOST '$OAC_HOST'. Use codex, claude-code, or openclaw." >&2
-    echo "For Claude Code-compatible hosts, set OAC_HOST=claude-code." >&2
+    echo "Unsupported release-pack OAC_HOST '$OAC_HOST'. Release packs are available for codex, claude-code, and openclaw." >&2
+    echo "For registry-driven platform install, use: npm i -g open-agent-connect && oac install" >&2
     exit 1
     ;;
 esac
@@ -292,13 +309,15 @@ export PATH="$HOME/.metabot/bin:$PATH"
 ## Bind Additional Hosts
 
 If one machine should serve multiple local agent hosts, run the remote install
-once for the primary host, then bind additional hosts:
+once, then bind additional hosts. This is advanced force-bind usage for roots
+that were not detected during bare install:
 
 ```bash
 export PATH="$HOME/.metabot/bin:$PATH"
 metabot host bind-skills --host codex
 metabot host bind-skills --host claude-code
 metabot host bind-skills --host openclaw
+metabot host bind-skills --host gemini
 ```
 
 This keeps one canonical shared skill root while exposing the same `metabot-*`
@@ -306,15 +325,17 @@ entries into multiple host-native skill trees.
 
 ## Claude Code-Compatible Fallback
 
-For agent platforms outside `Codex`, `Claude Code`, and `OpenClaw`, first use:
+For agent platforms whose homes are not detected during bare install and whose
+skill system reads Claude Code-style `SKILL.md` directories, first run the
+normal bare install:
 
 ```bash
-OAC_HOST=claude-code
+npm i -g open-agent-connect && oac install
 ```
 
-If that platform reads `${CLAUDE_HOME:-$HOME/.claude}/skills`, no extra binding
-is needed. If the platform has a different documented skill root, create
-Claude Code-style symlinks after install:
+If that platform reads `~/.agents/skills`, no extra binding is needed. If the
+platform has a different documented skill root that OAC does not know about yet,
+create Claude Code-style symlinks after install:
 
 ```bash
 TARGET_SKILL_ROOT="/absolute/path/to/that/agent/skills"
@@ -335,7 +356,7 @@ Run:
 ```bash
 export PATH="$HOME/.metabot/bin:$PATH"
 if command -v oac >/dev/null 2>&1; then
-  oac doctor --host "${OAC_HOST:-claude-code}"
+  oac doctor
 fi
 metabot --help
 metabot identity --help
@@ -343,10 +364,10 @@ metabot identity --help
 
 Base install success criteria:
 
-- if `oac` is available, `oac doctor` reports the selected host, shared skills, metabot shim, and host bindings
+- if `oac` is available, `oac doctor` reports shared skills, the metabot shim, `~/.agents/skills`, and detected platform bindings
 - `metabot` and `metabot identity` help commands run successfully
 - shared skill files exist under `~/.metabot/skills/`
-- related host `metabot-*` bindings exist for the selected host
+- related `metabot-*` bindings exist under `~/.agents/skills` and any detected host roots
 
 If an active MetaBot identity already exists, additionally run:
 
@@ -376,7 +397,8 @@ test -f "$SHARED_NETWORK_SKILL"
 test -f "$SHARED_CHAT_SKILL"
 ```
 
-Optional host binding verification for the host selected by `OAC_HOST`:
+Optional advanced force-bind verification for a specific host selected by
+`OAC_HOST`:
 
 ```bash
 case "${OAC_HOST:-claude-code}" in
@@ -617,18 +639,39 @@ after installation, use:
 
 ## Update
 
-Prefer the built-in update command:
+For normal registry-driven installs, prefer the built-in update command without
+`--host`:
 
 ```bash
 metabot system update
+```
+
+This runs the npm-first update path:
+
+```bash
+npm i -g open-agent-connect@latest
+oac install
+```
+
+The second step is important: it refreshes the shared runtime assets and reruns
+registry-driven platform binding for all supported platforms, including newly
+detected platform homes.
+
+To update to a pinned package version:
+
+```bash
+metabot system update --target-version v0.2.7
 ```
 
 Notes:
 
 - defaults to latest release
 - designed for non-interactive scheduling (for example cron)
-- use `--host` when multiple installed host packs exist
 - use `--dry-run` to preview planned update actions
+- `--host` is legacy release-pack update mode for `codex`, `claude-code`, and
+  `openclaw` compatibility packs only
+- do not use `--host` for the 11-platform npm-first install path; omit it so
+  `oac install` can rebind all registry roots
 
 ## Uninstall
 
