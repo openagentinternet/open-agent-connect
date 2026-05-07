@@ -204,6 +204,7 @@ async function runCommand(homeDir, args, envOverrides = {}) {
     METABOT_HOME: homeDir,
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_TEST_FAKE_PROVIDER_LLM_REPLY: 'Provider test result from {{skill}}.',
     METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
     ...envOverrides,
   };
@@ -230,6 +231,7 @@ async function runCommandWithEnv(cwd, args, envOverrides = {}) {
     ...process.env,
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_TEST_FAKE_PROVIDER_LLM_REPLY: 'Provider test result from {{skill}}.',
     METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
     ...envOverrides,
   };
@@ -259,6 +261,7 @@ async function runCommandText(homeDir, args, envOverrides = {}) {
     METABOT_HOME: homeDir,
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_TEST_FAKE_PROVIDER_LLM_REPLY: 'Provider test result from {{skill}}.',
     METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
     ...envOverrides,
   };

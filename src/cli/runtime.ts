@@ -95,6 +95,7 @@ const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
 const TEST_FAKE_BUYER_RATING_REPLY_ENV = 'METABOT_TEST_FAKE_BUYER_RATING_REPLY';
 const TEST_FAKE_MASTER_REPLY_ENV = 'METABOT_TEST_FAKE_MASTER_REPLY';
+const TEST_FAKE_PROVIDER_LLM_REPLY_ENV = 'METABOT_TEST_FAKE_PROVIDER_LLM_REPLY';
 const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
@@ -2204,11 +2205,31 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     acceptPolicy: 'accept_all' as const,
     defaultStrategyId: null as string | null,
   };
+  const providerLlmBackends = createRegistryBackendFactories();
+  const fakeProviderLlmReply = normalizeEnvText(context.env[TEST_FAKE_PROVIDER_LLM_REPLY_ENV]);
+  const useFakeProviderLlm = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' && Boolean(fakeProviderLlmReply);
+  if (useFakeProviderLlm) {
+    for (const provider of Object.keys(providerLlmBackends)) {
+      providerLlmBackends[provider] = () => ({
+        provider,
+        async execute(request) {
+          return {
+            status: 'completed',
+            output: fakeProviderLlmReply
+              .replace(/\{\{prompt\}\}/g, request.prompt)
+              .replace(/\{\{skill\}\}/g, request.skills?.[0] ?? ''),
+            durationMs: 1,
+          };
+        },
+      });
+    }
+  }
+
   const llmExecutor = new LlmExecutor({
     sessionsRoot: paths.llmExecutorSessionsRoot,
     transcriptsRoot: paths.llmExecutorTranscriptsRoot,
     skillsRoot: paths.skillsRoot,
-    backends: createRegistryBackendFactories(),
+    backends: providerLlmBackends,
   });
 
   const handlers = createDefaultMetabotDaemonHandlers({
@@ -2232,6 +2253,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     requestMvcGasSubsidy,
     autoReplyConfig: sharedAutoReplyConfig,
     llmExecutor,
+    providerRuntimeCanStart: useFakeProviderLlm ? async () => true : undefined,
   });
 
   const daemon = createMetabotDaemon({

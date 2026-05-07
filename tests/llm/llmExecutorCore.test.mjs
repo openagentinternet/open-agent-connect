@@ -565,6 +565,43 @@ test('LlmExecutor starts a session, streams events, injects skills, and persists
   assert.match(injected, /Test Skill/);
 });
 
+test('LlmExecutor preserves the provided system prompt and single-item skills array', async () => {
+  const base = await createTempDir();
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: path.join(base, 'skills'),
+    backends: {
+      custom: () => ({
+        provider: 'custom',
+        async execute(request) {
+          assert.equal(request.systemPrompt, 'Paid order system prompt');
+          assert.deepEqual(request.skills, ['order.writer']);
+          return {
+            status: 'completed',
+            output: 'done',
+            durationMs: 1,
+          };
+        },
+      }),
+    },
+  });
+
+  const sessionId = await executor.execute({
+    runtimeId: runtime.id,
+    runtime,
+    prompt: 'Write the order result',
+    systemPrompt: 'Paid order system prompt',
+    skills: ['order.writer'],
+  });
+
+  const events = await collectEvents(executor.streamEvents(sessionId));
+  const session = await executor.getSession(sessionId);
+  assert.equal(session.result.status, 'completed');
+  assert.equal(session.result.output, 'done');
+  assert.equal(events.at(-1).type, 'result');
+});
+
 test('LlmExecutor cancel preserves completed session history', async () => {
   const base = await createTempDir();
   const executor = new LlmExecutor({

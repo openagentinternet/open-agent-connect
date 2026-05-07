@@ -34,7 +34,7 @@ import {
   isLlmProvider,
   normalizeLlmBinding,
 } from '../core/llm/llmTypes';
-import type { LlmProvider } from '../core/llm/llmTypes';
+import type { LlmProvider, LlmRuntime } from '../core/llm/llmTypes';
 import type { LlmExecutor, LlmExecutionRequest } from '../core/llm/executor';
 import {
   buildMetabotProfileDraftFromIdentity,
@@ -58,6 +58,7 @@ import { buildPublishedService } from '../core/services/publishService';
 import { publishServiceToChain } from '../core/services/servicePublishChain';
 import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
 import { validateServicePublishProviderSkill } from '../core/services/servicePublishValidation';
+import { createProviderServiceRunner } from '../core/a2a/provider/providerServiceRunner';
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
@@ -97,7 +98,6 @@ import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore'
 import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/sessionEngine';
 import { resolvePublicStatus, type PublicStatus } from '../core/a2a/publicStatus';
-import { createServiceRunnerRegistry } from '../core/a2a/provider/serviceRunnerRegistry';
 import type { ProviderServiceRunnerResult } from '../core/a2a/provider/serviceRunnerContracts';
 import type { A2ASessionRecord, A2ATaskRunRecord } from '../core/a2a/sessionTypes';
 import { buildTraceWatchEvents, serializeTraceWatchEvents } from '../core/a2a/watch/traceWatch';
@@ -1389,29 +1389,6 @@ function buildServiceRatingFollowupMessage(input: {
     ? `\n\n我的评分已记录在链上（pin ID: ${pinId}）。`
     : '';
   return `${base}${pinLine}`.trim();
-}
-
-function renderDemoRemoteServiceResponse(input: {
-  serviceName: string;
-  displayName: string;
-  userTask: string;
-  taskContext: string;
-}): string {
-  const serviceName = normalizeText(input.serviceName).toLowerCase();
-  const displayName = normalizeText(input.displayName);
-  const userTask = normalizeText(input.userTask);
-  const taskContext = normalizeText(input.taskContext);
-  const weatherLike = serviceName.includes('weather')
-    || displayName.toLowerCase().includes('weather')
-    || /weather|天气/i.test(userTask)
-    || /weather|天气/i.test(taskContext);
-
-  if (weatherLike) {
-    return 'Tomorrow will be bright with a light wind.';
-  }
-
-  const contextSuffix = taskContext ? ` Context: ${taskContext}` : '';
-  return `${displayName || 'Remote agent'} completed the remote request: ${userTask}.${contextSuffix}`.trim();
 }
 
 function isSuccessfulCommandEnvelope(value: unknown): value is {
@@ -4064,6 +4041,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   createSignerForHome?: (homeDir: string) => Signer;
   autoReplyConfig?: PrivateChatAutoReplyConfig;
   llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
+  providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
 }): MetabotDaemonHttpHandlers {
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   // Create default adapter registry if none provided (backward compat)
@@ -8548,27 +8526,34 @@ export function createDefaultMetabotDaemonHandlers(input: {
           },
         ]);
 
-        const runnerRegistry = createServiceRunnerRegistry([
-          {
-            servicePinId: service.currentPinId,
-            providerSkill: service.providerSkill,
-            runner: async ({ userTask, taskContext }) => ({
-              state: 'completed',
-              responseText: renderDemoRemoteServiceResponse({
-                serviceName: service.serviceName,
-                displayName: service.displayName,
-                userTask,
-                taskContext,
-              }),
-            }),
+        const metaBotSlug = path.basename(input.homeDir);
+        const providerRunner = createProviderServiceRunner({
+          metaBotSlug,
+          systemHomeDir: runtimeStateStore.paths.systemHomeDir,
+          projectRoot: runtimeStateStore.paths.profileRoot,
+          runtimeStore: llmRuntimeStore,
+          bindingStore: llmBindingStore,
+          llmExecutor: input.llmExecutor ?? {
+            async execute() {
+              throw new Error('LLM executor is not configured.');
+            },
+            async getSession() {
+              return null;
+            },
+            async cancel() {},
           },
-        ]);
-        const runnerResult = await runnerRegistry.execute({
+          env: process.env,
+          canStartRuntime: input.providerRuntimeCanStart,
+        });
+        const runnerResult = await providerRunner.execute({
           servicePinId: service.currentPinId,
           providerSkill: service.providerSkill,
           providerGlobalMetaId: execution.providerGlobalMetaId,
           userTask: execution.request.userTask,
           taskContext: execution.request.taskContext,
+          serviceName: service.serviceName,
+          displayName: service.displayName,
+          outputType: service.outputType,
           metadata: {
             traceId,
             externalConversationId: execution.externalConversationId || null,
@@ -8576,32 +8561,32 @@ export function createDefaultMetabotDaemonHandlers(input: {
             payment: execution.payment,
           },
         });
+        if (runnerResult.state === 'failed') {
+          return commandFailed(runnerResult.code, runnerResult.message);
+        }
+        if (runnerResult.state === 'needs_clarification') {
+          return commandManualActionRequired(
+            'clarification_needed',
+            runnerResult.question,
+            `/ui/trace?traceId=${encodeURIComponent(traceId)}`,
+          );
+        }
         const applied = sessionEngine.applyProviderRunnerResult({
           session: received.session,
           taskRun: received.taskRun,
           result: runnerResult,
         });
         const appliedStatus = await persistSessionMutation(sessionStateStore, applied);
-        const responseText = runnerResult.state === 'completed'
-          ? normalizeText(runnerResult.responseText)
-          : '';
-        const providerMessage = runnerResult.state === 'completed'
-          ? normalizeText(runnerResult.responseText)
-          : runnerResult.state === 'needs_clarification'
-            ? normalizeText(runnerResult.question)
-            : normalizeText(runnerResult.message);
+        const responseText = normalizeText(runnerResult.responseText);
+        const providerMessage = responseText;
         await appendA2ATranscriptItems(sessionStateStore, [
           {
             id: `${traceId}-provider-runner-result`,
             sessionId: received.session.sessionId,
             taskRunId: applied.taskRun.runId,
             timestamp: applied.session.updatedAt,
-            type: runnerResult.state === 'needs_clarification'
-              ? 'clarification_request'
-              : runnerResult.state === 'failed'
-                ? 'failure'
-                : 'assistant',
-            sender: runnerResult.state === 'failed' ? 'system' : 'provider',
+            type: 'assistant',
+            sender: 'provider',
             content: providerMessage,
             metadata: {
               publicStatus: appliedStatus.status,
@@ -8691,17 +8676,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
             ...state.traces.filter((entry) => entry.traceId !== trace.traceId),
           ],
         });
-
-        if (runnerResult.state === 'needs_clarification') {
-          return commandManualActionRequired(
-            'clarification_needed',
-            runnerResult.question,
-            `/ui/trace?traceId=${encodeURIComponent(trace.traceId)}`,
-          );
-        }
-        if (runnerResult.state === 'failed') {
-          return commandFailed(runnerResult.code, runnerResult.message);
-        }
 
         return commandSuccess({
           traceId: trace.traceId,
