@@ -9,8 +9,10 @@ This document is written for a new AI development session that does not have the
 
 Primary project:
 
-- Open Agent Connect workspace: `/Users/tusm/Documents/MetaID_Projects/open-agent-connect`
-- Project instructions: `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/AGENTS.md`
+- Open Agent Connect implementation workspace: `<repo-root>`
+- `<repo-root>` means the root of the new feature worktree created for implementation, not necessarily the main checkout where this document was authored.
+- Project instructions: `<repo-root>/AGENTS.md`
+- The implementation session should create or use a dedicated worktree and same-name branch before code changes, then resolve `<repo-root>` with `pwd -P` inside that worktree.
 - All documentation, skill documents, and code comments must be written in English.
 - Do not introduce new code or documentation that depends on the legacy `.metabot/hot` layout.
 
@@ -77,35 +79,37 @@ IDBots should be the behavior reference:
 
 Use these files as the first reading list before implementation. The new development session should inspect the current versions of these files before editing.
 
+For OAC files, paths are written relative to `<repo-root>`, the implementation worktree root. Do not edit the main checkout only because an absolute path from the original authoring session exists elsewhere.
+
 OAC files:
 
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/platform/platformRegistry.ts`: supported platforms and skill roots.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/llm/executor/executor.ts`: LLM session creation, skill injection hook, runtime backend execution, session result storage.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/llm/executor/skill-injector.ts`: current pre-execution skill copy behavior.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/llm/llmRuntimeResolver.ts`: current generic runtime resolution behavior.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/llm/llmTypes.ts`: runtime and binding types, including primary/fallback binding roles.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/bot/metabotProfileManager.ts`: MetaBot profile and provider binding management.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/services/publishService.ts`: local service publish record builder.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/services/servicePublishChain.ts`: `/protocols/skill-service` chain write.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/discovery/chainServiceDirectory.ts`: chain service parser.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/a2a/provider/serviceRunnerContracts.ts`: current provider runner result contract.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/a2a/provider/serviceRunnerRegistry.ts`: current demo runner registry.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/a2a/protocol/orderProtocol.ts`: order protocol message helpers.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/orders/delegationOrderMessage.ts`: buyer-side order message construction.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/orders/orderMessage.ts`: order message parsing/formatting.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/orders/orderLifecycle.ts`: current shared lifecycle constants.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/orders/manualRefund.ts`: current manual refund decision helper.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/chat/sessionTrace.ts`: trace/order projection fields and refund markers.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/core/state/runtimeStateStore.ts`: local JSON runtime state shape.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/daemon/defaultHandlers.ts`: service publish/execute/rate/refund handlers, private order follow-up handling, trace persistence wiring.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/daemon/routes/services.ts`: `/api/services/*` routes.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/daemon/routes/provider.ts`: provider refund routes.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/cli/runtime.ts`: private `simplemsg` listener and order protocol dispatch.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/cli/commands/services.ts`: service CLI commands.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/ui/pages/publish/app.ts`: publish UI.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/ui/pages/my-services/app.ts`: provider console UI.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/ui/pages/refund/app.ts`: refund UI.
-- `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/src/ui/pages/trace/sseClient.ts`: trace UI event/field handling.
+- `<repo-root>/src/core/platform/platformRegistry.ts`: supported platforms and skill roots.
+- `<repo-root>/src/core/llm/executor/executor.ts`: LLM session creation, skill injection hook, runtime backend execution, session result storage.
+- `<repo-root>/src/core/llm/executor/skill-injector.ts`: current pre-execution skill copy behavior.
+- `<repo-root>/src/core/llm/llmRuntimeResolver.ts`: current generic runtime resolution behavior.
+- `<repo-root>/src/core/llm/llmTypes.ts`: runtime and binding types, including primary/fallback binding roles.
+- `<repo-root>/src/core/bot/metabotProfileManager.ts`: MetaBot profile and provider binding management.
+- `<repo-root>/src/core/services/publishService.ts`: local service publish record builder.
+- `<repo-root>/src/core/services/servicePublishChain.ts`: `/protocols/skill-service` chain write.
+- `<repo-root>/src/core/discovery/chainServiceDirectory.ts`: chain service parser.
+- `<repo-root>/src/core/a2a/provider/serviceRunnerContracts.ts`: current provider runner result contract.
+- `<repo-root>/src/core/a2a/provider/serviceRunnerRegistry.ts`: current demo runner registry.
+- `<repo-root>/src/core/a2a/protocol/orderProtocol.ts`: order protocol message helpers.
+- `<repo-root>/src/core/orders/delegationOrderMessage.ts`: buyer-side order message construction.
+- `<repo-root>/src/core/orders/orderMessage.ts`: order message parsing/formatting.
+- `<repo-root>/src/core/orders/orderLifecycle.ts`: current shared lifecycle constants.
+- `<repo-root>/src/core/orders/manualRefund.ts`: current manual refund decision helper.
+- `<repo-root>/src/core/chat/sessionTrace.ts`: trace/order projection fields and refund markers.
+- `<repo-root>/src/core/state/runtimeStateStore.ts`: local JSON runtime state shape.
+- `<repo-root>/src/daemon/defaultHandlers.ts`: service publish/execute/rate/refund handlers, private order follow-up handling, trace persistence wiring.
+- `<repo-root>/src/daemon/routes/services.ts`: `/api/services/*` routes.
+- `<repo-root>/src/daemon/routes/provider.ts`: provider refund routes.
+- `<repo-root>/src/cli/runtime.ts`: private `simplemsg` listener and order protocol dispatch.
+- `<repo-root>/src/cli/commands/services.ts`: service CLI commands.
+- `<repo-root>/src/ui/pages/publish/app.ts`: publish UI.
+- `<repo-root>/src/ui/pages/my-services/app.ts`: provider console UI.
+- `<repo-root>/src/ui/pages/refund/app.ts`: refund UI.
+- `<repo-root>/src/ui/pages/trace/sseClient.ts`: trace UI event/field handling.
 
 IDBots files:
 
@@ -417,6 +421,15 @@ Reference compatibility tests:
 - publish payload stays IDBots-compatible and contains no runtime fields;
 - refund request/finalize payloads stay IDBots-compatible.
 
+Real-chain acceptance:
+
+- Later implementation phases should include real-chain smoke tests when the phase touches chain publishing, chain reads, paid order delivery, rating, or refund settlement.
+- The local `eric` MetaBot profile can be used for real-chain validation. Its local account material, including mnemonic or wallet secrets, is stored under `~/.metabot/profiles/eric` in a hidden subdirectory on this machine.
+- The implementation session may use that local profile for test publishing and data retrieval, but must never copy mnemonic words, private keys, or other wallet secrets into source code, tests, documentation, logs, commits, buzz posts, or subagent prompts.
+- Real-chain acceptance should verify observable chain data, such as actual `/protocols/skill-service`, `/protocols/simplemsg`, `/protocols/skill-service-rate`, `/protocols/service-refund-request`, or refund finalization pins, rather than relying only on local JSON state.
+- Any real-chain test must record non-secret evidence: pin id, txid, protocol path, provider/caller `globalMetaId`, service pin id, order txid, payment txid, refund request pin id, refund txid, and finalization pin id as applicable.
+- If real-chain validation is skipped for an environmental reason, the phase acceptance report must say exactly why it was skipped and which local tests substitute for it. Chain-writing phases should not be marked finally accepted until real-chain evidence exists.
+
 ## Mandatory Development Process
 
 Development must happen in phases. A phase is not complete until all of these are true:
@@ -489,6 +502,7 @@ Objective acceptance criteria:
 - Given a matching primary skill, publish validation succeeds and returns the selected skill name, platform id, runtime id, and root diagnostics for local use only.
 - No runtime id, runtime provider, binary path, cwd, model, or skill root path is added to the `/protocols/skill-service` chain payload.
 - Skill names containing `/`, `\`, `..`, or empty/whitespace-only names are rejected by catalog and publish validation.
+- Real-chain publish smoke validation using the local `eric` profile proves that a valid published `/protocols/skill-service` pin contains `providerSkill` and does not contain runtime metadata. Record the pin id and txid as non-secret evidence.
 - Unit tests cover at least: Codex primary with fallback exclusion, missing primary runtime, unavailable primary runtime, missing skill, unsafe skill name, and no runtime fields in publish payload.
 - `npm test` or the repository's relevant targeted test command passes before commit.
 
@@ -517,6 +531,7 @@ Objective acceptance criteria:
 - Server-side publish handler revalidates `providerSkill`; bypassing the UI cannot publish an invalid skill.
 - CLI publish with a payload whose `providerSkill` is missing from the primary runtime fails before chain write.
 - CLI publish with a valid primary runtime skill reaches the existing chain publish flow.
+- A real-chain publish through UI or CLI using the local `eric` profile creates a service pin that can be read back and parsed by OAC's chain service directory.
 - Tests or browser automation verify both enabled and disabled UI states.
 - `npm test` or the repository's relevant targeted test command passes before commit.
 
@@ -575,6 +590,7 @@ Objective acceptance criteria:
 - A successful order sends one `[NeedsRating:<orderTxid>]` message after delivery.
 - Reprocessing the same order message does not send duplicate delivery or rating messages.
 - Delivery/rating messages remain parseable by existing buyer-side OAC handling and IDBots-style parsers.
+- Real-chain private-message validation using the local `eric` profile, or a documented paired local profile, proves that delivery and rating messages are written and readable as `/protocols/simplemsg` pins. Record non-secret pin ids and txids.
 - Tests cover valid paid order, unpaid order, duplicate order, and generic-chat bypass.
 - `npm test` or the repository's relevant targeted test command passes before commit.
 
@@ -624,6 +640,7 @@ Objective acceptance criteria:
 - Self-directed orders are repaired or resolved without external refund transfer.
 - Refund request payload includes payment txid, service pin id, service name, amount, currency, payment chain, settlement kind, buyer `globalMetaId`, seller `globalMetaId`, failure reason, failure timestamp, and evidence ids when available.
 - Duplicate refund request creation is prevented for the same payment/order.
+- Real-chain refund-request validation proves that a failed paid order can create a readable `/protocols/service-refund-request` pin with the expected non-secret fields.
 - Tests cover timeout, invalid deliverable, execution failure, zero-price skip, self-directed repair, and duplicate prevention.
 - `npm test` or the repository's relevant targeted test command passes before commit.
 
@@ -652,6 +669,7 @@ Objective acceptance criteria:
 - Zero-price refunds mark local orders refunded without transfer.
 - Unsupported asset, missing refund address, insufficient balance, transfer failure, or ambiguous request data leaves the order in `refund_pending` or `manual_action_required` with a clear machine-readable reason.
 - Retrying settlement after a completed refund does not send a second transfer.
+- Real-chain refund settlement validation proves that a valid refund writes a transfer txid and a readable finalization proof pin, or records a concrete chain/environment blocker if no funded refundable order is available.
 - Tests cover successful paid refund, zero-price refund, mismatched payload rejection, missing address, transfer failure, and idempotent retry.
 - `npm test` or the repository's relevant targeted test command passes before commit.
 
@@ -695,12 +713,13 @@ The whole project is accepted only when all phase gates pass and these end-to-en
 - Buyer-side timeout or invalid deliverable creates a refund request.
 - Seller-side refund settlement either finalizes a valid refund or exposes a clear manual-action blocker.
 - Provider UI and CLI surfaces show enough state for an operator to publish, monitor, deliver, and refund without reading raw JSON files.
+- Final acceptance includes real-chain evidence for service publish, service discovery/readback, private delivery/rating messages, refund request creation, and refund finalization or documented settlement blocker.
 - Every implementation phase has its own commit and on-chain development diary.
 
 ## Open Questions
 
 - Should the first implementation select the current active MetaBot automatically for CLI publish, or require `--metabot <slug>` to avoid accidental publishes from the wrong identity?
-- Should project skill roots be read relative to the OAC workspace cwd, the MetaBot execution workspace, or a per-MetaBot workspace directory once provider executions are isolated?
+- Should project skill roots be read relative to the implementation worktree cwd, the MetaBot execution workspace, or a per-MetaBot workspace directory once provider executions are isolated?
 - Which non-text artifact types should be supported in the first OAC provider implementation: text-only first, or IDBots parity for image/video/audio/other from the start?
 - Should seller-side automatic refund settlement run in the background daemon loop, or only when a pending refund is observed through private-chat/order state refresh?
 
