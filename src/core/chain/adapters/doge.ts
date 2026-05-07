@@ -152,6 +152,56 @@ function buildMetaIdInscriptionScript(data: InscriptionData): Buffer {
   return Buffer.concat(chunks);
 }
 
+function buildLockScript(publicKey: Buffer, inscriptionScript: Buffer): Buffer {
+  const chunks: Buffer[] = [];
+  chunks.push(pushData(publicKey));
+  chunks.push(Buffer.from([bitcoin.opcodes.OP_CHECKSIGVERIFY]));
+  const dropCount = countScriptChunks(inscriptionScript);
+  for (let i = 0; i < dropCount; i++) {
+    chunks.push(Buffer.from([bitcoin.opcodes.OP_DROP]));
+  }
+  chunks.push(Buffer.from([bitcoin.opcodes.OP_TRUE]));
+  return Buffer.concat(chunks);
+}
+
+function countScriptChunks(script: Buffer): number {
+  let count = 0;
+  let i = 0;
+  while (i < script.length) {
+    const opcode = script[i];
+    if (opcode === 0) {
+      count++;
+      i++;
+    } else if (opcode >= 1 && opcode <= 75) {
+      count++;
+      i += 1 + opcode;
+    } else if (opcode === bitcoin.opcodes.OP_PUSHDATA1) {
+      const len = script[i + 1];
+      count++;
+      i += 2 + len;
+    } else if (opcode === bitcoin.opcodes.OP_PUSHDATA2) {
+      const len = script[i + 1] | (script[i + 2] << 8);
+      count++;
+      i += 3 + len;
+    } else if (opcode === bitcoin.opcodes.OP_PUSHDATA4) {
+      const len =
+        script[i + 1] |
+        (script[i + 2] << 8) |
+        (script[i + 3] << 16) |
+        (script[i + 4] << 24);
+      count++;
+      i += 5 + len;
+    } else {
+      i++;
+    }
+  }
+  return count;
+}
+
+function hash160(data: Buffer): Buffer {
+  return bitcoin.crypto.hash160(data);
+}
+
 // ---- DOGE ChainAdapter ----
 
 export const dogeChainAdapter: ChainAdapter = {
