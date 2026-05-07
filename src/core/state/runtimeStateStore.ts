@@ -13,9 +13,10 @@ export interface RuntimeIdentityRecord {
   path: string;
   publicKey: string;
   chatPublicKey: string;
+  /** Chain addresses keyed by network name. E.g. { mvc: "1...", btc: "1...", doge: "D..." } */
+  addresses: Record<string, string>;
+  /** Convenience: same as addresses['mvc']. Preserved for backward compatibility. */
   mvcAddress: string;
-  btcAddress: string;
-  dogeAddress: string;
   metaId: string;
   globalMetaId: string;
   subsidyState?: RuntimeIdentitySubsidyState;

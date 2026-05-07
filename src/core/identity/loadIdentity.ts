@@ -11,6 +11,10 @@ export type IdentitySource = Partial<DerivedIdentity> & {
   mvc_address?: string;
   btc_address?: string;
   doge_address?: string;
+  /** Legacy: same as addresses.btc */
+  btcAddress?: string;
+  /** Legacy: same as addresses.doge */
+  dogeAddress?: string;
   metaid?: string;
   globalmetaid?: string;
 };
@@ -27,27 +31,34 @@ function readGlobalMetaId(value: unknown): string | undefined {
 }
 
 function readDerivedFields(source: IdentitySource): Partial<DerivedIdentity> {
+  const mvcAddress = readString(source.mvcAddress ?? source.mvc_address);
+  const btcAddress = readString(source.btcAddress ?? source.btc_address);
+  const dogeAddress = readString(source.dogeAddress ?? source.doge_address);
+
+  // Build addresses map from explicit fields
+  const addresses: Record<string, string> = {};
+  if (mvcAddress) addresses.mvc = mvcAddress;
+  if (btcAddress) addresses.btc = btcAddress;
+  if (dogeAddress) addresses.doge = dogeAddress;
+
   return {
     publicKey: readString(source.publicKey ?? source.public_key),
     chatPublicKey: readString(source.chatPublicKey ?? source.chat_public_key),
-    mvcAddress: readString(source.mvcAddress ?? source.mvc_address),
-    btcAddress: readString(source.btcAddress ?? source.btc_address),
-    dogeAddress: readString(source.dogeAddress ?? source.doge_address),
+    mvcAddress,
+    addresses: Object.keys(addresses).length > 0 ? addresses : undefined,
     metaId: readString(source.metaId ?? source.metaid),
     globalMetaId: readGlobalMetaId(source.globalMetaId ?? source.globalmetaid)
   };
 }
 
-function hasCompleteDerivedFields(derived: Partial<DerivedIdentity>): derived is Pick<
-  DerivedIdentity,
-  'publicKey' | 'chatPublicKey' | 'mvcAddress' | 'btcAddress' | 'dogeAddress' | 'metaId' | 'globalMetaId'
+function hasCompleteDerivedFields(derived: Partial<DerivedIdentity>): derived is Required<
+  Pick<DerivedIdentity, 'publicKey' | 'chatPublicKey' | 'mvcAddress' | 'metaId' | 'globalMetaId' | 'addresses'>
 > {
   return Boolean(
     derived.publicKey &&
       derived.chatPublicKey &&
       derived.mvcAddress &&
-      derived.btcAddress &&
-      derived.dogeAddress &&
+      derived.addresses &&
       derived.metaId &&
       derived.globalMetaId
   );
@@ -57,6 +68,18 @@ function assertDerivedFieldsMatch(expected: DerivedIdentity, actual: Partial<Der
   for (const key of Object.keys(actual) as Array<keyof DerivedIdentity>) {
     const value = actual[key];
     if (value === undefined) continue;
+
+    if (key === 'addresses') {
+      // Compare addresses map entries
+      const actualAddresses = value as Record<string, string>;
+      for (const [chain, addr] of Object.entries(actualAddresses)) {
+        if (addr !== expected.addresses[chain]) {
+          throw new Error(`Identity field mismatch: addresses.${chain}`);
+        }
+      }
+      continue;
+    }
+
     if (expected[key] !== value) {
       throw new Error(`Identity field mismatch: ${key}`);
     }
@@ -81,7 +104,12 @@ export async function loadIdentity(source: IdentitySource): Promise<DerivedIdent
     return {
       mnemonic: '',
       path,
-      ...derivedFields
+      publicKey: derivedFields.publicKey,
+      chatPublicKey: derivedFields.chatPublicKey,
+      addresses: derivedFields.addresses,
+      mvcAddress: derivedFields.mvcAddress,
+      metaId: derivedFields.metaId,
+      globalMetaId: derivedFields.globalMetaId,
     };
   }
 
