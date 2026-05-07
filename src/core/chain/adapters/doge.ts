@@ -202,6 +202,64 @@ function hash160(data: Buffer): Buffer {
   return bitcoin.crypto.hash160(data);
 }
 
+function buildP2SHOutputScript(lockScript: Buffer): Buffer {
+  const lockHash = hash160(lockScript);
+  return Buffer.concat([
+    Buffer.from([bitcoin.opcodes.OP_HASH160]),
+    pushData(lockHash),
+    Buffer.from([bitcoin.opcodes.OP_EQUAL]),
+  ]);
+}
+
+function buildP2PKHOutputScript(address: string, _network: bitcoin.Network): Buffer {
+  const decoded = bitcoin.address.fromBase58Check(address);
+  return Buffer.concat([
+    Buffer.from([bitcoin.opcodes.OP_DUP, bitcoin.opcodes.OP_HASH160]),
+    pushData(decoded.hash),
+    Buffer.from([bitcoin.opcodes.OP_EQUALVERIFY, bitcoin.opcodes.OP_CHECKSIG]),
+  ]);
+}
+
+function estimateTxSize(
+  p2pkhInputCount: number,
+  outputCount: number,
+  p2shUnlockScriptSize = 0
+): number {
+  let size = 10;
+  if (p2shUnlockScriptSize > 0) {
+    size += 32 + 4 + 3 + p2shUnlockScriptSize + 4;
+  }
+  size += p2pkhInputCount * 148;
+  size += outputCount * 34;
+  return size;
+}
+
+function selectUtxos(
+  availableUtxos: ChainUtxo[],
+  targetAmount: number,
+  feeRate: number,
+  outputCount: number,
+  p2shUnlockScriptSize = 0
+): { selectedUtxos: ChainUtxo[]; fee: number; totalInput: number } {
+  const selectedUtxos: ChainUtxo[] = [];
+  let totalInput = 0;
+  const sortedUtxos = [...availableUtxos].sort((a, b) => b.satoshis - a.satoshis);
+  for (const utxo of sortedUtxos) {
+    selectedUtxos.push(utxo);
+    totalInput += utxo.satoshis;
+    const txSize = estimateTxSize(
+      selectedUtxos.length,
+      outputCount,
+      p2shUnlockScriptSize
+    );
+    const fee = Math.ceil((txSize * feeRate) / 1000);
+    if (totalInput >= targetAmount + fee) {
+      return { selectedUtxos, fee, totalInput };
+    }
+  }
+  throw new Error(`Insufficient funds: need ${targetAmount}, have ${totalInput}`);
+}
+
 // ---- DOGE ChainAdapter ----
 
 export const dogeChainAdapter: ChainAdapter = {
