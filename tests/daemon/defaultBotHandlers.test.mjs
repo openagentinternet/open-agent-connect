@@ -168,6 +168,11 @@ test('default bot createProfile bootstraps a chained identity before indexing th
   assert.match(result.data.profile.globalMetaId, /^idq/);
   assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/avatar', '/info/bio']);
   assert.deepEqual(writeCalls.map((call) => call.operation), ['create', 'create', 'create', 'create']);
+  assert.equal(writeCalls[0].contentType, 'text/plain');
+  assert.equal(writeCalls[0].payload, 'Chain Bot');
+  assert.equal(writeCalls[2].contentType, 'image/png;binary');
+  assert.equal(writeCalls[2].payload, 'ZmFrZQ==');
+  assert.equal(writeCalls[2].encoding, 'base64');
   assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['tx-1', 'tx-2', 'tx-3', 'tx-4']);
   assert.equal(stored.role, 'Role after chain.');
   assert.equal(stored.avatarDataUrl, 'data:image/png;base64,ZmFrZQ==');
@@ -524,13 +529,20 @@ test('default bot updateProfile returns chain write txids after saving a chained
     slug: profile.slug,
     name: 'Chained Save Updated',
     role: 'Updated on chain first.',
+    avatarDataUrl: 'data:image/png;base64,VXBkYXRlZA==',
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.data.profile.name, 'Chained Save Updated');
   assert.equal(result.data.profile.role, 'Updated on chain first.');
-  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/bio']);
-  assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['save-tx-1', 'save-tx-2']);
+  assert.equal(result.data.profile.avatarDataUrl, 'data:image/png;base64,VXBkYXRlZA==');
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/bio']);
+  assert.equal(writeCalls[0].contentType, 'text/plain');
+  assert.equal(writeCalls[0].payload, 'Chained Save Updated');
+  assert.equal(writeCalls[1].contentType, 'image/png;binary');
+  assert.equal(writeCalls[1].payload, 'VXBkYXRlZA==');
+  assert.equal(writeCalls[1].encoding, 'base64');
+  assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['save-tx-1', 'save-tx-2', 'save-tx-3']);
 });
 
 test('default bot updateProfile writes an avatar clear to chain before removing the local avatar', async (t) => {

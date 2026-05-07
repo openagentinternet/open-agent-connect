@@ -308,7 +308,12 @@ test('syncMetabotInfoToChain writes name, avatar, and bio pins in chain-first or
 
   assert.deepEqual(calls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/bio']);
   assert.deepEqual(calls.map((call) => call.operation), ['modify', 'modify', 'modify']);
-  assert.equal(calls[1].contentType, 'image/png');
+  assert.equal(calls[0].contentType, 'text/plain');
+  assert.equal(calls[0].payload, 'Alice');
+  assert.equal(calls[0].encoding, 'utf-8');
+  assert.equal(calls[1].contentType, 'image/png;binary');
+  assert.equal(calls[1].payload, 'ZmFrZQ==');
+  assert.equal(calls[1].encoding, 'base64');
   assert.equal(JSON.parse(calls[2].payload).primaryProvider, 'claude-code');
   assert.equal(results.length, 3);
 });
