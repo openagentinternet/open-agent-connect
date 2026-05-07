@@ -39,6 +39,39 @@ export function readChainFlag(args: string[]): { chain: CliChainValue | null; er
   };
 }
 
+/**
+ * Parse --chain flag accepting any chain name.
+ * The runtime handler is responsible for validating against the adapter registry.
+ * Used by commands that support multi-chain (chain write).
+ */
+export function readAnyChainFlag(args: string[]): { chain: string | null; error: MetabotCommandResult<never> | null } {
+  const index = args.indexOf('--chain');
+  if (index === -1) {
+    return { chain: null, error: null };
+  }
+
+  const rawValue = args[index + 1];
+  if (typeof rawValue !== 'string' || rawValue.startsWith('--')) {
+    return {
+      chain: null,
+      error: commandFailed('invalid_flag', 'Missing value for --chain.'),
+    };
+  }
+
+  const normalized = rawValue.trim().toLowerCase();
+  if (!normalized) {
+    return {
+      chain: null,
+      error: commandFailed('invalid_flag', 'Empty --chain value.'),
+    };
+  }
+
+  return {
+    chain: normalized,
+    error: null,
+  };
+}
+
 export function hasFlag(args: string[], flag: string): boolean {
   return args.includes(flag);
 }

@@ -16,9 +16,10 @@ export interface DerivedIdentity {
   path: string;
   publicKey: string;
   chatPublicKey: string;
+  /** Chain addresses keyed by ChainWriteNetwork. Always includes "mvc" at minimum. */
+  addresses: Record<string, string>;
+  /** Convenience field: same as addresses['mvc']. Preserved for backward compatibility. */
   mvcAddress: string;
-  btcAddress: string;
-  dogeAddress: string;
   metaId: string;
   globalMetaId: string;
 }
@@ -484,14 +485,20 @@ export async function deriveIdentity(options: DeriveIdentityOptions = {}): Promi
     throw new Error(`Failed to normalize derived GlobalMetaId for address: ${mvcAddress}`);
   }
 
+  const btcAddress = btcWallet.getAddress();
+  const dogeAddress = dogeWallet.getAddress();
+
   return {
     mnemonic,
     path,
     publicKey: mvcWallet.getPublicKey().toString('hex'),
     chatPublicKey,
+    addresses: {
+      mvc: mvcAddress,
+      btc: btcAddress,
+      doge: dogeAddress,
+    },
     mvcAddress,
-    btcAddress: btcWallet.getAddress(),
-    dogeAddress: dogeWallet.getAddress(),
     metaId: computeMetaId(mvcAddress),
     globalMetaId
   };

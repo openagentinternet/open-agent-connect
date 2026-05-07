@@ -352,8 +352,10 @@ test('getMetabotWalletInfo and getMetabotMnemonicBackup expose selected profile 
   await createFileSecretStore(created.homeDir).writeIdentitySecrets({
     mnemonic: FIXTURE_MNEMONIC,
     path: "m/44'/10001'/0'/0/0",
-    mvcAddress: 'mvc-secret-address',
-    btcAddress: 'btc-secret-address',
+    addresses: {
+      mvc: 'mvc-secret-address',
+      btc: 'btc-secret-address',
+    },
     globalMetaId: 'gm-wallet-bot',
   });
 

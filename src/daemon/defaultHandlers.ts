@@ -126,6 +126,11 @@ import {
   type A2AOrderPaymentResult,
   type ServicePaymentExecutor,
 } from '../core/payments/servicePayment';
+import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
+import { createChainAdapterRegistry } from '../core/chain/adapters/registry';
+import { mvcChainAdapter } from '../core/chain/adapters/mvc';
+import { btcChainAdapter } from '../core/chain/adapters/btc';
+import { dogeChainAdapter } from '../core/chain/adapters/doge';
 import { createConfigStore } from '../core/config/configStore';
 import {
   createSocketIoMetaWebReplyWaiter,
@@ -527,8 +532,8 @@ function buildMasterRequestId(now: number): string {
 
 function resolvePaymentAddress(identity: RuntimeIdentityRecord, currency: string): string {
   const normalized = normalizeText(currency).toUpperCase();
-  if (normalized === 'BTC') return identity.btcAddress;
-  if (normalized === 'DOGE') return identity.dogeAddress;
+  if (normalized === 'BTC') return identity.addresses.btc ?? identity.mvcAddress;
+  if (normalized === 'DOGE') return identity.addresses.doge ?? identity.mvcAddress;
   return identity.mvcAddress;
 }
 
@@ -4036,6 +4041,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   getDaemonRecord: () => RuntimeDaemonRecord | null;
   secretStore?: SecretStore;
   signer?: Signer;
+  adapters?: ChainAdapterRegistry;
   identitySyncStepDelayMs?: number;
   chainApiBaseUrl?: string;
   idChatApiBaseUrl?: string;
@@ -4058,7 +4064,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
   llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
 }): MetabotDaemonHttpHandlers {
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
-  const signer = input.signer ?? createLocalMnemonicSigner({ secretStore });
+  // Create default adapter registry if none provided (backward compat)
+  const adapters = input.adapters ?? createChainAdapterRegistry([
+    mvcChainAdapter,
+    btcChainAdapter,
+    dogeChainAdapter,
+  ]);
+  const signer = input.signer ?? createLocalMnemonicSigner({
+    secretStore,
+    adapters,
+  });
   const configStore = createConfigStore(input.homeDir);
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
   const masterStateStore = createPublishedMasterStateStore(input.homeDir);
@@ -4082,7 +4097,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }));
   const callerReplyWaiter = input.callerReplyWaiter ?? createSocketIoMetaWebReplyWaiter();
   const masterReplyWaiter = input.masterReplyWaiter ?? null;
-  const servicePaymentExecutor = input.servicePaymentExecutor ?? createWalletServicePaymentExecutor({ secretStore });
+  const servicePaymentExecutor = input.servicePaymentExecutor ?? createWalletServicePaymentExecutor({
+    secretStore,
+    adapters: adapters ?? new Map(),
+  });
   const ratingMempoolRetryDelaysMs = normalizeRetryDelays(
     input.ratingFollowupRetryDelaysMs,
     DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS,
@@ -4583,8 +4601,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
     if (input.createSignerForHome) {
       return input.createSignerForHome(normalizedProfileHomeDir);
     }
+    const profileAdapters = adapters ?? new Map();
     return createLocalMnemonicSigner({
       secretStore: createFileSecretStore(normalizedProfileHomeDir),
+      adapters: profileAdapters,
     });
   }
 

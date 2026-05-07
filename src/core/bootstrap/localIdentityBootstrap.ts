@@ -54,9 +54,8 @@ function buildIdentityRecord(input: {
     path: input.identity.path,
     publicKey: input.identity.publicKey,
     chatPublicKey: input.identity.chatPublicKey,
+    addresses: { ...input.identity.addresses },
     mvcAddress: input.identity.mvcAddress,
-    btcAddress: input.identity.btcAddress,
-    dogeAddress: input.identity.dogeAddress,
     metaId: input.identity.metaId,
     globalMetaId: input.identity.globalMetaId,
     subsidyState: 'pending',
@@ -95,7 +94,7 @@ async function readSubsidyInput(
 ): Promise<BootstrapSubsidyInput> {
   const secrets = await secretStore.readIdentitySecrets();
   return {
-    mvcAddress: normalizeText(secrets?.mvcAddress) || metabot.mvcAddress,
+    mvcAddress: normalizeText(secrets?.addresses?.mvc) || metabot.mvcAddress,
     mnemonic: normalizeText(secrets?.mnemonic) || undefined,
     path: normalizeText(secrets?.path) || metabot.path || DEFAULT_DERIVATION_PATH,
   };
@@ -150,9 +149,7 @@ export function createLocalMetabotStep(input: {
       }),
       publicKey: identity.publicKey,
       chatPublicKey: identity.chatPublicKey,
-      mvcAddress: identity.mvcAddress,
-      btcAddress: identity.btcAddress,
-      dogeAddress: identity.dogeAddress,
+      addresses: { ...identity.addresses },
       metaId: identity.metaId,
       globalMetaId: identity.globalMetaId,
     });

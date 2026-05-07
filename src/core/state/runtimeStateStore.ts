@@ -13,9 +13,10 @@ export interface RuntimeIdentityRecord {
   path: string;
   publicKey: string;
   chatPublicKey: string;
+  /** Chain addresses keyed by network name. E.g. { mvc: "1...", btc: "1...", doge: "D..." } */
+  addresses: Record<string, string>;
+  /** Convenience: same as addresses['mvc']. Preserved for backward compatibility. */
   mvcAddress: string;
-  btcAddress: string;
-  dogeAddress: string;
   metaId: string;
   globalMetaId: string;
   subsidyState?: RuntimeIdentitySubsidyState;
@@ -87,13 +88,57 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
   }
 }
 
+interface LegacyIdentityRecord {
+  mvcAddress?: string;
+  btcAddress?: string;
+  dogeAddress?: string;
+  [key: string]: unknown;
+}
+
+function normalizeRuntimeIdentity(identity: Record<string, unknown> | null): RuntimeIdentityRecord | null {
+  if (!identity || typeof identity !== 'object') return null;
+
+  const legacy = identity as LegacyIdentityRecord;
+
+  // Build addresses map from legacy flat fields if missing
+  if (!identity['addresses'] || typeof identity['addresses'] !== 'object') {
+    const addresses: Record<string, string> = {};
+    const mvcAddr = typeof identity['mvcAddress'] === 'string' ? identity['mvcAddress'] : undefined;
+    const btcAddr = typeof legacy.btcAddress === 'string' ? legacy.btcAddress : undefined;
+    const dogeAddr = typeof legacy.dogeAddress === 'string' ? legacy.dogeAddress : undefined;
+    if (mvcAddr) addresses.mvc = mvcAddr;
+    if (btcAddr) addresses.btc = btcAddr;
+    if (dogeAddr) addresses.doge = dogeAddr;
+    identity = { ...identity, addresses };
+  }
+
+  return {
+    metabotId: typeof identity['metabotId'] === 'number' ? identity['metabotId'] : 0,
+    name: typeof identity['name'] === 'string' ? identity['name'] : '',
+    createdAt: typeof identity['createdAt'] === 'number' ? identity['createdAt'] : 0,
+    path: typeof identity['path'] === 'string' ? identity['path'] : '',
+    publicKey: typeof identity['publicKey'] === 'string' ? identity['publicKey'] : '',
+    chatPublicKey: typeof identity['chatPublicKey'] === 'string' ? identity['chatPublicKey'] : '',
+    addresses: (identity['addresses'] as Record<string, string>) ?? {},
+    mvcAddress: typeof identity['mvcAddress'] === 'string' ? identity['mvcAddress'] : '',
+    metaId: typeof identity['metaId'] === 'string' ? identity['metaId'] : '',
+    globalMetaId: typeof identity['globalMetaId'] === 'string' ? identity['globalMetaId'] : '',
+    subsidyState: identity['subsidyState'] as RuntimeIdentitySubsidyState | undefined,
+    subsidyError: typeof identity['subsidyError'] === 'string' ? identity['subsidyError'] : null,
+    syncState: identity['syncState'] as RuntimeIdentitySyncState | undefined,
+    syncError: typeof identity['syncError'] === 'string' ? identity['syncError'] : null,
+    namePinId: typeof identity['namePinId'] === 'string' ? identity['namePinId'] : null,
+    chatPublicKeyPinId: typeof identity['chatPublicKeyPinId'] === 'string' ? identity['chatPublicKeyPinId'] : null,
+  };
+}
+
 function normalizeRuntimeState(value: RuntimeState | null): RuntimeState {
   if (!value || typeof value !== 'object') {
     return cloneEmptyState();
   }
 
   return {
-    identity: value.identity ?? null,
+    identity: normalizeRuntimeIdentity(value.identity as Record<string, unknown> | null),
     services: Array.isArray(value.services) ? value.services : [],
     traces: Array.isArray(value.traces) ? value.traces : [],
   };
