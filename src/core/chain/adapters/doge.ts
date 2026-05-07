@@ -24,6 +24,23 @@ const DOGE_DUST_LIMIT = 1_000_000; // 0.01 DOGE
 const DEFAULT_DOGE_FEE_RATE = 200_000; // sat/KB (Fast tier fallback)
 const DEFAULT_DOGE_TIMEOUT_MS = 10_000;
 
+// ---- DOGE bitcoin network parameters ----
+
+const DOGE_NETWORK: bitcoin.Network = {
+  messagePrefix: '\x19Dogecoin Signed Message:\n',
+  bech32: '',
+  bip32: { public: 0x02facafd, private: 0x02fac398 },
+  pubKeyHash: 0x1e,
+  scriptHash: 0x16,
+  wif: 0x9e,
+};
+
+// ---- DOGE inscription constants ----
+
+const MAX_CHUNK_LEN = 240;
+const INSCRIPTION_OUTPUT_VALUE = 1_000_000; // 0.01 DOGE for the P2SH output
+const P2SH_DUST_LIMIT = 600;
+
 // ---- helpers ----
 
 function normalizeText(value: unknown): string {
