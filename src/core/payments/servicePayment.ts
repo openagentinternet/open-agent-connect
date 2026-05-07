@@ -1,9 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { LocalIdentitySecrets, SecretStore } from '../secrets/secretStore';
-import {
-  executeBtcTransfer,
-  executeMvcTransfer,
-} from '../signing/localMnemonicSigner';
+import { executeTransfer } from '../signing/localMnemonicSigner';
+import type { ChainAdapterRegistry } from '../chain/adapters/types';
 
 export interface A2AOrderPaymentResult {
   paymentTxid: string | null;
@@ -125,6 +123,7 @@ export function createTestServicePaymentExecutor(): ServicePaymentExecutor {
 
 export function createWalletServicePaymentExecutor(input: {
   secretStore: SecretStore;
+  adapters: ChainAdapterRegistry;
   feeRate?: number;
 }): ServicePaymentExecutor {
   return {
@@ -134,23 +133,27 @@ export function createWalletServicePaymentExecutor(input: {
         throw new Error('identity_secrets_missing: Identity mnemonic not found in the secret store.');
       }
 
-      const transferInput = {
+      const chain = paymentInput.paymentChain;
+      const adapter = input.adapters.get(chain);
+      if (!adapter) {
+        throw new Error(`service_payment_unsupported_chain: No adapter registered for chain "${chain}".`);
+      }
+
+      const result = await executeTransfer(adapter, {
         mnemonic: secrets.mnemonic,
         path: secrets.path ?? "m/44'/10001'/0'/0/0",
         toAddress: paymentInput.paymentAddress,
         amountSatoshis: decimalAmountToSatoshis(paymentInput.amount),
         feeRate: input.feeRate,
-      };
-      const transfer = paymentInput.paymentChain === 'btc'
-        ? await executeBtcTransfer(transferInput)
-        : await executeMvcTransfer(transferInput);
+      });
 
       return {
-        paymentTxid: transfer.txid,
+        paymentTxid: result.txid,
         paymentChain: paymentInput.paymentChain,
         paymentAmount: paymentInput.amount,
         paymentCurrency: paymentInput.currency === 'MVC' ? 'SPACE' : paymentInput.currency,
         settlementKind: paymentInput.settlementKind,
+        totalCost: result.fee,
         network: paymentInput.paymentChain,
       };
     },
