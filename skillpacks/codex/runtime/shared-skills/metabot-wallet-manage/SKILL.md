@@ -22,7 +22,7 @@ Route natural-language intent through `metabot`, then reason over the returned J
 
 Should trigger when:
 
-- The user asks for wallet balance across all chains, MVC only, or BTC only.
+- The user asks for wallet balance across all chains, MVC only, BTC only, DOGE only, or OPCAT only.
 - The user asks to send, transfer, or pay BTC, SPACE, DOGE, or OPCAT to an address.
 - The user mentions an amount with BTC, SPACE, DOGE, or OPCAT and a recipient address.
 
@@ -42,15 +42,15 @@ Should not trigger when:
 | SPACE / space / 太空币       | MVC     | `--chain mvc` | SPACE is the native currency of the MVC network. Querying SPACE balance = querying MVC balance. |
 | MVC / mvc                 | MVC     | `--chain mvc` | Same network as SPACE.                                                                          |
 | BTC / btc / Bitcoin / 比特币 | Bitcoin | `--chain btc` |                                                                                                 |
-| DOGE / doge                 | Dogecoin | transfer amount unit | Balance queries use the default/all-chain response when available.                              |
-| OPCAT / opcat               | OPCAT   | transfer amount unit | Balance queries use the default/all-chain response when available.                              |
+| DOGE / doge                 | Dogecoin | `--chain doge` | Use `DOGE` as the transfer amount unit.                                                        |
+| OPCAT / opcat               | OPCAT   | `--chain opcat` | Use `OPCAT` as the transfer amount unit.                                                       |
 
 
 **Never** search for a separate SPACE API, SPACE contract, or FT token endpoint. SPACE is not a token — it is the base currency of the MVC network and is always returned by `wallet balance --chain mvc`.
 
 ## Balance Command
 
-For default multi-chain balance (MVC/SPACE + BTC):
+For default multi-chain balance (MVC/SPACE + BTC + DOGE + OPCAT):
 
 ```bash
 metabot wallet balance
@@ -62,13 +62,25 @@ When the human asks for BTC, Bitcoin, or 比特币:
 metabot wallet balance --chain btc
 ```
 
+When the human asks for DOGE or Dogecoin:
+
+```bash
+metabot wallet balance --chain doge
+```
+
+When the human asks for OPCAT:
+
+```bash
+metabot wallet balance --chain opcat
+```
+
 When the human asks for SPACE, MVC, 太空币, or any MVC-network currency:
 
 ```bash
 metabot wallet balance --chain mvc
 ```
 
-The `mvc` balance response includes `balances.mvc.totalMvc` (the SPACE amount) and `balances.mvc.address` (the MVC/SPACE receiving address).
+The `mvc` balance response includes `balances.mvc.totalMvc` (the SPACE amount) and `balances.mvc.address` (the MVC/SPACE receiving address). DOGE and OPCAT balances are returned under `balances.doge` and `balances.opcat`.
 
 ## Transfer Command
 
@@ -111,6 +123,12 @@ Example — preview an OPCAT transfer:
 
 ```bash
 metabot wallet transfer --to o1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 10OPCAT
+```
+
+Example — preview a DOGE transfer:
+
+```bash
+metabot wallet transfer --to D9UuD6sjdEUNv8hPC8WtUXZapBCsFn67jo --amount 0.01DOGE
 ```
 
 The response has `state: "awaiting_confirmation"` and `data` containing:
@@ -157,6 +175,7 @@ Always show the `explorerUrl` to the human so they can verify the transaction on
 | "给地址1EX5NN...转 1 SPACE"         | `wallet transfer --to 1EX5NN... --amount 1SPACE`     |
 | "send 0.0001 btc to 1EX5NN..."  | `wallet transfer --to 1EX5NN... --amount 0.0001BTC`  |
 | "transfer 5 space to 1EX5NN..." | `wallet transfer --to 1EX5NN... --amount 5SPACE`     |
+| "transfer 0.01 doge to D9UuD..." | `wallet transfer --to D9UuD... --amount 0.01DOGE`    |
 | "transfer 10 opcat to o1EX5..." | `wallet transfer --to o1EX5... --amount 10OPCAT`     |
 
 
@@ -168,7 +187,7 @@ Always show the `explorerUrl` to the human so they can verify the transaction on
 
 ## In Scope
 
-- Wallet balance checks across all, MVC, or BTC chains.
+- Wallet balance checks across all, MVC, BTC, DOGE, or OPCAT chains.
 - BTC, SPACE (MVC), DOGE, and OPCAT transfers with two-step preview + confirm flow.
 
 ## Out of Scope

@@ -51,35 +51,35 @@ test('runCli dispatches `metabot buzz post --request-file` with parsed JSON requ
   });
 });
 
-test('runCli dispatches `metabot buzz post --request-file --chain btc` and sets network=btc', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-buzz-btc-'));
+test('runCli dispatches `metabot buzz post --request-file --chain` for supported write chains', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-buzz-network-'));
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
-    content: 'hello metabot buzz on btc',
+    content: 'hello metabot buzz',
   }), 'utf8');
 
   const calls = [];
-  const exitCode = await runCli(['buzz', 'post', '--request-file', requestFile, '--chain', 'btc'], {
-    stdout: { write: () => true },
-    stderr: { write: () => true },
-    dependencies: {
-      buzz: {
-        post: async (input) => {
-          calls.push(input);
-          return commandSuccess({
-            pinId: 'buzz-pin-btc-1',
-            network: input.network,
-          });
+  for (const chain of ['btc', 'doge', 'opcat']) {
+    const exitCode = await runCli(['buzz', 'post', '--request-file', requestFile, '--chain', chain], {
+      stdout: { write: () => true },
+      stderr: { write: () => true },
+      dependencies: {
+        buzz: {
+          post: async (input) => {
+            calls.push(input);
+            return commandSuccess({
+              pinId: `buzz-pin-${chain}-1`,
+              network: input.network,
+            });
+          },
         },
       },
-    },
-  });
+    });
 
-  assert.equal(exitCode, 0);
-  assert.deepEqual(calls, [{
-    content: 'hello metabot buzz on btc',
-    network: 'btc',
-  }]);
+    assert.equal(exitCode, 0);
+  }
+
+  assert.deepEqual(calls.map((entry) => entry.network), ['btc', 'doge', 'opcat']);
 });
 
 test('runCli fails `metabot buzz post` when --chain value is unsupported', async () => {
@@ -91,7 +91,7 @@ test('runCli fails `metabot buzz post` when --chain value is unsupported', async
 
   const stdout = [];
   const calls = [];
-  const exitCode = await runCli(['buzz', 'post', '--request-file', requestFile, '--chain', 'doge'], {
+  const exitCode = await runCli(['buzz', 'post', '--request-file', requestFile, '--chain', 'eth'], {
     stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
     stderr: { write: () => true },
     dependencies: {

@@ -163,6 +163,7 @@ import { createChainAdapterRegistry } from '../core/chain/adapters/registry';
 import { mvcChainAdapter } from '../core/chain/adapters/mvc';
 import { btcChainAdapter } from '../core/chain/adapters/btc';
 import { dogeChainAdapter } from '../core/chain/adapters/doge';
+import { opcatChainAdapter } from '../core/chain/adapters/opcat';
 import { createConfigStore } from '../core/config/configStore';
 import {
   createSocketIoMetaWebReplyWaiter,
@@ -4193,6 +4194,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     mvcChainAdapter,
     btcChainAdapter,
     dogeChainAdapter,
+    opcatChainAdapter,
   ]);
   const signer = input.signer ?? createLocalMnemonicSigner({
     secretStore,

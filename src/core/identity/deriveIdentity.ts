@@ -86,7 +86,7 @@ function getNet(): Net {
   return 'livenet' as Net;
 }
 
-async function getV3AddressType(chain: 'mvc' | 'btc' | 'doge'): Promise<AddressType> {
+async function getV3AddressType(chain: 'mvc' | 'btc' | 'doge' | 'opcat'): Promise<AddressType> {
   if (chain === 'mvc') return AddressType.LegacyMvc;
   if (chain === 'doge') return AddressType.DogeSameAsMvc;
   return AddressType.SameAsMvc;
@@ -487,6 +487,8 @@ export async function deriveIdentity(options: DeriveIdentityOptions = {}): Promi
 
   const btcAddress = btcWallet.getAddress();
   const dogeAddress = dogeWallet.getAddress();
+  // OPCAT currently uses the same legacy address derivation as BTC/MVC.
+  const opcatAddress = btcAddress;
 
   return {
     mnemonic,
@@ -497,6 +499,7 @@ export async function deriveIdentity(options: DeriveIdentityOptions = {}): Promi
       mvc: mvcAddress,
       btc: btcAddress,
       doge: dogeAddress,
+      opcat: opcatAddress,
     },
     mvcAddress,
     metaId: computeMetaId(mvcAddress),

@@ -82,6 +82,37 @@ test('runCli dispatches `metabot file upload --request-file --chain btc` and set
   }]);
 });
 
+test('runCli dispatches `metabot file upload --request-file --chain opcat` and sets network=opcat', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-opcat-'));
+  const requestFile = path.join(tempDir, 'request.json');
+  await writeFile(requestFile, JSON.stringify({
+    filePath: '/tmp/photo.png',
+  }), 'utf8');
+
+  const calls = [];
+  const exitCode = await runCli(['file', 'upload', '--request-file', requestFile, '--chain', 'opcat'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        upload: async (input) => {
+          calls.push(input);
+          return commandSuccess({
+            pinId: 'file-pin-opcat-1',
+            network: input.network,
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    filePath: '/tmp/photo.png',
+    network: 'opcat',
+  }]);
+});
+
 test('runCli fails `metabot file upload` when --chain value is missing', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-missing-chain-'));
   const requestFile = path.join(tempDir, 'request.json');
@@ -113,7 +144,7 @@ test('runCli fails `metabot file upload` when --chain value is missing', async (
   assert.match(envelope.message, /Missing value for --chain/);
 });
 
-test('runCli fails `metabot file upload` when --chain value is unsupported', async () => {
+test('runCli fails `metabot file upload` when --chain value is doge', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-invalid-chain-'));
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({

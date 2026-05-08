@@ -16,6 +16,7 @@ function readDerivedFields(source) {
     const mvcAddress = readString(source.mvcAddress ?? source.mvc_address);
     const btcAddress = readString(source.btcAddress ?? source.btc_address);
     const dogeAddress = readString(source.dogeAddress ?? source.doge_address);
+    const opcatAddress = readString(source.opcatAddress ?? source.opcat_address) ?? btcAddress ?? mvcAddress;
     // Build addresses map from explicit fields
     const addresses = {};
     if (mvcAddress)
@@ -24,6 +25,8 @@ function readDerivedFields(source) {
         addresses.btc = btcAddress;
     if (dogeAddress)
         addresses.doge = dogeAddress;
+    if (opcatAddress)
+        addresses.opcat = opcatAddress;
     return {
         publicKey: readString(source.publicKey ?? source.public_key),
         chatPublicKey: readString(source.chatPublicKey ?? source.chat_public_key),

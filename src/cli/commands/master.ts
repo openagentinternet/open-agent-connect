@@ -3,7 +3,7 @@ import {
   commandMissingFlag,
   commandUnknownSubcommand,
   hasFlag,
-  readChainFlag,
+  readChainWriteFlag,
   readFlagValue,
   readJsonFile,
 } from './helpers';
@@ -21,7 +21,7 @@ export async function runMasterCommand(
       return commandMissingFlag('--payload-file');
     }
 
-    const chainFlag = readChainFlag(args);
+    const chainFlag = readChainWriteFlag(args);
     if (chainFlag.error) {
       return chainFlag.error;
     }

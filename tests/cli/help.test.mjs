@@ -148,6 +148,87 @@ test('runCli prints wallet transfer help with every supported transfer unit', as
   assert.match(output, /Fails with invalid_argument when --to or --amount is missing, or the currency unit is not BTC, SPACE, DOGE, or OPCAT\./);
 });
 
+test('runCli prints wallet balance help with every supported balance chain', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['wallet', 'balance', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot wallet balance \[--chain <all\|mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /wallet balances for mvc, btc, doge, and opcat/i);
+  assert.match(output, /metabot wallet balance --chain doge/);
+  assert.match(output, /metabot wallet balance --chain opcat/);
+});
+
+test('runCli prints chain write help with every supported write chain', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['chain', 'write', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot chain write --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /optional chain network override: mvc, btc, doge, or opcat/i);
+  assert.match(output, /chain-doge-request\.json/);
+  assert.match(output, /chain-opcat-request\.json/);
+});
+
+test('runCli prints buzz post help with DOGE and OPCAT chain support', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['buzz', 'post', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot buzz post --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /buzz-doge-request\.json/);
+  assert.match(output, /buzz-opcat-request\.json/);
+});
+
+test('runCli prints file upload help with OPCAT support and DOGE exclusion', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['file', 'upload', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot file upload --request-file <path> \[--chain <mvc\|btc\|opcat>\]/m);
+  assert.match(output, /DOGE is not supported for file upload/i);
+});
+
+test('runCli prints master publish help with DOGE and OPCAT chain support', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['master', 'publish', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot master publish --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /master-doge-payload\.json/);
+  assert.match(output, /master-opcat-payload\.json/);
+});
+
 test('runCli prints system group help with update and uninstall subcommands', async () => {
   const stdout = [];
 
@@ -207,6 +288,32 @@ test('runCli prints services group help with publish skill listing', async () =>
   const output = stdout.join('');
   assert.match(output, /^Usage:\s+metabot services <subcommand>/m);
   assert.match(output, /publish-skills\s+List primary-runtime skills available for service publishing\./);
+});
+
+test('runCli prints services publish and rate help with DOGE and OPCAT chain support', async () => {
+  const publishStdout = [];
+  const publishExitCode = await runCli(['services', 'publish', '--help'], {
+    stdout: { write: (chunk) => { publishStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(publishExitCode, 0);
+  const publishOutput = publishStdout.join('');
+  assert.match(publishOutput, /^Usage:\s+metabot services publish --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(publishOutput, /service-doge-payload\.json/);
+  assert.match(publishOutput, /service-opcat-payload\.json/);
+
+  const rateStdout = [];
+  const rateExitCode = await runCli(['services', 'rate', '--help'], {
+    stdout: { write: (chunk) => { rateStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(rateExitCode, 0);
+  const rateOutput = rateStdout.join('');
+  assert.match(rateOutput, /^Usage:\s+metabot services rate --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(rateOutput, /rating-doge\.json/);
+  assert.match(rateOutput, /rating-opcat\.json/);
 });
 
 test('runCli prints leaf help text for `metabot services publish-skills --help`', async () => {

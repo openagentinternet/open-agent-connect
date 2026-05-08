@@ -53,8 +53,8 @@ test('runCli dispatches `metabot services publish --payload-file` with parsed JS
   });
 });
 
-test('runCli dispatches `metabot services publish --payload-file --chain btc` and sets network=btc', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-publish-btc-'));
+test('runCli dispatches `metabot services publish --payload-file --chain` for supported write chains', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-publish-network-'));
   const payloadFile = path.join(tempDir, 'payload.json');
   await writeFile(payloadFile, JSON.stringify({
     serviceName: 'Tarot Reading',
@@ -63,29 +63,27 @@ test('runCli dispatches `metabot services publish --payload-file --chain btc` an
   }), 'utf8');
 
   const calls = [];
-  const exitCode = await runCli(['services', 'publish', '--payload-file', payloadFile, '--chain', 'btc'], {
-    stdout: { write: () => true },
-    stderr: { write: () => true },
-    dependencies: {
-      services: {
-        publish: async (input) => {
-          calls.push(input);
-          return commandSuccess({
-            servicePinId: 'service-tarot-btc',
-            network: input.network,
-          });
+  for (const chain of ['btc', 'doge', 'opcat']) {
+    const exitCode = await runCli(['services', 'publish', '--payload-file', payloadFile, '--chain', chain], {
+      stdout: { write: () => true },
+      stderr: { write: () => true },
+      dependencies: {
+        services: {
+          publish: async (input) => {
+            calls.push(input);
+            return commandSuccess({
+              servicePinId: `service-tarot-${chain}`,
+              network: input.network,
+            });
+          },
         },
       },
-    },
-  });
+    });
 
-  assert.equal(exitCode, 0);
-  assert.deepEqual(calls, [{
-    serviceName: 'Tarot Reading',
-    displayName: 'Tarot Reading',
-    description: 'Performs tarot readings.',
-    network: 'btc',
-  }]);
+    assert.equal(exitCode, 0);
+  }
+
+  assert.deepEqual(calls.map((entry) => entry.network), ['btc', 'doge', 'opcat']);
 });
 
 test('runCli fails `metabot services publish` when --chain value is missing', async () => {
@@ -132,7 +130,7 @@ test('runCli fails `metabot services publish` when --chain value is unsupported'
 
   const stdout = [];
   const calls = [];
-  const exitCode = await runCli(['services', 'publish', '--payload-file', payloadFile, '--chain', 'doge'], {
+  const exitCode = await runCli(['services', 'publish', '--payload-file', payloadFile, '--chain', 'eth'], {
     stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
     stderr: { write: () => true },
     dependencies: {
@@ -250,8 +248,8 @@ test('runCli dispatches `metabot services call --request-file` with parsed JSON 
   });
 });
 
-test('runCli dispatches `metabot services rate --request-file --chain btc` and sets network=btc', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-rate-btc-'));
+test('runCli dispatches `metabot services rate --request-file --chain` for supported write chains', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-rate-network-'));
   const requestFile = path.join(tempDir, 'rating.json');
   await writeFile(requestFile, JSON.stringify({
     traceId: 'trace-123',
@@ -260,29 +258,27 @@ test('runCli dispatches `metabot services rate --request-file --chain btc` and s
   }), 'utf8');
 
   const calls = [];
-  const exitCode = await runCli(['services', 'rate', '--request-file', requestFile, '--chain', 'btc'], {
-    stdout: { write: () => true },
-    stderr: { write: () => true },
-    dependencies: {
-      services: {
-        rate: async (input) => {
-          calls.push(input);
-          return commandSuccess({
-            pinId: 'rating-pin-btc-1',
-            network: input.network,
-          });
+  for (const chain of ['btc', 'doge', 'opcat']) {
+    const exitCode = await runCli(['services', 'rate', '--request-file', requestFile, '--chain', chain], {
+      stdout: { write: () => true },
+      stderr: { write: () => true },
+      dependencies: {
+        services: {
+          rate: async (input) => {
+            calls.push(input);
+            return commandSuccess({
+              pinId: `rating-pin-${chain}-1`,
+              network: input.network,
+            });
+          },
         },
       },
-    },
-  });
+    });
 
-  assert.equal(exitCode, 0);
-  assert.deepEqual(calls, [{
-    traceId: 'trace-123',
-    rate: 5,
-    comment: 'Great result.',
-    network: 'btc',
-  }]);
+    assert.equal(exitCode, 0);
+  }
+
+  assert.deepEqual(calls.map((entry) => entry.network), ['btc', 'doge', 'opcat']);
 });
 
 test('runCli fails `metabot services rate` when --chain value is missing', async () => {
@@ -329,7 +325,7 @@ test('runCli fails `metabot services rate` when --chain value is unsupported', a
 
   const stdout = [];
   const calls = [];
-  const exitCode = await runCli(['services', 'rate', '--request-file', requestFile, '--chain', 'doge'], {
+  const exitCode = await runCli(['services', 'rate', '--request-file', requestFile, '--chain', 'eth'], {
     stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
     stderr: { write: () => true },
     dependencies: {

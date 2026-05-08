@@ -21,6 +21,7 @@ const FIXTURE_IDENTITY = {
     mvc: '15Lofqw6Kpa6P8WnTYXKvmPyw3UZvvQWrB',
     btc: '15Lofqw6Kpa6P8WnTYXKvmPyw3UZvvQWrB',
     doge: 'D9UuD6sjdEUNv8hPC8WtUXZapBCsFn67jo',
+    opcat: '15Lofqw6Kpa6P8WnTYXKvmPyw3UZvvQWrB',
   },
   mvcAddress: '15Lofqw6Kpa6P8WnTYXKvmPyw3UZvvQWrB',
   metaId: '1dde986762a582142fa908419eed375c76d683c0414ed67bb08cbea8c0fe2b4f',

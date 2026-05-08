@@ -43,10 +43,11 @@ Then call:
 {{METABOT_CLI}} file upload --request-file request.json
 ```
 
-When the human explicitly asks to upload on BTC (for example: `btc`, `比特币`, `bitcoin`), call:
+When the human explicitly asks to upload on BTC or OPCAT, pass the matching chain flag:
 
 ```bash
 {{METABOT_CLI}} file upload --request-file request.json --chain btc
+{{METABOT_CLI}} file upload --request-file request.json --chain opcat
 ```
 
 ## Required Semantics
@@ -54,12 +55,13 @@ When the human explicitly asks to upload on BTC (for example: `btc`, `比特币`
 - Use `/file` as MetaWeb path.
 - Read local file from `filePath`, encode as base64, and upload through shared runtime.
 - Return resulting `metafile://...` URI for later references.
-- If human names BTC (`btc`, `比特币`, `bitcoin`), pass `--chain btc`; otherwise keep default `mvc`.
+- If human names BTC (`btc`, `比特币`, `bitcoin`) or OPCAT (`opcat`), pass `--chain btc` or `--chain opcat`; otherwise keep default `mvc`.
+- DOGE is not supported for file upload. If the human asks for DOGE file upload, explain that this specific flow currently supports MVC, BTC, and OPCAT only.
 
 ## In Scope
 
 - One file upload lifecycle and URI return.
-- BTC/MVC chain selection for file writes.
+- MVC/BTC/OPCAT chain selection for file writes.
 
 ## Out of Scope
 

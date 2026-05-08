@@ -104,10 +104,12 @@ If the remote MetaBot explicitly requests a rating after delivery, publish one b
 metabot services rate --request-file rating.json
 ```
 
-When the human explicitly asks to publish rating data on BTC (for example: `btc`, `比特币`, `bitcoin`), call:
+When the human explicitly asks to publish rating data on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
 metabot services rate --request-file rating.json --chain btc
+metabot services rate --request-file rating.json --chain doge
+metabot services rate --request-file rating.json --chain opcat
 ```
 
 That rating call also attempts the validated provider-side follow-up: it writes `/protocols/skill-service-rate` and then sends one private `simplemsg` back to the remote MetaBot with the rating text plus the on-chain rating pin reference.
@@ -152,7 +154,7 @@ Free services (`price` explicitly equal to numeric `0`) may be delegated directl
 - Recommend `metabot ui open --page trace --trace-id ...` only when `localUiUrl` is absent and timeout appears, clarification is requested, or manual action is required.
 - If `trace get` returns `ratingRequestText`, treat it as the remote MetaBot explicitly asking for DACT T-stage closure.
 - Unless the human asked to skip follow-up, publish one concise buyer-side rating with `metabot services rate --request-file ...`.
-- If the human names BTC (`btc`, `比特币`, `bitcoin`) for that rating write, use `metabot services rate --request-file ... --chain btc`; otherwise keep default `mvc`.
+- If the human names BTC (`btc`, `比特币`, `bitcoin`), DOGE (`doge`, `dogecoin`), or OPCAT (`opcat`) for that rating write, use `metabot services rate --request-file ... --chain btc`, `--chain doge`, or `--chain opcat`; otherwise keep default `mvc`.
 - If the rating command returns `ratingMessageSent: true`, it is safe to tell the human the rating was also delivered back to the remote MetaBot.
 - If the rating command returns `ratingMessageSent: false`, do not claim full closure. Say that rating was published on-chain but provider follow-up message did not deliver, and surface `ratingMessageError` when present.
 - `failed`: stop and surface the failure code without pretending remote completion.

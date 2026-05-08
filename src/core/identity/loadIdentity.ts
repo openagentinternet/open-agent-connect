@@ -11,10 +11,13 @@ export type IdentitySource = Partial<DerivedIdentity> & {
   mvc_address?: string;
   btc_address?: string;
   doge_address?: string;
+  opcat_address?: string;
   /** Legacy: same as addresses.btc */
   btcAddress?: string;
   /** Legacy: same as addresses.doge */
   dogeAddress?: string;
+  /** Legacy: same as addresses.opcat */
+  opcatAddress?: string;
   metaid?: string;
   globalmetaid?: string;
 };
@@ -34,12 +37,14 @@ function readDerivedFields(source: IdentitySource): Partial<DerivedIdentity> {
   const mvcAddress = readString(source.mvcAddress ?? source.mvc_address);
   const btcAddress = readString(source.btcAddress ?? source.btc_address);
   const dogeAddress = readString(source.dogeAddress ?? source.doge_address);
+  const opcatAddress = readString(source.opcatAddress ?? source.opcat_address) ?? btcAddress ?? mvcAddress;
 
   // Build addresses map from explicit fields
   const addresses: Record<string, string> = {};
   if (mvcAddress) addresses.mvc = mvcAddress;
   if (btcAddress) addresses.btc = btcAddress;
   if (dogeAddress) addresses.doge = dogeAddress;
+  if (opcatAddress) addresses.opcat = opcatAddress;
 
   return {
     publicKey: readString(source.publicKey ?? source.public_key),

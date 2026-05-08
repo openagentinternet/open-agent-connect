@@ -69,6 +69,7 @@ const registry_1 = require("../core/chain/adapters/registry");
 const mvc_1 = require("../core/chain/adapters/mvc");
 const btc_1 = require("../core/chain/adapters/btc");
 const doge_1 = require("../core/chain/adapters/doge");
+const opcat_1 = require("../core/chain/adapters/opcat");
 const configStore_1 = require("../core/config/configStore");
 const metawebReplyWaiter_1 = require("../core/a2a/metawebReplyWaiter");
 const orderProtocol_1 = require("../core/a2a/protocol/orderProtocol");
@@ -3199,6 +3200,7 @@ function createDefaultMetabotDaemonHandlers(input) {
         mvc_1.mvcChainAdapter,
         btc_1.btcChainAdapter,
         doge_1.dogeChainAdapter,
+        opcat_1.opcatChainAdapter,
     ]);
     const signer = input.signer ?? (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
         secretStore,

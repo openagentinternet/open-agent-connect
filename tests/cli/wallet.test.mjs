@@ -213,27 +213,29 @@ test('runCli fails `metabot wallet transfer` with insufficient_balance when hand
 
 // ─── wallet balance error tests (existing) ────────────────────────────────────
 
-test('runCli dispatches `metabot wallet balance --chain doge` with the new dynamic chain support', async () => {
+test('runCli dispatches `metabot wallet balance --chain` with dynamic DOGE and OPCAT support', async () => {
   const calls = [];
   const stdout = [];
-  const exitCode = await runCli(['wallet', 'balance', '--chain', 'doge'], {
-    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-    dependencies: {
-      wallet: {
-        balance: async (input) => {
-          calls.push(input);
-          return commandSuccess({ chain: input.chain });
+  for (const chain of ['doge', 'opcat']) {
+    const exitCode = await runCli(['wallet', 'balance', '--chain', chain], {
+      stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+      stderr: { write: () => true },
+      dependencies: {
+        wallet: {
+          balance: async (input) => {
+            calls.push(input);
+            return commandSuccess({ chain: input.chain });
+          },
         },
       },
-    },
-  });
+    });
 
-  // With the adapter-based architecture, chain validation happens in the handler
-  // (which has the adapter registry). The CLI parser passes through any chain name.
-  // doge is now a registered chain, so it's accepted at the CLI level.
-  assert.equal(exitCode, 0);
-  assert.deepEqual(calls, [{ chain: 'doge' }]);
+    // With the adapter-based architecture, chain validation happens in the handler
+    // (which has the adapter registry). The CLI parser passes through any chain name.
+    assert.equal(exitCode, 0);
+  }
+
+  assert.deepEqual(calls, [{ chain: 'doge' }, { chain: 'opcat' }]);
 });
 
 test('runCli fails `metabot wallet balance` when --chain value is missing', async () => {

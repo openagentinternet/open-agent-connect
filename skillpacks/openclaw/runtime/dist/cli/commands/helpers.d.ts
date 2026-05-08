@@ -1,18 +1,14 @@
 import { type MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { CliRuntimeContext } from '../types';
-export type CliChainValue = 'mvc' | 'btc';
+export type CliWriteChainValue = 'mvc' | 'btc' | 'doge' | 'opcat';
+export type CliFileUploadChainValue = 'mvc' | 'btc' | 'opcat';
 export declare function readFlagValue(args: string[], flag: string): string | null;
-export declare function readChainFlag(args: string[]): {
-    chain: CliChainValue | null;
+export declare function readChainWriteFlag(args: string[]): {
+    chain: CliWriteChainValue | null;
     error: MetabotCommandResult<never> | null;
 };
-/**
- * Parse --chain flag accepting any chain name.
- * The runtime handler is responsible for validating against the adapter registry.
- * Used by commands that support multi-chain (chain write).
- */
-export declare function readAnyChainFlag(args: string[]): {
-    chain: string | null;
+export declare function readFileUploadChainFlag(args: string[]): {
+    chain: CliFileUploadChainValue | null;
     error: MetabotCommandResult<never> | null;
 };
 export declare function hasFlag(args: string[], flag: string): boolean;

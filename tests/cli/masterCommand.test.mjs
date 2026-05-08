@@ -113,7 +113,7 @@ test('runCli dispatches `metabot master list --online --kind debug` with parsed 
   ]);
 });
 
-test('runCli dispatches `metabot master publish --payload-file --chain btc` and sets network=btc', async () => {
+test('runCli dispatches `metabot master publish --payload-file --chain` for supported write chains', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-publish-'));
   const payloadFile = path.join(tempDir, 'master-service.json');
   await writeFile(payloadFile, JSON.stringify({
@@ -139,30 +139,37 @@ test('runCli dispatches `metabot master publish --payload-file --chain btc` and 
 
   const calls = [];
 
-  const exitCode = await runCli(['master', 'publish', '--payload-file', payloadFile, '--chain', 'btc'], {
-    stdout: { write: () => true },
-    stderr: { write: () => true },
-    dependencies: {
-      master: {
-        publish: async (input) => {
-          calls.push(input);
-          return {
-            ok: true,
-            state: 'success',
-            data: {
-              masterPinId: 'master-pin-1',
-              network: input.network,
-            },
-          };
+  for (const chain of ['btc', 'doge', 'opcat']) {
+    const exitCode = await runCli(['master', 'publish', '--payload-file', payloadFile, '--chain', chain], {
+      stdout: { write: () => true },
+      stderr: { write: () => true },
+      dependencies: {
+        master: {
+          publish: async (input) => {
+            calls.push(input);
+            return {
+              ok: true,
+              state: 'success',
+              data: {
+                masterPinId: `master-pin-${chain}`,
+                network: input.network,
+              },
+            };
+          },
         },
       },
-    },
-  });
+    });
 
-  assert.equal(exitCode, 0);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].serviceName, 'official-debug-master');
-  assert.equal(calls[0].network, 'btc');
+    assert.equal(exitCode, 0);
+  }
+
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls.map((entry) => entry.serviceName), [
+    'official-debug-master',
+    'official-debug-master',
+    'official-debug-master',
+  ]);
+  assert.deepEqual(calls.map((entry) => entry.network), ['btc', 'doge', 'opcat']);
 });
 
 test('runCli dispatches `metabot master ask --request-file` and returns not_implemented when the handler is missing', async () => {

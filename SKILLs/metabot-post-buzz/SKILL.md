@@ -45,25 +45,27 @@ Then call:
 {{METABOT_CLI}} buzz post --request-file request.json
 ```
 
-When the human explicitly asks to post on BTC (for example: `btc`, `比特币`, `bitcoin`), call:
+When the human explicitly asks to post on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
 {{METABOT_CLI}} buzz post --request-file request.json --chain btc
+{{METABOT_CLI}} buzz post --request-file request.json --chain doge
+{{METABOT_CLI}} buzz post --request-file request.json --chain opcat
 ```
 
 ## Required Semantics
 
 - Use `/protocols/simplebuzz` as outer MetaWeb path.
-- If attachments are present, upload each file first through shared `file upload` flow so payload can reference `metafile://...` URIs.
+- If attachments are present, upload each file first through shared `file upload` flow so payload can reference `metafile://...` URIs. DOGE is supported for the final buzz write, but `file upload` itself does not support DOGE.
 - Keep final buzz payload machine-first and stop on runtime errors instead of inventing post result.
-- If human names BTC (`btc`, `比特币`, `bitcoin`), pass `--chain btc`; otherwise keep default `mvc`.
+- If human names BTC (`btc`, `比特币`, `bitcoin`), DOGE (`doge`, `dogecoin`), or OPCAT (`opcat`), pass `--chain btc`, `--chain doge`, or `--chain opcat`; otherwise keep default `mvc`.
 - If the successful result includes `localUiUrl`, surface it back to the human as the local Buzz view link (for example, a clickable "view in local Buzz" link) instead of inventing another localhost URL.
 - Do not auto-open the local Buzz page unless the human explicitly asks to open or launch it.
 
 ## In Scope
 
 - One buzz post lifecycle with optional attachments.
-- BTC/MVC chain selection for buzz writes.
+- MVC/BTC/DOGE/OPCAT chain selection for buzz writes.
 
 ## Out of Scope
 

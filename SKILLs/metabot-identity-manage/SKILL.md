@@ -141,10 +141,12 @@ Write avatar pin:
 {{METABOT_CLI}} chain write --request-file avatar-request.json
 ```
 
-If the human explicitly asks to write avatar on BTC (for example: `btc`, `比特币`, `bitcoin`), use:
+If the human explicitly asks to write avatar on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
 {{METABOT_CLI}} chain write --request-file avatar-request.json --chain btc
+{{METABOT_CLI}} chain write --request-file avatar-request.json --chain doge
+{{METABOT_CLI}} chain write --request-file avatar-request.json --chain opcat
 ```
 
 ## In Scope
@@ -174,6 +176,7 @@ If the human explicitly asks to write avatar on BTC (for example: `btc`, `比特
 - If create returns `identity_name_conflict`, do not edit runtime files; run `identity who` and `identity list`, then assign explicitly.
 - For avatar updates, do not call `file upload` and then write `metafile://...` into `/info/avatar`.
 - Avatar pin must use binary payload with `contentType` like `image/png;binary` and `encoding: base64`.
+- Avatar chain writes support MVC, BTC, DOGE, and OPCAT.
 - Never manually edit `~/.metabot/profiles/<slug>/.runtime/` files.
 
 ## Compatibility

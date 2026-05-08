@@ -117,14 +117,19 @@ const HELP_JSON_FLAG = {
 };
 const PLATFORM_HOST_VALUE = `<${platformRegistry_1.SUPPORTED_PLATFORM_IDS.join('|')}>`;
 const PLATFORM_HOST_TEXT = platformRegistry_1.SUPPORTED_PLATFORM_IDS.join(', ');
-const CHAIN_BTC_MVC_FLAG = {
+const CHAIN_WRITE_FLAG = {
     flag: '--chain',
-    value: '<mvc|btc>',
-    description: 'Override the target chain network for this command. Defaults to mvc.',
+    value: '<mvc|btc|doge|opcat>',
+    description: 'Optional chain network override: mvc, btc, doge, or opcat. Defaults to mvc.',
 };
-const WALLET_CHAIN_ALL_BTC_MVC_FLAG = {
+const FILE_UPLOAD_CHAIN_FLAG = {
     flag: '--chain',
-    value: '<all|mvc|btc>',
+    value: '<mvc|btc|opcat>',
+    description: 'Optional chain network override: mvc, btc, or opcat. DOGE is not supported for file upload. Defaults to mvc.',
+};
+const WALLET_CHAIN_ALL_FLAG = {
+    flag: '--chain',
+    value: '<all|mvc|btc|doge|opcat>',
     description: 'Select wallet balance scope. Defaults to all.',
 };
 const VERSION_FLAG = {
@@ -452,7 +457,7 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['file', 'upload'],
         summary: 'Upload one local file to MetaWeb and return the resulting metafile URI.',
-        usage: 'metabot file upload --request-file <path> [--chain <mvc|btc>]',
+        usage: 'metabot file upload --request-file <path> [--chain <mvc|btc|opcat>]',
         requiredFlags: [
             { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
         ],
@@ -469,11 +474,13 @@ const COMMAND_HELP_SPECS = [
         ],
         failureSemantics: [
             'Fails when the local file is missing, unreadable, or the chain upload path rejects the write.',
+            'DOGE is not supported for file upload.',
         ],
         examples: [
             'metabot file upload --request-file file-request.json',
+            'metabot file upload --request-file file-opcat-request.json --chain opcat',
         ],
-        optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [FILE_UPLOAD_CHAIN_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['buzz'],
@@ -487,7 +494,7 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['buzz', 'post'],
         summary: 'Publish one simplebuzz post through the validated MetaWeb buzz contract.',
-        usage: 'metabot buzz post --request-file <path> [--chain <mvc|btc>]',
+        usage: 'metabot buzz post --request-file <path> [--chain <mvc|btc|doge|opcat>]',
         requiredFlags: [
             { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
         ],
@@ -505,8 +512,10 @@ const COMMAND_HELP_SPECS = [
         ],
         examples: [
             'metabot buzz post --request-file buzz-request.json',
+            'metabot buzz post --request-file buzz-doge-request.json --chain doge',
+            'metabot buzz post --request-file buzz-opcat-request.json --chain opcat',
         ],
-        optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['chain'],
@@ -520,7 +529,7 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['chain', 'write'],
         summary: 'Write one arbitrary MetaID tuple using the public chain-write interface.',
-        usage: 'metabot chain write --request-file <path> [--chain <mvc|btc>]',
+        usage: 'metabot chain write --request-file <path> [--chain <mvc|btc|doge|opcat>]',
         requiredFlags: [
             { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
         ],
@@ -531,7 +540,7 @@ const COMMAND_HELP_SPECS = [
             version: '1.0.0',
             contentType: 'application/json',
             payload: '{"example":true}',
-            network: 'optional chain network override',
+            network: 'optional chain network override: mvc, btc, doge, or opcat',
         },
         successFields: [
             'pinId',
@@ -543,8 +552,10 @@ const COMMAND_HELP_SPECS = [
         ],
         examples: [
             'metabot chain write --request-file chain-request.json',
+            'metabot chain write --request-file chain-doge-request.json --chain doge',
+            'metabot chain write --request-file chain-opcat-request.json --chain opcat',
         ],
-        optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['wallet'],
@@ -589,13 +600,15 @@ const COMMAND_HELP_SPECS = [
     },
     {
         commandPath: ['wallet', 'balance'],
-        summary: 'Query local wallet balances for mvc/btc. Defaults to all chains.',
-        usage: 'metabot wallet balance [--chain <all|mvc|btc>]',
+        summary: 'Query local wallet balances for mvc, btc, doge, and opcat. Defaults to all chains.',
+        usage: 'metabot wallet balance [--chain <all|mvc|btc|doge|opcat>]',
         successFields: [
             'chain',
             'globalMetaId',
             'balances.mvc',
             'balances.btc',
+            'balances.doge',
+            'balances.opcat',
         ],
         failureSemantics: [
             'Fails when no local identity is loaded or the selected chain balance API is unavailable.',
@@ -603,8 +616,10 @@ const COMMAND_HELP_SPECS = [
         examples: [
             'metabot wallet balance',
             'metabot wallet balance --chain btc',
+            'metabot wallet balance --chain doge',
+            'metabot wallet balance --chain opcat',
         ],
-        optionalFlags: [WALLET_CHAIN_ALL_BTC_MVC_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [WALLET_CHAIN_ALL_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['master'],
@@ -623,11 +638,16 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['master', 'publish'],
         summary: 'Publish one master-service payload for a remote master/provider.',
-        usage: 'metabot master publish --payload-file <path> [--chain <mvc|btc>]',
+        usage: 'metabot master publish --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
         requiredFlags: [
             { flag: '--payload-file', value: '<path>', description: 'JSON master-service payload file.' },
         ],
-        optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+        examples: [
+            'metabot master publish --payload-file master-payload.json',
+            'metabot master publish --payload-file master-doge-payload.json --chain doge',
+            'metabot master publish --payload-file master-opcat-payload.json --chain opcat',
+        ],
+        optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['master', 'list'],
@@ -828,7 +848,7 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['services', 'publish'],
         summary: 'Publish one service to the chain-backed skill-service directory.',
-        usage: 'metabot services publish --payload-file <path> [--chain <mvc|btc>]',
+        usage: 'metabot services publish --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
         requiredFlags: [
             { flag: '--payload-file', value: '<path>', description: 'JSON service payload file.' },
         ],
@@ -853,8 +873,10 @@ const COMMAND_HELP_SPECS = [
         ],
         examples: [
             'metabot services publish --payload-file service-payload.json',
+            'metabot services publish --payload-file service-doge-payload.json --chain doge',
+            'metabot services publish --payload-file service-opcat-payload.json --chain opcat',
         ],
-        optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['services', 'publish-skills'],
@@ -1007,7 +1029,7 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['services', 'rate'],
         summary: 'Publish one buyer-side service rating and optionally deliver a follow-up private message back to the provider.',
-        usage: 'metabot services rate --request-file <path> [--chain <mvc|btc>]',
+        usage: 'metabot services rate --request-file <path> [--chain <mvc|btc|doge|opcat>]',
         requiredFlags: [
             { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
         ],
@@ -1030,8 +1052,10 @@ const COMMAND_HELP_SPECS = [
         ],
         examples: [
             'metabot services rate --request-file rating.json',
+            'metabot services rate --request-file rating-doge.json --chain doge',
+            'metabot services rate --request-file rating-opcat.json --chain opcat',
         ],
-        optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['chat'],
