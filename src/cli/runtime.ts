@@ -1639,6 +1639,20 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       call: async (input) => requestJson(context, 'POST', '/api/services/call', input),
       rate: async (input) => requestJson(context, 'POST', '/api/services/rate', input),
     },
+    provider: {
+      inspectOrder: async (input) => {
+        const query = new URLSearchParams();
+        if (input.orderId) {
+          query.set('orderId', input.orderId);
+        }
+        if (input.paymentTxid) {
+          query.set('paymentTxid', input.paymentTxid);
+        }
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/provider/order${suffix}`);
+      },
+      settleRefund: async (input) => requestJson(context, 'POST', '/api/provider/refund/settle', input),
+    },
     chat: {
       private: async (input) => requestJson(context, 'POST', '/api/chat/private', input),
       conversations: async () => requestJson(context, 'GET', '/api/chat/private/conversations'),
@@ -2213,6 +2227,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
       listServices: networkListServices,
     },
     services: { ...defaults.services, ...provided.services },
+    provider: { ...defaults.provider, ...provided.provider },
     chat: { ...defaults.chat, ...provided.chat },
     file: { ...defaults.file, ...provided.file },
     wallet: { ...defaults.wallet, ...provided.wallet },

@@ -13,6 +13,7 @@ const { resolveMetabotHomeSelection } = require('../../dist/core/state/homeSelec
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
+const { createSellerOrderRecord } = require('../../dist/core/orders/sellerOrderState.js');
 const { createSessionStateStore } = require('../../dist/core/a2a/sessionStateStore.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
@@ -1639,6 +1640,120 @@ test('provider closure runtime can publish, go online, receive a seller trace, a
   assert.equal(summary.payload.data.manualActions.length, 1);
   assert.equal(summary.payload.data.manualActions[0].orderId, providerTrace.payload.data.order.id);
   assert.equal(summary.payload.data.manualActions[0].refundRequestPinId, 'refund-pin-acceptance-1');
+});
+
+test('provider CLI inspects seller orders by order id or payment txid and reports refund fields', async (t) => {
+  const providerHome = await createProfileHomeTemp('', 'provider-profile');
+  t.after(async () => stopDaemon(providerHome));
+
+  const created = await runCommand(providerHome, ['identity', 'create', '--name', 'Provider Operator']);
+  assert.equal(created.exitCode, 0);
+
+  const runtimeStateStore = createRuntimeStateStore(providerHome);
+  const state = await runtimeStateStore.readState();
+  const sellerOrder = createSellerOrderRecord({
+    id: 'seller-order-cli-inspect-1',
+    state: 'refund_pending',
+    localMetabotId: state.identity.metabotId,
+    localMetabotSlug: path.basename(providerHome),
+    providerGlobalMetaId: state.identity.globalMetaId,
+    buyerGlobalMetaId: 'idq1buyercliinspect',
+    servicePinId: '/protocols/skill-service-pin-cli-1',
+    currentServicePinId: '/protocols/skill-service-pin-cli-1',
+    serviceName: 'CLI Tarot Reading',
+    providerSkill: 'tarot-rws',
+    orderMessageId: 'order-message-cli-inspect-1',
+    paymentTxid: '1'.repeat(64),
+    paymentAmount: '0.00001',
+    paymentCurrency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    traceId: 'trace-provider-cli-inspect-1',
+    a2aSessionId: 'seller-session-cli-inspect-1',
+    a2aTaskRunId: 'seller-run-cli-inspect-1',
+    llmSessionId: 'llm-session-cli-inspect-1',
+    runtimeId: 'runtime-codex',
+    runtimeProvider: 'codex',
+    refundRequestPinId: 'refund-request-cli-inspect-1',
+    refundTxid: 'refund-transfer-cli-inspect-1',
+    refundFinalizePinId: 'refund-finalize-cli-inspect-1',
+    refundBlockingReason: 'insufficient_balance',
+    createdAt: 1_775_000_020_000,
+    updatedAt: 1_775_000_030_000,
+  });
+  await runtimeStateStore.writeState({
+    ...state,
+    sellerOrders: [sellerOrder],
+  });
+
+  const byOrderId = await runCommand(providerHome, ['provider', 'order', 'inspect', '--order-id', 'seller-order-cli-inspect-1']);
+  assert.equal(byOrderId.exitCode, 0);
+  assert.equal(byOrderId.payload.ok, true);
+  assert.equal(byOrderId.payload.data.order.orderId, 'seller-order-cli-inspect-1');
+  assert.equal(byOrderId.payload.data.order.service.name, 'CLI Tarot Reading');
+  assert.equal(byOrderId.payload.data.order.buyer.globalMetaId, 'idq1buyercliinspect');
+  assert.equal(byOrderId.payload.data.order.status.state, 'refund_pending');
+  assert.equal(byOrderId.payload.data.order.trace.id, 'trace-provider-cli-inspect-1');
+  assert.equal(byOrderId.payload.data.order.payment.txid, '1'.repeat(64));
+  assert.equal(byOrderId.payload.data.order.runtime.sessionId, 'llm-session-cli-inspect-1');
+  assert.equal(byOrderId.payload.data.order.refund.refundRequestPinId, 'refund-request-cli-inspect-1');
+  assert.equal(byOrderId.payload.data.order.refund.refundTxid, 'refund-transfer-cli-inspect-1');
+  assert.equal(byOrderId.payload.data.order.refund.refundFinalizePinId, 'refund-finalize-cli-inspect-1');
+  assert.equal(byOrderId.payload.data.order.refund.blockingReason, 'insufficient_balance');
+
+  const byPayment = await runCommand(providerHome, ['provider', 'order', 'inspect', '--payment-txid', '1'.repeat(64)]);
+  assert.equal(byPayment.exitCode, 0);
+  assert.equal(byPayment.payload.ok, true);
+  assert.equal(byPayment.payload.data.order.orderId, 'seller-order-cli-inspect-1');
+});
+
+test('provider CLI manual refund settlement returns structured blockers for pending seller orders', async (t) => {
+  const providerHome = await createProfileHomeTemp('', 'provider-profile');
+  t.after(async () => stopDaemon(providerHome));
+
+  const created = await runCommand(providerHome, ['identity', 'create', '--name', 'Provider Operator']);
+  assert.equal(created.exitCode, 0);
+
+  const runtimeStateStore = createRuntimeStateStore(providerHome);
+  const state = await runtimeStateStore.readState();
+  const sellerOrder = createSellerOrderRecord({
+    id: 'seller-order-cli-settle-blocked-1',
+    state: 'failed',
+    localMetabotId: state.identity.metabotId,
+    localMetabotSlug: path.basename(providerHome),
+    providerGlobalMetaId: state.identity.globalMetaId,
+    buyerGlobalMetaId: 'idq1buyercliblocked',
+    servicePinId: '/protocols/skill-service-pin-cli-2',
+    currentServicePinId: '/protocols/skill-service-pin-cli-2',
+    serviceName: 'CLI Tarot Reading',
+    providerSkill: 'tarot-rws',
+    orderMessageId: 'order-message-cli-blocked-1',
+    paymentTxid: '2'.repeat(64),
+    paymentAmount: '0.00001',
+    paymentCurrency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    traceId: 'trace-provider-cli-blocked-1',
+    a2aSessionId: 'seller-session-cli-blocked-1',
+    a2aTaskRunId: 'seller-run-cli-blocked-1',
+    failureReason: 'provider_execution_failed',
+    refundRequestPinId: null,
+    createdAt: 1_775_000_020_000,
+    updatedAt: 1_775_000_030_000,
+  });
+  await runtimeStateStore.writeState({
+    ...state,
+    sellerOrders: [sellerOrder],
+  });
+
+  const settled = await runCommand(providerHome, ['provider', 'refund', 'settle', '--payment-txid', '2'.repeat(64)]);
+  assert.equal(settled.exitCode, 2);
+  assert.equal(settled.payload.ok, false);
+  assert.equal(settled.payload.state, 'manual_action_required');
+  assert.equal(settled.payload.code, 'refund_request_missing');
+  assert.equal(settled.payload.data.order.orderId, 'seller-order-cli-settle-blocked-1');
+  assert.equal(settled.payload.data.order.refund.blockingReason, 'refund_request_missing');
+  assert.equal(settled.payload.data.order.trace.id, 'trace-provider-cli-blocked-1');
 });
 
 test('provider summary refreshes rating detail from chain and exposes rated seller-order closure', async (t) => {

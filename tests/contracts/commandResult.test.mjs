@@ -57,6 +57,24 @@ test('manual_action_required can carry a local UI URL', () => {
   assert.equal(result.localUiUrl, 'http://127.0.0.1:4455/approve');
 });
 
+test('manual_action_required can carry structured data', () => {
+  const result = commandManualActionRequired(
+    'REFUND_BLOCKED',
+    'refund settlement requires operator action',
+    {
+      localUiUrl: 'http://127.0.0.1:4455/ui/refund',
+      data: { orderId: 'seller-order-1', blockingReason: 'refund_request_missing' },
+    },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'manual_action_required');
+  assert.equal(result.localUiUrl, 'http://127.0.0.1:4455/ui/refund');
+  assert.deepEqual(result.data, {
+    orderId: 'seller-order-1',
+    blockingReason: 'refund_request_missing',
+  });
+});
+
 test('failed returns ok: false and preserves code and message', () => {
   const result = commandFailed('PERMISSION_DENIED', 'not allowed');
   assert.equal(result.ok, false);

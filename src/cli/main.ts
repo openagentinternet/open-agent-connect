@@ -7,6 +7,7 @@ import { runDoctorCommand } from './commands/doctor';
 import { runIdentityCommand } from './commands/identity';
 import { runMasterCommand } from './commands/master';
 import { runNetworkCommand } from './commands/network';
+import { runProviderCommand } from './commands/provider';
 import { runServicesCommand } from './commands/services';
 import { runBuzzCommand } from './commands/buzz';
 import { runChainCommand } from './commands/chain';
@@ -89,6 +90,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'network':
           result = await runNetworkCommand(rest, context);
+          break;
+        case 'provider':
+          result = await runProviderCommand(rest, context);
           break;
         case 'services':
           result = await runServicesCommand(rest, context);

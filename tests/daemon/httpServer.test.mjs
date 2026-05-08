@@ -1873,19 +1873,25 @@ test('GET /ui/publish serves the primary-runtime-aware publish console', async (
   assert.match(html, /href="\/ui\/publish"/);
 });
 
-test('GET /ui/my-services is intentionally hidden from direct UI route exposure', async (t) => {
+test('GET /ui/my-services renders provider operations console', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
   const response = await fetch(`${server.baseUrl}/ui/my-services`);
-  const payload = await response.json();
+  const html = await response.text();
 
-  assert.equal(response.status, 404);
-  assert.equal(payload.ok, false);
-  assert.equal(payload.code, 'not_found');
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /My Services/);
+  assert.match(html, /data-recent-orders/);
+  assert.match(html, /data-manual-actions/);
+  assert.match(html, /Payment/);
+  assert.match(html, /Runtime/);
+  assert.match(html, /Refund/);
+  assert.match(html, /\/api\/provider\/summary/);
 });
 
-test('GET /ui/refund renders the buyer-side initiated refund ledger', async (t) => {
+test('GET /ui/refund renders buyer and seller refund operations', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
@@ -1894,11 +1900,15 @@ test('GET /ui/refund renders the buyer-side initiated refund ledger', async (t) 
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
-  assert.match(html, /Refunds I Initiated/);
+  assert.match(html, /Refund Operations/);
+  assert.match(html, /Buyer initiated/);
+  assert.match(html, /Seller received/);
   assert.match(html, /data-refund-total-count/);
   assert.match(html, /data-refund-pending-count/);
-  assert.match(html, /data-refund-list/);
-  assert.match(html, /\/api\/provider\/refunds\/initiated/);
+  assert.match(html, /data-refund-buyer-list/);
+  assert.match(html, /data-refund-seller-list/);
+  assert.match(html, /\/api\/provider\/refunds/);
+  assert.match(html, /\/api\/provider\/refund\/settle/);
 });
 
 test('GET /ui/buzz serves the bundled Buzz MetaApp entry from the daemon server', async (t) => {

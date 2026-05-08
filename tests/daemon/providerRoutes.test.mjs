@@ -550,3 +550,244 @@ test('GET /api/provider/refunds/initiated returns local buyer-side initiated ref
   assert.equal(response.payload.data.initiatedByMe[0].status, 'refund_pending');
   assert.equal(response.payload.data.initiatedByMe[0].counterpartyGlobalMetaId, 'idq1seller');
 });
+
+test('GET /api/provider/refunds returns buyer initiated and seller received refund work', async (t) => {
+  const app = await startProviderServer();
+  t.after(async () => app.close());
+
+  const sellerPendingOrder = createSellerOrderRecord({
+    id: 'seller-order-refund-pending-1',
+    state: 'refund_pending',
+    localMetabotId: 1,
+    localMetabotSlug: path.basename(app.homeDir),
+    providerGlobalMetaId: 'idq1provider',
+    buyerGlobalMetaId: 'idq1buyer',
+    servicePinId: '/protocols/skill-service-pin-1',
+    currentServicePinId: '/protocols/skill-service-pin-1',
+    serviceName: 'Tarot Reading',
+    providerSkill: 'tarot-rws',
+    orderMessageId: 'order-message-pin-1',
+    paymentTxid: 'd'.repeat(64),
+    paymentAmount: '0.00001',
+    paymentCurrency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    traceId: 'trace-provider-refund-pending-1',
+    a2aSessionId: 'seller-session-1',
+    refundRequestPinId: 'seller-refund-request-pin-1',
+    refundBlockingReason: 'insufficient_balance',
+    createdAt: 1_775_000_020_000,
+    updatedAt: 1_775_000_030_000,
+  });
+  const sellerRefundedOrder = createSellerOrderRecord({
+    ...sellerPendingOrder,
+    id: 'seller-order-refunded-1',
+    state: 'refunded',
+    paymentTxid: 'e'.repeat(64),
+    traceId: 'trace-provider-refunded-1',
+    refundRequestPinId: 'seller-refund-request-pin-2',
+    refundTxid: 'refund-transfer-txid-2',
+    refundFinalizePinId: 'refund-finalize-pin-2',
+    refundBlockingReason: null,
+    refundedAt: 1_775_000_050_000,
+    refundCompletedAt: 1_775_000_050_000,
+    updatedAt: 1_775_000_050_000,
+  });
+
+  await app.runtimeStateStore.writeState({
+    identity: createIdentity(),
+    services: [createService()],
+    traces: [createBuyerRefundTrace()],
+    sellerOrders: [sellerPendingOrder, sellerRefundedOrder],
+  });
+
+  const response = await fetchJson(app.baseUrl, '/api/provider/refunds');
+
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.ok, true);
+  assert.equal(response.payload.data.initiatedByMe.length, 1);
+  assert.equal(response.payload.data.receivedByMe.length, 2);
+  assert.equal(response.payload.data.totalCount, 3);
+  assert.equal(response.payload.data.pendingCount, 2);
+  assert.equal(response.payload.data.receivedByMe[0].role, 'seller');
+  assert.equal(response.payload.data.receivedByMe[0].orderId, 'seller-order-refund-pending-1');
+  assert.equal(response.payload.data.receivedByMe[0].refundRequestPinId, 'seller-refund-request-pin-1');
+  assert.equal(response.payload.data.receivedByMe[0].refundTxid, null);
+  assert.equal(response.payload.data.receivedByMe[0].refundFinalizePinId, null);
+  assert.equal(response.payload.data.receivedByMe[0].blockingReason, 'insufficient_balance');
+  assert.equal(response.payload.data.receivedByMe[0].manualActionRequired, true);
+  assert.equal(response.payload.data.receivedByMe[0].counterpartyGlobalMetaId, 'idq1buyer');
+  assert.equal(response.payload.data.receivedByMe[1].status, 'refunded');
+  assert.equal(response.payload.data.receivedByMe[1].refundTxid, 'refund-transfer-txid-2');
+  assert.equal(response.payload.data.receivedByMe[1].refundFinalizePinId, 'refund-finalize-pin-2');
+});
+
+test('provider order inspection supports order id and payment txid selectors', async (t) => {
+  const app = await startProviderServer();
+  t.after(async () => app.close());
+
+  const sellerOrder = createSellerOrderRecord({
+    id: 'seller-order-inspect-1',
+    state: 'refund_pending',
+    localMetabotId: 1,
+    localMetabotSlug: path.basename(app.homeDir),
+    providerGlobalMetaId: 'idq1provider',
+    buyerGlobalMetaId: 'idq1buyerinspect',
+    servicePinId: '/protocols/skill-service-pin-1',
+    currentServicePinId: '/protocols/skill-service-pin-1',
+    serviceName: 'Tarot Reading',
+    providerSkill: 'tarot-rws',
+    orderMessageId: 'order-message-pin-inspect-1',
+    paymentTxid: 'f'.repeat(64),
+    paymentAmount: '0.00001',
+    paymentCurrency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    traceId: 'trace-provider-inspect-1',
+    a2aSessionId: 'seller-session-inspect-1',
+    a2aTaskRunId: 'seller-run-inspect-1',
+    llmSessionId: 'llm-session-inspect-1',
+    runtimeId: 'runtime-codex',
+    runtimeProvider: 'codex',
+    refundRequestPinId: 'seller-refund-request-pin-inspect-1',
+    refundBlockingReason: 'transfer_failed',
+    createdAt: 1_775_000_020_000,
+    updatedAt: 1_775_000_030_000,
+  });
+
+  await app.runtimeStateStore.writeState({
+    identity: createIdentity(),
+    services: [createService()],
+    traces: [],
+    sellerOrders: [sellerOrder],
+  });
+
+  const byOrder = await fetchJson(app.baseUrl, '/api/provider/order?orderId=seller-order-inspect-1');
+  assert.equal(byOrder.status, 200);
+  assert.equal(byOrder.payload.ok, true);
+  assert.equal(byOrder.payload.data.order.orderId, 'seller-order-inspect-1');
+  assert.equal(byOrder.payload.data.order.service.name, 'Tarot Reading');
+  assert.equal(byOrder.payload.data.order.buyer.globalMetaId, 'idq1buyerinspect');
+  assert.equal(byOrder.payload.data.order.status.state, 'refund_pending');
+  assert.equal(byOrder.payload.data.order.trace.id, 'trace-provider-inspect-1');
+  assert.equal(byOrder.payload.data.order.payment.txid, 'f'.repeat(64));
+  assert.equal(byOrder.payload.data.order.runtime.sessionId, 'llm-session-inspect-1');
+  assert.equal(byOrder.payload.data.order.refund.refundRequestPinId, 'seller-refund-request-pin-inspect-1');
+  assert.equal(byOrder.payload.data.order.refund.blockingReason, 'transfer_failed');
+
+  const byPayment = await fetchJson(app.baseUrl, `/api/provider/order?paymentTxid=${'f'.repeat(64)}`);
+  assert.equal(byPayment.status, 200);
+  assert.equal(byPayment.payload.ok, true);
+  assert.equal(byPayment.payload.data.order.orderId, 'seller-order-inspect-1');
+});
+
+test('provider order inspection and refund settlement reject multiple seller order selectors', async (t) => {
+  const app = await startProviderServer();
+  t.after(async () => app.close());
+
+  const sellerOrder = createSellerOrderRecord({
+    id: 'seller-order-selector-1',
+    state: 'refund_pending',
+    localMetabotId: 1,
+    localMetabotSlug: path.basename(app.homeDir),
+    providerGlobalMetaId: 'idq1provider',
+    buyerGlobalMetaId: 'idq1buyerselector',
+    servicePinId: '/protocols/skill-service-pin-1',
+    currentServicePinId: '/protocols/skill-service-pin-1',
+    serviceName: 'Tarot Reading',
+    providerSkill: 'tarot-rws',
+    orderMessageId: 'order-message-pin-selector-1',
+    paymentTxid: '9'.repeat(64),
+    paymentAmount: '0.00001',
+    paymentCurrency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    traceId: 'trace-provider-selector-1',
+    refundRequestPinId: 'seller-refund-request-pin-selector-1',
+    createdAt: 1_775_000_020_000,
+    updatedAt: 1_775_000_030_000,
+  });
+
+  await app.runtimeStateStore.writeState({
+    identity: createIdentity(),
+    services: [createService()],
+    traces: [],
+    sellerOrders: [sellerOrder],
+  });
+
+  const inspected = await fetchJson(
+    app.baseUrl,
+    `/api/provider/order?orderId=seller-order-selector-1&paymentTxid=${'8'.repeat(64)}`,
+  );
+  assert.equal(inspected.status, 200);
+  assert.equal(inspected.payload.ok, false);
+  assert.equal(inspected.payload.state, 'failed');
+  assert.equal(inspected.payload.code, 'seller_order_selector_ambiguous');
+
+  const settled = await fetchJson(app.baseUrl, '/api/provider/refund/settle', {
+    method: 'POST',
+    body: {
+      orderId: 'seller-order-selector-1',
+      paymentTxid: '8'.repeat(64),
+    },
+  });
+  assert.equal(settled.status, 200);
+  assert.equal(settled.payload.ok, false);
+  assert.equal(settled.payload.state, 'failed');
+  assert.equal(settled.payload.code, 'seller_order_selector_ambiguous');
+
+  const state = await app.runtimeStateStore.readState();
+  assert.equal(state.sellerOrders[0].state, 'refund_pending');
+  assert.equal(state.sellerOrders[0].refundTxid, null);
+});
+
+test('POST /api/provider/refund/settle accepts payment txid and returns structured blocker details', async (t) => {
+  const app = await startProviderServer();
+  t.after(async () => app.close());
+
+  const sellerOrder = createSellerOrderRecord({
+    id: 'seller-order-settle-blocked-1',
+    state: 'failed',
+    localMetabotId: 1,
+    localMetabotSlug: path.basename(app.homeDir),
+    providerGlobalMetaId: 'idq1provider',
+    buyerGlobalMetaId: 'idq1buyerblocked',
+    servicePinId: '/protocols/skill-service-pin-1',
+    currentServicePinId: '/protocols/skill-service-pin-1',
+    serviceName: 'Tarot Reading',
+    providerSkill: 'tarot-rws',
+    orderMessageId: 'order-message-pin-blocked-1',
+    paymentTxid: 'a'.repeat(64),
+    paymentAmount: '0.00001',
+    paymentCurrency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    traceId: 'trace-provider-settle-blocked-1',
+    a2aSessionId: 'seller-session-blocked-1',
+    a2aTaskRunId: 'seller-run-blocked-1',
+    failureReason: 'provider_execution_failed',
+    refundRequestPinId: null,
+    createdAt: 1_775_000_020_000,
+    updatedAt: 1_775_000_030_000,
+  });
+
+  await app.runtimeStateStore.writeState({
+    identity: createIdentity(),
+    services: [createService()],
+    traces: [],
+    sellerOrders: [sellerOrder],
+  });
+
+  const response = await fetchJson(app.baseUrl, '/api/provider/refund/settle', {
+    method: 'POST',
+    body: { paymentTxid: 'a'.repeat(64) },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.ok, false);
+  assert.equal(response.payload.state, 'manual_action_required');
+  assert.equal(response.payload.code, 'refund_request_missing');
+  assert.equal(response.payload.data.order.orderId, 'seller-order-settle-blocked-1');
+  assert.equal(response.payload.data.order.refund.blockingReason, 'refund_request_missing');
+  assert.equal(response.payload.data.order.trace.id, 'trace-provider-settle-blocked-1');
+});

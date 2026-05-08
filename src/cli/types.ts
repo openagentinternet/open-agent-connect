@@ -50,6 +50,10 @@ export interface CliDependencies {
     call?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     rate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  provider?: {
+    inspectOrder?: (input: { orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    settleRefund?: (input: { orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     conversations?: () => Awaitable<MetabotCommandResult<unknown>>;

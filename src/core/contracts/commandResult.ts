@@ -30,6 +30,7 @@ type CommandManualActionRequired = CommandBase & {
   ok: false;
   state: 'manual_action_required';
   localUiUrl?: string;
+  data?: Record<string, unknown>;
 };
 
 type CommandFailed = CommandBase & {
@@ -71,13 +72,22 @@ export const commandWaiting = (
   ...(options?.data ? { data: options.data } : {}),
 });
 
-export const commandManualActionRequired = (code: string, message: string, localUiUrl?: string): MetabotCommandResult<never> => ({
-  ok: false,
-  state: 'manual_action_required',
-  code,
-  message,
-  localUiUrl
-});
+export const commandManualActionRequired = (
+  code: string,
+  message: string,
+  options?: string | { localUiUrl?: string; data?: Record<string, unknown> },
+): MetabotCommandResult<never> => {
+  const localUiUrl = typeof options === 'string' ? options : options?.localUiUrl;
+  const data = typeof options === 'string' ? undefined : options?.data;
+  return {
+    ok: false,
+    state: 'manual_action_required',
+    code,
+    message,
+    ...(localUiUrl ? { localUiUrl } : {}),
+    ...(data ? { data } : {}),
+  };
+};
 
 export const commandFailed = (code: string, message: string): MetabotCommandResult<never> => ({
   ok: false,

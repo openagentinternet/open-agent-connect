@@ -28,6 +28,12 @@ export interface ProviderRecentOrderEntry {
   statusDetail: string;
   traceHref: string;
   traceLabel: string;
+  paymentLabel: string;
+  runtimeLabel: string;
+  refundRequestPinId: string;
+  refundTxid: string;
+  refundFinalizePinId: string;
+  refundBlockingReason: string;
   createdAt: string;
   requiresManualRefund: boolean;
   ratingCommentPreview: string;
@@ -119,6 +125,23 @@ function formatOrderStateLabel(record: Record<string, unknown>): string {
   return [lifecycle, rating].filter(Boolean).join(' · ') || rating;
 }
 
+function formatPaymentLabel(record: Record<string, unknown>): string {
+  const amount = normalizeText(record.paymentAmount);
+  const currency = normalizeText(record.paymentCurrency);
+  const paymentTxid = normalizeText(record.paymentTxid);
+  const amountLabel = [amount, currency].filter(Boolean).join(' ');
+  return [amountLabel, paymentTxid].filter(Boolean).join(' · ') || '—';
+}
+
+function formatRuntimeLabel(record: Record<string, unknown>): string {
+  const runtimeProvider = normalizeText(record.runtimeProvider);
+  const runtimeId = normalizeText(record.runtimeId);
+  const llmSessionId = normalizeText(record.llmSessionId);
+  const fallbackSelected = record.fallbackSelected === true ? 'fallback selected' : '';
+  return [runtimeProvider, runtimeId, llmSessionId, fallbackSelected].filter(Boolean).join(' · ')
+    || 'Runtime unavailable';
+}
+
 export function buildMyServicesPageViewModel(input: {
   providerSummary?: Record<string, unknown> | null;
 }): MyServicesPageViewModel {
@@ -172,6 +195,12 @@ export function buildMyServicesPageViewModel(input: {
           statusDetail: normalizeText(record.publicStatus) || 'unknown',
           traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '/ui/trace',
           traceLabel: traceId || 'Trace unavailable',
+          paymentLabel: formatPaymentLabel(record),
+          runtimeLabel: formatRuntimeLabel(record),
+          refundRequestPinId: normalizeText(record.refundRequestPinId),
+          refundTxid: normalizeText(record.refundTxid),
+          refundFinalizePinId: normalizeText(record.refundFinalizePinId),
+          refundBlockingReason: normalizeText(record.refundBlockingReason),
           createdAt: normalizeText(record.createdAt) || 'Unknown',
           requiresManualRefund: manualActionKeys.has(orderId),
           ratingCommentPreview: normalizeText(record.ratingComment),
@@ -224,4 +253,18 @@ export function buildMyServicesPageViewModel(input: {
     recentOrders,
     manualActions,
   };
+}
+
+export function buildMyServicesPageViewModelRuntimeSource(): string {
+  return [
+    normalizeText,
+    readObject,
+    pushRow,
+    formatRatingStateLabel,
+    formatLifecycleStateLabel,
+    formatOrderStateLabel,
+    formatPaymentLabel,
+    formatRuntimeLabel,
+    buildMyServicesPageViewModel,
+  ].map((fn) => fn.toString()).join('\n\n');
 }
