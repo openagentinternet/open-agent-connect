@@ -62,7 +62,6 @@ import { createProviderServiceRunner } from '../core/a2a/provider/providerServic
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
 import {
   createSellerOrderRecord,
-  transitionSellerOrderRecord,
   upsertSellerOrderRecord,
   type SellerOrderRecord,
   type SellerOrderState,
@@ -73,6 +72,11 @@ import {
   SERVICE_ORDER_SELF_REFUND_SKIPPED_REASON,
   isSelfDirectedPair,
 } from '../core/orders/orderLifecycle';
+import {
+  SERVICE_REFUND_FINALIZE_PATH,
+  processSellerRefundSettlement,
+  type RefundTransferInput,
+} from '../core/orders/serviceRefundSettlement';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
 import { refreshRatingDetailCacheFromChain } from '../core/ratings/ratingDetailSync';
@@ -92,8 +96,8 @@ import {
   type ChatViewerMessage,
   type FetchPrivateHistory,
 } from '../core/chat/privateConversation';
-import { createLocalMnemonicSigner } from '../core/signing/localMnemonicSigner';
-import type { SecretStore } from '../core/secrets/secretStore';
+import { createLocalMnemonicSigner, executeTransfer } from '../core/signing/localMnemonicSigner';
+import type { LocalIdentitySecrets, SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
@@ -764,6 +768,57 @@ function readObject(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function normalizeChainApiBaseUrl(value: unknown): string {
+  return (normalizeText(value) || 'https://manapi.metaid.io').replace(/\/$/, '');
+}
+
+function selectProtocolPinContent(payload: unknown): unknown {
+  const root = readObject(payload) ?? {};
+  const data = readObject(root.data) ?? {};
+  return data.contentSummary
+    ?? data.content
+    ?? root.contentSummary
+    ?? root.content
+    ?? payload;
+}
+
+async function fetchProtocolPinDetail(inputFetch: {
+  pinId: string;
+  chainApiBaseUrl?: string;
+}): Promise<{ pinId: string; path: string | null; content: unknown }> {
+  const pinId = normalizeText(inputFetch.pinId);
+  if (!pinId) {
+    throw new Error('pin_id_missing: Refund request pin id is required.');
+  }
+  const response = await fetch(`${normalizeChainApiBaseUrl(inputFetch.chainApiBaseUrl)}/pin/${encodeURIComponent(pinId)}`);
+  if (!response.ok) {
+    throw new Error(`pin_fetch_failed: Chain API returned HTTP ${response.status}.`);
+  }
+  const payload = await response.json() as unknown;
+  const root = readObject(payload) ?? {};
+  const data = readObject(root.data) ?? {};
+  return {
+    pinId,
+    path: normalizeText(data.path) || normalizeText(root.path) || null,
+    content: selectProtocolPinContent(payload),
+  };
+}
+
+function decimalAmountToSatoshis(value: string): number {
+  const amount = normalizeText(value);
+  if (!/^\d+(?:\.\d{1,8})?$/.test(amount)) {
+    throw new Error('refund_amount_invalid: Refund amount must have at most 8 decimal places.');
+  }
+  const [wholeRaw, fractionRaw = ''] = amount.split('.');
+  const whole = Number.parseInt(wholeRaw || '0', 10);
+  const fraction = Number.parseInt(fractionRaw.padEnd(8, '0') || '0', 10);
+  const satoshis = whole * 100_000_000 + fraction;
+  if (!Number.isSafeInteger(satoshis) || satoshis <= 0) {
+    throw new Error('refund_amount_invalid: Paid refund amount must be positive.');
+  }
+  return satoshis;
+}
+
 function readBoolean(value: unknown): boolean {
   return value === true;
 }
@@ -1387,6 +1442,8 @@ function readExecuteServiceRequest(rawInput: Record<string, unknown>) {
       paymentAmount: normalizeText(payment.paymentAmount),
       paymentCurrency: normalizeText(payment.paymentCurrency),
       settlementKind: normalizeText(payment.settlementKind) || null,
+      mrc20Ticker: normalizeText(payment.mrc20Ticker) || null,
+      mrc20Id: normalizeText(payment.mrc20Id) || null,
       orderReference: normalizeText(payment.orderReference) || null,
     },
   };
@@ -4124,6 +4181,29 @@ export function createDefaultMetabotDaemonHandlers(input: {
     secretStore,
     adapters: adapters ?? new Map(),
   });
+  async function executeSellerRefundTransfer(inputRefund: RefundTransferInput) {
+    const chain = normalizeText(inputRefund.paymentChain).toLowerCase();
+    const adapter = adapters.get(chain as Parameters<typeof adapters.get>[0]);
+    if (!adapter) {
+      throw new Error(`refund_asset_unsupported: No native transfer adapter registered for chain "${chain}".`);
+    }
+    const secrets = await secretStore.readIdentitySecrets<LocalIdentitySecrets>();
+    if (!secrets?.mnemonic) {
+      throw new Error('identity_secrets_missing: Identity mnemonic not found in the secret store.');
+    }
+    const result = await executeTransfer(adapter, {
+      mnemonic: secrets.mnemonic,
+      path: secrets.path ?? "m/44'/10001'/0'/0/0",
+      toAddress: inputRefund.refundToAddress,
+      amountSatoshis: decimalAmountToSatoshis(inputRefund.refundAmount),
+    });
+    return {
+      success: true,
+      txid: result.txid,
+      totalCost: result.fee,
+      network: chain,
+    };
+  }
   const ratingMempoolRetryDelaysMs = normalizeRetryDelays(
     input.ratingFollowupRetryDelaysMs,
     DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS,
@@ -5130,9 +5210,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
     orderPinId?: string | null;
     orderReference?: string | null;
     paymentTxid?: string | null;
+    paymentCommitTxid?: string | null;
     paymentAmount: string;
     paymentCurrency: string;
     paymentChain?: string | null;
+    settlementKind?: string | null;
+    mrc20Ticker?: string | null;
+    mrc20Id?: string | null;
     session: A2ASessionRecord;
     taskRun: A2ATaskRunRecord;
     publicStatus?: string | null;
@@ -5189,9 +5273,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
       orderTxid: orderTxid || null,
       orderReference: orderReference || null,
       paymentTxid: paymentTxid || null,
+      paymentCommitTxid: inputOrder.paymentCommitTxid || null,
       paymentAmount: inputOrder.paymentAmount,
       paymentCurrency: inputOrder.paymentCurrency,
       paymentChain: inputOrder.paymentChain || null,
+      settlementKind: inputOrder.settlementKind || null,
+      mrc20Ticker: inputOrder.mrc20Ticker || null,
+      mrc20Id: inputOrder.mrc20Id || null,
       traceId: inputOrder.traceId,
       a2aSessionId: inputOrder.session.sessionId,
       a2aTaskRunId: inputOrder.taskRun.runId,
@@ -5734,10 +5822,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
     orderMessageId?: string | null;
     orderPinId?: string | null;
     paymentTxid?: string | null;
+    paymentCommitTxid?: string | null;
     orderReference?: string | null;
     paymentCurrency: string;
     paymentAmount: string;
     paymentChain?: string | null;
+    settlementKind?: string | null;
+    mrc20Ticker?: string | null;
+    mrc20Id?: string | null;
     session: A2ASessionRecord;
     taskRun: A2ATaskRunRecord;
     publicStatus: { status: string | null };
@@ -5769,9 +5861,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
         orderTxid: inputFailure.orderTxid,
         orderTxids: [inputFailure.orderTxid],
         paymentTxid: inputFailure.paymentTxid || null,
+        paymentCommitTxid: inputFailure.paymentCommitTxid || null,
         orderReference: inputFailure.orderReference || null,
         paymentCurrency: inputFailure.paymentCurrency,
         paymentAmount: inputFailure.paymentAmount,
+        paymentChain: inputFailure.paymentChain || null,
+        settlementKind: inputFailure.settlementKind || null,
+        mrc20Ticker: inputFailure.mrc20Ticker || null,
+        mrc20Id: inputFailure.mrc20Id || null,
         providerSkill: inputFailure.service.providerSkill,
       },
       a2a: {
@@ -5830,9 +5927,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
       orderPinId: inputFailure.orderPinId || null,
       orderReference: inputFailure.orderReference || null,
       paymentTxid: inputFailure.paymentTxid || null,
+      paymentCommitTxid: inputFailure.paymentCommitTxid || null,
       paymentAmount: inputFailure.paymentAmount,
       paymentCurrency: inputFailure.paymentCurrency,
       paymentChain: inputFailure.paymentChain || null,
+      settlementKind: inputFailure.settlementKind || null,
+      mrc20Ticker: inputFailure.mrc20Ticker || null,
+      mrc20Id: inputFailure.mrc20Id || null,
       session: inputFailure.session,
       taskRun: inputFailure.taskRun,
       publicStatus: inputFailure.publicStatus.status,
@@ -5874,6 +5975,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
       || normalizeOrderProtocolReference(extractOrderLineValue(content, 'order id'))
       || '';
     const paymentTxid = normalizeText(extractOrderLineValue(content, 'txid'));
+    const paymentCommitTxid = normalizeText(extractOrderLineValue(content, 'commit txid'));
+    const settlementKind = normalizeText(extractOrderLineValue(content, 'settlement kind')).toLowerCase();
+    const mrc20Ticker = normalizeText(extractOrderLineValue(content, 'mrc20 ticker'));
+    const mrc20Id = normalizeText(extractOrderLineValue(content, 'mrc20 id'));
+    const orderPaymentMetadata = {
+      paymentCommitTxid: paymentCommitTxid || null,
+      settlementKind: settlementKind || null,
+      mrc20Ticker: mrc20Ticker || null,
+      mrc20Id: mrc20Id || null,
+    };
     const orderReference = normalizeText(extractOrderLineValue(content, 'order id'));
     const servicePinId = normalizeText(extractOrderLineValue(content, 'service id'))
       || normalizeText(extractOrderLineValue(content, 'serviceId'))
@@ -6031,6 +6142,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       paymentAmount: amountLine.amount || service.price,
       paymentCurrency: amountLine.currency || service.currency,
       paymentChain: paymentChain || null,
+      ...orderPaymentMetadata,
       session: received.session,
       taskRun: received.taskRun,
       publicStatus: receivedStatus.status,
@@ -6139,6 +6251,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         paymentCurrency: amountLine.currency || service.currency,
         paymentAmount: amountLine.amount || service.price,
         paymentChain: paymentChain || null,
+        ...orderPaymentMetadata,
         session: failedApplied.session,
         taskRun: failedApplied.taskRun,
         publicStatus: failedStatus,
@@ -6235,6 +6348,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         paymentCurrency: amountLine.currency || service.currency,
         paymentAmount: amountLine.amount || service.price,
         paymentChain: paymentChain || null,
+        ...orderPaymentMetadata,
         session: failedApplied.session,
         taskRun: failedApplied.taskRun,
         publicStatus: failedStatus,
@@ -6295,6 +6409,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       paymentAmount: amountLine.amount || service.price,
       paymentCurrency: amountLine.currency || service.currency,
       paymentChain: paymentChain || null,
+      ...orderPaymentMetadata,
       session: received.session,
       taskRun: received.taskRun,
       publicStatus: receivedStatus.status,
@@ -6319,6 +6434,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       paymentAmount: amountLine.amount || service.price,
       paymentCurrency: amountLine.currency || service.currency,
       paymentChain: paymentChain || null,
+      ...orderPaymentMetadata,
       session: received.session,
       taskRun: received.taskRun,
       publicStatus: executingStatus.status,
@@ -6484,6 +6600,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         paymentCurrency: amountLine.currency || service.currency,
         paymentAmount: amountLine.amount || service.price,
         paymentChain: paymentChain || null,
+        ...orderPaymentMetadata,
         session: applied.session,
         taskRun: applied.taskRun,
         publicStatus: appliedStatus,
@@ -6591,6 +6708,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         paymentCurrency: amountLine.currency || service.currency,
         paymentAmount: amountLine.amount || service.price,
         paymentChain: paymentChain || null,
+        ...orderPaymentMetadata,
         session: failedApplied.session,
         taskRun: failedApplied.taskRun,
         publicStatus: failedStatus,
@@ -6849,6 +6967,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       paymentAmount: amountLine.amount || service.price,
       paymentCurrency: amountLine.currency || service.currency,
       paymentChain: paymentChain || null,
+      ...orderPaymentMetadata,
       session: applied.session,
       taskRun: applied.taskRun,
       publicStatus: appliedStatus.status,
@@ -9658,80 +9777,49 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const state = await runtimeStateStore.readState();
-        const traceIndex = state.traces.findIndex((entry) => {
-          const traceRecord = entry as unknown as Record<string, unknown>;
-          const order = readObject(traceRecord.order);
-          return normalizeText(order?.id) === normalizedOrderId
-            && normalizeText(order?.role) === 'seller';
-        });
-        if (traceIndex < 0) {
-          const sellerOrderIndex = state.sellerOrders.findIndex((entry) => normalizeText(entry.id) === normalizedOrderId);
-          if (sellerOrderIndex < 0) {
-            return commandFailed('order_not_found', `Provider order was not found: ${normalizedOrderId}`);
-          }
-
-          const currentSellerOrder = state.sellerOrders[sellerOrderIndex];
-          if (
-            currentSellerOrder.state !== 'refund_pending'
-            || !normalizeText(currentSellerOrder.refundRequestPinId)
-          ) {
-            return commandFailed('refund_not_required', 'Manual refund is not required.');
-          }
-
-          const now = Date.now();
-          const nextSellerOrder = transitionSellerOrderRecord(currentSellerOrder, {
-            state: 'refunded',
-            refundedAt: now,
-            updatedAt: now,
-          });
-          await runtimeStateStore.writeState({
-            ...state,
-            sellerOrders: [
-              nextSellerOrder,
-              ...state.sellerOrders.filter((entry, index) => index !== sellerOrderIndex),
-            ],
-          });
-
-          return commandSuccess({
-            orderId: normalizedOrderId,
-            traceId: normalizeText(currentSellerOrder.traceId),
-            state: 'refunded',
-          });
-        }
-
-        const currentTrace = state.traces[traceIndex] as unknown as Record<string, unknown>;
-        const currentOrder = readObject(currentTrace.order);
-        if (
-          !currentOrder
-          || normalizeText(currentOrder.status) !== 'refund_pending'
-          || !normalizeText(currentOrder.refundRequestPinId)
-        ) {
-          return commandFailed('refund_not_required', 'Manual refund is not required.');
-        }
-
-        const now = Date.now();
-        const nextTrace = {
-          ...currentTrace,
-          order: {
-            ...currentOrder,
-            status: 'refunded',
-            refundConfirmedAt: now,
-            refundedAt: now,
+        const settlement = await processSellerRefundSettlement({
+          state,
+          orderId: normalizedOrderId,
+          fetchRefundRequestPin: (pinId) => fetchProtocolPinDetail({
+            pinId,
+            chainApiBaseUrl: input.chainApiBaseUrl,
+          }),
+          executeRefundTransfer: executeSellerRefundTransfer,
+          persistSettlementState: (nextState) => runtimeStateStore.writeState(nextState).then(() => undefined),
+          writeRefundFinalizePin: async ({ payload }) => signer.writePin({
+            operation: 'create',
+            path: SERVICE_REFUND_FINALIZE_PATH,
+            encryption: '0',
+            version: '1.0.0',
+            contentType: 'application/json',
+            payload: JSON.stringify(payload),
+            encoding: 'utf-8',
+            network: 'mvc',
+          }),
+          resolveLocalSellerGlobalMetaId: (order) => {
+            const identity = state.identity;
+            return identity?.globalMetaId || order.providerGlobalMetaId;
           },
-        } as unknown as SessionTraceRecord;
-
-        await runtimeStateStore.writeState({
-          ...state,
-          traces: [
-            nextTrace,
-            ...state.traces.filter((entry, index) => index !== traceIndex),
-          ],
         });
+        await runtimeStateStore.writeState(settlement.nextState);
+
+        if (!settlement.ok) {
+          return commandManualActionRequired(
+            settlement.code,
+            settlement.message,
+            buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/refund'),
+          );
+        }
 
         return commandSuccess({
-          orderId: normalizedOrderId,
-          traceId: normalizeText(currentTrace.traceId),
-          state: 'refunded',
+          orderId: settlement.orderId,
+          traceId: normalizeText(settlement.order.traceId) || null,
+          paymentTxid: settlement.paymentTxid,
+          state: settlement.state,
+          refundTxid: settlement.refundTxid,
+          refundFinalizePinId: settlement.refundFinalizePinId,
+          noTransferReason: settlement.noTransferReason,
+          finalization: settlement.finalizePayload,
         });
       },
     },
@@ -10610,6 +10698,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
           paymentAmount: execution.payment.paymentAmount || service.price,
           paymentCurrency: execution.payment.paymentCurrency || service.currency,
           paymentChain: execution.payment.paymentChain,
+          paymentCommitTxid: execution.payment.paymentCommitTxid,
+          settlementKind: execution.payment.settlementKind,
+          mrc20Ticker: execution.payment.mrc20Ticker,
+          mrc20Id: execution.payment.mrc20Id,
           session: received.session,
           taskRun: received.taskRun,
           publicStatus: receivedStatus.status,
@@ -10632,6 +10724,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
           paymentAmount: execution.payment.paymentAmount || service.price,
           paymentCurrency: execution.payment.paymentCurrency || service.currency,
           paymentChain: execution.payment.paymentChain,
+          paymentCommitTxid: execution.payment.paymentCommitTxid,
+          settlementKind: execution.payment.settlementKind,
+          mrc20Ticker: execution.payment.mrc20Ticker,
+          mrc20Id: execution.payment.mrc20Id,
           session: received.session,
           taskRun: received.taskRun,
           publicStatus: directExecutingStatus.status,
@@ -10724,9 +10820,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
               serviceId: service.currentPinId,
               serviceName: service.displayName,
               paymentTxid: execution.payment.paymentTxid,
+              paymentCommitTxid: execution.payment.paymentCommitTxid,
               orderReference: execution.payment.orderReference,
               paymentCurrency: execution.payment.paymentCurrency || service.currency,
               paymentAmount: execution.payment.paymentAmount || service.price,
+              paymentChain: execution.payment.paymentChain,
+              settlementKind: execution.payment.settlementKind,
+              mrc20Ticker: execution.payment.mrc20Ticker,
+              mrc20Id: execution.payment.mrc20Id,
               providerSkill: service.providerSkill,
             },
             a2a: {
@@ -10790,6 +10891,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
             paymentAmount: execution.payment.paymentAmount || service.price,
             paymentCurrency: execution.payment.paymentCurrency || service.currency,
             paymentChain: execution.payment.paymentChain,
+            paymentCommitTxid: execution.payment.paymentCommitTxid,
+            settlementKind: execution.payment.settlementKind,
+            mrc20Ticker: execution.payment.mrc20Ticker,
+            mrc20Id: execution.payment.mrc20Id,
             session: applied.session,
             taskRun: applied.taskRun,
             publicStatus: appliedStatus.status,
@@ -10863,9 +10968,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
             serviceId: service.currentPinId,
             serviceName: service.displayName,
             paymentTxid: execution.payment.paymentTxid,
+            paymentCommitTxid: execution.payment.paymentCommitTxid,
             orderReference: execution.payment.orderReference,
             paymentCurrency: execution.payment.paymentCurrency || service.currency,
             paymentAmount: execution.payment.paymentAmount || service.price,
+            paymentChain: execution.payment.paymentChain,
+            settlementKind: execution.payment.settlementKind,
+            mrc20Ticker: execution.payment.mrc20Ticker,
+            mrc20Id: execution.payment.mrc20Id,
           },
           a2a: {
             sessionId: received.session.sessionId,
@@ -10932,6 +11042,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
           paymentAmount: execution.payment.paymentAmount || service.price,
           paymentCurrency: execution.payment.paymentCurrency || service.currency,
           paymentChain: execution.payment.paymentChain,
+          paymentCommitTxid: execution.payment.paymentCommitTxid,
+          settlementKind: execution.payment.settlementKind,
+          mrc20Ticker: execution.payment.mrc20Ticker,
+          mrc20Id: execution.payment.mrc20Id,
           session: applied.session,
           taskRun: applied.taskRun,
           publicStatus: appliedStatus.status,

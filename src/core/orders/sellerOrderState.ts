@@ -28,9 +28,13 @@ export interface SellerOrderRecord {
   orderTxid: string | null;
   orderReference: string | null;
   paymentTxid: string | null;
+  paymentCommitTxid: string | null;
   paymentAmount: string | null;
   paymentCurrency: string | null;
   paymentChain: string | null;
+  settlementKind: string | null;
+  mrc20Ticker: string | null;
+  mrc20Id: string | null;
   traceId: string;
   a2aSessionId: string;
   a2aTaskRunId: string | null;
@@ -43,7 +47,10 @@ export interface SellerOrderRecord {
   failureReason: string | null;
   endReason: string | null;
   refundRequestPinId: string | null;
+  refundRequestTxid: string | null;
   refundTxid: string | null;
+  refundFinalizePinId: string | null;
+  refundBlockingReason: string | null;
   receivedAt: number | null;
   acknowledgedAt: number | null;
   startedAt: number | null;
@@ -51,6 +58,7 @@ export interface SellerOrderRecord {
   ratingRequestedAt: number | null;
   endedAt: number | null;
   refundedAt: number | null;
+  refundCompletedAt: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -83,7 +91,7 @@ const ALLOWED_TRANSITIONS: Record<SellerOrderState, SellerOrderState[]> = {
   failed: ['failed', 'refund_pending', 'ended'],
   refund_pending: ['refund_pending', 'refunded', 'ended'],
   refunded: ['refunded', 'ended'],
-  ended: ['ended'],
+  ended: ['ended', 'refunded'],
 };
 
 function normalizeText(value: unknown): string {
@@ -125,9 +133,13 @@ export function createSellerOrderRecord(input: SellerOrderRecordInput): SellerOr
     orderTxid: normalizeText(input.orderTxid) || null,
     orderReference: normalizeText(input.orderReference) || null,
     paymentTxid: normalizeText(input.paymentTxid) || null,
+    paymentCommitTxid: normalizeText(input.paymentCommitTxid) || null,
     paymentAmount: normalizeText(input.paymentAmount) || null,
     paymentCurrency: normalizeText(input.paymentCurrency) || null,
     paymentChain: normalizeText(input.paymentChain) || null,
+    settlementKind: normalizeText(input.settlementKind) || null,
+    mrc20Ticker: normalizeText(input.mrc20Ticker) || null,
+    mrc20Id: normalizeText(input.mrc20Id) || null,
     traceId: normalizeText(input.traceId),
     a2aSessionId: normalizeText(input.a2aSessionId),
     a2aTaskRunId: normalizeText(input.a2aTaskRunId) || null,
@@ -140,7 +152,10 @@ export function createSellerOrderRecord(input: SellerOrderRecordInput): SellerOr
     failureReason: normalizeText(input.failureReason) || null,
     endReason: normalizeText(input.endReason) || null,
     refundRequestPinId: normalizeText(input.refundRequestPinId) || null,
+    refundRequestTxid: normalizeText(input.refundRequestTxid) || null,
     refundTxid: normalizeText(input.refundTxid) || null,
+    refundFinalizePinId: normalizeText(input.refundFinalizePinId) || null,
+    refundBlockingReason: normalizeText(input.refundBlockingReason) || null,
     receivedAt: normalizeNumber(input.receivedAt) ?? (state === 'received' ? createdAt : null),
     acknowledgedAt: normalizeNumber(input.acknowledgedAt),
     startedAt: normalizeNumber(input.startedAt),
@@ -148,6 +163,7 @@ export function createSellerOrderRecord(input: SellerOrderRecordInput): SellerOr
     ratingRequestedAt: normalizeNumber(input.ratingRequestedAt),
     endedAt: normalizeNumber(input.endedAt),
     refundedAt: normalizeNumber(input.refundedAt),
+    refundCompletedAt: normalizeNumber(input.refundCompletedAt) ?? normalizeNumber(input.refundedAt),
     createdAt,
     updatedAt,
   };
@@ -174,6 +190,7 @@ export function transitionSellerOrderRecord(
     ratingRequestedAt: patch.ratingRequestedAt ?? current.ratingRequestedAt,
     endedAt: patch.endedAt ?? current.endedAt,
     refundedAt: patch.refundedAt ?? current.refundedAt,
+    refundCompletedAt: patch.refundCompletedAt ?? current.refundCompletedAt,
   });
 }
 

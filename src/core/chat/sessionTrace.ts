@@ -40,6 +40,8 @@ export interface SessionTraceOrderInput {
   refundRequestTxid?: string | null;
   refundRequestedAt?: number | null;
   refundCompletedAt?: number | null;
+  refundFinalizePinId?: string | null;
+  refundBlockingReason?: string | null;
   refundApplyRetryCount?: number | null;
   nextRetryAt?: number | null;
   refundTxid?: string | null;
@@ -190,6 +192,8 @@ export interface SessionTraceRecord {
     refundRequestTxid: string | null;
     refundRequestedAt: number | null;
     refundCompletedAt: number | null;
+    refundFinalizePinId: string | null;
+    refundBlockingReason: string | null;
     refundApplyRetryCount: number | null;
     nextRetryAt: number | null;
     refundTxid: string | null;
@@ -473,6 +477,8 @@ export function buildSessionTrace(input: BuildSessionTraceInput): SessionTraceRe
           refundRequestTxid: normalizeText(input.order.refundRequestTxid) || null,
           refundRequestedAt: normalizeOptionalNumber(input.order.refundRequestedAt),
           refundCompletedAt: normalizeOptionalNumber(input.order.refundCompletedAt),
+          refundFinalizePinId: normalizeText(input.order.refundFinalizePinId) || null,
+          refundBlockingReason: normalizeText(input.order.refundBlockingReason) || null,
           refundApplyRetryCount: normalizeOptionalNumber(input.order.refundApplyRetryCount),
           nextRetryAt: normalizeOptionalNumber(input.order.nextRetryAt),
           refundTxid: normalizeText(input.order.refundTxid) || null,

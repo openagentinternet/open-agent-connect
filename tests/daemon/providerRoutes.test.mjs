@@ -145,7 +145,7 @@ async function fetchJson(baseUrl, routePath, options = {}) {
   };
 }
 
-async function startProviderServer() {
+async function startProviderServer(options = {}) {
   const homeDir = await createProfileHome('metabot-provider-routes-');
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   const providerPresenceStore = createProviderPresenceStateStore(homeDir);
@@ -154,6 +154,10 @@ async function startProviderServer() {
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     getDaemonRecord: () => null,
+    chainApiBaseUrl: options.chainApiBaseUrl,
+    secretStore: options.secretStore,
+    signer: options.signer,
+    adapters: options.adapters,
     onProviderPresenceChanged: async (enabled) => {
       presenceChanges.push(enabled);
     },
@@ -180,6 +184,7 @@ async function startProviderServer() {
     runtimeStateStore,
     providerPresenceStore,
     presenceChanges,
+    writes: options.writes ?? [],
     baseUrl: `http://127.0.0.1:${address.port}`,
     async close() {
       await new Promise((resolve, reject) => {
@@ -257,7 +262,7 @@ test('POST /api/provider/presence persists enabled state and notifies the runtim
   assert.equal((await app.providerPresenceStore.read()).enabled, false);
 });
 
-test('POST /api/provider/refund/confirm clears the manual refund queue for the matching seller order', async (t) => {
+test('POST /api/provider/refund/confirm refuses to locally complete a trace-only refund without settlement proof', async (t) => {
   const app = await startProviderServer();
   t.after(async () => app.close());
 
@@ -273,24 +278,116 @@ test('POST /api/provider/refund/confirm clears the manual refund queue for the m
   });
 
   assert.equal(confirmed.status, 200);
-  assert.equal(confirmed.payload.ok, true);
-  assert.equal(confirmed.payload.data.orderId, 'order-refund-1');
-  assert.equal(confirmed.payload.data.traceId, 'trace-provider-refund');
-  assert.equal(confirmed.payload.data.state, 'refunded');
+  assert.equal(confirmed.payload.ok, false);
+  assert.equal(confirmed.payload.state, 'manual_action_required');
+  assert.equal(confirmed.payload.code, 'order_not_found');
 
   const summary = await fetchJson(app.baseUrl, '/api/provider/summary');
   assert.equal(summary.payload.ok, true);
-  assert.deepEqual(summary.payload.data.manualActions, []);
+  assert.equal(summary.payload.data.manualActions.length, 1);
 
   const state = await app.runtimeStateStore.readState();
-  assert.equal(state.traces[0].order.status, 'refunded');
-  assert.equal(typeof state.traces[0].order.refundConfirmedAt, 'number');
-  assert.equal(typeof state.traces[0].order.refundedAt, 'number');
+  assert.equal(state.traces[0].order.status, 'refund_pending');
+  assert.equal(state.traces[0].order.refundTxid ?? null, null);
+  assert.equal(state.traces[0].order.refundFinalizePinId ?? null, null);
 });
 
-test('POST /api/provider/refund/confirm clears a manual refund action backed by sellerOrders', async (t) => {
-  const app = await startProviderServer();
+test('POST /api/provider/refund/confirm settles a sellerOrder with transfer and finalization proof', async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const writes = [];
+  const transferBuilds = [];
+  const broadcasts = [];
+  const app = await startProviderServer({
+    chainApiBaseUrl: 'https://chain.test',
+    writes,
+    secretStore: {
+      async ensureLayout() { return {}; },
+      async readIdentitySecrets() {
+        return { mnemonic: 'test test test test test test test test test test test junk', path: "m/44'/10001'/0'/0/0" };
+      },
+      async writeIdentitySecrets(value) { return JSON.stringify(value); },
+      async deleteIdentitySecrets() {},
+    },
+    signer: {
+      async getIdentity() { return {}; },
+      async getPrivateChatIdentity() { return {}; },
+      async writePin(input) {
+        writes.push(input);
+        return {
+          txids: ['refund-finalize-txid-1'],
+          pinId: 'refund-finalize-pin-1',
+          totalCost: 1,
+          network: input.network,
+          operation: input.operation,
+          path: input.path,
+          contentType: input.contentType,
+          encoding: input.encoding,
+          globalMetaId: 'idq1provider',
+          mvcAddress: 'mvc-provider-address',
+        };
+      },
+    },
+    adapters: new Map([
+      ['mvc', {
+        network: 'mvc',
+        explorerBaseUrl: 'https://www.mvcscan.com',
+        feeRateUnit: 'sat/byte',
+        minTransferSatoshis: 600,
+        async deriveAddress() { return 'mvc-provider-address'; },
+        async fetchUtxos() { return []; },
+        async fetchBalance() {
+          return { chain: 'mvc', address: 'mvc-provider-address', totalSatoshis: 0, confirmedSatoshis: 0, unconfirmedSatoshis: 0, utxoCount: 0 };
+        },
+        async fetchFeeRate() { return 1; },
+        async fetchRawTx() { return ''; },
+        async buildTransfer(input) {
+          transferBuilds.push(input);
+          return { rawTx: 'signed-refund-transfer-rawtx', fee: 42 };
+        },
+        async buildInscription() { throw new Error('not used'); },
+        async broadcastTx(rawTx) {
+          broadcasts.push(rawTx);
+          return 'refund-transfer-txid-1';
+        },
+      }],
+    ]),
+  });
   t.after(async () => app.close());
+  globalThis.fetch = async (url, init) => {
+    const href = String(url);
+    if (href === 'https://chain.test/pin/seller-refund-pin-1') {
+      return new Response(JSON.stringify({
+        data: {
+          path: '/protocols/service-refund-request',
+          contentSummary: JSON.stringify({
+            version: '1.0.0',
+            paymentTxid: 'd'.repeat(64),
+            servicePinId: '/protocols/skill-service-pin-1',
+            serviceName: 'Tarot Reading',
+            refundAmount: '0.00001',
+            refundCurrency: 'SPACE',
+            amount: '0.00001',
+            currency: 'SPACE',
+            paymentChain: 'mvc',
+            settlementKind: 'native',
+            paymentCommitTxid: null,
+            refundToAddress: 'mvc-buyer-address',
+            buyerGlobalMetaId: 'idq1buyer',
+            sellerGlobalMetaId: 'idq1provider',
+            orderMessagePinId: 'order-message-pin-1',
+            failureReason: 'delivery_timeout',
+            failureDetectedAt: 1_775_000_030,
+            evidencePinIds: ['order-message-pin-1'],
+          }),
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    return originalFetch(url, init);
+  };
 
   const sellerOrder = createSellerOrderRecord({
     id: 'seller-order-refund-1',
@@ -309,6 +406,8 @@ test('POST /api/provider/refund/confirm clears a manual refund action backed by 
     paymentTxid: 'd'.repeat(64),
     paymentAmount: '0.00001',
     paymentCurrency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
     traceId: 'trace-provider-seller-order-refund',
     a2aSessionId: 'seller-session-1',
     a2aTaskRunId: 'seller-run-1',
@@ -339,6 +438,19 @@ test('POST /api/provider/refund/confirm clears a manual refund action backed by 
   assert.equal(confirmed.payload.data.orderId, 'seller-order-refund-1');
   assert.equal(confirmed.payload.data.traceId, 'trace-provider-seller-order-refund');
   assert.equal(confirmed.payload.data.state, 'refunded');
+  assert.equal(confirmed.payload.data.refundTxid, 'refund-transfer-txid-1');
+  assert.equal(confirmed.payload.data.refundFinalizePinId, 'refund-finalize-pin-1');
+  assert.equal(transferBuilds.length, 1);
+  assert.equal(transferBuilds[0].toAddress, 'mvc-buyer-address');
+  assert.equal(transferBuilds[0].amountSatoshis, 1000);
+  assert.deepEqual(broadcasts, ['signed-refund-transfer-rawtx']);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].path, '/protocols/service-refund-finalize');
+  const finalizePayload = JSON.parse(writes[0].payload);
+  assert.equal(finalizePayload.refundRequestPinId, 'seller-refund-pin-1');
+  assert.equal(finalizePayload.paymentTxid, 'd'.repeat(64));
+  assert.equal(finalizePayload.servicePinId, '/protocols/skill-service-pin-1');
+  assert.equal(finalizePayload.refundTxid, 'refund-transfer-txid-1');
 
   const summaryAfter = await fetchJson(app.baseUrl, '/api/provider/summary');
   assert.equal(summaryAfter.payload.ok, true);
@@ -346,8 +458,75 @@ test('POST /api/provider/refund/confirm clears a manual refund action backed by 
 
   const state = await app.runtimeStateStore.readState();
   assert.equal(state.sellerOrders[0].state, 'refunded');
-  assert.equal(state.sellerOrders[0].refundTxid, null);
+  assert.equal(state.sellerOrders[0].refundTxid, 'refund-transfer-txid-1');
+  assert.equal(state.sellerOrders[0].refundFinalizePinId, 'refund-finalize-pin-1');
   assert.equal(typeof state.sellerOrders[0].refundedAt, 'number');
+});
+
+test('POST /api/provider/refund/confirm preserves failed paid seller orders without a refund request proof', async (t) => {
+  const app = await startProviderServer();
+  t.after(async () => app.close());
+
+  const sellerOrder = createSellerOrderRecord({
+    id: 'seller-order-failed-without-refund-proof',
+    state: 'failed',
+    localMetabotId: 1,
+    localMetabotSlug: path.basename(app.homeDir),
+    providerGlobalMetaId: 'idq1provider',
+    buyerGlobalMetaId: 'idq1buyer',
+    servicePinId: '/protocols/skill-service-pin-1',
+    currentServicePinId: '/protocols/skill-service-pin-1',
+    serviceName: 'Tarot Reading',
+    providerSkill: 'tarot-rws',
+    orderMessageId: 'order-message-pin-2',
+    orderPinId: 'order-message-pin-2',
+    orderTxid: 'e'.repeat(64),
+    paymentTxid: 'f'.repeat(64),
+    paymentAmount: '0.00001',
+    paymentCurrency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    traceId: 'trace-provider-seller-order-failed',
+    a2aSessionId: 'seller-session-2',
+    a2aTaskRunId: 'seller-run-2',
+    failureReason: 'provider_execution_failed',
+    refundRequestPinId: null,
+    createdAt: 1_775_000_020_000,
+    updatedAt: 1_775_000_030_000,
+  });
+
+  await app.runtimeStateStore.writeState({
+    identity: createIdentity(),
+    services: [createService()],
+    traces: [],
+    sellerOrders: [sellerOrder],
+  });
+
+  const summaryBefore = await fetchJson(app.baseUrl, '/api/provider/summary');
+  assert.equal(summaryBefore.payload.ok, true);
+  assert.equal(summaryBefore.payload.data.manualActions.length, 1);
+  assert.equal(summaryBefore.payload.data.manualActions[0].orderId, 'seller-order-failed-without-refund-proof');
+
+  const confirmed = await fetchJson(app.baseUrl, '/api/provider/refund/confirm', {
+    method: 'POST',
+    body: { orderId: 'seller-order-failed-without-refund-proof' },
+  });
+
+  assert.equal(confirmed.status, 200);
+  assert.equal(confirmed.payload.ok, false);
+  assert.equal(confirmed.payload.state, 'manual_action_required');
+  assert.equal(confirmed.payload.code, 'refund_request_missing');
+
+  const summaryAfter = await fetchJson(app.baseUrl, '/api/provider/summary');
+  assert.equal(summaryAfter.payload.ok, true);
+  assert.equal(summaryAfter.payload.data.manualActions.length, 1);
+  assert.equal(summaryAfter.payload.data.manualActions[0].orderId, 'seller-order-failed-without-refund-proof');
+
+  const state = await app.runtimeStateStore.readState();
+  assert.equal(state.sellerOrders[0].state, 'failed');
+  assert.equal(state.sellerOrders[0].refundBlockingReason, 'refund_request_missing');
+  assert.equal(state.sellerOrders[0].refundTxid, null);
+  assert.equal(state.sellerOrders[0].refundFinalizePinId, null);
 });
 
 test('GET /api/provider/refunds/initiated returns local buyer-side initiated refunds', async (t) => {

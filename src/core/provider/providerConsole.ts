@@ -59,6 +59,9 @@ export interface ProviderConsoleOrderRow {
   fallbackSelected?: boolean | null;
   failureReason?: string | null;
   refundRequestPinId?: string | null;
+  refundTxid?: string | null;
+  refundFinalizePinId?: string | null;
+  refundBlockingReason?: string | null;
   createdAt: number;
   updatedAt?: number;
   ratingStatus: ProviderConsoleOrderRatingStatus;
@@ -201,6 +204,11 @@ function buildOrderRowWithRating(
     buyerGlobalMetaId: normalizeText(trace.session?.peerGlobalMetaId) || null,
     buyerName: normalizeText(trace.session?.peerName) || null,
     publicStatus: normalizeText(trace.a2a?.publicStatus) || null,
+    ...(normalizeText(order.failureReason) ? { failureReason: normalizeText(order.failureReason) } : {}),
+    ...(normalizeText(order.refundRequestPinId) ? { refundRequestPinId: normalizeText(order.refundRequestPinId) } : {}),
+    ...(normalizeText(order.refundTxid) ? { refundTxid: normalizeText(order.refundTxid) } : {}),
+    ...(normalizeText(order.refundFinalizePinId) ? { refundFinalizePinId: normalizeText(order.refundFinalizePinId) } : {}),
+    ...(normalizeText(order.refundBlockingReason) ? { refundBlockingReason: normalizeText(order.refundBlockingReason) } : {}),
     createdAt: Number.isFinite(trace.createdAt) ? Number(trace.createdAt) : 0,
     ...rating,
   };
@@ -264,6 +272,8 @@ function buildSellerOrderRowWithRating(
       refundRequestTxid: null,
       refundRequestedAt: null,
       refundCompletedAt: null,
+      refundFinalizePinId: normalizeText(order.refundFinalizePinId) || null,
+      refundBlockingReason: normalizeText(order.refundBlockingReason) || null,
       refundApplyRetryCount: null,
       nextRetryAt: null,
       refundTxid: normalizeText(order.refundTxid) || null,
@@ -320,6 +330,9 @@ function buildSellerOrderRowWithRating(
     fallbackSelected: typeof order.fallbackSelected === 'boolean' ? order.fallbackSelected : null,
     failureReason: normalizeText(order.failureReason) || null,
     refundRequestPinId: normalizeText(order.refundRequestPinId) || null,
+    refundTxid: normalizeText(order.refundTxid) || null,
+    refundFinalizePinId: normalizeText(order.refundFinalizePinId) || null,
+    refundBlockingReason: normalizeText(order.refundBlockingReason) || null,
     createdAt: Number.isFinite(order.createdAt) ? Number(order.createdAt) : 0,
     updatedAt: Number.isFinite(order.updatedAt) ? Number(order.updatedAt) : undefined,
     ...rating,
