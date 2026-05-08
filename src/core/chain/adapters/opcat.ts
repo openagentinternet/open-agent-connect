@@ -148,10 +148,10 @@ function buildMetaIdInscriptionPayload(request: {
   const chunks: Buffer[] = [];
   chunks.push(pushData(Buffer.from('metaid')));
   chunks.push(pushData(Buffer.from(request.operation)));
-  chunks.push(pushData(Buffer.from(request.contentType || 'text/plain')));
+  chunks.push(pushData(Buffer.from(request.path || '')));
   chunks.push(pushData(Buffer.from(request.encryption || '0')));
   chunks.push(pushData(Buffer.from(request.version || '0.0.1')));
-  chunks.push(pushData(Buffer.from(request.path || '')));
+  chunks.push(pushData(Buffer.from(request.contentType || 'text/plain')));
   for (const part of bodyParts) chunks.push(pushData(part));
   return Buffer.concat(chunks);
 }
