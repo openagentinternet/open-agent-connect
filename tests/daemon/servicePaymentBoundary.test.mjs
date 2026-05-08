@@ -1080,6 +1080,26 @@ test('inbound provider ORDER executes through runner and sends delivery plus rat
   assert.equal(trace.order.paymentTxid, paymentTxid);
   assert.equal(trace.order.providerSkill, harness.service.providerSkill);
   assert.equal(trace.order.orderTxid, orderTxid);
+  assert.equal(trace.providerRuntime.runtimeId, 'runtime-codex');
+  assert.equal(trace.providerRuntime.sessionId, 'provider-llm-session-1');
+  assert.equal(trace.providerRuntime.providerSkill, harness.service.providerSkill);
+
+  const sellerOrder = state.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.ok(sellerOrder, 'expected durable seller order state for inbound order');
+  assert.equal(sellerOrder.state, 'rating_pending');
+  assert.equal(sellerOrder.localMetabotId, harness.identity.metabotId);
+  assert.equal(sellerOrder.localMetabotSlug, path.basename(harness.homeDir));
+  assert.equal(sellerOrder.providerGlobalMetaId, harness.identity.globalMetaId);
+  assert.equal(sellerOrder.buyerGlobalMetaId, harness.buyerGlobalMetaId);
+  assert.equal(sellerOrder.servicePinId, harness.service.currentPinId);
+  assert.equal(sellerOrder.currentServicePinId, harness.service.currentPinId);
+  assert.equal(sellerOrder.providerSkill, harness.service.providerSkill);
+  assert.equal(sellerOrder.orderMessageId, `${orderTxid}i0`);
+  assert.equal(sellerOrder.paymentTxid, paymentTxid);
+  assert.equal(sellerOrder.traceId, trace.traceId);
+  assert.equal(sellerOrder.a2aSessionId, trace.a2a.sessionId);
+  assert.equal(sellerOrder.llmSessionId, 'provider-llm-session-1');
+  assert.equal(sellerOrder.runtimeId, 'runtime-codex');
 
   const conversation = await createA2AConversationStore({
     homeDir: harness.homeDir,
@@ -1098,6 +1118,140 @@ test('inbound provider ORDER executes through runner and sends delivery plus rat
   assert.equal(orderSession.role, 'provider');
   assert.equal(orderSession.paymentTxid, paymentTxid);
   assert.equal(orderSession.servicePinId, harness.service.currentPinId);
+});
+
+test('/api services.execute persists seller lifecycle state and provider runtime diagnostics', async (t) => {
+  const harness = await createInboundProviderOrderHarness(t);
+  const paymentTxid = '9'.repeat(64);
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-execute',
+    externalConversationId: 'direct:buyer:provider',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(harness.llmCalls.length, 1);
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.traceId === 'trace-provider-direct-execute');
+  assert.ok(trace, 'expected direct provider execution trace');
+  assert.equal(trace.providerRuntime.runtimeId, 'runtime-codex');
+  assert.equal(trace.providerRuntime.sessionId, 'provider-llm-session-1');
+  assert.equal(trace.providerRuntime.providerSkill, harness.service.providerSkill);
+
+  const sellerOrder = state.sellerOrders.find((entry) => entry.paymentTxid === paymentTxid);
+  assert.ok(sellerOrder, 'expected direct execution seller order');
+  assert.equal(sellerOrder.state, 'completed');
+  assert.equal(sellerOrder.providerGlobalMetaId, harness.identity.globalMetaId);
+  assert.equal(sellerOrder.buyerGlobalMetaId, harness.buyerGlobalMetaId);
+  assert.equal(sellerOrder.currentServicePinId, harness.service.currentPinId);
+  assert.equal(sellerOrder.traceId, 'trace-provider-direct-execute');
+  assert.equal(sellerOrder.a2aSessionId, trace.a2a.sessionId);
+  assert.equal(sellerOrder.llmSessionId, 'provider-llm-session-1');
+});
+
+test('/api services.execute rejects missing buyer globalMetaId before seller order persistence', async (t) => {
+  const harness = await createInboundProviderOrderHarness(t);
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-missing-buyer',
+    externalConversationId: 'direct:buyer:provider',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid: '7'.repeat(64),
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_service_execution_request');
+  assert.match(result.message, /buyer\.globalMetaId/);
+  assert.equal(harness.llmCalls.length, 0);
+
+  const state = await harness.runtimeStateStore.readState();
+  assert.equal(state.traces.length, 0);
+  assert.equal(state.sellerOrders.length, 0);
+});
+
+test('/api services.execute persists failed seller lifecycle state with provider runtime diagnostics', async (t) => {
+  const harness = await createInboundProviderOrderHarness(t, {
+    llmSession: (sessionId) => ({
+      sessionId,
+      status: 'failed',
+      error: 'runtime refused direct execution',
+    }),
+  });
+  const paymentTxid = '8'.repeat(64);
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-failed',
+    externalConversationId: 'direct:buyer:provider',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'provider_execution_failed');
+  assert.equal(harness.llmCalls.length, 1);
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.traceId === 'trace-provider-direct-failed');
+  assert.ok(trace, 'expected direct provider failure trace');
+  assert.equal(trace.a2a.publicStatus, 'remote_failed');
+  assert.equal(trace.providerRuntime.runtimeId, 'runtime-codex');
+  assert.equal(trace.providerRuntime.sessionId, 'provider-llm-session-1');
+
+  const sellerOrder = state.sellerOrders.find((entry) => entry.paymentTxid === paymentTxid);
+  assert.ok(sellerOrder, 'expected failed direct execution seller order');
+  assert.equal(sellerOrder.state, 'failed');
+  assert.equal(sellerOrder.failureReason, 'runtime refused direct execution');
+  assert.equal(sellerOrder.traceId, 'trace-provider-direct-failed');
 });
 
 test('inbound provider ORDER without payment metadata does not execute or deliver', async (t) => {
@@ -1587,6 +1741,9 @@ test('inbound provider ORDER execution failure marks seller order failed without
   assert.equal(trace.order.role, 'seller');
   assert.equal(trace.order.paymentTxid, paymentTxid);
   assert.equal(trace.a2a.publicStatus, 'remote_failed');
+  assert.equal(trace.providerRuntime.runtimeId, 'runtime-codex');
+  assert.equal(trace.providerRuntime.sessionId, 'provider-llm-session-1');
+  assert.equal(trace.providerRuntime.providerSkill, harness.service.providerSkill);
 });
 
 test('inbound provider ORDER marks failed when acknowledgement send fails before execution', async (t) => {

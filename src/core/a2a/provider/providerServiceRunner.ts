@@ -98,6 +98,62 @@ function buildPaidOrderUserPrompt(input: ProviderServiceOrderInput): string {
   return lines.join('\n');
 }
 
+type ProviderServiceRunnerResultWithRuntime = ProviderServiceRunnerResult & {
+  runtimeId?: string;
+  sessionId?: string;
+  selection?: ProviderServiceRunnerSelection | null;
+};
+
+function withRuntimeMetadata<T extends ProviderServiceRunnerResult>(
+  result: T,
+  input: {
+    runtime: LlmRuntime;
+    providerSkill: string;
+    sessionId?: string | null;
+    selection?: ProviderServiceRunnerSelection | null;
+  },
+): T & {
+  runtimeId: string;
+  sessionId?: string;
+  selection: ProviderServiceRunnerSelection | null;
+} {
+  const selection = input.selection ?? null;
+  const sessionId = normalizeText(input.sessionId);
+  const enriched = {
+    ...result,
+    metadata: {
+      ...(result.metadata ?? {}),
+      runtimeId: input.runtime.id,
+      runtimeProvider: input.runtime.provider,
+      sessionId: sessionId || null,
+      providerSkill: input.providerSkill,
+      fallbackSelected: selection?.fallbackSelected ?? null,
+      selection,
+    },
+    runtimeId: input.runtime.id,
+    ...(sessionId ? { sessionId } : {}),
+    selection,
+  };
+  return enriched as T & {
+    runtimeId: string;
+    sessionId?: string;
+    selection: ProviderServiceRunnerSelection | null;
+  };
+}
+
+function createRuntimeFailedResult(
+  code: string,
+  message: string,
+  input: {
+    runtime: LlmRuntime;
+    providerSkill: string;
+    sessionId?: string | null;
+    selection?: ProviderServiceRunnerSelection | null;
+  },
+): ProviderServiceRunnerResultWithRuntime {
+  return withRuntimeMetadata(createServiceRunnerFailedResult(code, message), input);
+}
+
 async function waitForSession(
   llmExecutor: Pick<LlmExecutor, 'getSession'>,
   sessionId: string,
@@ -247,7 +303,7 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
   const pollIntervalMs = input.pollIntervalMs ?? 500;
 
   return {
-    async execute(order: ProviderServiceOrderInput): Promise<ProviderServiceRunnerResult & { runtimeId?: string; sessionId?: string; selection?: ProviderServiceRunnerSelection | null }> {
+    async execute(order: ProviderServiceOrderInput): Promise<ProviderServiceRunnerResultWithRuntime> {
       if (!isSafeProviderSkillName(order.providerSkill)) {
         return createServiceRunnerFailedResult('invalid_provider_skill', 'Provider skill name is unsafe.');
       }
@@ -302,50 +358,110 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
               selection = fallbackSelection;
               sessionId = await executeWithRuntime(fallbackRuntime);
             } catch (fallbackError) {
-              return createServiceRunnerFailedResult('provider_execution_failed', fallbackError instanceof Error ? fallbackError.message : String(fallbackError));
+              return createRuntimeFailedResult(
+                'provider_execution_failed',
+                fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+                {
+                  runtime: fallbackRuntime,
+                  providerSkill: order.providerSkill,
+                  selection: fallbackSelection,
+                },
+              );
             }
           } else {
-            return createServiceRunnerFailedResult('provider_execution_failed', error instanceof Error ? error.message : String(error));
+            return createRuntimeFailedResult(
+              'provider_execution_failed',
+              error instanceof Error ? error.message : String(error),
+              {
+                runtime,
+                providerSkill: order.providerSkill,
+                selection,
+              },
+            );
           }
         } else {
-          return createServiceRunnerFailedResult('provider_execution_failed', error instanceof Error ? error.message : String(error));
+          return createRuntimeFailedResult(
+            'provider_execution_failed',
+            error instanceof Error ? error.message : String(error),
+            {
+              runtime,
+              providerSkill: order.providerSkill,
+              selection,
+            },
+          );
         }
       }
 
       const session = await waitForSession(input.llmExecutor, sessionId, sessionTimeoutMs, pollIntervalMs);
       if (session?.status === 'failed' || session?.status === 'cancelled' || session?.status === 'timeout') {
         const sessionError = (session as unknown as { error?: unknown }).error;
-        return createServiceRunnerFailedResult(
+        return createRuntimeFailedResult(
           session.status === 'timeout'
             ? 'provider_execution_timeout'
             : session.status === 'cancelled'
               ? 'provider_execution_cancelled'
               : 'provider_execution_failed',
           normalizeText(sessionError) || 'Provider execution did not complete successfully.',
+          {
+            runtime,
+            providerSkill: order.providerSkill,
+            sessionId,
+            selection,
+          },
         );
       }
       if (!session?.result) {
-        return createServiceRunnerFailedResult('provider_execution_timeout', 'The provider runtime did not produce a terminal session result before timeout.');
+        return createRuntimeFailedResult(
+          'provider_execution_timeout',
+          'The provider runtime did not produce a terminal session result before timeout.',
+          {
+            runtime,
+            providerSkill: order.providerSkill,
+            sessionId,
+            selection,
+          },
+        );
       }
       if (session.result.status !== 'completed') {
-        return createServiceRunnerFailedResult(
+        return createRuntimeFailedResult(
           session.result.status === 'timeout'
             ? 'provider_execution_timeout'
             : session.result.status === 'cancelled'
               ? 'provider_execution_cancelled'
               : 'provider_execution_failed',
           session.result.error || 'Provider execution did not complete successfully.',
+          {
+            runtime,
+            providerSkill: order.providerSkill,
+            sessionId,
+            selection,
+          },
         );
       }
 
       const responseText = normalizeText(session.result.output);
       if (!responseText) {
-        return createServiceRunnerFailedResult('provider_execution_empty', 'The provider runtime returned an empty result.');
+        return createRuntimeFailedResult(
+          'provider_execution_empty',
+          'The provider runtime returned an empty result.',
+          {
+            runtime,
+            providerSkill: order.providerSkill,
+            sessionId,
+            selection,
+          },
+        );
       }
       if (!isTextOutputType(order.outputType)) {
-        return createServiceRunnerFailedResult(
+        return createRuntimeFailedResult(
           'provider_deliverable_invalid',
           'Non-text provider deliverables require validation and upload support before delivery.',
+          {
+            runtime,
+            providerSkill: order.providerSkill,
+            sessionId,
+            selection,
+          },
         );
       }
 

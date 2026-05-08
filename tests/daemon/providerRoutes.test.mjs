@@ -11,6 +11,7 @@ const { createHttpServer } = require('../../dist/daemon/httpServer.js');
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
+const { createSellerOrderRecord } = require('../../dist/core/orders/sellerOrderState.js');
 
 function createIdentity() {
   return {
@@ -285,6 +286,68 @@ test('POST /api/provider/refund/confirm clears the manual refund queue for the m
   assert.equal(state.traces[0].order.status, 'refunded');
   assert.equal(typeof state.traces[0].order.refundConfirmedAt, 'number');
   assert.equal(typeof state.traces[0].order.refundedAt, 'number');
+});
+
+test('POST /api/provider/refund/confirm clears a manual refund action backed by sellerOrders', async (t) => {
+  const app = await startProviderServer();
+  t.after(async () => app.close());
+
+  const sellerOrder = createSellerOrderRecord({
+    id: 'seller-order-refund-1',
+    state: 'refund_pending',
+    localMetabotId: 1,
+    localMetabotSlug: path.basename(app.homeDir),
+    providerGlobalMetaId: 'idq1provider',
+    buyerGlobalMetaId: 'idq1buyer',
+    servicePinId: '/protocols/skill-service-pin-1',
+    currentServicePinId: '/protocols/skill-service-pin-1',
+    serviceName: 'Tarot Reading',
+    providerSkill: 'tarot-rws',
+    orderMessageId: 'order-message-pin-1',
+    orderPinId: 'order-message-pin-1',
+    orderTxid: 'c'.repeat(64),
+    paymentTxid: 'd'.repeat(64),
+    paymentAmount: '0.00001',
+    paymentCurrency: 'SPACE',
+    traceId: 'trace-provider-seller-order-refund',
+    a2aSessionId: 'seller-session-1',
+    a2aTaskRunId: 'seller-run-1',
+    refundRequestPinId: 'seller-refund-pin-1',
+    createdAt: 1_775_000_020_000,
+    updatedAt: 1_775_000_030_000,
+  });
+
+  await app.runtimeStateStore.writeState({
+    identity: createIdentity(),
+    services: [createService()],
+    traces: [],
+    sellerOrders: [sellerOrder],
+  });
+
+  const summaryBefore = await fetchJson(app.baseUrl, '/api/provider/summary');
+  assert.equal(summaryBefore.payload.ok, true);
+  assert.equal(summaryBefore.payload.data.manualActions.length, 1);
+  assert.equal(summaryBefore.payload.data.manualActions[0].orderId, 'seller-order-refund-1');
+
+  const confirmed = await fetchJson(app.baseUrl, '/api/provider/refund/confirm', {
+    method: 'POST',
+    body: { orderId: 'seller-order-refund-1' },
+  });
+
+  assert.equal(confirmed.status, 200);
+  assert.equal(confirmed.payload.ok, true);
+  assert.equal(confirmed.payload.data.orderId, 'seller-order-refund-1');
+  assert.equal(confirmed.payload.data.traceId, 'trace-provider-seller-order-refund');
+  assert.equal(confirmed.payload.data.state, 'refunded');
+
+  const summaryAfter = await fetchJson(app.baseUrl, '/api/provider/summary');
+  assert.equal(summaryAfter.payload.ok, true);
+  assert.deepEqual(summaryAfter.payload.data.manualActions, []);
+
+  const state = await app.runtimeStateStore.readState();
+  assert.equal(state.sellerOrders[0].state, 'refunded');
+  assert.equal(state.sellerOrders[0].refundTxid, null);
+  assert.equal(typeof state.sellerOrders[0].refundedAt, 'number');
 });
 
 test('GET /api/provider/refunds/initiated returns local buyer-side initiated refunds', async (t) => {

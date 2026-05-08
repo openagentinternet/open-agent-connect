@@ -60,12 +60,19 @@ import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalo
 import { validateServicePublishProviderSkill } from '../core/services/servicePublishValidation';
 import { createProviderServiceRunner } from '../core/a2a/provider/providerServiceRunner';
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
+import {
+  createSellerOrderRecord,
+  transitionSellerOrderRecord,
+  upsertSellerOrderRecord,
+  type SellerOrderRecord,
+  type SellerOrderState,
+} from '../core/orders/sellerOrderState';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
 import { refreshRatingDetailCacheFromChain } from '../core/ratings/ratingDetailSync';
 import { planRemoteCall } from '../core/delegation/remoteCall';
 import { buildSessionTrace } from '../core/chat/sessionTrace';
-import type { SessionTraceRecord } from '../core/chat/sessionTrace';
+import type { SessionTraceProviderRuntimeInput, SessionTraceRecord } from '../core/chat/sessionTrace';
 import { exportSessionArtifacts } from '../core/chat/transcriptExport';
 import { sendPrivateChat } from '../core/chat/privateChat';
 import { loadChatPersona } from '../core/chat/chatPersonaLoader';
@@ -1043,6 +1050,7 @@ function buildProviderSummaryPayload(input: {
     services: input.state.services,
     masters: input.masters,
     traces: input.state.traces as unknown as ProviderConsoleTraceRecord[],
+    sellerOrders: input.state.sellerOrders,
     ratingDetails: input.ratingDetails,
     ratingSyncState: input.ratingSyncState,
   });
@@ -5081,6 +5089,133 @@ export function createDefaultMetabotDaemonHandlers(input: {
     };
   }
 
+  function buildProviderRuntimeDiagnostics(
+    providerSkill: string,
+    runnerResult?: ProviderServiceRunnerResult | null,
+  ): SessionTraceProviderRuntimeInput {
+    const resultRecord = readObject(runnerResult) ?? {};
+    const metadata = readObject(resultRecord.metadata) ?? {};
+    const selection = readObject(resultRecord.selection) ?? readObject(metadata.selection) ?? {};
+    const runtime = readObject(selection.runtime) ?? {};
+    const fallbackSelected = typeof selection.fallbackSelected === 'boolean'
+      ? selection.fallbackSelected
+      : typeof metadata.fallbackSelected === 'boolean'
+        ? metadata.fallbackSelected
+        : null;
+
+    return {
+      runtimeId: normalizeText(resultRecord.runtimeId) || normalizeText(metadata.runtimeId) || normalizeText(runtime.id) || null,
+      runtimeProvider: normalizeText(metadata.runtimeProvider) || normalizeText(runtime.provider) || null,
+      sessionId: normalizeText(resultRecord.sessionId) || normalizeText(metadata.sessionId) || null,
+      providerSkill: normalizeText(metadata.providerSkill) || normalizeText(providerSkill) || null,
+      fallbackSelected,
+    };
+  }
+
+  function buildProviderSellerOrderRecord(inputOrder: {
+    state: RuntimeState;
+    service: RuntimeState['services'][number];
+    buyerGlobalMetaId: string;
+    lifecycleState: SellerOrderState;
+    traceId: string;
+    orderMessageId: string;
+    orderTxid: string;
+    orderPinId?: string | null;
+    orderReference?: string | null;
+    paymentTxid?: string | null;
+    paymentAmount: string;
+    paymentCurrency: string;
+    paymentChain?: string | null;
+    session: A2ASessionRecord;
+    taskRun: A2ATaskRunRecord;
+    publicStatus?: string | null;
+    latestEvent?: string | null;
+    providerRuntime?: SessionTraceProviderRuntimeInput | null;
+    failureReason?: string | null;
+    endReason?: string | null;
+    receivedAt?: number | null;
+    acknowledgedAt?: number | null;
+    startedAt?: number | null;
+    deliveredAt?: number | null;
+    ratingRequestedAt?: number | null;
+    endedAt?: number | null;
+    refundedAt?: number | null;
+    updatedAt?: number | null;
+  }): SellerOrderRecord {
+    const identity = inputOrder.state.identity!;
+    const runtime = inputOrder.providerRuntime ?? null;
+    const orderMessageId = normalizeText(inputOrder.orderMessageId)
+      || normalizeText(inputOrder.orderPinId)
+      || normalizeText(inputOrder.orderTxid)
+      || normalizeText(inputOrder.orderReference)
+      || inputOrder.traceId;
+    const paymentTxid = normalizeText(inputOrder.paymentTxid);
+    const orderTxid = normalizeText(inputOrder.orderTxid);
+    const orderReference = normalizeText(inputOrder.orderReference);
+    const stableOrderKey = paymentTxid || orderTxid || orderReference || inputOrder.traceId;
+    const createdAt = inputOrder.receivedAt
+      ?? inputOrder.session.createdAt
+      ?? inputOrder.taskRun.createdAt
+      ?? Date.now();
+    const updatedAt = inputOrder.updatedAt
+      ?? inputOrder.endedAt
+      ?? inputOrder.ratingRequestedAt
+      ?? inputOrder.deliveredAt
+      ?? inputOrder.startedAt
+      ?? inputOrder.acknowledgedAt
+      ?? inputOrder.taskRun.updatedAt
+      ?? Date.now();
+
+    return createSellerOrderRecord({
+      id: `seller-order-${stableOrderKey}`,
+      state: inputOrder.lifecycleState,
+      localMetabotId: identity.metabotId,
+      localMetabotSlug: path.basename(input.homeDir),
+      providerGlobalMetaId: identity.globalMetaId,
+      buyerGlobalMetaId: inputOrder.buyerGlobalMetaId,
+      servicePinId: inputOrder.service.sourceServicePinId || inputOrder.service.currentPinId,
+      currentServicePinId: inputOrder.service.currentPinId,
+      serviceName: normalizeText(inputOrder.service.displayName) || normalizeText(inputOrder.service.serviceName),
+      providerSkill: inputOrder.service.providerSkill,
+      orderMessageId,
+      orderPinId: inputOrder.orderPinId || null,
+      orderTxid: orderTxid || null,
+      orderReference: orderReference || null,
+      paymentTxid: paymentTxid || null,
+      paymentAmount: inputOrder.paymentAmount,
+      paymentCurrency: inputOrder.paymentCurrency,
+      paymentChain: inputOrder.paymentChain || null,
+      traceId: inputOrder.traceId,
+      a2aSessionId: inputOrder.session.sessionId,
+      a2aTaskRunId: inputOrder.taskRun.runId,
+      llmSessionId: runtime?.sessionId ?? null,
+      runtimeId: runtime?.runtimeId ?? null,
+      runtimeProvider: runtime?.runtimeProvider ?? null,
+      fallbackSelected: typeof runtime?.fallbackSelected === 'boolean' ? runtime.fallbackSelected : null,
+      publicStatus: inputOrder.publicStatus || null,
+      latestEvent: inputOrder.latestEvent || null,
+      failureReason: inputOrder.failureReason || null,
+      endReason: inputOrder.endReason || null,
+      receivedAt: inputOrder.receivedAt ?? createdAt,
+      acknowledgedAt: inputOrder.acknowledgedAt ?? null,
+      startedAt: inputOrder.startedAt ?? null,
+      deliveredAt: inputOrder.deliveredAt ?? null,
+      ratingRequestedAt: inputOrder.ratingRequestedAt ?? null,
+      endedAt: inputOrder.endedAt ?? null,
+      refundedAt: inputOrder.refundedAt ?? null,
+      createdAt,
+      updatedAt,
+    });
+  }
+
+  async function upsertProviderSellerOrderRecord(inputOrder: Parameters<typeof buildProviderSellerOrderRecord>[0]): Promise<void> {
+    const record = buildProviderSellerOrderRecord(inputOrder);
+    await runtimeStateStore.updateState((current) => ({
+      ...current,
+      sellerOrders: upsertSellerOrderRecord(current.sellerOrders, record),
+    }));
+  }
+
   async function findExistingProviderOrderSession(inputOrder: {
     state: RuntimeState;
     buyerGlobalMetaId?: string | null;
@@ -5092,13 +5227,36 @@ export function createDefaultMetabotDaemonHandlers(input: {
     orderTxid: string | null;
     paymentTxid: string | null;
     servicePinId: string | null;
-    source: 'conversation' | 'trace';
+    source: 'conversation' | 'trace' | 'seller_order';
   } | null> {
     const orderTxid = normalizeText(inputOrder.orderTxid);
     const paymentTxid = normalizeText(inputOrder.paymentTxid);
     const orderReference = normalizeText(inputOrder.orderReference);
     if (!orderTxid && !paymentTxid && !orderReference) {
       return null;
+    }
+
+    const buyerGlobalMetaId = normalizeText(inputOrder.buyerGlobalMetaId);
+    const matchingSellerOrder = inputOrder.state.sellerOrders.find((entry) => {
+      const sameBuyer = !buyerGlobalMetaId || normalizeText(entry.buyerGlobalMetaId) === buyerGlobalMetaId;
+      if (!sameBuyer) {
+        return false;
+      }
+      return (
+        (paymentTxid && normalizeText(entry.paymentTxid) === paymentTxid)
+        || (orderTxid && normalizeText(entry.orderTxid) === orderTxid)
+        || (orderReference && normalizeText(entry.orderReference) === orderReference)
+        || (orderReference && normalizeText(entry.orderMessageId) === orderReference)
+      );
+    });
+    if (matchingSellerOrder) {
+      return {
+        state: normalizeText(matchingSellerOrder.state) || 'unknown',
+        orderTxid: normalizeText(matchingSellerOrder.orderTxid) || null,
+        paymentTxid: normalizeText(matchingSellerOrder.paymentTxid) || null,
+        servicePinId: normalizeText(matchingSellerOrder.currentServicePinId) || normalizeText(matchingSellerOrder.servicePinId) || null,
+        source: 'seller_order',
+      };
     }
 
     const localGlobalMetaId = normalizeText(inputOrder.state.identity!.globalMetaId);
@@ -5109,7 +5267,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
       chatPublicKey: inputOrder.state.identity!.chatPublicKey,
     };
     const candidatePeers = new Set<string>();
-    const buyerGlobalMetaId = normalizeText(inputOrder.buyerGlobalMetaId);
     if (buyerGlobalMetaId) {
       candidatePeers.add(buyerGlobalMetaId);
     }
@@ -5212,17 +5369,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
     service: RuntimeState['services'][number];
     buyerGlobalMetaId: string;
     orderTxid: string;
+    orderMessageId?: string | null;
     orderPinId?: string | null;
     paymentTxid?: string | null;
     orderReference?: string | null;
     paymentCurrency: string;
     paymentAmount: string;
+    paymentChain?: string | null;
     session: A2ASessionRecord;
     taskRun: A2ATaskRunRecord;
     publicStatus: { status: string | null };
     latestEvent: string;
     userTask: string;
     failureText: string;
+    failureCode?: string | null;
+    providerRuntime?: SessionTraceProviderRuntimeInput | null;
   }): Promise<void> {
     const trace = buildSessionTrace({
       traceId: inputFailure.traceId,
@@ -5262,6 +5423,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
         providerGlobalMetaId: inputFailure.session.providerGlobalMetaId,
         servicePinId: inputFailure.session.servicePinId,
       },
+      providerRuntime: inputFailure.providerRuntime ?? {
+        providerSkill: inputFailure.service.providerSkill,
+      },
     });
     const artifacts = await exportSessionArtifacts({
       trace,
@@ -5293,6 +5457,32 @@ export function createDefaultMetabotDaemonHandlers(input: {
         ],
       },
     });
+    const failedOrder = buildProviderSellerOrderRecord({
+      state: inputFailure.state,
+      service: inputFailure.service,
+      buyerGlobalMetaId: inputFailure.buyerGlobalMetaId,
+      lifecycleState: 'failed',
+      traceId: inputFailure.traceId,
+      orderMessageId: inputFailure.orderMessageId || inputFailure.orderPinId || inputFailure.orderTxid,
+      orderTxid: inputFailure.orderTxid,
+      orderPinId: inputFailure.orderPinId || null,
+      orderReference: inputFailure.orderReference || null,
+      paymentTxid: inputFailure.paymentTxid || null,
+      paymentAmount: inputFailure.paymentAmount,
+      paymentCurrency: inputFailure.paymentCurrency,
+      paymentChain: inputFailure.paymentChain || null,
+      session: inputFailure.session,
+      taskRun: inputFailure.taskRun,
+      publicStatus: inputFailure.publicStatus.status,
+      latestEvent: inputFailure.latestEvent,
+      providerRuntime: inputFailure.providerRuntime ?? {
+        providerSkill: inputFailure.service.providerSkill,
+      },
+      failureReason: inputFailure.failureText,
+      endReason: inputFailure.failureCode || 'provider_failed',
+      endedAt: inputFailure.taskRun.completedAt ?? inputFailure.session.updatedAt,
+      updatedAt: inputFailure.session.updatedAt,
+    });
     await runtimeStateStore.updateState((current) => ({
       ...current,
       traces: [
@@ -5302,6 +5492,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         },
         ...current.traces.filter((entry) => entry.traceId !== inputFailure.traceId),
       ],
+      sellerOrders: upsertSellerOrderRecord(current.sellerOrders, failedOrder),
     }));
   }
 
@@ -5463,6 +5654,28 @@ export function createDefaultMetabotDaemonHandlers(input: {
       taskContext: '',
     });
     const receivedStatus = await persistSessionMutation(sessionStateStore, received);
+    const orderMessageId = normalizeText(inputMessage.messagePinId) || orderTxid || orderReference;
+    await upsertProviderSellerOrderRecord({
+      state,
+      service,
+      buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+      lifecycleState: 'received',
+      traceId,
+      orderMessageId,
+      orderTxid,
+      orderPinId: inputMessage.messagePinId || null,
+      orderReference: orderReference || null,
+      paymentTxid: paymentTxid || null,
+      paymentAmount: amountLine.amount || service.price,
+      paymentCurrency: amountLine.currency || service.currency,
+      paymentChain: paymentChain || null,
+      session: received.session,
+      taskRun: received.taskRun,
+      publicStatus: receivedStatus.status,
+      latestEvent: received.event,
+      receivedAt: timestamp,
+      updatedAt: received.session.updatedAt,
+    });
     await appendA2ATranscriptItems(sessionStateStore, [
       {
         id: `${traceId}-provider-order-received`,
@@ -5557,17 +5770,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
         service,
         buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
         orderTxid,
+        orderMessageId,
         orderPinId: inputMessage.messagePinId || null,
         paymentTxid: paymentTxid || null,
         orderReference: orderReference || null,
         paymentCurrency: amountLine.currency || service.currency,
         paymentAmount: amountLine.amount || service.price,
+        paymentChain: paymentChain || null,
         session: failedApplied.session,
         taskRun: failedApplied.taskRun,
         publicStatus: failedStatus,
         latestEvent: failedApplied.event,
         userTask,
         failureText,
+        failureCode: 'peer_chat_public_key_missing',
       });
       return commandManualActionRequired('peer_chat_public_key_missing', failureText);
     }
@@ -5650,17 +5866,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
         service,
         buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
         orderTxid,
+        orderMessageId,
         orderPinId: inputMessage.messagePinId || null,
         paymentTxid: paymentTxid || null,
         orderReference: orderReference || null,
         paymentCurrency: amountLine.currency || service.currency,
         paymentAmount: amountLine.amount || service.price,
+        paymentChain: paymentChain || null,
         session: failedApplied.session,
         taskRun: failedApplied.taskRun,
         publicStatus: failedStatus,
         latestEvent: failedApplied.event,
         userTask,
         failureText,
+        failureCode: 'provider_acknowledgement_failed',
       });
       return commandFailed('provider_acknowledgement_failed', failureText);
     }
@@ -5698,6 +5917,55 @@ export function createDefaultMetabotDaemonHandlers(input: {
         firstResponseAt: Date.now(),
       },
     }, a2aConversationPersister);
+
+    const acknowledgedAt = Date.now();
+    await upsertProviderSellerOrderRecord({
+      state,
+      service,
+      buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+      lifecycleState: 'acknowledged',
+      traceId,
+      orderMessageId,
+      orderTxid,
+      orderPinId: inputMessage.messagePinId || null,
+      orderReference: orderReference || null,
+      paymentTxid: paymentTxid || null,
+      paymentAmount: amountLine.amount || service.price,
+      paymentCurrency: amountLine.currency || service.currency,
+      paymentChain: paymentChain || null,
+      session: received.session,
+      taskRun: received.taskRun,
+      publicStatus: receivedStatus.status,
+      latestEvent: received.event,
+      receivedAt: timestamp,
+      acknowledgedAt,
+      updatedAt: acknowledgedAt,
+    });
+    const startedAt = Date.now();
+    const executingStatus = resolvePublicStatus({ event: 'provider_executing' });
+    await upsertProviderSellerOrderRecord({
+      state,
+      service,
+      buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+      lifecycleState: 'in_progress',
+      traceId,
+      orderMessageId,
+      orderTxid,
+      orderPinId: inputMessage.messagePinId || null,
+      orderReference: orderReference || null,
+      paymentTxid: paymentTxid || null,
+      paymentAmount: amountLine.amount || service.price,
+      paymentCurrency: amountLine.currency || service.currency,
+      paymentChain: paymentChain || null,
+      session: received.session,
+      taskRun: received.taskRun,
+      publicStatus: executingStatus.status,
+      latestEvent: 'provider_executing',
+      receivedAt: timestamp,
+      acknowledgedAt,
+      startedAt,
+      updatedAt: startedAt,
+    });
 
     const metaBotSlug = path.basename(input.homeDir);
     const providerRunner = createProviderServiceRunner({
@@ -5739,6 +6007,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         },
       },
     });
+    const providerRuntimeDiagnostics = buildProviderRuntimeDiagnostics(service.providerSkill, runnerResult);
 
     const applied = sessionEngine.applyProviderRunnerResult({
       session: received.session,
@@ -5846,17 +6115,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
         service,
         buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
         orderTxid,
+        orderMessageId,
         orderPinId: inputMessage.messagePinId || null,
         paymentTxid: paymentTxid || null,
         orderReference: orderReference || null,
         paymentCurrency: amountLine.currency || service.currency,
         paymentAmount: amountLine.amount || service.price,
+        paymentChain: paymentChain || null,
         session: applied.session,
         taskRun: applied.taskRun,
         publicStatus: appliedStatus,
         latestEvent: applied.event,
         userTask,
         failureText,
+        failureCode: runnerResult.state === 'failed' ? runnerResult.code : 'clarification_needed',
+        providerRuntime: providerRuntimeDiagnostics,
       });
       return runnerResult.state === 'failed'
         ? commandFailed(runnerResult.code, runnerResult.message)
@@ -5949,17 +6222,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
         service,
         buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
         orderTxid,
+        orderMessageId,
         orderPinId: inputMessage.messagePinId || null,
         paymentTxid: paymentTxid || null,
         orderReference: orderReference || null,
         paymentCurrency: amountLine.currency || service.currency,
         paymentAmount: amountLine.amount || service.price,
+        paymentChain: paymentChain || null,
         session: failedApplied.session,
         taskRun: failedApplied.taskRun,
         publicStatus: failedStatus,
         latestEvent: failedApplied.event,
         userTask,
         failureText,
+        failureCode: 'provider_delivery_failed',
+        providerRuntime: providerRuntimeDiagnostics,
       });
       return commandFailed('provider_delivery_failed', failureText);
     }
@@ -6160,6 +6437,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         providerGlobalMetaId: received.session.providerGlobalMetaId,
         servicePinId: received.session.servicePinId,
       },
+      providerRuntime: providerRuntimeDiagnostics,
     });
     const artifacts = await exportSessionArtifacts({
       trace,
@@ -6191,6 +6469,36 @@ export function createDefaultMetabotDaemonHandlers(input: {
         ],
       },
     });
+    const finalOrderState: SellerOrderState = ratingWrite.pinId || ratingWrite.txids.length
+      ? 'rating_pending'
+      : 'completed';
+    const finalOrderTimestamp = Date.now();
+    const finalSellerOrder = buildProviderSellerOrderRecord({
+      state,
+      service,
+      buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+      lifecycleState: finalOrderState,
+      traceId,
+      orderMessageId,
+      orderTxid,
+      orderPinId: inputMessage.messagePinId || null,
+      orderReference: orderReference || null,
+      paymentTxid: paymentTxid || null,
+      paymentAmount: amountLine.amount || service.price,
+      paymentCurrency: amountLine.currency || service.currency,
+      paymentChain: paymentChain || null,
+      session: applied.session,
+      taskRun: applied.taskRun,
+      publicStatus: appliedStatus.status,
+      latestEvent: applied.event,
+      providerRuntime: providerRuntimeDiagnostics,
+      receivedAt: timestamp,
+      acknowledgedAt,
+      startedAt,
+      deliveredAt: finalOrderTimestamp,
+      ratingRequestedAt: finalOrderState === 'rating_pending' ? finalOrderTimestamp : null,
+      updatedAt: finalOrderTimestamp,
+    });
     await runtimeStateStore.updateState((current) => ({
       ...current,
       traces: [
@@ -6200,6 +6508,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         },
         ...current.traces.filter((entry) => entry.traceId !== trace.traceId),
       ],
+      sellerOrders: upsertSellerOrderRecord(current.sellerOrders, finalSellerOrder),
     }));
 
     return commandSuccess({
@@ -8876,7 +9185,38 @@ export function createDefaultMetabotDaemonHandlers(input: {
             && normalizeText(order?.role) === 'seller';
         });
         if (traceIndex < 0) {
-          return commandFailed('order_not_found', `Provider order was not found: ${normalizedOrderId}`);
+          const sellerOrderIndex = state.sellerOrders.findIndex((entry) => normalizeText(entry.id) === normalizedOrderId);
+          if (sellerOrderIndex < 0) {
+            return commandFailed('order_not_found', `Provider order was not found: ${normalizedOrderId}`);
+          }
+
+          const currentSellerOrder = state.sellerOrders[sellerOrderIndex];
+          if (
+            currentSellerOrder.state !== 'refund_pending'
+            || !normalizeText(currentSellerOrder.refundRequestPinId)
+          ) {
+            return commandFailed('refund_not_required', 'Manual refund is not required.');
+          }
+
+          const now = Date.now();
+          const nextSellerOrder = transitionSellerOrderRecord(currentSellerOrder, {
+            state: 'refunded',
+            refundedAt: now,
+            updatedAt: now,
+          });
+          await runtimeStateStore.writeState({
+            ...state,
+            sellerOrders: [
+              nextSellerOrder,
+              ...state.sellerOrders.filter((entry, index) => index !== sellerOrderIndex),
+            ],
+          });
+
+          return commandSuccess({
+            orderId: normalizedOrderId,
+            traceId: normalizeText(currentSellerOrder.traceId),
+            state: 'refunded',
+          });
         }
 
         const currentTrace = state.traces[traceIndex] as unknown as Record<string, unknown>;
@@ -9711,11 +10051,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if (
           !execution.servicePinId
           || !execution.providerGlobalMetaId
+          || !execution.buyer.globalMetaId
           || !execution.request.userTask
         ) {
           return commandFailed(
             'invalid_service_execution_request',
-            'Execution request must include servicePinId, providerGlobalMetaId, and request.userTask.'
+            'Execution request must include servicePinId, providerGlobalMetaId, buyer.globalMetaId, and request.userTask.'
           );
         }
 
@@ -9761,6 +10102,50 @@ export function createDefaultMetabotDaemonHandlers(input: {
             },
           },
         ]);
+        const orderMessageId = execution.payment.paymentTxid || execution.payment.orderReference || traceId;
+        await upsertProviderSellerOrderRecord({
+          state,
+          service,
+          buyerGlobalMetaId: execution.buyer.globalMetaId,
+          lifecycleState: 'received',
+          traceId,
+          orderMessageId,
+          orderTxid: '',
+          orderReference: execution.payment.orderReference,
+          paymentTxid: execution.payment.paymentTxid,
+          paymentAmount: execution.payment.paymentAmount || service.price,
+          paymentCurrency: execution.payment.paymentCurrency || service.currency,
+          paymentChain: execution.payment.paymentChain,
+          session: received.session,
+          taskRun: received.taskRun,
+          publicStatus: receivedStatus.status,
+          latestEvent: received.event,
+          receivedAt: received.session.createdAt,
+          updatedAt: received.session.updatedAt,
+        });
+        const directStartedAt = Date.now();
+        const directExecutingStatus = resolvePublicStatus({ event: 'provider_executing' });
+        await upsertProviderSellerOrderRecord({
+          state,
+          service,
+          buyerGlobalMetaId: execution.buyer.globalMetaId,
+          lifecycleState: 'in_progress',
+          traceId,
+          orderMessageId,
+          orderTxid: '',
+          orderReference: execution.payment.orderReference,
+          paymentTxid: execution.payment.paymentTxid,
+          paymentAmount: execution.payment.paymentAmount || service.price,
+          paymentCurrency: execution.payment.paymentCurrency || service.currency,
+          paymentChain: execution.payment.paymentChain,
+          session: received.session,
+          taskRun: received.taskRun,
+          publicStatus: directExecutingStatus.status,
+          latestEvent: 'provider_executing',
+          receivedAt: received.session.createdAt,
+          startedAt: directStartedAt,
+          updatedAt: directStartedAt,
+        });
 
         const metaBotSlug = path.basename(input.homeDir);
         const providerRunner = createProviderServiceRunner({
@@ -9797,22 +10182,155 @@ export function createDefaultMetabotDaemonHandlers(input: {
             payment: execution.payment,
           },
         });
-        if (runnerResult.state === 'failed') {
-          return commandFailed(runnerResult.code, runnerResult.message);
-        }
-        if (runnerResult.state === 'needs_clarification') {
-          return commandManualActionRequired(
-            'clarification_needed',
-            runnerResult.question,
-            `/ui/trace?traceId=${encodeURIComponent(traceId)}`,
-          );
-        }
+        const providerRuntimeDiagnostics = buildProviderRuntimeDiagnostics(service.providerSkill, runnerResult);
         const applied = sessionEngine.applyProviderRunnerResult({
           session: received.session,
           taskRun: received.taskRun,
           result: runnerResult,
         });
         const appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+        if (runnerResult.state !== 'completed') {
+          const failureText = runnerResult.state === 'failed'
+            ? runnerResult.message
+            : runnerResult.question;
+          await appendA2ATranscriptItems(sessionStateStore, [
+            {
+              id: `${traceId}-provider-runner-${runnerResult.state}`,
+              sessionId: received.session.sessionId,
+              taskRunId: applied.taskRun.runId,
+              timestamp: applied.session.updatedAt,
+              type: runnerResult.state === 'failed' ? 'failure' : 'clarification',
+              sender: 'system',
+              content: failureText,
+              metadata: {
+                publicStatus: appliedStatus.status,
+                event: applied.event,
+                runnerState: runnerResult.state,
+                paymentTxid: execution.payment.paymentTxid,
+                orderReference: execution.payment.orderReference,
+              },
+            },
+          ]);
+          const trace = buildSessionTrace({
+            traceId,
+            channel: 'a2a',
+            exportRoot: runtimeStateStore.paths.exportsRoot,
+            session: {
+              id: `session-${traceId}`,
+              title: `${service.displayName} Execution`,
+              type: 'a2a',
+              metabotId: state.identity.metabotId,
+              peerGlobalMetaId: execution.buyer.globalMetaId || null,
+              peerName: execution.buyer.name || execution.buyer.host || null,
+              externalConversationId: execution.externalConversationId || null,
+            },
+            order: {
+              id: `order-${traceId}`,
+              role: 'seller',
+              serviceId: service.currentPinId,
+              serviceName: service.displayName,
+              paymentTxid: execution.payment.paymentTxid,
+              orderReference: execution.payment.orderReference,
+              paymentCurrency: execution.payment.paymentCurrency || service.currency,
+              paymentAmount: execution.payment.paymentAmount || service.price,
+              providerSkill: service.providerSkill,
+            },
+            a2a: {
+              sessionId: received.session.sessionId,
+              taskRunId: applied.taskRun.runId,
+              role: received.session.role,
+              publicStatus: appliedStatus.status,
+              latestEvent: applied.event,
+              taskRunState: applied.taskRun.state,
+              callerGlobalMetaId: received.session.callerGlobalMetaId,
+              callerName: execution.buyer.name || execution.buyer.host || null,
+              providerGlobalMetaId: received.session.providerGlobalMetaId,
+              servicePinId: received.session.servicePinId,
+            },
+            providerRuntime: providerRuntimeDiagnostics,
+          });
+          const artifacts = await exportSessionArtifacts({
+            trace,
+            transcript: {
+              sessionId: trace.session.id,
+              title: trace.session.title,
+              messages: [
+                {
+                  id: `${trace.traceId}-buyer`,
+                  type: 'user',
+                  timestamp: trace.createdAt,
+                  content: execution.request.userTask,
+                  metadata: {
+                    taskContext: execution.request.taskContext || null,
+                    buyerHost: execution.buyer.host || null,
+                    buyerGlobalMetaId: execution.buyer.globalMetaId || null,
+                    paymentTxid: execution.payment.paymentTxid,
+                    orderReference: execution.payment.orderReference,
+                  },
+                },
+                {
+                  id: `${trace.traceId}-provider-failure`,
+                  type: 'assistant',
+                  timestamp: trace.createdAt,
+                  content: failureText,
+                  metadata: {
+                    failed: runnerResult.state === 'failed',
+                    providerSessionId: received.session.sessionId,
+                    providerTaskRunId: received.taskRun.runId,
+                    providerEvent: applied.event,
+                  },
+                },
+              ],
+            },
+          });
+          const failedOrder = buildProviderSellerOrderRecord({
+            state,
+            service,
+            buyerGlobalMetaId: execution.buyer.globalMetaId,
+            lifecycleState: runnerResult.state === 'failed' ? 'failed' : 'in_progress',
+            traceId,
+            orderMessageId,
+            orderTxid: '',
+            orderReference: execution.payment.orderReference,
+            paymentTxid: execution.payment.paymentTxid,
+            paymentAmount: execution.payment.paymentAmount || service.price,
+            paymentCurrency: execution.payment.paymentCurrency || service.currency,
+            paymentChain: execution.payment.paymentChain,
+            session: applied.session,
+            taskRun: applied.taskRun,
+            publicStatus: appliedStatus.status,
+            latestEvent: applied.event,
+            providerRuntime: providerRuntimeDiagnostics,
+            failureReason: runnerResult.state === 'failed' ? failureText : null,
+            endReason: runnerResult.state === 'failed' ? runnerResult.code : null,
+            receivedAt: received.session.createdAt,
+            startedAt: directStartedAt,
+            endedAt: runnerResult.state === 'failed'
+              ? applied.taskRun.completedAt ?? applied.session.updatedAt
+              : null,
+            updatedAt: applied.session.updatedAt,
+          });
+          await runtimeStateStore.updateState((current) => ({
+            ...current,
+            traces: [
+              {
+                ...trace,
+                artifacts,
+              },
+              ...current.traces.filter((entry) => entry.traceId !== trace.traceId),
+            ],
+            sellerOrders: upsertSellerOrderRecord(current.sellerOrders, failedOrder),
+          }));
+
+          if (runnerResult.state === 'failed') {
+            return commandFailed(runnerResult.code, runnerResult.message);
+          }
+          return commandManualActionRequired(
+            'clarification_needed',
+            runnerResult.question,
+            `/ui/trace?traceId=${encodeURIComponent(traceId)}`,
+          );
+        }
         const responseText = normalizeText(runnerResult.responseText);
         const providerMessage = responseText;
         await appendA2ATranscriptItems(sessionStateStore, [
@@ -9867,6 +10385,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             providerGlobalMetaId: received.session.providerGlobalMetaId,
             servicePinId: received.session.servicePinId,
           },
+          providerRuntime: providerRuntimeDiagnostics,
         });
 
         const artifacts = await exportSessionArtifacts({
@@ -9905,13 +10424,41 @@ export function createDefaultMetabotDaemonHandlers(input: {
           },
         });
 
-        await runtimeStateStore.writeState({
-          ...state,
-          traces: [
-            trace,
-            ...state.traces.filter((entry) => entry.traceId !== trace.traceId),
-          ],
+        const completedAt = applied.taskRun.completedAt ?? applied.session.updatedAt;
+        const completedOrder = buildProviderSellerOrderRecord({
+          state,
+          service,
+          buyerGlobalMetaId: execution.buyer.globalMetaId,
+          lifecycleState: 'completed',
+          traceId,
+          orderMessageId,
+          orderTxid: '',
+          orderReference: execution.payment.orderReference,
+          paymentTxid: execution.payment.paymentTxid,
+          paymentAmount: execution.payment.paymentAmount || service.price,
+          paymentCurrency: execution.payment.paymentCurrency || service.currency,
+          paymentChain: execution.payment.paymentChain,
+          session: applied.session,
+          taskRun: applied.taskRun,
+          publicStatus: appliedStatus.status,
+          latestEvent: applied.event,
+          providerRuntime: providerRuntimeDiagnostics,
+          receivedAt: received.session.createdAt,
+          startedAt: directStartedAt,
+          deliveredAt: completedAt,
+          updatedAt: completedAt,
         });
+        await runtimeStateStore.updateState((current) => ({
+          ...current,
+          traces: [
+            {
+              ...trace,
+              artifacts,
+            },
+            ...current.traces.filter((entry) => entry.traceId !== trace.traceId),
+          ],
+          sellerOrders: upsertSellerOrderRecord(current.sellerOrders, completedOrder),
+        }));
 
         return commandSuccess({
           traceId: trace.traceId,

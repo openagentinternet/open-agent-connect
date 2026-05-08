@@ -36,7 +36,16 @@ export interface BuildSessionTraceInput {
   session: SessionTraceSessionInput;
   order?: SessionTraceOrderInput | null;
   a2a?: SessionTraceA2AInput | null;
+  providerRuntime?: SessionTraceProviderRuntimeInput | null;
   askMaster?: SessionTraceAskMasterInput | null;
+}
+
+export interface SessionTraceProviderRuntimeInput {
+  runtimeId?: string | null;
+  runtimeProvider?: string | null;
+  sessionId?: string | null;
+  providerSkill?: string | null;
+  fallbackSelected?: boolean | null;
 }
 
 export interface SessionTraceArtifacts {
@@ -71,6 +80,14 @@ export interface SessionTraceA2ARecord {
   providerGlobalMetaId: string | null;
   providerName: string | null;
   servicePinId: string | null;
+}
+
+export interface SessionTraceProviderRuntimeRecord {
+  runtimeId: string | null;
+  runtimeProvider: string | null;
+  sessionId: string | null;
+  providerSkill: string | null;
+  fallbackSelected: boolean | null;
 }
 
 export interface SessionTraceAskMasterInput extends AskMasterTraceMetadata {}
@@ -142,6 +159,7 @@ export interface SessionTraceRecord {
     providerSkill?: string | null;
   } | null;
   a2a: SessionTraceA2ARecord | null;
+  providerRuntime: SessionTraceProviderRuntimeRecord | null;
   askMaster: SessionTraceAskMasterRecord | null;
   artifacts: SessionTraceArtifacts;
 }
@@ -199,6 +217,20 @@ function buildA2ATraceRecord(input?: SessionTraceA2AInput | null): SessionTraceA
   };
 
   return Object.values(record).some(Boolean) ? record : null;
+}
+
+function buildProviderRuntimeTraceRecord(input?: SessionTraceProviderRuntimeInput | null): SessionTraceProviderRuntimeRecord | null {
+  if (!input) {
+    return null;
+  }
+  const record: SessionTraceProviderRuntimeRecord = {
+    runtimeId: normalizeText(input.runtimeId) || null,
+    runtimeProvider: normalizeText(input.runtimeProvider) || null,
+    sessionId: normalizeText(input.sessionId) || null,
+    providerSkill: normalizeText(input.providerSkill) || null,
+    fallbackSelected: typeof input.fallbackSelected === 'boolean' ? input.fallbackSelected : null,
+  };
+  return Object.values(record).some((value) => value !== null && value !== '') ? record : null;
 }
 
 function buildAskMasterTraceRecord(input?: SessionTraceAskMasterInput | null): SessionTraceAskMasterRecord | null {
@@ -384,6 +416,7 @@ export function buildSessionTrace(input: BuildSessionTraceInput): SessionTraceRe
         }
       : null,
     a2a: buildA2ATraceRecord(input.a2a),
+    providerRuntime: buildProviderRuntimeTraceRecord(input.providerRuntime),
     askMaster: buildAskMasterTraceRecord(input.askMaster),
     artifacts: {
       transcriptMarkdownPath,

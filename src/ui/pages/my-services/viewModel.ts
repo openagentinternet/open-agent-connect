@@ -88,6 +88,37 @@ function formatRatingStateLabel(record: Record<string, unknown>): string {
   return '未评价';
 }
 
+function formatLifecycleStateLabel(record: Record<string, unknown>): string {
+  switch (normalizeText(record.state)) {
+    case 'received':
+      return 'Received';
+    case 'acknowledged':
+      return 'Acknowledged';
+    case 'in_progress':
+      return 'In progress';
+    case 'completed':
+      return 'Completed';
+    case 'rating_pending':
+      return 'Rating pending';
+    case 'failed':
+      return 'Failed';
+    case 'refund_pending':
+      return 'Refund pending';
+    case 'refunded':
+      return 'Refunded';
+    case 'ended':
+      return 'Ended';
+    default:
+      return '';
+  }
+}
+
+function formatOrderStateLabel(record: Record<string, unknown>): string {
+  const lifecycle = formatLifecycleStateLabel(record);
+  const rating = formatRatingStateLabel(record);
+  return [lifecycle, rating].filter(Boolean).join(' · ') || rating;
+}
+
 export function buildMyServicesPageViewModel(input: {
   providerSummary?: Record<string, unknown> | null;
 }): MyServicesPageViewModel {
@@ -137,7 +168,7 @@ export function buildMyServicesPageViewModel(input: {
           key: orderId || traceId,
           serviceName: normalizeText(record.serviceName) || 'Unknown service',
           buyerLabel: [buyerName, buyerGlobalMetaId].filter(Boolean).join(' · ') || 'Unknown buyer',
-          stateLabel: formatRatingStateLabel(record),
+          stateLabel: formatOrderStateLabel(record),
           statusDetail: normalizeText(record.publicStatus) || 'unknown',
           traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '/ui/trace',
           traceLabel: traceId || 'Trace unavailable',
