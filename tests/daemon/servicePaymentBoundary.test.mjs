@@ -18,11 +18,36 @@ const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.j
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { buildDelegationOrderPayload } = require('../../dist/core/orders/delegationOrderMessage.js');
+const {
+  SERVICE_ORDER_FREE_REFUND_SKIPPED_REASON,
+  SERVICE_ORDER_SELF_REFUND_SKIPPED_REASON,
+} = require('../../dist/core/orders/orderLifecycle.js');
 const { parseDeliveryMessage, parseNeedsRatingMessage } = require('../../dist/core/a2a/protocol/orderProtocol.js');
 const { buildA2ASimplemsgInboundDispatcher } = require('../../dist/cli/runtime.js');
 
 const MVC_PAYMENT_ADDRESS = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 const MVC_OTHER_ADDRESS = '1dice8EMZmqKvrGE4Qc9bUFf9PX3xaYDp';
+
+async function waitForCondition(predicate, timeoutMs = 1000, intervalMs = 20) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let value;
+    try {
+      value = await predicate();
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        await delay(intervalMs);
+        continue;
+      }
+      throw error;
+    }
+    if (value) {
+      return value;
+    }
+    await delay(intervalMs);
+  }
+  return null;
+}
 
 function createIdentityPair() {
   const ecdh = createECDH('prime256v1');
@@ -65,7 +90,7 @@ function createService(overrides = {}) {
     currency: overrides.currency ?? 'SPACE',
     skillDocument: '# Weather Oracle',
     inputType: 'text',
-    outputType: 'text',
+    outputType: overrides.outputType ?? 'text',
     endpoint: 'simplemsg',
     paymentAddress: overrides.paymentAddress ?? MVC_PAYMENT_ADDRESS,
     payloadJson: '{}',
@@ -402,7 +427,7 @@ async function createServiceCallHarness(t, options = {}) {
     },
     fetchPeerChatPublicKey: options.fetchPeerChatPublicKey ?? (async () => providerPair.publicKeyHex),
     ratingFollowupRetryDelaysMs: options.ratingFollowupRetryDelaysMs,
-    callerReplyWaiter: {
+    callerReplyWaiter: options.callerReplyWaiter ?? {
       async awaitServiceReply() {
         return { state: 'timeout' };
       },
@@ -902,6 +927,492 @@ test('paid simplemsg service payment finishes before the order is broadcast', as
   ]);
 });
 
+test('buyer-side timeout creates a service refund request for paid simplemsg orders', async (t) => {
+  const paymentTxid = '1'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return { state: 'timeout' };
+      },
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.ok, false);
+  assert.equal(called.state, 'waiting');
+
+  const refundWrite = await waitForCondition(() => (
+    harness.writes.find((entry) => entry.path === '/protocols/service-refund-request') ?? null
+  ));
+  assert.ok(refundWrite, 'expected timeout to publish a refund request pin');
+  const payload = JSON.parse(refundWrite.payload);
+  assert.equal(payload.paymentTxid, paymentTxid);
+  assert.equal(payload.servicePinId, 'chain-service-pin-1');
+  assert.equal(payload.serviceName, 'Weather Oracle');
+  assert.equal(payload.refundAmount, '0.00001');
+  assert.equal(payload.refundCurrency, 'SPACE');
+  assert.equal(payload.paymentChain, 'mvc');
+  assert.equal(payload.settlementKind, 'native');
+  assert.equal(payload.buyerGlobalMetaId, harness.identity.globalMetaId);
+  assert.equal(payload.sellerGlobalMetaId, 'idq1provider');
+  assert.equal(payload.failureReason, 'delivery_timeout');
+  assert.equal(Number.isFinite(Number(payload.failureDetectedAt)), true);
+  assert.ok(Array.isArray(payload.evidencePinIds));
+  assert.ok(payload.evidencePinIds.includes(called.data.orderPinId));
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.order?.paymentTxid === paymentTxid);
+  assert.ok(trace, 'expected caller trace for timed-out paid order');
+  assert.equal(trace.order.status, 'refund_pending');
+  assert.match(trace.order.refundRequestPinId, /^\/protocols\/service-refund-request-pin-/);
+  assert.equal(trace.order.failureReason, 'delivery_timeout');
+});
+
+test('buyer-side timeout does not duplicate refund requests for the same paid payment', async (t) => {
+  const paymentTxid = '2'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return { state: 'timeout' };
+      },
+    },
+  });
+
+  const first = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+  const second = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather again',
+      taskContext: 'User is still in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(first.state, 'waiting');
+  assert.equal(second.state, 'waiting');
+  await waitForCondition(() => (
+    harness.writes.filter((entry) => entry.path === '/protocols/service-refund-request').length > 0
+  ));
+  await delay(50);
+  const refundWrites = harness.writes.filter((entry) => entry.path === '/protocols/service-refund-request');
+  assert.equal(refundWrites.length, 1);
+});
+
+test('buyer-side timeout marks zero-price service orders refunded without a chain refund request', async (t) => {
+  const harness = await createServiceCallHarness(t, {
+    service: { price: '0', currency: 'SPACE' },
+    servicePaymentExecutor: {
+      async execute() {
+        throw new Error('payment executor must not run for free services');
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return { state: 'timeout' };
+      },
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting');
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => entry.traceId === called.data.traceId && entry.order?.status === 'refunded') ?? null;
+  });
+  assert.ok(trace, 'expected free timed-out order to be resolved locally');
+  assert.equal(trace.order.failureReason, SERVICE_ORDER_FREE_REFUND_SKIPPED_REASON);
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
+});
+
+test('buyer-side timeout resolves self-directed paid orders without an external refund request', async (t) => {
+  const paymentTxid = '3'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    service: { providerGlobalMetaId: 'idq1caller' },
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return { state: 'timeout' };
+      },
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: harness.identity.globalMetaId,
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting');
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => entry.traceId === called.data.traceId && entry.order?.status === 'refunded') ?? null;
+  });
+  assert.ok(trace, 'expected self-directed timed-out order to be resolved locally');
+  assert.equal(trace.order.failureReason, SERVICE_ORDER_SELF_REFUND_SKIPPED_REASON);
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
+});
+
+test('buyer-side refund request write failure leaves a retry marker for paid timeout', async (t) => {
+  const paymentTxid = '4'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return { state: 'timeout' };
+      },
+    },
+    writePin(input, { writes }) {
+      if (input.path === '/protocols/service-refund-request') {
+        throw new Error('simulated refund request outage');
+      }
+      return {
+        txids: [`${input.path}-tx-${writes.length}`],
+        pinId: `${input.path}-pin-${writes.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: harness.identity.globalMetaId,
+        mvcAddress: harness.identity.mvcAddress,
+      };
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting');
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.order?.status === 'failed'
+      && Number.isFinite(Number(entry.order?.nextRetryAt))
+    )) ?? null;
+  });
+  assert.ok(trace, 'expected retryable refund marker after refund request write failure');
+  assert.equal(trace.order.refundRequestPinId, null);
+  assert.equal(trace.order.failureReason, 'delivery_timeout');
+  assert.equal(trace.order.refundApplyRetryCount, 1);
+});
+
+test('buyer-side invalid non-text deliverable creates a refund request for paid orders', async (t) => {
+  const paymentTxid = '5'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    service: { outputType: 'image' },
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return {
+          state: 'completed',
+          responseText: 'Image generation finished successfully.',
+          deliveryPinId: 'delivery-pin-without-artifact',
+          observedAt: Date.now(),
+          rawMessage: null,
+          ratingRequestText: null,
+        };
+      },
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Create a weather image',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting');
+  const refundWrite = await waitForCondition(() => (
+    harness.writes.find((entry) => entry.path === '/protocols/service-refund-request') ?? null
+  ));
+  assert.ok(refundWrite, 'expected invalid non-text delivery to publish a refund request');
+  const payload = JSON.parse(refundWrite.payload);
+  assert.equal(payload.paymentTxid, paymentTxid);
+  assert.equal(payload.failureReason, 'invalid_deliverable');
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.order?.paymentTxid === paymentTxid);
+  assert.ok(trace, 'expected invalid deliverable trace');
+  assert.equal(trace.order.status, 'refund_pending');
+  assert.equal(trace.order.failureReason, 'invalid_deliverable');
+  assert.equal(trace.a2a.publicStatus, 'remote_failed');
+});
+
+test('buyer-side provider daemon execution failure creates a refund request after paid execution dispatch', async (t) => {
+  const paymentTxid = '6'.repeat(64);
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const harness = await createServiceCallHarness(t, {
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+  });
+  globalThis.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes('/api/network/services')) {
+      return new Response(JSON.stringify({
+        ok: true,
+        data: {
+          services: [{
+            servicePinId: 'chain-service-pin-1',
+            sourceServicePinId: 'chain-service-pin-1',
+            currentPinId: 'chain-service-pin-1',
+            providerGlobalMetaId: 'idq1provider',
+            providerSkill: 'metabot-weather-oracle',
+            serviceName: 'weather-oracle',
+            displayName: 'Weather Oracle',
+            price: '0.00001',
+            currency: 'SPACE',
+            outputType: 'text',
+            endpoint: 'simplemsg',
+            paymentAddress: MVC_PAYMENT_ADDRESS,
+            online: true,
+            providerDaemonBaseUrl: 'http://127.0.0.1:27272',
+          }],
+        },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({
+      ok: false,
+      state: 'failed',
+      code: 'provider_execution_failed',
+      message: 'remote runtime refused execution',
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      providerDaemonBaseUrl: 'http://127.0.0.1:27272',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.ok, false);
+  assert.equal(called.code, 'provider_execution_failed');
+
+  const refundWrite = harness.writes.find((entry) => entry.path === '/protocols/service-refund-request');
+  assert.ok(refundWrite, 'expected provider daemon execution failure to publish a refund request');
+  const payload = JSON.parse(refundWrite.payload);
+  assert.equal(payload.paymentTxid, paymentTxid);
+  assert.equal(payload.failureReason, 'provider_execution_failed');
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.order?.paymentTxid === paymentTxid);
+  assert.ok(trace, 'expected caller trace after failed provider daemon execution');
+  assert.equal(trace.order.status, 'refund_pending');
+  assert.match(trace.order.refundRequestPinId, /^\/protocols\/service-refund-request-pin-/);
+});
+
+test('buyer-side BTC refund request is scheduled instead of publishing an MVC refund address fallback', async (t) => {
+  const paymentTxid = '7'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    service: {
+      price: '0.00001',
+      currency: 'BTC',
+      paymentAddress: 'btc-provider-address',
+    },
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return { state: 'timeout' };
+      },
+    },
+  });
+  await harness.runtimeStateStore.updateState((current) => ({
+    ...current,
+    identity: {
+      ...current.identity,
+      btcAddress: '',
+      addresses: {
+        mvc: current.identity.mvcAddress,
+      },
+    },
+  }));
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'BTC',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting');
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.order?.status === 'failed'
+      && Number.isFinite(Number(entry.order?.nextRetryAt))
+    )) ?? null;
+  });
+  assert.ok(trace, 'expected missing BTC refund address to schedule retry instead of publishing invalid payload');
+  assert.equal(trace.order.failureReason, 'refund_address_missing');
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
+});
+
 test('paid simplemsg service broadcast failure keeps a trace with payment provenance', async (t) => {
   const paymentTxid = 'e'.repeat(64);
   const harness = await createServiceCallHarness(t, {
@@ -1252,6 +1763,12 @@ test('/api services.execute persists failed seller lifecycle state with provider
   assert.equal(sellerOrder.state, 'failed');
   assert.equal(sellerOrder.failureReason, 'runtime refused direct execution');
   assert.equal(sellerOrder.traceId, 'trace-provider-direct-failed');
+
+  const summary = await harness.handlers.provider.getSummary();
+  assert.equal(summary.ok, true);
+  const manualAction = summary.data.manualActions.find((entry) => entry.orderId === sellerOrder.id);
+  assert.ok(manualAction, 'expected failed paid seller order to expose a manual refund marker');
+  assert.equal(manualAction.kind, 'refund');
 });
 
 test('inbound provider ORDER without payment metadata does not execute or deliver', async (t) => {

@@ -3435,7 +3435,7 @@ test('services call rejects unsupported chain service payment before sending ord
   assert.equal(state.traces.some((trace) => trace.session?.peerGlobalMetaId === 'idq1provider'), false);
 });
 
-test('services call persists timeout state when a chain-discovered service does not reply during the foreground wait', async (t) => {
+test('services call creates a refund request when a chain-discovered paid service times out', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
@@ -3478,19 +3478,24 @@ test('services call persists timeout state when a chain-discovered service does 
   assert.equal(called.payload.data.session.event, 'request_sent');
   assert.equal('responseText' in called.payload.data, false);
 
-  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+  const trace = await waitForTrace(homeDir, called.payload.data.traceId, {
     METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
-  });
+    METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+    METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
+      state: 'timeout',
+    }),
+  }, (data) => data?.order?.status === 'refund_pending');
   assert.equal(trace.exitCode, 0);
   assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.a2a.publicStatus, 'requesting_remote');
-  assert.equal(trace.payload.data.a2a.latestEvent, 'request_sent');
+  assert.equal(trace.payload.data.order.status, 'refund_pending');
+  assert.equal(trace.payload.data.order.failureReason, 'delivery_timeout');
+  assert.match(trace.payload.data.order.refundRequestPinId, /service-refund-request/);
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(transcriptMarkdown, /remote MetaBot task session/i);
+  assert.match(transcriptMarkdown, /Local MetaBot delegated|remote MetaBot task session/i);
 });
 
-test('services call upgrades a timed-out chain-discovered caller trace when the remote reply arrives later', async (t) => {
+test('services call keeps a timed-out paid chain-discovered caller trace in refund pending state', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
@@ -3544,21 +3549,23 @@ test('services call upgrades a timed-out chain-discovered caller trace when the 
   assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
   assert.equal(called.payload.data.session.event, 'request_sent');
 
-  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+  const trace = await waitForTrace(homeDir, called.payload.data.traceId, {
     METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
     METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
     METABOT_TEST_FAKE_METAWEB_REPLY: replyConfig,
-  });
+  }, (data) => data?.order?.status === 'refund_pending');
   assert.equal(trace.exitCode, 0);
   assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.a2a.publicStatus, 'requesting_remote');
-  assert.equal(trace.payload.data.a2a.latestEvent, 'request_sent');
+  assert.equal(trace.payload.data.order.status, 'refund_pending');
+  assert.equal(trace.payload.data.order.failureReason, 'delivery_timeout');
+  assert.match(trace.payload.data.order.refundRequestPinId, /service-refund-request/);
+  assert.notEqual(trace.payload.data.resultText, 'A late weather reply finally arrived.');
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(transcriptMarkdown, /remote MetaBot task session/i);
+  assert.match(transcriptMarkdown, /Local MetaBot delegated|remote MetaBot task session/i);
 });
 
-test('trace watch waits through the timeout handoff so one follow-up can observe the eventual late completion', async (t) => {
+test('trace get exposes refund pending state after a chain-discovered paid timeout', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
@@ -3611,14 +3618,16 @@ test('trace watch waits through the timeout handoff so one follow-up can observe
   assert.equal(called.payload.state, 'waiting');
   assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
 
-  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+  const trace = await waitForTrace(homeDir, called.payload.data.traceId, {
     METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
     METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
     METABOT_TEST_FAKE_METAWEB_REPLY: replyConfig,
-  });
+  }, (data) => data?.order?.status === 'refund_pending');
   assert.equal(trace.exitCode, 0);
   assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.a2a.publicStatus, 'requesting_remote');
+  assert.equal(trace.payload.data.order.status, 'refund_pending');
+  assert.equal(trace.payload.data.order.failureReason, 'delivery_timeout');
+  assert.match(trace.payload.data.order.refundRequestPinId, /service-refund-request/);
 });
 
 test('trace get exposes a remote rating request when the provider later asks for T-stage feedback', async (t) => {

@@ -22,10 +22,29 @@ export interface SessionTraceOrderInput {
   orderTxid?: string | null;
   orderTxids?: string[] | null;
   paymentTxid?: string | null;
+  paymentCommitTxid?: string | null;
   orderReference?: string | null;
   paymentCurrency?: string | null;
   paymentAmount?: string | null;
+  paymentChain?: string | null;
+  settlementKind?: string | null;
+  mrc20Ticker?: string | null;
+  mrc20Id?: string | null;
   providerSkill?: string | null;
+  outputType?: string | null;
+  requestText?: string | null;
+  status?: string | null;
+  failedAt?: number | null;
+  failureReason?: string | null;
+  refundRequestPinId?: string | null;
+  refundRequestTxid?: string | null;
+  refundRequestedAt?: number | null;
+  refundCompletedAt?: number | null;
+  refundApplyRetryCount?: number | null;
+  nextRetryAt?: number | null;
+  refundTxid?: string | null;
+  refundedAt?: number | null;
+  updatedAt?: number | null;
 }
 
 export interface BuildSessionTraceInput {
@@ -153,10 +172,29 @@ export interface SessionTraceRecord {
     orderTxid: string | null;
     orderTxids: string[];
     paymentTxid: string | null;
+    paymentCommitTxid: string | null;
     orderReference: string | null;
     paymentCurrency: string | null;
     paymentAmount: string | null;
+    paymentChain: string | null;
+    settlementKind: string | null;
+    mrc20Ticker: string | null;
+    mrc20Id: string | null;
     providerSkill?: string | null;
+    outputType: string | null;
+    requestText: string | null;
+    status: string | null;
+    failedAt: number | null;
+    failureReason: string | null;
+    refundRequestPinId: string | null;
+    refundRequestTxid: string | null;
+    refundRequestedAt: number | null;
+    refundCompletedAt: number | null;
+    refundApplyRetryCount: number | null;
+    nextRetryAt: number | null;
+    refundTxid: string | null;
+    refundedAt: number | null;
+    updatedAt: number | null;
   } | null;
   a2a: SessionTraceA2ARecord | null;
   providerRuntime: SessionTraceProviderRuntimeRecord | null;
@@ -190,6 +228,14 @@ export interface ServiceOrderEventMessageInput {
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeOptionalNumber(value: unknown): number | null {
+  if (value === null || value === undefined || normalizeText(value) === '') {
+    return null;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.trunc(numeric) : null;
 }
 
 function sanitizePathSegment(value: string, fallback: string): string {
@@ -409,10 +455,29 @@ export function buildSessionTrace(input: BuildSessionTraceInput): SessionTraceRe
             ? input.order.orderTxids.map((entry) => normalizeText(entry)).filter(Boolean)
             : [],
           paymentTxid: normalizeText(input.order.paymentTxid) || null,
+          paymentCommitTxid: normalizeText(input.order.paymentCommitTxid) || null,
           orderReference: normalizeText(input.order.orderReference) || null,
           paymentCurrency: normalizeText(input.order.paymentCurrency) || null,
           paymentAmount: normalizeText(input.order.paymentAmount) || null,
+          paymentChain: normalizeText(input.order.paymentChain) || null,
+          settlementKind: normalizeText(input.order.settlementKind) || null,
+          mrc20Ticker: normalizeText(input.order.mrc20Ticker) || null,
+          mrc20Id: normalizeText(input.order.mrc20Id) || null,
           providerSkill: normalizeText(input.order.providerSkill) || null,
+          outputType: normalizeText(input.order.outputType) || null,
+          requestText: normalizeText(input.order.requestText) || null,
+          status: normalizeText(input.order.status) || null,
+          failedAt: normalizeOptionalNumber(input.order.failedAt),
+          failureReason: normalizeText(input.order.failureReason) || null,
+          refundRequestPinId: normalizeText(input.order.refundRequestPinId) || null,
+          refundRequestTxid: normalizeText(input.order.refundRequestTxid) || null,
+          refundRequestedAt: normalizeOptionalNumber(input.order.refundRequestedAt),
+          refundCompletedAt: normalizeOptionalNumber(input.order.refundCompletedAt),
+          refundApplyRetryCount: normalizeOptionalNumber(input.order.refundApplyRetryCount),
+          nextRetryAt: normalizeOptionalNumber(input.order.nextRetryAt),
+          refundTxid: normalizeText(input.order.refundTxid) || null,
+          refundedAt: normalizeOptionalNumber(input.order.refundedAt),
+          updatedAt: normalizeOptionalNumber(input.order.updatedAt),
         }
       : null,
     a2a: buildA2ATraceRecord(input.a2a),

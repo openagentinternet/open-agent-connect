@@ -72,7 +72,7 @@ export interface ProviderConsoleManualActionRow {
   kind: 'refund';
   traceId: string;
   orderId: string;
-  refundRequestPinId: string;
+  refundRequestPinId: string | null;
   sessionId: string | null;
 }
 
@@ -105,6 +105,15 @@ export interface ProviderConsoleSnapshot {
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function isZeroAmount(value: unknown): boolean {
+  const text = normalizeText(value);
+  if (!text) {
+    return false;
+  }
+  const numeric = Number(text);
+  return Number.isFinite(numeric) && numeric === 0;
 }
 
 function sortByUpdatedAtDesc<T extends { updatedAt?: number; createdAt?: number }>(left: T, right: T): number {
@@ -237,10 +246,29 @@ function buildSellerOrderRowWithRating(
       orderTxid: normalizeText(order.orderTxid) || null,
       orderTxids: order.orderTxid ? [order.orderTxid] : [],
       paymentTxid,
+      paymentCommitTxid: null,
       orderReference: normalizeText(order.orderReference) || null,
       paymentCurrency: normalizeText(order.paymentCurrency) || null,
       paymentAmount: normalizeText(order.paymentAmount) || null,
+      paymentChain: normalizeText(order.paymentChain) || null,
+      settlementKind: null,
+      mrc20Ticker: null,
+      mrc20Id: null,
       providerSkill: normalizeText(order.providerSkill) || null,
+      outputType: null,
+      requestText: null,
+      status: normalizeText(order.state) || null,
+      failedAt: null,
+      failureReason: normalizeText(order.failureReason) || null,
+      refundRequestPinId: normalizeText(order.refundRequestPinId) || null,
+      refundRequestTxid: null,
+      refundRequestedAt: null,
+      refundCompletedAt: null,
+      refundApplyRetryCount: null,
+      nextRetryAt: null,
+      refundTxid: normalizeText(order.refundTxid) || null,
+      refundedAt: Number.isFinite(order.refundedAt) ? Number(order.refundedAt) : null,
+      updatedAt: Number.isFinite(order.updatedAt) ? Number(order.updatedAt) : null,
     },
     a2a: {
       sessionId: normalizeText(order.a2aSessionId) || null,
@@ -328,7 +356,20 @@ function buildManualAction(trace: ProviderConsoleTraceRecord): ProviderConsoleMa
 
 function buildSellerOrderManualAction(order: SellerOrderRecord): ProviderConsoleManualActionRow | null {
   if (normalizeText(order.state) !== 'refund_pending') {
-    return null;
+    if (
+      normalizeText(order.state) !== 'failed'
+      || !normalizeText(order.paymentTxid)
+      || isZeroAmount(order.paymentAmount)
+    ) {
+      return null;
+    }
+    return {
+      kind: 'refund',
+      traceId: normalizeText(order.traceId),
+      orderId: normalizeText(order.id),
+      refundRequestPinId: null,
+      sessionId: normalizeText(order.a2aSessionId) || null,
+    };
   }
   const refundRequestPinId = normalizeText(order.refundRequestPinId);
   if (!refundRequestPinId) {

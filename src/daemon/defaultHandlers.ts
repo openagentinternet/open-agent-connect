@@ -67,6 +67,12 @@ import {
   type SellerOrderRecord,
   type SellerOrderState,
 } from '../core/orders/sellerOrderState';
+import {
+  DEFAULT_REFUND_REQUEST_RETRY_DELAY_MS,
+  SERVICE_ORDER_FREE_REFUND_SKIPPED_REASON,
+  SERVICE_ORDER_SELF_REFUND_SKIPPED_REASON,
+  isSelfDirectedPair,
+} from '../core/orders/orderLifecycle';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
 import { refreshRatingDetailCacheFromChain } from '../core/ratings/ratingDetailSync';
@@ -222,6 +228,7 @@ const DEFAULT_MASTER_HOST_MODE = 'codex';
 const DEFAULT_NETWORK_BOT_LIST_LIMIT = 20;
 const MAX_NETWORK_BOT_LIST_LIMIT = 100;
 const DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS = [1_500, 5_000, 10_000];
+const SERVICE_REFUND_REQUEST_PATH = '/protocols/service-refund-request';
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -5216,6 +5223,361 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }));
   }
 
+  function inferRefundPaymentChain(order: Record<string, unknown>): string {
+    const chain = normalizeText(order.paymentChain).toLowerCase();
+    if (chain === 'btc' || chain === 'doge' || chain === 'mvc') {
+      return chain;
+    }
+    const currency = normalizeText(order.paymentCurrency).toUpperCase();
+    if (currency === 'BTC') return 'btc';
+    if (currency === 'DOGE') return 'doge';
+    return 'mvc';
+  }
+
+  function inferRefundSettlementKind(order: Record<string, unknown>): string {
+    const settlementKind = normalizeText(order.settlementKind).toLowerCase();
+    return settlementKind || 'native';
+  }
+
+  function resolveRefundAddress(identity: RuntimeIdentityRecord, paymentChain: string): string {
+    if (paymentChain === 'mvc') {
+      return normalizeText(identity.addresses?.mvc) || normalizeText(identity.mvcAddress);
+    }
+    return normalizeText(identity.addresses?.[paymentChain]);
+  }
+
+  function isZeroPaymentAmount(value: unknown): boolean {
+    const text = normalizeText(value);
+    if (!text) {
+      return false;
+    }
+    const amount = Number(text);
+    return Number.isFinite(amount) && amount === 0;
+  }
+
+  function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
+    return [...new Set(values.map((entry) => normalizeText(entry)).filter(Boolean))];
+  }
+
+  function normalizeRefundCounter(value: unknown): number {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? Math.trunc(numeric) : 0;
+  }
+
+  function findExistingBuyerRefundForOrder(inputRefund: {
+    state: RuntimeState;
+    traceId: string;
+    order: Record<string, unknown>;
+  }): Record<string, unknown> | null {
+    const paymentTxid = normalizeText(inputRefund.order.paymentTxid);
+    const orderTxid = normalizeText(inputRefund.order.orderTxid);
+    const orderReference = normalizeText(inputRefund.order.orderReference);
+    if (!paymentTxid && !orderTxid && !orderReference) {
+      return null;
+    }
+    for (const trace of inputRefund.state.traces) {
+      if (trace.traceId === inputRefund.traceId) {
+        continue;
+      }
+      const order = (trace.order ?? {}) as Record<string, unknown>;
+      if (normalizeText(order.role) !== 'buyer') {
+        continue;
+      }
+      const samePayment = paymentTxid && normalizeText(order.paymentTxid) === paymentTxid;
+      const sameOrderTxid = orderTxid && normalizeText(order.orderTxid) === orderTxid;
+      const sameOrderReference = orderReference && normalizeText(order.orderReference) === orderReference;
+      if (!samePayment && !sameOrderTxid && !sameOrderReference) {
+        continue;
+      }
+      const status = normalizeText(order.status);
+      if (
+        normalizeText(order.refundRequestPinId)
+        || status === 'refund_pending'
+        || status === 'refunded'
+      ) {
+        return order;
+      }
+    }
+    return null;
+  }
+
+  function isBuyerTraceSelfDirected(inputRefund: {
+    trace: SessionTraceRecord;
+    identity: RuntimeIdentityRecord;
+  }): boolean {
+    return isSelfDirectedPair({
+      localGlobalMetaId: inputRefund.identity.globalMetaId,
+      counterpartyGlobalMetaId: normalizeText(inputRefund.trace.a2a?.providerGlobalMetaId)
+        || normalizeText(inputRefund.trace.session.peerGlobalMetaId),
+    });
+  }
+
+  function normalizeServiceOutputType(value: unknown): string {
+    return normalizeText(value).toLowerCase();
+  }
+
+  function isTextLikeServiceOutputType(value: unknown): boolean {
+    const outputType = normalizeServiceOutputType(value);
+    return !outputType || outputType === 'text' || outputType === 'markdown';
+  }
+
+  function containsDeliverableReference(value: unknown): boolean {
+    const text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
+    return /metafile:\/\/[^\s)]+/iu.test(text)
+      || /https?:\/\/[^\s)]+\.(?:png|jpe?g|webp|gif|mp4|mov|webm|mp3|wav|m4a|pdf|zip|csv|json)(?:[?#][^\s)]*)?/iu.test(text)
+      || /https?:\/\/file\.metaid\.io\/[^\s)]+/iu.test(text);
+  }
+
+  function validateBuyerReplyDeliverable(inputReply: {
+    trace: SessionTraceRecord;
+    reply: AwaitMetaWebServiceReplyResult;
+  }): { ok: true } | { ok: false; reason: string } {
+    const expectedOutputType = normalizeServiceOutputType(
+      (inputReply.trace.order as Record<string, unknown> | null | undefined)?.outputType
+    );
+    if (isTextLikeServiceOutputType(expectedOutputType)) {
+      return { ok: true };
+    }
+    if (inputReply.reply.state !== 'completed') {
+      return { ok: true };
+    }
+    if (
+      containsDeliverableReference(inputReply.reply.responseText)
+      || containsDeliverableReference(inputReply.reply.rawMessage)
+    ) {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      reason: `Provider delivery did not include a valid ${expectedOutputType} deliverable reference.`,
+    };
+  }
+
+  function buildRefundRequestPayloadForTrace(inputRefund: {
+    trace: SessionTraceRecord;
+    identity: RuntimeIdentityRecord;
+    failureReason: string;
+    failedAt: number;
+    evidencePinIds?: string[];
+  }): Record<string, unknown> {
+    const order = (inputRefund.trace.order ?? {}) as Record<string, unknown>;
+    const paymentChain = inferRefundPaymentChain(order);
+    const refundAmount = normalizeText(order.paymentAmount);
+    const refundCurrency = normalizeText(order.paymentCurrency);
+    return {
+      version: '1.0.0',
+      paymentTxid: normalizeText(order.paymentTxid),
+      servicePinId: normalizeText(order.serviceId) || null,
+      serviceName: normalizeText(order.serviceName),
+      refundAmount,
+      refundCurrency,
+      amount: refundAmount,
+      currency: refundCurrency,
+      paymentChain,
+      settlementKind: inferRefundSettlementKind(order),
+      mrc20Ticker: normalizeText(order.mrc20Ticker) || null,
+      mrc20Id: normalizeText(order.mrc20Id) || null,
+      paymentCommitTxid: normalizeText(order.paymentCommitTxid) || null,
+      refundToAddress: resolveRefundAddress(inputRefund.identity, paymentChain),
+      buyerGlobalMetaId: inputRefund.identity.globalMetaId,
+      sellerGlobalMetaId: normalizeText(inputRefund.trace.session.peerGlobalMetaId)
+        || normalizeText(inputRefund.trace.a2a?.providerGlobalMetaId),
+      orderMessagePinId: normalizeText(order.orderPinId) || null,
+      failureReason: inputRefund.failureReason,
+      failureDetectedAt: Math.floor(inputRefund.failedAt / 1000),
+      reasonComment: inputRefund.failureReason === 'invalid_deliverable'
+        ? 'Provider delivery did not include the required deliverable.'
+        : 'Service delivery timed out.',
+      evidencePinIds: uniqueNonEmpty([
+        normalizeText(order.orderPinId),
+        normalizeText(order.orderTxid),
+        ...(inputRefund.evidencePinIds ?? []),
+      ]),
+    };
+  }
+
+  function withBuyerRefundOrderFields(inputRefund: {
+    trace: SessionTraceRecord;
+    status: 'failed' | 'refund_pending' | 'refunded';
+    failedAt: number;
+    failureReason: string;
+    refundRequestPinId?: string | null;
+    refundRequestTxid?: string | null;
+    refundRequestedAt?: number | null;
+    refundCompletedAt?: number | null;
+    nextRetryAt?: number | null;
+    refundApplyRetryCount?: number | null;
+  }): SessionTraceRecord {
+    const order = inputRefund.trace.order
+      ? { ...(inputRefund.trace.order as Record<string, unknown>) }
+      : null;
+    if (!order) {
+      return inputRefund.trace;
+    }
+    const nextOrder = {
+      ...order,
+      status: inputRefund.status,
+      failedAt: inputRefund.failedAt,
+      failureReason: inputRefund.failureReason,
+      refundRequestPinId: (inputRefund.refundRequestPinId ?? normalizeText(order.refundRequestPinId)) || null,
+      refundRequestTxid: (inputRefund.refundRequestTxid ?? normalizeText(order.refundRequestTxid)) || null,
+      refundRequestedAt: inputRefund.refundRequestedAt ?? normalizeTimestamp(order.refundRequestedAt),
+      refundCompletedAt: inputRefund.refundCompletedAt ?? normalizeTimestamp(order.refundCompletedAt),
+      nextRetryAt: inputRefund.nextRetryAt ?? normalizeTimestamp(order.nextRetryAt),
+      refundApplyRetryCount: inputRefund.refundApplyRetryCount ?? normalizeRefundCounter(order.refundApplyRetryCount),
+      updatedAt: inputRefund.failedAt,
+    } as unknown as SessionTraceRecord['order'];
+    return {
+      ...inputRefund.trace,
+      order: nextOrder,
+    };
+  }
+
+  async function persistBuyerRefundTrace(inputRefund: {
+    trace: SessionTraceRecord;
+    status: 'failed' | 'refund_pending' | 'refunded';
+    failedAt: number;
+    failureReason: string;
+    refundRequestPinId?: string | null;
+    refundRequestTxid?: string | null;
+    refundRequestedAt?: number | null;
+    refundCompletedAt?: number | null;
+    nextRetryAt?: number | null;
+    refundApplyRetryCount?: number | null;
+  }): Promise<SessionTraceRecord> {
+    const trace = withBuyerRefundOrderFields(inputRefund);
+    await runtimeStateStore.updateState((current) => ({
+      ...current,
+      traces: [
+        trace,
+        ...current.traces.filter((entry) => entry.traceId !== trace.traceId),
+      ],
+    }));
+    return trace;
+  }
+
+  async function ensureBuyerRefundRequestForTrace(inputRefund: {
+    trace: SessionTraceRecord;
+    failureReason: string;
+    failedAt?: number | null;
+    evidencePinIds?: string[];
+  }): Promise<SessionTraceRecord> {
+    const state = await runtimeStateStore.readState();
+    const identity = state.identity;
+    if (!identity) {
+      return inputRefund.trace;
+    }
+    const currentTrace = state.traces.find((entry) => entry.traceId === inputRefund.trace.traceId) ?? inputRefund.trace;
+    const order = (currentTrace.order ?? {}) as Record<string, unknown>;
+    if (normalizeText(order.role) !== 'buyer') {
+      return currentTrace;
+    }
+    const failedAt = inputRefund.failedAt ?? Date.now();
+    if (normalizeText(order.refundRequestPinId)) {
+      return currentTrace;
+    }
+
+    if (isBuyerTraceSelfDirected({ trace: currentTrace, identity })) {
+      return persistBuyerRefundTrace({
+        trace: currentTrace,
+        status: 'refunded',
+        failedAt,
+        failureReason: SERVICE_ORDER_SELF_REFUND_SKIPPED_REASON,
+        refundCompletedAt: failedAt,
+      });
+    }
+
+    if (isZeroPaymentAmount(order.paymentAmount)) {
+      return persistBuyerRefundTrace({
+        trace: currentTrace,
+        status: 'refunded',
+        failedAt,
+        failureReason: SERVICE_ORDER_FREE_REFUND_SKIPPED_REASON,
+        refundCompletedAt: failedAt,
+      });
+    }
+
+    const existingRefund = findExistingBuyerRefundForOrder({
+      state,
+      traceId: currentTrace.traceId,
+      order,
+    });
+    if (existingRefund) {
+      const existingStatus = normalizeText(existingRefund.status);
+      return persistBuyerRefundTrace({
+        trace: currentTrace,
+        status: existingStatus === 'refunded' ? 'refunded' : 'refund_pending',
+        failedAt,
+        failureReason: normalizeText(existingRefund.failureReason) || inputRefund.failureReason,
+        refundRequestPinId: normalizeText(existingRefund.refundRequestPinId) || null,
+        refundRequestTxid: normalizeText(existingRefund.refundRequestTxid) || null,
+        refundRequestedAt: normalizeTimestamp(existingRefund.refundRequestedAt),
+        refundCompletedAt: normalizeTimestamp(existingRefund.refundCompletedAt)
+          ?? normalizeTimestamp(existingRefund.refundedAt),
+      });
+    }
+
+    const paymentTxid = normalizeText(order.paymentTxid);
+    if (!paymentTxid) {
+      return persistBuyerRefundTrace({
+        trace: currentTrace,
+        status: 'failed',
+        failedAt,
+        failureReason: inputRefund.failureReason,
+        nextRetryAt: failedAt + DEFAULT_REFUND_REQUEST_RETRY_DELAY_MS,
+        refundApplyRetryCount: normalizeRefundCounter(order.refundApplyRetryCount) || 1,
+      });
+    }
+
+    try {
+      const payload = buildRefundRequestPayloadForTrace({
+        trace: currentTrace,
+        identity,
+        failureReason: inputRefund.failureReason,
+        failedAt,
+        evidencePinIds: inputRefund.evidencePinIds,
+      });
+      if (!normalizeText(payload.refundToAddress)) {
+        return persistBuyerRefundTrace({
+          trace: currentTrace,
+          status: 'failed',
+          failedAt,
+          failureReason: 'refund_address_missing',
+          nextRetryAt: failedAt + DEFAULT_REFUND_REQUEST_RETRY_DELAY_MS,
+          refundApplyRetryCount: normalizeRefundCounter(order.refundApplyRetryCount) + 1,
+        });
+      }
+      const write = await signer.writePin({
+        operation: 'create',
+        path: SERVICE_REFUND_REQUEST_PATH,
+        encryption: '0',
+        version: '1.0.0',
+        contentType: 'application/json',
+        payload: JSON.stringify(payload),
+        encoding: 'utf-8',
+        network: 'mvc',
+      });
+      return persistBuyerRefundTrace({
+        trace: currentTrace,
+        status: 'refund_pending',
+        failedAt,
+        failureReason: inputRefund.failureReason,
+        refundRequestPinId: normalizeText(write.pinId) || normalizeText(write.txids?.[0]) || null,
+        refundRequestTxid: normalizeText(write.txids?.[0]) || null,
+        refundRequestedAt: failedAt,
+      });
+    } catch {
+      return persistBuyerRefundTrace({
+        trace: currentTrace,
+        status: 'failed',
+        failedAt,
+        failureReason: inputRefund.failureReason,
+        nextRetryAt: failedAt + DEFAULT_REFUND_REQUEST_RETRY_DELAY_MS,
+        refundApplyRetryCount: normalizeRefundCounter(order.refundApplyRetryCount) + 1,
+      });
+    }
+  }
+
   async function findExistingProviderOrderSession(inputOrder: {
     state: RuntimeState;
     buyerGlobalMetaId?: string | null;
@@ -6648,6 +7010,56 @@ export function createDefaultMetabotDaemonHandlers(input: {
           timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
         });
         if (reply.state !== 'completed') {
+          const current = await loadCallerContinuationState({
+            traceId: input.trace.traceId,
+            sessionId: input.sessionId,
+            runtimeStateStore,
+            sessionStateStore,
+            fallbackTrace: input.trace,
+          });
+          if (!current || current.session.state === 'completed' || current.taskRun.state === 'completed') {
+            return;
+          }
+          const timedOut = sessionEngine.markForegroundTimeout({
+            session: current.session,
+            taskRun: current.taskRun,
+          });
+          await persistSessionMutation(sessionStateStore, timedOut);
+          const timeoutTrace = {
+            ...current.trace,
+            a2a: {
+              ...(current.trace.a2a ?? {
+                sessionId: current.session.sessionId,
+                taskRunId: current.taskRun.runId,
+                role: current.session.role,
+                publicStatus: null,
+                latestEvent: null,
+                taskRunState: null,
+                callerGlobalMetaId: current.session.callerGlobalMetaId,
+                callerName: null,
+                providerGlobalMetaId: current.session.providerGlobalMetaId,
+                providerName: current.trace.session.peerName,
+                servicePinId: current.session.servicePinId,
+              }),
+              publicStatus: 'timeout',
+              latestEvent: 'timeout',
+              taskRunState: 'timeout',
+            },
+          };
+          const rebuilt = await rebuildTraceArtifactsFromSessionState({
+            baseTrace: timeoutTrace,
+            runtimeStateStore,
+            sessionStateStore,
+          });
+          await ensureBuyerRefundRequestForTrace({
+            trace: rebuilt.trace,
+            failureReason: 'delivery_timeout',
+            failedAt: Date.now(),
+            evidencePinIds: uniqueNonEmpty([
+              normalizeText(rebuilt.trace.order?.orderPinId),
+              normalizeText(rebuilt.trace.order?.orderTxid),
+            ]),
+          });
           return;
         }
 
@@ -6659,6 +7071,74 @@ export function createDefaultMetabotDaemonHandlers(input: {
           fallbackTrace: input.trace,
         });
         if (!current || current.session.state === 'completed' || current.taskRun.state === 'completed') {
+          return;
+        }
+
+        const deliverableValidation = validateBuyerReplyDeliverable({
+          trace: current.trace,
+          reply,
+        });
+        if (!deliverableValidation.ok) {
+          const failedResult = createServiceRunnerFailedResult('invalid_deliverable', deliverableValidation.reason);
+          const failed = sessionEngine.applyProviderRunnerResult({
+            session: current.session,
+            taskRun: current.taskRun,
+            result: failedResult,
+          });
+          const failedStatus = await persistSessionMutation(sessionStateStore, failed);
+          await appendA2ATranscriptItems(sessionStateStore, [
+            {
+              id: `${current.trace.traceId}-invalid-deliverable`,
+              sessionId: current.session.sessionId,
+              taskRunId: failed.taskRun.runId,
+              timestamp: failed.session.updatedAt,
+              type: 'failure',
+              sender: 'system',
+              content: deliverableValidation.reason,
+              metadata: {
+                publicStatus: failedStatus.status,
+                event: failed.event,
+                failureCode: 'invalid_deliverable',
+                deliveryPinId: reply.deliveryPinId,
+              },
+            },
+          ]);
+          const invalidTrace = {
+            ...current.trace,
+            a2a: {
+              ...(current.trace.a2a ?? {
+                sessionId: current.session.sessionId,
+                taskRunId: current.taskRun.runId,
+                role: current.session.role,
+                publicStatus: null,
+                latestEvent: null,
+                taskRunState: null,
+                callerGlobalMetaId: current.session.callerGlobalMetaId,
+                callerName: null,
+                providerGlobalMetaId: current.session.providerGlobalMetaId,
+                providerName: current.trace.session.peerName,
+                servicePinId: current.session.servicePinId,
+              }),
+              publicStatus: failedStatus.status,
+              latestEvent: failed.event,
+              taskRunState: failed.taskRun.state,
+            },
+          };
+          const rebuilt = await rebuildTraceArtifactsFromSessionState({
+            baseTrace: invalidTrace,
+            runtimeStateStore,
+            sessionStateStore,
+          });
+          await ensureBuyerRefundRequestForTrace({
+            trace: rebuilt.trace,
+            failureReason: 'invalid_deliverable',
+            failedAt: Date.now(),
+            evidencePinIds: uniqueNonEmpty([
+              normalizeText(rebuilt.trace.order?.orderPinId),
+              normalizeText(rebuilt.trace.order?.orderTxid),
+              reply.deliveryPinId,
+            ]),
+          });
           return;
         }
 
@@ -9645,9 +10125,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
               orderTxid,
               orderTxids,
               paymentTxid,
+              paymentCommitTxid: orderPayment.paymentCommitTxid,
               orderReference,
               paymentCurrency: orderPayment.paymentCurrency,
               paymentAmount: orderPayment.paymentAmount,
+              paymentChain: orderPayment.paymentChain,
+              settlementKind: orderPayment.settlementKind,
+              outputType: normalizeText(service.outputType),
+              requestText: request.userTask,
             },
             a2a: {
               sessionId: started.session.sessionId,
@@ -9730,9 +10215,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
             },
           });
           if (!execution.ok) {
-            await persistCallerTraceSnapshot({
+            const persisted = await persistCallerTraceSnapshot({
               code: normalizeText(execution.code) || 'remote_execution_failed',
               message: normalizeText(execution.message) || 'Remote execution failed.',
+            });
+            await ensureBuyerRefundRequestForTrace({
+              trace: persisted.trace,
+              failureReason: normalizeText(execution.code) || 'remote_execution_failed',
+              failedAt: Date.now(),
+              evidencePinIds: uniqueNonEmpty([
+                normalizeText(orderPinId),
+                normalizeText(orderTxid),
+              ]),
             });
             if (execution.state === 'manual_action_required') {
               return execution;
