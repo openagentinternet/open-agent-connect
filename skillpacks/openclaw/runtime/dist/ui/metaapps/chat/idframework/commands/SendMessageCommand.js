@@ -15,7 +15,7 @@ export default class SendMessageCommand {
   async execute({ payload, store, delegate }) {
     try {
       const { to, content } = payload;
-      
+
       if (!to || !content || !content.trim()) {
         console.warn('SendMessageCommand: Missing to or content');
         return;
@@ -23,7 +23,7 @@ export default class SendMessageCommand {
 
       const chatStore = store('chat');
       const walletStore = store('wallet');
-      
+
       if (!chatStore) {
         console.warn('SendMessageCommand: Chat store not available');
         return;
@@ -88,4 +88,3 @@ export default class SendMessageCommand {
     }
   }
 }
-

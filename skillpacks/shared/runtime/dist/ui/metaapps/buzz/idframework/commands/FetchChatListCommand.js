@@ -7,7 +7,7 @@ const CHAT_LIST_USER_PREFETCH_COOLDOWN_MS = 120000;
  * FetchChatListCommand
  * Fetches the latest chat info list from IDChat API
  * Follows IDFramework Command Pattern
- * 
+ *
  * API Endpoint: /group-chat/user/latest-chat-info-list
  * Method: GET
  * Headers: Authorization: Bearer {globalMetaId}
@@ -715,7 +715,7 @@ export default class FetchChatListCommand {
       }
       return `${baseText}/users/avatar/accelerate/${pinId}?process=thumbnail`;
     };
-    
+
     if (metafileUrl.startsWith('metafile://')) {
       // Extract pinid from metafile://{pinid}
       let pinid = metafileUrl.replace('metafile://', '');
@@ -725,7 +725,7 @@ export default class FetchChatListCommand {
       }
       pinid = pinid.replace(/\.[a-zA-Z0-9]{1,10}$/i, '');
       if (!pinid) return '';
-      
+
       // Get metafs base URL from ServiceLocator
       const metafsBase = window.ServiceLocator?.metafs || 'https://file.metaid.io/metafile-indexer/api/v1';
 
@@ -737,12 +737,12 @@ export default class FetchChatListCommand {
       }
       return buildContentUrl(metafsBase, pinid);
     }
-    
+
     // If already a full URL, return as is
     if (metafileUrl.startsWith('http://') || metafileUrl.startsWith('https://')) {
       return metafileUrl;
     }
-    
+
     // Return as is for other cases
     return metafileUrl;
   }
@@ -762,7 +762,7 @@ export default class FetchChatListCommand {
       // Get stores - handle both cases where stores might not be passed correctly
       const walletStore = stores?.wallet || (typeof Alpine !== 'undefined' ? Alpine.store('wallet') : null);
       const chatStore = stores?.chat || (typeof Alpine !== 'undefined' ? Alpine.store('chat') : null);
-      
+
       if (!walletStore || !walletStore.isConnected) {
         console.warn('FetchChatListCommand: Wallet not connected');
         return;
@@ -804,7 +804,7 @@ export default class FetchChatListCommand {
       // API endpoint: /user/latest-chat-info-list?metaid={globalMetaId}
       const baseURL = window.ServiceLocator?.idchat || 'https://api.idchat.io/chat-api/group-chat';
       const endpoint = `/user/latest-chat-info-list?metaid=${encodeURIComponent(walletStore.globalMetaId)}`;
-      
+
       // Use fetch directly
       const response = await fetch(`${baseURL}${endpoint}`, {
         method: 'GET',
@@ -829,7 +829,7 @@ export default class FetchChatListCommand {
         chatStore.conversations,
         chatStore.messages
       );
-      
+
       // Update chat store - use Object.assign to ensure Alpine reactivity
       const nextState = {
         conversations: conversations,
@@ -951,25 +951,25 @@ export default class FetchChatListCommand {
     // Parse chat list based on type (1=group, 2=private)
 
     chatList.forEach((chat, index) => {
-      
+
       // Determine chat type: type=1 is group chat, type=2 is private chat
       const chatType = String(chat.type || chat.chatType || chat.chat_type || '2');
       const isGroupChat = chatType === '1';
       const isPrivateChat = chatType === '2';
-      
+
       // Extract conversation ID based on chat type
       let conversationId;
       let conversationKey;
       let conversationName;
       let conversationAvatar;
       let participantMetaId = null;
-      
+
       if (isGroupChat) {
         // Group chat: use groupId as conversationId
         conversationId = chat.groupId || chat.group_id || `group_${index}`;
         conversationKey = conversationId;
         conversationName = chat.roomName || chat.room_name || 'Unnamed Group';
-        
+
         // Handle roomIcon (may be in metafile:// format)
         if (chat.roomIcon) {
           conversationAvatar = this._normalizeAvatarReference(chat.roomIcon, 'group-avatar');
@@ -995,7 +995,7 @@ export default class FetchChatListCommand {
         conversationId = privateGlobalMetaId || privateMetaId || `private_${index}`;
         conversationKey = conversationId;
         participantMetaId = privateMetaId || null;
-        
+
         // For private chats, name and avatar come from userInfo
         if (chat.userInfo) {
           conversationName = chat.userInfo.name || chat.userInfo.nickname || null;
@@ -1010,13 +1010,13 @@ export default class FetchChatListCommand {
         conversationKey = conversationId;
         conversationName = chat.name || chat.title || null;
       }
-      
+
       const lastMessage = this._formatConversationPreview(
         chatType,
         this._extractMessagePreview(chat),
         this._extractPreviewSender(chat)
       );
-      
+
       // Last message time - use timestamp field
       let lastMessageTime = null;
       if (chat.timestamp) {
@@ -1026,11 +1026,11 @@ export default class FetchChatListCommand {
       } else if (chat.last_message_time) {
         lastMessageTime = this._normalizeTimestampMillis(chat.last_message_time);
       }
-      
+
       // Unread count - not directly available in this API response, default to 0
       const unreadCount = chat.unreadCount || chat.unread_count || chat.unread || 0;
       const normalizedConversationIndex = this._resolveConversationIndex(chat);
-      
+
       // Get participants (for group chats, this might be in userCount)
       const participants = chat.participants || chat.members || chat.users || [];
 
@@ -1053,7 +1053,7 @@ export default class FetchChatListCommand {
         // Store raw chat data for reference
         _raw: chat,
       };
-      
+
     });
 
     return conversations;

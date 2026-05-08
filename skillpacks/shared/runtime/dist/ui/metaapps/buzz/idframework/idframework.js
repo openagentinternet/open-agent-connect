@@ -1,19 +1,19 @@
 /**
  * IDFramework - Core Framework for MetaWeb Applications
- * 
+ *
  * A lightweight, decentralized SPA framework following Cairngorm MVC philosophy.
  * Designed for MetaID Protocol-based blockchain internet applications.
- * 
+ *
  * Core Philosophy:
  * - Single Source of Truth: All application state in global singleton Model layer
  * - View is "Dumb": Views only display data and dispatch events
  * - Command Pattern: Business logic atomized into independent Commands
  * - Separation of Concerns: View, Model, Command, Delegate strictly separated
  * - Event-Driven: Components communicate through events, not direct calls
- * 
+ *
  * Data Flow:
  * View -> Event -> IDController -> Command -> BusinessDelegate (Service) -> Model -> View (Binding)
- * 
+ *
  * @namespace IDFramework
  */
 
@@ -229,7 +229,7 @@ class IDFramework {
    * ============================================
    * MODEL LAYER - Single Source of Truth
    * ============================================
-   * 
+   *
    * The Model layer provides a global singleton store for all application state.
    * It includes built-in models (wallet, app) and allows dynamic model registration.
    * All models are managed through Alpine.js stores for reactive updates.
@@ -237,17 +237,17 @@ class IDFramework {
 
   /**
    * Initialize Model Layer with built-in models
-   * 
+   *
    * Built-in Models:
    * - wallet: User wallet information and connection status
    * - app: Application-level global state
-   * 
+   *
    * Additional models can be registered dynamically via Alpine.store()
-   * 
+   *
    * Note: This method will NOT overwrite existing stores. If a store already exists,
    * it will be preserved. This allows stores to be registered in index.html
    * before the framework loads, ensuring they're available when Alpine processes the DOM.
-   * 
+   *
    * @param {Object} customModels - Optional custom models to register
    * @example
    * IDFramework.initModels({
@@ -387,11 +387,11 @@ class IDFramework {
    * ============================================
    * DELEGATE LAYER - Service Abstraction
    * ============================================
-   * 
+   *
    * Delegate layer abstracts the complexity of remote service communication.
    * It handles API calls, error handling, and returns raw data to Commands.
    * Commands use DataAdapters to transform raw data into Model format.
-   * 
+   *
    * The Delegate object contains multiple delegate methods for different purposes:
    * - BusinessDelegate: Generic API communication handler
    * - UserDelegate: User-related API calls (e.g., avatar, profile)
@@ -399,21 +399,21 @@ class IDFramework {
 
   /**
    * Delegate - Service abstraction object
-   * 
+   *
    * Contains various delegate methods for different types of service communication.
    */
   static Delegate = {
     /**
      * BusinessDelegate - Generic API communication handler
-     * 
+     *
      * This method abstracts service communication, allowing Commands to focus on business logic
      * rather than HTTP details. It uses ServiceLocator to resolve service base URLs.
-     * 
+     *
      * @param {string} serviceKey - Key to look up BaseURL from ServiceLocator (e.g., 'metaid_man')
      * @param {string} endpoint - API endpoint path (e.g., '/pin/path/list')
      * @param {Object} options - Fetch options (method, headers, body, etc.)
      * @returns {Promise<Object>} Raw JSON response from the service
-     * 
+     *
      * @example
      * const data = await IDFramework.Delegate.BusinessDelegate('metaid_man', '/pin/path/list', {
      *   method: 'GET',
@@ -454,7 +454,7 @@ class IDFramework {
 
       try {
         const response = await fetch(url, fetchOptions);
-        
+
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -469,22 +469,22 @@ class IDFramework {
 
     /**
      * UserDelegate - User-related API communication handler with IndexedDB caching
-     * 
+     *
      * This method handles user-related API calls, such as fetching user avatar,
      * profile information, etc. from remote services.
-     * 
+     *
      * It implements a cache-first strategy:
      * 1. Check IndexedDB for cached user data
      * 2. If found, return cached data
      * 3. If not found, fetch from remote API and cache in IndexedDB
-     * 
+     *
      * @param {string} serviceKey - Key to look up BaseURL from ServiceLocator (e.g., 'metafs')
      * @param {string} endpoint - API endpoint path (e.g., '/info/metaid/xxx' or '/users/address/xxx')
      * @param {Object} options - Fetch options (method, headers, body, etc.)
      * @param {string} [options.metaid] - MetaID (optional when using address)
      * @param {string} [options.address] - Address (optional when using metaid)
      * @returns {Promise<Object>} User data object with avatar image
-     * 
+     *
      * @example
      * const userData = await IDFramework.Delegate.UserDelegate('metafs', '/users/address/' + address, { address });
      */
@@ -801,7 +801,7 @@ class IDFramework {
 
         request.onupgradeneeded = (event) => {
           const db = event.target.result;
-          
+
           // Create User object store if it doesn't exist
           if (!db.objectStoreNames.contains('User')) {
             const objectStore = db.createObjectStore('User', { keyPath: 'metaid' });
@@ -858,7 +858,7 @@ class IDFramework {
         return new Promise((resolve, reject) => {
           const transaction = db.transaction(['User'], 'readwrite');
           const objectStore = transaction.objectStore('User');
-          
+
           // Check for existing entry to potentially update its structure
           const getRequest = objectStore.get(cacheKey);
           getRequest.onsuccess = async () => {
@@ -944,10 +944,10 @@ class IDFramework {
    * ============================================
    * CONTROLLER LAYER - Event to Command Mapping
    * ============================================
-   * 
+   *
    * IDController maps events to Commands with async lazy loading.
    * This allows Commands to be loaded on-demand, reducing initial bundle size.
-   * 
+   *
    * Built-in Commands:
    * - connectWallet: Connect to Metalet wallet
    * - createPIN: Create and broadcast a PIN to the blockchain (mock implementation)
@@ -955,7 +955,7 @@ class IDFramework {
 
   /**
    * IDController - Maps Events to Commands
-   * 
+   *
    * The controller maintains a registry of event-to-command mappings.
    * Commands are lazy-loaded when events are dispatched, enabling code splitting.
    */
@@ -974,18 +974,18 @@ class IDFramework {
 
     /**
      * Register a command for an event
-     * 
+     *
      * Commands can be:
      * - File paths (e.g., './commands/FetchBuzzCommand.js') - will be lazy-loaded
      * - Built-in command functions (registered via registerBuiltIn)
-     * 
+     *
      * @param {string} eventName - Event name (e.g., 'fetchBuzz', 'postBuzz')
      * @param {string|Function} commandPathOrFunction - Path to command module or built-in command function
-     * 
+     *
      * @example
      * // Register a file-based command
      * IDFramework.IDController.register('fetchBuzz', './commands/FetchBuzzCommand.js');
-     * 
+     *
      * @example
      * // Register a built-in command
      * IDFramework.IDController.registerBuiltIn('connectWallet', IDFramework.BuiltInCommands.connectWallet);
@@ -1000,7 +1000,7 @@ class IDFramework {
 
     /**
      * Register a built-in command function
-     * 
+     *
      * @param {string} eventName - Event name
      * @param {Function} commandFunction - Command function
      */
@@ -1010,23 +1010,23 @@ class IDFramework {
 
     /**
      * Execute a command for an event
-     * 
+     *
      * This method:
      * 1. Looks up the command for the event
      * 2. Lazy-loads file-based commands or uses built-in commands
      * 3. Instantiates and executes the command
      * 4. Passes BusinessDelegate and relevant stores to the command
-     * 
+     *
      * @param {string} eventName - Event name to execute
      * @param {Object} payload - Event payload data
      * @param {Object} stores - Object containing relevant Alpine stores (optional, auto-resolved if not provided)
      * @returns {Promise<void>}
-     * 
+     *
      * @example
      * await IDFramework.IDController.execute('fetchBuzz', { cursor: 0, size: 30 });
      */
     async execute(eventName, payload = {}, stores = null) {
-        
+
       // Check built-in commands first
       const builtInCommand = this.builtInCommands.get(eventName);
       if (builtInCommand) {
@@ -1038,7 +1038,7 @@ class IDFramework {
               app: IDFramework.getStore('app'),
             };
           }
-          
+
           const builtInResult = await builtInCommand({
             payload,
             stores,
@@ -1054,7 +1054,7 @@ class IDFramework {
 
       // Check file-based commands
       const commandPath = this.commands.get(eventName);
-      
+
       if (!commandPath) {
         console.warn(`No command registered for event: ${eventName}`);
         return;
@@ -1065,18 +1065,18 @@ class IDFramework {
         console.error(`Invalid command path for event '${eventName}': ${commandPath}`);
         return;
       }
-      
+
       try {
         // Lazy load the command module
         const CommandModule = await import(commandPath);
         const CommandClass = CommandModule.default || CommandModule[Object.keys(CommandModule)[0]];
-        
+
         if (!CommandClass) {
           throw new Error(`Command class not found in ${commandPath}`);
         }
 
         const command = new CommandClass();
-        
+
         // Resolve stores if not provided
         // Include all registered stores (wallet, app, buzz, user, chat, etc.)
         if (!stores) {
@@ -1084,10 +1084,10 @@ class IDFramework {
             wallet: IDFramework.getStore('wallet'),
             app: IDFramework.getStore('app'),
             user: IDFramework.getStore('user'),
-            
+
           };
         }
-        
+
         // Execute command with Delegate and stores
         // Commands can use either BusinessDelegate or UserDelegate
         // Bind UserDelegate to Delegate object to ensure 'this' context is correct
@@ -1109,7 +1109,7 @@ class IDFramework {
    * ============================================
    * BUILT-IN COMMANDS
    * ============================================
-   * 
+   *
    * Framework-provided commands for common MetaID operations.
    * These can be used directly or extended by applications.
    */
@@ -1120,9 +1120,9 @@ class IDFramework {
   static BuiltInCommands = {
     /**
      * ConnectWalletCommand - Connect to Metalet wallet
-     * 
+     *
      * Updates the wallet store with connection status and user information.
-     * 
+     *
      * @param {Object} params - Command parameters
      * @param {Object} params.stores - Alpine stores (wallet, app)
      * @returns {Promise<void>}
@@ -1134,12 +1134,12 @@ class IDFramework {
 
       try {
         const result = await window.metaidwallet.connect();
-        
+
         if (result && result.address) {
           // Update wallet store
           stores.wallet.isConnected = true;
           stores.wallet.address = result.address;
-          
+
           // Try to get additional wallet info
           try {
             // stores.wallet.metaid = result.metaid || result.address;
@@ -1150,13 +1150,13 @@ class IDFramework {
              }else{
                 stores.wallet.network='mainnet'
              }
-            
+
             // Get GlobalMetaID for cross-chain identity
             try {
               const globalMetaIdResult = await window.metaidwallet.getGlobalMetaid();
-              
+
               if (globalMetaIdResult && globalMetaIdResult.mvc) {
-                
+
                 stores.wallet.globalMetaId = globalMetaIdResult.mvc.globalMetaId;
                 stores.wallet.globalMetaIdInfo = globalMetaIdResult; // Store full info (mvc, btc, doge)
               }
@@ -1179,12 +1179,12 @@ class IDFramework {
 
     /**
      * CreatePINCommand - Create and broadcast a PIN to the blockchain
-     * 
+     *
      * This method:
      * 1. Constructs the PIN transaction
      * 2. Signs the transaction using Metalet
      * 3. Broadcasts to the blockchain
-     * 
+     *
      * @param {Object} params - Command parameters
      * @param {Object} params.payload - PIN data (operation, body, path, contentType)
      * @param {Object} params.stores - Alpine stores
@@ -1195,7 +1195,7 @@ class IDFramework {
         // 1. Construct PIN transaction
         // 2. Sign with Metalet
         // 3. Broadcast to blockchain
-        
+
         const { operation, body, path, contentType } = payload;
 
         if (!body) {
@@ -1378,7 +1378,7 @@ class IDFramework {
             }
           ]
         };
-        
+
         const createPinRes = await window.metaidwallet.createPin(parmas);
         return createPinRes;
       } catch (e) {
@@ -1386,7 +1386,7 @@ class IDFramework {
       }
     },
 
-  
+
   };
 
   /**
@@ -1397,12 +1397,12 @@ class IDFramework {
 
   /**
    * Initialize IDFramework
-   * 
+   *
    * This method initializes the framework with built-in models and registers built-in commands.
    * Should be called after Alpine.js is loaded but before DOM processing.
-   * 
+   *
    * @param {Object} customModels - Optional custom models to register
-   * 
+   *
    * @example
    * IDFramework.init({
    *   user: { name: '', email: '' }
@@ -1423,13 +1423,13 @@ class IDFramework {
    * ============================================
    * ROUTER LAYER - Hash-based Routing
    * ============================================
-   * 
+   *
    * IDRouter handles hash-based routing for SPA navigation.
    * It listens to hash changes and dispatches ROUTE_CHANGE events
    * that are handled by routing commands (e.g., NavigateCommand).
    */
 
-  
+
 
   /**
    * ============================================
@@ -1439,17 +1439,17 @@ class IDFramework {
 
   /**
    * Load a Web Component dynamically (lazy loading)
-   * 
+   *
    * This method allows components to be loaded on-demand rather than at startup,
    * reducing initial bundle size and improving performance.
-   * 
+   *
    * @param {string} componentPath - Relative path to the component module (e.g., './components/id-buzz-card.js')
    * @returns {Promise<void>} Resolves when the component is loaded and registered
-   * 
+   *
    * @example
    * // Load a component dynamically
    * await IDFramework.loadComponent('./components/id-buzz-card.js');
-   * 
+   *
    * // Now the component can be used in the DOM
    * // <id-buzz-card content="Hello" author="user123"></id-buzz-card>
    */
@@ -1467,18 +1467,18 @@ class IDFramework {
 
   /**
    * Dispatch an event (helper for views)
-   * 
+   *
    * This is a convenience method for views to dispatch events.
    * It automatically resolves the appropriate stores and executes the command.
-   * 
+   *
    * @param {string} eventName - Event name
    * @param {Object} payload - Event payload
    * @param {string} storeName - Optional specific store name (default: auto-resolve all)
-   * 
+   *
    * @example
    * // In a component
    * await IDFramework.dispatch('fetchBuzz', { cursor: 0, size: 30 });
-   * 
+   *
    * @example
    * // In a component with specific store
    * await IDFramework.dispatch('updateUser', { name: 'John' }, 'user');
@@ -1501,7 +1501,7 @@ class IDFramework {
         stores[name] = store;
       }
     });
-    
+
     // Ensure user store is always included for user-related commands
     if (!stores.user && this.getStore('user')) {
       stores.user = this.getStore('user');
@@ -1511,7 +1511,7 @@ class IDFramework {
     if (storeName && this.getStore(storeName)) {
       stores[storeName] = this.getStore(storeName);
     }
-    
+
     return await this.IDController.execute(eventName, payload, stores);
   }
 

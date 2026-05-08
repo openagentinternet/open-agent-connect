@@ -1,19 +1,19 @@
 /**
  * CheckBtcAddressSameAsMvcCommand - Check if BTC address matches MVC address
- * 
+ *
  * Command Pattern implementation following IDFramework architecture.
- * 
+ *
  * This command:
  * 1. Gets MVC address from wallet
  * 2. Gets BTC address from wallet
  * 3. Compares them and throws error if different
- * 
+ *
  * @class CheckBtcAddressSameAsMvcCommand
  */
 export default class CheckBtcAddressSameAsMvcCommand {
   /**
    * Execute the command
-   * 
+   *
    * @param {Object} params - Command parameters
    * @param {Object} params.stores - Alpine stores object
    *   - wallet: {Object} - Wallet store (address, isConnected, etc.)

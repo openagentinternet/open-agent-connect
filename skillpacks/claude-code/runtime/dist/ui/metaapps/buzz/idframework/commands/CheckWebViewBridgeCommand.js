@@ -1,18 +1,18 @@
 /**
  * CheckWebViewBridgeCommand - Check if running in WebView environment
- * 
+ *
  * Command Pattern implementation following IDFramework architecture.
- * 
+ *
  * This command:
  * 1. Detects if the app is running in IDChat WebView (iOS/Android)
  * 2. Updates the app store with isWebView status
- * 
+ *
  * @class CheckWebViewBridgeCommand
  */
 export default class CheckWebViewBridgeCommand {
   /**
    * Execute the command
-   * 
+   *
    * @param {Object} params - Command parameters
    * @param {Object} params.stores - Alpine stores object
    *   - app: {Object} - App store (isWebView, isLogin, etc.)

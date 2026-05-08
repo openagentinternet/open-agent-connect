@@ -37,9 +37,15 @@ function normalizeText(value) {
 function resolveAvatarPath(homeDir) {
     return node_path_1.default.join(node_path_1.default.resolve(homeDir), 'avatar.txt');
 }
-function avatarMimeType(dataUrl) {
-    const match = dataUrl.match(/^data:([^;,]+);base64,/i);
-    return match?.[1]?.toLowerCase() ?? 'image/png';
+function parseAvatarDataUrl(dataUrl) {
+    const match = normalizeText(dataUrl).match(/^data:([^;,]+);base64,([A-Za-z0-9+/=\s]+)$/i);
+    if (!match)
+        return null;
+    const mimeType = match[1].toLowerCase();
+    const base64 = match[2].replace(/\s+/g, '');
+    if (!base64)
+        return null;
+    return { mimeType, base64 };
 }
 function isSafeLocalFileStem(value) {
     if (!value || value === '.' || value === '..')
@@ -545,8 +551,8 @@ async function syncMetabotInfoToChain(signer, profile, changedFields, options = 
             path: '/info/name',
             encryption: '0',
             version: '1.0',
-            contentType: 'application/json',
-            payload: JSON.stringify({ name: profile.name }),
+            contentType: 'text/plain',
+            payload: profile.name,
             encoding: 'utf-8',
             network: 'mvc',
         }));
@@ -556,14 +562,18 @@ async function syncMetabotInfoToChain(signer, profile, changedFields, options = 
             await sleep(delayMs);
         }
         const avatarPayload = normalizeText(profile.avatarDataUrl);
+        const avatarData = avatarPayload ? parseAvatarDataUrl(avatarPayload) : null;
+        if (avatarPayload && !avatarData) {
+            throw new Error('Invalid avatar data URL.');
+        }
         results.push(await signer.writePin({
             operation,
             path: '/info/avatar',
             encryption: '0',
             version: '1.0',
-            contentType: avatarPayload ? avatarMimeType(avatarPayload) : 'text/plain',
-            payload: avatarPayload,
-            encoding: 'utf-8',
+            contentType: avatarData ? `${avatarData.mimeType};binary` : 'text/plain',
+            payload: avatarData ? avatarData.base64 : '',
+            encoding: avatarData ? 'base64' : 'utf-8',
             network: 'mvc',
         }));
     }

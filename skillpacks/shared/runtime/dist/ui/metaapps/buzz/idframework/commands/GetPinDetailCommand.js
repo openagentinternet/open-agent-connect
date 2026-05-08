@@ -1,17 +1,17 @@
 /**
  * GetPinDetailCommand - Business Logic for fetching Pin detail
- * 
+ *
  * Command Pattern implementation following IDFramework architecture.
- * 
+ *
  * This command:
  * 1. Fetches Pin detail by number or ID using BusinessDelegate
- * 
+ *
  * @class GetPinDetailCommand
  */
 export default class GetPinDetailCommand {
   /**
    * Execute the command
-   * 
+   *
    * @param {Object} params - Command parameters
    * @param {Object} params.payload - Event payload
    *   - numberOrId: {string} - Pin number or ID

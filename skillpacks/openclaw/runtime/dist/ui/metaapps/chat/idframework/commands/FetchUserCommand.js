@@ -48,7 +48,7 @@ export default class FetchUserCommand {
   async execute({ payload = {}, stores, userDelegate }) {
     const userStore = stores.user;
     const walletStore = stores.wallet || null;
-    
+
     if (!userStore) {
       console.error('FetchUserCommand: User store not found');
       return;

@@ -18,7 +18,7 @@ class IdBuzzCard extends HTMLElement {
     // Use requestAnimationFrame to ensure attributes are set
     requestAnimationFrame(() => {
       this.render();
-      
+
       // Listen to Alpine store changes for user data
       if (typeof Alpine !== 'undefined' && Alpine.store('user')) {
         const metaid = this.getAttribute('metaid') || this.getAttribute('author');
@@ -40,7 +40,7 @@ class IdBuzzCard extends HTMLElement {
           this.render();
         });
       }
-      
+
       // If metaid or author changed, update user store watcher
       if ((name === 'metaid' || name === 'author') && typeof Alpine !== 'undefined' && Alpine.store('user')) {
         const metaid = this.getAttribute('metaid') || this.getAttribute('author');
@@ -64,7 +64,7 @@ class IdBuzzCard extends HTMLElement {
     if (typeof Alpine !== 'undefined' && Alpine.store('user')) {
       const userStore = Alpine.store('user');
       userInfo = userStore.users[metaid] || null;
-      
+
       if (!userInfo && metaid && metaid !== 'unknown') {
         // User info not loaded yet - trigger fetch
         // This ensures user info is fetched even if FetchBuzzCommand didn't trigger it
@@ -100,13 +100,13 @@ class IdBuzzCard extends HTMLElement {
           flex-direction: column;
           padding: var(--id-card-padding, 1rem);
           margin-bottom: var(--id-card-margin-bottom, 1rem);
-          
+
           /* Skin: Theme via CSS Variables with fallbacks */
           background-color: var(--id-bg-card, #ffffff);
           border: 1px solid var(--id-border-color, #e5e7eb);
           border-radius: var(--id-radius-card, 0.5rem);
           box-shadow: var(--id-shadow-sm, 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06));
-          
+
           /* Transitions */
           transition: box-shadow var(--id-transition-base, 0.2s);
         }
@@ -149,7 +149,7 @@ class IdBuzzCard extends HTMLElement {
           justify-content: center;
           font-size: var(--id-font-size-lg, 1.125rem);
           font-weight: var(--id-font-weight-bold, 700);
-          
+
           /* Skin: Theme */
           background-color: var(--id-bg-body, #f9fafb);
           border: 2px solid var(--id-border-color, #e5e7eb);
@@ -171,7 +171,7 @@ class IdBuzzCard extends HTMLElement {
           font-size: var(--id-font-size-base, 1rem);
           font-weight: var(--id-font-weight-bold, 700);
           line-height: var(--id-line-height-tight, 1.5);
-          
+
           /* Skin: Theme */
           color: var(--id-text-main, #1f2937);
           cursor: pointer;
@@ -188,7 +188,7 @@ class IdBuzzCard extends HTMLElement {
           font-family: monospace;
           line-height: var(--id-line-height-tight, 1.5);
           word-break: break-all;
-          
+
           /* Skin: Theme */
           color: var(--id-text-secondary, #6b7280);
         }
@@ -200,7 +200,7 @@ class IdBuzzCard extends HTMLElement {
           margin-bottom: var(--id-spacing-md, 0.75rem);
           line-height: var(--id-line-height-tight, 1.5);
           word-wrap: break-word;
-          
+
           /* Skin: Theme */
           color: var(--id-text-main, #1f2937);
           font-size: var(--id-font-size-base, 1rem);
@@ -213,7 +213,7 @@ class IdBuzzCard extends HTMLElement {
           justify-content: flex-end;
           align-items: center;
           gap: var(--id-spacing-sm, 0.5rem);
-          
+
           /* Skin: Theme */
           font-size: var(--id-font-size-sm, 0.875rem);
           color: var(--id-text-secondary, #6b7280);
@@ -227,7 +227,7 @@ class IdBuzzCard extends HTMLElement {
           word-break: break-all;
           flex-shrink: 1;
           min-width: 0;
-          
+
           /* Skin: Theme */
           color: var(--id-text-tertiary, #9ca3af);
         }
@@ -236,7 +236,7 @@ class IdBuzzCard extends HTMLElement {
         <!-- User Info Section -->
         <div class="user-info">
           ${userAvatar ? `
-            <img class="avatar hoverable-user" data-metaid="${this.escapeHtml(displayMetaId)}" src="${this.escapeHtml(userAvatar)}" alt="${this.escapeHtml(userName || 'User')}" 
+            <img class="avatar hoverable-user" data-metaid="${this.escapeHtml(displayMetaId)}" src="${this.escapeHtml(userAvatar)}" alt="${this.escapeHtml(userName || 'User')}"
                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
             <div class="avatar-placeholder hoverable-user" data-metaid="${this.escapeHtml(displayMetaId)}" style="display: none;">
               ${userName ? userName.charAt(0).toUpperCase() : (displayMetaId ? displayMetaId.charAt(0).toUpperCase() : '?')}
@@ -251,10 +251,10 @@ class IdBuzzCard extends HTMLElement {
             <div class="user-metaid" title="${this.escapeHtml(displayMetaId)}">${this.truncateMetaId(displayMetaId)}</div>
           </div>
         </div>
-        
+
         <!-- Content Section -->
         <div class="content">${this.escapeHtml(content)}</div>
-        
+
         <!-- Meta Section - TXID -->
         <div class="meta">
           <span class="txid" title="${this.escapeHtml(txid)}">${this.truncateTxid(txid)}</span>
@@ -272,7 +272,7 @@ class IdBuzzCard extends HTMLElement {
   _attachHoverListeners() {
     const hoverableElements = this.shadowRoot.querySelectorAll('.hoverable-user');
     const floatPanel = document.querySelector('id-userinfo-float-panel');
-    
+
     if (!floatPanel) {
       // Panel might not be loaded yet, try again later
       setTimeout(() => this._attachHoverListeners(), 100);
@@ -296,7 +296,7 @@ class IdBuzzCard extends HTMLElement {
         const rect = element.getBoundingClientRect();
         const panelTop = rect.bottom + 10; // 10px gap below element
         let panelLeft = rect.left;
-        
+
         // Adjust position if panel would go off-screen
         const panelWidth = 320; // Panel width from CSS
         if (panelLeft + panelWidth > window.innerWidth) {
@@ -364,17 +364,17 @@ class IdBuzzCard extends HTMLElement {
     if (this._checkInterval) {
       clearInterval(this._checkInterval);
     }
-    
+
     const checkInterval = setInterval(() => {
       if (typeof Alpine !== 'undefined' && Alpine.store('user')) {
         const userStore = Alpine.store('user');
         const currentUserData = userStore.users[metaid];
-        
+
         if (currentUserData) {
           // Check if this is new data or updated data
-          const dataChanged = !this._lastUserData || 
+          const dataChanged = !this._lastUserData ||
                              JSON.stringify(this._lastUserData) !== JSON.stringify(currentUserData);
-          
+
           if (dataChanged) {
             this._lastUserData = currentUserData;
             this.render();

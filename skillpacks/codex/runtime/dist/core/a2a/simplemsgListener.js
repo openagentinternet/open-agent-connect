@@ -89,6 +89,7 @@ function normalizeSimplemsgSocketMessage(data) {
 function createProfileSimplemsgListener(input) {
     let sockets = [];
     const seenPinIds = new Set();
+    let activeEndpointIndex = 0;
     const handleSocketPayload = async (payload) => {
         const message = normalizeSimplemsgSocketMessage(payload);
         if (!message)
@@ -155,7 +156,7 @@ function createProfileSimplemsgListener(input) {
         }, input.persister);
         await input.onMessage?.(input.profile, inboundMessage);
     };
-    const registerSocket = (socket) => {
+    const registerSocket = (socket, endpointIndex) => {
         socket.on('message', async (data) => {
             await handleSocketPayload(data).catch((error) => {
                 input.onError?.(error instanceof Error ? error : new Error(String(error)));
@@ -173,27 +174,44 @@ function createProfileSimplemsgListener(input) {
         });
         socket.on('connect_error', (error) => {
             input.onError?.(error);
+            if (endpointIndex !== activeEndpointIndex || endpointIndex >= input.endpoints.length - 1) {
+                return;
+            }
+            activeEndpointIndex += 1;
+            try {
+                socket.removeAllListeners();
+                socket.disconnect();
+            }
+            catch {
+                // Best effort fallback shutdown.
+            }
+            connectEndpoint(activeEndpointIndex);
         });
+    };
+    const connectEndpoint = (endpointIndex) => {
+        const endpoint = input.endpoints[endpointIndex];
+        if (!endpoint)
+            return;
+        const socket = input.socketClientFactory(endpoint, {
+            path: endpoint.path,
+            query: {
+                metaid: input.identity.globalMetaId,
+                type: 'pc',
+            },
+            reconnection: true,
+            reconnectionDelay: input.reconnectDelayMs,
+            reconnectionDelayMax: input.maxReconnectDelayMs,
+            transports: ['websocket'],
+        });
+        registerSocket(socket, endpointIndex);
+        sockets.push(socket);
     };
     return {
         start() {
             if (sockets.length > 0)
                 return;
-            for (const endpoint of input.endpoints) {
-                const socket = input.socketClientFactory(endpoint, {
-                    path: endpoint.path,
-                    query: {
-                        metaid: input.identity.globalMetaId,
-                        type: 'pc',
-                    },
-                    reconnection: true,
-                    reconnectionDelay: input.reconnectDelayMs,
-                    reconnectionDelayMax: input.maxReconnectDelayMs,
-                    transports: ['websocket'],
-                });
-                registerSocket(socket);
-                sockets.push(socket);
-            }
+            activeEndpointIndex = 0;
+            connectEndpoint(activeEndpointIndex);
         },
         stop() {
             for (const socket of sockets) {

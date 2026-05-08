@@ -32,18 +32,18 @@ class IdConnectButton extends HTMLElement {
     // Close dropdown when clicking outside
     this._handleClickOutside = (e) => {
       if (!this._dropdownOpen) return;
-      
+
       const path = e.composedPath();
       // Get user-info container and dropdown menu elements
       const userInfoEl = this.shadowRoot?.querySelector('.user-info');
       const dropdownMenuEl = this.shadowRoot?.querySelector('.dropdown-menu');
-      
+
       // Check if click target is inside user-info container or dropdown menu
       // composedPath() includes all nodes from target to document root
       const isInsideUserInfo = userInfoEl && path.includes(userInfoEl);
       const isInsideDropdown = dropdownMenuEl && path.includes(dropdownMenuEl);
       const isInsideComponent = path.includes(this);
-      
+
       // If click is outside user-info and dropdown menu, close the dropdown
       if (!isInsideUserInfo && !isInsideDropdown && !isInsideComponent) {
         this._dropdownOpen = false;
@@ -68,7 +68,7 @@ class IdConnectButton extends HTMLElement {
     requestAnimationFrame(() => {
       this.render();
     });
-    
+
     // Setup Alpine store watcher for user info updates
     this._watchUserStore();
     this._bindWalletEventListeners();
@@ -82,14 +82,14 @@ class IdConnectButton extends HTMLElement {
     // Delegate Save profile button click in capture phase so we get it before modal-content's stopPropagation (bubble) blocks it from reaching shadowRoot
     this.shadowRoot.addEventListener('click', (e) => {
       const saveBtn = e.target.closest('[data-action="save-profile"]');
-      
+
       if (saveBtn && !saveBtn.disabled) {
         e.preventDefault();
         e.stopPropagation();
         this.handleSaveProfile();
       }
     }, true);
-    
+
     // Add click outside listener
     document.addEventListener('click', this._handleClickOutside);
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
@@ -129,7 +129,7 @@ class IdConnectButton extends HTMLElement {
       }, pollInterval);
     });
   }
- 
+
   attributeChangedCallback(name, oldValue, newValue) {
     if (oldValue !== newValue) {
       if (!this._renderScheduled) {
@@ -499,7 +499,7 @@ class IdConnectButton extends HTMLElement {
       this._syncWalletState({ fetchUser: false }).catch(() => {});
     }, this._walletSyncIntervalMs);
   }
-  
+
   /**
    * Default avatar when user has no avatar (empty or "/content/").
    * Uses window.__DEFAULT_AVATAR_DATA_URL (full data URL) if set, else IDConfig.DEFAULT_AVATAR_URL, else /assets/images/default_avatar.png.
@@ -634,7 +634,7 @@ class IdConnectButton extends HTMLElement {
       address: address
     };
   }
-  
+
   /**
    * Watch Alpine user store for changes (data-driven reactive updates)
    * When store changes, trigger re-render which will read latest data from store
@@ -645,15 +645,15 @@ class IdConnectButton extends HTMLElement {
       setTimeout(() => this._watchUserStore(), 100);
       return;
     }
-    
+
     // Use a polling approach since Alpine doesn't work directly in Shadow DOM
     // Check every 300ms for store updates (more responsive than 500ms)
     if (this._userStoreWatcher) {
       clearInterval(this._userStoreWatcher);
     }
-    
+
     let lastUserInfoHash = null;
-    
+
     this._userStoreWatcher = setInterval(() => {
       const walletStore = Alpine.store('wallet');
       const userStore = Alpine.store('user');
@@ -728,7 +728,7 @@ class IdConnectButton extends HTMLElement {
       }
     }, 300);
   }
-  
+
   disconnectedCallback() {
     // Clean up watcher when component is removed
     if (this._userStoreWatcher) {
@@ -764,24 +764,24 @@ class IdConnectButton extends HTMLElement {
   }
 
   async handleConnect() {
-    
+
     if (this._isConnecting) return;
-    
+
     this._isConnecting = true;
       requestAnimationFrame(() => {
       this.render();
-      
-      
+
+
     });
 
     try {
       // Use framework's built-in connectWallet command
       if (window.IDFramework) {
         await window.IDFramework.dispatch('connectWallet');
-        
+
         // Get updated wallet info from store
         const walletStore = Alpine.store('wallet');
-      
+
         if (walletStore && walletStore.isConnected && walletStore.address) {
           this._setConnectedAttrs(walletStore.address);
           const appStore = this._getStore('app');
@@ -790,18 +790,18 @@ class IdConnectButton extends HTMLElement {
             appStore.userAddress = walletStore.address;
           }
           this._persistSessionToLocalStorage();
-          
-      
-          
+
+
+
           // Dispatch custom event for external listeners
           this.dispatchEvent(new CustomEvent('connected', {
-            detail: { 
+            detail: {
               address: walletStore.address,
-              globalMetaId: walletStore.globalMetaId 
+              globalMetaId: walletStore.globalMetaId
             },
             bubbles: true
           }));
-          
+
           // Auto-fetch user info by globalMetaId (fallback to address)
           const gmid = walletStore.globalMetaId;
           const addr = walletStore.address;
@@ -813,11 +813,11 @@ class IdConnectButton extends HTMLElement {
             });
           }
               // Re-render to show connected state (will read user info from store)
-              
+
            requestAnimationFrame(() => {
       this.render();
-      
-      
+
+
     });
         }
       } else {
@@ -830,8 +830,8 @@ class IdConnectButton extends HTMLElement {
       this._isConnecting = false;
        requestAnimationFrame(() => {
       this.render();
-      
-      
+
+
     });
     }
   }
@@ -841,11 +841,11 @@ class IdConnectButton extends HTMLElement {
     if (window.metaidwallet) {
       window.metaidwallet.disconnect().then(() => {
         this._applyLocalDisconnectedState({ emitEvent: true, clearUser: true });
-        
+
      requestAnimationFrame(() => {
       this.render();
-      
-      
+
+
     });
       }).catch(error => {
         console.error('Failed to disconnect from Metalet:', error);
@@ -860,8 +860,8 @@ class IdConnectButton extends HTMLElement {
     this._dropdownOpen = !this._dropdownOpen;
      requestAnimationFrame(() => {
       this.render();
-      
-      
+
+
     });
   }
 
@@ -1021,7 +1021,7 @@ class IdConnectButton extends HTMLElement {
       } else if (u.chatpubkey) {
         userData.chatpubkey = u.chatpubkey;
       }
-      
+
       var oldUserData = {
         nameId: u.nameId || '',
         bioId: u.bioId || '',
@@ -1043,7 +1043,7 @@ class IdConnectButton extends HTMLElement {
           if (typeof window.IDUtils.getMVCRewardsAddressInit === 'function') {
             await window.IDUtils.getMVCRewardsAddressInit({ address: address, gasChain: 'mvc' });
           }
-         
+
           var publicKey = await window.metaidwallet.btc.getPublicKey();
           var signature = await window.metaidwallet.btc.signMessage('metaso.network');
           if (typeof window.IDUtils.getMVCRewards === 'function') {
@@ -1070,7 +1070,7 @@ class IdConnectButton extends HTMLElement {
         const userStore = (typeof Alpine !== 'undefined' && Alpine.store('user')) ? Alpine.store('user') : null;
         const gmid = (walletStore && walletStore.globalMetaId) || (userStore && userStore.user && userStore.user.globalMetaId) || null;
         const payload = gmid ? { globalMetaId: gmid } : { address: address };
-        
+
         await window.IDFramework.dispatch('fetchUser', payload).catch(function (err) {
           console.warn('Refetch user after profile save failed:', err);
         });
@@ -1089,12 +1089,12 @@ class IdConnectButton extends HTMLElement {
     const isConnected = this.hasAttribute('connected') && this.getAttribute('connected') === 'true';
     const address = this.getAttribute('address') || this._address || '';
     const displayAddress = address ? this.formatAddress(address) : '';
-    
+
     // Data-driven: Read user info directly from Alpine store
     // This ensures we always get the latest data, even if updated asynchronously
     const userInfo = isConnected ? this._getUserInfoFromStore() : null;
     const userName = userInfo?.name || '';
-    
+
     const userMetaId = userInfo?.metaid || '';
     const defaultAvatarUrl = this.getDefaultAvatarUrl(address);
     const userAvatarUrl = (userInfo?.avatarUrl && userInfo.avatarUrl.trim()) ? userInfo.avatarUrl : defaultAvatarUrl;
@@ -1145,7 +1145,7 @@ class IdConnectButton extends HTMLElement {
           border-radius: var(--id-radius-button, 0.5rem);
           cursor: pointer;
           transition: background-color var(--id-transition-base, 0.2s), transform var(--id-transition-fast, 0.1s);
-          
+
           /* Skin: Theme */
           background-color: var(--id-bg-button, var(--id-color-primary, #3b82f6));
           color: var(--id-text-inverse, #ffffff);
@@ -1178,7 +1178,7 @@ class IdConnectButton extends HTMLElement {
           border-radius: var(--id-radius-button, 0.5rem);
           cursor: pointer;
           transition: background-color var(--id-transition-base, 0.2s);
-          
+
           /* Skin: Theme */
           background-color:var(--id-bg-body,#fff);
         }
@@ -1196,7 +1196,7 @@ class IdConnectButton extends HTMLElement {
           object-fit: cover;
           flex-shrink: 0;
           padding:3px;
-          
+
           /* Skin: Theme */
           border: 2px solid var(--id-border-color, #e5e7eb);
           background-color: var(--id-bg-card, #ffffff);
@@ -1217,7 +1217,7 @@ class IdConnectButton extends HTMLElement {
           align-items: center;
           font-size: var(--id-font-size-sm, 0.875rem);
           font-weight: var(--id-font-weight-semibold, 600);
-          
+
           /* Skin: Theme */
           color: var(--id-text-main, #1f2937);
         }
@@ -1229,7 +1229,7 @@ class IdConnectButton extends HTMLElement {
           align-items: center;
           font-size: var(--id-font-size-xs, 0.75rem);
           font-weight: var(--id-font-weight-normal, 400);
-          
+
           /* Skin: Theme */
           color: var(--id-text-secondary, #6b7280);
         }
@@ -1525,8 +1525,8 @@ class IdConnectButton extends HTMLElement {
           ` : ''}
         </div>
       ` : `
-        <button 
-          part="connect-button" 
+        <button
+          part="connect-button"
           class="connect-button"
           ${this._isConnecting ? 'disabled' : ''}
         >
@@ -1556,7 +1556,7 @@ class IdConnectButton extends HTMLElement {
               <label class="form-label">Username</label>
               <input type="text" class="form-input" id="username-input" value="${this.escapeHtml(this._editedName)}" placeholder="Enter your username" />
             </div>
-          
+
             <div class="modal-actions">
               <button type="button" class="modal-button modal-button-primary" data-action="save-profile" ${this._profileSaveLoading ? 'disabled' : ''}>
                 ${this._profileSaveLoading ? 'Saving...' : 'Save'}

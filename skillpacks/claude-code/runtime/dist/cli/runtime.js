@@ -7,6 +7,7 @@ exports.buildA2ASimplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher;
 exports.getDefaultDaemonPort = getDefaultDaemonPort;
 exports.getDaemonRuntimeFingerprint = getDaemonRuntimeFingerprint;
 exports.buildDaemonConfigHash = buildDaemonConfigHash;
+exports.createPrivateChatAutoReplyProfileDispatcher = createPrivateChatAutoReplyProfileDispatcher;
 exports.createDefaultCliDependencies = createDefaultCliDependencies;
 exports.mergeCliDependencies = mergeCliDependencies;
 exports.serveCliDaemonProcess = serveCliDaemonProcess;
@@ -45,9 +46,6 @@ const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const writePin_1 = require("../core/chain/writePin");
 const registry_1 = require("../core/chain/adapters/registry");
-const mvc_1 = require("../core/chain/adapters/mvc");
-const btc_1 = require("../core/chain/adapters/btc");
-const doge_1 = require("../core/chain/adapters/doge");
 const daemon_1 = require("../daemon");
 const defaultHandlers_1 = require("../daemon/defaultHandlers");
 const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
@@ -142,35 +140,29 @@ async function fetchMetaletData(url) {
     }
     return (payload?.data ?? null);
 }
-function createDefaultChainAdapterRegistry() {
-    return (0, registry_1.createChainAdapterRegistry)([
-        mvc_1.mvcChainAdapter,
-        btc_1.btcChainAdapter,
-        doge_1.dogeChainAdapter,
-    ]);
-}
 /**
- * Parse a transfer amount string like "0.01DOGE", "0.00001BTC", "1SPACE".
+ * Parse a transfer amount string like "0.01DOGE", "0.00001BTC", "1SPACE", "10OPCAT".
  * DOGE amounts: unit is DOGE (1 DOGE = 1e8 satoshis).
  * BTC amounts: unit is BTC (1 BTC = 1e8 satoshis).
  * SPACE amounts: unit is SPACE (1 SPACE = 1e8 satoshis).
+ * OPCAT amounts: unit is OPCAT (1 OPCAT = 1e8 satoshis).
  */
 function parseTransferAmount(raw, adapters) {
     const trimmed = raw.trim();
-    const match = trimmed.match(/^([\d.]+)\s*(btc|space|doge)$/i);
+    const match = trimmed.match(/^([\d.]+)\s*(btc|space|doge|opcat)$/i);
     if (!match) {
         const hasUnit = /[a-z]/i.test(trimmed);
         if (!hasUnit) {
-            throw new Error('Missing currency unit. Append BTC, SPACE, or DOGE to the amount. Example: 0.00001BTC, 1SPACE, or 0.01DOGE.');
+            throw new Error('Missing currency unit. Append BTC, SPACE, DOGE, or OPCAT to the amount. Example: 0.00001BTC, 1SPACE, 0.01DOGE, or 10OPCAT.');
         }
-        throw new Error(`Unsupported currency unit in "${raw}". Supported units: BTC, SPACE, DOGE.`);
+        throw new Error(`Unsupported currency unit in "${raw}". Supported units: BTC, SPACE, DOGE, OPCAT.`);
     }
     const amount = parseFloat(match[1]);
     if (!Number.isFinite(amount) || amount <= 0) {
         throw new Error(`Invalid amount "${match[1]}". Must be a positive number.`);
     }
     const unit = match[2].toUpperCase();
-    const chain = unit === 'BTC' ? 'btc' : unit === 'DOGE' ? 'doge' : 'mvc';
+    const chain = unit === 'BTC' ? 'btc' : unit === 'DOGE' ? 'doge' : unit === 'OPCAT' ? 'opcat' : 'mvc';
     const adapter = adapters.get(chain);
     if (!adapter) {
         throw new Error(`No adapter registered for chain "${chain}".`);
@@ -891,12 +883,85 @@ function mapEvolutionRuntimeError(error) {
 }
 function createCliSigner(context, homeDir) {
     const secretStore = (0, fileSecretStore_1.createFileSecretStore)(homeDir);
-    const adapters = createDefaultChainAdapterRegistry();
+    const adapters = (0, registry_1.createDefaultChainAdapterRegistry)();
     const baseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore, adapters });
     if (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1') {
         return createTestChainWriteSigner(baseSigner);
     }
     return baseSigner;
+}
+function createPrivateChatAutoReplyProfileDispatcher(input) {
+    const orchestrators = new Map();
+    const createOrchestrator = input.createOrchestrator ?? privateChatAutoReply_1.createPrivateChatAutoReplyOrchestrator;
+    function getOrCreateOrchestrator(profile) {
+        const profileHomeDir = normalizeEnvText(profile.homeDir);
+        if (!profileHomeDir)
+            return null;
+        const cacheKey = node_path_1.default.resolve(profileHomeDir);
+        const existing = orchestrators.get(cacheKey);
+        if (existing)
+            return existing;
+        const profilePaths = (0, paths_1.resolveMetabotPaths)(profileHomeDir);
+        const profileRuntimeStore = (0, runtimeStateStore_1.createRuntimeStateStore)(profilePaths);
+        const profileSigner = input.createSignerForHome
+            ? input.createSignerForHome(profileHomeDir)
+            : (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
+                secretStore: (0, fileSecretStore_1.createFileSecretStore)(profileHomeDir),
+                adapters: (0, registry_1.createDefaultChainAdapterRegistry)(),
+            });
+        const profileRuntimeStoreForLlm = (0, llmRuntimeStore_1.createLlmRuntimeStore)(profilePaths);
+        const profileBindingStore = (0, llmBindingStore_1.createLlmBindingStore)(profilePaths);
+        const profileRuntimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
+            runtimeStore: profileRuntimeStoreForLlm,
+            bindingStore: profileBindingStore,
+            getPreferredRuntimeId: async () => {
+                try {
+                    const raw = await node_fs_1.default.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+                    const data = JSON.parse(raw);
+                    return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+                }
+                catch {
+                    return null;
+                }
+            },
+        });
+        const metaBotSlug = node_path_1.default.basename(profilePaths.profileRoot);
+        const replyRunner = input.createReplyRunnerForProfile
+            ? input.createReplyRunnerForProfile({
+                paths: profilePaths,
+                metaBotSlug,
+                runtimeResolver: profileRuntimeResolver,
+                llmExecutor: input.llmExecutor,
+            })
+            : (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)({
+                runtimeResolver: profileRuntimeResolver,
+                llmExecutor: input.llmExecutor,
+                metaBotSlug,
+            });
+        const profileGlobalMetaId = normalizeEnvText(profile.globalMetaId);
+        const orchestrator = createOrchestrator({
+            stateStore: (0, privateChatStateStore_1.createPrivateChatStateStore)(profilePaths),
+            strategyStore: (0, chatStrategyStore_1.createChatStrategyStore)(profilePaths),
+            paths: profilePaths,
+            signer: profileSigner,
+            selfGlobalMetaId: async () => {
+                const state = await profileRuntimeStore.readState().catch(() => null);
+                return (state?.identity?.globalMetaId ?? profileGlobalMetaId) || null;
+            },
+            resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
+            replyRunner,
+        }, input.autoReplyConfig);
+        orchestrators.set(cacheKey, orchestrator);
+        return orchestrator;
+    }
+    return {
+        async handleInboundMessage(profile, message) {
+            const orchestrator = getOrCreateOrchestrator(profile);
+            if (!orchestrator)
+                return;
+            await orchestrator.handleInboundMessage(message);
+        },
+    };
 }
 function createTestSubsidyRequester() {
     return async (options) => ({
@@ -1346,7 +1411,7 @@ function createDefaultCliDependencies(context) {
                 if (!state.identity) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
                 }
-                const adapters = createDefaultChainAdapterRegistry();
+                const adapters = (0, registry_1.createDefaultChainAdapterRegistry)();
                 const allChains = Array.from(adapters.keys());
                 const targetChains = input.chain === 'all'
                     ? allChains
@@ -1385,7 +1450,7 @@ function createDefaultCliDependencies(context) {
                 if (!state.identity) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
                 }
-                const adapters = createDefaultChainAdapterRegistry();
+                const adapters = (0, registry_1.createDefaultChainAdapterRegistry)();
                 let parsed;
                 try {
                     parsed = parseTransferAmount(input.amountRaw, adapters);
@@ -1851,7 +1916,7 @@ async function serveCliDaemonProcess(context) {
     const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
     let daemonRecord = null;
     const secretStore = (0, fileSecretStore_1.createFileSecretStore)(homeDir);
-    const adapters = createDefaultChainAdapterRegistry();
+    const adapters = (0, registry_1.createDefaultChainAdapterRegistry)();
     const baseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore, adapters });
     const signer = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
         ? createTestChainWriteSigner(baseSigner)
@@ -2052,6 +2117,11 @@ async function serveCliDaemonProcess(context) {
             console.warn('[private chat auto-reply backfill]', error.message);
         },
     });
+    const profileAutoReplyDispatcher = createPrivateChatAutoReplyProfileDispatcher({
+        autoReplyConfig: sharedAutoReplyConfig,
+        resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+        llmExecutor,
+    });
     const daemonConfig = await (0, configStore_1.createConfigStore)(paths).read();
     const simplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher({
         handleOrderProtocolMessage: handlers.services?.handleInboundOrderProtocolMessage,
@@ -2070,7 +2140,11 @@ async function serveCliDaemonProcess(context) {
                 void simplemsgInboundDispatcher(message).catch((error) => {
                     console.warn('[private chat auto-reply]', error instanceof Error ? error.message : String(error));
                 });
+                return;
             }
+            void profileAutoReplyDispatcher.handleInboundMessage(profile, message).catch((error) => {
+                console.warn('[private chat auto-reply]', error instanceof Error ? error.message : String(error));
+            });
         },
         onError: (error) => {
             console.warn('[A2A simplemsg listener]', error.message);

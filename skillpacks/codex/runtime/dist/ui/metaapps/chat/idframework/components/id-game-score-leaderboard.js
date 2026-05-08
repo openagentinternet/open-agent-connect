@@ -318,7 +318,7 @@ class IdGameScoreLeaderboard extends HTMLElement {
         </svg>
         <span>分数排行榜</span>
       </button>
-      
+
       <div class="modal-overlay" data-action="close-overlay">
         <div class="modal-content" data-action="stop-propagation">
           <div class="modal-header">
@@ -341,7 +341,7 @@ class IdGameScoreLeaderboard extends HTMLElement {
                   const isFirst = rank === 1;
                   const isSecond = rank === 2;
                   const isThird = rank === 3;
-                  
+
                   return `
                   <li class="leaderboard-item">
                     <div class="rank">
@@ -367,7 +367,7 @@ class IdGameScoreLeaderboard extends HTMLElement {
                       <div class="score">${item.score.toLocaleString()}</div>
                       ${item.txid ? `
                         <a href="https://www.mvcscan.com/tx/${item.txid.slice(0, -2)}" target="_blank" rel="noopener noreferrer" class="tx-link">
-                         
+
                           <span>查看Tx</span>
                         </a>
                       ` : ''}
@@ -446,7 +446,7 @@ class IdGameScoreLeaderboard extends HTMLElement {
   }
 
   async _fetchGameInfo() {
-    
+
     try {
       const pinDetail = await window.IDFramework.dispatch('getPinDetail', {
         numberOrId: this._metaAppPinId
@@ -455,10 +455,10 @@ class IdGameScoreLeaderboard extends HTMLElement {
       if (pinDetail) {
         const item = pinDetail;
         if (item.contentSummary) {
-          const summary = typeof item.contentSummary === 'string' 
-            ? JSON.parse(item.contentSummary) 
+          const summary = typeof item.contentSummary === 'string'
+            ? JSON.parse(item.contentSummary)
             : item.contentSummary;
-          
+
           let iconUrl = '';
           if (summary.icon) {
             // 移除 metafile:// 前缀
@@ -471,7 +471,7 @@ class IdGameScoreLeaderboard extends HTMLElement {
             appName: summary.appName || 'Unknown Game',
             icon: iconUrl
           };
-          
+
         }
       }
     } catch (error) {
@@ -484,7 +484,7 @@ class IdGameScoreLeaderboard extends HTMLElement {
   }
 
   async _fetchLeaderboard() {
-    
+
     const allScores = [];
     let cursor = 0;
     const size = 100;
@@ -552,22 +552,22 @@ class IdGameScoreLeaderboard extends HTMLElement {
     const seenIds = new Set();
     const seenMetaidScores = new Set();
     const filteredScores = [];
-    
+
     // 先按分数从高到低排序，这样在去重时优先保留分数高的记录
     allScores.sort((a, b) => b.score - a.score);
-    
+
     for (const item of allScores) {
       // 检查是否已存在相同的 id
       if (item.txid && seenIds.has(item.txid)) {
         continue;
       }
-      
+
       // 检查是否已存在相同的 metaid+score
       const metaidScoreKey = `${item.metaid}_${item.score}`;
       if (seenMetaidScores.has(metaidScoreKey)) {
         continue;
       }
-      
+
       // 添加到结果中
       filteredScores.push(item);
       if (item.txid) {
@@ -583,7 +583,7 @@ class IdGameScoreLeaderboard extends HTMLElement {
     const top20 = [];
     let currentRank = 1;
     let previousScore = null;
-    
+
     for (let i = 0; i < filteredScores.length && top20.length < 20; i++) {
       const item = filteredScores[i];
       if (previousScore !== null && item.score !== previousScore) {
@@ -618,7 +618,7 @@ class IdGameScoreLeaderboard extends HTMLElement {
         }
       })
     );
-    
+
     this._leaderboardData = leaderboardData;
   }
 

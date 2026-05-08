@@ -280,7 +280,7 @@ class IdChatChatlistPanel extends HTMLElement {
           justify-content: space-between;
           padding: var(--id-spacing-md, 1rem);
           border-bottom: 1px solid var(--id-border-color, #e5e7eb);
-          
+
           /* Skin: Theme */
           background-color: var(--id-bg-card, #ffffff);
         }
@@ -290,7 +290,7 @@ class IdChatChatlistPanel extends HTMLElement {
           font-size: 1.5rem;
           font-weight: bold;
           margin: 0;
-          
+
           /* Skin: Theme */
           color: var(--id-text-title, #111827);
         }
@@ -307,7 +307,7 @@ class IdChatChatlistPanel extends HTMLElement {
           font-size: 1.5rem;
           cursor: pointer;
           transition: background-color 0.2s;
-          
+
           /* Skin: Theme */
           background-color: var(--id-color-primary, #3b82f6);
           color: var(--id-text-inverse, #ffffff);
@@ -374,7 +374,7 @@ class IdChatChatlistPanel extends HTMLElement {
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-          
+
           /* Skin: Theme */
           color: var(--id-text-title, #111827);
         }
@@ -389,7 +389,7 @@ class IdChatChatlistPanel extends HTMLElement {
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-          
+
           /* Skin: Theme */
           color: var(--id-text-secondary, #6b7280);
         }
@@ -417,7 +417,7 @@ class IdChatChatlistPanel extends HTMLElement {
         .chatlist-item-time {
           /* Structure: Layout */
           font-size: 0.75rem;
-          
+
           /* Skin: Theme */
           color: var(--id-text-tertiary, #9ca3af);
         }
@@ -464,7 +464,7 @@ class IdChatChatlistPanel extends HTMLElement {
           /* Structure: Layout */
           padding: var(--id-spacing-md, 1rem);
           text-align: center;
-          
+
           /* Skin: Theme */
           color: var(--id-text-secondary, #6b7280);
         }
@@ -478,7 +478,7 @@ class IdChatChatlistPanel extends HTMLElement {
           /* Structure: Layout */
           padding: var(--id-spacing-md, 1rem);
           text-align: center;
-          
+
           /* Skin: Theme */
           color: var(--id-text-secondary, #6b7280);
         }
@@ -502,18 +502,18 @@ class IdChatChatlistPanel extends HTMLElement {
           /* Structure: Layout */
           padding: var(--id-spacing-md, 1rem);
           text-align: center;
-          
+
           /* Skin: Theme */
           color: var(--id-text-error, #991b1b);
         }
       </style>
-      
+
       <div part="panel-container" class="chatlist-panel">
         <header class="chatlist-header">
           <h2 class="chatlist-title">${this.escapeHtml(this._t('chat.chatlist.title', 'Chat'))}</h2>
           <button class="new-chat-button" title="${this.escapeHtml(this._t('chat.chatlist.newChat', 'New Chat'))}">+</button>
         </header>
-        
+
         <div class="chatlist-content">
           ${listHtml}
         </div>
@@ -607,7 +607,7 @@ class IdChatChatlistPanel extends HTMLElement {
     const now = new Date();
     const diff = now - date;
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    
+
     if (days === 0) {
       return date.toLocaleTimeString(this._localeTag(), { hour: '2-digit', minute: '2-digit' });
     } else if (days === 1) {

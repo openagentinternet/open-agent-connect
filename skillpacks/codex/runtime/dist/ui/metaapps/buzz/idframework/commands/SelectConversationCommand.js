@@ -67,7 +67,7 @@ export default class SelectConversationCommand {
   _generateMockMessages(groupId, count) {
     const mockMessages = [];
     const now = Math.floor(Date.now() / 1000); // Current time in seconds
-    
+
     // Sample user names and avatars
     const sampleUsers = [
       { name: 'Alice', metaid: 'alice123', avatar: null },
@@ -79,7 +79,7 @@ export default class SelectConversationCommand {
       { name: 'Grace', metaid: 'grace901', avatar: null },
       { name: 'Henry', metaid: 'henry234', avatar: null },
     ];
-    
+
     // Sample message contents
     const sampleMessages = [
       'Hello everyone! 👋',
@@ -98,16 +98,16 @@ export default class SelectConversationCommand {
       'That sounds like a good plan',
       'We should schedule a call',
     ];
-    
+
     for (let i = 0; i < count; i++) {
       const user = sampleUsers[Math.floor(Math.random() * sampleUsers.length)];
       const message = sampleMessages[Math.floor(Math.random() * sampleMessages.length)];
-      
+
       // Generate timestamp (spread over last 7 days, newest first)
       const daysAgo = Math.random() * 7;
       const hoursAgo = Math.random() * 24;
       const timestamp = now - (daysAgo * 24 * 60 * 60) - (hoursAgo * 60 * 60);
-      
+
       mockMessages.push({
         id: `${groupId}_mock_${i}`,
         groupId: groupId,
@@ -122,7 +122,7 @@ export default class SelectConversationCommand {
         _raw: { mock: true },
       });
     }
-    
+
     // Sort by timestamp (oldest first)
     return mockMessages.sort((a, b) => a.timestamp - b.timestamp);
   }
@@ -135,7 +135,7 @@ export default class SelectConversationCommand {
   async execute({ payload, stores, delegate }) {
     try {
       const { metaid, globalMetaId, groupId, type, index } = payload;
-      
+
       // Get stores
       const chatStore = stores?.chat || (typeof Alpine !== 'undefined' ? Alpine.store('chat') : null);
       if (!chatStore) {
@@ -173,7 +173,7 @@ export default class SelectConversationCommand {
       if (chatStore.useCommandMessageFetch === undefined) {
         chatStore.useCommandMessageFetch = true;
       }
-      
+
 
       // Ensure conversation exists in conversations list
       if (!chatStore.conversations[conversationKey]) {

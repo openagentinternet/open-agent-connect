@@ -81,7 +81,7 @@ class IdPostBuzzPanel extends HTMLElement {
       textarea.addEventListener('input', (e) => {
         this._content = e.target.value;
       });
-      
+
       // Restore content if exists
       if (this._content) {
         textarea.value = this._content;
@@ -117,14 +117,14 @@ class IdPostBuzzPanel extends HTMLElement {
   async open() {
     this.setAttribute('open', 'true');
     this._isOpen = true;
-    
+
     // Load user info first
     await this.loadUserInfo();
-    
+
     // Then render
     this.render();
     this.attachEventListeners();
-    
+
     // Focus textarea when opened
     requestAnimationFrame(() => {
       const textarea = this.shadowRoot.querySelector('.buzz-textarea');
@@ -137,12 +137,12 @@ class IdPostBuzzPanel extends HTMLElement {
   close() {
     this._isOpen = false;
     this.removeAttribute('open');
-    
+
     // Dispatch close event
     this.dispatchEvent(new CustomEvent('panel-closed', {
       bubbles: true
     }));
-    
+
     // Render after a short delay to ensure attribute change is processed
     requestAnimationFrame(() => {
       this.render();
@@ -175,7 +175,7 @@ class IdPostBuzzPanel extends HTMLElement {
           content,
           author: this._userAddress
         });
-        
+
         // Close panel after successful post
         this.close();
       } catch (error) {
@@ -222,7 +222,7 @@ class IdPostBuzzPanel extends HTMLElement {
           left: 0;
           right: 0;
           bottom: 0;
-          
+
           /* Skin: Theme */
           background-color: rgba(0, 0, 0, 0.5);
           backdrop-filter: blur(4px);
@@ -243,7 +243,7 @@ class IdPostBuzzPanel extends HTMLElement {
           border-radius: var(--id-radius-card, 0.5rem);
           overflow: hidden;
           box-sizing: border-box;
-          
+
           /* Skin: Theme */
           background-color: var(--id-bg-card, #ffffff);
           box-shadow: var(--id-shadow-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05));
@@ -257,7 +257,7 @@ class IdPostBuzzPanel extends HTMLElement {
           justify-content: space-between;
           padding: var(--id-spacing-md, 1rem) var(--id-spacing-lg, 1.5rem);
           border-bottom: 1px solid var(--id-border-color, #e5e7eb);
-          
+
           /* Skin: Theme */
           background-color: var(--id-bg-card, #ffffff);
         }
@@ -267,7 +267,7 @@ class IdPostBuzzPanel extends HTMLElement {
           margin: 0;
           font-size: var(--id-font-size-lg, 1.125rem);
           font-weight: var(--id-font-weight-bold, 700);
-          
+
           /* Skin: Theme */
           color: var(--id-text-title, #111827);
         }
@@ -283,7 +283,7 @@ class IdPostBuzzPanel extends HTMLElement {
           border-radius: var(--id-radius-small, 0.25rem);
           cursor: pointer;
           transition: background-color var(--id-transition-base, 0.2s);
-          
+
           /* Skin: Theme */
           background-color: transparent;
           color: var(--id-text-secondary, #6b7280);
@@ -317,7 +317,7 @@ class IdPostBuzzPanel extends HTMLElement {
           font-size: var(--id-font-size-base, 1rem);
           line-height: var(--id-line-height-tight, 1.5);
           box-sizing: border-box;
-          
+
           /* Skin: Theme */
           background-color: var(--id-bg-card, #ffffff);
           color: var(--id-text-main, #1f2937);
@@ -342,7 +342,7 @@ class IdPostBuzzPanel extends HTMLElement {
           gap: var(--id-spacing-md, 1rem);
           padding: var(--id-spacing-md, 1rem) var(--id-spacing-lg, 1.5rem);
           border-top: 1px solid var(--id-border-color, #e5e7eb);
-          
+
           /* Skin: Theme */
           background-color: var(--id-bg-body, #f9fafb);
         }
@@ -402,7 +402,7 @@ class IdPostBuzzPanel extends HTMLElement {
           padding: var(--id-spacing-sm, 0.5rem) var(--id-spacing-md, 1rem);
           margin-bottom: var(--id-spacing-md, 1rem);
           border-radius: var(--id-radius-card, 0.5rem);
-          
+
           /* Skin: Theme */
           background-color: var(--id-bg-body, #f9fafb);
           border: 1px solid var(--id-border-color, #e5e7eb);
@@ -412,7 +412,7 @@ class IdPostBuzzPanel extends HTMLElement {
           /* Structure: Layout */
           font-size: var(--id-font-size-sm, 0.875rem);
           font-weight: var(--id-font-weight-semibold, 600);
-          
+
           /* Skin: Theme */
           color: var(--id-text-secondary, #6b7280);
         }
@@ -421,7 +421,7 @@ class IdPostBuzzPanel extends HTMLElement {
           /* Structure: Layout */
           font-size: var(--id-font-size-sm, 0.875rem);
           font-family: monospace;
-          
+
           /* Skin: Theme */
           color: var(--id-text-main, #1f2937);
         }
@@ -439,7 +439,7 @@ class IdPostBuzzPanel extends HTMLElement {
               <span part="user-info-value" class="user-info-value">${this.escapeHtml(this.formatAddress(this._userAddress))}</span>
             </div>
           ` : ''}
-          <textarea 
+          <textarea
             part="buzz-textarea"
             class="buzz-textarea"
             placeholder="What's on your mind?"
@@ -457,4 +457,3 @@ class IdPostBuzzPanel extends HTMLElement {
 
 // Register the custom element
 customElements.define('id-post-buzz-panel', IdPostBuzzPanel);
-

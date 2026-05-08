@@ -32,7 +32,7 @@ describe('Base58Check', function() {
   });
 
   describe('#set', function() {
-    
+
     it('should set a buf', function() {
       should.exist(Base58Check().set({buf: buf}).buf);
     });
@@ -83,7 +83,7 @@ describe('Base58Check', function() {
   });
 
   describe('#fromBuffer', function() {
-    
+
     it('should not fail', function() {
       should.exist(Base58Check().fromBuffer(buf));
     });

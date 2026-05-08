@@ -6,6 +6,10 @@ import type { ChainAdapter, ChainAdapterRegistry } from './types';
  */
 export declare function createChainAdapterRegistry(adapters: ChainAdapter[]): ChainAdapterRegistry;
 /**
+ * Creates the default adapter registry with all supported chains pre-registered.
+ */
+export declare function createDefaultChainAdapterRegistry(): ChainAdapterRegistry;
+/**
  * Get the list of supported chain network names from the registry.
  * Useful for CLI validation without hardcoding chain names.
  */

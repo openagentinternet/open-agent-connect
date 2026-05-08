@@ -1,24 +1,24 @@
 /**
  * NavigateCommand - Business Logic for handling route changes
- * 
+ *
  * Command Pattern implementation following IDFramework architecture.
- * 
+ *
  * This command:
  * 1. Receives route change event (view and params)
  * 2. Dynamically loads the required Web Component using lazy loading
  * 3. Updates the Model (app store) with current route state
- * 
+ *
  * @class NavigateCommand
  */
 export default class NavigateCommand {
   /**
    * Execute the command
-   * 
+   *
    * Command execution flow:
    * 1. Extract view and params from payload
    * 2. Dynamically load the corresponding Web Component
    * 3. Update app store with current route state
-   * 
+   *
    * @param {Object} params - Command parameters
    * @param {Object} params.payload - Event payload
    *   - view: {string} - View name (e.g., 'home', 'profile')
@@ -32,7 +32,7 @@ export default class NavigateCommand {
   async execute({ payload = {}, stores, delegate }) {
     try {
       const { view, params = {}, path } = payload;
-      
+
       if (!view) {
         console.warn('NavigateCommand: No view specified in payload');
         return;

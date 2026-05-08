@@ -35,7 +35,7 @@ class IdUserinfoFloatPanel extends HTMLElement {
       } else if (name === 'top' || name === 'left') {
         this._position[name] = parseFloat(newValue) || 0;
       }
-      
+
       if (!this._renderScheduled) {
         this._renderScheduled = true;
         requestAnimationFrame(() => {
@@ -83,7 +83,7 @@ class IdUserinfoFloatPanel extends HTMLElement {
     const userAvatar = userInfo?.avatarUrl || null;
     const displayMetaId = metaid || '';
     const address = userInfo?.address || '';
-    
+
     // Mock data for missing fields (following X profile layout)
     const bio = userInfo?.bio || 'MetaID Protocol User'; // Mock bio
     const following = userInfo?.following || 0; // Mock following count
@@ -100,12 +100,12 @@ class IdUserinfoFloatPanel extends HTMLElement {
           left: ${left}px;
           z-index: 1000;
           display: ${visible ? 'block' : 'none'};
-          
+
           /* Structure: Layout */
           width: 320px;
           padding: var(--id-spacing-md, 1rem);
           border-radius: var(--id-radius-card, 0.5rem);
-          
+
           /* Skin: Theme */
           background-color: var(--id-bg-card, #ffffff);
           color: var(--id-text-main, #1f2937);
@@ -219,12 +219,12 @@ class IdUserinfoFloatPanel extends HTMLElement {
           word-break: break-all;
         }
       </style>
-      
+
       <div part="panel-container" class="float-panel">
         <div class="user-header">
           <div class="avatar-container">
             ${userAvatar ? `
-              <img class="avatar" src="${this.escapeHtml(userAvatar)}" alt="${this.escapeHtml(userName || 'User')}" 
+              <img class="avatar" src="${this.escapeHtml(userAvatar)}" alt="${this.escapeHtml(userName || 'User')}"
                    onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
               <div class="avatar-placeholder" style="display: none;">
                 ${userName ? userName.charAt(0).toUpperCase() : (displayMetaId ? displayMetaId.charAt(0).toUpperCase() : '?')}
@@ -235,7 +235,7 @@ class IdUserinfoFloatPanel extends HTMLElement {
               </div>
             `}
           </div>
-          
+
           <div class="user-info">
             <div class="user-name-row">
               <span class="user-name">${this.escapeHtml(userName || 'Unknown User')}</span>
@@ -244,9 +244,9 @@ class IdUserinfoFloatPanel extends HTMLElement {
             <div class="user-handle">@${this.truncateMetaId(displayMetaId)}</div>
           </div>
         </div>
-        
+
         <div class="user-bio">${this.escapeHtml(bio)}</div>
-        
+
         <div class="user-stats">
           <div class="stat-item">
             <span class="stat-value">${following}</span>
@@ -257,7 +257,7 @@ class IdUserinfoFloatPanel extends HTMLElement {
             <span>Followers</span>
           </div>
         </div>
-        
+
         <div class="user-metaid" title="${this.escapeHtml(displayMetaId)}">
           ${this.truncateMetaId(displayMetaId)}
         </div>
@@ -282,4 +282,3 @@ class IdUserinfoFloatPanel extends HTMLElement {
 if (!customElements.get('id-userinfo-float-panel')) {
   customElements.define('id-userinfo-float-panel', IdUserinfoFloatPanel);
 }
-

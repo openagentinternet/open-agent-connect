@@ -83,4 +83,3 @@
 
   global.useApprovedStore = useApprovedStore;
 })(typeof window !== 'undefined' ? window : this);
-

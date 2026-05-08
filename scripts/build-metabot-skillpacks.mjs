@@ -40,6 +40,8 @@ const HOSTS = {
   },
 };
 
+const GENERATED_JUNK_FILENAMES = new Set(['.DS_Store']);
+
 function replaceAll(source, replacements) {
   return Object.entries(replacements).reduce(
     (text, [token, value]) => text.split(token).join(value),
@@ -392,6 +394,61 @@ async function renderHostSkill(options) {
   });
 }
 
+function isLikelyTextBuffer(buffer) {
+  if (buffer.includes(0)) {
+    return false;
+  }
+  return !buffer.toString('utf8').includes('\uFFFD');
+}
+
+function normalizeGeneratedText(source) {
+  return source
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/[ \t]+$/g, '')
+    .replace(/\n{2,}$/g, '\n');
+}
+
+async function sanitizeGeneratedTree(rootPath) {
+  let entries;
+  try {
+    entries = await fs.readdir(rootPath, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(rootPath, entry.name);
+    if (GENERATED_JUNK_FILENAMES.has(entry.name)) {
+      await fs.rm(entryPath, { recursive: true, force: true });
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      await sanitizeGeneratedTree(entryPath);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const buffer = await fs.readFile(entryPath);
+    if (!isLikelyTextBuffer(buffer)) {
+      continue;
+    }
+
+    const before = buffer.toString('utf8');
+    const after = normalizeGeneratedText(before);
+    if (after !== before) {
+      await writeFile(entryPath, after);
+    }
+  }
+}
+
 async function collectBundledRuntimeDependencies(repoRoot) {
   const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, 'package.json'), 'utf8'));
   const packageLock = JSON.parse(await fs.readFile(path.join(repoRoot, 'package-lock.json'), 'utf8'));
@@ -456,6 +513,8 @@ async function copyBundledRuntimeDependencies(repoRoot, runtimeRoot, dependencyN
       { recursive: true, verbatimSymlinks: true },
     );
   }
+
+  await sanitizeGeneratedTree(bundledNodeModulesRoot);
 }
 
 async function copyIfPresent(sourcePath, targetPath) {
@@ -480,6 +539,7 @@ async function copyRuntimeUiAssets(repoRoot, runtimeRoot) {
   const runtimeUiRoot = path.join(runtimeRoot, 'dist', 'ui');
   await fs.mkdir(runtimeUiRoot, { recursive: true });
   await fs.cp(sourceUiRoot, runtimeUiRoot, { recursive: true });
+  await sanitizeGeneratedTree(runtimeUiRoot);
 }
 
 async function ensureBundledRuntime(repoRoot, runtimeRoot, compatibilityManifest, dependencyNames) {

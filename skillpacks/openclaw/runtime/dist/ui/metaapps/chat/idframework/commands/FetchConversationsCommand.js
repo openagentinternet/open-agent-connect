@@ -15,7 +15,7 @@ export default class FetchConversationsCommand {
   async execute({ payload, store, delegate }) {
     try {
       const chatStore = store('chat');
-      
+
       if (!chatStore) {
         console.warn('FetchConversationsCommand: Chat store not available');
         return;
@@ -33,7 +33,7 @@ export default class FetchConversationsCommand {
       // In production, this would be replaced with actual API call:
       // const rawData = await delegate.get('metaid_man', '/api/conversations');
       // const conversations = this._parseConversations(rawData);
-      
+
       // For now, conversations are created on-demand when messages are sent
       // or when a conversation is selected
 
@@ -56,4 +56,3 @@ export default class FetchConversationsCommand {
     return {};
   }
 }
-

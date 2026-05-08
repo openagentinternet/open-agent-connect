@@ -1,18 +1,18 @@
 /**
  * FetchUserInfoCommand - Business Logic for fetching user information
- * 
+ *
  * Command Pattern implementation following IDFramework architecture.
- * 
+ *
  * This command:
  * 1. Uses UserDelegate to fetch user data (with IndexedDB caching)
  * 2. Returns user information data object from API response
- * 
+ *
  * @class FetchUserInfoCommand
  */
 export default class FetchUserInfoCommand {
   /**
    * Execute the command
-   * 
+   *
    * @param {Object} params - Command parameters
    * @param {Object} params.payload - Event payload
    *   - metaid: {string} - MetaID to fetch user info for

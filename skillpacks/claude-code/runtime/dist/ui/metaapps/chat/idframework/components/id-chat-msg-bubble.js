@@ -2,7 +2,7 @@
  * id-chat-msg-bubble
  * Message bubble component for chat messages
  * Displays user avatar, name, timestamp, and message content
- * 
+ *
  * Attributes:
  * - content: Message content text
  * - user-name: User display name
@@ -36,14 +36,14 @@ class IdChatMsgBubble extends HTMLElement {
    */
   formatTimestamp(timestamp) {
     if (!timestamp) return '';
-    
+
     const date = new Date(timestamp * 1000); // Convert seconds to milliseconds
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     const hours = String(date.getHours()).padStart(2, '0');
     const minutes = String(date.getMinutes()).padStart(2, '0');
-    
+
     return `${year}/${month}/${day} ${hours}:${minutes}`;
   }
 
@@ -53,7 +53,7 @@ class IdChatMsgBubble extends HTMLElement {
     const userAvatar = this.getAttribute('user-avatar') || null;
     const timestamp = this.getAttribute('timestamp');
     const isOwn = this.getAttribute('is-own') === 'true';
-    
+
     const formattedTime = this.formatTimestamp(parseInt(timestamp));
     const iconLetter = userName.charAt(0).toUpperCase();
 
@@ -164,11 +164,11 @@ class IdChatMsgBubble extends HTMLElement {
           }
         }
       </style>
-      
+
       <div part="message-container" class="message-bubble ${isOwn ? 'own' : ''}">
         <div class="message-avatar">
           ${userAvatar ? `
-            <img src="${this.escapeHtml(userAvatar)}" alt="${this.escapeHtml(userName)}" 
+            <img src="${this.escapeHtml(userAvatar)}" alt="${this.escapeHtml(userName)}"
                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
             <span style="display: none;">${iconLetter}</span>
           ` : `
@@ -202,4 +202,3 @@ if (!customElements.get('id-chat-msg-bubble')) {
 }
 
 export default IdChatMsgBubble;
-

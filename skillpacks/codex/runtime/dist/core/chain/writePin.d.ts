@@ -1,7 +1,7 @@
 export type ChainWriteOperation = 'init' | 'create' | 'modify' | 'revoke';
 export type ChainWriteEncryption = '0' | '1' | '2';
 export type ChainWriteEncoding = 'utf-8' | 'base64';
-export type ChainWriteNetwork = 'mvc' | 'btc' | 'doge';
+export type ChainWriteNetwork = 'mvc' | 'btc' | 'doge' | 'opcat';
 export interface ChainWriteRequest {
     operation?: string;
     path?: string;

@@ -79,4 +79,4 @@ For a single machine dual terminal smoke, keep one provider terminal online with
 - Bundled compatibility copy: `runtime/compatibility.json`
 - Bundled shared installer: `runtime/shared-install.sh`
 - Host pack id: `claude-code`
-- Package version: `0.2.7`
+- Package version: `0.2.8`

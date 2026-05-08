@@ -22,7 +22,7 @@ function normalizeChainWriteRequest(input) {
         throw new Error(`Unsupported chain write encoding: ${input.encoding}`);
     }
     const network = normalizeText(input.network).toLowerCase() || 'mvc';
-    if (network !== 'mvc' && network !== 'btc' && network !== 'doge') {
+    if (network !== 'mvc' && network !== 'btc' && network !== 'doge' && network !== 'opcat') {
         throw new Error(`Unsupported chain write network: ${input.network}`);
     }
     if (typeof input.payload !== 'string') {

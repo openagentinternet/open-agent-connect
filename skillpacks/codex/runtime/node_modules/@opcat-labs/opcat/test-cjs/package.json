@@ -1,0 +1,6 @@
+{
+  "name": "test-cjs-import",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Test opcat as CJS package"
+}
