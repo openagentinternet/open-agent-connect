@@ -131,6 +131,23 @@ test('runCli prints wallet group help with balance subcommand', async () => {
   assert.match(output, /^\s+balance\s+/m);
 });
 
+test('runCli prints wallet transfer help with every supported transfer unit', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['wallet', 'transfer', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot wallet transfer --to <address> --amount <amount><UNIT> \[--confirm\]/m);
+  assert.match(output, /BTC, SPACE, DOGE, or OPCAT/);
+  assert.match(output, /10OPCAT/);
+  assert.match(output, /Fails with invalid_argument when --to or --amount is missing, or the currency unit is not BTC, SPACE, DOGE, or OPCAT\./);
+});
+
 test('runCli prints system group help with update and uninstall subcommands', async () => {
   const stdout = [];
 

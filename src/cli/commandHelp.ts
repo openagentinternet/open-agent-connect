@@ -603,17 +603,17 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot wallet <subcommand>',
     subcommands: [
       { name: 'balance', summary: 'Query local wallet balances on supported chains.' },
-      { name: 'transfer', summary: 'Preview or execute a BTC or SPACE transfer to a target address.' },
+      { name: 'transfer', summary: 'Preview or execute a BTC, SPACE, DOGE, or OPCAT transfer to a target address.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
   {
     commandPath: ['wallet', 'transfer'],
-    summary: 'Preview or execute a BTC or SPACE transfer to a target address. Without --confirm, returns a preview for confirmation. With --confirm, executes the transfer.',
+    summary: 'Preview or execute a BTC, SPACE, DOGE, or OPCAT transfer to a target address. Without --confirm, returns a preview for confirmation. With --confirm, executes the transfer.',
     usage: 'metabot wallet transfer --to <address> --amount <amount><UNIT> [--confirm]',
     requiredFlags: [
       { flag: '--to', value: '<address>', description: 'Recipient address.' },
-      { flag: '--amount', value: '<amount><UNIT>', description: 'Amount with currency unit: BTC or SPACE (case-insensitive). Example: 0.00001BTC, 1SPACE.' },
+      { flag: '--amount', value: '<amount><UNIT>', description: 'Amount with currency unit: BTC, SPACE, DOGE, or OPCAT (case-insensitive). Example: 0.00001BTC, 1SPACE, 0.01DOGE, 10OPCAT.' },
     ],
     optionalFlags: [
       { flag: '--confirm', description: 'Execute the transfer. Omit to preview only.' },
@@ -627,7 +627,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     failureSemantics: [
       'Returns awaiting_confirmation with preview data (fromAddress, currentBalance, toAddress, amount, estimatedFee) when --confirm is omitted.',
-      'Fails with invalid_argument when --to or --amount is missing, or the currency unit is not BTC or SPACE.',
+      'Fails with invalid_argument when --to or --amount is missing, or the currency unit is not BTC, SPACE, DOGE, or OPCAT.',
       'Fails with insufficient_balance when total balance (confirmed + unconfirmed) is below amount + estimated fee.',
       'Fails with transfer_broadcast_failed when the network rejects the transaction.',
     ],
@@ -635,6 +635,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC',
       'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC --confirm',
       'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 1SPACE --confirm',
+      'metabot wallet transfer --to o1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 10OPCAT',
     ],
   },
   {
