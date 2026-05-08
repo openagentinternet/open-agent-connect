@@ -313,6 +313,17 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
       }
 
       const session = await waitForSession(input.llmExecutor, sessionId, sessionTimeoutMs, pollIntervalMs);
+      if (session?.status === 'failed' || session?.status === 'cancelled' || session?.status === 'timeout') {
+        const sessionError = (session as unknown as { error?: unknown }).error;
+        return createServiceRunnerFailedResult(
+          session.status === 'timeout'
+            ? 'provider_execution_timeout'
+            : session.status === 'cancelled'
+              ? 'provider_execution_cancelled'
+              : 'provider_execution_failed',
+          normalizeText(sessionError) || 'Provider execution did not complete successfully.',
+        );
+      }
       if (!session?.result) {
         return createServiceRunnerFailedResult('provider_execution_timeout', 'The provider runtime did not produce a terminal session result before timeout.');
       }

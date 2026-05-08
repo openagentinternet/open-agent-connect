@@ -25,6 +25,7 @@ export interface SessionTraceOrderInput {
   orderReference?: string | null;
   paymentCurrency?: string | null;
   paymentAmount?: string | null;
+  providerSkill?: string | null;
 }
 
 export interface BuildSessionTraceInput {
@@ -138,6 +139,7 @@ export interface SessionTraceRecord {
     orderReference: string | null;
     paymentCurrency: string | null;
     paymentAmount: string | null;
+    providerSkill?: string | null;
   } | null;
   a2a: SessionTraceA2ARecord | null;
   askMaster: SessionTraceAskMasterRecord | null;
@@ -378,6 +380,7 @@ export function buildSessionTrace(input: BuildSessionTraceInput): SessionTraceRe
           orderReference: normalizeText(input.order.orderReference) || null,
           paymentCurrency: normalizeText(input.order.paymentCurrency) || null,
           paymentAmount: normalizeText(input.order.paymentAmount) || null,
+          providerSkill: normalizeText(input.order.providerSkill) || null,
         }
       : null,
     a2a: buildA2ATraceRecord(input.a2a),

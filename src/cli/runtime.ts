@@ -60,6 +60,7 @@ import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeer
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { createA2ASimplemsgListenerManager } from '../core/a2a/simplemsgListener';
+import { classifySimplemsgContent } from '../core/a2a/simplemsgClassifier';
 import { createSocketIoMetaWebMasterReplyWaiter, type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
 import { parseMasterResponse } from '../core/master/masterMessageSchema';
 import { createPrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
@@ -67,7 +68,7 @@ import { createPrivateChatAutoReplyBackfillLoop } from '../core/chat/privateChat
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
-import type { ChatReplyRunner } from '../core/chat/privateChatTypes';
+import type { ChatReplyRunner, PrivateChatInboundMessage } from '../core/chat/privateChatTypes';
 import { createTestServicePaymentExecutor } from '../core/payments/servicePayment';
 import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
@@ -101,6 +102,56 @@ const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
 let cachedDaemonRuntimeFingerprint: string | null = null;
+
+type A2ASimplemsgInboundDispatcherMessage = Pick<
+  PrivateChatInboundMessage,
+  'fromGlobalMetaId' | 'content' | 'messagePinId' | 'timestamp'
+> & Partial<PrivateChatInboundMessage>;
+
+function normalizeDispatcherPrivateChatMessage(
+  message: A2ASimplemsgInboundDispatcherMessage
+): PrivateChatInboundMessage {
+  return {
+    fromGlobalMetaId: message.fromGlobalMetaId,
+    content: message.content,
+    messagePinId: message.messagePinId ?? null,
+    fromChatPublicKey: message.fromChatPublicKey ?? null,
+    timestamp: Number.isFinite(message.timestamp) ? Math.trunc(Number(message.timestamp)) : Date.now(),
+    rawMessage: message.rawMessage ?? null,
+  };
+}
+
+export function buildA2ASimplemsgInboundDispatcher(input: {
+  handleOrderProtocolMessage?: (message: A2ASimplemsgInboundDispatcherMessage) => Promise<MetabotCommandResult<unknown>> | MetabotCommandResult<unknown>;
+  handleGenericPrivateChatMessage: (message: PrivateChatInboundMessage) => Promise<void> | void;
+  logWarning?: (scope: string, error: unknown) => void;
+}): (message: A2ASimplemsgInboundDispatcherMessage) => Promise<void> {
+  const logWarning = input.logWarning ?? ((scope: string, error: unknown) => {
+    console.warn(scope, error instanceof Error ? error.message : String(error));
+  });
+
+  return async (message) => {
+    const simplemsgClassification = classifySimplemsgContent(message.content);
+    const orderProtocolHandler = input.handleOrderProtocolMessage;
+    if (orderProtocolHandler) {
+      try {
+        const result = await orderProtocolHandler(message);
+        if (
+          simplemsgClassification.kind === 'order_protocol'
+          || (result?.ok === true && (result.data as { handled?: unknown } | undefined)?.handled === true)
+        ) {
+          return;
+        }
+      } catch (error) {
+        logWarning('[A2A order protocol handler]', error);
+        if (simplemsgClassification.kind === 'order_protocol') {
+          return;
+        }
+      }
+    }
+    await input.handleGenericPrivateChatMessage(normalizeDispatcherPrivateChatMessage(message));
+  };
+}
 
 type EvolutionPublishFailureCode =
   | 'evolution_variant_not_found'
@@ -2394,25 +2445,23 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   });
 
   const daemonConfig = await createConfigStore(paths).read();
+  const simplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher({
+    handleOrderProtocolMessage: handlers.services?.handleInboundOrderProtocolMessage,
+    handleGenericPrivateChatMessage: async (message) => {
+      await chatAutoReplyOrchestrator.handleInboundMessage(message);
+    },
+    logWarning: (scope, error) => {
+      console.warn(scope, error instanceof Error ? error.message : String(error));
+    },
+  });
   const simplemsgListener = createA2ASimplemsgListenerManager({
     systemHomeDir: paths.systemHomeDir,
     resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
     onMessage: (profile, message) => {
       if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
-        void chatAutoReplyOrchestrator.handleInboundMessage(message).catch((error) => {
+        void simplemsgInboundDispatcher(message).catch((error) => {
           console.warn('[private chat auto-reply]', error instanceof Error ? error.message : String(error));
         });
-        const orderProtocolHandler = handlers.services?.handleInboundOrderProtocolMessage;
-        if (orderProtocolHandler) {
-          void Promise.resolve(orderProtocolHandler({
-            fromGlobalMetaId: message.fromGlobalMetaId,
-            content: message.content,
-            messagePinId: message.messagePinId,
-            timestamp: message.timestamp,
-          })).catch((error) => {
-            console.warn('[A2A order protocol handler]', error instanceof Error ? error.message : String(error));
-          });
-        }
       }
     },
     onError: (error) => {
