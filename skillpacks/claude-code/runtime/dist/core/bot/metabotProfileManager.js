@@ -334,8 +334,8 @@ async function getMetabotWalletInfo(systemHomeDir, slug) {
         slug: profile.slug,
         name: profile.name,
         addresses: {
-            btc: normalizeText(secrets?.btcAddress) || normalizeText(identity?.btcAddress),
-            mvc: normalizeText(secrets?.mvcAddress) || normalizeText(identity?.mvcAddress) || profile.mvcAddress,
+            btc: normalizeText(secrets?.addresses?.btc) || normalizeText(identity?.addresses?.btc),
+            mvc: normalizeText(secrets?.addresses?.mvc ?? secrets?.mvcAddress) || normalizeText(identity?.addresses?.mvc ?? identity?.mvcAddress) || profile.mvcAddress,
         },
     };
 }

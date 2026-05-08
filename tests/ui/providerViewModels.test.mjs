@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import vm from 'node:vm';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { buildPublishPageViewModel } = require('../../dist/ui/pages/publish/viewModel.js');
-const { buildMyServicesPageViewModel } = require('../../dist/ui/pages/my-services/viewModel.js');
+const {
+  buildMyServicesPageViewModel,
+  buildMyServicesPageViewModelRuntimeSource,
+} = require('../../dist/ui/pages/my-services/viewModel.js');
 
 test('buildPublishPageViewModel shows the local provider identity that will publish the service', () => {
   const model = buildPublishPageViewModel({
@@ -30,6 +34,138 @@ test('buildPublishPageViewModel shows the local provider identity that will publ
       value: '1AliceWeatherProviderAddress11111111111111',
     },
   ]);
+});
+
+test('buildPublishPageViewModel exposes primary runtime catalog availability for publishing', () => {
+  const model = buildPublishPageViewModel({
+    providerSummary: {
+      identity: {
+        name: 'Alice Weather Bot',
+        globalMetaId: 'idq1aliceweatherprovider000000000000000000000000000000',
+        mvcAddress: '1AliceWeatherProviderAddress11111111111111',
+      },
+    },
+    publishSkills: {
+      metaBotSlug: 'alice-weather-bot',
+      identity: {
+        name: 'Alice Weather Bot',
+        globalMetaId: 'idq1aliceweatherprovider000000000000000000000000000000',
+      },
+      runtime: {
+        id: 'runtime-codex',
+        provider: 'codex',
+        displayName: 'Codex',
+        health: 'healthy',
+        version: '0.2.7',
+      },
+      platform: {
+        id: 'codex',
+        displayName: 'Codex',
+      },
+      skills: [
+        {
+          skillName: 'metabot-weather-oracle',
+          title: 'Weather Oracle',
+          description: 'Returns one concise forecast.',
+        },
+      ],
+      rootDiagnostics: [
+        {
+          rootId: 'codex-home',
+          status: 'readable',
+          absolutePath: '/tmp/alice/.codex/skills',
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(model.providerCard.rows, [
+    { label: 'Provider Name', value: 'Alice Weather Bot' },
+    { label: 'MetaBot Slug', value: 'alice-weather-bot' },
+    {
+      label: 'Provider GlobalMetaId',
+      value: 'idq1aliceweatherprovider000000000000000000000000000000',
+    },
+    {
+      label: 'Payment Address',
+      value: '1AliceWeatherProviderAddress11111111111111',
+    },
+  ]);
+  assert.equal(model.runtimeCard.title, 'Primary Runtime');
+  assert.match(model.runtimeCard.summary, /healthy primary runtime/i);
+  assert.deepEqual(model.runtimeCard.rows, [
+    { label: 'Runtime', value: 'Codex' },
+    { label: 'Provider', value: 'codex' },
+    { label: 'Health', value: 'healthy' },
+    { label: 'Version', value: '0.2.7' },
+    { label: 'Readable Roots', value: '1 / 1' },
+  ]);
+  assert.deepEqual(model.skills, [
+    {
+      value: 'metabot-weather-oracle',
+      label: 'metabot-weather-oracle',
+      title: 'Weather Oracle',
+      description: 'Returns one concise forecast.',
+    },
+  ]);
+  assert.deepEqual(model.availability, {
+    canPublish: true,
+    reasonCode: 'ready',
+    message: 'Ready to publish with the selected primary runtime skill.',
+  });
+});
+
+test('buildPublishPageViewModel disables publishing when primary runtime or skill roots are unavailable', () => {
+  const missingRuntime = buildPublishPageViewModel({
+    providerSummary: {
+      identity: {
+        name: 'Alice Weather Bot',
+        globalMetaId: 'idq1aliceweatherprovider000000000000000000000000000000',
+      },
+    },
+    publishSkillsError: {
+      code: 'primary_runtime_missing',
+      message: 'The selected MetaBot has no enabled primary runtime binding.',
+    },
+  });
+
+  assert.equal(missingRuntime.availability.canPublish, false);
+  assert.equal(missingRuntime.availability.reasonCode, 'primary_runtime_missing');
+  assert.match(missingRuntime.runtimeCard.summary, /no enabled primary runtime/i);
+
+  const unreadableRoots = buildPublishPageViewModel({
+    providerSummary: {
+      identity: {
+        name: 'Alice Weather Bot',
+        globalMetaId: 'idq1aliceweatherprovider000000000000000000000000000000',
+      },
+    },
+    publishSkills: {
+      metaBotSlug: 'alice-weather-bot',
+      runtime: {
+        id: 'runtime-codex',
+        provider: 'codex',
+        displayName: 'Codex',
+        health: 'healthy',
+      },
+      platform: {
+        id: 'codex',
+        displayName: 'Codex',
+      },
+      skills: [],
+      rootDiagnostics: [
+        {
+          rootId: 'codex-home',
+          status: 'missing',
+          absolutePath: '/tmp/alice/.codex/skills',
+        },
+      ],
+    },
+  });
+
+  assert.equal(unreadableRoots.availability.canPublish, false);
+  assert.equal(unreadableRoots.availability.reasonCode, 'primary_skill_roots_unreadable');
+  assert.match(unreadableRoots.availability.message, /No readable primary runtime skill roots/i);
 });
 
 test('buildPublishPageViewModel shows the publish result with the real chain pin, price, and output type', () => {
@@ -126,6 +262,7 @@ test('buildMyServicesPageViewModel renders recent seller orders with trace linka
           buyerGlobalMetaId: 'idq1buyer0000000000000000000000000000000000000',
           buyerName: 'Buyer Bot',
           publicStatus: 'manual_action_required',
+          state: 'refund_pending',
           ratingStatus: 'requested_unrated',
           ratingValue: null,
           ratingComment: null,
@@ -196,10 +333,16 @@ test('buildMyServicesPageViewModel renders recent seller orders with trace linka
     key: 'order-refund-1',
     serviceName: 'Tarot Reading',
     buyerLabel: 'Buyer Bot · idq1buyer0000000000000000000000000000000000000',
-    stateLabel: '未评价',
+    stateLabel: 'Refund pending · 未评价',
     statusDetail: 'manual_action_required',
     traceHref: '/ui/trace?traceId=trace-provider-refund',
     traceLabel: 'trace-provider-refund',
+    paymentLabel: '—',
+    runtimeLabel: 'Runtime unavailable',
+    refundRequestPinId: '',
+    refundTxid: '',
+    refundFinalizePinId: '',
+    refundBlockingReason: '',
     createdAt: '1775000020000',
     requiresManualRefund: true,
     ratingCommentPreview: '',
@@ -214,6 +357,12 @@ test('buildMyServicesPageViewModel renders recent seller orders with trace linka
     statusDetail: 'completed',
     traceHref: '/ui/trace?traceId=trace-provider-rated',
     traceLabel: 'trace-provider-rated',
+    paymentLabel: '—',
+    runtimeLabel: 'Runtime unavailable',
+    refundRequestPinId: '',
+    refundTxid: '',
+    refundFinalizePinId: '',
+    refundBlockingReason: '',
     createdAt: '1775000025000',
     requiresManualRefund: false,
     ratingCommentPreview: '解释得很清楚。',
@@ -228,6 +377,12 @@ test('buildMyServicesPageViewModel renders recent seller orders with trace linka
     statusDetail: 'completed',
     traceHref: '/ui/trace?traceId=trace-provider-unconfirmed',
     traceLabel: 'trace-provider-unconfirmed',
+    paymentLabel: '—',
+    runtimeLabel: 'Runtime unavailable',
+    refundRequestPinId: '',
+    refundTxid: '',
+    refundFinalizePinId: '',
+    refundBlockingReason: '',
     createdAt: '1775000026000',
     requiresManualRefund: false,
     ratingCommentPreview: '闭环完整，回复及时。',
@@ -242,6 +397,12 @@ test('buildMyServicesPageViewModel renders recent seller orders with trace linka
     statusDetail: 'completed',
     traceHref: '/ui/trace?traceId=trace-provider-sync-error',
     traceLabel: 'trace-provider-sync-error',
+    paymentLabel: '—',
+    runtimeLabel: 'Runtime unavailable',
+    refundRequestPinId: '',
+    refundTxid: '',
+    refundFinalizePinId: '',
+    refundBlockingReason: '',
     createdAt: '1775000027000',
     requiresManualRefund: false,
     ratingCommentPreview: '',
@@ -257,4 +418,112 @@ test('buildMyServicesPageViewModel renders recent seller orders with trace linka
     refundHref: '/ui/refund?orderId=order-refund-1',
     traceHref: '/ui/trace?traceId=trace-provider-refund',
   });
+});
+
+test('buildMyServicesPageViewModel exposes payment, runtime session, and refund proof fields for seller operations', () => {
+  const model = buildMyServicesPageViewModel({
+    providerSummary: {
+      recentOrders: [
+        {
+          traceId: 'trace-provider-refund-detail',
+          orderId: 'order-refund-detail-1',
+          serviceName: 'Tarot Reading',
+          buyerGlobalMetaId: 'idq1buyerrefunddetail',
+          publicStatus: 'manual_action_required',
+          state: 'refund_pending',
+          paymentTxid: 'payment-txid-1',
+          paymentAmount: '0.00001',
+          paymentCurrency: 'SPACE',
+          llmSessionId: 'llm-session-1',
+          runtimeId: 'runtime-codex-1',
+          runtimeProvider: 'codex',
+          fallbackSelected: false,
+          refundRequestPinId: 'refund-request-pin-1',
+          refundTxid: 'refund-transfer-txid-1',
+          refundFinalizePinId: 'refund-finalize-pin-1',
+          refundBlockingReason: 'insufficient_balance',
+          ratingStatus: 'requested_unrated',
+          createdAt: 1_775_000_020_000,
+        },
+      ],
+      manualActions: [
+        {
+          kind: 'refund',
+          traceId: 'trace-provider-refund-detail',
+          orderId: 'order-refund-detail-1',
+          refundRequestPinId: 'refund-request-pin-1',
+        },
+      ],
+    },
+  });
+
+  assert.equal(model.recentOrders.length, 1);
+  assert.deepEqual(model.recentOrders[0], {
+    key: 'order-refund-detail-1',
+    serviceName: 'Tarot Reading',
+    buyerLabel: 'idq1buyerrefunddetail',
+    stateLabel: 'Refund pending · 未评价',
+    statusDetail: 'manual_action_required',
+    traceHref: '/ui/trace?traceId=trace-provider-refund-detail',
+    traceLabel: 'trace-provider-refund-detail',
+    paymentLabel: '0.00001 SPACE · payment-txid-1',
+    runtimeLabel: 'codex · runtime-codex-1 · llm-session-1',
+    refundRequestPinId: 'refund-request-pin-1',
+    refundTxid: 'refund-transfer-txid-1',
+    refundFinalizePinId: 'refund-finalize-pin-1',
+    refundBlockingReason: 'insufficient_balance',
+    createdAt: '1775000020000',
+    requiresManualRefund: true,
+    ratingCommentPreview: '',
+    ratingPinId: '',
+  });
+});
+
+test('buildMyServicesPageViewModelRuntimeSource executes with helper functions in browser-like context', () => {
+  const context = {
+    input: {
+      providerSummary: {
+        services: [
+          {
+            servicePinId: 'service-pin-runtime-source',
+            serviceName: 'weather-runtime',
+            displayName: 'Weather Runtime',
+            price: '0.00001',
+            currency: 'SPACE',
+            available: true,
+            updatedAt: 1_775_000_010_000,
+          },
+        ],
+        recentOrders: [
+          {
+            traceId: 'trace-runtime-source',
+            orderId: 'order-runtime-source',
+            serviceName: 'Weather Runtime',
+            buyerGlobalMetaId: 'idq1buyerruntime',
+            publicStatus: 'provider_running',
+            state: 'in_progress',
+            paymentTxid: 'payment-runtime-source',
+            paymentAmount: '0.00001',
+            paymentCurrency: 'SPACE',
+            runtimeProvider: 'codex',
+            runtimeId: 'runtime-codex',
+            llmSessionId: 'llm-session-runtime',
+            createdAt: 1_775_000_020_000,
+          },
+        ],
+      },
+    },
+    result: null,
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${buildMyServicesPageViewModelRuntimeSource()}\nresult = buildMyServicesPageViewModel(input);`,
+    context,
+  );
+
+  assert.equal(context.result.serviceInventory.length, 1);
+  assert.equal(context.result.serviceInventory[0].displayName, 'Weather Runtime');
+  assert.equal(context.result.recentOrders.length, 1);
+  assert.equal(context.result.recentOrders[0].paymentLabel, '0.00001 SPACE · payment-runtime-source');
+  assert.equal(context.result.recentOrders[0].runtimeLabel, 'codex · runtime-codex · llm-session-runtime');
 });

@@ -428,14 +428,19 @@ async function deriveIdentity(options = {}) {
     if (!globalMetaId) {
         throw new Error(`Failed to normalize derived GlobalMetaId for address: ${mvcAddress}`);
     }
+    const btcAddress = btcWallet.getAddress();
+    const dogeAddress = dogeWallet.getAddress();
     return {
         mnemonic,
         path,
         publicKey: mvcWallet.getPublicKey().toString('hex'),
         chatPublicKey,
+        addresses: {
+            mvc: mvcAddress,
+            btc: btcAddress,
+            doge: dogeAddress,
+        },
         mvcAddress,
-        btcAddress: btcWallet.getAddress(),
-        dogeAddress: dogeWallet.getAddress(),
         metaId: computeMetaId(mvcAddress),
         globalMetaId
     };

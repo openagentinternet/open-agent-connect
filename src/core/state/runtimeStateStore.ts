@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import type { PublishedServiceRecord } from '../services/publishService';
 import type { SessionTraceRecord } from '../chat/sessionTrace';
+import { createSellerOrderRecord, type SellerOrderRecord } from '../orders/sellerOrderState';
 import { resolveMetabotPaths, type MetabotPaths } from './paths';
 
 export type RuntimeIdentitySubsidyState = 'pending' | 'claimed' | 'failed';
@@ -41,6 +42,7 @@ export interface RuntimeState {
   identity: RuntimeIdentityRecord | null;
   services: PublishedServiceRecord[];
   traces: SessionTraceRecord[];
+  sellerOrders: SellerOrderRecord[];
 }
 
 export interface RuntimeStateStore {
@@ -61,6 +63,7 @@ function cloneEmptyState(): RuntimeState {
     identity: null,
     services: [],
     traces: [],
+    sellerOrders: [],
   };
 }
 
@@ -141,6 +144,17 @@ function normalizeRuntimeState(value: RuntimeState | null): RuntimeState {
     identity: normalizeRuntimeIdentity(value.identity as Record<string, unknown> | null),
     services: Array.isArray(value.services) ? value.services : [],
     traces: Array.isArray(value.traces) ? value.traces : [],
+    sellerOrders: Array.isArray((value as { sellerOrders?: unknown }).sellerOrders)
+      ? ((value as { sellerOrders: unknown[] }).sellerOrders)
+        .map((entry) => {
+          try {
+            return createSellerOrderRecord(entry as Parameters<typeof createSellerOrderRecord>[0]);
+          } catch {
+            return null;
+          }
+        })
+        .filter((entry): entry is SellerOrderRecord => Boolean(entry))
+      : [],
   };
 }
 

@@ -125,21 +125,53 @@ test('buildProviderConsoleSnapshot summarizes published services and seller-side
   const snapshot = buildProviderConsoleSnapshot({
     services: [createServiceRecord()],
     traces: [createSellerTrace()],
+    sellerOrders: [
+      {
+        id: 'seller-order-runtime-1',
+        state: 'in_progress',
+        localMetabotId: 1,
+        localMetabotSlug: 'provider-bot',
+        providerGlobalMetaId: 'idq1provider',
+        buyerGlobalMetaId: 'idq1buyer',
+        servicePinId: 'service-pin-1',
+        currentServicePinId: 'service-pin-1',
+        serviceName: 'Tarot Reading',
+        providerSkill: 'tarot-rws',
+        orderMessageId: 'order-message-pin-1',
+        orderPinId: 'order-message-pin-1',
+        orderTxid: 'd'.repeat(64),
+        paymentTxid: 'e'.repeat(64),
+        paymentAmount: '0.00001',
+        paymentCurrency: 'SPACE',
+        traceId: 'trace-provider-runtime',
+        a2aSessionId: 'a2a-order-session-runtime',
+        a2aTaskRunId: 'a2a-task-runtime',
+        llmSessionId: 'llm-session-runtime',
+        runtimeId: 'runtime-codex',
+        runtimeProvider: 'codex',
+        createdAt: 1_775_000_015_000,
+        updatedAt: 1_775_000_016_000,
+      },
+    ],
     ratingDetails: [],
   });
 
   assert.equal(snapshot.services.length, 1);
   assert.equal(snapshot.services[0].servicePinId, 'service-pin-1');
   assert.equal(snapshot.services[0].available, true);
-  assert.equal(snapshot.recentOrders.length, 1);
-  assert.equal(snapshot.recentOrders[0].traceId, 'trace-provider-1');
-  assert.equal(snapshot.recentOrders[0].servicePinId, 'service-pin-1');
-  assert.equal(snapshot.recentOrders[0].ratingStatus, 'requested_unrated');
-  assert.equal(snapshot.recentOrders[0].ratingValue, null);
-  assert.equal(snapshot.recentOrders[0].ratingComment, null);
-  assert.equal(snapshot.recentOrders[0].ratingPinId, null);
-  assert.equal(snapshot.recentOrders[0].ratingCreatedAt, null);
-  assert.equal(snapshot.totals.sellerOrderCount, 1);
+  assert.equal(snapshot.recentOrders.length, 2);
+  assert.equal(snapshot.recentOrders[0].traceId, 'trace-provider-runtime');
+  assert.equal(snapshot.recentOrders[0].state, 'in_progress');
+  assert.equal(snapshot.recentOrders[0].llmSessionId, 'llm-session-runtime');
+  assert.equal(snapshot.recentOrders[0].runtimeId, 'runtime-codex');
+  assert.equal(snapshot.recentOrders[1].traceId, 'trace-provider-1');
+  assert.equal(snapshot.recentOrders[1].servicePinId, 'service-pin-1');
+  assert.equal(snapshot.recentOrders[1].ratingStatus, 'requested_unrated');
+  assert.equal(snapshot.recentOrders[1].ratingValue, null);
+  assert.equal(snapshot.recentOrders[1].ratingComment, null);
+  assert.equal(snapshot.recentOrders[1].ratingPinId, null);
+  assert.equal(snapshot.recentOrders[1].ratingCreatedAt, null);
+  assert.equal(snapshot.totals.sellerOrderCount, 2);
 });
 
 test('buildProviderConsoleSnapshot joins a matching on-chain rating onto the seller order', () => {

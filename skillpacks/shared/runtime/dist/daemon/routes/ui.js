@@ -35,10 +35,12 @@ const PAGE_BUILDERS = {
 const NAV_ITEMS = [
     { page: 'hub', label: 'Hub' },
     { page: 'bot', label: 'Bot' },
+    { page: 'publish', label: 'Publish' },
+    { page: 'my-services', label: 'My Services' },
     { page: 'trace', label: 'Trace' },
     { page: 'refund', label: 'Refund' },
 ];
-const HIDDEN_UI_PAGES = new Set(['publish', 'my-services']);
+const HIDDEN_UI_PAGES = new Set();
 function escapeHtml(value) {
     return value
         .replace(/&/g, '&amp;')

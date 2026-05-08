@@ -83,22 +83,25 @@ function createWalletServicePaymentExecutor(input) {
             if (!secrets?.mnemonic) {
                 throw new Error('identity_secrets_missing: Identity mnemonic not found in the secret store.');
             }
-            const transferInput = {
+            const chain = paymentInput.paymentChain;
+            const adapter = input.adapters.get(chain);
+            if (!adapter) {
+                throw new Error(`service_payment_unsupported_chain: No adapter registered for chain "${chain}".`);
+            }
+            const result = await (0, localMnemonicSigner_1.executeTransfer)(adapter, {
                 mnemonic: secrets.mnemonic,
                 path: secrets.path ?? "m/44'/10001'/0'/0/0",
                 toAddress: paymentInput.paymentAddress,
                 amountSatoshis: decimalAmountToSatoshis(paymentInput.amount),
                 feeRate: input.feeRate,
-            };
-            const transfer = paymentInput.paymentChain === 'btc'
-                ? await (0, localMnemonicSigner_1.executeBtcTransfer)(transferInput)
-                : await (0, localMnemonicSigner_1.executeMvcTransfer)(transferInput);
+            });
             return {
-                paymentTxid: transfer.txid,
+                paymentTxid: result.txid,
                 paymentChain: paymentInput.paymentChain,
                 paymentAmount: paymentInput.amount,
                 paymentCurrency: paymentInput.currency === 'MVC' ? 'SPACE' : paymentInput.currency,
                 settlementKind: paymentInput.settlementKind,
+                totalCost: result.fee,
                 network: paymentInput.paymentChain,
             };
         },

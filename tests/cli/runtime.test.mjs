@@ -13,6 +13,7 @@ const { resolveMetabotHomeSelection } = require('../../dist/core/state/homeSelec
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
+const { createSellerOrderRecord } = require('../../dist/core/orders/sellerOrderState.js');
 const { createSessionStateStore } = require('../../dist/core/a2a/sessionStateStore.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
@@ -98,6 +99,73 @@ async function writeFileAtomic(filePath, content) {
   }
 }
 
+function createLlmRuntime(id, provider, health = 'healthy') {
+  const now = '2026-05-07T00:00:00.000Z';
+  return {
+    id,
+    provider,
+    displayName: `${provider} runtime`,
+    binaryPath: `/bin/${provider}`,
+    version: '1.0.0',
+    authState: 'authenticated',
+    health,
+    capabilities: ['tool-use'],
+    lastSeenAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createLlmBinding(id, slug, llmRuntimeId, role, enabled = true) {
+  const now = '2026-05-07T00:00:00.000Z';
+  return {
+    id,
+    metaBotSlug: slug,
+    llmRuntimeId,
+    role,
+    priority: 0,
+    enabled,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+async function writeSkill(root, skillName) {
+  await mkdir(path.join(root, skillName), { recursive: true });
+  await writeFile(path.join(root, skillName, 'SKILL.md'), `# ${skillName}\n`, 'utf8');
+}
+
+async function preparePrimaryRuntimeSkill(homeDir, skillName, options = {}) {
+  const paths = metabotPaths(homeDir);
+  const slug = path.basename(path.resolve(homeDir));
+  const provider = options.provider || 'codex';
+  await mkdir(path.dirname(paths.llmRuntimesPath), { recursive: true });
+  await writeFileAtomic(
+    paths.llmRuntimesPath,
+    `${JSON.stringify({
+      version: 1,
+      runtimes: [
+        createLlmRuntime(`runtime-${provider}`, provider, options.health || 'healthy'),
+        createLlmRuntime('runtime-claude-code', 'claude-code'),
+      ],
+    }, null, 2)}\n`,
+  );
+  await writeFileAtomic(
+    paths.llmBindingsPath,
+    `${JSON.stringify({
+      version: 1,
+      bindings: [
+        createLlmBinding(`binding-${provider}-primary`, slug, `runtime-${provider}`, 'primary', options.primaryEnabled !== false),
+        createLlmBinding('binding-claude-fallback', slug, 'runtime-claude-code', 'fallback', true),
+      ],
+    }, null, 2)}\n`,
+  );
+  if (skillName) {
+    const rootName = provider === 'claude-code' ? '.claude' : `.${provider}`;
+    await writeSkill(path.join(homeDir, rootName, 'skills'), skillName);
+  }
+}
+
 async function ensureIndexedProfileHome(homeDir) {
   const systemHome = deriveSystemHome(homeDir);
   const managerRoot = path.join(systemHome, '.metabot', 'manager');
@@ -137,6 +205,7 @@ async function runCommand(homeDir, args, envOverrides = {}) {
     METABOT_HOME: homeDir,
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_TEST_FAKE_PROVIDER_LLM_REPLY: 'Provider test result from {{skill}}.',
     METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
     ...envOverrides,
   };
@@ -163,6 +232,7 @@ async function runCommandWithEnv(cwd, args, envOverrides = {}) {
     ...process.env,
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_TEST_FAKE_PROVIDER_LLM_REPLY: 'Provider test result from {{skill}}.',
     METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
     ...envOverrides,
   };
@@ -192,6 +262,7 @@ async function runCommandText(homeDir, args, envOverrides = {}) {
     METABOT_HOME: homeDir,
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_TEST_FAKE_PROVIDER_LLM_REPLY: 'Provider test result from {{skill}}.',
     METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
     ...envOverrides,
   };
@@ -1288,6 +1359,7 @@ test('services publish persists a local directory entry that network services --
     outputType: 'text',
     skillDocument: '# Weather Oracle',
   }), 'utf8');
+  await preparePrimaryRuntimeSkill(homeDir, 'metabot-weather-oracle');
 
   const published = await runCommand(homeDir, ['services', 'publish', '--payload-file', payloadFile]);
 
@@ -1312,6 +1384,81 @@ test('services publish persists a local directory entry that network services --
   assert.equal(listed.payload.data.services[0].displayName, 'Weather Oracle');
   assert.equal(listed.payload.data.services[0].online, true);
   assert.equal(listed.payload.data.services[0].providerGlobalMetaId, created.payload.data.globalMetaId);
+});
+
+test('services publish-skills lists only active MetaBot primary runtime skills', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+  await preparePrimaryRuntimeSkill(homeDir, 'metabot-weather-oracle');
+  await writeSkill(path.join(homeDir, '.claude', 'skills'), 'metabot-claude-only');
+
+  const listed = await runCommand(homeDir, ['services', 'publish-skills']);
+
+  assert.equal(listed.exitCode, 0);
+  assert.equal(listed.payload.ok, true);
+  assert.equal(listed.payload.data.identity.globalMetaId, created.payload.data.globalMetaId);
+  assert.equal(listed.payload.data.runtime.provider, 'codex');
+  assert.deepEqual(
+    listed.payload.data.skills.map((skill) => skill.skillName),
+    ['metabot-weather-oracle'],
+  );
+});
+
+test('services publish rejects missing primary runtime before chain write', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const payloadFile = path.join(homeDir, 'payload-missing-primary.json');
+  await writeFile(payloadFile, JSON.stringify({
+    serviceName: 'weather-oracle',
+    displayName: 'Weather Oracle',
+    description: 'Returns tomorrow weather from the local connected-agent runtime.',
+    providerSkill: 'metabot-weather-oracle',
+    price: '0.00001',
+    currency: 'SPACE',
+    outputType: 'text',
+    skillDocument: '# Weather Oracle',
+  }), 'utf8');
+
+  const published = await runCommand(homeDir, ['services', 'publish', '--payload-file', payloadFile]);
+
+  assert.equal(published.exitCode, 1);
+  assert.equal(published.payload.ok, false);
+  assert.equal(published.payload.code, 'primary_runtime_missing');
+});
+
+test('services publish rejects fallback-only providerSkill before chain write', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+  await preparePrimaryRuntimeSkill(homeDir, null);
+  await writeSkill(path.join(homeDir, '.claude', 'skills'), 'metabot-weather-oracle');
+
+  const payloadFile = path.join(homeDir, 'payload-fallback-only.json');
+  await writeFile(payloadFile, JSON.stringify({
+    serviceName: 'weather-oracle',
+    displayName: 'Weather Oracle',
+    description: 'Returns tomorrow weather from the local connected-agent runtime.',
+    providerSkill: 'metabot-weather-oracle',
+    price: '0.00001',
+    currency: 'SPACE',
+    outputType: 'text',
+    skillDocument: '# Weather Oracle',
+  }), 'utf8');
+
+  const published = await runCommand(homeDir, ['services', 'publish', '--payload-file', payloadFile]);
+
+  assert.equal(published.exitCode, 1);
+  assert.equal(published.payload.ok, false);
+  assert.equal(published.payload.code, 'provider_skill_missing');
 });
 
 test('services call with providerDaemonBaseUrl rejects a provider that is offline in socket presence', async (t) => {
@@ -1341,6 +1488,7 @@ test('services call with providerDaemonBaseUrl rejects a provider that is offlin
     outputType: 'text',
     skillDocument: '# Tarot Reading',
   }), 'utf8');
+  await preparePrimaryRuntimeSkill(providerHome, 'tarot-rws');
 
   const published = await runCommand(providerHome, ['services', 'publish', '--payload-file', publishFile], providerEnv);
   assert.equal(published.exitCode, 0);
@@ -1402,6 +1550,7 @@ test('provider closure runtime can publish, go online, receive a seller trace, a
     outputType: 'text',
     skillDocument: '# Tarot Reading',
   }), 'utf8');
+  await preparePrimaryRuntimeSkill(providerHome, 'tarot-rws');
 
   const published = await runCommand(providerHome, ['services', 'publish', '--payload-file', publishFile]);
   assert.equal(published.exitCode, 0);
@@ -1493,6 +1642,120 @@ test('provider closure runtime can publish, go online, receive a seller trace, a
   assert.equal(summary.payload.data.manualActions[0].refundRequestPinId, 'refund-pin-acceptance-1');
 });
 
+test('provider CLI inspects seller orders by order id or payment txid and reports refund fields', async (t) => {
+  const providerHome = await createProfileHomeTemp('', 'provider-profile');
+  t.after(async () => stopDaemon(providerHome));
+
+  const created = await runCommand(providerHome, ['identity', 'create', '--name', 'Provider Operator']);
+  assert.equal(created.exitCode, 0);
+
+  const runtimeStateStore = createRuntimeStateStore(providerHome);
+  const state = await runtimeStateStore.readState();
+  const sellerOrder = createSellerOrderRecord({
+    id: 'seller-order-cli-inspect-1',
+    state: 'refund_pending',
+    localMetabotId: state.identity.metabotId,
+    localMetabotSlug: path.basename(providerHome),
+    providerGlobalMetaId: state.identity.globalMetaId,
+    buyerGlobalMetaId: 'idq1buyercliinspect',
+    servicePinId: '/protocols/skill-service-pin-cli-1',
+    currentServicePinId: '/protocols/skill-service-pin-cli-1',
+    serviceName: 'CLI Tarot Reading',
+    providerSkill: 'tarot-rws',
+    orderMessageId: 'order-message-cli-inspect-1',
+    paymentTxid: '1'.repeat(64),
+    paymentAmount: '0.00001',
+    paymentCurrency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    traceId: 'trace-provider-cli-inspect-1',
+    a2aSessionId: 'seller-session-cli-inspect-1',
+    a2aTaskRunId: 'seller-run-cli-inspect-1',
+    llmSessionId: 'llm-session-cli-inspect-1',
+    runtimeId: 'runtime-codex',
+    runtimeProvider: 'codex',
+    refundRequestPinId: 'refund-request-cli-inspect-1',
+    refundTxid: 'refund-transfer-cli-inspect-1',
+    refundFinalizePinId: 'refund-finalize-cli-inspect-1',
+    refundBlockingReason: 'insufficient_balance',
+    createdAt: 1_775_000_020_000,
+    updatedAt: 1_775_000_030_000,
+  });
+  await runtimeStateStore.writeState({
+    ...state,
+    sellerOrders: [sellerOrder],
+  });
+
+  const byOrderId = await runCommand(providerHome, ['provider', 'order', 'inspect', '--order-id', 'seller-order-cli-inspect-1']);
+  assert.equal(byOrderId.exitCode, 0);
+  assert.equal(byOrderId.payload.ok, true);
+  assert.equal(byOrderId.payload.data.order.orderId, 'seller-order-cli-inspect-1');
+  assert.equal(byOrderId.payload.data.order.service.name, 'CLI Tarot Reading');
+  assert.equal(byOrderId.payload.data.order.buyer.globalMetaId, 'idq1buyercliinspect');
+  assert.equal(byOrderId.payload.data.order.status.state, 'refund_pending');
+  assert.equal(byOrderId.payload.data.order.trace.id, 'trace-provider-cli-inspect-1');
+  assert.equal(byOrderId.payload.data.order.payment.txid, '1'.repeat(64));
+  assert.equal(byOrderId.payload.data.order.runtime.sessionId, 'llm-session-cli-inspect-1');
+  assert.equal(byOrderId.payload.data.order.refund.refundRequestPinId, 'refund-request-cli-inspect-1');
+  assert.equal(byOrderId.payload.data.order.refund.refundTxid, 'refund-transfer-cli-inspect-1');
+  assert.equal(byOrderId.payload.data.order.refund.refundFinalizePinId, 'refund-finalize-cli-inspect-1');
+  assert.equal(byOrderId.payload.data.order.refund.blockingReason, 'insufficient_balance');
+
+  const byPayment = await runCommand(providerHome, ['provider', 'order', 'inspect', '--payment-txid', '1'.repeat(64)]);
+  assert.equal(byPayment.exitCode, 0);
+  assert.equal(byPayment.payload.ok, true);
+  assert.equal(byPayment.payload.data.order.orderId, 'seller-order-cli-inspect-1');
+});
+
+test('provider CLI manual refund settlement returns structured blockers for pending seller orders', async (t) => {
+  const providerHome = await createProfileHomeTemp('', 'provider-profile');
+  t.after(async () => stopDaemon(providerHome));
+
+  const created = await runCommand(providerHome, ['identity', 'create', '--name', 'Provider Operator']);
+  assert.equal(created.exitCode, 0);
+
+  const runtimeStateStore = createRuntimeStateStore(providerHome);
+  const state = await runtimeStateStore.readState();
+  const sellerOrder = createSellerOrderRecord({
+    id: 'seller-order-cli-settle-blocked-1',
+    state: 'failed',
+    localMetabotId: state.identity.metabotId,
+    localMetabotSlug: path.basename(providerHome),
+    providerGlobalMetaId: state.identity.globalMetaId,
+    buyerGlobalMetaId: 'idq1buyercliblocked',
+    servicePinId: '/protocols/skill-service-pin-cli-2',
+    currentServicePinId: '/protocols/skill-service-pin-cli-2',
+    serviceName: 'CLI Tarot Reading',
+    providerSkill: 'tarot-rws',
+    orderMessageId: 'order-message-cli-blocked-1',
+    paymentTxid: '2'.repeat(64),
+    paymentAmount: '0.00001',
+    paymentCurrency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    traceId: 'trace-provider-cli-blocked-1',
+    a2aSessionId: 'seller-session-cli-blocked-1',
+    a2aTaskRunId: 'seller-run-cli-blocked-1',
+    failureReason: 'provider_execution_failed',
+    refundRequestPinId: null,
+    createdAt: 1_775_000_020_000,
+    updatedAt: 1_775_000_030_000,
+  });
+  await runtimeStateStore.writeState({
+    ...state,
+    sellerOrders: [sellerOrder],
+  });
+
+  const settled = await runCommand(providerHome, ['provider', 'refund', 'settle', '--payment-txid', '2'.repeat(64)]);
+  assert.equal(settled.exitCode, 2);
+  assert.equal(settled.payload.ok, false);
+  assert.equal(settled.payload.state, 'manual_action_required');
+  assert.equal(settled.payload.code, 'refund_request_missing');
+  assert.equal(settled.payload.data.order.orderId, 'seller-order-cli-settle-blocked-1');
+  assert.equal(settled.payload.data.order.refund.blockingReason, 'refund_request_missing');
+  assert.equal(settled.payload.data.order.trace.id, 'trace-provider-cli-blocked-1');
+});
+
 test('provider summary refreshes rating detail from chain and exposes rated seller-order closure', async (t) => {
   const providerHome = await createProfileHomeTemp('', 'provider-profile');
   const callerHome = await createProfileHomeTemp('', 'caller-profile');
@@ -1520,6 +1783,7 @@ test('provider summary refreshes rating detail from chain and exposes rated sell
     outputType: 'text',
     skillDocument: '# Tarot Reading',
   }), 'utf8');
+  await preparePrimaryRuntimeSkill(providerHome, 'tarot-rws');
 
   const published = await runCommand(providerHome, ['services', 'publish', '--payload-file', publishFile]);
   assert.equal(published.exitCode, 0);
@@ -2418,6 +2682,7 @@ test('network services merges remote demo directory seeds and returns provider d
     outputType: 'text',
     skillDocument: '# Weather Oracle',
   }), 'utf8');
+  await preparePrimaryRuntimeSkill(providerHome, 'metabot-weather-oracle');
 
   const published = await runCommand(providerHome, ['services', 'publish', '--payload-file', publishFile]);
   assert.equal(published.exitCode, 0);
@@ -2567,6 +2832,7 @@ test('services call stores a trace that trace get can read back from the local r
     outputType: 'text',
     skillDocument: '# Weather Oracle',
   }), 'utf8');
+  await preparePrimaryRuntimeSkill(homeDir, 'metabot-weather-oracle');
 
   const published = await runCommand(homeDir, ['services', 'publish', '--payload-file', publishFile]);
   assert.equal(published.exitCode, 0);
@@ -2651,6 +2917,7 @@ test('services call returns an A2A start contract while provider execution flows
     outputType: 'text',
     skillDocument: '# Weather Oracle',
   }), 'utf8');
+  await preparePrimaryRuntimeSkill(providerHome, 'metabot-weather-oracle');
 
   const published = await runCommand(providerHome, ['services', 'publish', '--payload-file', publishFile]);
   assert.equal(published.exitCode, 0);
@@ -3283,7 +3550,7 @@ test('services call rejects unsupported chain service payment before sending ord
   assert.equal(state.traces.some((trace) => trace.session?.peerGlobalMetaId === 'idq1provider'), false);
 });
 
-test('services call persists timeout state when a chain-discovered service does not reply during the foreground wait', async (t) => {
+test('services call creates a refund request when a chain-discovered paid service times out', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
@@ -3326,19 +3593,24 @@ test('services call persists timeout state when a chain-discovered service does 
   assert.equal(called.payload.data.session.event, 'request_sent');
   assert.equal('responseText' in called.payload.data, false);
 
-  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+  const trace = await waitForTrace(homeDir, called.payload.data.traceId, {
     METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
-  });
+    METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+    METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
+      state: 'timeout',
+    }),
+  }, (data) => data?.order?.status === 'refund_pending');
   assert.equal(trace.exitCode, 0);
   assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.a2a.publicStatus, 'requesting_remote');
-  assert.equal(trace.payload.data.a2a.latestEvent, 'request_sent');
+  assert.equal(trace.payload.data.order.status, 'refund_pending');
+  assert.equal(trace.payload.data.order.failureReason, 'delivery_timeout');
+  assert.match(trace.payload.data.order.refundRequestPinId, /service-refund-request/);
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(transcriptMarkdown, /remote MetaBot task session/i);
+  assert.match(transcriptMarkdown, /Local MetaBot delegated|remote MetaBot task session/i);
 });
 
-test('services call upgrades a timed-out chain-discovered caller trace when the remote reply arrives later', async (t) => {
+test('services call keeps a timed-out paid chain-discovered caller trace in refund pending state', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
@@ -3392,21 +3664,23 @@ test('services call upgrades a timed-out chain-discovered caller trace when the 
   assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
   assert.equal(called.payload.data.session.event, 'request_sent');
 
-  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+  const trace = await waitForTrace(homeDir, called.payload.data.traceId, {
     METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
     METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
     METABOT_TEST_FAKE_METAWEB_REPLY: replyConfig,
-  });
+  }, (data) => data?.order?.status === 'refund_pending');
   assert.equal(trace.exitCode, 0);
   assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.a2a.publicStatus, 'requesting_remote');
-  assert.equal(trace.payload.data.a2a.latestEvent, 'request_sent');
+  assert.equal(trace.payload.data.order.status, 'refund_pending');
+  assert.equal(trace.payload.data.order.failureReason, 'delivery_timeout');
+  assert.match(trace.payload.data.order.refundRequestPinId, /service-refund-request/);
+  assert.notEqual(trace.payload.data.resultText, 'A late weather reply finally arrived.');
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(transcriptMarkdown, /remote MetaBot task session/i);
+  assert.match(transcriptMarkdown, /Local MetaBot delegated|remote MetaBot task session/i);
 });
 
-test('trace watch waits through the timeout handoff so one follow-up can observe the eventual late completion', async (t) => {
+test('trace get exposes refund pending state after a chain-discovered paid timeout', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
@@ -3459,14 +3733,16 @@ test('trace watch waits through the timeout handoff so one follow-up can observe
   assert.equal(called.payload.state, 'waiting');
   assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
 
-  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+  const trace = await waitForTrace(homeDir, called.payload.data.traceId, {
     METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
     METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
     METABOT_TEST_FAKE_METAWEB_REPLY: replyConfig,
-  });
+  }, (data) => data?.order?.status === 'refund_pending');
   assert.equal(trace.exitCode, 0);
   assert.equal(trace.payload.ok, true);
-  assert.equal(trace.payload.data.a2a.publicStatus, 'requesting_remote');
+  assert.equal(trace.payload.data.order.status, 'refund_pending');
+  assert.equal(trace.payload.data.order.failureReason, 'delivery_timeout');
+  assert.match(trace.payload.data.order.refundRequestPinId, /service-refund-request/);
 });
 
 test('trace get exposes a remote rating request when the provider later asks for T-stage feedback', async (t) => {

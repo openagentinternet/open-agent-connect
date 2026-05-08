@@ -13,12 +13,22 @@ function readGlobalMetaId(value) {
     return normalized ?? undefined;
 }
 function readDerivedFields(source) {
+    const mvcAddress = readString(source.mvcAddress ?? source.mvc_address);
+    const btcAddress = readString(source.btcAddress ?? source.btc_address);
+    const dogeAddress = readString(source.dogeAddress ?? source.doge_address);
+    // Build addresses map from explicit fields
+    const addresses = {};
+    if (mvcAddress)
+        addresses.mvc = mvcAddress;
+    if (btcAddress)
+        addresses.btc = btcAddress;
+    if (dogeAddress)
+        addresses.doge = dogeAddress;
     return {
         publicKey: readString(source.publicKey ?? source.public_key),
         chatPublicKey: readString(source.chatPublicKey ?? source.chat_public_key),
-        mvcAddress: readString(source.mvcAddress ?? source.mvc_address),
-        btcAddress: readString(source.btcAddress ?? source.btc_address),
-        dogeAddress: readString(source.dogeAddress ?? source.doge_address),
+        mvcAddress,
+        addresses: Object.keys(addresses).length > 0 ? addresses : undefined,
         metaId: readString(source.metaId ?? source.metaid),
         globalMetaId: readGlobalMetaId(source.globalMetaId ?? source.globalmetaid)
     };
@@ -27,8 +37,7 @@ function hasCompleteDerivedFields(derived) {
     return Boolean(derived.publicKey &&
         derived.chatPublicKey &&
         derived.mvcAddress &&
-        derived.btcAddress &&
-        derived.dogeAddress &&
+        derived.addresses &&
         derived.metaId &&
         derived.globalMetaId);
 }
@@ -37,6 +46,16 @@ function assertDerivedFieldsMatch(expected, actual) {
         const value = actual[key];
         if (value === undefined)
             continue;
+        if (key === 'addresses') {
+            // Compare addresses map entries
+            const actualAddresses = value;
+            for (const [chain, addr] of Object.entries(actualAddresses)) {
+                if (addr !== expected.addresses[chain]) {
+                    throw new Error(`Identity field mismatch: addresses.${chain}`);
+                }
+            }
+            continue;
+        }
         if (expected[key] !== value) {
             throw new Error(`Identity field mismatch: ${key}`);
         }
@@ -58,7 +77,12 @@ async function loadIdentity(source) {
         return {
             mnemonic: '',
             path,
-            ...derivedFields
+            publicKey: derivedFields.publicKey,
+            chatPublicKey: derivedFields.chatPublicKey,
+            addresses: derivedFields.addresses,
+            mvcAddress: derivedFields.mvcAddress,
+            metaId: derivedFields.metaId,
+            globalMetaId: derivedFields.globalMetaId,
         };
     }
     throw new Error('Identity source is missing mnemonic');

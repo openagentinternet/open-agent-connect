@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildMyServicesPageViewModel = buildMyServicesPageViewModel;
+exports.buildMyServicesPageViewModelRuntimeSource = buildMyServicesPageViewModelRuntimeSource;
 function normalizeText(value) {
     if (typeof value === 'string') {
         return value.trim();
@@ -33,6 +34,50 @@ function formatRatingStateLabel(record) {
         return '评分同步异常';
     }
     return '未评价';
+}
+function formatLifecycleStateLabel(record) {
+    switch (normalizeText(record.state)) {
+        case 'received':
+            return 'Received';
+        case 'acknowledged':
+            return 'Acknowledged';
+        case 'in_progress':
+            return 'In progress';
+        case 'completed':
+            return 'Completed';
+        case 'rating_pending':
+            return 'Rating pending';
+        case 'failed':
+            return 'Failed';
+        case 'refund_pending':
+            return 'Refund pending';
+        case 'refunded':
+            return 'Refunded';
+        case 'ended':
+            return 'Ended';
+        default:
+            return '';
+    }
+}
+function formatOrderStateLabel(record) {
+    const lifecycle = formatLifecycleStateLabel(record);
+    const rating = formatRatingStateLabel(record);
+    return [lifecycle, rating].filter(Boolean).join(' · ') || rating;
+}
+function formatPaymentLabel(record) {
+    const amount = normalizeText(record.paymentAmount);
+    const currency = normalizeText(record.paymentCurrency);
+    const paymentTxid = normalizeText(record.paymentTxid);
+    const amountLabel = [amount, currency].filter(Boolean).join(' ');
+    return [amountLabel, paymentTxid].filter(Boolean).join(' · ') || '—';
+}
+function formatRuntimeLabel(record) {
+    const runtimeProvider = normalizeText(record.runtimeProvider);
+    const runtimeId = normalizeText(record.runtimeId);
+    const llmSessionId = normalizeText(record.llmSessionId);
+    const fallbackSelected = record.fallbackSelected === true ? 'fallback selected' : '';
+    return [runtimeProvider, runtimeId, llmSessionId, fallbackSelected].filter(Boolean).join(' · ')
+        || 'Runtime unavailable';
 }
 function buildMyServicesPageViewModel(input) {
     const providerSummary = readObject(input.providerSummary);
@@ -76,10 +121,16 @@ function buildMyServicesPageViewModel(input) {
                 key: orderId || traceId,
                 serviceName: normalizeText(record.serviceName) || 'Unknown service',
                 buyerLabel: [buyerName, buyerGlobalMetaId].filter(Boolean).join(' · ') || 'Unknown buyer',
-                stateLabel: formatRatingStateLabel(record),
+                stateLabel: formatOrderStateLabel(record),
                 statusDetail: normalizeText(record.publicStatus) || 'unknown',
                 traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '/ui/trace',
                 traceLabel: traceId || 'Trace unavailable',
+                paymentLabel: formatPaymentLabel(record),
+                runtimeLabel: formatRuntimeLabel(record),
+                refundRequestPinId: normalizeText(record.refundRequestPinId),
+                refundTxid: normalizeText(record.refundTxid),
+                refundFinalizePinId: normalizeText(record.refundFinalizePinId),
+                refundBlockingReason: normalizeText(record.refundBlockingReason),
                 createdAt: normalizeText(record.createdAt) || 'Unknown',
                 requiresManualRefund: manualActionKeys.has(orderId),
                 ratingCommentPreview: normalizeText(record.ratingComment),
@@ -129,4 +180,17 @@ function buildMyServicesPageViewModel(input) {
         recentOrders,
         manualActions,
     };
+}
+function buildMyServicesPageViewModelRuntimeSource() {
+    return [
+        normalizeText,
+        readObject,
+        pushRow,
+        formatRatingStateLabel,
+        formatLifecycleStateLabel,
+        formatOrderStateLabel,
+        formatPaymentLabel,
+        formatRuntimeLabel,
+        buildMyServicesPageViewModel,
+    ].map((fn) => fn.toString()).join('\n\n');
 }

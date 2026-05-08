@@ -6,6 +6,15 @@ export declare function readChainFlag(args: string[]): {
     chain: CliChainValue | null;
     error: MetabotCommandResult<never> | null;
 };
+/**
+ * Parse --chain flag accepting any chain name.
+ * The runtime handler is responsible for validating against the adapter registry.
+ * Used by commands that support multi-chain (chain write).
+ */
+export declare function readAnyChainFlag(args: string[]): {
+    chain: string | null;
+    error: MetabotCommandResult<never> | null;
+};
 export declare function hasFlag(args: string[], flag: string): boolean;
 export declare function readJsonFile(context: CliRuntimeContext, filePath: string): Promise<Record<string, unknown>>;
 export declare function commandMissingFlag(flag: string): MetabotCommandResult<never>;

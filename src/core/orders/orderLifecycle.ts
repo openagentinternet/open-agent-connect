@@ -2,6 +2,7 @@ export const SERVICE_ORDER_OPEN_ORDER_EXISTS_ERROR_CODE = 'open_order_exists';
 export const SERVICE_ORDER_SELF_ORDER_NOT_ALLOWED_ERROR_CODE = 'self_order_not_allowed';
 export const DEFAULT_REFUND_REQUEST_RETRY_DELAY_MS = 60_000;
 export const SERVICE_ORDER_FREE_REFUND_SKIPPED_REASON = 'free_order_no_refund_required';
+export const SERVICE_ORDER_SELF_REFUND_SKIPPED_REASON = 'self_directed_order_no_external_refund_required';
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';

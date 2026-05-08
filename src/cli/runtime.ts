@@ -58,6 +58,7 @@ import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeer
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { createA2ASimplemsgListenerManager } from '../core/a2a/simplemsgListener';
+import { classifySimplemsgContent } from '../core/a2a/simplemsgClassifier';
 import { createSocketIoMetaWebMasterReplyWaiter, type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
 import { parseMasterResponse } from '../core/master/masterMessageSchema';
 import {
@@ -79,6 +80,7 @@ import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
 import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
 import { discoverLlmRuntimes } from '../core/llm/llmRuntimeDiscovery';
+import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
 import {
   LlmExecutor,
   createRegistryBackendFactories,
@@ -100,11 +102,62 @@ const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
 const TEST_FAKE_BUYER_RATING_REPLY_ENV = 'METABOT_TEST_FAKE_BUYER_RATING_REPLY';
 const TEST_FAKE_MASTER_REPLY_ENV = 'METABOT_TEST_FAKE_MASTER_REPLY';
+const TEST_FAKE_PROVIDER_LLM_REPLY_ENV = 'METABOT_TEST_FAKE_PROVIDER_LLM_REPLY';
 const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
 let cachedDaemonRuntimeFingerprint: string | null = null;
+
+type A2ASimplemsgInboundDispatcherMessage = Pick<
+  PrivateChatInboundMessage,
+  'fromGlobalMetaId' | 'content' | 'messagePinId' | 'timestamp'
+> & Partial<PrivateChatInboundMessage>;
+
+function normalizeDispatcherPrivateChatMessage(
+  message: A2ASimplemsgInboundDispatcherMessage
+): PrivateChatInboundMessage {
+  return {
+    fromGlobalMetaId: message.fromGlobalMetaId,
+    content: message.content,
+    messagePinId: message.messagePinId ?? null,
+    fromChatPublicKey: message.fromChatPublicKey ?? null,
+    timestamp: Number.isFinite(message.timestamp) ? Math.trunc(Number(message.timestamp)) : Date.now(),
+    rawMessage: message.rawMessage ?? null,
+  };
+}
+
+export function buildA2ASimplemsgInboundDispatcher(input: {
+  handleOrderProtocolMessage?: (message: A2ASimplemsgInboundDispatcherMessage) => Promise<MetabotCommandResult<unknown>> | MetabotCommandResult<unknown>;
+  handleGenericPrivateChatMessage: (message: PrivateChatInboundMessage) => Promise<void> | void;
+  logWarning?: (scope: string, error: unknown) => void;
+}): (message: A2ASimplemsgInboundDispatcherMessage) => Promise<void> {
+  const logWarning = input.logWarning ?? ((scope: string, error: unknown) => {
+    console.warn(scope, error instanceof Error ? error.message : String(error));
+  });
+
+  return async (message) => {
+    const simplemsgClassification = classifySimplemsgContent(message.content);
+    const orderProtocolHandler = input.handleOrderProtocolMessage;
+    if (orderProtocolHandler) {
+      try {
+        const result = await orderProtocolHandler(message);
+        if (
+          simplemsgClassification.kind === 'order_protocol'
+          || (result?.ok === true && (result.data as { handled?: unknown } | undefined)?.handled === true)
+        ) {
+          return;
+        }
+      } catch (error) {
+        logWarning('[A2A order protocol handler]', error);
+        if (simplemsgClassification.kind === 'order_protocol') {
+          return;
+        }
+      }
+    }
+    await input.handleGenericPrivateChatMessage(normalizeDispatcherPrivateChatMessage(message));
+  };
+}
 
 type EvolutionPublishFailureCode =
   | 'evolution_variant_not_found'
@@ -1641,8 +1694,63 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     },
     services: {
       publish: async (input) => requestJson(context, 'POST', '/api/services/publish', input),
+      listPublishSkills: async () => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const runtimeStateStore = createRuntimeStateStore(homeDir);
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before listing publishable skills.');
+        }
+
+        const paths = resolveMetabotPaths(homeDir);
+        const metaBotSlug = path.basename(paths.profileRoot);
+        const catalog = createPlatformSkillCatalog({
+          runtimeStore: createLlmRuntimeStore(paths),
+          bindingStore: createLlmBindingStore(paths),
+          systemHomeDir: paths.systemHomeDir,
+          projectRoot: paths.profileRoot,
+          env: context.env,
+        });
+        const result = await catalog.listPrimaryRuntimeSkills({ metaBotSlug });
+        if (!result.ok) {
+          return commandFailed(result.code, result.message);
+        }
+        return commandSuccess({
+          metaBotSlug,
+          identity: {
+            metabotId: state.identity.metabotId,
+            name: state.identity.name,
+            globalMetaId: state.identity.globalMetaId,
+          },
+          runtime: {
+            id: result.runtime.id,
+            provider: result.runtime.provider,
+            displayName: result.runtime.displayName,
+            health: result.runtime.health,
+            version: result.runtime.version,
+            logoPath: result.runtime.logoPath,
+          },
+          platform: result.platform,
+          skills: result.skills,
+          rootDiagnostics: result.rootDiagnostics,
+        });
+      },
       call: async (input) => requestJson(context, 'POST', '/api/services/call', input),
       rate: async (input) => requestJson(context, 'POST', '/api/services/rate', input),
+    },
+    provider: {
+      inspectOrder: async (input) => {
+        const query = new URLSearchParams();
+        if (input.orderId) {
+          query.set('orderId', input.orderId);
+        }
+        if (input.paymentTxid) {
+          query.set('paymentTxid', input.paymentTxid);
+        }
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/provider/order${suffix}`);
+      },
+      settleRefund: async (input) => requestJson(context, 'POST', '/api/provider/refund/settle', input),
     },
     chat: {
       private: async (input) => requestJson(context, 'POST', '/api/chat/private', input),
@@ -2218,6 +2326,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
       listServices: networkListServices,
     },
     services: { ...defaults.services, ...provided.services },
+    provider: { ...defaults.provider, ...provided.provider },
     chat: { ...defaults.chat, ...provided.chat },
     file: { ...defaults.file, ...provided.file },
     wallet: { ...defaults.wallet, ...provided.wallet },
@@ -2261,11 +2370,31 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     acceptPolicy: 'accept_all' as const,
     defaultStrategyId: null as string | null,
   };
+  const providerLlmBackends = createRegistryBackendFactories();
+  const fakeProviderLlmReply = normalizeEnvText(context.env[TEST_FAKE_PROVIDER_LLM_REPLY_ENV]);
+  const useFakeProviderLlm = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' && Boolean(fakeProviderLlmReply);
+  if (useFakeProviderLlm) {
+    for (const provider of Object.keys(providerLlmBackends)) {
+      providerLlmBackends[provider] = () => ({
+        provider,
+        async execute(request) {
+          return {
+            status: 'completed',
+            output: fakeProviderLlmReply
+              .replace(/\{\{prompt\}\}/g, request.prompt)
+              .replace(/\{\{skill\}\}/g, request.skills?.[0] ?? ''),
+            durationMs: 1,
+          };
+        },
+      });
+    }
+  }
+
   const llmExecutor = new LlmExecutor({
     sessionsRoot: paths.llmExecutorSessionsRoot,
     transcriptsRoot: paths.llmExecutorTranscriptsRoot,
     skillsRoot: paths.skillsRoot,
-    backends: createRegistryBackendFactories(),
+    backends: providerLlmBackends,
   });
 
   const handlers = createDefaultMetabotDaemonHandlers({
@@ -2289,6 +2418,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     requestMvcGasSubsidy,
     autoReplyConfig: sharedAutoReplyConfig,
     llmExecutor,
+    providerRuntimeCanStart: useFakeProviderLlm ? async () => true : undefined,
   });
 
   const daemon = createMetabotDaemon({
@@ -2434,26 +2564,28 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   });
 
   const daemonConfig = await createConfigStore(paths).read();
+  const simplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher({
+    handleOrderProtocolMessage: handlers.services?.handleInboundOrderProtocolMessage,
+    handleGenericPrivateChatMessage: async (message) => {
+      await chatAutoReplyOrchestrator.handleInboundMessage(message);
+    },
+    logWarning: (scope, error) => {
+      console.warn(scope, error instanceof Error ? error.message : String(error));
+    },
+  });
   const simplemsgListener = createA2ASimplemsgListenerManager({
     systemHomeDir: paths.systemHomeDir,
     resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
     onMessage: (profile, message) => {
+      if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
+        void simplemsgInboundDispatcher(message).catch((error) => {
+          console.warn('[private chat auto-reply]', error instanceof Error ? error.message : String(error));
+        });
+        return;
+      }
       void profileAutoReplyDispatcher.handleInboundMessage(profile, message).catch((error) => {
         console.warn('[private chat auto-reply]', error instanceof Error ? error.message : String(error));
       });
-      if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
-        const orderProtocolHandler = handlers.services?.handleInboundOrderProtocolMessage;
-        if (orderProtocolHandler) {
-          void Promise.resolve(orderProtocolHandler({
-            fromGlobalMetaId: message.fromGlobalMetaId,
-            content: message.content,
-            messagePinId: message.messagePinId,
-            timestamp: message.timestamp,
-          })).catch((error) => {
-            console.warn('[A2A order protocol handler]', error instanceof Error ? error.message : String(error));
-          });
-        }
-      }
     },
     onError: (error) => {
       console.warn('[A2A simplemsg listener]', error.message);

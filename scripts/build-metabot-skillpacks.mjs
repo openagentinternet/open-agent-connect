@@ -396,29 +396,45 @@ async function collectBundledRuntimeDependencies(repoRoot) {
   const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, 'package.json'), 'utf8'));
   const packageLock = JSON.parse(await fs.readFile(path.join(repoRoot, 'package-lock.json'), 'utf8'));
   const packages = packageLock?.packages ?? {};
-  const queue = Object.keys(packageJson.dependencies || {});
-  const seen = new Set();
+  const dependencyNames = new Set();
+  const queue = Object.keys(packageJson.dependencies || {}).map((dependencyName) => ({
+    dependencyName,
+    packagePath: `node_modules/${dependencyName}`,
+  }));
+  const seenPackagePaths = new Set();
+
+  function resolveDependencyPath(parentPackagePath, dependencyName) {
+    if (parentPackagePath) {
+      const nestedPath = `${parentPackagePath}/node_modules/${dependencyName}`;
+      if (packages[nestedPath]) {
+        return nestedPath;
+      }
+    }
+    return `node_modules/${dependencyName}`;
+  }
 
   while (queue.length > 0) {
-    const dependencyName = queue.shift();
-    if (!dependencyName || seen.has(dependencyName)) {
+    const item = queue.shift();
+    if (!item?.dependencyName || !item.packagePath || seenPackagePaths.has(item.packagePath)) {
       continue;
     }
 
-    const packageLockEntry = packages[`node_modules/${dependencyName}`];
+    const packageLockEntry = packages[item.packagePath];
     if (!packageLockEntry) {
-      throw new Error(`Missing package-lock entry for runtime dependency: ${dependencyName}`);
+      throw new Error(`Missing package-lock entry for runtime dependency: ${item.dependencyName}`);
     }
 
-    seen.add(dependencyName);
+    seenPackagePaths.add(item.packagePath);
+    dependencyNames.add(item.dependencyName);
     for (const nestedDependencyName of Object.keys(packageLockEntry.dependencies || {})) {
-      if (!seen.has(nestedDependencyName)) {
-        queue.push(nestedDependencyName);
-      }
+      queue.push({
+        dependencyName: nestedDependencyName,
+        packagePath: resolveDependencyPath(item.packagePath, nestedDependencyName),
+      });
     }
   }
 
-  return [...seen].sort();
+  return [...dependencyNames].sort();
 }
 
 async function copyBundledRuntimeDependencies(repoRoot, runtimeRoot, dependencyNames) {

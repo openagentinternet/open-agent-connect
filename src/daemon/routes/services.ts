@@ -18,6 +18,19 @@ export const handleServicesRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  if (url.pathname === '/api/services/publish/skills') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+
+    const result = handlers.services?.listPublishSkills
+      ? await handlers.services.listPublishSkills()
+      : commandFailed('not_implemented', 'Services publish skills handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
   if (url.pathname === '/api/services/call') {
     if (req.method !== 'POST') {
       context.sendMethodNotAllowed(['POST']);

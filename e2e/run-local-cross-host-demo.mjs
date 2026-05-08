@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../dist/cli/main.js');
 const { createRuntimeStateStore } = require('../dist/core/state/runtimeStateStore.js');
+const { resolveMetabotPaths } = require('../dist/core/state/paths.js');
 const { buildPresenceSnapshot } = require('../dist/core/discovery/serviceDirectory.js');
 const { rankServicesForDirectory } = require('../dist/core/discovery/serviceRanking.js');
 const { planRemoteCall } = require('../dist/core/delegation/remoteCall.js');
@@ -44,6 +45,7 @@ async function runCommand(homeDir, args) {
     METABOT_HOME: homeDir,
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_TEST_FAKE_PROVIDER_LLM_REPLY: 'Tomorrow weather from {{skill}}: bright with light wind.',
     METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
   };
 
@@ -150,6 +152,64 @@ function buildProviderDirectoryServices(providerIdentity, services) {
   }));
 }
 
+function createLlmRuntime(id, provider, health = 'healthy') {
+  const now = '2026-05-07T00:00:00.000Z';
+  return {
+    id,
+    provider,
+    displayName: `${provider} runtime`,
+    binaryPath: `/bin/${provider}`,
+    version: '1.0.0',
+    authState: 'authenticated',
+    health,
+    capabilities: ['tool-use'],
+    lastSeenAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createLlmBinding(id, slug, llmRuntimeId, role, priority = 0, enabled = true) {
+  const now = '2026-05-07T00:00:00.000Z';
+  return {
+    id,
+    metaBotSlug: slug,
+    llmRuntimeId,
+    role,
+    priority,
+    enabled,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+async function preparePrimaryRuntimeSkill(homeDir, providerHost, skillName) {
+  const paths = resolveMetabotPaths(homeDir);
+  const slug = path.basename(path.resolve(homeDir));
+  const primaryRuntimeId = `runtime-${providerHost}`;
+
+  await mkdir(path.dirname(paths.llmRuntimesPath), { recursive: true });
+  await writeFile(paths.llmRuntimesPath, JSON.stringify({
+    version: 1,
+    runtimes: [
+      createLlmRuntime(primaryRuntimeId, providerHost),
+      createLlmRuntime('runtime-codex-fallback', 'codex'),
+    ],
+  }, null, 2), 'utf8');
+  await writeFile(paths.llmBindingsPath, JSON.stringify({
+    version: 1,
+    bindings: [
+      createLlmBinding(`binding-${providerHost}-primary`, slug, primaryRuntimeId, 'primary'),
+      createLlmBinding('binding-codex-fallback', slug, 'runtime-codex-fallback', 'fallback', 10),
+    ],
+  }, null, 2), 'utf8');
+
+  const skillRootName = providerHost === 'claude-code' ? '.claude' : `.${providerHost}`;
+  const skillRoot = path.join(homeDir, skillRootName, 'skills', skillName);
+  await mkdir(skillRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, 'SKILL.md'), `# ${skillName}\n`, 'utf8');
+}
+
 async function publishWeatherOracle(homeDir) {
   const payloadFile = path.join(homeDir, 'weather-oracle.json');
   await writeFile(payloadFile, JSON.stringify({
@@ -190,6 +250,7 @@ export async function runLocalCrossHostDemo({
       await runCommand(providerHome, ['identity', 'create', '--name', providerName]),
       ['identity', 'create', '--name', providerName]
     );
+    await preparePrimaryRuntimeSkill(providerHome, providerHost, 'metabot-weather-oracle');
     const publishFile = await publishWeatherOracle(providerHome);
     const providerService = assertCommandSucceeded(
       await runCommand(providerHome, ['services', 'publish', '--payload-file', publishFile]),

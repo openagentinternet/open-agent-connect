@@ -5,6 +5,10 @@ export type IdentitySource = Partial<DerivedIdentity> & {
     mvc_address?: string;
     btc_address?: string;
     doge_address?: string;
+    /** Legacy: same as addresses.btc */
+    btcAddress?: string;
+    /** Legacy: same as addresses.doge */
+    dogeAddress?: string;
     metaid?: string;
     globalmetaid?: string;
 };

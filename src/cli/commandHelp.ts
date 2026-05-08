@@ -197,6 +197,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'network', summary: 'Inspect the MetaWeb yellow-pages directory and local source seeds.' },
     { name: 'master', summary: 'Publish, discover, ask, and inspect Ask Master flows.' },
     { name: 'services', summary: 'Publish, call, and rate remote MetaBot services.' },
+    { name: 'provider', summary: 'Inspect local provider orders and settle seller-side refunds.' },
     { name: 'chat', summary: 'Send encrypted private MetaWeb messages to another MetaBot.' },
     { name: 'host', summary: 'Project shared MetaBot skills into one host-native skills root.' },
     { name: 'trace', summary: 'Watch or inspect structured remote delegation traces.' },
@@ -868,6 +869,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot services <subcommand>',
     subcommands: [
       { name: 'publish', summary: 'Publish one paid capability to chain.' },
+      { name: 'publish-skills', summary: 'List primary-runtime skills available for service publishing.' },
       { name: 'call', summary: 'Delegate one task to a remote MetaBot service.' },
       { name: 'rate', summary: 'Publish one buyer-side service rating after delivery.' },
     ],
@@ -903,6 +905,115 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot services publish --payload-file service-payload.json',
     ],
     optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['services', 'publish-skills'],
+    summary: 'Lists skills from the active MetaBot primary runtime only.',
+    usage: 'metabot services publish-skills',
+    successFields: [
+      'metaBotSlug',
+      'identity',
+      'runtime',
+      'platform',
+      'skills',
+      'rootDiagnostics',
+    ],
+    failureSemantics: [
+      'Fails before chain writes when no identity exists, the primary runtime is missing, or the primary runtime is unavailable.',
+      'Fallback runtime skills are intentionally excluded from this list.',
+    ],
+    examples: [
+      'metabot services publish-skills',
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['provider'],
+    summary: 'Provider operations for local seller-side order inspection and refund settlement.',
+    usage: 'metabot provider <subcommand>',
+    subcommands: [
+      { name: 'order', summary: 'Inspect seller-side provider orders.' },
+      { name: 'refund', summary: 'Process seller-side refund settlement.' },
+    ],
+    failureSemantics: [
+      'Provider operations resolve the active local MetaBot and fail before settlement when no active identity exists.',
+      'Refund settlement returns a machine-readable blocker instead of marking an order refunded without proof.',
+    ],
+    examples: [
+      'metabot provider order inspect --order-id seller-order-123',
+      'metabot provider refund settle --payment-txid <txid>',
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['provider', 'order'],
+    summary: 'Inspect seller-side provider orders.',
+    usage: 'metabot provider order <subcommand>',
+    subcommands: [
+      { name: 'inspect', summary: 'Inspect one seller order by order id or payment txid.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['provider', 'order', 'inspect'],
+    summary: 'Inspect one seller-side provider order and return service, buyer, status, trace, payment, runtime session, and refund fields.',
+    usage: 'metabot provider order inspect (--order-id <id> | --payment-txid <txid>)',
+    optionalFlags: [
+      { flag: '--order-id', value: '<id>', description: 'Local seller order id.' },
+      { flag: '--payment-txid', value: '<txid>', description: 'Payment txid associated with the seller order.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'order.orderId',
+      'order.service',
+      'order.buyer',
+      'order.status',
+      'order.trace',
+      'order.payment',
+      'order.runtime',
+      'order.refund',
+    ],
+    failureSemantics: [
+      'Fails when neither selector is provided, both selectors are provided, or no seller order matches the selector.',
+    ],
+    examples: [
+      'metabot provider order inspect --order-id seller-order-123',
+      'metabot provider order inspect --payment-txid <txid>',
+    ],
+  },
+  {
+    commandPath: ['provider', 'refund'],
+    summary: 'Process seller-side refund settlement.',
+    usage: 'metabot provider refund <subcommand>',
+    subcommands: [
+      { name: 'settle', summary: 'Settle one pending seller refund by order id or payment txid.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['provider', 'refund', 'settle'],
+    summary: 'Settle one pending seller refund and return a refund txid, finalization pin, or a machine-readable blocking reason.',
+    usage: 'metabot provider refund settle (--order-id <id> | --payment-txid <txid>)',
+    optionalFlags: [
+      { flag: '--order-id', value: '<id>', description: 'Local seller order id.' },
+      { flag: '--payment-txid', value: '<txid>', description: 'Payment txid associated with the seller order.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'orderId',
+      'paymentTxid',
+      'refundTxid',
+      'refundFinalizePinId',
+      'order',
+      'settlement',
+    ],
+    failureSemantics: [
+      'Returns manual_action_required with order.refund.blockingReason when settlement is blocked by missing proof, unsupported asset, missing destination address, insufficient balance, transfer failure, or finalization failure.',
+    ],
+    examples: [
+      'metabot provider refund settle --order-id seller-order-123',
+      'metabot provider refund settle --payment-txid <txid>',
+    ],
   },
   {
     commandPath: ['services', 'call'],

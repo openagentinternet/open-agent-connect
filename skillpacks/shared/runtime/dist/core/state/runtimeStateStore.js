@@ -3,12 +3,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ensureRuntimeLayout = ensureRuntimeLayout;
 exports.createRuntimeStateStore = createRuntimeStateStore;
 const node_fs_1 = require("node:fs");
+const sellerOrderState_1 = require("../orders/sellerOrderState");
 const paths_1 = require("./paths");
 function cloneEmptyState() {
     return {
         identity: null,
         services: [],
         traces: [],
+        sellerOrders: [],
     };
 }
 async function ensureRuntimeLayout(paths) {
@@ -34,14 +36,63 @@ async function readJsonFile(filePath) {
         throw error;
     }
 }
+function normalizeRuntimeIdentity(identity) {
+    if (!identity || typeof identity !== 'object')
+        return null;
+    const legacy = identity;
+    // Build addresses map from legacy flat fields if missing
+    if (!identity['addresses'] || typeof identity['addresses'] !== 'object') {
+        const addresses = {};
+        const mvcAddr = typeof identity['mvcAddress'] === 'string' ? identity['mvcAddress'] : undefined;
+        const btcAddr = typeof legacy.btcAddress === 'string' ? legacy.btcAddress : undefined;
+        const dogeAddr = typeof legacy.dogeAddress === 'string' ? legacy.dogeAddress : undefined;
+        if (mvcAddr)
+            addresses.mvc = mvcAddr;
+        if (btcAddr)
+            addresses.btc = btcAddr;
+        if (dogeAddr)
+            addresses.doge = dogeAddr;
+        identity = { ...identity, addresses };
+    }
+    return {
+        metabotId: typeof identity['metabotId'] === 'number' ? identity['metabotId'] : 0,
+        name: typeof identity['name'] === 'string' ? identity['name'] : '',
+        createdAt: typeof identity['createdAt'] === 'number' ? identity['createdAt'] : 0,
+        path: typeof identity['path'] === 'string' ? identity['path'] : '',
+        publicKey: typeof identity['publicKey'] === 'string' ? identity['publicKey'] : '',
+        chatPublicKey: typeof identity['chatPublicKey'] === 'string' ? identity['chatPublicKey'] : '',
+        addresses: identity['addresses'] ?? {},
+        mvcAddress: typeof identity['mvcAddress'] === 'string' ? identity['mvcAddress'] : '',
+        metaId: typeof identity['metaId'] === 'string' ? identity['metaId'] : '',
+        globalMetaId: typeof identity['globalMetaId'] === 'string' ? identity['globalMetaId'] : '',
+        subsidyState: identity['subsidyState'],
+        subsidyError: typeof identity['subsidyError'] === 'string' ? identity['subsidyError'] : null,
+        syncState: identity['syncState'],
+        syncError: typeof identity['syncError'] === 'string' ? identity['syncError'] : null,
+        namePinId: typeof identity['namePinId'] === 'string' ? identity['namePinId'] : null,
+        chatPublicKeyPinId: typeof identity['chatPublicKeyPinId'] === 'string' ? identity['chatPublicKeyPinId'] : null,
+    };
+}
 function normalizeRuntimeState(value) {
     if (!value || typeof value !== 'object') {
         return cloneEmptyState();
     }
     return {
-        identity: value.identity ?? null,
+        identity: normalizeRuntimeIdentity(value.identity),
         services: Array.isArray(value.services) ? value.services : [],
         traces: Array.isArray(value.traces) ? value.traces : [],
+        sellerOrders: Array.isArray(value.sellerOrders)
+            ? (value.sellerOrders)
+                .map((entry) => {
+                try {
+                    return (0, sellerOrderState_1.createSellerOrderRecord)(entry);
+                }
+                catch {
+                    return null;
+                }
+            })
+                .filter((entry) => Boolean(entry))
+            : [],
     };
 }
 function createRuntimeStateStore(homeDirOrPaths) {

@@ -154,6 +154,52 @@ test('runCli fails `metabot services publish` when --chain value is unsupported'
   assert.match(envelope.message, /Unsupported --chain value/);
 });
 
+test('runCli dispatches `metabot services publish-skills` to the primary runtime skill lister', async () => {
+  const stdout = [];
+  const calls = [];
+
+  const exitCode = await runCli(['services', 'publish-skills'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        listPublishSkills: async () => {
+          calls.push({});
+          return commandSuccess({
+            metaBotSlug: 'alice',
+            runtime: {
+              provider: 'codex',
+              displayName: 'Codex',
+              health: 'healthy',
+            },
+            skills: [
+              { skillName: 'metabot-weather-oracle' },
+            ],
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{}]);
+  assert.deepEqual(JSON.parse(stdout.join('').trim()), {
+    ok: true,
+    state: 'success',
+    data: {
+      metaBotSlug: 'alice',
+      runtime: {
+        provider: 'codex',
+        displayName: 'Codex',
+        health: 'healthy',
+      },
+      skills: [
+        { skillName: 'metabot-weather-oracle' },
+      ],
+    },
+  });
+});
+
 test('runCli dispatches `metabot services call --request-file` with parsed JSON request', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-call-'));
   const requestFile = path.join(tempDir, 'request.json');

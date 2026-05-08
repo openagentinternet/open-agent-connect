@@ -1,5 +1,6 @@
 import type { SessionTraceRecord } from '../chat/sessionTrace';
 import { resolveManualRefundDecision } from '../orders/manualRefund';
+import type { SellerOrderRecord } from '../orders/sellerOrderState';
 import { findRatingDetailByServicePayment } from '../ratings/ratingDetailSync';
 import type { RatingDetailItem } from '../ratings/ratingDetailState';
 import type { PublishedMasterRecord } from '../master/masterTypes';
@@ -48,7 +49,21 @@ export interface ProviderConsoleOrderRow {
   buyerGlobalMetaId: string | null;
   buyerName: string | null;
   publicStatus: string | null;
+  state?: string | null;
+  providerSkill?: string | null;
+  a2aSessionId?: string | null;
+  a2aTaskRunId?: string | null;
+  llmSessionId?: string | null;
+  runtimeId?: string | null;
+  runtimeProvider?: string | null;
+  fallbackSelected?: boolean | null;
+  failureReason?: string | null;
+  refundRequestPinId?: string | null;
+  refundTxid?: string | null;
+  refundFinalizePinId?: string | null;
+  refundBlockingReason?: string | null;
   createdAt: number;
+  updatedAt?: number;
   ratingStatus: ProviderConsoleOrderRatingStatus;
   ratingValue: number | null;
   ratingComment: string | null;
@@ -60,7 +75,7 @@ export interface ProviderConsoleManualActionRow {
   kind: 'refund';
   traceId: string;
   orderId: string;
-  refundRequestPinId: string;
+  refundRequestPinId: string | null;
   sessionId: string | null;
 }
 
@@ -93,6 +108,15 @@ export interface ProviderConsoleSnapshot {
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function isZeroAmount(value: unknown): boolean {
+  const text = normalizeText(value);
+  if (!text) {
+    return false;
+  }
+  const numeric = Number(text);
+  return Number.isFinite(numeric) && numeric === 0;
 }
 
 function sortByUpdatedAtDesc<T extends { updatedAt?: number; createdAt?: number }>(left: T, right: T): number {
@@ -180,7 +204,137 @@ function buildOrderRowWithRating(
     buyerGlobalMetaId: normalizeText(trace.session?.peerGlobalMetaId) || null,
     buyerName: normalizeText(trace.session?.peerName) || null,
     publicStatus: normalizeText(trace.a2a?.publicStatus) || null,
+    ...(normalizeText(order.failureReason) ? { failureReason: normalizeText(order.failureReason) } : {}),
+    ...(normalizeText(order.refundRequestPinId) ? { refundRequestPinId: normalizeText(order.refundRequestPinId) } : {}),
+    ...(normalizeText(order.refundTxid) ? { refundTxid: normalizeText(order.refundTxid) } : {}),
+    ...(normalizeText(order.refundFinalizePinId) ? { refundFinalizePinId: normalizeText(order.refundFinalizePinId) } : {}),
+    ...(normalizeText(order.refundBlockingReason) ? { refundBlockingReason: normalizeText(order.refundBlockingReason) } : {}),
     createdAt: Number.isFinite(trace.createdAt) ? Number(trace.createdAt) : 0,
+    ...rating,
+  };
+}
+
+function buildSellerOrderRowWithRating(
+  order: SellerOrderRecord,
+  ratingDetails: RatingDetailItem[],
+  ratingSyncState: ProviderConsoleRatingSyncState,
+): ProviderConsoleOrderRow | null {
+  const orderId = normalizeText(order.id);
+  const servicePinId = normalizeText(order.currentServicePinId) || normalizeText(order.servicePinId);
+  if (!orderId || !servicePinId) {
+    return null;
+  }
+
+  const paymentTxid = normalizeText(order.paymentTxid) || null;
+  const ratingDetail = servicePinId && paymentTxid
+    ? findRatingDetailByServicePayment(ratingDetails, {
+        serviceId: servicePinId,
+        servicePaidTx: paymentTxid,
+      })
+    : null;
+  const ratingTrace: ProviderConsoleTraceRecord = {
+    traceId: normalizeText(order.traceId),
+    channel: 'a2a',
+    createdAt: Number.isFinite(order.createdAt) ? Number(order.createdAt) : 0,
+    session: {
+      id: normalizeText(order.a2aSessionId),
+      title: normalizeText(order.serviceName) || null,
+      type: 'a2a',
+      metabotId: Number.isFinite(order.localMetabotId) ? Number(order.localMetabotId) : null,
+      peerGlobalMetaId: normalizeText(order.buyerGlobalMetaId) || null,
+      peerName: null,
+      externalConversationId: null,
+    },
+    order: {
+      id: orderId,
+      role: 'seller',
+      serviceId: servicePinId,
+      serviceName: normalizeText(order.serviceName),
+      orderPinId: normalizeText(order.orderPinId) || null,
+      orderTxid: normalizeText(order.orderTxid) || null,
+      orderTxids: order.orderTxid ? [order.orderTxid] : [],
+      paymentTxid,
+      paymentCommitTxid: null,
+      orderReference: normalizeText(order.orderReference) || null,
+      paymentCurrency: normalizeText(order.paymentCurrency) || null,
+      paymentAmount: normalizeText(order.paymentAmount) || null,
+      paymentChain: normalizeText(order.paymentChain) || null,
+      settlementKind: null,
+      mrc20Ticker: null,
+      mrc20Id: null,
+      providerSkill: normalizeText(order.providerSkill) || null,
+      outputType: null,
+      requestText: null,
+      status: normalizeText(order.state) || null,
+      failedAt: null,
+      failureReason: normalizeText(order.failureReason) || null,
+      refundRequestPinId: normalizeText(order.refundRequestPinId) || null,
+      refundRequestTxid: null,
+      refundRequestedAt: null,
+      refundCompletedAt: null,
+      refundFinalizePinId: normalizeText(order.refundFinalizePinId) || null,
+      refundBlockingReason: normalizeText(order.refundBlockingReason) || null,
+      refundApplyRetryCount: null,
+      nextRetryAt: null,
+      refundTxid: normalizeText(order.refundTxid) || null,
+      refundedAt: Number.isFinite(order.refundedAt) ? Number(order.refundedAt) : null,
+      updatedAt: Number.isFinite(order.updatedAt) ? Number(order.updatedAt) : null,
+    },
+    a2a: {
+      sessionId: normalizeText(order.a2aSessionId) || null,
+      taskRunId: normalizeText(order.a2aTaskRunId) || null,
+      role: 'provider',
+      publicStatus: normalizeText(order.publicStatus) || null,
+      latestEvent: normalizeText(order.latestEvent) || null,
+      taskRunState: null,
+      callerGlobalMetaId: normalizeText(order.buyerGlobalMetaId) || null,
+      callerName: null,
+      providerGlobalMetaId: normalizeText(order.providerGlobalMetaId) || null,
+      providerName: null,
+      servicePinId,
+    },
+    providerRuntime: {
+      runtimeId: normalizeText(order.runtimeId) || null,
+      runtimeProvider: normalizeText(order.runtimeProvider) || null,
+      sessionId: normalizeText(order.llmSessionId) || null,
+      providerSkill: normalizeText(order.providerSkill) || null,
+      fallbackSelected: typeof order.fallbackSelected === 'boolean' ? order.fallbackSelected : null,
+    },
+    askMaster: null,
+    artifacts: {
+      transcriptMarkdownPath: '',
+      traceMarkdownPath: '',
+      traceJsonPath: '',
+    },
+  };
+  const rating = resolveOrderRating(ratingTrace, ratingDetail, ratingSyncState);
+
+  return {
+    traceId: normalizeText(order.traceId),
+    orderId,
+    servicePinId,
+    serviceName: normalizeText(order.serviceName),
+    paymentTxid,
+    paymentAmount: normalizeText(order.paymentAmount) || null,
+    paymentCurrency: normalizeText(order.paymentCurrency) || null,
+    buyerGlobalMetaId: normalizeText(order.buyerGlobalMetaId) || null,
+    buyerName: null,
+    publicStatus: normalizeText(order.publicStatus) || null,
+    state: normalizeText(order.state) || null,
+    providerSkill: normalizeText(order.providerSkill) || null,
+    a2aSessionId: normalizeText(order.a2aSessionId) || null,
+    a2aTaskRunId: normalizeText(order.a2aTaskRunId) || null,
+    llmSessionId: normalizeText(order.llmSessionId) || null,
+    runtimeId: normalizeText(order.runtimeId) || null,
+    runtimeProvider: normalizeText(order.runtimeProvider) || null,
+    fallbackSelected: typeof order.fallbackSelected === 'boolean' ? order.fallbackSelected : null,
+    failureReason: normalizeText(order.failureReason) || null,
+    refundRequestPinId: normalizeText(order.refundRequestPinId) || null,
+    refundTxid: normalizeText(order.refundTxid) || null,
+    refundFinalizePinId: normalizeText(order.refundFinalizePinId) || null,
+    refundBlockingReason: normalizeText(order.refundBlockingReason) || null,
+    createdAt: Number.isFinite(order.createdAt) ? Number(order.createdAt) : 0,
+    updatedAt: Number.isFinite(order.updatedAt) ? Number(order.updatedAt) : undefined,
     ...rating,
   };
 }
@@ -210,6 +364,36 @@ function buildManualAction(trace: ProviderConsoleTraceRecord): ProviderConsoleMa
     orderId: decision.ui.orderId,
     refundRequestPinId: decision.ui.refundRequestPinId,
     sessionId: decision.ui.sessionId,
+  };
+}
+
+function buildSellerOrderManualAction(order: SellerOrderRecord): ProviderConsoleManualActionRow | null {
+  if (normalizeText(order.state) !== 'refund_pending') {
+    if (
+      normalizeText(order.state) !== 'failed'
+      || !normalizeText(order.paymentTxid)
+      || isZeroAmount(order.paymentAmount)
+    ) {
+      return null;
+    }
+    return {
+      kind: 'refund',
+      traceId: normalizeText(order.traceId),
+      orderId: normalizeText(order.id),
+      refundRequestPinId: null,
+      sessionId: normalizeText(order.a2aSessionId) || null,
+    };
+  }
+  const refundRequestPinId = normalizeText(order.refundRequestPinId);
+  if (!refundRequestPinId) {
+    return null;
+  }
+  return {
+    kind: 'refund',
+    traceId: normalizeText(order.traceId),
+    orderId: normalizeText(order.id),
+    refundRequestPinId,
+    sessionId: normalizeText(order.a2aSessionId) || null,
   };
 }
 
@@ -252,6 +436,7 @@ export function buildProviderConsoleSnapshot(input: {
   services: PublishedServiceRecord[];
   masters?: PublishedMasterRecord[];
   traces: ProviderConsoleTraceRecord[];
+  sellerOrders?: SellerOrderRecord[];
   ratingDetails?: RatingDetailItem[];
   ratingSyncState?: ProviderConsoleRatingSyncState;
 }): ProviderConsoleSnapshot {
@@ -261,12 +446,31 @@ export function buildProviderConsoleSnapshot(input: {
   const services = [...input.services]
     .sort(sortByUpdatedAtDesc)
     .map(buildServiceRow);
-  const recentOrders = input.traces
+  const sellerOrderRows = (Array.isArray(input.sellerOrders) ? input.sellerOrders : [])
+    .map((order) => buildSellerOrderRowWithRating(order, ratingDetails, ratingSyncState))
+    .filter((entry): entry is ProviderConsoleOrderRow => Boolean(entry));
+  const sellerOrderRowKeys = new Set(sellerOrderRows.flatMap((entry) => [
+    entry.traceId ? `trace:${entry.traceId}` : '',
+    entry.orderId ? `order:${entry.orderId}` : '',
+    entry.paymentTxid ? `payment:${entry.paymentTxid}` : '',
+  ].filter(Boolean)));
+  const traceOrderRows = input.traces
     .map((trace) => buildOrderRowWithRating(trace, ratingDetails, ratingSyncState))
     .filter((entry): entry is ProviderConsoleOrderRow => Boolean(entry))
+    .filter((entry) => ![
+      entry.traceId ? `trace:${entry.traceId}` : '',
+      entry.orderId ? `order:${entry.orderId}` : '',
+      entry.paymentTxid ? `payment:${entry.paymentTxid}` : '',
+    ].some((key) => key && sellerOrderRowKeys.has(key)));
+  const recentOrders = [
+    ...sellerOrderRows,
+    ...traceOrderRows,
+  ]
     .sort(sortByUpdatedAtDesc);
-  const manualActions = input.traces
-    .map(buildManualAction)
+  const manualActions = [
+    ...input.traces.map(buildManualAction),
+    ...(Array.isArray(input.sellerOrders) ? input.sellerOrders : []).map(buildSellerOrderManualAction),
+  ]
     .filter((entry): entry is ProviderConsoleManualActionRow => Boolean(entry));
   const recentMasterRequests = input.traces
     .map((trace) => buildMasterRequestRow(trace, masters))

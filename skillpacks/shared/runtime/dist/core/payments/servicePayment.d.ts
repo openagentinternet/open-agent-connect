@@ -1,4 +1,5 @@
 import type { SecretStore } from '../secrets/secretStore';
+import type { ChainAdapterRegistry } from '../chain/adapters/types';
 export interface A2AOrderPaymentResult {
     paymentTxid: string | null;
     paymentCommitTxid?: string | null;
@@ -34,6 +35,7 @@ export interface ExecuteServiceOrderPaymentInput {
 export declare function createTestServicePaymentExecutor(): ServicePaymentExecutor;
 export declare function createWalletServicePaymentExecutor(input: {
     secretStore: SecretStore;
+    adapters: ChainAdapterRegistry;
     feeRate?: number;
 }): ServicePaymentExecutor;
 export declare function executeServiceOrderPayment(input: ExecuteServiceOrderPaymentInput): Promise<A2AOrderPaymentResult>;

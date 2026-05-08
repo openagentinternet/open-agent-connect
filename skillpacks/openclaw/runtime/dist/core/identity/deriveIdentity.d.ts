@@ -3,9 +3,10 @@ export interface DerivedIdentity {
     path: string;
     publicKey: string;
     chatPublicKey: string;
+    /** Chain addresses keyed by ChainWriteNetwork. Always includes "mvc" at minimum. */
+    addresses: Record<string, string>;
+    /** Convenience field: same as addresses['mvc']. Preserved for backward compatibility. */
     mvcAddress: string;
-    btcAddress: string;
-    dogeAddress: string;
     metaId: string;
     globalMetaId: string;
 }

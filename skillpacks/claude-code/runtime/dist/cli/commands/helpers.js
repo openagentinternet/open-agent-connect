@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.readFlagValue = readFlagValue;
 exports.readChainFlag = readChainFlag;
+exports.readAnyChainFlag = readAnyChainFlag;
 exports.hasFlag = hasFlag;
 exports.readJsonFile = readJsonFile;
 exports.commandMissingFlag = commandMissingFlag;
@@ -35,6 +36,35 @@ function readChainFlag(args) {
         return {
             chain: null,
             error: (0, commandResult_1.commandFailed)('invalid_flag', `Unsupported --chain value: ${rawValue}. Supported values: mvc, btc.`),
+        };
+    }
+    return {
+        chain: normalized,
+        error: null,
+    };
+}
+/**
+ * Parse --chain flag accepting any chain name.
+ * The runtime handler is responsible for validating against the adapter registry.
+ * Used by commands that support multi-chain (chain write).
+ */
+function readAnyChainFlag(args) {
+    const index = args.indexOf('--chain');
+    if (index === -1) {
+        return { chain: null, error: null };
+    }
+    const rawValue = args[index + 1];
+    if (typeof rawValue !== 'string' || rawValue.startsWith('--')) {
+        return {
+            chain: null,
+            error: (0, commandResult_1.commandFailed)('invalid_flag', 'Missing value for --chain.'),
+        };
+    }
+    const normalized = rawValue.trim().toLowerCase();
+    if (!normalized) {
+        return {
+            chain: null,
+            error: (0, commandResult_1.commandFailed)('invalid_flag', 'Empty --chain value.'),
         };
     }
     return {

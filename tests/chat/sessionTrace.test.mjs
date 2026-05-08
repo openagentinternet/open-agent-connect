@@ -100,6 +100,45 @@ test('buildSessionTrace keeps explicit a2a session and task-run identity separat
   assert.equal(trace.a2a.servicePinId, 'service-weather');
 });
 
+test('buildSessionTrace preserves nullable refund order fields as null', () => {
+  const homeDir = createProfileHome('metabot-chat-trace-');
+  const paths = resolveMetabotPaths(homeDir);
+  const trace = buildSessionTrace({
+    traceId: 'trace-null-refund-fields',
+    channel: 'a2a',
+    session: {
+      id: 'session-null-refund-fields',
+      title: 'Refund Field Normalization',
+      type: 'a2a',
+    },
+    order: {
+      id: 'order-null-refund-fields',
+      role: 'buyer',
+      serviceId: 'service-weather',
+      serviceName: 'Weather Oracle',
+      paymentTxid: 'c'.repeat(64),
+      paymentCurrency: 'SPACE',
+      paymentAmount: '0.0001',
+      failedAt: null,
+      refundRequestedAt: null,
+      refundCompletedAt: null,
+      refundApplyRetryCount: null,
+      nextRetryAt: null,
+      refundedAt: null,
+      updatedAt: null,
+    },
+    exportRoot: paths.exportsRoot,
+  });
+
+  assert.equal(trace.order.failedAt, null);
+  assert.equal(trace.order.refundRequestedAt, null);
+  assert.equal(trace.order.refundCompletedAt, null);
+  assert.equal(trace.order.refundApplyRetryCount, null);
+  assert.equal(trace.order.nextRetryAt, null);
+  assert.equal(trace.order.refundedAt, null);
+  assert.equal(trace.order.updatedAt, null);
+});
+
 test('exportSessionArtifacts writes transcript markdown under exports/chats', async () => {
   const homeDir = createProfileHome('metabot-chat-trace-');
   const paths = resolveMetabotPaths(homeDir);

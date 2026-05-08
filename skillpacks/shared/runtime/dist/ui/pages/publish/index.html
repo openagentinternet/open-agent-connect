@@ -12,6 +12,31 @@
         gap: 20px;
         align-items: start;
       }
+      .publish-main {
+        display: grid;
+        gap: 12px;
+        min-width: 0;
+      }
+      .publish-availability {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px 14px;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .publish-availability[data-tone="ready"] {
+        border-color: rgba(34,197,94,.32);
+        background: var(--green-dim);
+        color: var(--green);
+      }
+      .publish-availability[data-tone="blocked"] {
+        border-color: rgba(245,158,11,.34);
+        background: var(--amber-dim);
+        color: var(--amber);
+      }
       .publish-form {
         background: var(--surface);
         border: 1px solid var(--border);
@@ -37,6 +62,7 @@
         color: var(--muted);
       }
       .publish-field input,
+      .publish-field select,
       .publish-field textarea {
         background: var(--surface2);
         border: 1px solid var(--border2);
@@ -48,8 +74,26 @@
         transition: border-color .15s;
         width: 100%;
       }
+      .publish-field select {
+        appearance: none;
+        min-height: 38px;
+      }
       .publish-field input:focus,
+      .publish-field select:focus,
       .publish-field textarea:focus { outline: none; border-color: var(--accent); }
+      .publish-field input:disabled,
+      .publish-field select:disabled,
+      .publish-field textarea:disabled {
+        opacity: .6;
+        cursor: not-allowed;
+      }
+      .publish-skill-summary {
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 12px;
+        min-height: 18px;
+        overflow-wrap: anywhere;
+      }
       .publish-actions {
         margin-top: 18px;
         display: flex;
@@ -65,6 +109,7 @@
       .publish-status[data-tone="success"] { color: var(--green); }
       .publish-status[data-tone="error"]   { color: var(--red); }
       .publish-status[data-tone="busy"]    { color: var(--amber); }
+      .publish-status[data-tone="ready"]   { color: var(--green); }
       .publish-cards { display: grid; gap: 14px; }
       .publish-card {
         background: var(--surface);
