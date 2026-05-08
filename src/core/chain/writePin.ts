@@ -1,7 +1,7 @@
 export type ChainWriteOperation = 'init' | 'create' | 'modify' | 'revoke';
 export type ChainWriteEncryption = '0' | '1' | '2';
 export type ChainWriteEncoding = 'utf-8' | 'base64';
-export type ChainWriteNetwork = 'mvc' | 'btc' | 'doge';
+export type ChainWriteNetwork = 'mvc' | 'btc' | 'doge' | 'opcat';
 
 export interface ChainWriteRequest {
   operation?: string;
@@ -64,7 +64,7 @@ export function normalizeChainWriteRequest(input: ChainWriteRequest): Normalized
   }
 
   const network = normalizeText(input.network).toLowerCase() || 'mvc';
-  if (network !== 'mvc' && network !== 'btc' && network !== 'doge') {
+  if (network !== 'mvc' && network !== 'btc' && network !== 'doge' && network !== 'opcat') {
     throw new Error(`Unsupported chain write network: ${input.network}`);
   }
 

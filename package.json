@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "@metalet/utxo-wallet-service": "^0.3.33-beta.5",
+    "@opcat-labs/scrypt-ts-opcat": "^4.0.0",
     "@scure/bip39": "^1.6.0",
     "crypto-js": "^4.2.0",
     "meta-contract": "^0.4.16",

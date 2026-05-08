@@ -48,10 +48,7 @@ import {
   executeTransfer,
 } from '../core/signing/localMnemonicSigner';
 import { normalizeChainWriteRequest, type ChainWriteNetwork } from '../core/chain/writePin';
-import { createChainAdapterRegistry } from '../core/chain/adapters/registry';
-import { mvcChainAdapter } from '../core/chain/adapters/mvc';
-import { btcChainAdapter } from '../core/chain/adapters/btc';
-import { dogeChainAdapter } from '../core/chain/adapters/doge';
+import { createDefaultChainAdapterRegistry } from '../core/chain/adapters/registry';
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import type { ChainAdapter } from '../core/chain/adapters/types';
 import type { Signer } from '../core/signing/signer';
@@ -160,14 +157,6 @@ async function fetchMetaletData<T>(url: string): Promise<T> {
   return (payload?.data ?? null) as T;
 }
 
-function createDefaultChainAdapterRegistry(): ChainAdapterRegistry {
-  return createChainAdapterRegistry([
-    mvcChainAdapter,
-    btcChainAdapter,
-    dogeChainAdapter,
-  ]);
-}
-
 interface ParsedTransferAmount {
   chain: string;
   currency: string;
@@ -176,27 +165,28 @@ interface ParsedTransferAmount {
 }
 
 /**
- * Parse a transfer amount string like "0.01DOGE", "0.00001BTC", "1SPACE".
+ * Parse a transfer amount string like "0.01DOGE", "0.00001BTC", "1SPACE", "10OPCAT".
  * DOGE amounts: unit is DOGE (1 DOGE = 1e8 satoshis).
  * BTC amounts: unit is BTC (1 BTC = 1e8 satoshis).
  * SPACE amounts: unit is SPACE (1 SPACE = 1e8 satoshis).
+ * OPCAT amounts: unit is OPCAT (1 OPCAT = 1e8 satoshis).
  */
 function parseTransferAmount(raw: string, adapters: ChainAdapterRegistry): ParsedTransferAmount {
   const trimmed = raw.trim();
-  const match = trimmed.match(/^([\d.]+)\s*(btc|space|doge)$/i);
+  const match = trimmed.match(/^([\d.]+)\s*(btc|space|doge|opcat)$/i);
   if (!match) {
     const hasUnit = /[a-z]/i.test(trimmed);
     if (!hasUnit) {
-      throw new Error('Missing currency unit. Append BTC, SPACE, or DOGE to the amount. Example: 0.00001BTC, 1SPACE, or 0.01DOGE.');
+      throw new Error('Missing currency unit. Append BTC, SPACE, DOGE, or OPCAT to the amount. Example: 0.00001BTC, 1SPACE, 0.01DOGE, or 10OPCAT.');
     }
-    throw new Error(`Unsupported currency unit in "${raw}". Supported units: BTC, SPACE, DOGE.`);
+    throw new Error(`Unsupported currency unit in "${raw}". Supported units: BTC, SPACE, DOGE, OPCAT.`);
   }
   const amount = parseFloat(match[1]);
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error(`Invalid amount "${match[1]}". Must be a positive number.`);
   }
   const unit = match[2].toUpperCase();
-  const chain = unit === 'BTC' ? 'btc' : unit === 'DOGE' ? 'doge' : 'mvc';
+  const chain = unit === 'BTC' ? 'btc' : unit === 'DOGE' ? 'doge' : unit === 'OPCAT' ? 'opcat' : 'mvc';
   const adapter = adapters.get(chain);
   if (!adapter) {
     throw new Error(`No adapter registered for chain "${chain}".`);
