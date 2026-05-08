@@ -11,7 +11,7 @@ async function runChainCommand(args, context) {
     if (!requestFile) {
         return (0, helpers_1.commandMissingFlag)('--request-file');
     }
-    const chainFlag = (0, helpers_1.readChainFlag)(args);
+    const chainFlag = (0, helpers_1.readAnyChainFlag)(args);
     if (chainFlag.error) {
         return chainFlag.error;
     }

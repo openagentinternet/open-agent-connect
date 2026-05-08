@@ -1,4 +1,5 @@
 import { createRuntimeStateStore, type RuntimeDaemonRecord } from '../core/state/runtimeStateStore';
+import type { LlmRuntime } from '../core/llm/llmTypes';
 import type { LlmExecutor } from '../core/llm/executor';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 import type { SessionTraceRecord } from '../core/chat/sessionTrace';
@@ -12,6 +13,7 @@ import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import { type A2AConversationMessagePersister } from '../core/a2a/conversationPersistence';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import { type ServicePaymentExecutor } from '../core/payments/servicePayment';
+import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import { type MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
 export declare function resolveServiceOrderPaymentMetadata(currency: unknown): {
@@ -35,6 +37,7 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     getDaemonRecord: () => RuntimeDaemonRecord | null;
     secretStore?: SecretStore;
     signer?: Signer;
+    adapters?: ChainAdapterRegistry;
     identitySyncStepDelayMs?: number;
     chainApiBaseUrl?: string;
     idChatApiBaseUrl?: string;
@@ -53,4 +56,5 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     createSignerForHome?: (homeDir: string) => Signer;
     autoReplyConfig?: PrivateChatAutoReplyConfig;
     llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
+    providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
 }): MetabotDaemonHttpHandlers;

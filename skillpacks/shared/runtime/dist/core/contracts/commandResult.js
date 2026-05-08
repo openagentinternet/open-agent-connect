@@ -23,13 +23,18 @@ const commandWaiting = (code, message, pollAfterMs, options) => ({
     ...(options?.data ? { data: options.data } : {}),
 });
 exports.commandWaiting = commandWaiting;
-const commandManualActionRequired = (code, message, localUiUrl) => ({
-    ok: false,
-    state: 'manual_action_required',
-    code,
-    message,
-    localUiUrl
-});
+const commandManualActionRequired = (code, message, options) => {
+    const localUiUrl = typeof options === 'string' ? options : options?.localUiUrl;
+    const data = typeof options === 'string' ? undefined : options?.data;
+    return {
+        ok: false,
+        state: 'manual_action_required',
+        code,
+        message,
+        ...(localUiUrl ? { localUiUrl } : {}),
+        ...(data ? { data } : {}),
+    };
+};
 exports.commandManualActionRequired = commandManualActionRequired;
 const commandFailed = (code, message) => ({
     ok: false,

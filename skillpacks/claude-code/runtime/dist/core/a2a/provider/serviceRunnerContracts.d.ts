@@ -5,6 +5,9 @@ export interface ProviderServiceRunnerRequest {
     providerGlobalMetaId: string;
     userTask: string;
     taskContext: string;
+    serviceName?: string | null;
+    displayName?: string | null;
+    outputType?: string | null;
     rawRequest?: string | null;
     metadata?: Record<string, unknown> | null;
 }

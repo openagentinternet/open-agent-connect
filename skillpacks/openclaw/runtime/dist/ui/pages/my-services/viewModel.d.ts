@@ -25,6 +25,12 @@ export interface ProviderRecentOrderEntry {
     statusDetail: string;
     traceHref: string;
     traceLabel: string;
+    paymentLabel: string;
+    runtimeLabel: string;
+    refundRequestPinId: string;
+    refundTxid: string;
+    refundFinalizePinId: string;
+    refundBlockingReason: string;
     createdAt: string;
     requiresManualRefund: boolean;
     ratingCommentPreview: string;
@@ -47,3 +53,4 @@ export interface MyServicesPageViewModel {
 export declare function buildMyServicesPageViewModel(input: {
     providerSummary?: Record<string, unknown> | null;
 }): MyServicesPageViewModel;
+export declare function buildMyServicesPageViewModelRuntimeSource(): string;

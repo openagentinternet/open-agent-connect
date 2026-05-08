@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildA2ASimplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher;
 exports.getDefaultDaemonPort = getDefaultDaemonPort;
 exports.getDaemonRuntimeFingerprint = getDaemonRuntimeFingerprint;
 exports.buildDaemonConfigHash = buildDaemonConfigHash;
@@ -43,9 +44,14 @@ const ratingDetailState_1 = require("../core/ratings/ratingDetailState");
 const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const writePin_1 = require("../core/chain/writePin");
+const registry_1 = require("../core/chain/adapters/registry");
+const mvc_1 = require("../core/chain/adapters/mvc");
+const btc_1 = require("../core/chain/adapters/btc");
+const doge_1 = require("../core/chain/adapters/doge");
 const daemon_1 = require("../daemon");
 const defaultHandlers_1 = require("../daemon/defaultHandlers");
 const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
+const simplemsgClassifier_1 = require("../core/a2a/simplemsgClassifier");
 const metawebMasterReplyWaiter_1 = require("../core/master/metawebMasterReplyWaiter");
 const masterMessageSchema_1 = require("../core/master/masterMessageSchema");
 const privateChatAutoReply_1 = require("../core/chat/privateChatAutoReply");
@@ -58,6 +64,7 @@ const llmRuntimeStore_1 = require("../core/llm/llmRuntimeStore");
 const llmBindingStore_1 = require("../core/llm/llmBindingStore");
 const llmRuntimeResolver_1 = require("../core/llm/llmRuntimeResolver");
 const llmRuntimeDiscovery_1 = require("../core/llm/llmRuntimeDiscovery");
+const platformSkillCatalog_1 = require("../core/services/platformSkillCatalog");
 const executor_1 = require("../core/llm/executor");
 const update_1 = require("../core/system/update");
 const uninstall_1 = require("../core/system/uninstall");
@@ -74,12 +81,47 @@ const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
 const TEST_FAKE_BUYER_RATING_REPLY_ENV = 'METABOT_TEST_FAKE_BUYER_RATING_REPLY';
 const TEST_FAKE_MASTER_REPLY_ENV = 'METABOT_TEST_FAKE_MASTER_REPLY';
+const TEST_FAKE_PROVIDER_LLM_REPLY_ENV = 'METABOT_TEST_FAKE_PROVIDER_LLM_REPLY';
 const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
-const MAX_MVC_BALANCE_QUERY_PAGES = 200;
 let cachedDaemonRuntimeFingerprint = null;
+function normalizeDispatcherPrivateChatMessage(message) {
+    return {
+        fromGlobalMetaId: message.fromGlobalMetaId,
+        content: message.content,
+        messagePinId: message.messagePinId ?? null,
+        fromChatPublicKey: message.fromChatPublicKey ?? null,
+        timestamp: Number.isFinite(message.timestamp) ? Math.trunc(Number(message.timestamp)) : Date.now(),
+        rawMessage: message.rawMessage ?? null,
+    };
+}
+function buildA2ASimplemsgInboundDispatcher(input) {
+    const logWarning = input.logWarning ?? ((scope, error) => {
+        console.warn(scope, error instanceof Error ? error.message : String(error));
+    });
+    return async (message) => {
+        const simplemsgClassification = (0, simplemsgClassifier_1.classifySimplemsgContent)(message.content);
+        const orderProtocolHandler = input.handleOrderProtocolMessage;
+        if (orderProtocolHandler) {
+            try {
+                const result = await orderProtocolHandler(message);
+                if (simplemsgClassification.kind === 'order_protocol'
+                    || (result?.ok === true && result.data?.handled === true)) {
+                    return;
+                }
+            }
+            catch (error) {
+                logWarning('[A2A order protocol handler]', error);
+                if (simplemsgClassification.kind === 'order_protocol') {
+                    return;
+                }
+            }
+        }
+        await input.handleGenericPrivateChatMessage(normalizeDispatcherPrivateChatMessage(message));
+    };
+}
 const EVOLUTION_IMPORT_SKILL_NAME = 'metabot-network-directory';
 function normalizeBaseUrl(value) {
     const trimmed = typeof value === 'string' ? value.trim() : '';
@@ -100,108 +142,45 @@ async function fetchMetaletData(url) {
     }
     return (payload?.data ?? null);
 }
-async function fetchMvcBalanceSnapshot(address) {
-    let flag = '';
-    let totalSatoshis = 0;
-    let confirmedSatoshis = 0;
-    let unconfirmedSatoshis = 0;
-    let utxoCount = 0;
-    for (let page = 0; page < MAX_MVC_BALANCE_QUERY_PAGES; page += 1) {
-        const params = new URLSearchParams({
-            address,
-            net: CHAIN_NET,
-            ...(flag ? { flag } : {}),
-        });
-        const data = await fetchMetaletData(`${METALET_HOST}/wallet-api/v4/mvc/address/utxo-list?${params}`);
-        const list = Array.isArray(data?.list) ? data.list : [];
-        if (!list.length) {
-            break;
-        }
-        for (const utxo of list) {
-            const satoshis = Math.max(0, Math.floor(toFiniteNumber(utxo.value)));
-            totalSatoshis += satoshis;
-            utxoCount += 1;
-            if (toFiniteNumber(utxo.height) > 0) {
-                confirmedSatoshis += satoshis;
-            }
-            else {
-                unconfirmedSatoshis += satoshis;
-            }
-        }
-        const nextFlag = normalizeEnvText(list[list.length - 1]?.flag);
-        if (!nextFlag || nextFlag === flag) {
-            break;
-        }
-        flag = nextFlag;
-    }
-    return {
-        chain: 'mvc',
-        address,
-        totalSatoshis,
-        confirmedSatoshis,
-        unconfirmedSatoshis,
-        utxoCount,
-        totalMvc: totalSatoshis / 1e8,
-    };
+function createDefaultChainAdapterRegistry() {
+    return (0, registry_1.createChainAdapterRegistry)([
+        mvc_1.mvcChainAdapter,
+        btc_1.btcChainAdapter,
+        doge_1.dogeChainAdapter,
+    ]);
 }
-async function fetchBtcBalanceSnapshot(address) {
-    const params = new URLSearchParams({
-        address,
-        net: CHAIN_NET,
-    });
-    const data = await fetchMetaletData(`${METALET_HOST}/wallet-api/v3/address/btc-balance?${params}`);
-    const totalBtc = Math.max(0, toFiniteNumber(data?.balance));
-    const confirmedBtc = Math.max(0, toFiniteNumber(data?.safeBalance ?? data?.balance));
-    const unconfirmedBtc = toFiniteNumber(data?.pendingBalance);
-    return {
-        chain: 'btc',
-        address,
-        totalSatoshis: Math.round(totalBtc * 1e8),
-        confirmedSatoshis: Math.round(confirmedBtc * 1e8),
-        unconfirmedSatoshis: Math.round(unconfirmedBtc * 1e8),
-        totalBtc,
-        confirmedBtc,
-        unconfirmedBtc,
-    };
-}
-function parseTransferAmount(raw) {
-    const match = raw.trim().match(/^([\d.]+)\s*(btc|space)$/i);
+/**
+ * Parse a transfer amount string like "0.01DOGE", "0.00001BTC", "1SPACE".
+ * DOGE amounts: unit is DOGE (1 DOGE = 1e8 satoshis).
+ * BTC amounts: unit is BTC (1 BTC = 1e8 satoshis).
+ * SPACE amounts: unit is SPACE (1 SPACE = 1e8 satoshis).
+ */
+function parseTransferAmount(raw, adapters) {
+    const trimmed = raw.trim();
+    const match = trimmed.match(/^([\d.]+)\s*(btc|space|doge)$/i);
     if (!match) {
-        const hasUnit = /[a-z]/i.test(raw.trim());
+        const hasUnit = /[a-z]/i.test(trimmed);
         if (!hasUnit) {
-            throw new Error('Missing currency unit. Append BTC or SPACE to the amount. Example: 0.00001BTC or 1SPACE.');
+            throw new Error('Missing currency unit. Append BTC, SPACE, or DOGE to the amount. Example: 0.00001BTC, 1SPACE, or 0.01DOGE.');
         }
-        throw new Error(`Unsupported currency unit in "${raw}". Supported units: BTC, SPACE.`);
+        throw new Error(`Unsupported currency unit in "${raw}". Supported units: BTC, SPACE, DOGE.`);
     }
     const amount = parseFloat(match[1]);
     if (!Number.isFinite(amount) || amount <= 0) {
         throw new Error(`Invalid amount "${match[1]}". Must be a positive number.`);
     }
     const unit = match[2].toUpperCase();
+    const chain = unit === 'BTC' ? 'btc' : unit === 'DOGE' ? 'doge' : 'mvc';
+    const adapter = adapters.get(chain);
+    if (!adapter) {
+        throw new Error(`No adapter registered for chain "${chain}".`);
+    }
     return {
-        chain: unit === 'BTC' ? 'btc' : 'mvc',
+        chain,
         currency: unit,
         satoshis: Math.round(amount * 1e8),
+        adapter,
     };
-}
-async function fetchTransferFeeRate(chain) {
-    const defaultRate = chain === 'btc' ? 2 : 1;
-    try {
-        const url = chain === 'btc'
-            ? `${METALET_HOST}/wallet-api/v3/btc/fee/summary?net=${CHAIN_NET}`
-            : `${METALET_HOST}/wallet-api/v4/mvc/fee/summary?net=${CHAIN_NET}`;
-        const response = await fetch(url);
-        const json = await response.json();
-        if (json?.code !== 0)
-            return defaultRate;
-        const list = json?.data?.list ?? [];
-        const avg = list.find((t) => /avg/i.test(String(t?.title ?? '')));
-        const rate = toFiniteNumber(avg?.feeRate ?? list[0]?.feeRate);
-        return rate > 0 ? rate : defaultRate;
-    }
-    catch {
-        return defaultRate;
-    }
 }
 function parseDaemonPort(value) {
     const parsed = Number.parseInt(normalizeEnvText(value), 10);
@@ -912,7 +891,8 @@ function mapEvolutionRuntimeError(error) {
 }
 function createCliSigner(context, homeDir) {
     const secretStore = (0, fileSecretStore_1.createFileSecretStore)(homeDir);
-    const baseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore });
+    const adapters = createDefaultChainAdapterRegistry();
+    const baseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore, adapters });
     if (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1') {
         return createTestChainWriteSigner(baseSigner);
     }
@@ -1286,8 +1266,62 @@ function createDefaultCliDependencies(context) {
         },
         services: {
             publish: async (input) => requestJson(context, 'POST', '/api/services/publish', input),
+            listPublishSkills: async () => {
+                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const runtimeStateStore = (0, runtimeStateStore_1.createRuntimeStateStore)(homeDir);
+                const state = await runtimeStateStore.readState();
+                if (!state.identity) {
+                    return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before listing publishable skills.');
+                }
+                const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
+                const metaBotSlug = node_path_1.default.basename(paths.profileRoot);
+                const catalog = (0, platformSkillCatalog_1.createPlatformSkillCatalog)({
+                    runtimeStore: (0, llmRuntimeStore_1.createLlmRuntimeStore)(paths),
+                    bindingStore: (0, llmBindingStore_1.createLlmBindingStore)(paths),
+                    systemHomeDir: paths.systemHomeDir,
+                    projectRoot: paths.profileRoot,
+                    env: context.env,
+                });
+                const result = await catalog.listPrimaryRuntimeSkills({ metaBotSlug });
+                if (!result.ok) {
+                    return (0, commandResult_1.commandFailed)(result.code, result.message);
+                }
+                return (0, commandResult_1.commandSuccess)({
+                    metaBotSlug,
+                    identity: {
+                        metabotId: state.identity.metabotId,
+                        name: state.identity.name,
+                        globalMetaId: state.identity.globalMetaId,
+                    },
+                    runtime: {
+                        id: result.runtime.id,
+                        provider: result.runtime.provider,
+                        displayName: result.runtime.displayName,
+                        health: result.runtime.health,
+                        version: result.runtime.version,
+                        logoPath: result.runtime.logoPath,
+                    },
+                    platform: result.platform,
+                    skills: result.skills,
+                    rootDiagnostics: result.rootDiagnostics,
+                });
+            },
             call: async (input) => requestJson(context, 'POST', '/api/services/call', input),
             rate: async (input) => requestJson(context, 'POST', '/api/services/rate', input),
+        },
+        provider: {
+            inspectOrder: async (input) => {
+                const query = new URLSearchParams();
+                if (input.orderId) {
+                    query.set('orderId', input.orderId);
+                }
+                if (input.paymentTxid) {
+                    query.set('paymentTxid', input.paymentTxid);
+                }
+                const suffix = query.size ? `?${query.toString()}` : '';
+                return requestJson(context, 'GET', `/api/provider/order${suffix}`);
+            },
+            settleRefund: async (input) => requestJson(context, 'POST', '/api/provider/refund/settle', input),
         },
         chat: {
             private: async (input) => requestJson(context, 'POST', '/api/chat/private', input),
@@ -1312,25 +1346,27 @@ function createDefaultCliDependencies(context) {
                 if (!state.identity) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
                 }
+                const adapters = createDefaultChainAdapterRegistry();
+                const allChains = Array.from(adapters.keys());
                 const targetChains = input.chain === 'all'
-                    ? ['mvc', 'btc']
+                    ? allChains
                     : [input.chain];
+                // Validate all chains are registered
+                for (const chain of targetChains) {
+                    if (!adapters.has(chain)) {
+                        return (0, commandResult_1.commandFailed)('invalid_flag', `Unsupported --chain value: ${chain}. Supported values: all, ${Array.from(adapters.keys()).join(', ')}.`);
+                    }
+                }
                 try {
                     const balances = {};
                     for (const chain of targetChains) {
-                        if (chain === 'mvc') {
-                            const mvcAddress = normalizeEnvText(state.identity.mvcAddress);
-                            if (!mvcAddress) {
-                                return (0, commandResult_1.commandFailed)('identity_address_missing', 'Current identity has no mvcAddress.');
-                            }
-                            balances.mvc = await fetchMvcBalanceSnapshot(mvcAddress);
-                            continue;
+                        const adapter = adapters.get(chain);
+                        const address = state.identity.addresses[chain] ?? state.identity.mvcAddress;
+                        if (!address) {
+                            return (0, commandResult_1.commandFailed)('identity_address_missing', `Current identity has no address for chain "${chain}".`);
                         }
-                        const btcAddress = normalizeEnvText(state.identity.btcAddress);
-                        if (!btcAddress) {
-                            return (0, commandResult_1.commandFailed)('identity_address_missing', 'Current identity has no btcAddress.');
-                        }
-                        balances.btc = await fetchBtcBalanceSnapshot(btcAddress);
+                        const balance = await adapter.fetchBalance(address);
+                        balances[chain] = balance;
                     }
                     return (0, commandResult_1.commandSuccess)({
                         chain: input.chain,
@@ -1349,45 +1385,45 @@ function createDefaultCliDependencies(context) {
                 if (!state.identity) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
                 }
+                const adapters = createDefaultChainAdapterRegistry();
                 let parsed;
                 try {
-                    parsed = parseTransferAmount(input.amountRaw);
+                    parsed = parseTransferAmount(input.amountRaw, adapters);
                 }
                 catch (error) {
                     return (0, commandResult_1.commandFailed)('invalid_argument', error instanceof Error ? error.message : String(error));
                 }
-                const minSatoshis = parsed.chain === 'btc' ? 546 : 600;
+                const adapter = parsed.adapter;
+                const minSatoshis = adapter.minTransferSatoshis;
                 if (parsed.satoshis < minSatoshis) {
                     return (0, commandResult_1.commandFailed)('invalid_argument', `Amount is below the minimum of ${minSatoshis} satoshis for ${parsed.currency}.`);
                 }
-                const fromAddress = parsed.chain === 'btc'
-                    ? normalizeEnvText(state.identity.btcAddress)
-                    : normalizeEnvText(state.identity.mvcAddress);
+                const fromAddress = state.identity.addresses[parsed.chain] ?? state.identity.mvcAddress;
                 if (!fromAddress) {
-                    return (0, commandResult_1.commandFailed)('identity_address_missing', `Current identity has no ${parsed.chain === 'btc' ? 'btcAddress' : 'mvcAddress'}.`);
+                    return (0, commandResult_1.commandFailed)('identity_address_missing', `Current identity has no address for chain "${parsed.chain}".`);
                 }
-                const feeRate = await fetchTransferFeeRate(parsed.chain);
-                const estimatedFeeSatoshis = Math.ceil(392 * feeRate);
+                const feeRate = await adapter.fetchFeeRate();
+                // Rough fee estimate: ~392 bytes * feeRate for sat/byte chains, adjusted for sat/KB chains
+                const feePerByte = adapter.feeRateUnit === 'sat/KB' ? feeRate / 1000 : feeRate;
+                const estimatedFeeSatoshis = Math.ceil(392 * feePerByte);
                 const totalRequired = parsed.satoshis + estimatedFeeSatoshis;
-                const balanceSnap = parsed.chain === 'btc'
-                    ? await fetchBtcBalanceSnapshot(fromAddress)
-                    : await fetchMvcBalanceSnapshot(fromAddress);
-                if (balanceSnap.totalSatoshis < totalRequired) {
-                    const balanceDisplay = `${balanceSnap.totalSatoshis} sats (${(balanceSnap.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
-                    const unconfirmedNote = balanceSnap.unconfirmedSatoshis > 0
-                        ? ` (includes ${balanceSnap.unconfirmedSatoshis} unconfirmed sats)`
+                const balance = await adapter.fetchBalance(fromAddress);
+                if (balance.totalSatoshis < totalRequired) {
+                    const balanceDisplay = `${balance.totalSatoshis} sats (${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
+                    const unconfirmedNote = balance.unconfirmedSatoshis > 0
+                        ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
                         : '';
                     return (0, commandResult_1.commandFailed)('insufficient_balance', `Total balance ${balanceDisplay}${unconfirmedNote} is below the required ${totalRequired} sats (${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency} + estimated fee ${estimatedFeeSatoshis} sats).`);
                 }
                 if (!input.confirm) {
-                    const currentBalanceDisplay = `${(balanceSnap.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
-                    const unconfirmedNote = balanceSnap.unconfirmedSatoshis > 0
-                        ? ` (includes ${balanceSnap.unconfirmedSatoshis} unconfirmed sats)`
+                    const currentBalanceDisplay = `${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
+                    const unconfirmedNote = balance.unconfirmedSatoshis > 0
+                        ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
                         : '';
                     return (0, commandResult_1.commandAwaitingConfirmation)({
                         fromAddress,
                         currentBalance: currentBalanceDisplay + unconfirmedNote,
-                        currentBalanceSatoshis: balanceSnap.totalSatoshis,
+                        currentBalanceSatoshis: balance.totalSatoshis,
                         toAddress: input.toAddress,
                         amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
                         amountSatoshis: parsed.satoshis,
@@ -1404,19 +1440,14 @@ function createDefaultCliDependencies(context) {
                     return (0, commandResult_1.commandFailed)('identity_secrets_missing', 'Identity mnemonic not found in the secret store.');
                 }
                 try {
-                    const transferInput = {
+                    const result = await (0, localMnemonicSigner_1.executeTransfer)(adapter, {
                         mnemonic: secrets.mnemonic,
                         path: secrets.path ?? state.identity.path ?? "m/44'/10001'/0'/0/0",
                         toAddress: input.toAddress,
                         amountSatoshis: parsed.satoshis,
                         feeRate,
-                    };
-                    const result = parsed.chain === 'btc'
-                        ? await (0, localMnemonicSigner_1.executeBtcTransfer)(transferInput)
-                        : await (0, localMnemonicSigner_1.executeMvcTransfer)(transferInput);
-                    const explorerUrl = parsed.chain === 'btc'
-                        ? `https://mempool.space/tx/${result.txid}`
-                        : `https://www.mvcscan.com/tx/${result.txid}`;
+                    });
+                    const explorerUrl = `${adapter.explorerBaseUrl}/tx/${result.txid}`;
                     return (0, commandResult_1.commandSuccess)({
                         txid: result.txid,
                         explorerUrl,
@@ -1800,6 +1831,7 @@ function mergeCliDependencies(context) {
             listServices: networkListServices,
         },
         services: { ...defaults.services, ...provided.services },
+        provider: { ...defaults.provider, ...provided.provider },
         chat: { ...defaults.chat, ...provided.chat },
         file: { ...defaults.file, ...provided.file },
         wallet: { ...defaults.wallet, ...provided.wallet },
@@ -1819,7 +1851,8 @@ async function serveCliDaemonProcess(context) {
     const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
     let daemonRecord = null;
     const secretStore = (0, fileSecretStore_1.createFileSecretStore)(homeDir);
-    const baseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore });
+    const adapters = createDefaultChainAdapterRegistry();
+    const baseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore, adapters });
     const signer = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
         ? createTestChainWriteSigner(baseSigner)
         : baseSigner;
@@ -1840,11 +1873,30 @@ async function serveCliDaemonProcess(context) {
         acceptPolicy: 'accept_all',
         defaultStrategyId: null,
     };
+    const providerLlmBackends = (0, executor_1.createRegistryBackendFactories)();
+    const fakeProviderLlmReply = normalizeEnvText(context.env[TEST_FAKE_PROVIDER_LLM_REPLY_ENV]);
+    const useFakeProviderLlm = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' && Boolean(fakeProviderLlmReply);
+    if (useFakeProviderLlm) {
+        for (const provider of Object.keys(providerLlmBackends)) {
+            providerLlmBackends[provider] = () => ({
+                provider,
+                async execute(request) {
+                    return {
+                        status: 'completed',
+                        output: fakeProviderLlmReply
+                            .replace(/\{\{prompt\}\}/g, request.prompt)
+                            .replace(/\{\{skill\}\}/g, request.skills?.[0] ?? ''),
+                        durationMs: 1,
+                    };
+                },
+            });
+        }
+    }
     const llmExecutor = new executor_1.LlmExecutor({
         sessionsRoot: paths.llmExecutorSessionsRoot,
         transcriptsRoot: paths.llmExecutorTranscriptsRoot,
         skillsRoot: paths.skillsRoot,
-        backends: (0, executor_1.createRegistryBackendFactories)(),
+        backends: providerLlmBackends,
     });
     const handlers = (0, defaultHandlers_1.createDefaultMetabotDaemonHandlers)({
         homeDir,
@@ -1852,6 +1904,7 @@ async function serveCliDaemonProcess(context) {
         getDaemonRecord: () => daemonRecord,
         secretStore,
         signer,
+        adapters,
         chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
         socketPresenceApiBaseUrl,
         socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
@@ -1866,6 +1919,7 @@ async function serveCliDaemonProcess(context) {
         requestMvcGasSubsidy,
         autoReplyConfig: sharedAutoReplyConfig,
         llmExecutor,
+        providerRuntimeCanStart: useFakeProviderLlm ? async () => true : undefined,
     });
     const daemon = (0, daemon_1.createMetabotDaemon)({
         homeDirOrPaths: paths,
@@ -1999,25 +2053,23 @@ async function serveCliDaemonProcess(context) {
         },
     });
     const daemonConfig = await (0, configStore_1.createConfigStore)(paths).read();
+    const simplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher({
+        handleOrderProtocolMessage: handlers.services?.handleInboundOrderProtocolMessage,
+        handleGenericPrivateChatMessage: async (message) => {
+            await chatAutoReplyOrchestrator.handleInboundMessage(message);
+        },
+        logWarning: (scope, error) => {
+            console.warn(scope, error instanceof Error ? error.message : String(error));
+        },
+    });
     const simplemsgListener = (0, simplemsgListener_1.createA2ASimplemsgListenerManager)({
         systemHomeDir: paths.systemHomeDir,
         resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
         onMessage: (profile, message) => {
             if (node_path_1.default.resolve(profile.homeDir) === node_path_1.default.resolve(homeDir)) {
-                void chatAutoReplyOrchestrator.handleInboundMessage(message).catch((error) => {
+                void simplemsgInboundDispatcher(message).catch((error) => {
                     console.warn('[private chat auto-reply]', error instanceof Error ? error.message : String(error));
                 });
-                const orderProtocolHandler = handlers.services?.handleInboundOrderProtocolMessage;
-                if (orderProtocolHandler) {
-                    void Promise.resolve(orderProtocolHandler({
-                        fromGlobalMetaId: message.fromGlobalMetaId,
-                        content: message.content,
-                        messagePinId: message.messagePinId,
-                        timestamp: message.timestamp,
-                    })).catch((error) => {
-                        console.warn('[A2A order protocol handler]', error instanceof Error ? error.message : String(error));
-                    });
-                }
             }
         },
         onError: (error) => {

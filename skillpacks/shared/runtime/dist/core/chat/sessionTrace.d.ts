@@ -19,9 +19,31 @@ export interface SessionTraceOrderInput {
     orderTxid?: string | null;
     orderTxids?: string[] | null;
     paymentTxid?: string | null;
+    paymentCommitTxid?: string | null;
     orderReference?: string | null;
     paymentCurrency?: string | null;
     paymentAmount?: string | null;
+    paymentChain?: string | null;
+    settlementKind?: string | null;
+    mrc20Ticker?: string | null;
+    mrc20Id?: string | null;
+    providerSkill?: string | null;
+    outputType?: string | null;
+    requestText?: string | null;
+    status?: string | null;
+    failedAt?: number | null;
+    failureReason?: string | null;
+    refundRequestPinId?: string | null;
+    refundRequestTxid?: string | null;
+    refundRequestedAt?: number | null;
+    refundCompletedAt?: number | null;
+    refundFinalizePinId?: string | null;
+    refundBlockingReason?: string | null;
+    refundApplyRetryCount?: number | null;
+    nextRetryAt?: number | null;
+    refundTxid?: string | null;
+    refundedAt?: number | null;
+    updatedAt?: number | null;
 }
 export interface BuildSessionTraceInput {
     traceId: string;
@@ -31,7 +53,15 @@ export interface BuildSessionTraceInput {
     session: SessionTraceSessionInput;
     order?: SessionTraceOrderInput | null;
     a2a?: SessionTraceA2AInput | null;
+    providerRuntime?: SessionTraceProviderRuntimeInput | null;
     askMaster?: SessionTraceAskMasterInput | null;
+}
+export interface SessionTraceProviderRuntimeInput {
+    runtimeId?: string | null;
+    runtimeProvider?: string | null;
+    sessionId?: string | null;
+    providerSkill?: string | null;
+    fallbackSelected?: boolean | null;
 }
 export interface SessionTraceArtifacts {
     transcriptMarkdownPath: string;
@@ -63,6 +93,13 @@ export interface SessionTraceA2ARecord {
     providerGlobalMetaId: string | null;
     providerName: string | null;
     servicePinId: string | null;
+}
+export interface SessionTraceProviderRuntimeRecord {
+    runtimeId: string | null;
+    runtimeProvider: string | null;
+    sessionId: string | null;
+    providerSkill: string | null;
+    fallbackSelected: boolean | null;
 }
 export interface SessionTraceAskMasterInput extends AskMasterTraceMetadata {
 }
@@ -126,11 +163,34 @@ export interface SessionTraceRecord {
         orderTxid: string | null;
         orderTxids: string[];
         paymentTxid: string | null;
+        paymentCommitTxid: string | null;
         orderReference: string | null;
         paymentCurrency: string | null;
         paymentAmount: string | null;
+        paymentChain: string | null;
+        settlementKind: string | null;
+        mrc20Ticker: string | null;
+        mrc20Id: string | null;
+        providerSkill?: string | null;
+        outputType: string | null;
+        requestText: string | null;
+        status: string | null;
+        failedAt: number | null;
+        failureReason: string | null;
+        refundRequestPinId: string | null;
+        refundRequestTxid: string | null;
+        refundRequestedAt: number | null;
+        refundCompletedAt: number | null;
+        refundFinalizePinId: string | null;
+        refundBlockingReason: string | null;
+        refundApplyRetryCount: number | null;
+        nextRetryAt: number | null;
+        refundTxid: string | null;
+        refundedAt: number | null;
+        updatedAt: number | null;
     } | null;
     a2a: SessionTraceA2ARecord | null;
+    providerRuntime: SessionTraceProviderRuntimeRecord | null;
     askMaster: SessionTraceAskMasterRecord | null;
     artifacts: SessionTraceArtifacts;
 }

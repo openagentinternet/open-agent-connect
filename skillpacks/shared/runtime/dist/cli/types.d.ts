@@ -70,8 +70,19 @@ export interface CliDependencies {
     };
     services?: {
         publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        listPublishSkills?: () => Awaitable<MetabotCommandResult<unknown>>;
         call?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         rate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    provider?: {
+        inspectOrder?: (input: {
+            orderId?: string;
+            paymentTxid?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        settleRefund?: (input: {
+            orderId?: string;
+            paymentTxid?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     chat?: {
         private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
@@ -91,7 +102,7 @@ export interface CliDependencies {
     };
     wallet?: {
         balance?: (input: {
-            chain: 'all' | 'mvc' | 'btc';
+            chain: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         transfer?: (input: {
             toAddress: string;

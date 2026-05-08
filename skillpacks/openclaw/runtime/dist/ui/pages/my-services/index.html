@@ -15,7 +15,7 @@
       }
       .console-grid {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr);
         gap: 18px;
       }
       .presence-toggle-row {
@@ -79,6 +79,7 @@
         color: var(--accent);
       }
       .console-table { width: 100%; border-collapse: collapse; }
+      .table-wrap { overflow-x: auto; }
       .console-table th {
         font-size: 11px;
         font-family: var(--mono);
@@ -99,6 +100,16 @@
       .console-table tbody tr:last-child td { border-bottom: none; }
       .console-table tbody tr:hover { background: var(--surface2); }
       .mono-cell, .mono-text { font-family: var(--mono); font-size: 11px; color: var(--dim); overflow-wrap: anywhere; }
+      .refund-cell { min-width: 180px; color: var(--dim); font-size: 11px; }
+      .refund-cell span {
+        display: block;
+        margin-bottom: 2px;
+        color: var(--muted);
+        font-family: var(--mono);
+        text-transform: uppercase;
+        letter-spacing: .06em;
+      }
+      .refund-cell p { margin: 0 0 6px; }
       .flag-text { margin-top: 4px; color: var(--amber); font-size: 11px; font-family: var(--mono); }
       .console-empty { color: var(--muted); font-size: 12px; font-family: var(--mono); }
       .console-empty-cell { text-align: center; color: var(--muted); font-size: 12px; font-family: var(--mono); padding: 24px !important; }
@@ -115,7 +126,6 @@
       .manual-action-links a { color: var(--accent); text-decoration: none; font-size: 12px; font-family: var(--mono); }
       .manual-action-links a:hover { text-decoration: underline; }
       @media (max-width: 980px) {
-        .console-grid { grid-template-columns: 1fr; }
         .manual-action-item { flex-direction: column; }
         .manual-action-links { align-items: flex-start; }
       }

@@ -5,9 +5,8 @@ export interface LocalIdentitySecrets extends Record<string, unknown> {
     privateKeyHex?: string;
     publicKey?: string;
     chatPublicKey?: string;
-    mvcAddress?: string;
-    btcAddress?: string;
-    dogeAddress?: string;
+    /** Chain addresses keyed by network name. E.g. { mvc: "1...", btc: "1...", doge: "D..." } */
+    addresses?: Record<string, string>;
     metaId?: string;
     globalMetaId?: string;
 }

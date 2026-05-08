@@ -1,4 +1,5 @@
 import type { SessionTraceRecord } from '../chat/sessionTrace';
+import type { SellerOrderRecord } from '../orders/sellerOrderState';
 import type { RatingDetailItem } from '../ratings/ratingDetailState';
 import type { PublishedMasterRecord } from '../master/masterTypes';
 import type { PublishedServiceRecord } from '../services/publishService';
@@ -35,7 +36,21 @@ export interface ProviderConsoleOrderRow {
     buyerGlobalMetaId: string | null;
     buyerName: string | null;
     publicStatus: string | null;
+    state?: string | null;
+    providerSkill?: string | null;
+    a2aSessionId?: string | null;
+    a2aTaskRunId?: string | null;
+    llmSessionId?: string | null;
+    runtimeId?: string | null;
+    runtimeProvider?: string | null;
+    fallbackSelected?: boolean | null;
+    failureReason?: string | null;
+    refundRequestPinId?: string | null;
+    refundTxid?: string | null;
+    refundFinalizePinId?: string | null;
+    refundBlockingReason?: string | null;
     createdAt: number;
+    updatedAt?: number;
     ratingStatus: ProviderConsoleOrderRatingStatus;
     ratingValue: number | null;
     ratingComment: string | null;
@@ -46,7 +61,7 @@ export interface ProviderConsoleManualActionRow {
     kind: 'refund';
     traceId: string;
     orderId: string;
-    refundRequestPinId: string;
+    refundRequestPinId: string | null;
     sessionId: string | null;
 }
 export interface ProviderConsoleMasterRequestRow {
@@ -78,6 +93,7 @@ export declare function buildProviderConsoleSnapshot(input: {
     services: PublishedServiceRecord[];
     masters?: PublishedMasterRecord[];
     traces: ProviderConsoleTraceRecord[];
+    sellerOrders?: SellerOrderRecord[];
     ratingDetails?: RatingDetailItem[];
     ratingSyncState?: ProviderConsoleRatingSyncState;
 }): ProviderConsoleSnapshot;

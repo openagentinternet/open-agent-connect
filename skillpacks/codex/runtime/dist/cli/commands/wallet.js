@@ -10,6 +10,12 @@ function readStringFlag(args, flag) {
     const value = args[index + 1];
     return typeof value === 'string' && !value.startsWith('--') ? value : null;
 }
+/**
+ * Read --chain flag with dynamic validation against the adapter registry.
+ * The supported chains are read from the wallet balance handler's metadata
+ * or validated at runtime. For CLI command parsing, we accept any non-empty
+ * chain name and let the handler validate it.
+ */
 function readWalletBalanceChainFlag(args) {
     const index = args.indexOf('--chain');
     if (index === -1) {
@@ -19,14 +25,14 @@ function readWalletBalanceChainFlag(args) {
     if (typeof rawValue !== 'string' || rawValue.startsWith('--')) {
         return {
             chain: 'all',
-            error: (0, commandResult_1.commandFailed)('invalid_flag', 'Missing value for --chain. Supported values: all, mvc, btc.'),
+            error: (0, commandResult_1.commandFailed)('invalid_flag', 'Missing value for --chain.'),
         };
     }
     const normalized = rawValue.trim().toLowerCase();
-    if (normalized !== 'all' && normalized !== 'mvc' && normalized !== 'btc') {
+    if (!normalized) {
         return {
             chain: 'all',
-            error: (0, commandResult_1.commandFailed)('invalid_flag', `Unsupported --chain value: ${rawValue}. Supported values: all, mvc, btc.`),
+            error: (0, commandResult_1.commandFailed)('invalid_flag', 'Empty --chain value.'),
         };
     }
     return { chain: normalized, error: null };

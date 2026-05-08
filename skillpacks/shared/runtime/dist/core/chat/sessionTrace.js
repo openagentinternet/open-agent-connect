@@ -11,6 +11,13 @@ const node_path_1 = __importDefault(require("node:path"));
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
+function normalizeOptionalNumber(value) {
+    if (value === null || value === undefined || normalizeText(value) === '') {
+        return null;
+    }
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Math.trunc(numeric) : null;
+}
 function sanitizePathSegment(value, fallback) {
     const normalized = normalizeText(value).replace(/[^a-zA-Z0-9._-]+/g, '-');
     return normalized || fallback;
@@ -33,6 +40,19 @@ function buildA2ATraceRecord(input) {
         servicePinId: normalizeText(input.servicePinId) || null,
     };
     return Object.values(record).some(Boolean) ? record : null;
+}
+function buildProviderRuntimeTraceRecord(input) {
+    if (!input) {
+        return null;
+    }
+    const record = {
+        runtimeId: normalizeText(input.runtimeId) || null,
+        runtimeProvider: normalizeText(input.runtimeProvider) || null,
+        sessionId: normalizeText(input.sessionId) || null,
+        providerSkill: normalizeText(input.providerSkill) || null,
+        fallbackSelected: typeof input.fallbackSelected === 'boolean' ? input.fallbackSelected : null,
+    };
+    return Object.values(record).some((value) => value !== null && value !== '') ? record : null;
 }
 function buildAskMasterTraceRecord(input) {
     if (!input || typeof input !== 'object') {
@@ -191,12 +211,35 @@ function buildSessionTrace(input) {
                     ? input.order.orderTxids.map((entry) => normalizeText(entry)).filter(Boolean)
                     : [],
                 paymentTxid: normalizeText(input.order.paymentTxid) || null,
+                paymentCommitTxid: normalizeText(input.order.paymentCommitTxid) || null,
                 orderReference: normalizeText(input.order.orderReference) || null,
                 paymentCurrency: normalizeText(input.order.paymentCurrency) || null,
                 paymentAmount: normalizeText(input.order.paymentAmount) || null,
+                paymentChain: normalizeText(input.order.paymentChain) || null,
+                settlementKind: normalizeText(input.order.settlementKind) || null,
+                mrc20Ticker: normalizeText(input.order.mrc20Ticker) || null,
+                mrc20Id: normalizeText(input.order.mrc20Id) || null,
+                providerSkill: normalizeText(input.order.providerSkill) || null,
+                outputType: normalizeText(input.order.outputType) || null,
+                requestText: normalizeText(input.order.requestText) || null,
+                status: normalizeText(input.order.status) || null,
+                failedAt: normalizeOptionalNumber(input.order.failedAt),
+                failureReason: normalizeText(input.order.failureReason) || null,
+                refundRequestPinId: normalizeText(input.order.refundRequestPinId) || null,
+                refundRequestTxid: normalizeText(input.order.refundRequestTxid) || null,
+                refundRequestedAt: normalizeOptionalNumber(input.order.refundRequestedAt),
+                refundCompletedAt: normalizeOptionalNumber(input.order.refundCompletedAt),
+                refundFinalizePinId: normalizeText(input.order.refundFinalizePinId) || null,
+                refundBlockingReason: normalizeText(input.order.refundBlockingReason) || null,
+                refundApplyRetryCount: normalizeOptionalNumber(input.order.refundApplyRetryCount),
+                nextRetryAt: normalizeOptionalNumber(input.order.nextRetryAt),
+                refundTxid: normalizeText(input.order.refundTxid) || null,
+                refundedAt: normalizeOptionalNumber(input.order.refundedAt),
+                updatedAt: normalizeOptionalNumber(input.order.updatedAt),
             }
             : null,
         a2a: buildA2ATraceRecord(input.a2a),
+        providerRuntime: buildProviderRuntimeTraceRecord(input.providerRuntime),
         askMaster: buildAskMasterTraceRecord(input.askMaster),
         artifacts: {
             transcriptMarkdownPath,

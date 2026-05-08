@@ -1,8 +1,8 @@
 import type { LocalUiPageDefinition } from '../types';
-import { buildMyServicesPageViewModel } from './viewModel';
+import { buildMyServicesPageViewModelRuntimeSource } from './viewModel';
 
 export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
-  const buildMyServicesPageViewModelSource = buildMyServicesPageViewModel.toString();
+  const buildMyServicesPageViewModelSource = buildMyServicesPageViewModelRuntimeSource();
   return {
     page: 'my-services',
     title: 'My Services',
@@ -62,6 +62,9 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
                     <th>Service</th>
                     <th>Buyer</th>
                     <th>State</th>
+                    <th>Payment</th>
+                    <th>Runtime</th>
+                    <th>Refund</th>
                     <th>Trace</th>
                     <th>Created</th>
                   </tr>
@@ -82,7 +85,7 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
       </section>
     `,
     script: `(() => {
-  const buildMyServicesPageViewModel = ${buildMyServicesPageViewModelSource};
+  ${buildMyServicesPageViewModelSource}
   const elements = {
     presenceCard: document.querySelector('[data-provider-presence-card]'),
     serviceInventory: document.querySelector('[data-service-inventory] tbody'),
@@ -172,7 +175,7 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
       elements.orderCount.textContent = String(entries.length);
     }
     if (!entries.length) {
-      elements.recentOrders.innerHTML = '<tr><td colspan="5" class="console-empty-cell">No seller-side orders are stored yet.</td></tr>';
+      elements.recentOrders.innerHTML = '<tr><td colspan="8" class="console-empty-cell">No seller-side orders are stored yet.</td></tr>';
       return;
     }
     elements.recentOrders.innerHTML = entries.map((entry) => (
@@ -183,6 +186,15 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
         + (entry.statusDetail ? '<div class="flag-text">' + escapeHtml(entry.statusDetail) + '</div>' : '')
         + (entry.ratingCommentPreview ? '<div class="flag-text">' + escapeHtml(entry.ratingCommentPreview) + '</div>' : '')
         + (entry.ratingPinId ? '<div class="mono-text">' + escapeHtml(entry.ratingPinId) + '</div>' : '')
+        + '</td>'
+      + '<td class="mono-cell">' + escapeHtml(entry.paymentLabel) + '</td>'
+      + '<td class="mono-cell">' + escapeHtml(entry.runtimeLabel) + '</td>'
+      + '<td class="refund-cell">'
+        + (entry.refundRequestPinId ? '<div><span>Request</span><p class="mono-text">' + escapeHtml(entry.refundRequestPinId) + '</p></div>' : '')
+        + (entry.refundTxid ? '<div><span>Transfer</span><p class="mono-text">' + escapeHtml(entry.refundTxid) + '</p></div>' : '')
+        + (entry.refundFinalizePinId ? '<div><span>Finalize</span><p class="mono-text">' + escapeHtml(entry.refundFinalizePinId) + '</p></div>' : '')
+        + (entry.refundBlockingReason ? '<div class="flag-text">Blocked: ' + escapeHtml(entry.refundBlockingReason) + '</div>' : '')
+        + (!entry.refundRequestPinId && !entry.refundTxid && !entry.refundFinalizePinId && !entry.refundBlockingReason ? '—' : '')
         + '</td>'
       + '<td><a href="' + escapeHtml(entry.traceHref) + '">' + escapeHtml(entry.traceLabel) + '</a></td>'
       + '<td>' + escapeHtml(entry.createdAt) + '</td>'

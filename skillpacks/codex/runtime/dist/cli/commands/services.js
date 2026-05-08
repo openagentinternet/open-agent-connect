@@ -58,6 +58,13 @@ async function runServicesCommand(args, context) {
         const payload = await (0, helpers_1.readJsonFile)(context, payloadFile);
         return handler(chainFlag.chain ? { ...payload, network: chainFlag.chain } : payload);
     }
+    if (subcommand === 'publish-skills') {
+        const handler = context.dependencies.services?.listPublishSkills;
+        if (!handler) {
+            return (0, commandResult_1.commandFailed)('not_implemented', 'Services publish skills handler is not configured.');
+        }
+        return handler();
+    }
     if (subcommand === 'call') {
         const requestFile = (0, helpers_1.readFlagValue)(args, '--request-file');
         if (!requestFile) {
