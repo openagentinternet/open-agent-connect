@@ -50,6 +50,8 @@ async function startServer(options = {}) {
     botListRuntimes: [],
     botDiscoverRuntimes: [],
     botListSessions: [],
+    botConfigGet: [],
+    botConfigSet: [],
     configGet: [],
     configSet: [],
   };
@@ -644,6 +646,31 @@ async function startServer(options = {}) {
               createdAt: '2026-05-05T00:00:00.000Z',
             },
           ],
+        });
+      },
+      getConfig: async (input) => {
+        calls.botConfigGet.push(input);
+        if (input.slug === 'missing') {
+          return commandFailed('profile_not_found', 'Profile not found: missing');
+        }
+        return commandSuccess({
+          chain: {
+            defaultWriteNetwork: input.slug === 'eric-bot' ? 'doge' : 'mvc',
+          },
+        });
+      },
+      setConfig: async (input) => {
+        calls.botConfigSet.push(input);
+        if (input.slug === 'missing') {
+          return commandFailed('profile_not_found', 'Profile not found: missing');
+        }
+        if (input.chain?.defaultWriteNetwork === 'eth') {
+          return commandFailed('invalid_argument', 'defaultWriteNetwork must be one of mvc, btc, doge, opcat.');
+        }
+        return commandSuccess({
+          chain: {
+            defaultWriteNetwork: input.chain?.defaultWriteNetwork ?? 'mvc',
+          },
         });
       },
     },
@@ -1326,6 +1353,64 @@ test('GET /api/bot/sessions forwards slug and clamped limit to the MetaBot sessi
   assert.equal(payload.data.sessions[0].metaBotSlug, 'alice-bot');
 });
 
+test('GET /api/bot/profiles/:slug/config reads config for the selected MetaBot', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/eric-bot/config`);
+  const payload = await response.json();
+  const missingResponse = await fetch(`${server.baseUrl}/api/bot/profiles/missing/config`);
+  const missingPayload = await missingResponse.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botConfigGet, [{ slug: 'eric-bot' }, { slug: 'missing' }]);
+  assert.deepEqual(payload.data.chain, {
+    defaultWriteNetwork: 'doge',
+  });
+  assert.equal(missingResponse.status, 404);
+  assert.equal(missingPayload.code, 'profile_not_found');
+});
+
+test('PUT /api/bot/profiles/:slug/config persists config for the selected MetaBot', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/eric-bot/config`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      slug: 'alice-bot',
+      chain: {
+        defaultWriteNetwork: 'opcat',
+      },
+    }),
+  });
+  const payload = await response.json();
+  const invalidResponse = await fetch(`${server.baseUrl}/api/bot/profiles/eric-bot/config`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      chain: {
+        defaultWriteNetwork: 'eth',
+      },
+    }),
+  });
+  const invalidPayload = await invalidResponse.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botConfigSet[0], {
+    slug: 'eric-bot',
+    chain: {
+      defaultWriteNetwork: 'opcat',
+    },
+  });
+  assert.deepEqual(payload.data.chain, {
+    defaultWriteNetwork: 'opcat',
+  });
+  assert.equal(invalidResponse.status, 400);
+  assert.equal(invalidPayload.code, 'invalid_argument');
+});
+
 test('GET /api/config returns normalized local runtime config', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
@@ -1417,6 +1502,8 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.ok(html.includes("api('/api/bot/sessions?slug='+encodeURIComponent"));
   assert.ok(!html.includes("api('/api/bot/sessions?limit=50'"));
   assert.ok(html.includes("api('/api/bot/profiles/'+encodeURIComponent"));
+  assert.ok(html.includes("'/config'"));
+  assert.ok(!html.includes("api('/api/config'"));
   assert.match(html, /r\.health==='healthy'\|\|r\.health==='degraded'/);
   assert.ok(!html.includes(" / unavailable"));
   assert.match(html, /max-height:\s*220px/);

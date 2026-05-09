@@ -15,6 +15,7 @@ const {
 const { listIdentityProfiles, upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
+const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 
 function runtime(provider, id, health = 'healthy') {
@@ -96,6 +97,39 @@ test('default bot handlers create, list, and fetch MetaBot profiles', async (t) 
   assert.deepEqual(listed.data.profiles.map((profile) => profile.slug), ['alice-bot']);
   assert.equal(fetched.ok, true);
   assert.equal(fetched.data.profile.name, 'Alice Bot');
+});
+
+test('default bot config handlers persist default write network per MetaBot profile', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const alice = await createMetabotProfile(systemHomeDir, { name: 'Alice Bot' });
+  const eric = await createMetabotProfile(systemHomeDir, { name: 'Eric Bot' });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+  });
+
+  const setAlice = await handlers.bot.setConfig({
+    slug: alice.slug,
+    chain: {
+      defaultWriteNetwork: 'opcat',
+    },
+  });
+  const aliceConfig = await handlers.bot.getConfig({ slug: alice.slug });
+  const ericConfig = await handlers.bot.getConfig({ slug: eric.slug });
+  const aliceConfigOnDisk = await createConfigStore(alice.homeDir).read();
+  const ericConfigOnDisk = await createConfigStore(eric.homeDir).read();
+
+  assert.equal(setAlice.ok, true);
+  assert.equal(aliceConfig.data.chain.defaultWriteNetwork, 'opcat');
+  assert.equal(ericConfig.data.chain.defaultWriteNetwork, 'mvc');
+  assert.equal(aliceConfigOnDisk.chain.defaultWriteNetwork, 'opcat');
+  assert.equal(ericConfigOnDisk.chain.defaultWriteNetwork, 'mvc');
 });
 
 test('default bot createProfile rejects missing or duplicate names', async (t) => {

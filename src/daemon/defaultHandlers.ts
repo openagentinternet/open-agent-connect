@@ -4226,6 +4226,31 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }
     return network;
   }
+  async function updateConfigDefaultWriteNetwork(
+    targetConfigStore: ReturnType<typeof createConfigStore>,
+    rawInput: Record<string, unknown>,
+  ): Promise<MetabotCommandResult<unknown>> {
+    const chainInput = rawInput.chain && typeof rawInput.chain === 'object' && !Array.isArray(rawInput.chain)
+      ? rawInput.chain as Record<string, unknown>
+      : {};
+    const defaultWriteNetwork = normalizeText(chainInput.defaultWriteNetwork).toLowerCase();
+    if (!isSupportedWriteNetwork(defaultWriteNetwork)) {
+      return commandFailed(
+        'invalid_argument',
+        `chain.defaultWriteNetwork must be one of ${DEFAULT_WRITE_NETWORKS.join(', ')}.`,
+      );
+    }
+    const current = await targetConfigStore.read();
+    const next = {
+      ...current,
+      chain: {
+        ...current.chain,
+        defaultWriteNetwork,
+      },
+    };
+    await targetConfigStore.set(next);
+    return commandSuccess(next);
+  }
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
   const llmRuntimeStore = createLlmRuntimeStore(input.homeDir);
   const llmBindingStore = createLlmBindingStore(input.homeDir);
@@ -7954,28 +7979,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   return {
     config: {
       get: async () => commandSuccess(await configStore.read()),
-      set: async (rawInput) => {
-        const chainInput = rawInput.chain && typeof rawInput.chain === 'object' && !Array.isArray(rawInput.chain)
-          ? rawInput.chain as Record<string, unknown>
-          : {};
-        const defaultWriteNetwork = normalizeText(chainInput.defaultWriteNetwork).toLowerCase();
-        if (!isSupportedWriteNetwork(defaultWriteNetwork)) {
-          return commandFailed(
-            'invalid_argument',
-            `chain.defaultWriteNetwork must be one of ${DEFAULT_WRITE_NETWORKS.join(', ')}.`,
-          );
-        }
-        const current = await configStore.read();
-        const next = {
-          ...current,
-          chain: {
-            ...current.chain,
-            defaultWriteNetwork,
-          },
-        };
-        await configStore.set(next);
-        return commandSuccess(next);
-      },
+      set: async (rawInput) => updateConfigDefaultWriteNetwork(configStore, rawInput),
     },
     chain: {
       write: async (rawInput) => {
@@ -11951,6 +11955,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
         }
         return commandSuccess({ profile });
+      },
+      getConfig: async ({ slug }) => {
+        const profile = await getMetabotProfile(normalizedSystemHomeDir, slug);
+        if (!profile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+        }
+        return commandSuccess(await createConfigStore(profile.homeDir).read());
+      },
+      setConfig: async (body) => {
+        const slug = normalizeText(body.slug);
+        const profile = await getMetabotProfile(normalizedSystemHomeDir, slug);
+        if (!profile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${slug || '<missing>'}`);
+        }
+        return updateConfigDefaultWriteNetwork(createConfigStore(profile.homeDir), body);
       },
       createProfile: async (body) => {
         let createInput: CreateMetabotInput;
