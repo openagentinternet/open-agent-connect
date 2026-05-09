@@ -163,16 +163,23 @@ const HELP_JSON_FLAG: CommandHelpFlag = {
 
 const PLATFORM_HOST_VALUE = `<${SUPPORTED_PLATFORM_IDS.join('|')}>`;
 const PLATFORM_HOST_TEXT = SUPPORTED_PLATFORM_IDS.join(', ');
+const CONFIGURED_WRITE_NETWORK_TEXT = 'Defaults to the configured `chain.defaultWriteNetwork`, initially mvc.';
 
-const CHAIN_BTC_MVC_FLAG: CommandHelpFlag = {
+const CHAIN_WRITE_FLAG: CommandHelpFlag = {
   flag: '--chain',
-  value: '<mvc|btc>',
-  description: 'Override the target chain network for this command. Defaults to mvc.',
+  value: '<mvc|btc|doge|opcat>',
+  description: `Optional chain network override: mvc, btc, doge, or opcat. ${CONFIGURED_WRITE_NETWORK_TEXT}`,
 };
 
-const WALLET_CHAIN_ALL_BTC_MVC_FLAG: CommandHelpFlag = {
+const FILE_UPLOAD_CHAIN_FLAG: CommandHelpFlag = {
   flag: '--chain',
-  value: '<all|mvc|btc>',
+  value: '<mvc|btc|opcat>',
+  description: `Optional chain network override: mvc, btc, or opcat. ${CONFIGURED_WRITE_NETWORK_TEXT} DOGE is not supported for file upload.`,
+};
+
+const WALLET_CHAIN_ALL_FLAG: CommandHelpFlag = {
+  flag: '--chain',
+  value: '<all|mvc|btc|doge|opcat>',
   description: 'Select wallet balance scope. Defaults to all.',
 };
 
@@ -301,7 +308,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['config'],
-    summary: 'Read or change supported public runtime switches such as Ask Master availability.',
+    summary: 'Read or change supported public runtime switches such as Ask Master availability and default write network.',
     usage: 'metabot config <subcommand>',
     subcommands: [
       { name: 'get', summary: 'Read one supported config key from the active local runtime home.' },
@@ -309,6 +316,8 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     optionalFlags: [HELP_JSON_FLAG],
     examples: [
+      'metabot config get chain.defaultWriteNetwork',
+      'metabot config set chain.defaultWriteNetwork opcat',
       'metabot config get askMaster.enabled',
       'metabot config get a2a.simplemsgListenerEnabled',
       'metabot config set askMaster.triggerMode suggest',
@@ -316,7 +325,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['config', 'get'],
-    summary: 'Read one supported public config key such as Ask Master availability or trigger mode.',
+    summary: 'Read one supported public config key such as the default write network, Ask Master availability, or trigger mode.',
     usage: 'metabot config get <key>',
     successFields: [
       'key',
@@ -327,6 +336,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'Fails with unsupported_config_key when the requested key is not in the public CLI allowlist.',
     ],
     examples: [
+      'metabot config get chain.defaultWriteNetwork',
       'metabot config get askMaster.enabled',
       'metabot config get askMaster.triggerMode',
       'metabot config get a2a.simplemsgListenerEnabled',
@@ -344,9 +354,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     failureSemantics: [
       'Fails with missing_argument when the key or value is omitted.',
       'Fails with unsupported_config_key when the requested key is not in the public CLI allowlist.',
+      'Fails when chain.defaultWriteNetwork is not one of mvc, btc, doge, or opcat.',
       'Fails when askMaster.triggerMode is not one of `manual` or `suggest`.',
     ],
     examples: [
+      'metabot config set chain.defaultWriteNetwork opcat',
       'metabot config set askMaster.enabled false',
       'metabot config set a2a.simplemsgListenerEnabled false',
       'metabot config set askMaster.triggerMode suggest',
@@ -503,7 +515,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['file', 'upload'],
     summary: 'Upload one local file to MetaWeb and return the resulting metafile URI.',
-    usage: 'metabot file upload --request-file <path> [--chain <mvc|btc>]',
+    usage: 'metabot file upload --request-file <path> [--chain <mvc|btc|opcat>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -520,11 +532,13 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     failureSemantics: [
       'Fails when the local file is missing, unreadable, or the chain upload path rejects the write.',
+      'DOGE is not supported for file upload.',
     ],
     examples: [
       'metabot file upload --request-file file-request.json',
+      'metabot file upload --request-file file-opcat-request.json --chain opcat',
     ],
-    optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [FILE_UPLOAD_CHAIN_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['buzz'],
@@ -538,7 +552,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['buzz', 'post'],
     summary: 'Publish one simplebuzz post through the validated MetaWeb buzz contract.',
-    usage: 'metabot buzz post --request-file <path> [--chain <mvc|btc>]',
+    usage: 'metabot buzz post --request-file <path> [--chain <mvc|btc|doge|opcat>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -556,8 +570,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot buzz post --request-file buzz-request.json',
+      'metabot buzz post --request-file buzz-doge-request.json --chain doge',
+      'metabot buzz post --request-file buzz-opcat-request.json --chain opcat',
     ],
-    optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['chain'],
@@ -571,7 +587,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['chain', 'write'],
     summary: 'Write one arbitrary MetaID tuple using the public chain-write interface.',
-    usage: 'metabot chain write --request-file <path> [--chain <mvc|btc>]',
+    usage: 'metabot chain write --request-file <path> [--chain <mvc|btc|doge|opcat>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -582,7 +598,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       version: '1.0.0',
       contentType: 'application/json',
       payload: '{"example":true}',
-      network: 'optional chain network override',
+      network: 'optional chain network override: mvc, btc, doge, or opcat',
     },
     successFields: [
       'pinId',
@@ -594,8 +610,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot chain write --request-file chain-request.json',
+      'metabot chain write --request-file chain-doge-request.json --chain doge',
+      'metabot chain write --request-file chain-opcat-request.json --chain opcat',
     ],
-    optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['wallet'],
@@ -603,17 +621,17 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot wallet <subcommand>',
     subcommands: [
       { name: 'balance', summary: 'Query local wallet balances on supported chains.' },
-      { name: 'transfer', summary: 'Preview or execute a BTC or SPACE transfer to a target address.' },
+      { name: 'transfer', summary: 'Preview or execute a BTC, SPACE, DOGE, or OPCAT transfer to a target address.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
   {
     commandPath: ['wallet', 'transfer'],
-    summary: 'Preview or execute a BTC or SPACE transfer to a target address. Without --confirm, returns a preview for confirmation. With --confirm, executes the transfer.',
+    summary: 'Preview or execute a BTC, SPACE, DOGE, or OPCAT transfer to a target address. Without --confirm, returns a preview for confirmation. With --confirm, executes the transfer.',
     usage: 'metabot wallet transfer --to <address> --amount <amount><UNIT> [--confirm]',
     requiredFlags: [
       { flag: '--to', value: '<address>', description: 'Recipient address.' },
-      { flag: '--amount', value: '<amount><UNIT>', description: 'Amount with currency unit: BTC or SPACE (case-insensitive). Example: 0.00001BTC, 1SPACE.' },
+      { flag: '--amount', value: '<amount><UNIT>', description: 'Amount with currency unit: BTC, SPACE, DOGE, or OPCAT (case-insensitive). Example: 0.00001BTC, 1SPACE, 0.01DOGE, 10OPCAT.' },
     ],
     optionalFlags: [
       { flag: '--confirm', description: 'Execute the transfer. Omit to preview only.' },
@@ -627,7 +645,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     failureSemantics: [
       'Returns awaiting_confirmation with preview data (fromAddress, currentBalance, toAddress, amount, estimatedFee) when --confirm is omitted.',
-      'Fails with invalid_argument when --to or --amount is missing, or the currency unit is not BTC or SPACE.',
+      'Fails with invalid_argument when --to or --amount is missing, or the currency unit is not BTC, SPACE, DOGE, or OPCAT.',
       'Fails with insufficient_balance when total balance (confirmed + unconfirmed) is below amount + estimated fee.',
       'Fails with transfer_broadcast_failed when the network rejects the transaction.',
     ],
@@ -635,17 +653,20 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC',
       'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC --confirm',
       'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 1SPACE --confirm',
+      'metabot wallet transfer --to o1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 10OPCAT',
     ],
   },
   {
     commandPath: ['wallet', 'balance'],
-    summary: 'Query local wallet balances for mvc/btc. Defaults to all chains.',
-    usage: 'metabot wallet balance [--chain <all|mvc|btc>]',
+    summary: 'Query local wallet balances for mvc, btc, doge, and opcat. Defaults to all chains.',
+    usage: 'metabot wallet balance [--chain <all|mvc|btc|doge|opcat>]',
     successFields: [
       'chain',
       'globalMetaId',
       'balances.mvc',
       'balances.btc',
+      'balances.doge',
+      'balances.opcat',
     ],
     failureSemantics: [
       'Fails when no local identity is loaded or the selected chain balance API is unavailable.',
@@ -653,8 +674,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot wallet balance',
       'metabot wallet balance --chain btc',
+      'metabot wallet balance --chain doge',
+      'metabot wallet balance --chain opcat',
     ],
-    optionalFlags: [WALLET_CHAIN_ALL_BTC_MVC_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [WALLET_CHAIN_ALL_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['master'],
@@ -673,11 +696,16 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['master', 'publish'],
     summary: 'Publish one master-service payload for a remote master/provider.',
-    usage: 'metabot master publish --payload-file <path> [--chain <mvc|btc>]',
+    usage: 'metabot master publish --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
     requiredFlags: [
       { flag: '--payload-file', value: '<path>', description: 'JSON master-service payload file.' },
     ],
-    optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+    examples: [
+      'metabot master publish --payload-file master-payload.json',
+      'metabot master publish --payload-file master-doge-payload.json --chain doge',
+      'metabot master publish --payload-file master-opcat-payload.json --chain opcat',
+    ],
+    optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['master', 'list'],
@@ -878,7 +906,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['services', 'publish'],
     summary: 'Publish one service to the chain-backed skill-service directory.',
-    usage: 'metabot services publish --payload-file <path> [--chain <mvc|btc>]',
+    usage: 'metabot services publish --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
     requiredFlags: [
       { flag: '--payload-file', value: '<path>', description: 'JSON service payload file.' },
     ],
@@ -903,8 +931,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot services publish --payload-file service-payload.json',
+      'metabot services publish --payload-file service-doge-payload.json --chain doge',
+      'metabot services publish --payload-file service-opcat-payload.json --chain opcat',
     ],
-    optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['services', 'publish-skills'],
@@ -1057,7 +1087,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['services', 'rate'],
     summary: 'Publish one buyer-side service rating and optionally deliver a follow-up private message back to the provider.',
-    usage: 'metabot services rate --request-file <path> [--chain <mvc|btc>]',
+    usage: 'metabot services rate --request-file <path> [--chain <mvc|btc|doge|opcat>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -1080,8 +1110,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot services rate --request-file rating.json',
+      'metabot services rate --request-file rating-doge.json --chain doge',
+      'metabot services rate --request-file rating-opcat.json --chain opcat',
     ],
-    optionalFlags: [CHAIN_BTC_MVC_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['chat'],
@@ -1098,7 +1130,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['chat', 'private'],
     summary: 'Send one encrypted private MetaWeb message to another MetaBot.',
-    usage: 'metabot chat private --request-file <path>',
+    usage: 'metabot chat private --request-file <path> [--chain <mvc|btc|doge|opcat>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -1106,6 +1138,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       to: 'remote globalMetaId',
       content: 'message text',
       replyPin: 'optional prior message pin id',
+      network: 'optional chain network override: mvc, btc, doge, or opcat',
     },
     successFields: [
       'to',
@@ -1122,8 +1155,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot chat private --request-file chat-request.json',
+      'metabot chat private --request-file chat-doge-request.json --chain doge',
+      'metabot chat private --request-file chat-opcat-request.json --chain opcat',
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['trace'],

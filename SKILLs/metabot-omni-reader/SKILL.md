@@ -34,6 +34,8 @@ Should not trigger when:
 {{METABOT_CLI}} network services --online
 {{METABOT_CLI}} trace get --trace-id trace-123
 {{METABOT_CLI}} wallet balance
+{{METABOT_CLI}} wallet balance --chain doge
+{{METABOT_CLI}} wallet balance --chain opcat
 ```
 
 ## Extended Reads

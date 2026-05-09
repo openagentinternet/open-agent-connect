@@ -5,6 +5,7 @@ import { resolveMetabotHomeSelection } from '../state/homeSelection';
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 import {
   createDefaultConfig,
+  isDefaultWriteNetwork,
   isAskMasterConfirmationMode,
   isAskMasterContextMode,
   isAskMasterTriggerMode,
@@ -78,6 +79,7 @@ function normalizeConfig(input: unknown): MetabotConfig {
   const maybeNetwork = root['evolution_network'];
   const maybeAskMaster = root['askMaster'];
   const maybeA2A = root['a2a'];
+  const maybeChain = root['chain'];
 
   const networkSource = maybeNetwork && typeof maybeNetwork === 'object'
     ? maybeNetwork as Record<string, unknown>
@@ -88,12 +90,21 @@ function normalizeConfig(input: unknown): MetabotConfig {
   const a2aSource = maybeA2A && typeof maybeA2A === 'object'
     ? maybeA2A as Record<string, unknown>
     : {};
+  const chainSource = maybeChain && typeof maybeChain === 'object'
+    ? maybeChain as Record<string, unknown>
+    : {};
 
   const triggerMode = normalizeString(askMasterSource.triggerMode);
   const confirmationMode = normalizeString(askMasterSource.confirmationMode);
   const contextMode = normalizeString(askMasterSource.contextMode);
+  const defaultWriteNetwork = normalizeString(chainSource.defaultWriteNetwork).toLowerCase();
 
   return {
+    chain: {
+      defaultWriteNetwork: isDefaultWriteNetwork(defaultWriteNetwork)
+        ? defaultWriteNetwork
+        : defaults.chain.defaultWriteNetwork,
+    },
     evolution_network: {
       enabled: normalizeBoolean(networkSource.enabled, defaults.evolution_network.enabled),
       autoAdoptSameSkillSameScope: normalizeBoolean(

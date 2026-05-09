@@ -146,10 +146,19 @@ Write avatar pin:
 metabot chain write --request-file avatar-request.json
 ```
 
-If the human explicitly asks to write avatar on BTC (for example: `btc`, `比特币`, `bitcoin`), use:
+When `--chain` is omitted for this manual `chain write`, the daemon uses the active profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
+
+```bash
+metabot config get chain.defaultWriteNetwork
+metabot config set chain.defaultWriteNetwork opcat
+```
+
+If the human explicitly asks to write avatar on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
 metabot chain write --request-file avatar-request.json --chain btc
+metabot chain write --request-file avatar-request.json --chain doge
+metabot chain write --request-file avatar-request.json --chain opcat
 ```
 
 ## In Scope
@@ -179,6 +188,8 @@ metabot chain write --request-file avatar-request.json --chain btc
 - If create returns `identity_name_conflict`, do not edit runtime files; run `identity who` and `identity list`, then assign explicitly.
 - For avatar updates, do not call `file upload` and then write `metafile://...` into `/info/avatar`.
 - Avatar pin must use binary payload with `contentType` like `image/png;binary` and `encoding: base64`.
+- Avatar chain writes support MVC, BTC, DOGE, and OPCAT.
+- Identity bootstrap and normal profile sync are not governed by `chain.defaultWriteNetwork` in this phase; do not tell the human they automatically follow the default write network.
 - Never manually edit `~/.metabot/profiles/<slug>/.runtime/` files.
 
 ## Compatibility

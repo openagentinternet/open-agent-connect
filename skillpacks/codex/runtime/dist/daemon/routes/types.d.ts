@@ -4,6 +4,10 @@ import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 export type Awaitable<T> = T | Promise<T>;
 export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'chat-viewer' | 'bot';
 export interface MetabotDaemonHttpHandlers {
+    config?: {
+        get?: () => Awaitable<MetabotCommandResult<unknown>>;
+        set?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    };
     buzz?: {
         post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
@@ -167,6 +171,12 @@ export interface MetabotDaemonHttpHandlers {
         }) => Awaitable<MetabotCommandResult<unknown>>;
         createProfile?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         updateProfile?: (input: {
+            slug: string;
+        } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        getConfig?: (input: {
+            slug: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        setConfig?: (input: {
             slug: string;
         } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         getWallet?: (input: {

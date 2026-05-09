@@ -14,7 +14,7 @@ export interface RuntimeIdentityRecord {
   path: string;
   publicKey: string;
   chatPublicKey: string;
-  /** Chain addresses keyed by network name. E.g. { mvc: "1...", btc: "1...", doge: "D..." } */
+  /** Chain addresses keyed by network name. E.g. { mvc: "1...", btc: "1...", doge: "D...", opcat: "1..." } */
   addresses: Record<string, string>;
   /** Convenience: same as addresses['mvc']. Preserved for backward compatibility. */
   mvcAddress: string;
@@ -95,6 +95,7 @@ interface LegacyIdentityRecord {
   mvcAddress?: string;
   btcAddress?: string;
   dogeAddress?: string;
+  opcatAddress?: string;
   [key: string]: unknown;
 }
 
@@ -102,18 +103,31 @@ function normalizeRuntimeIdentity(identity: Record<string, unknown> | null): Run
   if (!identity || typeof identity !== 'object') return null;
 
   const legacy = identity as LegacyIdentityRecord;
+  const rawAddresses = (
+    identity['addresses'] && typeof identity['addresses'] === 'object' && !Array.isArray(identity['addresses'])
+      ? identity['addresses'] as Record<string, unknown>
+      : {}
+  );
+  const addresses: Record<string, string> = {};
+  for (const [chain, address] of Object.entries(rawAddresses)) {
+    if (typeof address === 'string' && address.trim()) {
+      addresses[chain] = address;
+    }
+  }
+
+  const mvcAddr = typeof identity['mvcAddress'] === 'string' ? identity['mvcAddress'] : undefined;
+  const btcAddr = typeof legacy.btcAddress === 'string' ? legacy.btcAddress : undefined;
+  const dogeAddr = typeof legacy.dogeAddress === 'string' ? legacy.dogeAddress : undefined;
+  const opcatAddr = typeof legacy.opcatAddress === 'string' ? legacy.opcatAddress : undefined;
+  if (mvcAddr && !addresses.mvc) addresses.mvc = mvcAddr;
+  if (btcAddr && !addresses.btc) addresses.btc = btcAddr;
+  if (dogeAddr && !addresses.doge) addresses.doge = dogeAddr;
+  // OPCAT uses the same legacy address derivation as BTC/MVC, so migrate old identities eagerly.
+  const inferredOpcatAddress = opcatAddr ?? addresses.btc ?? addresses.mvc;
+  if (inferredOpcatAddress && !addresses.opcat) addresses.opcat = inferredOpcatAddress;
 
   // Build addresses map from legacy flat fields if missing
-  if (!identity['addresses'] || typeof identity['addresses'] !== 'object') {
-    const addresses: Record<string, string> = {};
-    const mvcAddr = typeof identity['mvcAddress'] === 'string' ? identity['mvcAddress'] : undefined;
-    const btcAddr = typeof legacy.btcAddress === 'string' ? legacy.btcAddress : undefined;
-    const dogeAddr = typeof legacy.dogeAddress === 'string' ? legacy.dogeAddress : undefined;
-    if (mvcAddr) addresses.mvc = mvcAddr;
-    if (btcAddr) addresses.btc = btcAddr;
-    if (dogeAddr) addresses.doge = dogeAddr;
-    identity = { ...identity, addresses };
-  }
+  identity = { ...identity, addresses };
 
   return {
     metabotId: typeof identity['metabotId'] === 'number' ? identity['metabotId'] : 0,

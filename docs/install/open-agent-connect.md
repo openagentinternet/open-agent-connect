@@ -88,6 +88,13 @@ node -e 'const major=Number(process.versions.node.split(".")[0]); if (major < 20
 If Node.js is missing or outside the supported range, stop and ask the user to
 install Node.js 20, 22, or 24 before continuing.
 
+The installed `metabot` shim does not blindly follow the ambient `node`
+command. At runtime it first uses executable `METABOT_NODE`, then common
+Homebrew `node@22` paths, and only falls back to `node` on `PATH` when that
+binary reports a supported major version (`>=20 <25`). This keeps long-running
+MetaBot daemon processes off unsupported Node.js 25 installations while still
+letting advanced users point the shim at a specific supported Node binary.
+
 For the recommended npm path, also verify:
 
 ```bash

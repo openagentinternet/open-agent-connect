@@ -430,6 +430,8 @@ async function deriveIdentity(options = {}) {
     }
     const btcAddress = btcWallet.getAddress();
     const dogeAddress = dogeWallet.getAddress();
+    // OPCAT currently uses the same legacy address derivation as BTC/MVC.
+    const opcatAddress = btcAddress;
     return {
         mnemonic,
         path,
@@ -439,6 +441,7 @@ async function deriveIdentity(options = {}) {
             mvc: mvcAddress,
             btc: btcAddress,
             doge: dogeAddress,
+            opcat: opcatAddress,
         },
         mvcAddress,
         metaId: computeMetaId(mvcAddress),

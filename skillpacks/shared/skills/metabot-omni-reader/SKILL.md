@@ -39,6 +39,8 @@ metabot doctor
 metabot network services --online
 metabot trace get --trace-id trace-123
 metabot wallet balance
+metabot wallet balance --chain doge
+metabot wallet balance --chain opcat
 ```
 
 ## Extended Reads

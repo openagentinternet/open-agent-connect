@@ -69,7 +69,9 @@ const registry_1 = require("../core/chain/adapters/registry");
 const mvc_1 = require("../core/chain/adapters/mvc");
 const btc_1 = require("../core/chain/adapters/btc");
 const doge_1 = require("../core/chain/adapters/doge");
+const opcat_1 = require("../core/chain/adapters/opcat");
 const configStore_1 = require("../core/config/configStore");
+const configTypes_1 = require("../core/config/configTypes");
 const metawebReplyWaiter_1 = require("../core/a2a/metawebReplyWaiter");
 const orderProtocol_1 = require("../core/a2a/protocol/orderProtocol");
 const callerRating_1 = require("../core/a2a/callerRating");
@@ -3199,12 +3201,53 @@ function createDefaultMetabotDaemonHandlers(input) {
         mvc_1.mvcChainAdapter,
         btc_1.btcChainAdapter,
         doge_1.dogeChainAdapter,
+        opcat_1.opcatChainAdapter,
     ]);
     const signer = input.signer ?? (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
         secretStore,
         adapters,
     });
     const configStore = (0, configStore_1.createConfigStore)(input.homeDir);
+    function isSupportedWriteNetwork(value) {
+        return configTypes_1.DEFAULT_WRITE_NETWORKS.includes(value);
+    }
+    async function resolveDefaultWriteNetwork() {
+        const config = await configStore.read();
+        return config.chain.defaultWriteNetwork;
+    }
+    async function resolveWriteNetwork(rawNetwork) {
+        const explicit = normalizeText(rawNetwork).toLowerCase();
+        if (isSupportedWriteNetwork(explicit)) {
+            return explicit;
+        }
+        return resolveDefaultWriteNetwork();
+    }
+    async function resolveFileUploadNetwork(rawNetwork) {
+        const network = await resolveWriteNetwork(rawNetwork);
+        if (network === 'doge') {
+            throw new Error('DOGE is not supported for file upload. Use mvc, btc, or opcat.');
+        }
+        return network;
+    }
+    async function updateConfigDefaultWriteNetwork(targetConfigStore, rawInput) {
+        const chainInput = rawInput.chain && typeof rawInput.chain === 'object' && !Array.isArray(rawInput.chain)
+            ? rawInput.chain
+            : {};
+        const defaultWriteNetwork = normalizeText(chainInput.defaultWriteNetwork).toLowerCase();
+        if (!isSupportedWriteNetwork(defaultWriteNetwork)) {
+            return (0, commandResult_1.commandFailed)('invalid_argument', `chain.defaultWriteNetwork must be one of ${configTypes_1.DEFAULT_WRITE_NETWORKS.join(', ')}.`);
+        }
+        const current = await targetConfigStore.read();
+        const next = {
+            ...current,
+            chain: {
+                ...current.chain,
+                defaultWriteNetwork,
+            },
+        };
+        await targetConfigStore.set(next);
+        return (0, commandResult_1.commandSuccess)(next);
+    }
     const runtimeStateStore = (0, runtimeStateStore_1.createRuntimeStateStore)(input.homeDir);
     const llmRuntimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
     const llmBindingStore = (0, llmBindingStore_1.createLlmBindingStore)(input.homeDir);
@@ -3827,7 +3870,8 @@ function createDefaultMetabotDaemonHandlers(input) {
                         contentType: outgoingRatingMessage.contentType,
                         payload: outgoingRatingMessage.payload,
                         encoding: 'utf-8',
-                        network: request.network,
+                        // Only the rating pin follows the public write-network setting in this phase.
+                        network: 'mvc',
                     },
                 });
                 ratingMessageSent = true;
@@ -6496,9 +6540,14 @@ function createDefaultMetabotDaemonHandlers(input) {
         });
     }
     return {
+        config: {
+            get: async () => (0, commandResult_1.commandSuccess)(await configStore.read()),
+            set: async (rawInput) => updateConfigDefaultWriteNetwork(configStore, rawInput),
+        },
         chain: {
             write: async (rawInput) => {
                 try {
+                    const network = await resolveWriteNetwork(rawInput.network);
                     const result = await signer.writePin({
                         operation: typeof rawInput.operation === 'string' ? rawInput.operation : undefined,
                         path: typeof rawInput.path === 'string' ? rawInput.path : undefined,
@@ -6507,7 +6556,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
                         payload: typeof rawInput.payload === 'string' ? rawInput.payload : undefined,
                         encoding: typeof rawInput.encoding === 'string' ? rawInput.encoding : undefined,
-                        network: typeof rawInput.network === 'string' ? rawInput.network : undefined,
+                        network,
                     });
                     return (0, commandResult_1.commandSuccess)(result);
                 }
@@ -6523,12 +6572,13 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before posting buzz.');
                 }
                 try {
+                    const network = await resolveWriteNetwork(rawInput.network);
                     const result = await (0, postBuzz_1.postBuzzToChain)({
                         content: normalizeText(rawInput.content),
                         contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
                         attachments: readStringArray(rawInput.attachments),
                         quotePin: typeof rawInput.quotePin === 'string' ? rawInput.quotePin : undefined,
-                        network: typeof rawInput.network === 'string' ? rawInput.network : undefined,
+                        network,
                         signer,
                     });
                     return (0, commandResult_1.commandSuccess)({
@@ -6692,7 +6742,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 try {
                     const now = Date.now();
-                    const network = typeof rawInput.network === 'string' ? rawInput.network : undefined;
+                    const network = await resolveWriteNetwork(rawInput.network);
                     const published = await (0, masterServicePublish_1.publishMasterToChain)({
                         signer,
                         creatorMetabotId: state.identity.metabotId,
@@ -8396,7 +8446,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 try {
                     const now = Date.now();
-                    const network = typeof rawInput.network === 'string' ? rawInput.network : undefined;
+                    const network = await resolveWriteNetwork(rawInput.network);
                     const published = await (0, servicePublishChain_1.publishServiceToChain)({
                         signer,
                         creatorMetabotId: state.identity.metabotId,
@@ -9047,7 +9097,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 if (!request.comment) {
                     return (0, commandResult_1.commandFailed)('invalid_service_rating_comment', 'Service rating request must include a non-empty comment.');
                 }
-                const network = typeof rawInput.network === 'string' ? rawInput.network : undefined;
+                const network = await resolveWriteNetwork(rawInput.network);
                 return publishBuyerServiceRating({
                     traceId: request.traceId,
                     rate: request.rate,
@@ -9573,6 +9623,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 });
                 let chatWrite;
                 try {
+                    const network = await resolveWriteNetwork(rawInput.network);
                     chatWrite = await signer.writePin({
                         operation: 'create',
                         path: sent.path,
@@ -9581,7 +9632,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         contentType: sent.contentType,
                         payload: sent.payload,
                         encoding: 'utf-8',
-                        network: 'mvc',
+                        network,
                     });
                 }
                 catch (error) {
@@ -9758,10 +9809,11 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before uploading files.');
                 }
                 try {
+                    const network = await resolveFileUploadNetwork(rawInput.network);
                     const result = await (0, uploadFile_1.uploadLocalFileToChain)({
                         filePath: normalizeText(rawInput.filePath),
                         contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
-                        network: typeof rawInput.network === 'string' ? rawInput.network : undefined,
+                        network,
                         signer,
                     });
                     return (0, commandResult_1.commandSuccess)(result);
@@ -10108,6 +10160,21 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
                 }
                 return (0, commandResult_1.commandSuccess)({ profile });
+            },
+            getConfig: async ({ slug }) => {
+                const profile = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);
+                if (!profile) {
+                    return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+                }
+                return (0, commandResult_1.commandSuccess)(await (0, configStore_1.createConfigStore)(profile.homeDir).read());
+            },
+            setConfig: async (body) => {
+                const slug = normalizeText(body.slug);
+                const profile = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);
+                if (!profile) {
+                    return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${slug || '<missing>'}`);
+                }
+                return updateConfigDefaultWriteNetwork((0, configStore_1.createConfigStore)(profile.homeDir), body);
             },
             createProfile: async (body) => {
                 let createInput;

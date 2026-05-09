@@ -71,6 +71,27 @@ export const handleBotRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  const configMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/config$/);
+  if (configMatch && req.method === 'GET') {
+    const slug = normalizeSlug(configMatch[1]);
+    const result = handlers.bot?.getConfig
+      ? await handlers.bot.getConfig({ slug })
+      : commandFailed('not_implemented', 'MetaBot config handler not configured.');
+    context.sendJson(result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400, result);
+    return true;
+  }
+
+  if (configMatch && req.method === 'PUT') {
+    const slug = normalizeSlug(configMatch[1]);
+    const body = await context.readJsonBody();
+    const result = handlers.bot?.setConfig
+      ? await handlers.bot.setConfig({ ...body, slug })
+      : commandFailed('not_implemented', 'MetaBot config handler not configured.');
+    const status = result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400;
+    context.sendJson(status, result);
+    return true;
+  }
+
   const profileMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)$/);
   if (profileMatch && req.method === 'GET') {
     const slug = normalizeSlug(profileMatch[1]);

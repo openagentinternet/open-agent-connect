@@ -40,20 +40,31 @@ function normalizeRuntimeIdentity(identity) {
     if (!identity || typeof identity !== 'object')
         return null;
     const legacy = identity;
-    // Build addresses map from legacy flat fields if missing
-    if (!identity['addresses'] || typeof identity['addresses'] !== 'object') {
-        const addresses = {};
-        const mvcAddr = typeof identity['mvcAddress'] === 'string' ? identity['mvcAddress'] : undefined;
-        const btcAddr = typeof legacy.btcAddress === 'string' ? legacy.btcAddress : undefined;
-        const dogeAddr = typeof legacy.dogeAddress === 'string' ? legacy.dogeAddress : undefined;
-        if (mvcAddr)
-            addresses.mvc = mvcAddr;
-        if (btcAddr)
-            addresses.btc = btcAddr;
-        if (dogeAddr)
-            addresses.doge = dogeAddr;
-        identity = { ...identity, addresses };
+    const rawAddresses = (identity['addresses'] && typeof identity['addresses'] === 'object' && !Array.isArray(identity['addresses'])
+        ? identity['addresses']
+        : {});
+    const addresses = {};
+    for (const [chain, address] of Object.entries(rawAddresses)) {
+        if (typeof address === 'string' && address.trim()) {
+            addresses[chain] = address;
+        }
     }
+    const mvcAddr = typeof identity['mvcAddress'] === 'string' ? identity['mvcAddress'] : undefined;
+    const btcAddr = typeof legacy.btcAddress === 'string' ? legacy.btcAddress : undefined;
+    const dogeAddr = typeof legacy.dogeAddress === 'string' ? legacy.dogeAddress : undefined;
+    const opcatAddr = typeof legacy.opcatAddress === 'string' ? legacy.opcatAddress : undefined;
+    if (mvcAddr && !addresses.mvc)
+        addresses.mvc = mvcAddr;
+    if (btcAddr && !addresses.btc)
+        addresses.btc = btcAddr;
+    if (dogeAddr && !addresses.doge)
+        addresses.doge = dogeAddr;
+    // OPCAT uses the same legacy address derivation as BTC/MVC, so migrate old identities eagerly.
+    const inferredOpcatAddress = opcatAddr ?? addresses.btc ?? addresses.mvc;
+    if (inferredOpcatAddress && !addresses.opcat)
+        addresses.opcat = inferredOpcatAddress;
+    // Build addresses map from legacy flat fields if missing
+    identity = { ...identity, addresses };
     return {
         metabotId: typeof identity['metabotId'] === 'number' ? identity['metabotId'] : 0,
         name: typeof identity['name'] === 'string' ? identity['name'] : '',

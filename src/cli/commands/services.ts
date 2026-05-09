@@ -1,5 +1,5 @@
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, readChainFlag, readFlagValue, readJsonFile } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, readChainWriteFlag, readFlagValue, readJsonFile } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 export async function runServicesCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
@@ -17,7 +17,7 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
       return commandMissingFlag('--payload-file');
     }
 
-    const chainFlag = readChainFlag(args);
+    const chainFlag = readChainWriteFlag(args);
     if (chainFlag.error) {
       return chainFlag.error;
     }
@@ -114,7 +114,7 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
       return commandMissingFlag('--request-file');
     }
 
-    const chainFlag = readChainFlag(args);
+    const chainFlag = readChainWriteFlag(args);
     if (chainFlag.error) {
       return chainFlag.error;
     }

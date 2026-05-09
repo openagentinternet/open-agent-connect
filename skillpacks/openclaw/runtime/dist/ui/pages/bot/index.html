@@ -479,6 +479,33 @@
         color: var(--muted);
       }
 
+      .settings-form {
+        max-width: 520px;
+        display: grid;
+        gap: 16px;
+      }
+      .settings-form select {
+        min-height: 36px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text);
+        font-size: 12px;
+        padding: 7px 9px;
+      }
+      .settings-note {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .settings-save-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
+      }
+
       .history-scroll {
         overflow: auto;
       }
@@ -843,6 +870,7 @@
           <div class="tab-bar" data-tab-bar hidden>
             <button class="tab-btn active" data-tab="info">Basic Info</button>
             <button class="tab-btn" data-tab="history">Execution History</button>
+            <button class="tab-btn" data-tab="settings">Settings</button>
           </div>
           <div class="tab-content" data-tab-content hidden>
             <div class="tab-panel active" data-tab-panel="info">
@@ -871,6 +899,9 @@
                   </table>
                 </div>
               </div>
+            </div>
+            <div class="tab-panel" data-tab-panel="settings">
+              <div data-settings-content data-default-write-network="mvc"></div>
             </div>
           </div>
           <div class="detail-empty" data-detail-empty>

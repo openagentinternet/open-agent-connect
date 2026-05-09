@@ -18,6 +18,7 @@ const node_child_process_1 = require("node:child_process");
 const node_net_1 = __importDefault(require("node:net"));
 const commandResult_1 = require("../core/contracts/commandResult");
 const configStore_1 = require("../core/config/configStore");
+const configTypes_1 = require("../core/config/configTypes");
 const service_1 = require("../core/evolution/service");
 const localEvolutionStore_1 = require("../core/evolution/localEvolutionStore");
 const remoteEvolutionStore_1 = require("../core/evolution/remoteEvolutionStore");
@@ -223,6 +224,7 @@ const SUPPORTED_CONFIG_KEYS = new Set([
     'askMaster.enabled',
     'askMaster.triggerMode',
     'a2a.simplemsgListenerEnabled',
+    'chain.defaultWriteNetwork',
 ]);
 function isRecord(value) {
     return typeof value === 'object' && value !== null;
@@ -289,6 +291,9 @@ function readConfigValue(config, key) {
     if (key === 'a2a.simplemsgListenerEnabled') {
         return config.a2a.simplemsgListenerEnabled;
     }
+    if (key === 'chain.defaultWriteNetwork') {
+        return config.chain.defaultWriteNetwork;
+    }
     return config.evolution_network.autoRecordExecutions;
 }
 function writeConfigValue(config, key, value) {
@@ -307,6 +312,15 @@ function writeConfigValue(config, key, value) {
             askMaster: {
                 ...config.askMaster,
                 triggerMode: value,
+            },
+        };
+    }
+    if (key === 'chain.defaultWriteNetwork') {
+        return {
+            ...config,
+            chain: {
+                ...config.chain,
+                defaultWriteNetwork: value,
             },
         };
     }
@@ -368,6 +382,19 @@ function normalizeConfigValueForKey(input) {
         return {
             ok: true,
             value: input.value,
+        };
+    }
+    if (input.key === 'chain.defaultWriteNetwork') {
+        const value = typeof input.value === 'string' ? input.value.trim().toLowerCase() : '';
+        if (!configTypes_1.DEFAULT_WRITE_NETWORKS.includes(value)) {
+            return {
+                ok: false,
+                message: `Config value for chain.defaultWriteNetwork must be one of ${configTypes_1.DEFAULT_WRITE_NETWORKS.join(', ')}.`,
+            };
+        }
+        return {
+            ok: true,
+            value: value,
         };
     }
     return {

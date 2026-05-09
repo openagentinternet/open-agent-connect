@@ -77,6 +77,9 @@ test('createConfigStore defaults to evolution_network enabled true and persists 
     const defaults = await store.read();
     assert.equal(store.paths.configPath, path.join(homeDir, '.runtime', 'config.json'));
     assert.deepEqual(JSON.parse(await fs.readFile(store.paths.configPath, 'utf8')), defaults);
+    assert.deepEqual(defaults.chain, {
+      defaultWriteNetwork: 'mvc',
+    });
     assert.strictEqual(defaults.evolution_network.enabled, true);
     assert.strictEqual(defaults.evolution_network.autoRecordExecutions, true);
     assert.deepEqual(defaults.askMaster, {
@@ -98,6 +101,9 @@ test('createConfigStore defaults to evolution_network enabled true and persists 
     });
 
     const updated = {
+      chain: {
+        defaultWriteNetwork: 'opcat',
+      },
       evolution_network: {
         enabled: false,
         autoAdoptSameSkillSameScope: true,
@@ -141,6 +147,9 @@ test('read merges defaults when config fields are missing', async () => {
     await fs.writeFile(store.paths.configPath, `${JSON.stringify(partial, null, 2)}\n`, 'utf8');
     const reloaded = await store.read();
     assert.deepEqual(reloaded, {
+      chain: {
+        defaultWriteNetwork: 'mvc',
+      },
       evolution_network: {
         enabled: false,
         autoAdoptSameSkillSameScope: false,
@@ -182,6 +191,9 @@ test('read ignores non-boolean config values and falls back to defaults', async 
     await fs.writeFile(store.paths.configPath, `${JSON.stringify(invalid, null, 2)}\n`, 'utf8');
     const reloaded = await store.read();
     assert.deepEqual(reloaded, {
+      chain: {
+        defaultWriteNetwork: 'mvc',
+      },
       evolution_network: {
         enabled: true,
         autoAdoptSameSkillSameScope: false,
@@ -217,10 +229,61 @@ test('read throws when config file contains malformed JSON', async () => {
   });
 });
 
+test('read normalizes chain.defaultWriteNetwork and preserves supported values', async () => {
+  await withTempProfileHome(async () => {
+    const store = createConfigStore();
+    await store.ensureLayout();
+
+    for (const network of ['mvc', 'btc', 'doge', 'opcat']) {
+      await store.set({
+        chain: {
+          defaultWriteNetwork: network,
+        },
+        evolution_network: {
+          enabled: true,
+          autoAdoptSameSkillSameScope: false,
+          autoRecordExecutions: true
+        },
+        askMaster: {
+          enabled: true,
+          triggerMode: 'suggest',
+          confirmationMode: 'always',
+          contextMode: 'standard',
+          trustedMasters: [],
+          autoPolicy: {
+            minConfidence: 0.9,
+            minNoProgressWindowMs: 300_000,
+            perTraceLimit: 1,
+            globalCooldownMs: 1_800_000,
+            allowTrustedAutoSend: false,
+          },
+        },
+        a2a: {
+          simplemsgListenerEnabled: true,
+        },
+      });
+      const reloaded = await store.read();
+      assert.equal(reloaded.chain.defaultWriteNetwork, network);
+    }
+
+    await fs.writeFile(store.paths.configPath, `${JSON.stringify({
+      chain: {
+        defaultWriteNetwork: 'eth',
+      },
+    }, null, 2)}\n`, 'utf8');
+
+    const invalidReloaded = await store.read();
+    assert.equal(invalidReloaded.chain.defaultWriteNetwork, 'mvc');
+  });
+});
+
 test('set normalizes partial askMaster autoPolicy when callers omit new phase-3 fields', async () => {
   await withTempProfileHome(async () => {
     const store = createConfigStore();
     await store.set({
+      chain: {
+        defaultWriteNetwork: 'mvc',
+      },
       evolution_network: {
         enabled: true,
         autoAdoptSameSkillSameScope: false,
@@ -254,6 +317,9 @@ test('set preserves internal auto triggerMode when the internal override is enab
   await withTempProfileHome(async () => {
     const store = createConfigStore();
     await store.set({
+      chain: {
+        defaultWriteNetwork: 'mvc',
+      },
       evolution_network: {
         enabled: true,
         autoAdoptSameSkillSameScope: false,

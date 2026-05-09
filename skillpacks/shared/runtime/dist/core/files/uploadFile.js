@@ -50,12 +50,16 @@ async function uploadLocalFileToChain(input) {
     const buffer = await node_fs_1.promises.readFile(resolvedPath);
     const extension = node_path_1.default.extname(resolvedPath).toLowerCase();
     const contentType = normalizeText(input.contentType) || inferUploadContentType(resolvedPath);
+    const network = normalizeText(input.network) || 'mvc';
+    if (network.toLowerCase() === 'doge') {
+        throw new Error('DOGE is not supported for file upload. Use mvc, btc, or opcat.');
+    }
     const chainWrite = await input.signer.writePin({
         path: '/file',
         payload: buffer.toString('base64'),
         contentType,
         encoding: 'base64',
-        network: normalizeText(input.network) || 'mvc',
+        network,
     });
     return {
         pinId: chainWrite.pinId,

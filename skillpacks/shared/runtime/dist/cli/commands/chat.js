@@ -16,8 +16,12 @@ async function runChatCommand(args, context) {
         if (!handler) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'Chat private handler is not configured.');
         }
+        const chainFlag = (0, helpers_1.readChainWriteFlag)(args);
+        if (chainFlag.error) {
+            return chainFlag.error;
+        }
         const request = await (0, helpers_1.readJsonFile)(context, requestFile);
-        return handler(request);
+        return handler(chainFlag.chain ? { ...request, network: chainFlag.chain } : request);
     }
     if (args[0] === 'conversations') {
         const handler = context.dependencies.chat?.conversations;

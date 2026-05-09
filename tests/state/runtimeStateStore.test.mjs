@@ -30,6 +30,7 @@ test('createRuntimeStateStore persists identity, services, and traces in .runtim
       mvcAddress: 'mvc-address',
       btcAddress: 'btc-address',
       dogeAddress: 'doge-address',
+      opcatAddress: 'opcat-address',
       metaId: 'meta-id',
       globalMetaId: 'idq123',
     },

@@ -1,5 +1,11 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, readFlagValue, readJsonFile } from './helpers';
+import {
+  commandMissingFlag,
+  commandUnknownSubcommand,
+  readChainWriteFlag,
+  readFlagValue,
+  readJsonFile,
+} from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function normalizeText(value: unknown): string {
@@ -16,8 +22,12 @@ export async function runChatCommand(args: string[], context: CliRuntimeContext)
     if (!handler) {
       return commandFailed('not_implemented', 'Chat private handler is not configured.');
     }
+    const chainFlag = readChainWriteFlag(args);
+    if (chainFlag.error) {
+      return chainFlag.error;
+    }
     const request = await readJsonFile(context, requestFile);
-    return handler(request);
+    return handler(chainFlag.chain ? { ...request, network: chainFlag.chain } : request);
   }
 
   if (args[0] === 'conversations') {

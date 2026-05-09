@@ -20,7 +20,7 @@ async function runFileCommand(args, context) {
     if (!requestFile) {
         return (0, helpers_1.commandMissingFlag)('--request-file');
     }
-    const chainFlag = (0, helpers_1.readChainFlag)(args);
+    const chainFlag = (0, helpers_1.readFileUploadChainFlag)(args);
     if (chainFlag.error) {
         return chainFlag.error;
     }

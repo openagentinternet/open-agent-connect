@@ -47,7 +47,7 @@ async function runServicesCommand(args, context) {
         if (!payloadFile) {
             return (0, helpers_1.commandMissingFlag)('--payload-file');
         }
-        const chainFlag = (0, helpers_1.readChainFlag)(args);
+        const chainFlag = (0, helpers_1.readChainWriteFlag)(args);
         if (chainFlag.error) {
             return chainFlag.error;
         }
@@ -130,7 +130,7 @@ async function runServicesCommand(args, context) {
         if (!requestFile) {
             return (0, helpers_1.commandMissingFlag)('--request-file');
         }
-        const chainFlag = (0, helpers_1.readChainFlag)(args);
+        const chainFlag = (0, helpers_1.readChainWriteFlag)(args);
         if (chainFlag.error) {
             return chainFlag.error;
         }

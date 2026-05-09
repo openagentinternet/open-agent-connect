@@ -4002,6 +4002,9 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
 
   const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
   assert.equal(created.exitCode, 0);
+  const configured = await runCommand(homeDir, ['config', 'set', 'chain.defaultWriteNetwork', 'doge']);
+  assert.equal(configured.exitCode, 0);
+  assert.equal(configured.payload.data.value, 'doge');
 
   const requestFile = path.join(homeDir, 'chat-request.json');
   await writeFile(requestFile, JSON.stringify({
@@ -4016,6 +4019,7 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
   assert.equal(sent.payload.ok, true);
   assert.equal(sent.payload.data.to, created.payload.data.globalMetaId);
   assert.equal(sent.payload.data.path, '/protocols/simplemsg');
+  assert.equal(sent.payload.data.network, 'doge');
   assert.equal(sent.payload.data.deliveryMode, 'onchain_simplemsg');
   assert.match(sent.payload.data.pinId, /^\/protocols\/simplemsg-pin-/);
   assert.match(sent.payload.data.txids[0], /^\/protocols\/simplemsg-tx-/);
@@ -4065,6 +4069,7 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
   assert.equal(chatMessage.sessionId, sent.payload.data.a2aSessionId);
   assert.equal(chatMessage.pinId, sent.payload.data.pinId);
   assert.deepEqual(chatMessage.txids, sent.payload.data.txids);
+  assert.equal(chatMessage.chain, 'doge');
   assert.equal(chatMessage.replyPinId, 'reply-pin-1');
   assert.equal(chatConversation.sessions.some(
     (session) => session.sessionId === chatMessage.sessionId && session.type === 'peer',
@@ -4072,4 +4077,29 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
 
   const transcriptMarkdown = await readFile(sent.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /hello from loopback/);
+});
+
+test('file upload fails clearly when default write network is DOGE', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+  const configured = await runCommand(homeDir, ['config', 'set', 'chain.defaultWriteNetwork', 'doge']);
+  assert.equal(configured.exitCode, 0);
+
+  const filePath = path.join(homeDir, 'hello.txt');
+  const requestFile = path.join(homeDir, 'file-request.json');
+  await writeFile(filePath, 'hello doge upload guard', 'utf8');
+  await writeFile(requestFile, JSON.stringify({
+    filePath,
+    contentType: 'text/plain',
+  }), 'utf8');
+
+  const uploaded = await runCommand(homeDir, ['file', 'upload', '--request-file', requestFile]);
+
+  assert.equal(uploaded.exitCode, 1);
+  assert.equal(uploaded.payload.ok, false);
+  assert.equal(uploaded.payload.code, 'file_upload_failed');
+  assert.match(uploaded.payload.message, /DOGE is not supported for file upload/i);
 });
