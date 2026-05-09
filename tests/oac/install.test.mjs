@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
+import { execFile as execFileCallback } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { promisify } from 'node:util';
 
 const require = createRequire(import.meta.url);
 const { runOac } = require('../../dist/oac/main.js');
+const execFile = promisify(execFileCallback);
 
 async function createSystemHome(prefix) {
   const systemHome = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -19,6 +22,10 @@ function createRuntimeEnv(systemHome, overrides = {}) {
     HOME: systemHome,
     ...overrides,
   };
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function runOacCli(systemHome, args, envOverrides = {}) {
@@ -44,6 +51,26 @@ async function assertSymlinkPointsTo(entryPath, targetPath) {
   assert.equal(stat.isSymbolicLink(), true);
   const resolved = await fs.readlink(entryPath);
   assert.equal(path.resolve(path.dirname(entryPath), resolved), targetPath);
+}
+
+async function writeRecordingNodeShim(nodePath, logPath) {
+  await fs.writeFile(
+    nodePath,
+    [
+      '#!/usr/bin/env bash',
+      'set -euo pipefail',
+      'if [ "${1:-}" = "-p" ]; then',
+      '  printf "%s\\n" "22"',
+      '  exit 0',
+      'fi',
+      `printf '%s\\n' "$0" > ${JSON.stringify(logPath)}`,
+      `printf '%s\\n' "$@" >> ${JSON.stringify(logPath)}`,
+      `exec ${JSON.stringify(process.execPath)} "$@"`,
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  await fs.chmod(nodePath, 0o755);
 }
 
 test('runOac help shows primary bare install flow and registry platform host list', async (t) => {
@@ -92,8 +119,50 @@ test('runOac installs shared skills, metabot shim, and codex host bindings for a
   assert.equal(await fs.readFile(sharedSkillFile, 'utf8').then((body) => body.includes('metabot master ask')), true);
   const shim = await fs.readFile(metabotShimPath, 'utf8');
   assert.match(shim, /dist\/cli\/main\.js/);
+  assert.match(shim, /METABOT_NODE/);
+  assert.match(shim, /node@22/);
+  assert.match(shim, /Node\.js >=20 <25/);
+  assert.match(shim, /exec "\$NODE_BIN"/);
+  assert.doesNotMatch(shim, /exec node /);
   await assertSymlinkPointsTo(hostSkillPath, sharedSkillPath);
   await assert.rejects(fs.stat(evalsPath), { code: 'ENOENT' });
+});
+
+test('installed metabot shim uses METABOT_NODE instead of the ambient node command', async (t) => {
+  const { systemHome } = await createSystemHome('oac-install-metabot-node-');
+  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
+
+  const result = await runOacCli(systemHome, ['install', '--host', 'codex']);
+  assert.equal(result.exitCode, 0);
+
+  const fakeNodePath = path.join(systemHome, 'fake-node22');
+  const fakeNodeLog = path.join(systemHome, 'fake-node22.log');
+  await writeRecordingNodeShim(fakeNodePath, fakeNodeLog);
+
+  let commandFailure = null;
+  try {
+    await execFile(path.join(systemHome, '.metabot', 'bin', 'metabot'), [], {
+      cwd: systemHome,
+      env: createRuntimeEnv(systemHome, {
+        METABOT_NODE: fakeNodePath,
+        PATH: '/usr/bin:/bin',
+      }),
+    });
+  } catch (error) {
+    commandFailure = error;
+  }
+
+  assert.ok(commandFailure, 'metabot shim should execute the CLI through METABOT_NODE');
+  assert.equal(commandFailure.code, 1);
+  assert.deepEqual(JSON.parse(String(commandFailure.stdout).trim()), {
+    ok: false,
+    state: 'failed',
+    code: 'missing_command',
+    message: 'No command provided.',
+  });
+  const fakeNodeInvocation = await fs.readFile(fakeNodeLog, 'utf8');
+  assert.match(fakeNodeInvocation, new RegExp(escapeRegExp(fakeNodePath)));
+  assert.match(fakeNodeInvocation, /dist\/cli\/main\.js/);
 });
 
 test('runOac auto-detects codex when CODEX_HOME is the only host signal', async (t) => {

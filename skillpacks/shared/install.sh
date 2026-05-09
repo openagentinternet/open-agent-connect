@@ -50,10 +50,40 @@ build_cli_from_source() {
   return 1
 }
 
-command -v node >/dev/null 2>&1 || {
-  echo "node is required to run the MetaBot CLI." >&2
-  exit 1
+resolve_node_bin() {
+  if [ -n "${METABOT_NODE:-}" ]; then
+    if [ -x "$METABOT_NODE" ]; then
+      printf '%s\n' "$METABOT_NODE"
+      return 0
+    fi
+    echo "METABOT_NODE is set but is not executable: $METABOT_NODE" >&2
+    return 1
+  fi
+
+  for candidate in /opt/homebrew/opt/node@22/bin/node /usr/local/opt/node@22/bin/node /opt/homebrew/bin/node22 /usr/local/bin/node22; do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  if command -v node >/dev/null 2>&1; then
+    candidate="$(command -v node)"
+    major="$("$candidate" -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || true)"
+    if [ -n "$major" ] && [ "$major" -ge 20 ] 2>/dev/null && [ "$major" -lt 25 ] 2>/dev/null; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+    version="$("$candidate" -v 2>/dev/null || printf unknown)"
+    echo "Unsupported Node.js version at $candidate ($version). Open Agent Connect requires Node.js >=20 <25. Install node@22 or set METABOT_NODE." >&2
+    return 1
+  fi
+
+  echo "Node.js >=20 <25 is required. Install node@22 or set METABOT_NODE." >&2
+  return 1
 }
+
+NODE_BIN="$(resolve_node_bin)"
 
 [ -d "$SOURCE_SKILLS_ROOT" ] || {
   echo "Shared MetaBot skills not found at $SOURCE_SKILLS_ROOT" >&2
@@ -118,8 +148,42 @@ write_cli_shim() {
 ' '  exit 1'
     printf '%s
 ' '}'
+    printf '%s\n' 'resolve_node_bin() {'
+    printf '%s\n' '  if [ -n "${METABOT_NODE:-}" ]; then'
+    printf '%s\n' '    if [ -x "$METABOT_NODE" ]; then'
+    printf '%s\n' '      printf '\''%s\n'\'' "$METABOT_NODE"'
+    printf '%s\n' '      return 0'
+    printf '%s\n' '    fi'
+    printf '%s\n' '    echo "METABOT_NODE is set but is not executable: $METABOT_NODE" >&2'
+    printf '%s\n' '    return 1'
+    printf '%s\n' '  fi'
+    printf '%s\n' ''
+    printf '%s\n' '  for candidate in /opt/homebrew/opt/node@22/bin/node /usr/local/opt/node@22/bin/node /opt/homebrew/bin/node22 /usr/local/bin/node22; do'
+    printf '%s\n' '    if [ -x "$candidate" ]; then'
+    printf '%s\n' '      printf '\''%s\n'\'' "$candidate"'
+    printf '%s\n' '      return 0'
+    printf '%s\n' '    fi'
+    printf '%s\n' '  done'
+    printf '%s\n' ''
+    printf '%s\n' '  if command -v node >/dev/null 2>&1; then'
+    printf '%s\n' '    candidate="$(command -v node)"'
+    printf '%s\n' '    major="$("$candidate" -p '\''Number(process.versions.node.split(".")[0])'\'' 2>/dev/null || true)"'
+    printf '%s\n' '    if [ -n "$major" ] && [ "$major" -ge 20 ] 2>/dev/null && [ "$major" -lt 25 ] 2>/dev/null; then'
+    printf '%s\n' '      printf '\''%s\n'\'' "$candidate"'
+    printf '%s\n' '      return 0'
+    printf '%s\n' '    fi'
+    printf '%s\n' '    version="$("$candidate" -v 2>/dev/null || printf unknown)"'
+    printf '%s\n' '    echo "Unsupported Node.js version at $candidate ($version). Open Agent Connect requires Node.js >=20 <25. Install node@22 or set METABOT_NODE." >&2'
+    printf '%s\n' '    return 1'
+    printf '%s\n' '  fi'
+    printf '%s\n' ''
+    printf '%s\n' '  echo "Node.js >=20 <25 is required. Install node@22 or set METABOT_NODE." >&2'
+    printf '%s\n' '  return 1'
+    printf '%s\n' '}'
     printf '%s
-' 'exec node "$CLI_ENTRY" "$@"'
+' 'NODE_BIN="$(resolve_node_bin)"'
+    printf '%s
+' 'exec "$NODE_BIN" "$CLI_ENTRY" "$@"'
   } > "$BIN_DIR/$target_name"
   chmod +x "$BIN_DIR/$target_name"
 }

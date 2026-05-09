@@ -88,6 +88,42 @@ async function copySharedSkills(input) {
     }
     return { sharedSkillRoot, installedSkills };
 }
+function renderNodeResolverShellLines() {
+    return [
+        'resolve_node_bin() {',
+        '  if [ -n "${METABOT_NODE:-}" ]; then',
+        '    if [ -x "$METABOT_NODE" ]; then',
+        '      printf \'%s\\n\' "$METABOT_NODE"',
+        '      return 0',
+        '    fi',
+        '    echo "METABOT_NODE is set but is not executable: $METABOT_NODE" >&2',
+        '    return 1',
+        '  fi',
+        '',
+        '  for candidate in /opt/homebrew/opt/node@22/bin/node /usr/local/opt/node@22/bin/node /opt/homebrew/bin/node22 /usr/local/bin/node22; do',
+        '    if [ -x "$candidate" ]; then',
+        '      printf \'%s\\n\' "$candidate"',
+        '      return 0',
+        '    fi',
+        '  done',
+        '',
+        '  if command -v node >/dev/null 2>&1; then',
+        '    candidate="$(command -v node)"',
+        '    major="$("$candidate" -p \'Number(process.versions.node.split(".")[0])\' 2>/dev/null || true)"',
+        '    if [ -n "$major" ] && [ "$major" -ge 20 ] 2>/dev/null && [ "$major" -lt 25 ] 2>/dev/null; then',
+        '      printf \'%s\\n\' "$candidate"',
+        '      return 0',
+        '    fi',
+        '    version="$("$candidate" -v 2>/dev/null || printf unknown)"',
+        '    echo "Unsupported Node.js version at $candidate ($version). Open Agent Connect requires Node.js >=20 <25. Install node@22 or set METABOT_NODE." >&2',
+        '    return 1',
+        '  fi',
+        '',
+        '  echo "Node.js >=20 <25 is required. Install node@22 or set METABOT_NODE." >&2',
+        '  return 1',
+        '}',
+    ];
+}
 async function writeMetabotShim(input) {
     const binRoot = node_path_1.default.join(input.systemHomeDir, '.metabot', 'bin');
     const metabotShimPath = node_path_1.default.join(binRoot, 'metabot');
@@ -97,7 +133,9 @@ async function writeMetabotShim(input) {
     await node_fs_1.promises.writeFile(metabotShimPath, [
         '#!/usr/bin/env bash',
         'set -euo pipefail',
-        `exec node ${JSON.stringify(cliEntry)} "$@"`,
+        ...renderNodeResolverShellLines(),
+        'NODE_BIN="$(resolve_node_bin)"',
+        `exec "$NODE_BIN" ${JSON.stringify(cliEntry)} "$@"`,
         '',
     ].join('\n'), 'utf8');
     await node_fs_1.promises.chmod(metabotShimPath, 0o755);

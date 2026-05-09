@@ -3229,6 +3229,25 @@ function createDefaultMetabotDaemonHandlers(input) {
         }
         return network;
     }
+    async function updateConfigDefaultWriteNetwork(targetConfigStore, rawInput) {
+        const chainInput = rawInput.chain && typeof rawInput.chain === 'object' && !Array.isArray(rawInput.chain)
+            ? rawInput.chain
+            : {};
+        const defaultWriteNetwork = normalizeText(chainInput.defaultWriteNetwork).toLowerCase();
+        if (!isSupportedWriteNetwork(defaultWriteNetwork)) {
+            return (0, commandResult_1.commandFailed)('invalid_argument', `chain.defaultWriteNetwork must be one of ${configTypes_1.DEFAULT_WRITE_NETWORKS.join(', ')}.`);
+        }
+        const current = await targetConfigStore.read();
+        const next = {
+            ...current,
+            chain: {
+                ...current.chain,
+                defaultWriteNetwork,
+            },
+        };
+        await targetConfigStore.set(next);
+        return (0, commandResult_1.commandSuccess)(next);
+    }
     const runtimeStateStore = (0, runtimeStateStore_1.createRuntimeStateStore)(input.homeDir);
     const llmRuntimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
     const llmBindingStore = (0, llmBindingStore_1.createLlmBindingStore)(input.homeDir);
@@ -6523,25 +6542,7 @@ function createDefaultMetabotDaemonHandlers(input) {
     return {
         config: {
             get: async () => (0, commandResult_1.commandSuccess)(await configStore.read()),
-            set: async (rawInput) => {
-                const chainInput = rawInput.chain && typeof rawInput.chain === 'object' && !Array.isArray(rawInput.chain)
-                    ? rawInput.chain
-                    : {};
-                const defaultWriteNetwork = normalizeText(chainInput.defaultWriteNetwork).toLowerCase();
-                if (!isSupportedWriteNetwork(defaultWriteNetwork)) {
-                    return (0, commandResult_1.commandFailed)('invalid_argument', `chain.defaultWriteNetwork must be one of ${configTypes_1.DEFAULT_WRITE_NETWORKS.join(', ')}.`);
-                }
-                const current = await configStore.read();
-                const next = {
-                    ...current,
-                    chain: {
-                        ...current.chain,
-                        defaultWriteNetwork,
-                    },
-                };
-                await configStore.set(next);
-                return (0, commandResult_1.commandSuccess)(next);
-            },
+            set: async (rawInput) => updateConfigDefaultWriteNetwork(configStore, rawInput),
         },
         chain: {
             write: async (rawInput) => {
@@ -10159,6 +10160,21 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
                 }
                 return (0, commandResult_1.commandSuccess)({ profile });
+            },
+            getConfig: async ({ slug }) => {
+                const profile = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);
+                if (!profile) {
+                    return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+                }
+                return (0, commandResult_1.commandSuccess)(await (0, configStore_1.createConfigStore)(profile.homeDir).read());
+            },
+            setConfig: async (body) => {
+                const slug = normalizeText(body.slug);
+                const profile = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);
+                if (!profile) {
+                    return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${slug || '<missing>'}`);
+                }
+                return updateConfigDefaultWriteNetwork((0, configStore_1.createConfigStore)(profile.homeDir), body);
             },
             createProfile: async (body) => {
                 let createInput;

@@ -15,7 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},config:{chain:{defaultWriteNetwork:'mvc'}},selectedSlug:'',selectedTab:'info',originalProfile:null,_pendingAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},selectedSlug:'',selectedTab:'info',originalProfile:null,_pendingAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false};
 
 function api(url,opts){return fetch(url,opts).then(function(r){return r.json().catch(function(){return{ok:false,message:String(r.status)}}).then(function(body){if(!r.ok||body.ok===false){throw new Error(body.message||body.code||String(r.status))}return body})})}
 function fmtTime(t){if(!t)return'-';var d=new Date(t);if(Number.isNaN(d.getTime()))return'-';return d.toLocaleString()}
@@ -39,7 +39,8 @@ function providerIconMarkup(provider){
   return '<span class="provider-logo provider-logo-'+esc(key.replace(/[^a-z0-9_-]+/gi,'-'))+'" data-provider-icon="'+esc(key)+'" aria-hidden="true"><img src="'+esc(path)+'" alt="" loading="lazy" /></span>';
 }
 function defaultWriteNetwork(){
-  var value=state.config&&state.config.chain&&state.config.chain.defaultWriteNetwork;
+  var config=state.profileConfigs[state.selectedSlug]||{};
+  var value=config&&config.chain&&config.chain.defaultWriteNetwork;
   return ['mvc','btc','doge','opcat'].indexOf(value)>=0?value:'mvc';
 }
 function uniqueProviderRuntimes(){
@@ -408,6 +409,12 @@ function renderHistoryTab(){
 
 function renderSettingsTab(){
   var root=q('[data-settings-content]');if(!root)return;
+  var profile=selectedProfile();
+  if(!profile){root.innerHTML='';return}
+  if(!state.profileConfigs[profile.slug]){
+    root.innerHTML='<div class="settings-form"><div class="settings-note">Loading settings...</div></div>';
+    return;
+  }
   var current=defaultWriteNetwork();
   root.setAttribute('data-default-write-network',current);
   var options=['mvc','btc','doge','opcat'].map(function(network){
@@ -431,23 +438,37 @@ function switchTab(tab,silent){
   state.selectedTab=tab||'info';
   qq('[data-tab]').forEach(function(el){el.classList.toggle('active',el.getAttribute('data-tab')===state.selectedTab)});
   qq('[data-tab-panel]').forEach(function(el){el.classList.toggle('active',el.getAttribute('data-tab-panel')===state.selectedTab)});
-  if(state.selectedTab==='history')loadSessions();else if(state.selectedTab==='settings')renderSettingsTab();else renderInfoTab();
+  if(state.selectedTab==='history')loadSessions();else if(state.selectedTab==='settings'){renderSettingsTab();loadSelectedProfileConfig()}else renderInfoTab();
 }
 
 function loadStats(){return api('/api/bot/stats').then(function(r){state.stats=r.data||{};renderStats()}).catch(function(){renderStats()})}
 function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];if(!state.selectedSlug&&state.profiles.length)state.selectedSlug=state.profiles[0].slug;if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))state.selectedSlug=state.profiles[0]&&state.profiles[0].slug||'';state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
 function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];renderCurrentTab();renderStats()}).catch(function(){state.runtimes=[];renderCurrentTab();renderStats()})}
 function loadSessions(slug){var activeSlug=slug||state.selectedSlug;if(!activeSlug){state.sessions=[];renderHistoryTab();renderStats();return Promise.resolve()}return api('/api/bot/sessions?slug='+encodeURIComponent(activeSlug)+'&limit=50').then(function(r){if(activeSlug!==state.selectedSlug)return;state.sessions=(r.data&&r.data.sessions)||[];renderHistoryTab();renderStats()}).catch(function(){if(activeSlug!==state.selectedSlug)return;state.sessions=[];renderHistoryTab();renderStats()})}
-function loadConfig(){return api('/api/config').then(function(r){state.config=r.data||state.config;renderSettingsTab()}).catch(function(){renderSettingsTab()})}
-function loadAll(){return Promise.all([loadStats(),loadProfiles(),loadRuntimes(),loadConfig()]).then(function(){return loadSessions()})}
+function loadSelectedProfileConfig(force){
+  var slug=state.selectedSlug;
+  if(!slug)return Promise.resolve();
+  if(!force&&state.profileConfigs[slug])return Promise.resolve(state.profileConfigs[slug]);
+  return api('/api/bot/profiles/'+encodeURIComponent(slug)+'/config').then(function(r){
+    if(slug!==state.selectedSlug)return;
+    state.profileConfigs[slug]=r.data||{chain:{defaultWriteNetwork:'mvc'}};
+    renderSettingsTab();
+  }).catch(function(error){
+    if(slug!==state.selectedSlug)return;
+    var root=q('[data-settings-content]');
+    if(root)root.innerHTML='<div class="settings-form"><div class="save-status error">'+esc(error.message)+'</div></div>';
+  });
+}
+function loadAll(){return Promise.all([loadStats(),loadProfiles(),loadRuntimes()]).then(function(){return loadSessions()})}
 
 function saveSettings(){
+  var profile=selectedProfile();if(!profile)return;
   var select=q('[data-field="defaultWriteNetwork"]');var status=q('[data-settings-status]');var btn=q('[data-act="save-settings"]');
   var value=(select&&select.value)||defaultWriteNetwork();
   if(status){status.textContent='Saving...';status.className='save-status saving'}
   if(btn)btn.disabled=true;
-  return api('/api/config',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({chain:{defaultWriteNetwork:value}})}).then(function(r){
-    state.config=r.data||state.config;
+  return api('/api/bot/profiles/'+encodeURIComponent(profile.slug)+'/config',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({chain:{defaultWriteNetwork:value}})}).then(function(r){
+    state.profileConfigs[profile.slug]=r.data||state.profileConfigs[profile.slug]||{chain:{defaultWriteNetwork:'mvc'}};
     renderSettingsTab();
     status=q('[data-settings-status]');if(status){status.textContent='Saved';status.className='save-status success'}
   }).catch(function(error){

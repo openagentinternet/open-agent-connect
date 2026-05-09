@@ -82,6 +82,26 @@ async function assertFileMissing(filePath) {
   );
 }
 
+async function writeRecordingNodeShim(nodePath, logPath) {
+  await writeFile(
+    nodePath,
+    [
+      '#!/usr/bin/env bash',
+      'set -euo pipefail',
+      'if [ "${1:-}" = "-p" ]; then',
+      '  printf "%s\\n" "22"',
+      '  exit 0',
+      'fi',
+      `printf '%s\\n' "$0" > ${JSON.stringify(logPath)}`,
+      `printf '%s\\n' "$@" >> ${JSON.stringify(logPath)}`,
+      `exec ${JSON.stringify(process.execPath)} "$@"`,
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  await chmod(nodePath, 0o755);
+}
+
 async function assertRepoFileTracked(repoRelativePath) {
   await execFile('git', ['ls-files', '--error-unmatch', repoRelativePath], {
     cwd: REPO_ROOT,
@@ -592,9 +612,26 @@ test('shared install.sh copies shared skills and installs a runnable metabot shi
   await assertFileExists(path.join(binDir, 'metabot'));
   await assertFileMissing(path.join(binDir, 'agent-connect'));
 
+  const sharedInstall = await readFile(path.join(sharedRoot, 'install.sh'), 'utf8');
+  assert.match(sharedInstall, /resolve_node_bin/);
+  assert.match(sharedInstall, /METABOT_NODE/);
+  assert.match(sharedInstall, /node@22/);
+  assert.match(sharedInstall, /Node\.js >=20 <25/);
+  assert.doesNotMatch(sharedInstall, /exec node "\$CLI_ENTRY"/);
+
+  const shim = await readFile(path.join(binDir, 'metabot'), 'utf8');
+  assert.match(shim, /METABOT_NODE/);
+  assert.match(shim, /node@22/);
+  assert.match(shim, /exec "\$NODE_BIN" "\$CLI_ENTRY" "\$@"/);
+  assert.doesNotMatch(shim, /exec node "\$CLI_ENTRY"/);
+
   const installedAskMaster = await readFile(path.join(skillDest, 'metabot-ask-master', 'SKILL.md'), 'utf8');
   assert.match(installedAskMaster, /metabot master ask --request-file/);
   assert.doesNotMatch(installedAskMaster, /metabot advisor ask/);
+
+  const fakeNodePath = path.join(fakeHome, 'fake-node22');
+  const fakeNodeLog = path.join(fakeHome, 'fake-node22.log');
+  await writeRecordingNodeShim(fakeNodePath, fakeNodeLog);
 
   let commandFailure = null;
   try {
@@ -602,6 +639,8 @@ test('shared install.sh copies shared skills and installs a runnable metabot shi
       env: {
         ...process.env,
         HOME: fakeHome,
+        METABOT_NODE: fakeNodePath,
+        PATH: '/usr/bin:/bin',
       },
     });
   } catch (error) {
@@ -616,6 +655,9 @@ test('shared install.sh copies shared skills and installs a runnable metabot shi
     code: 'missing_command',
     message: 'No command provided.',
   });
+  const fakeNodeInvocation = await readFile(fakeNodeLog, 'utf8');
+  assert.match(fakeNodeInvocation, new RegExp(escapeForRegex(fakeNodePath)));
+  assert.match(fakeNodeInvocation, /runtime\/dist\/cli\/main\.js/);
 });
 
 test('host wrapper install.sh runs the packaged shared install flow and binds host skills without relying on an adjacent shared pack directory', async () => {
