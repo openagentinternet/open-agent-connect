@@ -65,3 +65,25 @@ test('uploadLocalFileToChain reads the local file, writes /file to chain, and re
     globalMetaId: 'gm-local-alice',
   });
 });
+
+test('uploadLocalFileToChain rejects DOGE file uploads before writing to chain', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-file-upload-doge-'));
+  const filePath = path.join(tempDir, 'photo.png');
+  await writeFile(filePath, Buffer.from('hello doge guard'));
+
+  const calls = [];
+  await assert.rejects(
+    () => uploadLocalFileToChain({
+      filePath,
+      network: 'doge',
+      signer: {
+        writePin: async (input) => {
+          calls.push(input);
+          throw new Error('writePin should not be called');
+        },
+      },
+    }),
+    /DOGE is not supported for file upload/i,
+  );
+  assert.equal(calls.length, 0);
+});

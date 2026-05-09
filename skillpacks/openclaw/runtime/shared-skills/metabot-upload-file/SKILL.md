@@ -48,6 +48,13 @@ Then call:
 metabot file upload --request-file request.json
 ```
 
+When `--chain` is omitted, the daemon uses the active profile's configured `chain.defaultWriteNetwork` (initially `mvc`). If that configured default is `doge`, file upload fails clearly because DOGE file upload is not supported. To inspect or change the default:
+
+```bash
+metabot config get chain.defaultWriteNetwork
+metabot config set chain.defaultWriteNetwork opcat
+```
+
 When the human explicitly asks to upload on BTC or OPCAT, pass the matching chain flag:
 
 ```bash
@@ -60,7 +67,7 @@ metabot file upload --request-file request.json --chain opcat
 - Use `/file` as MetaWeb path.
 - Read local file from `filePath`, encode as base64, and upload through shared runtime.
 - Return resulting `metafile://...` URI for later references.
-- If human names BTC (`btc`, `比特币`, `bitcoin`) or OPCAT (`opcat`), pass `--chain btc` or `--chain opcat`; otherwise keep default `mvc`.
+- If human names BTC (`btc`, `比特币`, `bitcoin`) or OPCAT (`opcat`), pass `--chain btc` or `--chain opcat`; otherwise omit `--chain` so the configured default write network applies.
 - DOGE is not supported for file upload. If the human asks for DOGE file upload, explain that this specific flow currently supports MVC, BTC, and OPCAT only.
 
 ## In Scope

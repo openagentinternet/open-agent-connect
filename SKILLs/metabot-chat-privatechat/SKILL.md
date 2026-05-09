@@ -44,18 +44,35 @@ Then call:
 {{METABOT_CLI}} chat private --request-file request.json
 ```
 
+When `--chain` is omitted, the private `simplemsg` write uses the active profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
+
+```bash
+{{METABOT_CLI}} config get chain.defaultWriteNetwork
+{{METABOT_CLI}} config set chain.defaultWriteNetwork opcat
+```
+
+When the human explicitly asks to send on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
+
+```bash
+{{METABOT_CLI}} chat private --request-file request.json --chain btc
+{{METABOT_CLI}} chat private --request-file request.json --chain doge
+{{METABOT_CLI}} chat private --request-file request.json --chain opcat
+```
+
 ## Required Semantics
 
 - Use `/protocols/simplemsg` as the outer MetaWeb path.
 - Resolve the peer chat public key before encryption.
 - Encrypt the content with the shared ECDH secret.
 - Stop with an error if `to`, `content`, or remote chat public key is missing.
+- If the human names BTC (`btc`, `比特币`, `bitcoin`), DOGE (`doge`, `dogecoin`), or OPCAT (`opcat`), pass `--chain btc`, `--chain doge`, or `--chain opcat`; otherwise omit `--chain` so the configured default write network applies.
 - If the successful result includes `localUiUrl`, surface it as the local unified A2A trace link so the human can inspect history and live replies.
 
 ## In Scope
 
 - One private message send with optional reply pin context.
 - Protocol-safe encryption and on-chain delivery reporting (`pinId`, `txids`).
+- MVC/BTC/DOGE/OPCAT chain selection for the private message write.
 
 ## Out of Scope
 

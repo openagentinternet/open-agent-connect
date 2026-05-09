@@ -69,6 +69,7 @@ function normalizeConfig(input) {
     const maybeNetwork = root['evolution_network'];
     const maybeAskMaster = root['askMaster'];
     const maybeA2A = root['a2a'];
+    const maybeChain = root['chain'];
     const networkSource = maybeNetwork && typeof maybeNetwork === 'object'
         ? maybeNetwork
         : {};
@@ -78,10 +79,19 @@ function normalizeConfig(input) {
     const a2aSource = maybeA2A && typeof maybeA2A === 'object'
         ? maybeA2A
         : {};
+    const chainSource = maybeChain && typeof maybeChain === 'object'
+        ? maybeChain
+        : {};
     const triggerMode = normalizeString(askMasterSource.triggerMode);
     const confirmationMode = normalizeString(askMasterSource.confirmationMode);
     const contextMode = normalizeString(askMasterSource.contextMode);
+    const defaultWriteNetwork = normalizeString(chainSource.defaultWriteNetwork).toLowerCase();
     return {
+        chain: {
+            defaultWriteNetwork: (0, configTypes_1.isDefaultWriteNetwork)(defaultWriteNetwork)
+                ? defaultWriteNetwork
+                : defaults.chain.defaultWriteNetwork,
+        },
         evolution_network: {
             enabled: normalizeBoolean(networkSource.enabled, defaults.evolution_network.enabled),
             autoAdoptSameSkillSameScope: normalizeBoolean(networkSource.autoAdoptSameSkillSameScope, defaults.evolution_network.autoAdoptSameSkillSameScope),

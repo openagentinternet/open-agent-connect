@@ -62,6 +62,7 @@ test('runCli prints config group help with get and set subcommands', async () =>
   assert.match(output, /^Commands:/m);
   assert.match(output, /^\s+get\s+/m);
   assert.match(output, /^\s+set\s+/m);
+  assert.match(output, /chain\.defaultWriteNetwork/);
   assert.match(output, /askMaster\.enabled/);
   assert.match(output, /askMaster\.triggerMode suggest/);
 });
@@ -178,6 +179,7 @@ test('runCli prints chain write help with every supported write chain', async ()
   const output = stdout.join('');
   assert.match(output, /^Usage:\s+metabot chain write --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
   assert.match(output, /optional chain network override: mvc, btc, doge, or opcat/i);
+  assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(output, /chain-doge-request\.json/);
   assert.match(output, /chain-opcat-request\.json/);
 });
@@ -194,6 +196,7 @@ test('runCli prints buzz post help with DOGE and OPCAT chain support', async () 
 
   const output = stdout.join('');
   assert.match(output, /^Usage:\s+metabot buzz post --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(output, /buzz-doge-request\.json/);
   assert.match(output, /buzz-opcat-request\.json/);
 });
@@ -211,6 +214,7 @@ test('runCli prints file upload help with OPCAT support and DOGE exclusion', asy
   const output = stdout.join('');
   assert.match(output, /^Usage:\s+metabot file upload --request-file <path> \[--chain <mvc\|btc\|opcat>\]/m);
   assert.match(output, /DOGE is not supported for file upload/i);
+  assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
 });
 
 test('runCli prints master publish help with DOGE and OPCAT chain support', async () => {
@@ -225,6 +229,7 @@ test('runCli prints master publish help with DOGE and OPCAT chain support', asyn
 
   const output = stdout.join('');
   assert.match(output, /^Usage:\s+metabot master publish --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(output, /master-doge-payload\.json/);
   assert.match(output, /master-opcat-payload\.json/);
 });
@@ -300,6 +305,7 @@ test('runCli prints services publish and rate help with DOGE and OPCAT chain sup
   assert.equal(publishExitCode, 0);
   const publishOutput = publishStdout.join('');
   assert.match(publishOutput, /^Usage:\s+metabot services publish --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(publishOutput, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(publishOutput, /service-doge-payload\.json/);
   assert.match(publishOutput, /service-opcat-payload\.json/);
 
@@ -312,6 +318,7 @@ test('runCli prints services publish and rate help with DOGE and OPCAT chain sup
   assert.equal(rateExitCode, 0);
   const rateOutput = rateStdout.join('');
   assert.match(rateOutput, /^Usage:\s+metabot services rate --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(rateOutput, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(rateOutput, /rating-doge\.json/);
   assert.match(rateOutput, /rating-opcat\.json/);
 });
@@ -438,7 +445,7 @@ test('runCli prints machine-readable help for `metabot chat private --help --jso
   const output = JSON.parse(stdout.join(''));
   assert.deepEqual(output.commandPath, ['chat', 'private']);
   assert.equal(output.command, 'metabot chat private');
-  assert.match(output.usage, /^metabot chat private --request-file <path>$/);
+  assert.match(output.usage, /^metabot chat private --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]$/);
   assert.equal(output.summary, 'Send one encrypted private MetaWeb message to another MetaBot.');
   assert.deepEqual(output.requiredFlags, [
     {
@@ -447,9 +454,15 @@ test('runCli prints machine-readable help for `metabot chat private --help --jso
       description: 'JSON request file.',
     },
   ]);
+  assert.ok(output.optionalFlags.some((entry) => (
+    entry.flag === '--chain'
+    && entry.value === '<mvc|btc|doge|opcat>'
+    && /chain\.defaultWriteNetwork/.test(entry.description)
+  )));
   assert.equal(output.requestShape.to, 'remote globalMetaId');
   assert.equal(output.requestShape.content, 'message text');
   assert.equal(output.requestShape.replyPin, 'optional prior message pin id');
+  assert.equal(output.requestShape.network, 'optional chain network override: mvc, btc, doge, or opcat');
   assert.ok(Array.isArray(output.successFields));
   assert.ok(output.successFields.includes('traceId'));
   assert.ok(output.successFields.includes('pinId'));

@@ -1,15 +1,20 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ASK_MASTER_CONTEXT_MODES = exports.ASK_MASTER_CONFIRMATION_MODES = exports.ASK_MASTER_TRIGGER_MODES = void 0;
+exports.ASK_MASTER_CONTEXT_MODES = exports.ASK_MASTER_CONFIRMATION_MODES = exports.ASK_MASTER_TRIGGER_MODES = exports.DEFAULT_WRITE_NETWORKS = void 0;
+exports.isDefaultWriteNetwork = isDefaultWriteNetwork;
 exports.isAskMasterTriggerMode = isAskMasterTriggerMode;
 exports.isAskMasterConfirmationMode = isAskMasterConfirmationMode;
 exports.isAskMasterContextMode = isAskMasterContextMode;
 exports.createDefaultAskMasterAutoPolicyConfig = createDefaultAskMasterAutoPolicyConfig;
 exports.normalizeAskMasterAutoPolicyConfig = normalizeAskMasterAutoPolicyConfig;
 exports.createDefaultConfig = createDefaultConfig;
+exports.DEFAULT_WRITE_NETWORKS = ['mvc', 'btc', 'doge', 'opcat'];
 exports.ASK_MASTER_TRIGGER_MODES = ['manual', 'suggest', 'auto'];
 exports.ASK_MASTER_CONFIRMATION_MODES = ['always', 'sensitive_only', 'never'];
 exports.ASK_MASTER_CONTEXT_MODES = ['compact', 'standard', 'full_task'];
+function isDefaultWriteNetwork(value) {
+    return typeof value === 'string' && exports.DEFAULT_WRITE_NETWORKS.includes(value);
+}
 function isAskMasterTriggerMode(value) {
     return typeof value === 'string' && exports.ASK_MASTER_TRIGGER_MODES.includes(value);
 }
@@ -61,6 +66,9 @@ function normalizeAskMasterAutoPolicyConfig(value) {
 }
 function createDefaultConfig() {
     return {
+        chain: {
+            defaultWriteNetwork: 'mvc',
+        },
         evolution_network: {
             enabled: true,
             autoAdoptSameSkillSameScope: false,

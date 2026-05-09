@@ -7,6 +7,7 @@ exports.createHttpServer = createHttpServer;
 const node_http_1 = __importDefault(require("node:http"));
 const node_buffer_1 = require("node:buffer");
 const commandResult_1 = require("../core/contracts/commandResult");
+const config_1 = require("./routes/config");
 const buzz_1 = require("./routes/buzz");
 const chain_1 = require("./routes/chain");
 const daemon_1 = require("./routes/daemon");
@@ -23,6 +24,7 @@ const llm_1 = require("./routes/llm");
 const bot_1 = require("./routes/bot");
 const JSON_BODY_LIMIT_BYTES = 1024 * 1024;
 const ROUTES = [
+    config_1.handleConfigRoutes,
     buzz_1.handleBuzzRoutes,
     chain_1.handleChainRoutes,
     daemon_1.handleDaemonRoutes,

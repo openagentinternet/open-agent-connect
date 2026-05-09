@@ -49,6 +49,13 @@ Then call:
 {{METABOT_CLI}} services publish --payload-file payload.json
 ```
 
+When `--chain` is omitted, the daemon uses the active profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
+
+```bash
+{{METABOT_CLI}} config get chain.defaultWriteNetwork
+{{METABOT_CLI}} config set chain.defaultWriteNetwork opcat
+```
+
 When the human explicitly asks to publish the service record on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
@@ -63,7 +70,7 @@ When the human explicitly asks to publish the service record on BTC, DOGE, or OP
 - Preserve price and currency as explicit payload fields.
 - Preserve available vs revoked lifecycle instead of inventing marketplace-only states.
 - If an icon or skill document must be stored on-chain first, publish that asset before calling this skill. File upload supports MVC, BTC, and OPCAT, but not DOGE.
-- If human names BTC (`btc`, `比特币`, `bitcoin`), DOGE (`doge`, `dogecoin`), or OPCAT (`opcat`), pass `--chain btc`, `--chain doge`, or `--chain opcat`; otherwise keep default `mvc`.
+- If human names BTC (`btc`, `比特币`, `bitcoin`), DOGE (`doge`, `dogecoin`), or OPCAT (`opcat`), pass `--chain btc`, `--chain doge`, or `--chain opcat`; otherwise omit `--chain` so the configured default write network applies.
 
 ## In Scope
 

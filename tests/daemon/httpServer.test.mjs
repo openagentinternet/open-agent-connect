@@ -50,6 +50,8 @@ async function startServer(options = {}) {
     botListRuntimes: [],
     botDiscoverRuntimes: [],
     botListSessions: [],
+    configGet: [],
+    configSet: [],
   };
 
   const server = createHttpServer({
@@ -642,6 +644,27 @@ async function startServer(options = {}) {
               createdAt: '2026-05-05T00:00:00.000Z',
             },
           ],
+        });
+      },
+    },
+    config: {
+      get: async () => {
+        calls.configGet.push({});
+        return commandSuccess({
+          chain: {
+            defaultWriteNetwork: 'mvc',
+          },
+        });
+      },
+      set: async (input) => {
+        calls.configSet.push(input);
+        if (input.chain?.defaultWriteNetwork === 'eth') {
+          return commandFailed('invalid_argument', 'defaultWriteNetwork must be one of mvc, btc, doge, opcat.');
+        }
+        return commandSuccess({
+          chain: {
+            defaultWriteNetwork: input.chain?.defaultWriteNetwork ?? 'mvc',
+          },
         });
       },
     },
@@ -1303,6 +1326,61 @@ test('GET /api/bot/sessions forwards slug and clamped limit to the MetaBot sessi
   assert.equal(payload.data.sessions[0].metaBotSlug, 'alice-bot');
 });
 
+test('GET /api/config returns normalized local runtime config', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/config`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.configGet, [{}]);
+  assert.deepEqual(payload.data.chain, {
+    defaultWriteNetwork: 'mvc',
+  });
+});
+
+test('PUT /api/config persists the default write network and rejects invalid values', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/config`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      chain: {
+        defaultWriteNetwork: 'opcat',
+      },
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.configSet, [{
+    chain: {
+      defaultWriteNetwork: 'opcat',
+    },
+  }]);
+  assert.deepEqual(payload.data.chain, {
+    defaultWriteNetwork: 'opcat',
+  });
+
+  const invalidResponse = await fetch(`${server.baseUrl}/api/config`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      chain: {
+        defaultWriteNetwork: 'eth',
+      },
+    }),
+  });
+  const invalidPayload = await invalidResponse.json();
+
+  assert.equal(invalidResponse.status, 400);
+  assert.equal(invalidPayload.ok, false);
+  assert.equal(invalidPayload.code, 'invalid_argument');
+});
+
 test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
@@ -1322,6 +1400,8 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.ok(html.indexOf('data-act="open-backup"') < html.indexOf('data-act="discover-runtimes"'));
   assert.match(html, /data-tab="info"/);
   assert.match(html, /data-tab="history"/);
+  assert.match(html, /data-tab="settings"/);
+  assert.match(html, /data-default-write-network/);
   assert.match(html, /data-info-content/);
   assert.match(html, /data-execution-history-list/);
   assert.match(html, /<th>Time<\/th>/);

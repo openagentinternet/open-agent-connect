@@ -163,17 +163,18 @@ const HELP_JSON_FLAG: CommandHelpFlag = {
 
 const PLATFORM_HOST_VALUE = `<${SUPPORTED_PLATFORM_IDS.join('|')}>`;
 const PLATFORM_HOST_TEXT = SUPPORTED_PLATFORM_IDS.join(', ');
+const CONFIGURED_WRITE_NETWORK_TEXT = 'Defaults to the configured `chain.defaultWriteNetwork`, initially mvc.';
 
 const CHAIN_WRITE_FLAG: CommandHelpFlag = {
   flag: '--chain',
   value: '<mvc|btc|doge|opcat>',
-  description: 'Optional chain network override: mvc, btc, doge, or opcat. Defaults to mvc.',
+  description: `Optional chain network override: mvc, btc, doge, or opcat. ${CONFIGURED_WRITE_NETWORK_TEXT}`,
 };
 
 const FILE_UPLOAD_CHAIN_FLAG: CommandHelpFlag = {
   flag: '--chain',
   value: '<mvc|btc|opcat>',
-  description: 'Optional chain network override: mvc, btc, or opcat. DOGE is not supported for file upload. Defaults to mvc.',
+  description: `Optional chain network override: mvc, btc, or opcat. ${CONFIGURED_WRITE_NETWORK_TEXT} DOGE is not supported for file upload.`,
 };
 
 const WALLET_CHAIN_ALL_FLAG: CommandHelpFlag = {
@@ -307,7 +308,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['config'],
-    summary: 'Read or change supported public runtime switches such as Ask Master availability.',
+    summary: 'Read or change supported public runtime switches such as Ask Master availability and default write network.',
     usage: 'metabot config <subcommand>',
     subcommands: [
       { name: 'get', summary: 'Read one supported config key from the active local runtime home.' },
@@ -315,6 +316,8 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     optionalFlags: [HELP_JSON_FLAG],
     examples: [
+      'metabot config get chain.defaultWriteNetwork',
+      'metabot config set chain.defaultWriteNetwork opcat',
       'metabot config get askMaster.enabled',
       'metabot config get a2a.simplemsgListenerEnabled',
       'metabot config set askMaster.triggerMode suggest',
@@ -322,7 +325,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['config', 'get'],
-    summary: 'Read one supported public config key such as Ask Master availability or trigger mode.',
+    summary: 'Read one supported public config key such as the default write network, Ask Master availability, or trigger mode.',
     usage: 'metabot config get <key>',
     successFields: [
       'key',
@@ -333,6 +336,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'Fails with unsupported_config_key when the requested key is not in the public CLI allowlist.',
     ],
     examples: [
+      'metabot config get chain.defaultWriteNetwork',
       'metabot config get askMaster.enabled',
       'metabot config get askMaster.triggerMode',
       'metabot config get a2a.simplemsgListenerEnabled',
@@ -350,9 +354,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     failureSemantics: [
       'Fails with missing_argument when the key or value is omitted.',
       'Fails with unsupported_config_key when the requested key is not in the public CLI allowlist.',
+      'Fails when chain.defaultWriteNetwork is not one of mvc, btc, doge, or opcat.',
       'Fails when askMaster.triggerMode is not one of `manual` or `suggest`.',
     ],
     examples: [
+      'metabot config set chain.defaultWriteNetwork opcat',
       'metabot config set askMaster.enabled false',
       'metabot config set a2a.simplemsgListenerEnabled false',
       'metabot config set askMaster.triggerMode suggest',
@@ -1124,7 +1130,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['chat', 'private'],
     summary: 'Send one encrypted private MetaWeb message to another MetaBot.',
-    usage: 'metabot chat private --request-file <path>',
+    usage: 'metabot chat private --request-file <path> [--chain <mvc|btc|doge|opcat>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -1132,6 +1138,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       to: 'remote globalMetaId',
       content: 'message text',
       replyPin: 'optional prior message pin id',
+      network: 'optional chain network override: mvc, btc, doge, or opcat',
     },
     successFields: [
       'to',
@@ -1148,8 +1155,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot chat private --request-file chat-request.json',
+      'metabot chat private --request-file chat-doge-request.json --chain doge',
+      'metabot chat private --request-file chat-opcat-request.json --chain opcat',
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['trace'],

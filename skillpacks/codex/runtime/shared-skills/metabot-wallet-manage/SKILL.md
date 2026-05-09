@@ -82,6 +82,19 @@ metabot wallet balance --chain mvc
 
 The `mvc` balance response includes `balances.mvc.totalMvc` (the SPACE amount) and `balances.mvc.address` (the MVC/SPACE receiving address). DOGE and OPCAT balances are returned under `balances.doge` and `balances.opcat`.
 
+## Default Write Network Config
+
+Wallet balance and transfer do not use the default write-network setting. Balance defaults to all chains, and transfer selects the chain from the amount unit (`BTC`, `SPACE`, `DOGE`, or `OPCAT`).
+
+Use these commands only when the human asks to inspect or change the default chain for on-chain write commands such as buzz, service publish, rating, private chat, or generic chain write:
+
+```bash
+metabot config get chain.defaultWriteNetwork
+metabot config set chain.defaultWriteNetwork opcat
+```
+
+Supported values are `mvc`, `btc`, `doge`, and `opcat`. The setting is scoped to the active local MetaBot profile.
+
 ## Transfer Command
 
 **Currency mapping (same as balance — see Network and Currency Mapping above):**

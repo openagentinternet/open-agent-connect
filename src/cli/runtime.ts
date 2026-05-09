@@ -5,7 +5,11 @@ import { spawn } from 'node:child_process';
 import net from 'node:net';
 import { commandAwaitingConfirmation, commandFailed, commandManualActionRequired, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
-import type { AskMasterTriggerMode } from '../core/config/configTypes';
+import {
+  DEFAULT_WRITE_NETWORKS,
+  type AskMasterTriggerMode,
+  type DefaultWriteNetwork,
+} from '../core/config/configTypes';
 import { createNetworkDirectoryEvolutionService } from '../core/evolution/service';
 import { createLocalEvolutionStore, parseSkillActiveVariantRef } from '../core/evolution/localEvolutionStore';
 import { createRemoteEvolutionStore } from '../core/evolution/remoteEvolutionStore';
@@ -316,11 +320,12 @@ type SupportedBooleanConfigKey =
   | 'a2a.simplemsgListenerEnabled';
 
 type SupportedEnumConfigKey =
-  | 'askMaster.triggerMode';
+  | 'askMaster.triggerMode'
+  | 'chain.defaultWriteNetwork';
 
 type SupportedConfigKey = SupportedBooleanConfigKey | SupportedEnumConfigKey;
 
-type SupportedConfigValue = boolean | AskMasterTriggerMode;
+type SupportedConfigValue = boolean | AskMasterTriggerMode | DefaultWriteNetwork;
 
 const SUPPORTED_CONFIG_KEYS = new Set<SupportedConfigKey>([
   'evolution_network.enabled',
@@ -329,6 +334,7 @@ const SUPPORTED_CONFIG_KEYS = new Set<SupportedConfigKey>([
   'askMaster.enabled',
   'askMaster.triggerMode',
   'a2a.simplemsgListenerEnabled',
+  'chain.defaultWriteNetwork',
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -407,6 +413,9 @@ function readConfigValue(
   if (key === 'a2a.simplemsgListenerEnabled') {
     return config.a2a.simplemsgListenerEnabled;
   }
+  if (key === 'chain.defaultWriteNetwork') {
+    return config.chain.defaultWriteNetwork;
+  }
   return config.evolution_network.autoRecordExecutions;
 }
 
@@ -430,6 +439,15 @@ function writeConfigValue(
       askMaster: {
         ...config.askMaster,
         triggerMode: value as AskMasterTriggerMode,
+      },
+    };
+  }
+  if (key === 'chain.defaultWriteNetwork') {
+    return {
+      ...config,
+      chain: {
+        ...config.chain,
+        defaultWriteNetwork: value as DefaultWriteNetwork,
       },
     };
   }
@@ -502,6 +520,20 @@ function normalizeConfigValueForKey(input: {
     return {
       ok: true,
       value: input.value,
+    };
+  }
+
+  if (input.key === 'chain.defaultWriteNetwork') {
+    const value = typeof input.value === 'string' ? input.value.trim().toLowerCase() : '';
+    if (!DEFAULT_WRITE_NETWORKS.includes(value as DefaultWriteNetwork)) {
+      return {
+        ok: false,
+        message: `Config value for chain.defaultWriteNetwork must be one of ${DEFAULT_WRITE_NETWORKS.join(', ')}.`,
+      };
+    }
+    return {
+      ok: true,
+      value: value as DefaultWriteNetwork,
     };
   }
 

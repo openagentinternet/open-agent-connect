@@ -15,7 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},selectedSlug:'',selectedTab:'info',originalProfile:null,_pendingAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},config:{chain:{defaultWriteNetwork:'mvc'}},selectedSlug:'',selectedTab:'info',originalProfile:null,_pendingAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false};
 
 function api(url,opts){return fetch(url,opts).then(function(r){return r.json().catch(function(){return{ok:false,message:String(r.status)}}).then(function(body){if(!r.ok||body.ok===false){throw new Error(body.message||body.code||String(r.status))}return body})})}
 function fmtTime(t){if(!t)return'-';var d=new Date(t);if(Number.isNaN(d.getTime()))return'-';return d.toLocaleString()}
@@ -37,6 +37,10 @@ function providerIconMarkup(provider){
   var key=String(provider||'generic');
   var path=providerLogoPath(key);
   return '<span class="provider-logo provider-logo-'+esc(key.replace(/[^a-z0-9_-]+/gi,'-'))+'" data-provider-icon="'+esc(key)+'" aria-hidden="true"><img src="'+esc(path)+'" alt="" loading="lazy" /></span>';
+}
+function defaultWriteNetwork(){
+  var value=state.config&&state.config.chain&&state.config.chain.defaultWriteNetwork;
+  return ['mvc','btc','doge','opcat'].indexOf(value)>=0?value:'mvc';
 }
 function uniqueProviderRuntimes(){
   var seen={};var rows=[];
@@ -402,6 +406,21 @@ function renderHistoryTab(){
   qq('[data-act="toggle-exec"]').forEach(function(el){el.addEventListener('click',function(){toggleExecDetail(this)})});
 }
 
+function renderSettingsTab(){
+  var root=q('[data-settings-content]');if(!root)return;
+  var current=defaultWriteNetwork();
+  root.setAttribute('data-default-write-network',current);
+  var options=['mvc','btc','doge','opcat'].map(function(network){
+    return '<option value="'+network+'"'+(network===current?' selected':'')+'>'+network.toUpperCase()+'</option>';
+  }).join('');
+  root.innerHTML='<div class="settings-form">'+
+    '<div class="field"><label for="default-write-network">Default Write Network</label><select id="default-write-network" data-field="defaultWriteNetwork">'+options+'</select></div>'+
+    '<div class="settings-note">Used by write commands when no explicit chain is supplied. Wallet balance and transfer keep their own chain selection rules.</div>'+
+    '<div class="settings-save-row"><button class="btn btn-primary" data-act="save-settings">Save Settings</button><span class="save-status" data-settings-status></span></div>'+
+  '</div>';
+  var save=q('[data-act="save-settings"]');if(save)save.addEventListener('click',saveSettings);
+}
+
 function toggleExecDetail(btn){
   var id=btn.getAttribute('data-detail');var row=document.getElementById(id);if(!row)return;
   var open=row.hasAttribute('hidden');
@@ -412,14 +431,29 @@ function switchTab(tab,silent){
   state.selectedTab=tab||'info';
   qq('[data-tab]').forEach(function(el){el.classList.toggle('active',el.getAttribute('data-tab')===state.selectedTab)});
   qq('[data-tab-panel]').forEach(function(el){el.classList.toggle('active',el.getAttribute('data-tab-panel')===state.selectedTab)});
-  if(state.selectedTab==='history')loadSessions();else renderInfoTab();
+  if(state.selectedTab==='history')loadSessions();else if(state.selectedTab==='settings')renderSettingsTab();else renderInfoTab();
 }
 
 function loadStats(){return api('/api/bot/stats').then(function(r){state.stats=r.data||{};renderStats()}).catch(function(){renderStats()})}
 function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];if(!state.selectedSlug&&state.profiles.length)state.selectedSlug=state.profiles[0].slug;if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))state.selectedSlug=state.profiles[0]&&state.profiles[0].slug||'';state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
 function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];renderCurrentTab();renderStats()}).catch(function(){state.runtimes=[];renderCurrentTab();renderStats()})}
 function loadSessions(slug){var activeSlug=slug||state.selectedSlug;if(!activeSlug){state.sessions=[];renderHistoryTab();renderStats();return Promise.resolve()}return api('/api/bot/sessions?slug='+encodeURIComponent(activeSlug)+'&limit=50').then(function(r){if(activeSlug!==state.selectedSlug)return;state.sessions=(r.data&&r.data.sessions)||[];renderHistoryTab();renderStats()}).catch(function(){if(activeSlug!==state.selectedSlug)return;state.sessions=[];renderHistoryTab();renderStats()})}
-function loadAll(){return Promise.all([loadStats(),loadProfiles(),loadRuntimes()]).then(function(){return loadSessions()})}
+function loadConfig(){return api('/api/config').then(function(r){state.config=r.data||state.config;renderSettingsTab()}).catch(function(){renderSettingsTab()})}
+function loadAll(){return Promise.all([loadStats(),loadProfiles(),loadRuntimes(),loadConfig()]).then(function(){return loadSessions()})}
+
+function saveSettings(){
+  var select=q('[data-field="defaultWriteNetwork"]');var status=q('[data-settings-status]');var btn=q('[data-act="save-settings"]');
+  var value=(select&&select.value)||defaultWriteNetwork();
+  if(status){status.textContent='Saving...';status.className='save-status saving'}
+  if(btn)btn.disabled=true;
+  return api('/api/config',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({chain:{defaultWriteNetwork:value}})}).then(function(r){
+    state.config=r.data||state.config;
+    renderSettingsTab();
+    status=q('[data-settings-status]');if(status){status.textContent='Saved';status.className='save-status success'}
+  }).catch(function(error){
+    if(status){status.textContent=error.message;status.className='save-status error'}
+  }).finally(function(){btn=q('[data-act="save-settings"]');if(btn)btn.disabled=false});
+}
 
 function discoverRuntimes(){
   var btn=q('[data-act="discover-runtimes"]');if(btn){btn.disabled=true;btn.textContent='Refreshing...'}

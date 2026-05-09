@@ -8,6 +8,14 @@ export interface A2AConfig {
   simplemsgListenerEnabled: boolean;
 }
 
+export type DefaultWriteNetwork = 'mvc' | 'btc' | 'doge' | 'opcat';
+
+export const DEFAULT_WRITE_NETWORKS: DefaultWriteNetwork[] = ['mvc', 'btc', 'doge', 'opcat'];
+
+export interface ChainConfig {
+  defaultWriteNetwork: DefaultWriteNetwork;
+}
+
 export type AskMasterTriggerMode = 'manual' | 'suggest' | 'auto';
 export type AskMasterConfirmationMode = 'always' | 'sensitive_only' | 'never';
 export type AskMasterContextMode = 'compact' | 'standard' | 'full_task';
@@ -34,9 +42,14 @@ export interface AskMasterConfig {
 }
 
 export interface MetabotConfig {
+  chain: ChainConfig;
   evolution_network: EvolutionNetworkConfig;
   askMaster: AskMasterConfig;
   a2a: A2AConfig;
+}
+
+export function isDefaultWriteNetwork(value: unknown): value is DefaultWriteNetwork {
+  return typeof value === 'string' && DEFAULT_WRITE_NETWORKS.includes(value as DefaultWriteNetwork);
 }
 
 export function isAskMasterTriggerMode(value: unknown): value is AskMasterTriggerMode {
@@ -100,6 +113,9 @@ export function normalizeAskMasterAutoPolicyConfig(value: unknown): AskMasterAut
 
 export function createDefaultConfig(): MetabotConfig {
   return {
+    chain: {
+      defaultWriteNetwork: 'mvc',
+    },
     evolution_network: {
       enabled: true,
       autoAdoptSameSkillSameScope: false,

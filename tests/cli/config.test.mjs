@@ -87,6 +87,52 @@ test('runCli supports `metabot config get evolution_network.enabled`', async () 
   });
 });
 
+test('runCli supports `metabot config get chain.defaultWriteNetwork`', async () => {
+  const homeDir = createProfileHome('metabot-cli-config-get-default-write-network-');
+  const result = await runConfigCli(homeDir, ['config', 'get', 'chain.defaultWriteNetwork']);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.deepEqual(result.payload.data, {
+    key: 'chain.defaultWriteNetwork',
+    value: 'mvc',
+  });
+});
+
+test('runCli supports `metabot config set chain.defaultWriteNetwork opcat`', async () => {
+  const homeDir = createProfileHome('metabot-cli-config-set-default-write-network-');
+  const setResult = await runConfigCli(homeDir, ['config', 'set', 'chain.defaultWriteNetwork', 'opcat']);
+
+  assert.equal(setResult.exitCode, 0);
+  assert.equal(setResult.payload.ok, true);
+  assert.deepEqual(setResult.payload.data, {
+    key: 'chain.defaultWriteNetwork',
+    value: 'opcat',
+  });
+
+  const getResult = await runConfigCli(homeDir, ['config', 'get', 'chain.defaultWriteNetwork']);
+  assert.equal(getResult.exitCode, 0);
+  assert.equal(getResult.payload.ok, true);
+  assert.equal(getResult.payload.data.value, 'opcat');
+
+  const configPath = resolveMetabotPaths(homeDir).configPath;
+  const configFromDisk = JSON.parse(readFileSync(configPath, 'utf8'));
+  assert.equal(configFromDisk.chain.defaultWriteNetwork, 'opcat');
+});
+
+test('runCli rejects unsupported chain.defaultWriteNetwork values', async () => {
+  const homeDir = createProfileHome('metabot-cli-config-set-default-write-network-invalid-');
+  const result = await runConfigCli(homeDir, ['config', 'set', 'chain.defaultWriteNetwork', 'eth']);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.code, 'invalid_argument');
+  assert.match(result.payload.message, /mvc, btc, doge, opcat/i);
+
+  const configPath = resolveMetabotPaths(homeDir).configPath;
+  assert.throws(() => readFileSync(configPath, 'utf8'), /ENOENT/);
+});
+
 test('runCli supports `metabot config set evolution_network.enabled false`', async () => {
   const homeDir = createProfileHome('metabot-cli-config-set-');
   const setResult = await runConfigCli(homeDir, ['config', 'set', 'evolution_network.enabled', 'false']);
