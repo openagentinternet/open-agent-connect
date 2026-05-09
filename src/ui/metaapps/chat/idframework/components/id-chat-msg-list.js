@@ -4,7 +4,6 @@
  * Store mode data source: Alpine.store('chat')
  * Standalone viewer mode data source: element attributes/properties
  */
-import { getSimpleTalkStore } from '../stores/chat/simple-talk.js';
 
 class IdChatMsgList extends HTMLElement {
   constructor() {
@@ -571,7 +570,9 @@ class IdChatMsgList extends HTMLElement {
 
   async _ensureCryptoHelper() {
     if (this._cryptoReady) return;
+    if (this._isStandaloneViewer()) return;
     try {
+      const { getSimpleTalkStore } = await import('../stores/chat/simple-talk.js');
       this._cryptoStore = getSimpleTalkStore();
       await this._cryptoStore.init();
       this._cryptoReady = true;
@@ -1204,7 +1205,7 @@ class IdChatMsgList extends HTMLElement {
       node.currentUserMetaId = snapshot.selfMetaId;
       node.mode = mode;
       node.groupId = groupId;
-      node.chatStore = this._cryptoReady ? this._cryptoStore : null;
+      node.chatStore = snapshot.viewerMode === 'standalone' ? null : (this._cryptoReady ? this._cryptoStore : null);
     });
 
     this._applyForceBottomAfterHydrate(snapshot);

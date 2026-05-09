@@ -22,7 +22,7 @@ const CHAT_COMPONENTS = [
   '@idf/components/id-avatar.js?v=20260322-m4i',
   '@idf/components/id-chat-header.js?v=20260322-m4i',
   '@idf/components/id-chat-chatlist-panel.js?v=20260323-perf2',
-  '@idf/components/id-chat-groupmsg-list.js?v=20260324-scrollfix1',
+  '@idf/components/id-chat-msg-list.js?v=20260324-scrollfix1',
   '@idf/components/id-chat-bubble.js?v=20260323-opt1',
   '@idf/components/id-chat-msg-bubble.js?v=20260322-m4i',
   '@idf/components/id-chain-fee-selector.js?v=20260322-m4i',
@@ -73,7 +73,7 @@ const CHAT_I18N_CATALOGS = {
         newChat: 'New Chat',
         yesterday: 'Yesterday',
       },
-      groupmsg: {
+      msg: {
         loadingOlder: 'Loading older messages...',
         syncing: 'Syncing messages...',
         loadingMessages: 'Loading messages...',
@@ -215,7 +215,7 @@ const CHAT_I18N_CATALOGS = {
         newChat: '新建会话',
         yesterday: '昨天',
       },
-      groupmsg: {
+      msg: {
         loadingOlder: '正在加载更早消息...',
         syncing: '同步消息中...',
         loadingMessages: '正在加载消息...',
@@ -840,6 +840,7 @@ function normalizeChain(rawChain) {
   if (raw === 'bsv' || raw === 'btc') return 'btc';
   if (raw === 'dogecoin' || raw === 'doge') return 'doge';
   if (raw === 'microvisionchain' || raw === 'mvc') return 'mvc';
+  if (raw === 'opcat') return 'opcat';
   return raw;
 }
 

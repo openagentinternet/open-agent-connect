@@ -649,6 +649,10 @@ class IdChatBubble extends HTMLElement {
           window.open(`https://mempool.space/tx/${txid}`, '_blank');
           return;
         }
+        if (chain === 'opcat') {
+          window.open(`https://mempool.opcatlabs.io/tx/${txid}`, '_blank');
+          return;
+        }
         if (chain === 'doge') {
           window.open(`https://dogechain.info/tx/${txid}`, '_blank');
           return;
@@ -761,7 +765,9 @@ class IdChatBubble extends HTMLElement {
     );
     const time = this._formatTime(message.timestamp);
     const messageChain = this._normalizeIdentity(message.chain || '');
-    const chainClass = (messageChain === 'btc' || messageChain === 'doge') ? `${messageChain}-item` : '';
+    const chainClass = (messageChain === 'btc' || messageChain === 'doge' || messageChain === 'opcat')
+      ? `${messageChain}-item`
+      : '';
     const isOptimistic = this._isOptimisticMessage(message);
     const sendStatus = this._messageSendStatus(message);
     const isFailed = isOptimistic && sendStatus === 'failed';
@@ -793,10 +799,12 @@ class IdChatBubble extends HTMLElement {
         .row.self .bubble{margin-left:auto;}
         .bubble.optimistic-item{box-shadow:none;}
         .row .bubble.btc-item{background:linear-gradient(113deg,#fff6e6 -12%,#e5bc77 103%);color:#5a4015;border-color:#d6b171;}
-        .row .bubble.doge-item{background:linear-gradient(113deg,#fff9e6 -12%,#d4b84a 103%);color:#5a4a15;border-color:#c9b24f;}
+        .row .bubble.doge-item{background:linear-gradient(113deg,#fffbf0 -12%,#d4c078 103%);color:#4a3d12;border-color:#b8860b;}
+        .row .bubble.opcat-item{background:linear-gradient(113deg,#f5f3ff -12%,#c4b5fd 103%);color:#4c1d95;border-color:#7c3aed;}
         .bubble.failed-item,
         .row .bubble.btc-item.failed-item,
-        .row .bubble.doge-item.failed-item{background:var(--id-bg-disabled,#e5e7eb);border-color:var(--id-border-color,#d1d5db);opacity:.82;color:var(--id-text-secondary,#4b5563);}
+        .row .bubble.doge-item.failed-item,
+        .row .bubble.opcat-item.failed-item{background:var(--id-bg-disabled,#e5e7eb);border-color:var(--id-border-color,#d1d5db);opacity:.82;color:var(--id-text-secondary,#4b5563);}
         .menu{position:absolute;top:-30px;display:none;gap:6px;background:var(--id-bg-card,#ffffff);border:1px solid var(--id-border-color,#e5e7eb);border-radius:999px;padding:4px 8px;box-shadow:0 3px 10px rgba(15,23,42,.12);}
         .row.self .menu{right:0;}
         .row.other .menu{left:0;}
@@ -811,7 +819,8 @@ class IdChatBubble extends HTMLElement {
         .send-state button:hover{background:rgba(220,38,38,.08);}
         .text{font-size:14px;line-height:1.5;color:var(--id-text-main,#111827);white-space:normal;}
         .row .bubble.btc-item .text,
-        .row .bubble.doge-item .text{color:inherit;}
+        .row .bubble.doge-item .text,
+        .row .bubble.opcat-item .text{color:inherit;}
         .mention{color:#fc457b;font-weight:600;cursor:pointer;}
         .reply-box{display:flex;align-items:flex-start;gap:8px;padding:6px;border-radius:8px;background:var(--id-bg-body,#f3f4f6);border:1px solid var(--id-border-color,#e5e7eb);margin-top:10px;cursor:pointer;}
         .reply-avatar{width:22px;height:22px;border-radius:999px;object-fit:cover;background:var(--id-bg-body,#e5e7eb);flex:0 0 22px;}

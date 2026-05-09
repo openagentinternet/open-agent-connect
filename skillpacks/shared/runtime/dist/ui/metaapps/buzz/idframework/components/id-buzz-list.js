@@ -794,8 +794,19 @@ class IdBuzzList extends HTMLElement {
     var chain = String(chainName || '').toLowerCase();
     if (!txid) return '';
     if (chain === 'btc') return 'https://mempool.space/tx/' + encodeURIComponent(txid);
+    if (chain === 'opcat') return 'https://mempool.opcatlabs.io/tx/' + encodeURIComponent(txid);
     if (chain === 'mvc') return 'https://www.mvcscan.com/tx/' + encodeURIComponent(txid);
+    if (chain === 'doge') return 'https://dogechain.info/tx/' + encodeURIComponent(txid);
     return '';
+  }
+
+  _pinLinkChainClass(chainName) {
+    var chain = String(chainName || '').toLowerCase();
+    if (chain === 'btc') return 'btc';
+    if (chain === 'mvc') return 'mvc';
+    if (chain === 'doge') return 'doge';
+    if (chain === 'opcat') return 'opcat';
+    return 'unknown';
   }
 
   _renderPinLink(item, extraClass) {
@@ -803,8 +814,7 @@ class IdBuzzList extends HTMLElement {
     var chainName = (item && (item.chainName || (item.raw && item.raw.chainName))) || '';
     var explorerUrl = this._resolveExplorerUrl(chainName, pinid);
     if (!pinid || !explorerUrl) return '';
-    var chain = String(chainName || '').toLowerCase();
-    var chainClass = chain === 'btc' ? 'btc' : (chain === 'mvc' ? 'mvc' : 'unknown');
+    var chainClass = this._pinLinkChainClass(chainName);
     var label = this._escapeHtml(String(pinid).slice(0, 8));
     return `
       <a class="pin-link ${chainClass} ${extraClass || ''}" href="${this._escapeHtml(explorerUrl)}" target="_blank" rel="noopener noreferrer">
@@ -1420,6 +1430,12 @@ class IdBuzzList extends HTMLElement {
         }
         .pin-link.mvc {
           color: #2563eb;
+        }
+        .pin-link.doge {
+          color: #b8860b;
+        }
+        .pin-link.opcat {
+          color: #7c3aed;
         }
         .pin-link.unknown {
           color: #4b5563;

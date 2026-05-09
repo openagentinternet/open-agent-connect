@@ -28,6 +28,32 @@ class IDFramework {
     return alpine.store(name);
   }
 
+  static getRegisteredStoreNames() {
+    const commonStoreNames = ['user', 'settings', 'chat', 'buzz'];
+    const customStoreNames = this._customStoreNames instanceof Set
+      ? Array.from(this._customStoreNames)
+      : [];
+    return Array.from(new Set([...commonStoreNames, ...customStoreNames]));
+  }
+
+  static resolveStores(storeName = null) {
+    const stores = {
+      wallet: this.getStore('wallet'),
+      app: this.getStore('app'),
+    };
+
+    this.getRegisteredStoreNames().forEach((name) => {
+      const store = this.getStore(name);
+      if (store) stores[name] = store;
+    });
+
+    if (storeName && this.getStore(storeName)) {
+      stores[storeName] = this.getStore(storeName);
+    }
+
+    return stores;
+  }
+
   /**
    * ============================================
    * I18N LAYER - Lightweight runtime translation
@@ -287,10 +313,12 @@ class IDFramework {
 
     // Register custom models if provided
     // Only register if they don't already exist
+    if (!this._customStoreNames) this._customStoreNames = new Set();
     Object.keys(customModels).forEach(modelName => {
       if (!alpine.store(modelName)) {
         alpine.store(modelName, customModels[modelName]);
       }
+      this._customStoreNames.add(modelName);
     });
   }
 
@@ -1033,10 +1061,7 @@ class IDFramework {
         try {
           // Resolve stores if not provided
           if (!stores) {
-            stores = {
-              wallet: IDFramework.getStore('wallet'),
-              app: IDFramework.getStore('app'),
-            };
+            stores = IDFramework.resolveStores();
           }
 
           const builtInResult = await builtInCommand({
@@ -1078,14 +1103,9 @@ class IDFramework {
         const command = new CommandClass();
 
         // Resolve stores if not provided
-        // Include all registered stores (wallet, app, buzz, user, chat, etc.)
+        // Include all registered stores (wallet, app, buzz, user, chat, note, draft, etc.)
         if (!stores) {
-          stores = {
-            wallet: IDFramework.getStore('wallet'),
-            app: IDFramework.getStore('app'),
-            user: IDFramework.getStore('user'),
-
-          };
+          stores = IDFramework.resolveStores();
         }
 
         // Execute command with Delegate and stores
@@ -1484,34 +1504,7 @@ class IDFramework {
    * await IDFramework.dispatch('updateUser', { name: 'John' }, 'user');
    */
   static async dispatch(eventName, payload = {}, storeName = null) {
-    // Auto-resolve all available stores
-    // This ensures commands have access to all stores they might need
-    const stores = {
-      wallet: this.getStore('wallet'),
-      app: this.getStore('app'),
-    };
-
-    // Add all other registered stores (like 'buzz', 'user', etc.)
-    // Alpine doesn't provide a direct way to list all stores,
-    // so we try common store names and add any that exist
-    const commonStoreNames = [ 'user', 'settings', 'chat', 'buzz' ];
-    commonStoreNames.forEach(name => {
-      const store = this.getStore(name);
-      if (store) {
-        stores[name] = store;
-      }
-    });
-
-    // Ensure user store is always included for user-related commands
-    if (!stores.user && this.getStore('user')) {
-      stores.user = this.getStore('user');
-    }
-
-    // If specific store requested, add it (even if not in common list)
-    if (storeName && this.getStore(storeName)) {
-      stores[storeName] = this.getStore(storeName);
-    }
-
+    const stores = this.resolveStores(storeName);
     return await this.IDController.execute(eventName, payload, stores);
   }
 

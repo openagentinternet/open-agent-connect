@@ -1,3 +1,5 @@
+import MetafileUploadHelper from '../utils/metafile-upload.js';
+
 /**
  * PostBuzzCommand - Create buzz with optional local attachments.
  *
@@ -9,6 +11,22 @@
  * 3) Create simplebuzz pin via IDFramework.BuiltInCommands.createPin.
  */
 export default class PostBuzzCommand {
+  constructor() {
+    this._uploader = new MetafileUploadHelper({
+      ensureOnchainReady: (stores) => this._ensureOnchainReady(stores),
+      resolveChain: (source) => this._resolveChain(source),
+      getFeeRate: (options) => this._getFeeRate(options),
+      runChunkedUploadFlow: (options) => this.runChunkedUploadFlow(options),
+      uploadFileToChainDirect: (file) => this.uploadFileToChainDirect(file),
+      uploadFileByCreatePin: (file, stores, options) => this._uploadFileByCreatePin(file, stores, options),
+      fileToBase64: (file) => this._fileToBase64(file),
+      sanitizePathName: (name) => this._sanitizePathName(name),
+      buildContentType: (file) => this._buildContentType(file),
+      extractUploadTxid: (result) => this._extractUploadTxid(result),
+      extractTxid: (res) => this._extractTxid(res),
+    });
+  }
+
   async execute({ payload = {}, stores }) {
     if (!window.IDFramework || !window.IDFramework.BuiltInCommands || !window.IDFramework.BuiltInCommands.createPin) {
       throw new Error('IDFramework.BuiltInCommands.createPin is not available');
@@ -61,123 +79,11 @@ export default class PostBuzzCommand {
   }
 
   async _uploadFileToMetafile(file, stores, options = {}) {
-    this._ensureOnchainReady(stores);
-    if (!(file instanceof File)) {
-      throw new Error('Invalid file object');
-    }
-    var chain = this._resolveChain(options);
-    if (chain !== 'mvc') {
-      return await this._uploadFileByCreatePin(file, stores, options);
-    }
-
-    try {
-      var result;
-      if (file.size > 5 * 1024 * 1024) {
-        result = await this.runChunkedUploadFlow({ file: file, asynchronous: false });
-      } else {
-        result = await this.uploadFileToChainDirect(file);
-      }
-
-      var txid = this._extractUploadTxid(result);
-      if (!txid) {
-        throw new Error('File upload succeeded but txid is missing');
-      }
-
-      return this._buildMetafileUri(txid, file);
-    } catch (error) {
-      if (!this._shouldFallbackToCreatePin(error)) throw error;
-      return await this._uploadFileByCreatePin(file, stores, options);
-    }
-  }
-
-  _errorMessage(error) {
-    if (!error) return '';
-    if (typeof error === 'string') return error;
-    if (error && error.message) return String(error.message);
-    try {
-      return JSON.stringify(error);
-    } catch (_) {
-      return String(error);
-    }
-  }
-
-  _shouldFallbackToCreatePin(error) {
-    if (typeof window === 'undefined' || !window.metaidwallet || typeof window.metaidwallet.createPin !== 'function') {
-      return false;
-    }
-    var message = this._errorMessage(error).toLowerCase();
-    if (!message) return false;
-    return (
-      message.indexOf('error 1290') >= 0 ||
-      message.indexOf('lock_write') >= 0 ||
-      message.indexOf('failed to save upload record') >= 0 ||
-      message.indexOf('failed to create file metadata') >= 0
-    );
-  }
-
-  _fileExtensionSuffix(fileName) {
-    var name = String(fileName || '').trim();
-    if (!name) return '';
-    var match = name.match(/\.([a-zA-Z0-9]{1,16})$/);
-    if (!match || !match[1]) return '';
-    return '.' + String(match[1]).toLowerCase();
-  }
-
-  _buildMetafileUri(txid, file) {
-    var id = String(txid || '').trim();
-    if (!id) return '';
-    if (!/i\d+$/i.test(id)) id += 'i0';
-    return 'metafile://' + id + this._fileExtensionSuffix(file && file.name ? file.name : '');
+    return await this._uploader.uploadFileToMetafile(file, stores, options);
   }
 
   async _uploadFileByCreatePin(file, stores, options = {}) {
-    this._ensureOnchainReady(stores);
-    if (!(file instanceof File)) throw new Error('upload fallback requires a file');
-    var chain = this._resolveChain(options);
-    var feeRate = this._getFeeRate({ chain: chain, feeRate: options.feeRate });
-
-    var base64Body = await this._fileToBase64(file);
-    var createPayload = {
-      operation: 'create',
-      body: base64Body,
-      path: '/file/' + this._sanitizePathName(file.name),
-      encoding: 'base64',
-      contentType: this._buildContentType(file),
-      chain: chain,
-      feeRate: feeRate,
-    };
-    var createRes;
-    if (
-      window.IDFramework &&
-      window.IDFramework.BuiltInCommands &&
-      typeof window.IDFramework.BuiltInCommands.createPin === 'function'
-    ) {
-      createRes = await window.IDFramework.BuiltInCommands.createPin({
-        payload: createPayload,
-        stores: stores,
-      });
-    } else {
-      if (!window.metaidwallet || typeof window.metaidwallet.createPin !== 'function') {
-        throw new Error('Wallet createPin is not available for upload fallback');
-      }
-      createRes = await window.metaidwallet.createPin({
-        chain: chain,
-        feeRate: feeRate,
-        dataList: [{
-          metaidData: {
-            operation: createPayload.operation,
-            body: createPayload.body,
-            path: createPayload.path,
-            encoding: createPayload.encoding,
-            contentType: createPayload.contentType,
-          },
-        }],
-      });
-    }
-
-    var txid = this._extractTxid(createRes);
-    if (!txid) throw new Error('fallback upload succeeded but txid is missing');
-    return this._buildMetafileUri(txid, file);
+    return await this._uploader.uploadFileByCreatePin(file, stores, options);
   }
 
   async runChunkedUploadFlow(options) {

@@ -315,7 +315,7 @@ export class SimpleTalkStore {
     }
     if (protocol === PRIVATE_TEXT_PROTOCOL) {
       const peer = this._resolvePeerGlobalMetaId(message);
-      const secret = await this.getSharedSecret(peer);
+      const secret = await this.getSharedSecret(peer, message);
       if (!secret) return content;
       return this._privateDecrypt(content, secret);
     }
@@ -326,7 +326,7 @@ export class SimpleTalkStore {
     const pinId = extractPinId(message.content || message.attachment);
     if (!pinId) return '';
     const peer = this._resolvePeerGlobalMetaId(message);
-    const secret = await this.getSharedSecret(peer);
+    const secret = await this.getSharedSecret(peer, message);
     if (!secret) return '';
     const fileUrl = buildFileUrl(pinId, false);
     const response = await fetch(fileUrl);
@@ -336,20 +336,31 @@ export class SimpleTalkStore {
     return URL.createObjectURL(blob);
   }
 
-  async getSharedSecret(otherGlobalMetaId) {
-    const peer = String(otherGlobalMetaId || '').trim();
-    if (!peer || peer === this.selfGlobalMetaId) return '';
-    if (this.sharedSecretCache.has(peer)) return this.sharedSecretCache.get(peer);
-    if (!window.IDFramework || typeof window.IDFramework.dispatch !== 'function') return '';
-    const userInfo = await window.IDFramework.dispatch('fetchUserInfo', { globalMetaId: peer });
-    const pubkey = String(
-      (userInfo && (userInfo.chatpubkey || userInfo.chatPubkey || userInfo.chatPublicKey)) || ''
-    ).trim();
+  async getSharedSecret(otherGlobalMetaId, message) {
+    let peer = this._toText(otherGlobalMetaId);
+    if (!peer || peer === this.selfGlobalMetaId) {
+      peer = this._resolvePeerGlobalMetaId(message);
+    }
+    const inlinePubkey = this._resolveChatPublicKey(message, peer);
+    const cacheKey = peer || (inlinePubkey ? `pubkey:${inlinePubkey}` : '');
+    if (!cacheKey) return '';
+    if (this.sharedSecretCache.has(cacheKey)) return this.sharedSecretCache.get(cacheKey);
+    let pubkey = inlinePubkey;
+    if (!pubkey && peer) {
+      if (!window.IDFramework || typeof window.IDFramework.dispatch !== 'function') return '';
+      const userInfo = await window.IDFramework.dispatch('fetchUserInfo', { globalMetaId: peer });
+      pubkey = String(
+        (userInfo && (userInfo.chatpubkey || userInfo.chatPubkey || userInfo.chatPublicKey)) || ''
+      ).trim();
+    }
     if (!pubkey) return '';
     if (!window.metaidwallet || !window.metaidwallet.common || typeof window.metaidwallet.common.ecdh !== 'function') return '';
     const ecdh = await window.metaidwallet.common.ecdh({ externalPubKey: pubkey });
     const secret = ecdh && ecdh.sharedSecret ? String(ecdh.sharedSecret) : '';
-    if (secret) this.sharedSecretCache.set(peer, secret);
+    if (secret) {
+      this.sharedSecretCache.set(cacheKey, secret);
+      if (peer && cacheKey !== peer) this.sharedSecretCache.set(peer, secret);
+    }
     return secret;
   }
 
@@ -472,9 +483,14 @@ export class SimpleTalkStore {
       groupId,
       fromGlobalMetaId,
       toGlobalMetaId,
+      createGlobalMetaId: String(raw.createGlobalMetaId || raw.createGlobalMetaID || ''),
+      createMetaId: String(raw.createMetaId || raw.createUserMetaId || ''),
+      globalMetaId: String(raw.globalMetaId || ''),
+      chatPublicKey: String(raw.chatPublicKey || raw.chatPubKey || raw.chatpubkey || ''),
       userInfo: raw.userInfo || raw.fromUserInfo || {},
       fromUserInfo: raw.fromUserInfo || null,
       toUserInfo: raw.toUserInfo || null,
+      createUserInfo: raw.createUserInfo || null,
       replyPin: replyPin,
       replyInfo: raw.replyInfo && typeof raw.replyInfo === 'object' ? Object.assign({}, raw.replyInfo) : null,
       replyMetaId: replyMetaId,
@@ -503,19 +519,89 @@ export class SimpleTalkStore {
     }
     const a = String(message.fromGlobalMetaId || '');
     const b = String(message.toGlobalMetaId || '');
-    return (
+    const exactMatch = (
       (a === this.selfGlobalMetaId && b === this.context.targetGlobalMetaId) ||
       (b === this.selfGlobalMetaId && a === this.context.targetGlobalMetaId) ||
       (a === this.selfGlobalMetaId && b === this.selfGlobalMetaId)
     );
+    if (exactMatch) return true;
+    const peer = this._resolvePeerGlobalMetaId(message);
+    return !!peer && peer === this.context.targetGlobalMetaId;
   }
 
   _resolvePeerGlobalMetaId(message) {
-    const from = String(message.fromGlobalMetaId || '');
-    const to = String(message.toGlobalMetaId || '');
-    if (from && from !== this.selfGlobalMetaId) return from;
-    if (to && to !== this.selfGlobalMetaId) return to;
-    return this.context.targetGlobalMetaId || '';
+    const roots = this._messageRoots(message);
+    for (let i = 0; i < roots.length; i += 1) {
+      const root = roots[i];
+      const from = this._toText(root.fromGlobalMetaId || root.fromGlobalMetaID || root.senderGlobalMetaId || '');
+      const to = this._toText(root.toGlobalMetaId || root.toGlobalMetaID || root.receiveGlobalMetaId || root.targetGlobalMetaId || '');
+      if (from && from !== this.selfGlobalMetaId) return from;
+      if (to && to !== this.selfGlobalMetaId) return to;
+    }
+    const candidates = [];
+    roots.forEach((root) => {
+      candidates.push(
+        root.createGlobalMetaId,
+        root.createGlobalMetaID,
+        root.globalMetaId,
+        root.globalMetaID,
+        root.senderGlobalMetaId
+      );
+      [root.userInfo, root.fromUserInfo, root.toUserInfo, root.createUserInfo].forEach((info) => {
+        candidates.push(this._extractUserGlobalMetaId(info));
+      });
+    });
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = this._toText(candidates[i]);
+      if (candidate && candidate !== this.selfGlobalMetaId) return candidate;
+    }
+    return this._toText(this.context.targetGlobalMetaId);
+  }
+
+  _resolveChatPublicKey(message, peerGlobalMetaId) {
+    const peer = this._toText(peerGlobalMetaId);
+    const roots = this._messageRoots(message);
+    const preferred = [];
+    const fallback = [];
+
+    roots.forEach((root) => {
+      const directPubkey = this._extractChatPublicKey(root);
+      if (directPubkey) fallback.push(directPubkey);
+      [root.userInfo, root.fromUserInfo, root.toUserInfo, root.createUserInfo].forEach((info) => {
+        const pubkey = this._extractChatPublicKey(info);
+        if (!pubkey) return;
+        const globalMetaId = this._extractUserGlobalMetaId(info);
+        if (peer && globalMetaId && globalMetaId === peer) {
+          preferred.push(pubkey);
+          return;
+        }
+        fallback.push(pubkey);
+      });
+    });
+
+    return preferred[0] || fallback[0] || '';
+  }
+
+  _messageRoots(message) {
+    const root = message && typeof message === 'object' ? message : {};
+    const raw = root.raw && typeof root.raw === 'object'
+      ? root.raw
+      : (root._raw && typeof root._raw === 'object' ? root._raw : null);
+    return raw ? [root, raw] : [root];
+  }
+
+  _extractUserGlobalMetaId(userInfo) {
+    if (!userInfo || typeof userInfo !== 'object') return '';
+    return this._toText(userInfo.globalMetaId || userInfo.globalmetaid || '');
+  }
+
+  _extractChatPublicKey(root) {
+    if (!root || typeof root !== 'object') return '';
+    return this._toText(root.chatPublicKey || root.chatPubKey || root.chatpubkey || root.pubkey || '');
+  }
+
+  _toText(value) {
+    return String(value == null ? '' : value).trim();
   }
 
   _hexToBytes(hex) {

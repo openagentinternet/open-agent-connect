@@ -112,9 +112,7 @@ class IdChatMsgList extends HTMLElement {
       window.addEventListener('id:i18n:changed', this._onLocaleChanged);
     }
     this._handleChatUpdated();
-    if (!this._isStandaloneViewer()) {
-      this._ensureCryptoHelper();
-    }
+    this._ensureCryptoHelper();
   }
 
   disconnectedCallback() {
@@ -532,7 +530,7 @@ class IdChatMsgList extends HTMLElement {
   }
 
   _handleChatUpdated() {
-    if (!this._isStandaloneViewer() && !this._cryptoReady) this._ensureCryptoHelper();
+    if (!this._cryptoReady) this._ensureCryptoHelper();
     const beforeMetrics = this._captureScrollMetrics();
     const previousConversation = this._lastConversation;
     const previousMaxIndex = this._lastMaxIndex;
@@ -553,7 +551,6 @@ class IdChatMsgList extends HTMLElement {
   }
 
   _syncCryptoContext(snapshot) {
-    if (snapshot && snapshot.viewerMode === 'standalone') return;
     if (!this._cryptoReady || !this._cryptoStore || !snapshot || !snapshot.currentConversation) return;
     const isPrivate = String(snapshot.conversationType || '1') === '2';
     if (isPrivate) {
@@ -572,8 +569,8 @@ class IdChatMsgList extends HTMLElement {
   }
 
   async _ensureCryptoHelper() {
-    if (this._isStandaloneViewer()) return;
     if (this._cryptoReady) return;
+    if (this._isStandaloneViewer()) return;
     try {
       const { getSimpleTalkStore } = await import('../stores/chat/simple-talk.js');
       this._cryptoStore = getSimpleTalkStore();
@@ -1208,9 +1205,7 @@ class IdChatMsgList extends HTMLElement {
       node.currentUserMetaId = snapshot.selfMetaId;
       node.mode = mode;
       node.groupId = groupId;
-      node.chatStore = snapshot.viewerMode === 'standalone'
-        ? null
-        : (this._cryptoReady ? this._cryptoStore : null);
+      node.chatStore = snapshot.viewerMode === 'standalone' ? null : (this._cryptoReady ? this._cryptoStore : null);
     });
 
     this._applyForceBottomAfterHydrate(snapshot);
