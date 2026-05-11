@@ -116,6 +116,21 @@ async function stopDaemon(homeDir) {
   await rm(daemonStatePath, { force: true });
 }
 
+async function removeTreeWithRetry(targetPath, attempts = 20) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await rm(targetPath, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const retryable = ['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(error?.code);
+      if (!retryable || attempt === attempts - 1) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+}
+
 async function readSuccessJson(url, options) {
   const response = await fetch(url, options);
   const payload = await response.json();
@@ -239,9 +254,13 @@ export async function runLocalCrossHostDemo({
   const callerStore = createRuntimeStateStore(callerHome);
   const sessionEngine = createA2ASessionEngine();
   const cleanup = async () => {
+    await Promise.allSettled([
+      stopDaemon(callerHome),
+      stopDaemon(providerHome),
+    ]);
     await Promise.all([
-      rm(deriveSystemHome(callerHome), { recursive: true, force: true }),
-      rm(deriveSystemHome(providerHome), { recursive: true, force: true }),
+      removeTreeWithRetry(deriveSystemHome(callerHome)),
+      removeTreeWithRetry(deriveSystemHome(providerHome)),
     ]);
   };
 
