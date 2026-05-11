@@ -5,12 +5,17 @@ import test from 'node:test';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 
-test('README points Ask Master verification at the Ask Master release runbook', async () => {
+test('Ask Master acceptance docs stay in the acceptance runbook, not the public README', async () => {
   const readme = await readFile(path.join(REPO_ROOT, 'README.md'), 'utf8');
+  const runbook = await readFile(
+    path.join(REPO_ROOT, 'docs', 'acceptance', 'ask-master-release-runbook.md'),
+    'utf8'
+  );
 
-  assert.match(readme, /Ask Master release acceptance: \[docs\/acceptance\/ask-master-release-runbook\.md\]/);
-  assert.match(readme, /DACT service-call\/rating closure demo: \[docs\/acceptance\/cross-host-demo-runbook\.md\]/);
-  assert.match(readme, /2026-04-17-metaweb-ask-master-design\.zh-CN\.md/);
+  assert.doesNotMatch(readme, /Ask Master release acceptance/i);
+  assert.doesNotMatch(readme, /DACT service-call\/rating closure demo/i);
+  assert.doesNotMatch(readme, /2026-04-17-metaweb-ask-master-design\.zh-CN\.md/);
+  assert.match(runbook, /# Ask Master Release Runbook/);
 });
 
 test('Ask Master release runbook documents the shipped manual and suggest release contract', async () => {

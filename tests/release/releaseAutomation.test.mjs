@@ -78,16 +78,19 @@ test('release documentation explains the tag-driven GitHub and npm publish path'
   const readme = await readFile(path.join(REPO_ROOT, 'README.md'), 'utf8');
   const agentInstructions = await readFile(path.join(REPO_ROOT, 'AGENTS.md'), 'utf8');
 
-  for (const content of [readme, agentInstructions]) {
-    assert.match(content, /node scripts\/verify-release-version\.mjs v\{version\}/);
-    assert.match(content, /git tag v\{version\}/);
-    assert.doesNotMatch(content, /NPM_TOKEN/);
-    assert.match(content, /Trusted Publisher/i);
-    assert.match(content, /openagentinternet\/open-agent-connect/);
-    assert.match(content, /release\.yml/);
-    assert.match(content, /publishes the same version to npm/i);
-    assert.match(content, /Do not run .*npm publish/i);
-  }
+  assert.doesNotMatch(readme, /node scripts\/verify-release-version\.mjs v\{version\}/);
+  assert.doesNotMatch(readme, /git tag v\{version\}/);
+  assert.doesNotMatch(readme, /Trusted Publisher/i);
+  assert.doesNotMatch(readme, /Do not run .*npm publish/i);
+
+  assert.match(agentInstructions, /node scripts\/verify-release-version\.mjs v\{version\}/);
+  assert.match(agentInstructions, /git tag v\{version\}/);
+  assert.doesNotMatch(agentInstructions, /NPM_TOKEN/);
+  assert.match(agentInstructions, /Trusted Publisher/i);
+  assert.match(agentInstructions, /openagentinternet\/open-agent-connect/);
+  assert.match(agentInstructions, /release\.yml/);
+  assert.match(agentInstructions, /publishes the same version to npm/i);
+  assert.match(agentInstructions, /Do not run .*npm publish/i);
 });
 
 test('verify-release-version accepts matching tag, package version, and compatibility manifest', async (t) => {

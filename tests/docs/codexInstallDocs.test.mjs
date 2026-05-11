@@ -5,19 +5,19 @@ import test from 'node:test';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 
-test('README exposes the unified install guide as the primary install entrypoint', async () => {
+test('README exposes one user-facing install prompt and the npm fallback', async () => {
   const readme = await readFile(path.join(REPO_ROOT, 'README.md'), 'utf8');
 
-  assert.match(readme, /Unified install guide/i);
-  assert.match(readme, /Recommended terminal install/i);
+  assert.match(readme, /## Install/i);
+  assert.match(readme, /Recommended Agent Install/i);
   assert.match(readme, /npm i -g open-agent-connect/);
   assert.match(readme, /oac install/);
-  assert.match(readme, /bare command binds the shared\s+`~\/\.agents\/skills` root and detected platform roots/i);
   assert.match(readme, /docs\/install\/open-agent-connect\.md/);
   assert.match(readme, /Read https:\/\/github\.com\/openagentinternet\/open-agent-connect\/blob\/main\/docs\/install\/open-agent-connect\.md/i);
-  assert.match(readme, /agent-readable guide are equivalent by final installed state/i);
-  assert.match(readme, /Claude Code-compatible install path/i);
   assert.match(readme, /docs\/install\/uninstall-open-agent-connect\.md/);
+  assert.doesNotMatch(readme, /raw\.githubusercontent\.com\/openagentinternet\/open-agent-connect\/main\/docs\/install\/open-agent-connect\.md/i);
+  assert.doesNotMatch(readme, /host roots contain symlinks/i);
+  assert.doesNotMatch(readme, /platformRegistry\.ts/);
 });
 
 test('unified install guide defines the remote GitHub install and host bind flow', async () => {
@@ -71,15 +71,21 @@ test('unified install guide documents registry-driven bare install and force hos
     'utf8'
   );
 
-  for (const content of [readme, guide]) {
-    assert.match(content, /npm i -g open-agent-connect && oac install/);
-    assert.match(content, /supported platforms/i);
-    assert.match(content, /~\/\.metabot\/skills/i);
-    assert.match(content, /host roots contain symlinks/i);
-    assert.match(content, /~\/\.metabot\/skills\/metabot-\*/);
-    assert.match(content, /~\/\.agents\/skills/i);
-    assert.match(content, /platformRegistry\.ts/);
-  }
+  assert.match(readme, /npm i -g open-agent-connect && oac install/);
+  assert.match(readme, /Supported platforms/i);
+  assert.doesNotMatch(readme, /~\/\.metabot\/skills/i);
+  assert.doesNotMatch(readme, /host roots contain symlinks/i);
+  assert.doesNotMatch(readme, /~\/\.metabot\/skills\/metabot-\*/);
+  assert.doesNotMatch(readme, /~\/\.agents\/skills/i);
+  assert.doesNotMatch(readme, /platformRegistry\.ts/);
+
+  assert.match(guide, /npm i -g open-agent-connect && oac install/);
+  assert.match(guide, /supported platforms/i);
+  assert.match(guide, /~\/\.metabot\/skills/i);
+  assert.match(guide, /host roots contain symlinks/i);
+  assert.match(guide, /~\/\.metabot\/skills\/metabot-\*/);
+  assert.match(guide, /~\/\.agents\/skills/i);
+  assert.match(guide, /platformRegistry\.ts/);
 
   assert.match(guide, /bare `oac install` binds\s+`~\/\.agents\/skills` and detected platform roots/i);
   assert.match(guide, /`--host` is only needed when forcing a platform root before that platform home exists/i);
