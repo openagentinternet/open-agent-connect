@@ -8,7 +8,7 @@ Use the unified install guide as the primary install source:
 
 ## Claude Code Binding Model
 
-The shared MetaBot skill source of truth lives under `~/.metabot/skills/`.
+The shared skill source of truth lives under `~/.metabot/skills/`.
 Claude Code exposure is a bind step that projects `metabot-*` entries into `${CLAUDE_HOME:-$HOME/.claude}/skills`.
 
 Bind Claude Code exposure with:
@@ -30,16 +30,16 @@ metabot skills resolve --skill metabot-network-directory --format markdown
 
 ## First Actions
 
-```bash
-metabot identity who
-metabot network services --online
-metabot ui open --page hub
-```
+Ask your local agent to:
 
-If identity is missing:
+- check my Bot identity
+- show me online Bots
+- open the Bot Hub and show available Bot services
+
+If a Bot identity is missing, create one after the user picks a name:
 
 ```bash
-metabot identity create --name "<your chosen MetaBot name>"
+metabot identity create --name "<your chosen Bot name>"
 metabot doctor
 ```
 

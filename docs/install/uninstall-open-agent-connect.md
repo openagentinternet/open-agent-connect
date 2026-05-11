@@ -2,15 +2,15 @@
 
 This guide explains how to remove `Open Agent Connect` from a local machine.
 
-Default uninstall must preserve MetaBot identities, mnemonics, private keys,
-provider secrets, profile names, and wallet-related data. A MetaBot mnemonic can
-control funds, so no normal uninstall step should delete it.
+Default uninstall must preserve Bot identities, mnemonics, private keys,
+provider secrets, profile names, and wallet-related data. A Bot identity
+mnemonic can control funds, so no normal uninstall step should delete it.
 
 Use this document for:
 
 - disabling Open Agent Connect in local agent hosts
 - cleaning runtime files for repeat install tests
-- intentionally removing all local MetaBot data only through a separate danger-zone flow
+- intentionally removing all local Bot data only through a separate danger-zone flow
 
 ## What Is Installed
 
@@ -19,7 +19,7 @@ The current installer may create or refresh:
 - host skill bindings under supported host skill roots
 - shared skills under `~/.metabot/skills/metabot-*`
 - the primary CLI shim at `~/.metabot/bin/metabot`
-- MetaBot manager and profile data under `~/.metabot/manager/` and `~/.metabot/profiles/`
+- Bot manager and profile data under `~/.metabot/manager/` and `~/.metabot/profiles/`
 
 Current supported host roots:
 
@@ -33,7 +33,7 @@ you manually created in that host's documented skill root.
 ## Tier 1: Safe Uninstall (Default)
 
 Use this when a user wants to remove Open Agent Connect from their agent host
-without touching identity or wallet data.
+without touching Bot identity or wallet data.
 
 Preferred CLI path:
 
@@ -109,10 +109,10 @@ if (!Number.isInteger(pid) || pid <= 0) {
 
 try {
   process.kill(pid, 'SIGTERM');
-  console.log(`Sent SIGTERM to active MetaBot daemon pid ${pid}`);
+  console.log(`Sent SIGTERM to active metabot daemon pid ${pid}`);
 } catch (error) {
   if (error && error.code !== 'ESRCH') {
-    console.error(`Could not terminate MetaBot daemon pid ${pid}: ${error.message}`);
+    console.error(`Could not terminate metabot daemon pid ${pid}: ${error.message}`);
   }
 }
 NODE
@@ -144,7 +144,7 @@ skill discovery for the lifetime of a session.
 ## Tier 2: Clean Reinstall / Test Cleanup
 
 Use this when you need a cleaner test machine state but still want to preserve
-MetaBot identity, mnemonic, private key, provider secrets, and profile names.
+Bot identity, mnemonic, private key, provider secrets, and profile names.
 
 Run Tier 1 first, then run:
 
@@ -186,7 +186,7 @@ skills while reusing the preserved identity state.
 
 Do not use this for normal uninstall or install testing.
 
-This tier deletes local MetaBot identities and secrets. If the user does not
+This tier deletes local Bot identities and secrets. If the user does not
 have an independent backup of the mnemonic or private key, this may permanently
 remove access to the identity and any assets controlled by that key.
 
@@ -194,7 +194,7 @@ Before using this tier, the user must explicitly confirm all of the following:
 
 - every mnemonic or private key has been backed up outside this machine
 - any funds controlled by those keys are understood and intentionally left there or moved
-- deleting all local MetaBot profiles is intended
+- deleting all local Bot profiles is intended
 
 Preferred CLI path for full erase:
 
@@ -225,7 +225,7 @@ fi
 rm -rf "$HOME/.metabot"
 ```
 
-After Tier 3, reinstalling Open Agent Connect starts from a blank local MetaBot
+After Tier 3, reinstalling Open Agent Connect starts from a blank local Bot
 state unless the user restores identity data from an external backup.
 
 ## Agent Response Contract
@@ -238,7 +238,7 @@ When an agent completes uninstall, respond with:
 - whether identities and secrets were preserved
 - any host restart needed because of skill caching
 
-For Tier 1 or Tier 2, explicitly state that MetaBot identities, mnemonics,
+For Tier 1 or Tier 2, explicitly state that Bot identities, mnemonics,
 private keys, profile names, and wallet-related local data were preserved.
 
 For Tier 3, explicitly state that local identity and secret data was deleted

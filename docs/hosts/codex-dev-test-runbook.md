@@ -38,7 +38,7 @@ If any precondition fails, stop and return a concise blocked report.
 During local development and testing, keep the active storage contract in mind:
 
 - `~/.metabot/manager/` stores the manager index and active profile pointer
-- `~/.metabot/profiles/<slug>/` stores one MetaBot workspace
+- `~/.metabot/profiles/<slug>/` stores one Bot workspace
 - `~/.metabot/profiles/<slug>/.runtime/` stores machine-managed runtime files
 
 Do not manually edit `.runtime/` files during test setup or debugging.
@@ -86,10 +86,10 @@ metabot identity who
 metabot identity list
 ```
 
-If you need to switch active local bot:
+If you need to switch active local Bot:
 
 ```bash
-metabot identity assign --name "<metabot-name>"
+metabot identity assign --name "<bot-name>"
 metabot identity who
 ```
 
@@ -110,6 +110,7 @@ metabot skills resolve --skill metabot-network-directory --format markdown
 Optional functional smoke:
 
 ```bash
+metabot network bots --online --limit 10
 metabot network services --online
 metabot ui open --page hub
 ```
