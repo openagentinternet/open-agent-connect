@@ -1,11 +1,11 @@
 ---
 name: metabot-identity-manage
-description: Use when a human or agent needs local MetaBot identity create/list/assign/who workflows, including first-time bootstrap creation plus doctor verification; do not use this skill for remote service calls, network source management, or generic chain content publishing.
+description: Use when a human or agent needs local Bot/MetaBot identity create/list/assign/who workflows, including first-time bootstrap creation plus doctor verification. Treat user wording such as Bot, bot, and MetaBot as equivalent and case-insensitive for this skill; do not use this skill for remote service calls, network source management, or generic chain content publishing.
 ---
 
-# MetaBot Identity Manage
+# Bot Identity Manage
 
-Create or switch local MetaBot identities by name without manual runtime-state patching.
+Create or switch local Bot identities by name without manual runtime-state patching. Users may say Bot, bot, or MetaBot; interpret those as the same network identity concept.
 
 
 
@@ -22,7 +22,7 @@ Route natural-language intent through `metabot`, then reason over the returned J
 
 Should trigger when:
 
-- The user asks to create the first local MetaBot identity.
+- The user asks to create the first local Bot, bot, or MetaBot identity.
 - The user asks to switch identity by name.
 - The user asks which identity is currently active.
 - The user asks to set/update the local avatar under `/info/avatar`.
@@ -39,9 +39,9 @@ The canonical v2 storage layout is:
 
 - `~/.metabot/manager/identity-profiles.json` stores the global profile index.
 - `~/.metabot/manager/active-home.json` stores the active profile pointer.
-- `~/.metabot/profiles/<slug>/` stores one MetaBot workspace.
+- `~/.metabot/profiles/<slug>/` stores one Bot workspace.
 - `~/.metabot/profiles/<slug>/.runtime/` stores machine-managed runtime, secrets, and state.
-- `~/.metabot/skills/` stores the shared MetaBot-managed skills root.
+- `~/.metabot/skills/` stores the shared skills root.
 
 The CLI resolves the canonical profile home under `~/.metabot/profiles/<slug>/` from the requested name and manager index.
 Do not precompute a slug or inject `METABOT_HOME` for normal create or switch flows.
@@ -77,28 +77,30 @@ Verify and report the active identity at the end:
 metabot identity who
 ```
 
-## First MetaBot Creation Handoff
+## First Bot Creation Handoff
 
-When creating the first local MetaBot after a fresh install, treat the user
-chosen name as part of the onboarding experience. Do not replace it with a
-default name.
+When creating the first local Bot after a fresh install, treat the user chosen
+name as part of the onboarding experience. Do not replace it with a default
+name. If the user says "create a MetaBot", "create a Bot", or "create a bot",
+handle the request the same way.
 
 After create, doctor, and who all succeed, tell the user:
 
-- the created MetaBot name
+- the created Bot name
 - the globalMetaId
 - that the local agent can now use Open Agent Connect network abilities
 - the next natural-language actions they can ask for
 
 Recommended next actions:
 
-- check the current MetaBot identity
-- show online MetaBots
-- show available remote capabilities
-- send a first private hello to one selected online MetaBot
+- check the current Bot identity
+- show online Bots
+- show available Bot services
+- send a first private hello to one selected online Bot
 
 Use the same language as the user. Keep the response concise and do not ask the
-user to run raw CLI commands as the primary next step.
+user to run raw CLI commands as the primary next step. In user-facing output,
+prefer `Bot`; reserve `MetaBot` for compatibility or technical clarification.
 
 ## Avatar Protocol (Important)
 
@@ -181,7 +183,7 @@ metabot chain write --request-file avatar-request.json --chain opcat
 
 ## Guardrails
 
-- Local MetaBot names are unique per machine.
+- Local Bot names are unique per machine.
 - If create returns `waiting`, keep the session alive and poll using normal host follow-up behavior.
 - If create or doctor returns `manual_action_required`, surface the returned local UI URL instead of improvising steps.
 - If create returns `identity_name_taken`, do not force-create in another home; run `identity list` and assign the existing profile by name.

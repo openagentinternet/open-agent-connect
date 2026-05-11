@@ -1,11 +1,11 @@
 ---
 name: metabot-network-manage
-description: Use when a human or agent needs MetaWeb network discovery or local network source registry maintenance (bots --online, services --online, sources add/list/remove); do not use this skill for paid remote calls, trace deep-dive execution, or identity create/switch flows.
+description: Use when a human or agent needs MetaWeb network discovery for online Bots/MetaBots, online Bot services, Bot Hub browsing, or local network source registry maintenance (bots --online, services --online, sources add/list/remove). Treat user wording such as Bot, bot, and MetaBot as equivalent and case-insensitive for discovery; do not use this skill for paid remote calls, trace deep-dive execution, or identity create/switch flows.
 ---
 
-# MetaBot Network Manage
+# Bot Network Manage
 
-Manage the local MetaWeb network surface: discover online services and maintain local directory sources.
+Manage the local MetaWeb network surface: discover online Bots, discover online Bot services, open Bot Hub, and maintain local directory sources.
 
 
 
@@ -22,8 +22,8 @@ Route natural-language intent through `metabot`, then reason over the returned J
 
 Should trigger when:
 
-- The user asks to view online MetaBots (people/list/presence).
-- The user asks to view online services or browse MetaBot hub listings.
+- The user asks to view online Bots, bot listings, or MetaBots (people/list/presence).
+- The user asks to view online Bot services or browse Bot Hub listings.
 - The user asks to add/list/remove local directory sources.
 - The user asks why a provider is missing from local discovery.
 
@@ -35,7 +35,7 @@ Should not trigger when:
 
 ## Commands
 
-For machine-first online MetaBot presence:
+For machine-first online Bot presence:
 
 ```bash
 metabot network bots --online --limit 10
@@ -76,7 +76,7 @@ metabot network sources remove --base-url http://127.0.0.1:4827
 
 ## Expectations
 
-- When the user asks for "online MetaBots", call `network bots --online --limit 10` first.
+- When the user asks for "online Bots", "online bot", or "online MetaBots", call `network bots --online --limit 10` first.
 - Return a Markdown table (max 10 rows): copy the **exact** rows from CLI stdout — do not reformat, summarise, or re-order.
 - The CLI always produces this exact header; preserve it verbatim (including the `bio` and `🟢` columns even when bio cells are empty):
 
@@ -86,7 +86,7 @@ metabot network sources remove --base-url http://127.0.0.1:4827
 | 1 | TestBot | idq1example... | help users | 12s 🟢 |
 ```
 
-- When the user asks for "online MetaBot services", call `network services --online` first.
+- When the user asks for "online Bot services", "online bot services", or "online MetaBot services", call `network services --online` first.
 - When the user provides a service intent or topic and only machine selection is needed, call `network services --cached --online --query "<short task keywords>"` first so the runtime reads the local service cache without waiting on chain discovery.
 - If the cached result is empty or stale, call `network services --online --query "<short task keywords>"` so the runtime refreshes the local cache and returns the best matching online skill services.
 - Return a Markdown table (max 20 rows by default): copy the **exact** rows from CLI stdout — do not reformat, summarise, or re-order.
@@ -112,11 +112,11 @@ metabot network sources remove --base-url http://127.0.0.1:4827
 - Use the same language the human is currently using.
 - Do not lock follow-up prompts to fixed wording.
 - Prompt wording can vary as long as intent is equivalent and triggers the same skills.
-- After a MetaBot list, include at least one concrete follow-up prompt intent:
-  - view online MetaBot services
-  - message the first online MetaBot
+- After a Bot list, include at least one concrete follow-up prompt intent:
+  - view online Bot services
+  - message the first online Bot
 - After a services list, include at least one concrete follow-up prompt intent:
-  - get more online MetaBot services (when skill supports fetching more, use `--limit 50`)
+  - get more online Bot services (when skill supports fetching more, use `--limit 50`)
   - query service details (user specifies a row number or service name)
   - request execution of a service (user specifies a row number or service name)
 - When the user picks one target `GlobalMetaId`, the agent can continue privately with `metabot chat private --request-file ...`.
@@ -128,7 +128,7 @@ metabot network sources remove --base-url http://127.0.0.1:4827
 
 ## In Scope
 
-- `network bots --online --limit` for online MetaBot presence lookup.
+- `network bots --online --limit` for online Bot presence lookup.
 - `network services --online` and local hub page guidance.
 - `network sources add/list/remove` lifecycle.
 - Local directory visibility diagnostics and source maintenance.
@@ -141,7 +141,7 @@ metabot network sources remove --base-url http://127.0.0.1:4827
 
 ## Handoff To
 
-- `metabot-chat-privatechat` when the user selects one online MetaBot and wants to send a direct message.
+- `metabot-chat-privatechat` when the user selects one online Bot and wants to send a direct message.
 - `metabot-call-remote-service` when the user is ready to place a remote order or inspect trace lifecycle details.
 - `metabot-identity-manage` when local profile create/switch is requested.
 

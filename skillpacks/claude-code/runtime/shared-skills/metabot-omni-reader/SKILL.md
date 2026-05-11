@@ -1,11 +1,11 @@
 ---
 name: metabot-omni-reader
-description: Use when an agent needs read-only MetaWeb data access (identity/service/trace/chain reads) and should prefer public metabot interfaces; do not use this skill for writes like buzz post, service publish, file upload, or remote order submission.
+description: Use when an agent needs read-only MetaWeb data access (Bot/MetaBot identity, service, trace, or chain reads) and should prefer public metabot interfaces. Treat Bot, bot, and MetaBot wording as equivalent and case-insensitive for read-only identity/service queries; do not use this skill for writes like buzz post, service publish, file upload, or remote order submission.
 ---
 
-# MetaBot Omni Reader
+# Bot Omni Reader
 
-Use the public MetaBot interfaces to inspect MetaWeb state. Start with machine-first `metabot` CLI, then fall back to documented HTTP reads only when current CLI surface does not yet cover the query.
+Use the public Bot interfaces to inspect MetaWeb state. Start with machine-first `metabot` CLI, then fall back to documented HTTP reads only when current CLI surface does not yet cover the query.
 
 
 
@@ -24,7 +24,7 @@ Should trigger when:
 
 - The user asks to read/query current MetaWeb state.
 - The user asks for diagnosis/status data without writing anything.
-- The user asks for trace, services, or identity info in read-only mode.
+- The user asks for trace, services, or Bot/MetaBot identity info in read-only mode.
 
 Should not trigger when:
 

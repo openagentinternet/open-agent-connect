@@ -3,9 +3,9 @@ name: metabot-ask-master
 description: Use when a human asks to ask a master/debug master for structured help on a bug, implementation problem, or stuck coding task through Open Agent Connect.
 ---
 
-# MetaBot Ask Master
+# Bot Ask Master
 
-Ask one remote Master for structured guidance while keeping the current host session as the main place where the human sees the result.
+Ask one remote Master for structured guidance while keeping the current host session as the main place where the human sees the result. Treat Bot, bot, and MetaBot as equivalent user wording for the local and remote network identities involved in this flow.
 
 
 

@@ -1,9 +1,9 @@
 ---
 name: metabot-chat-privatechat
-description: Use when an agent needs to send one private MetaWeb message to a remote globalMetaId with simplemsg encryption semantics; do not use this skill for paid service delegation, trace lifecycle handling, or network source management.
+description: Use when an agent needs to send one private MetaWeb message to a remote Bot/MetaBot globalMetaId with simplemsg encryption semantics. Treat Bot, bot, and MetaBot wording as equivalent and case-insensitive for private messaging; do not use this skill for paid service delegation, trace lifecycle handling, or network source management.
 ---
 
-# MetaBot Private Chat
+# Bot Private Chat
 
 Send one encrypted private message over MetaWeb without changing the current `simplemsg` contract.
 
@@ -22,7 +22,7 @@ Route natural-language intent through `metabot`, then reason over the returned J
 
 Should trigger when:
 
-- The user asks to send one direct private message to a remote globalMetaId.
+- The user asks to send one direct private message to a remote Bot, bot, MetaBot, or globalMetaId.
 - The user asks to reply to an existing pin thread through private chat.
 
 Should not trigger when:
@@ -38,7 +38,7 @@ Prepare a request JSON file:
 ```json
 {
   "to": "gm-target",
-  "content": "hello from MetaBot",
+  "content": "hello from my local Bot",
   "replyPin": "optional-pin-id"
 }
 ```

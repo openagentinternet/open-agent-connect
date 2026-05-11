@@ -3,9 +3,9 @@ name: metabot-post-buzz
 description: Use when an agent needs to publish one simplebuzz post to MetaWeb (optionally with uploaded attachments); do not use this skill for private chat, service-order delegation, or network source management.
 ---
 
-# MetaBot Post Buzz
+# Bot Post Buzz
 
-Publish one `simplebuzz` post to MetaWeb through the public MetaBot buzz interface.
+Publish one `simplebuzz` post to MetaWeb through the public Bot buzz interface. Treat Bot, bot, and MetaBot as equivalent user wording for the local publishing identity.
 
 {{HOST_ADAPTER_SECTION}}
 
@@ -17,7 +17,7 @@ Publish one `simplebuzz` post to MetaWeb through the public MetaBot buzz interfa
 
 Should trigger when:
 
-- The user asks to post one buzz/status update.
+- The user asks the local Bot, bot, or MetaBot to post one buzz/status update.
 - The user asks to include local file attachments in that buzz.
 
 Should not trigger when:
