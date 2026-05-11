@@ -484,7 +484,8 @@ test('buildAgentConnectSkillpacks publishes shared remote-call plus trace-inspec
   assert.match(content, /timeout/i);
   assert.match(content, /clarification/i);
   assert.match(content, /manual action/i);
-  assert.match(content, /remote MetaBot/i);
+  assert.match(content, /remote Bot/i);
+  assert.match(content, /Bot, bot, and MetaBot wording as equivalent and case-insensitive/i);
   assert.match(content, /rating/i);
 });
 
@@ -496,6 +497,11 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow in th
   assert.match(content, /network bots --online --limit 10/);
   assert.match(content, /network services --online/);
   assert.match(content, /ui open --page hub/);
+  assert.match(content, /online Bots\/MetaBots/i);
+  assert.match(content, /Bot, bot, and MetaBot as equivalent and case-insensitive/i);
+  assert.match(content, /"online Bots", "online bot", or "online MetaBots"/i);
+  assert.match(content, /online Bot services/i);
+  assert.match(content, /Bot Hub/i);
   assert.match(content, /network sources add/);
   assert.match(content, /network sources list/);
   assert.match(content, /network sources remove/);
@@ -526,10 +532,14 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   assert.match(content, /identity assign --name/);
   assert.match(content, /identity who/);
   assert.match(content, /metabot doctor/);
-  assert.match(content, /## First MetaBot Creation Handoff/);
-  assert.match(content, /user\s+chosen name as part of the onboarding experience/i);
-  assert.match(content, /show online MetaBots/i);
-  assert.match(content, /show available remote capabilities/i);
+  assert.match(content, /## First Bot Creation Handoff/);
+  assert.match(content, /Bot, bot, and MetaBot as equivalent and case-insensitive/i);
+  assert.match(content, /user chosen\s+name as part of the onboarding experience/i);
+  assert.match(content, /show online Bots/i);
+  assert.match(content, /show available Bot services/i);
+  assert.match(content, /create a MetaBot/i);
+  assert.match(content, /create a Bot/i);
+  assert.match(content, /create a bot/i);
   assert.match(content, /CLI resolves the canonical profile home/i);
   assert.match(content, /~\/\.metabot\/manager\//);
   assert.match(content, /~\/\.metabot\/profiles\/<slug>\//);
@@ -560,6 +570,8 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
   assert.match(chatContent, /do not lock to one fixed phrase template/i);
   assert.match(chatContent, /localUiUrl/);
   assert.match(chatContent, /unified A2A trace/i);
+  assert.match(chatContent, /Bot, bot, and MetaBot wording as equivalent and case-insensitive/i);
+  assert.match(chatContent, /hello from my local Bot/);
   assert.doesNotMatch(chatContent, /private chat viewer/i);
 
   const privateChatDeclarations = await readFile(
@@ -581,6 +593,7 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
 
   const buzzContent = await readFile(sharedSkillFile(outputRoot, 'metabot-post-buzz'), 'utf8');
   assert.match(buzzContent, /buzz post/);
+  assert.match(buzzContent, /Bot, bot, and MetaBot as equivalent user wording/i);
   assert.match(buzzContent, /file upload/);
   assert.match(buzzContent, /localUiUrl/);
   assert.match(buzzContent, /Do not auto-open the local Buzz page/i);
@@ -588,6 +601,7 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
   const fileContent = await readFile(sharedSkillFile(outputRoot, 'metabot-upload-file'), 'utf8');
   assert.match(fileContent, /file upload/);
   assert.match(fileContent, /\/file/);
+  assert.match(fileContent, /Bot, bot, and MetaBot as equivalent user wording/i);
 });
 
 test('shared install.sh copies shared skills and installs a runnable metabot shim from the bundled runtime', async () => {
@@ -726,7 +740,7 @@ test('codex install runbook documents install verification and first-run handoff
   assert.doesNotMatch(installRunbook, /\$\{CODEX_HOME:-\$HOME\/\.codex\}\/skills\/metabot-ask-master\/SKILL\.md/);
   assert.match(installRunbook, /metabot doctor/);
   assert.match(installRunbook, /Only run `metabot identity create --name \.\.\.` after the user has supplied/i);
-  assert.match(installRunbook, /Create a MetaBot named <your chosen name>/);
+  assert.match(installRunbook, /Create a Bot named <your chosen name>/);
   assert.match(installRunbook, /do not auto-create a default identity such as `Alice`/i);
   assert.match(installRunbook, /metabot network bots --online --limit 10/);
   assert.match(installRunbook, /## Agent Response Contract \(Required\)/);

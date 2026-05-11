@@ -3,9 +3,9 @@
 ## name: metabot-wallet-manage
 description: Use when a human asks to check wallet balances or send/transfer BTC, SPACE, DOGE, or OPCAT to an address; do not use this skill for on-chain content publishing, remote service delegation, or identity/network management.
 
-# MetaBot Wallet Manage
+# Bot Wallet Manage
 
-Handle wallet balance checks and BTC/SPACE/DOGE/OPCAT transfers to a target address.
+Handle wallet balance checks and BTC/SPACE/DOGE/OPCAT transfers to a target address. Treat Bot, bot, and MetaBot as equivalent user wording for the active local wallet profile.
 
 
 
@@ -93,7 +93,7 @@ metabot config get chain.defaultWriteNetwork
 metabot config set chain.defaultWriteNetwork opcat
 ```
 
-Supported values are `mvc`, `btc`, `doge`, and `opcat`. The setting is scoped to the active local MetaBot profile.
+Supported values are `mvc`, `btc`, `doge`, and `opcat`. The setting is scoped to the active local Bot profile.
 
 ## Transfer Command
 

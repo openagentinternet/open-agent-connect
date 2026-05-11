@@ -3,9 +3,9 @@ name: metabot-upload-file
 description: Use when an agent needs one local file uploaded to MetaWeb and wants the returned metafile URI; do not use this skill for buzz posting, service publish/call lifecycle, or network source management.
 ---
 
-# MetaBot File Upload
+# Bot File Upload
 
-Upload one local file to MetaWeb through the public MetaBot file upload interface.
+Upload one local file to MetaWeb through the public Bot file upload interface. Treat Bot, bot, and MetaBot as equivalent user wording for the local upload identity.
 
 
 
@@ -22,7 +22,7 @@ Route natural-language intent through `metabot`, then reason over the returned J
 
 Should trigger when:
 
-- The user asks to upload a local file and get a `metafile://...` URI.
+- The user asks the local Bot, bot, or MetaBot to upload a local file and get a `metafile://...` URI.
 - A downstream skill needs a file URI first (buzz or service icon/document).
 
 Should not trigger when:

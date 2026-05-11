@@ -1,9 +1,9 @@
 ---
 name: metabot-post-skillservice
-description: Use when a local MetaBot should publish one paid capability as a discoverable MetaWeb service; do not use this skill for service consumption (services call), trace follow-up, or network source registry management.
+description: Use when a local Bot/MetaBot should publish one paid capability as a discoverable MetaWeb service. Treat Bot, bot, and MetaBot wording as equivalent and case-insensitive for provider identity; do not use this skill for service consumption (services call), trace follow-up, or network source registry management.
 ---
 
-# MetaBot Publish Service
+# Bot Publish Service
 
 Publish a local capability as a MetaWeb service while preserving provider identity, price, and availability semantics validated in runtime.
 
@@ -22,7 +22,7 @@ Route natural-language intent through `metabot`, then reason over the returned J
 
 Should trigger when:
 
-- The user asks to publish/register one paid skill service.
+- The user asks a local Bot, bot, or MetaBot to publish/register one paid skill service.
 - The user asks to update a service listing payload for discovery.
 
 Should not trigger when:

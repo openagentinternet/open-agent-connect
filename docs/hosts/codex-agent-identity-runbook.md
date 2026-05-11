@@ -1,10 +1,13 @@
-# Codex Agent Identity Runbook
+# Codex Agent Bot Identity Runbook
 
-Use this runbook when you want Codex to reliably create or switch to a local MetaBot identity by name.
+Use this runbook when you want Codex to reliably create or switch to a local Bot identity by name.
+
+The CLI and storage paths still use `metabot` and `~/.metabot`; keep those exact
+terms in commands and path references.
 
 ## Agent Goal
 
-- treat the MetaBot identity name as the canonical local reference
+- treat the Bot identity name as the canonical local reference
 - if the name already exists locally, switch to the indexed profile that best matches it
 - if the name does not exist, create it in its own canonical profile home
 - finish with an explicit `identity who` verification report
@@ -22,17 +25,17 @@ Before running commands, verify:
 
 - repository root contains `package.json`
 - `metabot` is available in current shell (`command -v metabot`)
-- target MetaBot identity name is provided and not empty
+- target Bot identity name is provided and not empty
 
 If any precondition fails, stop and return a concise blocked report.
 
 ## Canonical V2 Layout
 
-The active v2 layout separates global machine state from per-MetaBot profile state:
+The active v2 layout separates global machine state from per-Bot profile state:
 
 - `~/.metabot/manager/identity-profiles.json` is the global profile index
 - `~/.metabot/manager/active-home.json` is the active profile pointer
-- `~/.metabot/profiles/<slug>/` is one MetaBot profile home
+- `~/.metabot/profiles/<slug>/` is one Bot profile home
 - `~/.metabot/profiles/<slug>/.runtime/` is the machine-managed runtime layer
 
 CLI resolves the canonical profile home from the requested name and the manager index.

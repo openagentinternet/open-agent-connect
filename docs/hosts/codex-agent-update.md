@@ -165,4 +165,5 @@ At the end of each check or apply run, return:
 - local version summary
 - remote version summary
 - update decision made
+- user-facing apply summary: "Open Agent Connect runtime refreshed; your local agent keeps its Bot/network abilities."
 - follow-up action required (if any)

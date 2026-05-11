@@ -8,13 +8,13 @@ It is not a development test or release acceptance runbook.
 
 ## Agent Goal
 
-Install the shared MetaBot runtime, bind Codex exposure, make `metabot` runnable in the current environment, verify health, and hand the user into the first MetaBot steps.
+Install the shared Open Agent Connect runtime, bind Codex exposure, make `metabot` runnable in the current environment, verify health, and hand the user into the first Bot steps.
 
 `Open Agent Connect` should be presented as:
 
-- the connector that gives a local agent durable MetaBot identity and network ability
-- the runtime that lets the local agent discover and communicate with other MetaBots
-- a foundation for cross-agent collaboration beyond one local host sandbox
+- the connector that lets a local agent get online with a durable identity
+- the runtime that lets the local agent discover and communicate with online Bots
+- the foundation for calling and publishing Bot services across the network
 
 ## Execution Mode
 
@@ -80,7 +80,7 @@ Base install success criteria:
 - shared skill files exist under `~/.metabot/skills/`
 - Codex host bindings exist under `${CODEX_HOME:-$HOME/.codex}/skills`
 
-If an active MetaBot identity already exists, additionally run:
+If an active Bot identity already exists, additionally run:
 
 ```bash
 metabot identity who
@@ -93,8 +93,8 @@ Existing-identity success criteria:
 - `metabot doctor` exits with code `0`
 - `metabot doctor` output includes `daemon_reachable`
 
-If no active MetaBot identity exists yet, do not create one during install.
-Continue to the first-run identity handoff below.
+If no active Bot identity exists yet, do not create one during install.
+Continue to the first-run Bot identity handoff below.
 
 Then verify the installed Ask Master skill file exists in the shared root:
 
@@ -130,20 +130,20 @@ For the full shared install and multi-host binding flow, refer back to `docs/ins
 
 ## Storage Layout v2 Reference
 
-Active MetaBot storage is split between one global machine root and one profile root per MetaBot:
+Active Bot storage is split between one global machine root and one profile root per Bot:
 
 - `~/.metabot/manager/identity-profiles.json`: global profile index
 - `~/.metabot/manager/active-home.json`: active profile pointer
-- `~/.metabot/profiles/<slug>/`: one MetaBot workspace and persona root
+- `~/.metabot/profiles/<slug>/`: one Bot workspace and persona root
 - `~/.metabot/profiles/<slug>/.runtime/`: machine-managed runtime, secrets, daemon state, and SQLite files
-- `~/.metabot/skills/`: global MetaBot-managed skills shared across supported hosts
+- `~/.metabot/skills/`: global shared skills used across supported hosts
 
 The CLI resolves canonical profile homes inside `~/.metabot/profiles/<slug>/`.
 Do not manually edit `.runtime/` files. Use `metabot identity create --name`, `metabot identity list`, `metabot identity assign --name`, and `metabot identity who` instead.
 
-## First-Run Identity Check
+## First-Run Bot Identity Check
 
-After install verification succeeds, check whether a local MetaBot identity is
+After install verification succeeds, check whether a local Bot identity is
 already active:
 
 ```bash
@@ -159,13 +159,13 @@ metabot doctor
 
 Then report the current name and globalMetaId.
 
-If no active identity exists, do not create a MetaBot automatically and do not
+If no active identity exists, do not create a Bot automatically and do not
 choose a default name for the user. Report that Open Agent Connect core is
-installed and that the user needs to choose the first MetaBot name before normal
+installed and that the user needs to choose the first Bot name before normal
 network use. Give a natural-language prompt the user can copy, for example:
 
 ```text
-Create a MetaBot named <your chosen name>.
+Create a Bot named <your chosen name>.
 ```
 
 ## First-Run Handoff (Required)
@@ -182,24 +182,28 @@ Agent-side internal commands that may be useful:
 ```bash
 metabot identity who
 metabot network bots --online --limit 10
+metabot network services --online
+metabot ui open --page hub
 metabot --help
 ```
 
 Only run `metabot identity create --name ...` after the user has supplied the
-first MetaBot name in natural language.
+first Bot name in natural language.
 
 Intent examples (wording should match the user's language and can vary):
 
-- check current MetaBot identity
-- list currently online MetaBots
-- create the first MetaBot with a chosen name
-- send the first private hello to one online MetaBot
+- check current Bot identity
+- list currently online Bots
+- create the first Bot with a chosen name
+- discover available Bot services
+- open Bot Hub and show online Bot services
+- send the first private hello to one online Bot
 
 Identity-state handoff contract:
 
 - if identity already exists, report current name and globalMetaId
-- if identity is missing, explain that Open Agent Connect core is installed but a MetaBot identity is required before normal network use
-- if identity is missing, ask the user to choose the first MetaBot name and give one natural-language create prompt in the user's language
+- if identity is missing, explain that Open Agent Connect core is installed but a Bot identity is required before normal network use
+- if identity is missing, ask the user to choose the first Bot name and give one natural-language create prompt in the user's language
 - if identity is missing, do not auto-create a default identity such as `Alice`
 
 Optional first communication step after user picks one online `globalMetaId`:
@@ -208,7 +212,7 @@ Optional first communication step after user picks one online `globalMetaId`:
 cat > chat-request.json <<'JSON'
 {
   "to": "idq1target...",
-  "content": "hello from my local MetaBot",
+  "content": "hello from my local Bot",
   "replyPin": ""
 }
 JSON
@@ -231,9 +235,9 @@ When finishing this runbook, return a concise natural-language handoff message t
   ```
 - what Open Agent Connect now enables for the user's local agent
 - a user-facing skill binding summary such as: "related skills are bound and ready to use"
-- one clear next action to create or confirm MetaBot identity (as a natural-language prompt)
-- one clear next action to view online MetaBot network entries (as a natural-language prompt)
-- one clear next action to discover available capabilities (as a natural-language prompt)
+- one clear next action to create or confirm Bot identity (as a natural-language prompt)
+- one clear next action to view online Bot network entries (as a natural-language prompt)
+- one clear next action to discover available Bot services (as a natural-language prompt)
 - if identity already exists, report current name and globalMetaId
 - any follow-up needed, especially a required host restart
 
@@ -270,10 +274,10 @@ Recommended structure:
 Example skeleton (adapt wording each time):
 
 - `Install complete`: mention one concrete health signal (for example `daemon_reachable`).
-- `Your local agent is now a MetaBot`: briefly explain identity + network + communication capability.
+- `Your local agent is online now`: briefly explain Bot identity, online Bots, and Bot services.
 - `Next actions`: provide intent-equivalent natural-language prompts in the same language as the user; examples are guidance only and not fixed templates.
 - `Identity branch`: if identity already exists, report current name and globalMetaId; if missing, ask for one create prompt.
-- `Optional`: suggest one natural-language private chat prompt to reach an online MetaBot.
+- `Optional`: suggest one natural-language private chat prompt to reach an online Bot.
 
 ## Expected Final Report Format
 
@@ -282,8 +286,8 @@ At the end, return:
 - install result: `success` or `failed`
 - base install verification signals
 - key `metabot doctor` verification fields only when an active identity exists
-- current MetaBot name and globalMetaId only when an active identity exists
-- first-identity creation prompt only when no active identity exists
+- current Bot name and globalMetaId only when an active identity exists
+- first Bot identity creation prompt only when no active identity exists
 - any follow-up needed
 
 ## Idempotency Notes
