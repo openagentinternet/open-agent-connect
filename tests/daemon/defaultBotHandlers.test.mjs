@@ -337,6 +337,104 @@ test('default bot createProfile persists requested provider fields after chain b
   );
 });
 
+test('default bot createProfile prefers the requested host provider and falls back to a different recent provider', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'host-default-bot');
+  await createLlmRuntimeStore(targetHomeDir).write({
+    version: 1,
+    runtimes: [
+      {
+        ...runtime('codex', 'runtime-codex', 'healthy'),
+        lastSeenAt: '2026-05-06T00:01:00.000Z',
+        updatedAt: '2026-05-06T00:01:00.000Z',
+      },
+      {
+        ...runtime('claude-code', 'runtime-claude', 'healthy'),
+        lastSeenAt: '2026-05-06T00:05:00.000Z',
+        updatedAt: '2026-05-06T00:05:00.000Z',
+      },
+    ],
+  });
+  const bioPayloads = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+    createSignerForHome: () => makeSigner(async (input) => {
+      if (input.path === '/info/bio') {
+        bioPayloads.push(JSON.parse(input.payload));
+      }
+      return {
+        txids: [`host-default-tx-${bioPayloads.length + 1}`],
+        pinId: `host-default-pin-${bioPayloads.length + 1}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gm-host-default',
+        mvcAddress: 'mvc-host-default',
+      };
+    }),
+  });
+
+  const result = await handlers.bot.createProfile({
+    name: 'Host Default Bot',
+    host: 'codex',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.primaryProvider, 'codex');
+  assert.equal(result.data.profile.fallbackProvider, 'claude-code');
+  assert.equal(bioPayloads.at(-1).primaryProvider, 'codex');
+  assert.equal(bioPayloads.at(-1).fallbackProvider, 'claude-code');
+});
+
+test('default bot createProfile from UI defaults providers by recent runtime activity', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'ui-default-bot');
+  await createLlmRuntimeStore(targetHomeDir).write({
+    version: 1,
+    runtimes: [
+      {
+        ...runtime('codex', 'runtime-codex', 'healthy'),
+        lastSeenAt: '2026-05-06T00:01:00.000Z',
+        updatedAt: '2026-05-06T00:01:00.000Z',
+      },
+      {
+        ...runtime('claude-code', 'runtime-claude', 'healthy'),
+        lastSeenAt: '2026-05-06T00:05:00.000Z',
+        updatedAt: '2026-05-06T00:05:00.000Z',
+      },
+    ],
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+  });
+
+  const result = await handlers.bot.createProfile({
+    name: 'UI Default Bot',
+    creationSource: 'ui',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.primaryProvider, 'claude-code');
+  assert.equal(result.data.profile.fallbackProvider, 'codex');
+});
+
 test('default bot createProfile removes pending local files when subsidy or chain bootstrap fails', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
   t.after(async () => {
