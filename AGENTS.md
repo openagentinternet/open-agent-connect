@@ -3,8 +3,7 @@
 - Commit once for every round of modifications.
 - For every commit, use the `metabot-post-buzz` skill to post a detailed development diary of that round's changes on-chain.
 - All documentation, SKILL documents, and code comments must be written in English.
-- When spawning review or test subagents, default to model `gpt-5.4`.
-- Do not use `gpt-5.1-codex-mini` for review/test subagents unless the user explicitly asks for it.
+- When spawning review or test subagents, default to model `gpt-5.5`.
 - Prefer small, frequent commits. Commit each independent, verifiable unit of work as soon as it is complete.
 - For every modification or newly added feature, create one commit.
 - Before committing, make sure the relevant local verification steps pass for your changes. Prefer the smallest meaningful verification set instead of defaulting to the full suite.
