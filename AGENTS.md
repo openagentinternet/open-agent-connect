@@ -7,10 +7,17 @@
 - Do not use `gpt-5.1-codex-mini` for review/test subagents unless the user explicitly asks for it.
 - Prefer small, frequent commits. Commit each independent, verifiable unit of work as soon as it is complete.
 - For every modification or newly added feature, create one commit.
-- Before committing, make sure the relevant local tests or verification steps pass for your changes.
+- Before committing, make sure the relevant local verification steps pass for your changes. Prefer the smallest meaningful verification set instead of defaulting to the full suite.
 - When merging completed work into `main`, use `git merge --no-ff` to preserve the feature merge point.
 - MetaBot storage and directory layout changes must follow `docs/superpowers/specs/2026-04-23-metabot-storage-layout-v2-design.md`.
 - Do not introduce new code or documentation that depends on the legacy `.metabot/hot` layout unless you are explicitly documenting historical behavior.
+
+## Local Verification Policy
+
+- For focused documentation, prompt, SKILL, UI copy, or narrowly scoped code changes, targeted tests plus `npm run build` or an equivalent static check are sufficient before committing.
+- Run the full `npm test` locally only when the change touches shared runtime behavior, wallet/chain writes, persistence formats, release artifacts, package/build plumbing, broad cross-host skillpack output, or when the user explicitly asks for full verification.
+- After merging a completed branch into `main`, do not automatically run the full `npm test` for every low-risk branch. Re-run the same targeted checks on the merged result unless the merge combines high-risk areas, resolves conflicts, or changes release/build artifacts.
+- Treat CI as the default full-suite gate for ordinary development merges. Local full-suite runs are still required before releases and when CI is unavailable or unsuitable for the risk involved.
 
 ## Releasing a New Version
 
