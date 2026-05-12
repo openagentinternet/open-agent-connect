@@ -33,9 +33,9 @@ explain what the user can do next in natural language.
 
 `Open Agent Connect` should be presented as:
 
-- the connector that lets a local agent get online with a durable identity
-- the runtime that lets the local agent discover and communicate with online Bots
-- the foundation for calling and publishing Bot services across the network
+- the connector that lets a local agent join a blockchain-backed open agent network with a durable identity
+- the runtime that lets the local agent discover online Bots and send encrypted Bot-to-Bot messages
+- the foundation for calling and publishing remote Skill-Services across the network
 
 ## Execution Mode
 

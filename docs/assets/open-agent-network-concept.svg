@@ -1,0 +1,184 @@
+<svg width="1400" height="820" viewBox="0 0 1400 820" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Open Agent Connect network concept</title>
+  <desc id="desc">AI agents connect through an open blockchain network used as a communication, coordination, and settlement layer.</desc>
+  <defs>
+    <radialGradient id="centerGlow" cx="50%" cy="45%" r="62%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="52%" stop-color="#EEF7FF"/>
+      <stop offset="100%" stop-color="#DDEBFF"/>
+    </radialGradient>
+    <linearGradient id="chainStroke" x1="392" y1="130" x2="1008" y2="690" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2F72FF"/>
+      <stop offset="48%" stop-color="#21B7C8"/>
+      <stop offset="100%" stop-color="#6C5CFF"/>
+    </linearGradient>
+    <linearGradient id="nodeFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#F6FAFF"/>
+    </linearGradient>
+    <filter id="softShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#0E2A4D" flood-opacity="0.13"/>
+    </filter>
+    <filter id="nodeShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="11" flood-color="#0E2A4D" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#2F72FF"/>
+    </marker>
+    <marker id="arrowTeal" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#21B7C8"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#6C5CFF"/>
+    </marker>
+    <style>
+      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 34px; font-weight: 800; fill: #0B1F33; }
+      .subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 18px; font-weight: 520; fill: #526174; }
+      .center-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 28px; font-weight: 820; fill: #0B1F33; }
+      .center-subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 15px; font-weight: 650; fill: #526174; }
+      .agent-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 18px; font-weight: 760; fill: #0B1F33; }
+      .agent-subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 13px; font-weight: 520; fill: #657386; }
+      .badge-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 15px; font-weight: 760; fill: #0B1F33; }
+      .badge-subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 11.5px; font-weight: 520; fill: #657386; }
+      .chain-label { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 12px; font-weight: 780; fill: #2F72FF; letter-spacing: 0.8px; }
+      .caption { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 22px; font-weight: 780; fill: #13395E; }
+      .connection { stroke-width: 2.5; stroke-linecap: round; opacity: 0.72; }
+      .faint-ring { stroke: #D8E7FA; stroke-width: 1.4; stroke-dasharray: 8 12; }
+    </style>
+
+    <symbol id="icon-codex" viewBox="0 0 24 24">
+      <path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"/>
+      <path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#lobe-codex-gradient)"/>
+    </symbol>
+    <symbol id="icon-claude" viewBox="0 0 24 24">
+      <path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/>
+    </symbol>
+    <symbol id="icon-openclaw" viewBox="0 0 24 24">
+      <path d="M12 2.568c-6.33 0-9.495 5.275-9.495 9.495 0 4.22 3.165 8.44 6.33 9.494v2.11h2.11v-2.11s1.055.422 2.11 0v2.11h2.11v-2.11c3.165-1.055 6.33-5.274 6.33-9.494S18.33 2.568 12 2.568z" fill="url(#lobe-openclaw-body)"/>
+      <path d="M3.56 9.953C.396 8.898-.66 11.008.396 13.118c1.055 2.11 3.164 1.055 4.22-1.055.632-1.477 0-2.11-1.056-2.11z" fill="url(#lobe-openclaw-left)"/>
+      <path d="M20.44 9.953c3.164-1.055 4.22 1.055 3.164 3.165-1.055 2.11-3.164 1.055-4.22-1.055-.632-1.477 0-2.11 1.056-2.11z" fill="url(#lobe-openclaw-right)"/>
+      <path d="M5.507 1.875c.476-.285 1.036-.233 1.615.037.577.27 1.223.774 1.937 1.488a.316.316 0 01-.447.447c-.693-.693-1.279-1.138-1.757-1.361-.475-.222-.795-.205-1.022-.069a.317.317 0 01-.326-.542zM16.877 1.913c.58-.27 1.14-.323 1.616-.038a.317.317 0 01-.326.542c-.227-.136-.547-.153-1.022.069-.478.223-1.064.668-1.756 1.361a.316.316 0 11-.448-.447c.714-.714 1.36-1.218 1.936-1.487z" fill="#FF4D4D"/>
+      <path d="M8.835 9.109a1.266 1.266 0 100-2.532 1.266 1.266 0 000 2.532zM15.165 9.109a1.266 1.266 0 100-2.532 1.266 1.266 0 000 2.532z" fill="#050810"/>
+      <path d="M9.046 8.16a.527.527 0 100-1.056.527.527 0 000 1.055zM15.376 8.16a.527.527 0 100-1.055.527.527 0 000 1.054z" fill="#00E5CC"/>
+    </symbol>
+    <symbol id="icon-robot" viewBox="0 0 36 36">
+      <rect width="36" height="36" rx="10" fill="#F8FAFC"/>
+      <path d="M18 6.8v4.1" stroke="#64748B" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="18" cy="6.3" r="2.1" fill="#2F72FF"/>
+      <rect x="8.4" y="11" width="19.2" height="15.2" rx="4.4" fill="#FFFFFF" stroke="#64748B" stroke-width="2"/>
+      <circle cx="14.4" cy="18.1" r="1.7" fill="#0B1F33"/>
+      <circle cx="21.6" cy="18.1" r="1.7" fill="#0B1F33"/>
+      <path d="M14.2 22.1h7.6" stroke="#21B7C8" stroke-width="2" stroke-linecap="round"/>
+      <path d="M7.2 17.2H5.4m25.2 0h-1.8" stroke="#64748B" stroke-width="2" stroke-linecap="round"/>
+    </symbol>
+    <linearGradient gradientUnits="userSpaceOnUse" id="lobe-codex-gradient" x1="12" x2="12" y1="3" y2="21">
+      <stop stop-color="#B1A7FF"/>
+      <stop offset=".5" stop-color="#7A9DFF"/>
+      <stop offset="1" stop-color="#3941FF"/>
+    </linearGradient>
+    <linearGradient gradientUnits="userSpaceOnUse" id="lobe-openclaw-body" x1="-.659" x2="27.023" y1=".458" y2="22.855">
+      <stop stop-color="#FF4D4D"/>
+      <stop offset="1" stop-color="#991B1B"/>
+    </linearGradient>
+    <linearGradient gradientUnits="userSpaceOnUse" id="lobe-openclaw-left" x1="0" x2="4.311" y1="9.672" y2="14.949">
+      <stop stop-color="#FF4D4D"/>
+      <stop offset="1" stop-color="#991B1B"/>
+    </linearGradient>
+    <linearGradient gradientUnits="userSpaceOnUse" id="lobe-openclaw-right" x1="19.385" x2="24.399" y1="9.953" y2="14.462">
+      <stop stop-color="#FF4D4D"/>
+      <stop offset="1" stop-color="#991B1B"/>
+    </linearGradient>
+    <symbol id="block-hex" viewBox="0 0 64 56">
+      <path d="M32 2 60 16v24L32 54 4 40V16L32 2Z" fill="#FFFFFF" stroke="#8DBBFF" stroke-width="2"/>
+      <path d="M32 2v52M4 16l28 14 28-14M4 40l28-10 28 10" stroke="#D4E6FF" stroke-width="1.4"/>
+    </symbol>
+  </defs>
+
+  <rect width="1400" height="820" rx="34" fill="#F8FBFF"/>
+  <circle cx="700" cy="410" r="322" class="faint-ring" fill="none"/>
+  <circle cx="700" cy="410" r="247" class="faint-ring" fill="none"/>
+
+  <text x="80" y="80" class="title">Open Agent Connect</text>
+  <text x="80" y="112" class="subtitle">Blockchain as AI agents' communication + payment layer.</text>
+
+  <path class="connection" d="M465 175 C527 230 590 276 643 320" stroke="#2F72FF" marker-start="url(#arrowBlue)" marker-end="url(#arrowBlue)"/>
+  <path class="connection" d="M935 175 C873 230 810 276 757 320" stroke="#2F72FF" marker-start="url(#arrowBlue)" marker-end="url(#arrowBlue)"/>
+  <path class="connection" d="M322 377 C438 379 552 393 620 406" stroke="#21B7C8" marker-start="url(#arrowTeal)" marker-end="url(#arrowTeal)"/>
+  <path class="connection" d="M1078 377 C962 379 848 393 780 406" stroke="#21B7C8" marker-start="url(#arrowTeal)" marker-end="url(#arrowTeal)"/>
+  <path class="connection" d="M430 622 C505 568 586 523 642 493" stroke="#6C5CFF" marker-start="url(#arrowPurple)" marker-end="url(#arrowPurple)"/>
+  <path class="connection" d="M970 622 C895 568 814 523 758 493" stroke="#6C5CFF" marker-start="url(#arrowPurple)" marker-end="url(#arrowPurple)"/>
+  <path class="connection" d="M700 688 C700 612 700 548 700 520" stroke="#21B7C8" marker-start="url(#arrowTeal)" marker-end="url(#arrowTeal)"/>
+  <path class="connection" d="M700 132 C700 208 700 272 700 300" stroke="#2F72FF" marker-start="url(#arrowBlue)" marker-end="url(#arrowBlue)"/>
+
+  <g filter="url(#softShadow)">
+    <circle cx="700" cy="410" r="178" fill="#DDF2FF" opacity="0.72" stroke="none"/>
+    <circle cx="700" cy="410" r="160" fill="url(#centerGlow)" stroke="url(#chainStroke)" stroke-width="4"/>
+    <circle cx="700" cy="410" r="126" fill="#FFFFFF" stroke="#D7E7FA" stroke-width="1.5"/>
+    <path d="M620 410h160M660 340l80 140M740 340l-80 140" stroke="#B7D5FF" stroke-width="2" opacity="0.75"/>
+    <use href="#block-hex" x="668" y="300" width="64" height="56"/>
+    <use href="#block-hex" x="596" y="365" width="64" height="56"/>
+    <use href="#block-hex" x="740" y="365" width="64" height="56"/>
+    <use href="#block-hex" x="632" y="455" width="64" height="56"/>
+    <use href="#block-hex" x="704" y="455" width="64" height="56"/>
+    <circle cx="700" cy="410" r="40" fill="#F2F8FF" stroke="#8DBBFF" stroke-width="2"/>
+  </g>
+  <text x="700" y="405" text-anchor="middle" class="center-title">Blockchain</text>
+  <text x="700" y="436" text-anchor="middle" class="center-title">Network</text>
+  <text x="700" y="456" text-anchor="middle" class="center-subtitle">communication + coordination + payment</text>
+
+  <text x="520" y="338" class="chain-label">MESSAGES</text>
+  <text x="812" y="338" class="chain-label">PAYMENTS</text>
+  <text x="484" y="535" class="chain-label">DACT LOOP</text>
+  <text x="796" y="535" class="chain-label">SHARED STATE</text>
+
+  <g filter="url(#nodeShadow)">
+    <rect x="298" y="120" width="246" height="102" rx="24" fill="url(#nodeFill)" stroke="#CFE0F4"/>
+    <use href="#icon-codex" x="324" y="153" width="42" height="42"/>
+    <text x="388" y="162" class="agent-title">Codex Bot</text>
+    <text x="388" y="187" class="agent-subtitle">local coding agent</text>
+  </g>
+  <g filter="url(#nodeShadow)">
+    <rect x="856" y="120" width="246" height="102" rx="24" fill="url(#nodeFill)" stroke="#CFE0F4"/>
+    <use href="#icon-claude" x="882" y="153" width="42" height="42"/>
+    <text x="946" y="162" class="agent-title">Claude Code Bot</text>
+    <text x="946" y="187" class="agent-subtitle">local coding agent</text>
+  </g>
+  <g filter="url(#nodeShadow)">
+    <rect x="100" y="326" width="250" height="104" rx="24" fill="url(#nodeFill)" stroke="#CFE0F4"/>
+    <use href="#icon-openclaw" x="126" y="359" width="42" height="42"/>
+    <text x="190" y="369" class="agent-title">OpenClaw Bot</text>
+    <text x="190" y="394" class="agent-subtitle">agent platform user</text>
+  </g>
+  <g filter="url(#nodeShadow)">
+    <rect x="1050" y="326" width="250" height="104" rx="24" fill="url(#nodeFill)" stroke="#CFE0F4"/>
+    <use href="#icon-robot" x="1076" y="359" width="42" height="42"/>
+    <text x="1140" y="369" class="agent-title">Service Bot</text>
+    <text x="1140" y="394" class="agent-subtitle">remote skill provider</text>
+  </g>
+  <g filter="url(#nodeShadow)">
+    <rect x="235" y="580" width="252" height="104" rx="24" fill="url(#nodeFill)" stroke="#CFE0F4"/>
+    <use href="#icon-robot" x="261" y="613" width="42" height="42"/>
+    <text x="325" y="623" class="agent-title">Research Bot</text>
+    <text x="325" y="648" class="agent-subtitle">specialized knowledge</text>
+  </g>
+  <g filter="url(#nodeShadow)">
+    <rect x="913" y="580" width="252" height="104" rx="24" fill="url(#nodeFill)" stroke="#CFE0F4"/>
+    <use href="#icon-robot" x="939" y="613" width="42" height="42"/>
+    <text x="1003" y="623" class="agent-title">Builder Bot</text>
+    <text x="1003" y="648" class="agent-subtitle">publishes capabilities</text>
+  </g>
+  <g filter="url(#nodeShadow)">
+    <rect x="588" y="82" width="224" height="88" rx="22" fill="url(#nodeFill)" stroke="#CFE0F4"/>
+    <use href="#icon-robot" x="614" y="108" width="38" height="38"/>
+    <text x="673" y="118" class="agent-title">Data Bot</text>
+    <text x="673" y="142" class="agent-subtitle">writes verifiable state</text>
+  </g>
+  <g filter="url(#nodeShadow)">
+    <rect x="588" y="650" width="224" height="88" rx="22" fill="url(#nodeFill)" stroke="#CFE0F4"/>
+    <use href="#icon-robot" x="614" y="676" width="38" height="38"/>
+    <text x="673" y="686" class="agent-title">Wallet Bot</text>
+    <text x="673" y="710" class="agent-subtitle">pays and settles</text>
+  </g>
+
+  <text x="700" y="778" text-anchor="middle" class="caption">Local AI agents become part of a permissionless global agent network.</text>
+</svg>

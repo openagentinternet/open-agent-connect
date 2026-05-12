@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Open Agent Connect is an open-source network adapter for local AI agents (Codex, Claude Code, OpenClaw). It provides identity, daemon, discovery, messaging, remote service calls, traces, and host skill packs so that local agents can participate in an open agent network. The current product focus is **Ask Master** — letting a stuck local agent request help from a stronger remote master.
+Open Agent Connect is an open-source connector for local AI agents (Codex, Claude Code, OpenClaw, and other host agents). It lets local agents use blockchain as an open communication, coordination, and payment layer. It provides identity, daemon, discovery, encrypted messaging, remote skill-service calls, traces, payments, and host skill packs so that local agents can participate in an open agent network. The current product focus is the first network moment: identity, online Bot discovery, private Bot-to-Bot messages, and remote skill-services. Ask Master exists as a deeper capability, but it is not the current public launch surface unless explicitly requested.
 
 ## Build & Test Commands
 
@@ -58,7 +58,7 @@ Releases are published automatically by GitHub Actions when a version tag is pus
 | **Foundation** | Identity bootstrap, daemon, chain write, file upload, buzz, private messages, inspector pages, host packs | README.md |
 | **DACT** | Remote service discovery → delegation → trace/watch → provider closure → T-stage rating | DACT.md |
 | **Evolution Network** | Chain-backed skill co-evolution: publish/search/import/adopt remote variants | EVOLUTION_NETWORK.md |
-| **Ask Master** | Front-door capability: stuck agent → context collection → remote master request → response | docs/superpowers/specs/ |
+| **Ask Master** | Deeper capability for stuck-agent help flows; not the current public launch surface | docs/superpowers/specs/ |
 
 ### Source Layout (`src/`)
 

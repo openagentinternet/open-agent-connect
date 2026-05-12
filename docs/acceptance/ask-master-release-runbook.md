@@ -1,8 +1,16 @@
 # Ask Master Release Runbook
 
-Use this runbook for the current public Ask Master release acceptance.
+Historical note: this is a feature-specific Ask Master acceptance runbook. It
+is not the current public launch posture for Open Agent Connect. The current
+public surface should be validated through identity creation, online Bot
+discovery, private Bot-to-Bot messaging, remote Skill-Service calls, trace
+inspection, and rating closure. Use
+[`cross-host-demo-runbook.md`](cross-host-demo-runbook.md) for the public
+network smoke path.
 
-It verifies the release posture we are actually shipping:
+Use this runbook only when explicitly validating the Ask Master feature path.
+
+It verifies the Ask Master feature posture for dedicated Ask Master work:
 
 - `manual` lane is supported
 - `suggest` lane is supported
@@ -10,7 +18,7 @@ It verifies the release posture we are actually shipping:
 - the public trigger-mode switch is supported through `askMaster.triggerMode`
 - preview/confirm remains the required public contract before dispatch
 
-This runbook is intentionally different from the DACT cross-host demo. It validates Ask Master as the product surface, not generic `services call`.
+This runbook is intentionally different from the DACT cross-host demo. It validates the Ask Master feature path, not the current public Open Agent Connect surface.
 
 ## Preconditions
 
