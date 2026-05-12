@@ -7,6 +7,7 @@ export interface PublishedServiceDraft {
   currency: string;
   outputType: string;
   serviceIconUri?: string | null;
+  serviceIconDataUrl?: string | null;
 }
 
 export interface PublishedServiceRecord {
@@ -22,6 +23,10 @@ export interface PublishedServiceRecord {
   serviceIcon: string | null;
   price: string;
   currency: string;
+  paymentChain: string | null;
+  settlementKind: string | null;
+  mrc20Ticker: string | null;
+  mrc20Id: string | null;
   skillDocument: string;
   inputType: 'text';
   outputType: string;
@@ -40,6 +45,59 @@ function normalizeText(value: unknown): string {
 export function normalizePublishedServiceCurrency(value: string): string {
   const normalized = normalizeText(value).toUpperCase();
   return normalized === 'MVC' ? 'SPACE' : normalized;
+}
+
+export function resolvePublishedServiceSettlement(value: string): {
+  currency: string;
+  paymentChain: string | null;
+  settlementKind: string | null;
+  mrc20Ticker: string | null;
+  mrc20Id: string | null;
+} {
+  const normalized = normalizePublishedServiceCurrency(value);
+  if (normalized === 'SPACE') {
+    return {
+      currency: 'SPACE',
+      paymentChain: 'mvc',
+      settlementKind: 'native',
+      mrc20Ticker: null,
+      mrc20Id: null,
+    };
+  }
+  if (normalized === 'BTC') {
+    return {
+      currency: 'BTC',
+      paymentChain: 'btc',
+      settlementKind: 'native',
+      mrc20Ticker: null,
+      mrc20Id: null,
+    };
+  }
+  if (normalized === 'DOGE') {
+    return {
+      currency: 'DOGE',
+      paymentChain: 'doge',
+      settlementKind: 'native',
+      mrc20Ticker: null,
+      mrc20Id: null,
+    };
+  }
+  if (normalized === 'BTC-OPCAT' || normalized === 'BTC_OPCAT' || normalized === 'OPCAT') {
+    return {
+      currency: 'BTC-OPCAT',
+      paymentChain: 'opcat',
+      settlementKind: 'native',
+      mrc20Ticker: null,
+      mrc20Id: null,
+    };
+  }
+  return {
+    currency: normalized,
+    paymentChain: null,
+    settlementKind: null,
+    mrc20Ticker: null,
+    mrc20Id: null,
+  };
 }
 
 function normalizeDraft(draft: PublishedServiceDraft): PublishedServiceDraft {
@@ -65,10 +123,11 @@ export function buildPublishedService(input: {
   skillDocument: string;
   now: number;
 }): {
-  payload: Record<string, string>;
+  payload: Record<string, string | null>;
   record: PublishedServiceRecord;
 } {
   const draft = normalizeDraft(input.draft);
+  const settlement = resolvePublishedServiceSettlement(draft.currency);
   const payload = {
     serviceName: draft.serviceName,
     displayName: draft.displayName,
@@ -77,8 +136,12 @@ export function buildPublishedService(input: {
     providerMetaBot: normalizeText(input.providerGlobalMetaId),
     providerSkill: draft.providerSkill,
     price: draft.price,
-    currency: draft.currency,
-    skillDocument: normalizeText(input.skillDocument),
+    currency: settlement.currency,
+    paymentChain: settlement.paymentChain,
+    settlementKind: settlement.settlementKind,
+    mrc20Ticker: settlement.mrc20Ticker,
+    mrc20Id: settlement.mrc20Id,
+    skillDocument: '',
     inputType: 'text',
     outputType: draft.outputType || 'text',
     endpoint: 'simplemsg',
@@ -97,8 +160,12 @@ export function buildPublishedService(input: {
     description: draft.description,
     serviceIcon: draft.serviceIconUri || null,
     price: draft.price,
-    currency: draft.currency,
-    skillDocument: normalizeText(input.skillDocument),
+    currency: settlement.currency,
+    paymentChain: settlement.paymentChain,
+    settlementKind: settlement.settlementKind,
+    mrc20Ticker: settlement.mrc20Ticker,
+    mrc20Id: settlement.mrc20Id,
+    skillDocument: '',
     inputType: 'text',
     outputType: draft.outputType || 'text',
     endpoint: 'simplemsg',
@@ -124,9 +191,14 @@ export function buildRevokedPublishedService(input: {
   serviceIcon?: string | null;
   price: string;
   currency: string;
+  paymentChain?: string | null;
+  settlementKind?: string | null;
+  mrc20Ticker?: string | null;
+  mrc20Id?: string | null;
   skillDocument: string;
   now: number;
 }): PublishedServiceRecord {
+  const settlement = resolvePublishedServiceSettlement(input.currency);
   return {
     id: normalizeText(input.sourceServicePinId),
     sourceServicePinId: normalizeText(input.sourceServicePinId),
@@ -139,8 +211,12 @@ export function buildRevokedPublishedService(input: {
     description: normalizeText(input.description),
     serviceIcon: normalizeText(input.serviceIcon) || null,
     price: normalizeText(input.price),
-    currency: normalizePublishedServiceCurrency(input.currency),
-    skillDocument: normalizeText(input.skillDocument),
+    currency: settlement.currency,
+    paymentChain: normalizeText(input.paymentChain) || settlement.paymentChain,
+    settlementKind: normalizeText(input.settlementKind) || settlement.settlementKind,
+    mrc20Ticker: normalizeText(input.mrc20Ticker) || settlement.mrc20Ticker,
+    mrc20Id: normalizeText(input.mrc20Id) || settlement.mrc20Id,
+    skillDocument: '',
     inputType: 'text',
     outputType: 'text',
     endpoint: 'simplemsg',

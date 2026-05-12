@@ -38,11 +38,45 @@ test('buildPublishPageViewModel shows the local provider identity that will publ
 
 test('buildPublishPageViewModel exposes primary runtime catalog availability for publishing', () => {
   const model = buildPublishPageViewModel({
-    providerSummary: {
-      identity: {
+    profiles: [
+      {
         name: 'Alice Weather Bot',
+        slug: 'alice-weather-bot',
         globalMetaId: 'idq1aliceweatherprovider000000000000000000000000000000',
         mvcAddress: '1AliceWeatherProviderAddress11111111111111',
+        primaryProvider: 'codex',
+      },
+      {
+        name: 'Local Draft Bot',
+        slug: 'local-draft-bot',
+        primaryProvider: null,
+      },
+      {
+        name: 'Unavailable Bot',
+        slug: 'unavailable-bot',
+        primaryProvider: 'claude-code',
+      },
+    ],
+    runtimes: [
+      {
+        id: 'runtime-codex',
+        provider: 'codex',
+        displayName: 'Codex',
+        health: 'healthy',
+      },
+      {
+        id: 'runtime-claude',
+        provider: 'claude-code',
+        displayName: 'Claude Code',
+        health: 'unavailable',
+      },
+    ],
+    selectedMetaBotSlug: 'alice-weather-bot',
+    providerSummary: {
+      identity: {
+        name: 'Current Default Bot',
+        globalMetaId: 'idq1currentdefaultprovider00000000000000000000000000',
+        mvcAddress: '1CurrentDefaultProviderAddress111111111111',
       },
     },
     publishSkills: {
@@ -50,6 +84,7 @@ test('buildPublishPageViewModel exposes primary runtime catalog availability for
       identity: {
         name: 'Alice Weather Bot',
         globalMetaId: 'idq1aliceweatherprovider000000000000000000000000000000',
+        mvcAddress: '1AliceWeatherProviderAddress11111111111111',
       },
       runtime: {
         id: 'runtime-codex',
@@ -108,6 +143,17 @@ test('buildPublishPageViewModel exposes primary runtime catalog availability for
       description: 'Returns one concise forecast.',
     },
   ]);
+  assert.deepEqual(model.metabots, [
+    {
+      value: 'alice-weather-bot',
+      label: 'Alice Weather Bot',
+      title: 'Alice Weather Bot',
+      description: 'Primary runtime: codex',
+      globalMetaId: 'idq1aliceweatherprovider000000000000000000000000000000',
+      primaryProvider: 'codex',
+    },
+  ]);
+  assert.equal(model.selectedMetaBotSlug, 'alice-weather-bot');
   assert.deepEqual(model.availability, {
     canPublish: true,
     reasonCode: 'ready',

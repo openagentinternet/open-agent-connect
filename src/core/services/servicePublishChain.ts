@@ -8,13 +8,22 @@ import {
 
 const SKILL_SERVICE_PROTOCOL_PATH = '/protocols/skill-service';
 const PENDING_SERVICE_PIN_ID = 'pending-skill-service-pin';
+const MAX_SERVICE_ICON_BYTES = 2 * 1024 * 1024;
+const SERVICE_ICON_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+  'image/gif',
+  'image/svg+xml',
+]);
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
 export function buildServicePublishChainWrite(input: {
-  payload: Record<string, string>;
+  payload: Record<string, string | null>;
   network?: string;
 }) {
   return {
@@ -27,9 +36,57 @@ export function buildServicePublishChainWrite(input: {
 }
 
 export interface PublishServiceToChainResult {
-  payload: Record<string, string>;
+  payload: Record<string, string | null>;
   record: PublishedServiceRecord;
+  serviceIconUpload?: ChainWriteResult;
   chainWrite: ChainWriteResult;
+}
+
+function parseServiceIconDataUrl(value: unknown): { mimeType: string; base64: string; bytes: number } | null {
+  const normalized = normalizeText(value);
+  const match = normalized.match(/^data:([^;,]+);base64,([A-Za-z0-9+/=\s]+)$/iu);
+  if (!match) {
+    return null;
+  }
+  const mimeType = normalizeText(match[1]).toLowerCase();
+  const base64 = match[2].replace(/\s+/gu, '');
+  if (!mimeType || !base64 || !SERVICE_ICON_MIME_TYPES.has(mimeType)) {
+    return null;
+  }
+  const bytes = Buffer.byteLength(base64, 'base64');
+  if (bytes <= 0 || bytes > MAX_SERVICE_ICON_BYTES) {
+    return null;
+  }
+  return { mimeType, base64, bytes };
+}
+
+async function uploadServiceIconDataUrl(input: {
+  signer: Pick<Signer, 'writePin'>;
+  serviceIconDataUrl?: string | null;
+  network?: string;
+}): Promise<{ serviceIconUri: string | null; upload?: ChainWriteResult }> {
+  const serviceIconDataUrl = normalizeText(input.serviceIconDataUrl);
+  if (!serviceIconDataUrl) {
+    return { serviceIconUri: null };
+  }
+  const parsed = parseServiceIconDataUrl(serviceIconDataUrl);
+  if (!parsed) {
+    throw new Error('Service icon must be a valid image data URL of 2MB or less.');
+  }
+  const requestedNetwork = normalizeText(input.network).toLowerCase() || 'mvc';
+  const network = requestedNetwork === 'doge' ? 'mvc' : requestedNetwork;
+  const upload = await input.signer.writePin({
+    operation: 'create',
+    path: '/file',
+    payload: parsed.base64,
+    contentType: parsed.mimeType,
+    encoding: 'base64',
+    network,
+  });
+  return {
+    serviceIconUri: `metafile://${normalizeText(upload.pinId)}`,
+    upload,
+  };
 }
 
 export async function publishServiceToChain(input: {
@@ -42,13 +99,22 @@ export async function publishServiceToChain(input: {
   now: number;
   network?: string;
 }): Promise<PublishServiceToChainResult> {
+  const icon = await uploadServiceIconDataUrl({
+    signer: input.signer,
+    serviceIconDataUrl: input.draft.serviceIconDataUrl,
+    network: input.network,
+  });
+  const draft = {
+    ...input.draft,
+    serviceIconUri: icon.serviceIconUri || input.draft.serviceIconUri || null,
+  };
   const prepared = buildPublishedService({
     sourceServicePinId: PENDING_SERVICE_PIN_ID,
     currentPinId: PENDING_SERVICE_PIN_ID,
     creatorMetabotId: input.creatorMetabotId,
     providerGlobalMetaId: input.providerGlobalMetaId,
     paymentAddress: input.paymentAddress,
-    draft: input.draft,
+    draft,
     skillDocument: input.skillDocument,
     now: input.now,
   });
@@ -66,7 +132,7 @@ export async function publishServiceToChain(input: {
     creatorMetabotId: input.creatorMetabotId,
     providerGlobalMetaId: input.providerGlobalMetaId,
     paymentAddress: input.paymentAddress,
-    draft: input.draft,
+    draft,
     skillDocument: input.skillDocument,
     now: input.now,
   });
@@ -74,6 +140,7 @@ export async function publishServiceToChain(input: {
   return {
     payload: published.payload,
     record: published.record,
+    ...(icon.upload ? { serviceIconUpload: icon.upload } : {}),
     chainWrite,
   };
 }

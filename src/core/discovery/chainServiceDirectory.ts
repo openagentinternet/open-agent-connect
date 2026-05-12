@@ -18,6 +18,10 @@ export interface ChainServiceDirectoryItem {
   description: string;
   price: string;
   currency: string;
+  paymentChain: string | null;
+  settlementKind: string | null;
+  mrc20Ticker: string | null;
+  mrc20Id: string | null;
   serviceIcon: string | null;
   providerSkill: string | null;
   skillDocument: string | null;
@@ -39,6 +43,10 @@ export interface ParsedChainServiceRow {
   description: string;
   price: string;
   currency: string;
+  paymentChain: string | null;
+  settlementKind: string | null;
+  mrc20Ticker: string | null;
+  mrc20Id: string | null;
   serviceIcon: string | null;
   providerSkill: string | null;
   skillDocument: string | null;
@@ -240,6 +248,10 @@ export function parseChainServiceItem(item: Record<string, unknown>): ParsedChai
       description: '',
       price: '0',
       currency: '',
+      paymentChain: null,
+      settlementKind: null,
+      mrc20Ticker: null,
+      mrc20Id: null,
       serviceIcon: null,
       providerSkill: null,
       skillDocument: null,
@@ -272,6 +284,10 @@ export function parseChainServiceItem(item: Record<string, unknown>): ParsedChai
     description: toSafeString(summary.description),
     price: toSafeString(summary.price),
     currency: toSafeString(summary.currency ?? summary.priceUnit),
+    paymentChain: toSafeString(summary.paymentChain) || null,
+    settlementKind: toSafeString(summary.settlementKind) || null,
+    mrc20Ticker: toSafeString(summary.mrc20Ticker) || null,
+    mrc20Id: toSafeString(summary.mrc20Id) || null,
     serviceIcon: toSafeString(summary.serviceIcon) || null,
     providerSkill: toSafeString(summary.providerSkill) || null,
     skillDocument: toSafeString(summary.skillDocument) || null,
@@ -337,6 +353,10 @@ export function resolveCurrentChainServices(
         description: currentRow.description,
         price: currentRow.price,
         currency: currentRow.currency,
+        paymentChain: currentRow.paymentChain,
+        settlementKind: currentRow.settlementKind,
+        mrc20Ticker: currentRow.mrc20Ticker,
+        mrc20Id: currentRow.mrc20Id,
         serviceIcon: currentRow.serviceIcon,
         providerSkill: currentRow.providerSkill,
         skillDocument: currentRow.skillDocument,

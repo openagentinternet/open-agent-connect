@@ -23,6 +23,15 @@ export interface PublishSkillOptionViewModel {
   description: string;
 }
 
+export interface PublishMetaBotOptionViewModel {
+  value: string;
+  label: string;
+  title: string;
+  description: string;
+  globalMetaId: string;
+  primaryProvider: string;
+}
+
 export interface PublishAvailabilityViewModel {
   canPublish: boolean;
   reasonCode: string;
@@ -33,12 +42,17 @@ export interface PublishPageViewModel {
   providerCard: PublishProviderCardViewModel;
   runtimeCard: PublishProviderCardViewModel;
   resultCard: PublishResultCardViewModel;
+  metabots: PublishMetaBotOptionViewModel[];
+  selectedMetaBotSlug: string;
   skills: PublishSkillOptionViewModel[];
   availability: PublishAvailabilityViewModel;
 }
 
 export function buildPublishPageViewModel(input: {
   providerSummary?: Record<string, unknown> | null;
+  profiles?: unknown[] | null;
+  runtimes?: unknown[] | null;
+  selectedMetaBotSlug?: string | null;
   publishSkills?: Record<string, unknown> | null;
   publishSkillsError?: Record<string, unknown> | null;
   publishResult?: Record<string, unknown> | null;
@@ -60,6 +74,44 @@ export function buildPublishPageViewModel(input: {
   const providerSummary = input.providerSummary && typeof input.providerSummary === 'object'
     ? input.providerSummary
     : {};
+  const selectedMetaBotSlug = normalizeText(input.selectedMetaBotSlug);
+  const profiles = Array.isArray(input.profiles)
+    ? input.profiles.filter((entry): entry is Record<string, unknown> => (
+        entry !== null && typeof entry === 'object' && !Array.isArray(entry)
+      ))
+    : [];
+  const runtimes = Array.isArray(input.runtimes)
+    ? input.runtimes.filter((entry): entry is Record<string, unknown> => (
+        entry !== null && typeof entry === 'object' && !Array.isArray(entry)
+      ))
+    : [];
+  const availableRuntimeProviders = new Set(
+    runtimes
+      .filter((entry) => {
+        const health = normalizeText(entry.health).toLowerCase();
+        return normalizeText(entry.provider) && (health === 'healthy' || health === 'degraded');
+      })
+      .map((entry) => normalizeText(entry.provider))
+  );
+  const metabots = profiles
+    .map((entry) => {
+      const slug = normalizeText(entry.slug);
+      const name = normalizeText(entry.name) || slug;
+      const primaryProvider = normalizeText(entry.primaryProvider);
+      return {
+        value: slug,
+        label: name,
+        title: name,
+        description: primaryProvider ? `Primary runtime: ${primaryProvider}` : '',
+        globalMetaId: normalizeText(entry.globalMetaId),
+        primaryProvider,
+      };
+    })
+    .filter((entry) => (
+      entry.value
+      && entry.primaryProvider
+      && (availableRuntimeProviders.size === 0 || availableRuntimeProviders.has(entry.primaryProvider))
+    ));
   const publishSkills = input.publishSkills && typeof input.publishSkills === 'object'
     ? input.publishSkills
     : {};
@@ -69,8 +121,8 @@ export function buildPublishPageViewModel(input: {
   const summaryIdentity = readObject(providerSummary.identity);
   const catalogIdentity = readObject(publishSkills.identity);
   const identity = {
-    ...catalogIdentity,
     ...summaryIdentity,
+    ...catalogIdentity,
   };
   const runtime = readObject(publishSkills.runtime);
   const publishResult = input.publishResult && typeof input.publishResult === 'object'
@@ -122,7 +174,9 @@ export function buildPublishPageViewModel(input: {
     availability = {
       canPublish: false,
       reasonCode: 'identity_missing',
-      message: 'Create a local MetaBot identity before publishing services.',
+      message: selectedMetaBotSlug
+        ? 'The selected MetaBot has no chained identity yet.'
+        : 'Select a MetaBot with an available primary runtime before publishing.',
     };
   } else if (errorCode) {
     availability = {
@@ -200,6 +254,8 @@ export function buildPublishPageViewModel(input: {
         : 'No publish result yet. Submit the form to create one on-chain.',
       rows: resultRows,
     },
+    metabots,
+    selectedMetaBotSlug,
     skills,
     availability,
   };
