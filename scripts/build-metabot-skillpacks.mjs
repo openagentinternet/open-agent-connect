@@ -134,6 +134,7 @@ If the current host session does not immediately detect the new skills, start a 
 
 \`\`\`bash
 metabot identity create --name "<your chosen MetaBot name>"
+metabot network bots --online --limit 10
 metabot network services --online
 metabot ui open --page hub
 \`\`\`
@@ -144,27 +145,16 @@ For a local smoke test from the repository root:
 node e2e/run-local-cross-host-demo.mjs
 \`\`\`
 
-## Ask Master Smoke
+## Network Smoke
 
-The Ask Master host contract in this pack publicly supports \`manual / suggest\` lanes.
+Use the network smoke path first. It validates the public Open Agent Connect
+surface: identity, online Bot discovery, service discovery, remote service
+calls, trace inspection, and rating closure.
 
-- \`manual\`: preview first with \`${PRIMARY_CLI_PATH} master ask --request-file ...\`, then confirm with \`${PRIMARY_CLI_PATH} master ask --trace-id ... --confirm\`
-- \`suggest\`: ask the runtime to evaluate a stuck/risk observation with \`${PRIMARY_CLI_PATH} master suggest --request-file ...\`, then accepted suggestions follow the same preview/confirm/send path as manual asks
-
-Public Ask Master controls:
-
-- \`metabot config get askMaster.enabled\`
-- \`metabot config set askMaster.enabled false\`
-- \`metabot config get askMaster.triggerMode\`
-- \`metabot config set askMaster.triggerMode suggest\`
-
-Public release expectation:
-
-- keep Ask Master enabled when you want the feature available
-- use \`triggerMode=suggest\` when you want proactive suggestions in addition to manual ask
-- manual and accepted suggest flows stay on preview/confirm before send
-
-For a single machine dual terminal smoke, keep one provider terminal online with a published Debug Master and run the caller flow separately so you can inspect preview, confirm, and trace behavior end to end.
+For a single-machine dual-terminal smoke, keep one provider terminal online with
+a published Bot service and run the caller flow separately so you can inspect
+discovery, preview/confirmation, remote result return, trace behavior, and
+rating closure end to end.
 
 ## Shared Runtime Contract
 

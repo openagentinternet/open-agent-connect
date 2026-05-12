@@ -376,19 +376,19 @@ test('buildAgentConnectSkillpacks host README lists the active metabot skills in
   }
 });
 
-test('buildAgentConnectSkillpacks host README advertises the phase-3 Ask Master smoke contract', async () => {
+test('buildAgentConnectSkillpacks host README advertises the network smoke contract', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
 
   for (const host of HOSTS) {
     const readme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
-    assert.match(readme, /manual.*suggest/i);
-    assert.match(readme, /single-machine two-terminal|single machine dual terminal/i);
-    assert.match(readme, /preview\/confirm|preview first/i);
-    assert.match(readme, /metabot config get askMaster.enabled/);
-    assert.match(readme, /metabot config set askMaster.triggerMode suggest/);
-    assert.match(readme, /accepted suggestions follow the same preview\/confirm\/send path as manual asks/i);
-    assert.match(readme, /metabot master suggest --request-file/);
-    assert.match(readme, /metabot master ask --request-file/);
+    assert.match(readme, /## Network Smoke/);
+    assert.match(readme, /online Bot discovery/);
+    assert.match(readme, /service discovery/);
+    assert.match(readme, /remote service/);
+    assert.match(readme, /trace inspection/);
+    assert.match(readme, /rating closure/);
+    assert.match(readme, /metabot network bots --online --limit 10/);
+    assert.match(readme, /metabot network services --online/);
     assert.doesNotMatch(readme, /metabot advisor (list|ask|trace)/);
   }
 });
@@ -734,9 +734,9 @@ test('codex install runbook documents install verification and first-run handoff
   assert.match(installRunbook, /npm run build:skillpacks/);
   assert.match(installRunbook, /cd skillpacks\/shared/);
   assert.match(installRunbook, /metabot host bind-skills --host codex/);
-  assert.match(installRunbook, /\$HOME\/\.metabot\/skills\/metabot-ask-master\/SKILL\.md/);
   assert.match(installRunbook, /\$HOME\/\.metabot\/skills\/metabot-network-manage\/SKILL\.md/);
   assert.match(installRunbook, /\$HOME\/\.metabot\/skills\/metabot-chat-privatechat\/SKILL\.md/);
+  assert.match(installRunbook, /\$HOME\/\.metabot\/skills\/metabot-call-remote-service\/SKILL\.md/);
   assert.doesNotMatch(installRunbook, /\$\{CODEX_HOME:-\$HOME\/\.codex\}\/skills\/metabot-ask-master\/SKILL\.md/);
   assert.match(installRunbook, /metabot doctor/);
   assert.match(installRunbook, /Only run `metabot identity create --name \.\.\.` after the user has supplied/i);
