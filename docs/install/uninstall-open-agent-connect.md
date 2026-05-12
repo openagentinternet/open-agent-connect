@@ -21,11 +21,20 @@ The current installer may create or refresh:
 - the primary CLI shim at `~/.metabot/bin/metabot`
 - Bot manager and profile data under `~/.metabot/manager/` and `~/.metabot/profiles/`
 
-Current supported host roots:
+Current supported host roots are registry-driven and match `oac install`:
 
 - `Codex`: `${CODEX_HOME:-$HOME/.codex}/skills`
 - `Claude Code`: `${CLAUDE_HOME:-$HOME/.claude}/skills`
+- `GitHub Copilot CLI`: `${COPILOT_HOME:-$HOME/.copilot}/skills`
+- `OpenCode`: `$HOME/.config/opencode/skills` and `$HOME/.claude/skills`
 - `OpenClaw`: `${OPENCLAW_HOME:-$HOME/.openclaw}/skills`
+- `Hermes`: `$HOME/.hermes/skills`
+- `Gemini CLI`: `$HOME/.gemini/skills`
+- `Pi`: `$HOME/.pi/agent/skills`
+- `Cursor Agent`: `$HOME/.cursor/skills`
+- `Kimi`: `$HOME/.kimi/skills` and `$HOME/.config/agents/skills`
+- `Kiro CLI`: `$HOME/.kiro/skills`
+- Shared standard root: `$HOME/.agents/skills`
 
 For other Claude Code-compatible hosts, also remove any `metabot-*` symlinks
 you manually created in that host's documented skill root.
@@ -40,6 +49,11 @@ Preferred CLI path:
 ```bash
 metabot system uninstall
 ```
+
+The preferred CLI path uses the same platform registry as `oac install`. It
+removes guarded `metabot-*` symlinks from all built-in global host roots plus
+the shared standard root, but only when those symlinks point back to
+`~/.metabot/skills/`.
 
 This tier removes:
 
@@ -120,9 +134,19 @@ NODE
 
 terminate_active_metabot_daemon || true
 
+remove_metabot_host_symlinks "$HOME/.agents/skills"
 remove_metabot_host_symlinks "${CODEX_HOME:-$HOME/.codex}/skills"
 remove_metabot_host_symlinks "${CLAUDE_HOME:-$HOME/.claude}/skills"
+remove_metabot_host_symlinks "${COPILOT_HOME:-$HOME/.copilot}/skills"
+remove_metabot_host_symlinks "$HOME/.config/opencode/skills"
 remove_metabot_host_symlinks "${OPENCLAW_HOME:-$HOME/.openclaw}/skills"
+remove_metabot_host_symlinks "$HOME/.hermes/skills"
+remove_metabot_host_symlinks "$HOME/.gemini/skills"
+remove_metabot_host_symlinks "$HOME/.pi/agent/skills"
+remove_metabot_host_symlinks "$HOME/.cursor/skills"
+remove_metabot_host_symlinks "$HOME/.kimi/skills"
+remove_metabot_host_symlinks "$HOME/.config/agents/skills"
+remove_metabot_host_symlinks "$HOME/.kiro/skills"
 
 rm -f "$HOME/.metabot/bin/metabot"
 ```
@@ -131,9 +155,22 @@ Verify:
 
 ```bash
 test ! -e "$HOME/.metabot/bin/metabot"
-test ! -L "${CODEX_HOME:-$HOME/.codex}/skills/metabot-identity-manage"
-test ! -L "${CLAUDE_HOME:-$HOME/.claude}/skills/metabot-identity-manage"
-test ! -L "${OPENCLAW_HOME:-$HOME/.openclaw}/skills/metabot-identity-manage"
+for root in \
+  "$HOME/.agents/skills" \
+  "${CODEX_HOME:-$HOME/.codex}/skills" \
+  "${CLAUDE_HOME:-$HOME/.claude}/skills" \
+  "${COPILOT_HOME:-$HOME/.copilot}/skills" \
+  "$HOME/.config/opencode/skills" \
+  "${OPENCLAW_HOME:-$HOME/.openclaw}/skills" \
+  "$HOME/.hermes/skills" \
+  "$HOME/.gemini/skills" \
+  "$HOME/.pi/agent/skills" \
+  "$HOME/.cursor/skills" \
+  "$HOME/.kimi/skills" \
+  "$HOME/.config/agents/skills" \
+  "$HOME/.kiro/skills"; do
+  test ! -L "$root/metabot-identity-manage"
+done
 test -d "$HOME/.metabot/profiles" || true
 test -d "$HOME/.metabot/manager" || true
 ```
