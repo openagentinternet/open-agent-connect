@@ -2041,8 +2041,15 @@ test('GET /ui/publish serves the primary-runtime-aware publish console', async (
   assert.match(html, /value="DOGE"/);
   assert.match(html, /value="image"/);
   assert.match(html, /type="file"/);
+  assert.match(html, /Service Cover/);
+  assert.match(html, /id="publish-service-cover-input"/);
+  assert.match(html, /for="publish-service-cover-input"/);
+  assert.match(html, /data-publish-status-txid/);
+  assert.match(html, /data-publish-status-copy/);
   assert.doesNotMatch(html, /Skill Document/);
   assert.doesNotMatch(html, /Service Icon URI/);
+  assert.doesNotMatch(html, /Service Icon/);
+  assert.doesNotMatch(html, /data-publish-result-card/);
   assert.doesNotMatch(html, /name="runtimeId"/);
   assert.doesNotMatch(html, /name="llmRuntimeId"/);
   assert.doesNotMatch(html, /runtime picker/i);

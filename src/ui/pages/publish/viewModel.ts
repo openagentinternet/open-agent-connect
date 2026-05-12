@@ -9,13 +9,6 @@ export interface PublishProviderCardViewModel {
   rows: PublishDefinitionRow[];
 }
 
-export interface PublishResultCardViewModel {
-  hasResult: boolean;
-  title: string;
-  summary: string;
-  rows: PublishDefinitionRow[];
-}
-
 export interface PublishSkillOptionViewModel {
   value: string;
   label: string;
@@ -41,7 +34,6 @@ export interface PublishAvailabilityViewModel {
 export interface PublishPageViewModel {
   providerCard: PublishProviderCardViewModel;
   runtimeCard: PublishProviderCardViewModel;
-  resultCard: PublishResultCardViewModel;
   metabots: PublishMetaBotOptionViewModel[];
   selectedMetaBotSlug: string;
   skills: PublishSkillOptionViewModel[];
@@ -125,9 +117,6 @@ export function buildPublishPageViewModel(input: {
     ...catalogIdentity,
   };
   const runtime = readObject(publishSkills.runtime);
-  const publishResult = input.publishResult && typeof input.publishResult === 'object'
-    ? input.publishResult
-    : {};
   const rootDiagnostics = Array.isArray(publishSkills.rootDiagnostics)
     ? publishSkills.rootDiagnostics.filter((entry): entry is Record<string, unknown> => (
         entry !== null && typeof entry === 'object' && !Array.isArray(entry)
@@ -222,17 +211,6 @@ export function buildPublishPageViewModel(input: {
       ? `${normalizeText(runtime.displayName)} is the ${runtimeHealth || 'unknown'} primary runtime used for publish validation.`
       : 'No enabled primary runtime is available for publishing.';
 
-  const resultRows: PublishDefinitionRow[] = [];
-  pushRow(resultRows, 'Service Pin ID', publishResult.servicePinId);
-  pushRow(resultRows, 'Source Pin ID', publishResult.sourceServicePinId);
-  pushRow(resultRows, 'Provider Skill', publishResult.providerSkill);
-  pushRow(resultRows, 'Price', [
-    normalizeText(publishResult.price),
-    normalizeText(publishResult.currency),
-  ].filter(Boolean).join(' '));
-  pushRow(resultRows, 'Output Type', publishResult.outputType);
-  pushRow(resultRows, 'Path', publishResult.path);
-
   return {
     providerCard: {
       title: 'Provider Identity',
@@ -245,14 +223,6 @@ export function buildPublishPageViewModel(input: {
       title: 'Primary Runtime',
       summary: runtimeSummary,
       rows: runtimeRows,
-    },
-    resultCard: {
-      hasResult: Boolean(normalizeText(publishResult.servicePinId)),
-      title: 'Publish Result',
-      summary: normalizeText(publishResult.servicePinId)
-        ? 'The service has been published to MetaWeb and now has a real chain pin.'
-        : 'No publish result yet. Submit the form to create one on-chain.',
-      rows: resultRows,
     },
     metabots,
     selectedMetaBotSlug,

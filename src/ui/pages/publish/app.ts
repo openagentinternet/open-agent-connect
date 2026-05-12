@@ -80,7 +80,7 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
               </label>
 
               <div class="publish-field publish-field-wide publish-icon-field">
-                <span>Service Icon</span>
+                <span>Service Cover</span>
                 <div class="publish-icon-uploader">
                   <div class="publish-icon-preview" data-service-icon-preview>
                     <img alt="" data-service-icon-preview-img hidden />
@@ -88,12 +88,19 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
                   </div>
                   <div class="publish-icon-controls">
                     <input
+                      id="publish-service-cover-input"
                       type="file"
                       accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/svg+xml"
                       data-service-icon-input
                     />
                     <div class="publish-icon-actions">
-                      <button class="btn" type="button" data-service-icon-trigger>Upload Image</button>
+                      <label
+                        class="btn publish-upload-label"
+                        for="publish-service-cover-input"
+                        role="button"
+                        tabindex="0"
+                        data-service-icon-trigger
+                      >Upload Image</label>
                       <button class="btn" type="button" data-service-icon-remove hidden>Remove</button>
                     </div>
                     <p class="publish-field-note" data-service-icon-note>Optional PNG, JPG, WebP, GIF, or SVG. Maximum 2MB.</p>
@@ -115,6 +122,20 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
                 <div class="publish-status-copy">
                   <h2 data-publish-status-panel-title>Publishing service</h2>
                   <p data-publish-status-panel-message>Writing the service payload to MetaWeb...</p>
+                  <div class="publish-status-tx" data-publish-status-tx hidden>
+                    <span>TXID</span>
+                    <code data-publish-status-txid></code>
+                    <button
+                      class="publish-copy-button"
+                      type="button"
+                      title="Copy txid"
+                      aria-label="Copy txid"
+                      data-status-panel-action
+                      data-publish-status-copy
+                    >
+                      <span class="publish-copy-icon" aria-hidden="true"></span>
+                    </button>
+                  </div>
                 </div>
                 <button class="btn btn-primary" type="button" data-status-panel-action data-publish-status-panel-close hidden>Done</button>
               </div>
@@ -125,7 +146,6 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
         <section class="publish-cards" aria-label="Selected publish context">
           <article class="publish-card" data-publish-provider-card></article>
           <article class="publish-card" data-publish-runtime-card></article>
-          <article class="publish-card" data-publish-result-card></article>
         </section>
       </section>
     `,
@@ -144,7 +164,6 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     skillSummary: document.querySelector('[data-publish-skill-summary]'),
     providerCard: document.querySelector('[data-publish-provider-card]'),
     runtimeCard: document.querySelector('[data-publish-runtime-card]'),
-    resultCard: document.querySelector('[data-publish-result-card]'),
     displayNameInput: document.querySelector('[data-display-name-input]'),
     serviceNameInput: document.querySelector('[data-service-name-input]'),
     iconInput: document.querySelector('[data-service-icon-input]'),
@@ -158,6 +177,9 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     statusPanelMark: document.querySelector('[data-publish-status-panel-mark]'),
     statusPanelTitle: document.querySelector('[data-publish-status-panel-title]'),
     statusPanelMessage: document.querySelector('[data-publish-status-panel-message]'),
+    statusPanelTx: document.querySelector('[data-publish-status-tx]'),
+    statusPanelTxid: document.querySelector('[data-publish-status-txid]'),
+    statusPanelCopy: document.querySelector('[data-publish-status-copy]'),
     statusPanelClose: document.querySelector('[data-publish-status-panel-close]'),
   };
   const state = {
@@ -206,6 +228,19 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     if (elements.statusPanelTitle) elements.statusPanelTitle.textContent = title;
     if (elements.statusPanelMessage) elements.statusPanelMessage.textContent = body;
     if (elements.statusPanelMark) elements.statusPanelMark.dataset.state = statusPanelState;
+    const txid = statusPanelState === 'success' ? extractPublishTxid(state.publishResult) : '';
+    if (elements.statusPanelTx) {
+      elements.statusPanelTx.hidden = !txid;
+    }
+    if (elements.statusPanelTxid) {
+      elements.statusPanelTxid.textContent = txid;
+    }
+    if (elements.statusPanelCopy) {
+      elements.statusPanelCopy.disabled = !txid;
+      elements.statusPanelCopy.dataset.copied = 'false';
+      elements.statusPanelCopy.title = 'Copy txid';
+      elements.statusPanelCopy.setAttribute('aria-label', 'Copy txid');
+    }
     if (elements.statusPanelClose) {
       elements.statusPanelClose.hidden = statusPanelState === 'submitting' || !statusPanelOpen;
       elements.statusPanelClose.textContent = statusPanelState === 'error' ? 'Close' : 'Done';
@@ -220,6 +255,32 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     .replace(/'/g, '&#39;');
 
   const normalizeText = (value) => String(value || '').trim();
+  const extractPublishTxid = (result) => {
+    const txids = Array.isArray(result && result.txids) ? result.txids : [];
+    for (const txid of txids) {
+      const normalized = normalizeText(txid);
+      if (normalized) return normalized;
+    }
+    return normalizeText(result && result.txid);
+  };
+  const copyText = async (text) => {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const scratch = document.createElement('textarea');
+    scratch.value = text;
+    scratch.setAttribute('readonly', 'true');
+    scratch.style.position = 'fixed';
+    scratch.style.opacity = '0';
+    document.body.appendChild(scratch);
+    scratch.select();
+    const copied = document.execCommand('copy');
+    scratch.remove();
+    if (!copied) {
+      throw new Error('Copy failed.');
+    }
+  };
 
   const selectedMetaBotSlug = () => elements.metaBotSelect ? normalizeText(elements.metaBotSelect.value) : state.selectedMetaBotSlug;
   const selectedSkillValue = () => elements.skillSelect ? normalizeText(elements.skillSelect.value) : '';
@@ -325,6 +386,7 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
 
   const renderIconPreview = () => {
     const hasIcon = Boolean(state.serviceIconDataUrl);
+    const coverDisabled = busy || statusPanelOpen;
     if (elements.iconPreviewImg) {
       elements.iconPreviewImg.hidden = !hasIcon;
       if (hasIcon) elements.iconPreviewImg.src = state.serviceIconDataUrl;
@@ -335,13 +397,14 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     }
     if (elements.iconRemove) {
       elements.iconRemove.hidden = !hasIcon;
-      elements.iconRemove.disabled = busy;
+      elements.iconRemove.disabled = coverDisabled;
     }
     if (elements.iconTrigger) {
-      elements.iconTrigger.disabled = busy;
+      elements.iconTrigger.setAttribute('aria-disabled', coverDisabled ? 'true' : 'false');
+      elements.iconTrigger.tabIndex = coverDisabled ? -1 : 0;
     }
     if (elements.iconInput) {
-      elements.iconInput.disabled = busy;
+      elements.iconInput.disabled = coverDisabled;
     }
     if (elements.iconPreview) {
       elements.iconPreview.dataset.hasIcon = hasIcon ? 'true' : 'false';
@@ -422,7 +485,6 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     });
     renderCard(elements.providerCard, currentModel.providerCard, 'No selected provider identity is available.');
     renderCard(elements.runtimeCard, currentModel.runtimeCard, 'No primary runtime diagnostics are available.');
-    renderCard(elements.resultCard, currentModel.resultCard, 'No publish result yet.');
     renderMetaBotSelect(currentModel);
     renderSkillSelect(currentModel);
     renderSkillSummary();
@@ -522,16 +584,16 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
       return;
     }
     if (file.size > ICON_MAX_BYTES) {
-      reject(new Error('Service icon must be 2MB or less.'));
+      reject(new Error('Service cover must be 2MB or less.'));
       return;
     }
     if (!ICON_MIME_TYPES.has(String(file.type || '').toLowerCase())) {
-      reject(new Error('Service icon must be PNG, JPG, WebP, GIF, or SVG.'));
+      reject(new Error('Service cover must be PNG, JPG, WebP, GIF, or SVG.'));
       return;
     }
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('Service icon could not be read.'));
+    reader.onerror = () => reject(new Error('Service cover could not be read.'));
     reader.readAsDataURL(file);
   });
 
@@ -653,7 +715,11 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
   }
 
   if (elements.iconTrigger && elements.iconInput) {
-    elements.iconTrigger.addEventListener('click', () => elements.iconInput.click());
+    elements.iconTrigger.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      if (!elements.iconInput.disabled) elements.iconInput.click();
+    });
   }
 
   if (elements.iconInput) {
@@ -661,7 +727,7 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
       const file = elements.iconInput.files && elements.iconInput.files[0];
       try {
         state.serviceIconDataUrl = await readIconFile(file);
-        setStatus(currentModel ? currentModel.availability.message : 'Service icon ready.', currentModel && currentModel.availability.canPublish ? 'ready' : 'neutral');
+        setStatus(currentModel ? currentModel.availability.message : 'Service cover ready.', currentModel && currentModel.availability.canPublish ? 'ready' : 'neutral');
       } catch (error) {
         state.serviceIconDataUrl = '';
         setStatus(error instanceof Error ? error.message : String(error), 'error');
@@ -681,9 +747,26 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     });
   }
 
+  if (elements.statusPanelCopy) {
+    elements.statusPanelCopy.addEventListener('click', async () => {
+      const txid = normalizeText(elements.statusPanelTxid && elements.statusPanelTxid.textContent);
+      if (!txid) return;
+      try {
+        await copyText(txid);
+        elements.statusPanelCopy.dataset.copied = 'true';
+        elements.statusPanelCopy.title = 'Copied';
+        elements.statusPanelCopy.setAttribute('aria-label', 'Copied');
+        setStatus('TXID copied.', 'success');
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : 'Copy failed.', 'error');
+      }
+    });
+  }
+
   if (elements.statusPanelClose) {
     elements.statusPanelClose.addEventListener('click', () => {
       setStatusPanel('idle');
+      renderIconPreview();
       syncFormDisabled();
       updateSubmitState();
     });

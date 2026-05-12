@@ -151,7 +151,12 @@
         flex-wrap: wrap;
         align-items: center;
       }
-      .publish-form .btn:disabled {
+      .publish-upload-label {
+        cursor: pointer;
+        user-select: none;
+      }
+      .publish-form .btn:disabled,
+      .publish-form .btn[aria-disabled="true"] {
         opacity: .52;
         cursor: not-allowed;
       }
@@ -191,7 +196,7 @@
         backdrop-filter: blur(8px);
       }
       .publish-status-dialog {
-        width: min(100%, 360px);
+        width: min(100%, 460px);
         display: grid;
         grid-template-columns: 42px minmax(0, 1fr);
         gap: 14px;
@@ -241,6 +246,79 @@
         color: var(--muted);
         font-size: 12px;
         overflow-wrap: anywhere;
+      }
+      .publish-status-tx {
+        margin-top: 10px;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) 30px;
+        gap: 8px;
+        align-items: center;
+        padding: 8px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface2);
+      }
+      .publish-status-tx span {
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: .06em;
+        color: var(--muted);
+      }
+      .publish-status-tx code {
+        min-width: 0;
+        color: var(--text);
+        font-size: 11px;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+      }
+      .publish-copy-button {
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--border2);
+        border-radius: 6px;
+        background: transparent;
+        color: var(--muted);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+      .publish-copy-button:hover {
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      .publish-copy-button:disabled {
+        opacity: .45;
+        cursor: not-allowed;
+      }
+      .publish-copy-button[data-copied="true"] {
+        color: var(--green);
+        border-color: rgba(34,197,94,.42);
+      }
+      .publish-copy-icon {
+        position: relative;
+        display: block;
+        width: 14px;
+        height: 14px;
+      }
+      .publish-copy-icon::before,
+      .publish-copy-icon::after {
+        content: "";
+        position: absolute;
+        width: 9px;
+        height: 11px;
+        border: 1px solid currentColor;
+        border-radius: 2px;
+      }
+      .publish-copy-icon::before {
+        left: 1px;
+        top: 3px;
+        opacity: .6;
+      }
+      .publish-copy-icon::after {
+        left: 4px;
+        top: 0;
+        background: var(--surface2);
       }
       .publish-status-dialog .btn {
         grid-column: 2;

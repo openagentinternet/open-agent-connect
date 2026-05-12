@@ -214,7 +214,7 @@ test('buildPublishPageViewModel disables publishing when primary runtime or skil
   assert.match(unreadableRoots.availability.message, /No readable primary runtime skill roots/i);
 });
 
-test('buildPublishPageViewModel shows the publish result with the real chain pin, price, and output type', () => {
+test('buildPublishPageViewModel keeps publish results out of the side-card model', () => {
   const model = buildPublishPageViewModel({
     publishResult: {
       servicePinId: 'service-pin-weather-1',
@@ -226,15 +226,7 @@ test('buildPublishPageViewModel shows the publish result with the real chain pin
     },
   });
 
-  assert.equal(model.resultCard.hasResult, true);
-  assert.match(model.resultCard.summary, /real chain pin/i);
-  assert.deepEqual(model.resultCard.rows, [
-    { label: 'Service Pin ID', value: 'service-pin-weather-1' },
-    { label: 'Source Pin ID', value: 'source-pin-weather-1' },
-    { label: 'Price', value: '0.00001 SPACE' },
-    { label: 'Output Type', value: 'text' },
-    { label: 'Path', value: '/protocols/skill-service' },
-  ]);
+  assert.equal(model.resultCard, undefined);
 });
 
 test('buildMyServicesPageViewModel renders provider presence, current services, and chain publish metadata', () => {
