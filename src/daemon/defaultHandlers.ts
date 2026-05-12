@@ -56,7 +56,11 @@ import type {
   UpdateMetabotInfoInput,
 } from '../core/bot/metabotProfileManager';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
-import { buildPublishedService, normalizePublishedServiceCurrency } from '../core/services/publishService';
+import {
+  buildPublishedService,
+  normalizePublishedServiceCurrency,
+  resolvePublishedServiceSettlement,
+} from '../core/services/publishService';
 import { publishServiceToChain } from '../core/services/servicePublishChain';
 import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
 import { validateServicePublishProviderSkill } from '../core/services/servicePublishValidation';
@@ -619,9 +623,10 @@ function buildMasterRequestId(now: number): string {
 }
 
 function resolvePaymentAddress(identity: RuntimeIdentityRecord, currency: string): string {
-  const normalized = normalizeText(currency).toUpperCase();
-  if (normalized === 'BTC') return identity.addresses.btc ?? identity.mvcAddress;
-  if (normalized === 'DOGE') return identity.addresses.doge ?? identity.mvcAddress;
+  const settlement = resolvePublishedServiceSettlement(currency);
+  if (settlement.paymentChain === 'btc') return identity.addresses.btc ?? identity.mvcAddress;
+  if (settlement.paymentChain === 'doge') return identity.addresses.doge ?? identity.mvcAddress;
+  if (settlement.paymentChain === 'opcat') return identity.addresses.opcat ?? identity.addresses.btc ?? identity.mvcAddress;
   return identity.mvcAddress;
 }
 
@@ -4265,6 +4270,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
       return explicit;
     }
     return resolveDefaultWriteNetwork();
+  }
+  async function resolveWriteNetworkForHome(rawNetwork: unknown, homeDir: string): Promise<DefaultWriteNetwork> {
+    const explicit = normalizeText(rawNetwork).toLowerCase();
+    if (isSupportedWriteNetwork(explicit)) {
+      return explicit;
+    }
+    const config = await createConfigStore(homeDir).read();
+    return config.chain.defaultWriteNetwork;
   }
   async function resolveFileUploadNetwork(rawNetwork: unknown): Promise<Exclude<DefaultWriteNetwork, 'doge'>> {
     const network = await resolveWriteNetwork(rawNetwork);
@@ -10072,18 +10085,29 @@ export function createDefaultMetabotDaemonHandlers(input: {
       settleRefund: async ({ orderId, paymentTxid }) => settleProviderSellerRefund({ orderId, paymentTxid }),
     },
     services: {
-      listPublishSkills: async () => {
-        const state = await runtimeStateStore.readState();
+      listPublishSkills: async (request = {}) => {
+        const requestedSlug = normalizeText(request.slug);
+        const selectedProfile = requestedSlug
+          ? await getMetabotProfile(normalizedSystemHomeDir, requestedSlug)
+          : null;
+        if (requestedSlug && !selectedProfile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`);
+        }
+        const profileHomeDir = selectedProfile?.homeDir ?? input.homeDir;
+        const profileRuntimeStateStore = profileHomeDir === input.homeDir
+          ? runtimeStateStore
+          : createRuntimeStateStore(profileHomeDir);
+        const state = await profileRuntimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before listing publishable skills.');
         }
 
-        const metaBotSlug = path.basename(input.homeDir);
+        const metaBotSlug = selectedProfile?.slug ?? path.basename(profileHomeDir);
         const catalog = createPlatformSkillCatalog({
-          runtimeStore: llmRuntimeStore,
-          bindingStore: llmBindingStore,
-          systemHomeDir: runtimeStateStore.paths.systemHomeDir,
-          projectRoot: runtimeStateStore.paths.profileRoot,
+          runtimeStore: profileHomeDir === input.homeDir ? llmRuntimeStore : createLlmRuntimeStore(profileHomeDir),
+          bindingStore: profileHomeDir === input.homeDir ? llmBindingStore : createLlmBindingStore(profileHomeDir),
+          systemHomeDir: profileRuntimeStateStore.paths.systemHomeDir,
+          projectRoot: profileRuntimeStateStore.paths.profileRoot,
           env: process.env,
         });
         const result = await catalog.listPrimaryRuntimeSkills({ metaBotSlug });
@@ -10095,8 +10119,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
           metaBotSlug,
           identity: {
             metabotId: state.identity.metabotId,
-            name: state.identity.name,
+            name: selectedProfile?.name ?? state.identity.name,
             globalMetaId: state.identity.globalMetaId,
+            mvcAddress: state.identity.mvcAddress,
+            addresses: state.identity.addresses,
           },
           runtime: {
             id: result.runtime.id,
@@ -10112,7 +10138,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
       },
       publish: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
+        const requestedSlug = normalizeText(rawInput.metaBotSlug ?? rawInput.slug);
+        const selectedProfile = requestedSlug
+          ? await getMetabotProfile(normalizedSystemHomeDir, requestedSlug)
+          : null;
+        if (requestedSlug && !selectedProfile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`);
+        }
+        const profileHomeDir = selectedProfile?.homeDir ?? input.homeDir;
+        const profileRuntimeStateStore = profileHomeDir === input.homeDir
+          ? runtimeStateStore
+          : createRuntimeStateStore(profileHomeDir);
+        const profileSigner = createSignerForProfileHome(profileHomeDir);
+        const state = await profileRuntimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing services.');
         }
@@ -10125,20 +10163,31 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const currency = normalizeText(rawInput.currency);
         const outputType = normalizeText(rawInput.outputType);
         const serviceIconUri = normalizeText(rawInput.serviceIconUri) || null;
-        const skillDocument = normalizeText(rawInput.skillDocument);
+        const serviceIconDataUrl = normalizeText(rawInput.serviceIconDataUrl) || null;
+        const skillDocument = '';
 
         if (!serviceName || !displayName || !description || !providerSkill || !price || !currency || !outputType) {
           return commandFailed('invalid_service_payload', 'Service payload is missing one or more required fields.');
         }
+        if (!/^\d+(?:\.\d+)?$/u.test(price) || !Number.isFinite(Number(price)) || Number(price) < 0) {
+          return commandFailed('invalid_service_payload', 'Service price must be a non-negative decimal number.');
+        }
+        const settlement = resolvePublishedServiceSettlement(currency);
+        if (!['SPACE', 'BTC', 'DOGE', 'BTC-OPCAT'].includes(settlement.currency)) {
+          return commandFailed('invalid_service_payload', 'Service currency must be one of BTC, SPACE, DOGE, or BTC-OPCAT.');
+        }
+        if (!['text', 'image', 'video', 'audio', 'other'].includes(outputType.toLowerCase())) {
+          return commandFailed('invalid_service_payload', 'Service outputType must be one of text, image, video, audio, or other.');
+        }
 
-        const metaBotSlug = path.basename(input.homeDir);
+        const metaBotSlug = selectedProfile?.slug ?? path.basename(profileHomeDir);
         const validation = await validateServicePublishProviderSkill({
           metaBotSlug,
           providerSkill,
-          runtimeStore: llmRuntimeStore,
-          bindingStore: llmBindingStore,
-          systemHomeDir: runtimeStateStore.paths.systemHomeDir,
-          projectRoot: runtimeStateStore.paths.profileRoot,
+          runtimeStore: profileHomeDir === input.homeDir ? llmRuntimeStore : createLlmRuntimeStore(profileHomeDir),
+          bindingStore: profileHomeDir === input.homeDir ? llmBindingStore : createLlmBindingStore(profileHomeDir),
+          systemHomeDir: profileRuntimeStateStore.paths.systemHomeDir,
+          projectRoot: profileRuntimeStateStore.paths.profileRoot,
           env: process.env,
         });
         if (!validation.ok) {
@@ -10147,9 +10196,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         try {
           const now = Date.now();
-          const network = await resolveWriteNetwork(rawInput.network);
+          const network = await resolveWriteNetworkForHome(rawInput.network, profileHomeDir);
           const published = await publishServiceToChain({
-            signer,
+            signer: profileSigner,
             creatorMetabotId: state.identity.metabotId,
             providerGlobalMetaId: state.identity.globalMetaId,
             paymentAddress: resolvePaymentAddress(state.identity, currency),
@@ -10162,13 +10211,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
               currency,
               outputType,
               serviceIconUri,
+              serviceIconDataUrl,
             },
             skillDocument,
             now,
             network,
           });
 
-          await runtimeStateStore.writeState({
+          await profileRuntimeStateStore.writeState({
             ...state,
             services: [
               published.record,

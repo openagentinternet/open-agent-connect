@@ -178,10 +178,10 @@ async function startServer(options = {}) {
       },
     },
     services: {
-      listPublishSkills: async () => {
-        calls.publishSkills.push({});
+      listPublishSkills: async (input) => {
+        calls.publishSkills.push(input);
         return commandSuccess({
-          metaBotSlug: 'alice',
+          metaBotSlug: input?.slug || 'alice',
           runtime: {
             id: 'runtime-codex',
             provider: 'codex',
@@ -1798,12 +1798,13 @@ test('GET /api/services/publish/skills forwards to services.listPublishSkills', 
   const server = await startServer();
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/api/services/publish/skills`);
+  const response = await fetch(`${server.baseUrl}/api/services/publish/skills?slug=alice-weather-bot`);
   const payload = await response.json();
 
   assert.equal(response.status, 200);
-  assert.deepEqual(server.calls.publishSkills, [{}]);
+  assert.deepEqual(server.calls.publishSkills, [{ slug: 'alice-weather-bot' }]);
   assert.equal(payload.ok, true);
+  assert.equal(payload.data.metaBotSlug, 'alice-weather-bot');
   assert.equal(payload.data.runtime.provider, 'codex');
   assert.deepEqual(
     payload.data.skills.map((skill) => skill.skillName),
@@ -2032,8 +2033,23 @@ test('GET /ui/publish serves the primary-runtime-aware publish console', async (
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /Publish Service/);
+  assert.match(html, /data-metabot-select/);
   assert.match(html, /data-provider-skill-select/);
   assert.match(html, /\/api\/services\/publish\/skills/);
+  assert.match(html, /name="inputType"/);
+  assert.match(html, /value="BTC-OPCAT"/);
+  assert.match(html, /value="DOGE"/);
+  assert.match(html, /value="image"/);
+  assert.match(html, /type="file"/);
+  assert.match(html, /Service Cover/);
+  assert.match(html, /id="publish-service-cover-input"/);
+  assert.match(html, /for="publish-service-cover-input"/);
+  assert.match(html, /data-publish-status-txid/);
+  assert.match(html, /data-publish-status-copy/);
+  assert.doesNotMatch(html, /Skill Document/);
+  assert.doesNotMatch(html, /Service Icon URI/);
+  assert.doesNotMatch(html, /Service Icon/);
+  assert.doesNotMatch(html, /data-publish-result-card/);
   assert.doesNotMatch(html, /name="runtimeId"/);
   assert.doesNotMatch(html, /name="llmRuntimeId"/);
   assert.doesNotMatch(html, /runtime picker/i);
