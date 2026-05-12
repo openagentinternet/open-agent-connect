@@ -31,6 +31,10 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
               <span data-my-services-list-count>0</span>
             </div>
             <div class="my-services-list" data-my-services-list></div>
+            <div class="ledger-pagination">
+              <button class="btn btn-sm" type="button" data-services-page-prev>Previous</button>
+              <button class="btn btn-sm" type="button" data-services-page-next>Next</button>
+            </div>
           </section>
 
           <section class="my-services-detail-panel" data-my-service-detail aria-label="Selected service details">
@@ -40,6 +44,10 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
             </div>
             <div class="my-service-detail-summary" data-my-service-detail-summary></div>
             <div class="my-service-orders" data-my-service-orders></div>
+            <div class="ledger-pagination">
+              <button class="btn btn-sm" type="button" data-orders-page-prev>Previous</button>
+              <button class="btn btn-sm" type="button" data-orders-page-next>Next</button>
+            </div>
           </section>
         </div>
 
@@ -131,10 +139,14 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
     notice: document.querySelector('[data-my-services-notice]'),
     list: document.querySelector('[data-my-services-list]'),
     listCount: document.querySelector('[data-my-services-list-count]'),
+    servicesPagePrev: document.querySelector('[data-services-page-prev]'),
+    servicesPageNext: document.querySelector('[data-services-page-next]'),
     detail: document.querySelector('[data-my-service-detail]'),
     detailSummary: document.querySelector('[data-my-service-detail-summary]'),
     orders: document.querySelector('[data-my-service-orders]'),
     orderPageLabel: document.querySelector('[data-my-service-order-page-label]'),
+    ordersPagePrev: document.querySelector('[data-orders-page-prev]'),
+    ordersPageNext: document.querySelector('[data-orders-page-next]'),
     editModal: document.querySelector('[data-my-service-edit-modal]'),
     editForm: document.querySelector('[data-my-service-edit-form]'),
     editProviderSkill: document.querySelector('[data-edit-provider-skill]'),
@@ -156,6 +168,10 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
     mutationResult: null,
     error: null,
     busy: false,
+    servicesPageNumber: 1,
+    servicesPageSize: 20,
+    ordersPageNumber: 1,
+    ordersPageSize: 10,
     editServiceId: '',
     revokeServiceId: '',
     editCoverDataUrl: '',
@@ -220,7 +236,9 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
 
   const renderServices = (model) => {
     if (elements.pageLabel) elements.pageLabel.textContent = model.pageLabel;
-    if (elements.listCount) elements.listCount.textContent = String(model.services.length);
+    if (elements.listCount) elements.listCount.textContent = String(model.pagination.total);
+    if (elements.servicesPagePrev) elements.servicesPagePrev.disabled = !model.pagination.canPrevious;
+    if (elements.servicesPageNext) elements.servicesPageNext.disabled = !model.pagination.canNext;
     if (!elements.list) return;
     if (!model.services.length) {
       elements.list.innerHTML = '<div class="ledger-empty"><strong>' + escapeHtml(model.emptyState.title) + '</strong><p>' + escapeHtml(model.emptyState.message) + '</p></div>';
@@ -254,6 +272,8 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
 
   const renderDetail = (model) => {
     if (elements.orderPageLabel) elements.orderPageLabel.textContent = model.orderPageLabel;
+    if (elements.ordersPagePrev) elements.ordersPagePrev.disabled = !model.orderPagination.canPrevious || !model.selectedService;
+    if (elements.ordersPageNext) elements.ordersPageNext.disabled = !model.orderPagination.canNext || !model.selectedService;
     if (!elements.detailSummary || !elements.orders) return;
     const selected = model.selectedService;
     if (!selected) {
@@ -283,7 +303,10 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
       + '<div><span>Payment</span><p class="mono-text">' + escapeHtml(order.paymentLabel) + '</p><p class="mono-text">' + escapeHtml(order.orderTxid) + '</p></div>'
       + '<div><span>Rating</span><p>' + escapeHtml(order.ratingLabel) + '</p>' + (order.ratingComment ? '<p>' + escapeHtml(order.ratingComment) + '</p>' : '') + (order.ratingPinId ? '<p class="mono-text">' + escapeHtml(order.ratingPinId) + '</p>' : '') + '</div>'
       + '<div><span>Runtime</span><p class="mono-text">' + escapeHtml(order.runtimeLabel) + '</p><p class="mono-text">' + escapeHtml(order.sessionLabel) + '</p></div>'
+      + '<div class="order-actions">'
       + '<a class="btn btn-sm" href="' + escapeHtml(order.traceHref) + '">Trace</a>'
+      + (order.sessionHref ? '<a class="btn btn-sm" href="' + escapeHtml(order.sessionHref) + '">Session</a>' : '')
+      + '</div>'
       + '</article>'
     )).join('');
   };
@@ -301,17 +324,30 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
       render();
       return;
     }
-    state.ordersPage = await fetchJson('/api/services/my/orders?serviceId=' + encodeURIComponent(serviceId) + '&page=1&pageSize=10&refresh=' + (refresh ? 'true' : 'false'));
+    const fetchOrdersPage = () => fetchJson('/api/services/my/orders?serviceId=' + encodeURIComponent(serviceId) + '&page=' + encodeURIComponent(String(state.ordersPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.ordersPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
+    state.ordersPage = await fetchOrdersPage();
+    const totalPages = Number(state.ordersPage && state.ordersPage.totalPages) || 0;
+    if (state.ordersPageNumber > 1 && totalPages > 0 && state.ordersPageNumber > totalPages) {
+      state.ordersPageNumber = totalPages;
+      state.ordersPage = await fetchOrdersPage();
+    }
     render();
   };
 
   const loadServices = async (refresh) => {
     state.error = null;
-    state.servicesPage = await fetchJson('/api/services/my?page=1&pageSize=20&refresh=' + (refresh ? 'true' : 'false'));
+    const fetchServicesPage = () => fetchJson('/api/services/my?page=' + encodeURIComponent(String(state.servicesPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.servicesPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
+    state.servicesPage = await fetchServicesPage();
+    const totalPages = Number(state.servicesPage && state.servicesPage.totalPages) || 0;
+    if (state.servicesPageNumber > 1 && totalPages > 0 && state.servicesPageNumber > totalPages) {
+      state.servicesPageNumber = totalPages;
+      state.servicesPage = await fetchServicesPage();
+    }
     const items = getServiceItems();
     const hasSelected = items.some((service) => normalizeTextClient(service && (service.currentPinId || service.id)) === state.selectedServiceId);
     if (!state.selectedServiceId || !hasSelected) {
       state.selectedServiceId = normalizeTextClient(items[0] && (items[0].currentPinId || items[0].id));
+      state.ordersPageNumber = 1;
     }
     await loadOrders(state.selectedServiceId, refresh);
   };
@@ -454,7 +490,7 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
   };
 
   document.addEventListener('click', async (event) => {
-    const target = event.target instanceof Element ? event.target.closest('[data-service-action], [data-copy-value], [data-my-services-refresh], [data-my-service-edit-close], [data-my-service-revoke-close]') : null;
+    const target = event.target instanceof Element ? event.target.closest('[data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-edit-close], [data-my-service-revoke-close]') : null;
     if (!target) return;
     if (target.matches('[data-my-services-refresh]')) {
       try {
@@ -472,6 +508,28 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
       closeRevoke();
       return;
     }
+    if (target.matches('[data-services-page-prev]') || target.matches('[data-services-page-next]')) {
+      const delta = target.matches('[data-services-page-prev]') ? -1 : 1;
+      state.servicesPageNumber = Math.max(1, state.servicesPageNumber + delta);
+      state.mutationResult = null;
+      try {
+        await loadServices(false);
+      } catch (error) {
+        setError(error);
+      }
+      return;
+    }
+    if (target.matches('[data-orders-page-prev]') || target.matches('[data-orders-page-next]')) {
+      const delta = target.matches('[data-orders-page-prev]') ? -1 : 1;
+      state.ordersPageNumber = Math.max(1, state.ordersPageNumber + delta);
+      state.mutationResult = null;
+      try {
+        await loadOrders(state.selectedServiceId, false);
+      } catch (error) {
+        setError(error);
+      }
+      return;
+    }
     const copyValue = target.getAttribute('data-copy-value');
     if (copyValue) {
       await navigator.clipboard?.writeText(copyValue).catch(() => undefined);
@@ -482,6 +540,7 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
     const serviceId = target.getAttribute('data-service-id') || '';
     if (action === 'details') {
       state.selectedServiceId = serviceId;
+      state.ordersPageNumber = 1;
       state.mutationResult = null;
       try {
         await loadOrders(serviceId, false);

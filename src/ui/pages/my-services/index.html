@@ -51,6 +51,10 @@
         border-color: rgba(239,68,68,.34);
         background: var(--red-dim);
       }
+      .my-services-notice[data-tone="warning"] {
+        border-color: rgba(245,158,11,.38);
+        background: var(--amber-dim);
+      }
       .my-services-notice strong {
         font-size: 13px;
       }
@@ -101,6 +105,12 @@
       .my-service-orders {
         display: grid;
         gap: 10px;
+      }
+      .ledger-pagination {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 10px;
       }
       .service-row,
       .order-row,
@@ -280,6 +290,11 @@
         font-size: 12px;
         overflow-wrap: anywhere;
       }
+      .order-actions {
+        display: grid;
+        gap: 6px;
+        justify-items: stretch;
+      }
       .ledger-empty {
         padding: 18px;
       }
@@ -413,6 +428,10 @@
         }
         .order-row {
           grid-template-columns: minmax(0, 1fr);
+        }
+        .ledger-pagination,
+        .order-actions {
+          justify-content: stretch;
         }
       }
     </style>

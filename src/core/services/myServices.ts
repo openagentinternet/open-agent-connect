@@ -253,6 +253,19 @@ function buildRatingIndex(profile: MyServicesProfileInput, servicePinIds: Set<st
   return profile.ratingDetails.filter((rating) => servicePinIds.has(toSafeString(rating.serviceId)));
 }
 
+function buildClosedOrderRatings(ratings: RatingDetailItem[], orders: SellerOrderRecord[]): number[] {
+  const seenPaymentTxids = new Set<string>();
+  const matchedRatings: number[] = [];
+  for (const order of orders) {
+    const paymentTxid = toSafeString(order.paymentTxid);
+    if (!paymentTxid || seenPaymentTxids.has(paymentTxid)) continue;
+    seenPaymentTxids.add(paymentTxid);
+    const rating = pickRatingDetail(ratings, paymentTxid, order.buyerGlobalMetaId);
+    if (rating) matchedRatings.push(rating.rate);
+  }
+  return matchedRatings;
+}
+
 function getPaymentAddress(identity: RuntimeIdentityRecord | null, currency: string, fallback: string): string {
   const normalizedCurrency = toSafeString(currency).toUpperCase();
   const addresses = identity?.addresses ?? {};
@@ -298,9 +311,7 @@ export function buildMyServiceSummaries(input: {
         }
       }
 
-      const ratings = buildRatingIndex(profile, servicePinIdSet)
-        .map((rating) => toSafeNumber(rating.rate))
-        .filter((rate) => Number.isFinite(rate) && rate > 0);
+      const ratings = buildClosedOrderRatings(buildRatingIndex(profile, servicePinIdSet), closedOrders);
       const ratingCount = ratings.length;
       const ratingAvg = ratingCount > 0
         ? ratings.reduce((sum, rate) => sum + rate, 0) / ratingCount

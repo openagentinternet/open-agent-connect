@@ -3,6 +3,15 @@ export interface MyServiceMetricViewModel {
   value: string;
 }
 
+export interface MyServicesPaginationViewModel {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  canPrevious: boolean;
+  canNext: boolean;
+}
+
 export interface MyServiceListEntryViewModel {
   key: string;
   id: string;
@@ -38,6 +47,7 @@ export interface MyServiceOrderEntryViewModel {
   ratingPinId: string;
   traceHref: string;
   traceLabel: string;
+  sessionHref: string;
   sessionLabel: string;
   runtimeLabel: string;
 }
@@ -75,6 +85,8 @@ export interface MyServicesPageViewModel {
   notice: MyServicesNoticeViewModel | null;
   pageLabel: string;
   orderPageLabel: string;
+  pagination: MyServicesPaginationViewModel;
+  orderPagination: MyServicesPaginationViewModel;
   emptyState: MyServicesEmptyStateViewModel;
   orderEmptyState: MyServicesEmptyStateViewModel;
   currencyOptions: string[];
@@ -106,6 +118,24 @@ function readArray(value: unknown): unknown[] {
 function formatCount(value: unknown): string {
   const numeric = normalizeNumber(value);
   return Number.isFinite(numeric) ? String(Math.trunc(numeric)) : '0';
+}
+
+function formatTimestamp(value: unknown): string {
+  const raw = normalizeText(value);
+  const numeric = Number(value);
+  let date: Date | null = null;
+  if (Number.isFinite(numeric) && numeric > 0) {
+    date = new Date(numeric < 10_000_000_000 ? numeric * 1000 : numeric);
+  } else if (raw) {
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) date = new Date(parsed);
+  }
+  if (!date || !Number.isFinite(date.getTime())) return raw || 'Unknown';
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return [
+    `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`,
+    `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`,
+  ].join(' ');
 }
 
 function formatPrice(record: Record<string, unknown>): string {
@@ -151,9 +181,9 @@ function formatStatusLabel(value: unknown): string {
 function formatOrderTime(record: Record<string, unknown>): string {
   const status = normalizeText(record.status);
   const timestamp = status === 'refunded'
-    ? normalizeText(record.refundCompletedAt) || normalizeText(record.createdAt)
-    : normalizeText(record.deliveredAt) || normalizeText(record.createdAt);
-  return timestamp || 'Unknown';
+    ? record.refundCompletedAt || record.createdAt
+    : record.deliveredAt || record.createdAt;
+  return formatTimestamp(timestamp);
 }
 
 function formatOrderRating(record: Record<string, unknown>): {
@@ -180,6 +210,21 @@ function formatPageLabel(page: Record<string, unknown>, noun: string): string {
   return `${currentPage} / ${totalPages} · ${total} ${noun}`;
 }
 
+function buildPagination(page: Record<string, unknown>): MyServicesPaginationViewModel {
+  const currentPage = Math.max(1, Math.trunc(normalizeNumber(page.page) || 1));
+  const pageSize = Math.max(1, Math.trunc(normalizeNumber(page.pageSize) || 1));
+  const total = Math.max(0, Math.trunc(normalizeNumber(page.total)));
+  const totalPages = Math.max(1, Math.trunc(normalizeNumber(page.totalPages) || 1));
+  return {
+    page: currentPage,
+    pageSize,
+    total,
+    totalPages,
+    canPrevious: currentPage > 1,
+    canNext: total > 0 && currentPage < totalPages,
+  };
+}
+
 function buildServiceEntry(entry: unknown): MyServiceListEntryViewModel | null {
   const record = readObject(entry);
   const currentPinId = normalizeText(record.currentPinId) || normalizeText(record.id);
@@ -204,7 +249,7 @@ function buildServiceEntry(entry: unknown): MyServiceListEntryViewModel | null {
     outputTypeLabel: normalizeText(record.outputType) || 'text',
     priceLabel,
     creatorLabel: [creatorName, creatorSlug].filter(Boolean).join(' · ') || 'Unknown MetaBot',
-    updatedAtLabel: normalizeText(record.updatedAt) || 'Unknown',
+    updatedAtLabel: formatTimestamp(record.updatedAt),
     metrics: [
       { label: 'Success', value: formatCount(record.successCount) },
       { label: 'Refunded', value: formatCount(record.refundCount) },
@@ -225,6 +270,7 @@ function buildOrderEntry(entry: unknown): MyServiceOrderEntryViewModel | null {
   const paymentTxid = normalizeText(record.paymentTxid);
   const orderTxid = normalizeText(record.orderMessageTxid);
   const traceId = normalizeText(record.traceId);
+  const sessionId = normalizeText(record.coworkSessionId);
   const rating = formatOrderRating(record);
   const runtimeLabel = [
     normalizeText(record.runtimeProvider),
@@ -245,7 +291,8 @@ function buildOrderEntry(entry: unknown): MyServiceOrderEntryViewModel | null {
     ratingPinId: rating.pinId,
     traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '/ui/trace',
     traceLabel: traceId || 'Trace unavailable',
-    sessionLabel: normalizeText(record.coworkSessionId) || 'No session',
+    sessionHref: sessionId ? `/ui/trace?sessionId=${encodeURIComponent(sessionId)}` : '',
+    sessionLabel: sessionId || 'No session',
     runtimeLabel,
   };
 }
@@ -292,6 +339,16 @@ function buildNotice(input: {
     : operation === 'modify'
       ? 'Modify'
       : 'Service';
+  const warning = normalizeText(result.warning);
+  if (warning) {
+    return {
+      tone: 'warning',
+      title: `${operationLabel} warning`,
+      message: warning,
+      txids,
+      pinId: normalizeText(result.pinId),
+    };
+  }
   return {
     tone: 'success',
     title: `${operationLabel} broadcast`,
@@ -339,6 +396,8 @@ export function buildMyServicesPageViewModel(input: {
     }),
     pageLabel: formatPageLabel(servicesPage, 'services'),
     orderPageLabel: formatPageLabel(ordersPage, 'orders'),
+    pagination: buildPagination(servicesPage),
+    orderPagination: buildPagination(ordersPage),
     emptyState: {
       title: 'No published services',
       message: 'Local MetaBot profiles have no active skill services yet.',
@@ -359,6 +418,7 @@ export function buildMyServicesPageViewModelRuntimeSource(): string {
     readObject,
     readArray,
     formatCount,
+    formatTimestamp,
     formatPrice,
     formatAmount,
     formatServiceInitials,
@@ -367,6 +427,7 @@ export function buildMyServicesPageViewModelRuntimeSource(): string {
     formatOrderTime,
     formatOrderRating,
     formatPageLabel,
+    buildPagination,
     buildServiceEntry,
     buildOrderEntry,
     buildEditForm,

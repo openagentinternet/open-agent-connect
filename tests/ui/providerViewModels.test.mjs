@@ -234,8 +234,8 @@ test('buildMyServicesPageViewModel renders IDBots-style local service rows with 
     servicesPage: {
       page: 1,
       pageSize: 20,
-      total: 1,
-      totalPages: 1,
+      total: 24,
+      totalPages: 2,
       items: [
         {
           id: 'service-current-pin-1',
@@ -280,7 +280,7 @@ test('buildMyServicesPageViewModel renders IDBots-style local service rows with 
     outputTypeLabel: 'text',
     priceLabel: '0.00004 BTC-OPCAT',
     creatorLabel: 'Alice Bot · alice-bot',
-    updatedAtLabel: '1775000010000',
+    updatedAtLabel: '2026-03-31 23:33',
     metrics: [
       { label: 'Success', value: '3' },
       { label: 'Refunded', value: '1' },
@@ -292,7 +292,15 @@ test('buildMyServicesPageViewModel renders IDBots-style local service rows with 
     canRevoke: true,
     blockedReason: '',
   });
-  assert.equal(model.pageLabel, '1 / 1 · 1 services');
+  assert.equal(model.pageLabel, '1 / 2 · 24 services');
+  assert.deepEqual(model.pagination, {
+    page: 1,
+    pageSize: 20,
+    total: 24,
+    totalPages: 2,
+    canPrevious: false,
+    canNext: true,
+  });
   assert.equal(model.emptyState.title, 'No published services');
 });
 
@@ -332,10 +340,10 @@ test('buildMyServicesPageViewModel renders selected service details, closed orde
       ],
     },
     ordersPage: {
-      page: 1,
+      page: 2,
       pageSize: 10,
-      total: 2,
-      totalPages: 1,
+      total: 12,
+      totalPages: 2,
       items: [
         {
           id: 'order-refunded',
@@ -402,6 +410,8 @@ test('buildMyServicesPageViewModel renders selected service details, closed orde
     paymentLabel: order.paymentLabel,
     ratingLabel: order.ratingLabel,
     traceHref: order.traceHref,
+    sessionHref: order.sessionHref,
+    timeLabel: order.timeLabel,
   })), [
     {
       key: 'order-refunded',
@@ -409,6 +419,8 @@ test('buildMyServicesPageViewModel renders selected service details, closed orde
       paymentLabel: '0.00004 BTC · payment-refunded',
       ratingLabel: 'No rating',
       traceHref: '/ui/trace?traceId=trace-refunded',
+      sessionHref: '/ui/trace?sessionId=session-refunded',
+      timeLabel: '2026-03-31 23:34',
     },
     {
       key: 'order-completed',
@@ -416,10 +428,20 @@ test('buildMyServicesPageViewModel renders selected service details, closed orde
       paymentLabel: '0.00004 BTC · payment-completed',
       ratingLabel: '5 / 5',
       traceHref: '/ui/trace?traceId=trace-completed',
+      sessionHref: '/ui/trace?sessionId=session-completed',
+      timeLabel: '2026-03-31 23:33',
     },
   ]);
   assert.equal(model.orders[1].ratingComment, 'Excellent.');
-  assert.equal(model.orderPageLabel, '1 / 1 · 2 orders');
+  assert.equal(model.orderPageLabel, '2 / 2 · 12 orders');
+  assert.deepEqual(model.orderPagination, {
+    page: 2,
+    pageSize: 10,
+    total: 12,
+    totalPages: 2,
+    canPrevious: true,
+    canNext: false,
+  });
 });
 
 test('buildMyServicesPageViewModel exposes mutation txid notices and deterministic error state', () => {
@@ -436,6 +458,22 @@ test('buildMyServicesPageViewModel exposes mutation txid notices and determinist
     message: 'Local state has been updated after the chain write.',
     txids: ['modify-txid-1'],
     pinId: 'modify-pin-1',
+  });
+
+  const warning = buildMyServicesPageViewModel({
+    mutationResult: {
+      operation: 'revoke',
+      txids: ['revoke-txid-1'],
+      pinId: 'revoke-pin-1',
+      warning: 'Chain write broadcast, but directory refresh is pending.',
+    },
+  });
+  assert.deepEqual(warning.notice, {
+    tone: 'warning',
+    title: 'Revoke warning',
+    message: 'Chain write broadcast, but directory refresh is pending.',
+    txids: ['revoke-txid-1'],
+    pinId: 'revoke-pin-1',
   });
 
   const failed = buildMyServicesPageViewModel({

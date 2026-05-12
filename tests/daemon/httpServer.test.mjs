@@ -2068,6 +2068,10 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.match(html, /My Services/);
   assert.match(html, /data-my-services-list/);
   assert.match(html, /data-my-service-orders/);
+  assert.match(html, /data-services-page-prev/);
+  assert.match(html, /data-services-page-next/);
+  assert.match(html, /data-orders-page-prev/);
+  assert.match(html, /data-orders-page-next/);
   assert.match(html, /data-my-service-edit-modal/);
   assert.match(html, /data-my-service-revoke-modal/);
   assert.match(html, /Details/);
@@ -2076,6 +2080,7 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.match(html, /Payment/);
   assert.match(html, /Runtime/);
   assert.match(html, /Rating/);
+  assert.match(html, /Session/);
   assert.match(html, /\/api\/services\/my/);
   assert.match(html, /\/api\/services\/my\/orders/);
   assert.match(html, /\/api\/services\/my\/modify/);

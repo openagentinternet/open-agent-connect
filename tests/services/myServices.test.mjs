@@ -185,6 +185,16 @@ test('buildMyServiceSummaries aggregates services across local profiles with cha
             raterMetaId: null,
             createdAt: 1_775_000_026_000,
           },
+          {
+            pinId: 'rating-unmatched-payment',
+            serviceId: 'service-modify-pin',
+            servicePaidTx: 'payment-stale-open-or-unrelated',
+            rate: 5,
+            comment: 'This rating must not count without a matching closed seller order payment tx.',
+            raterGlobalMetaId: 'idq1buyer',
+            raterMetaId: null,
+            createdAt: 1_775_000_027_000,
+          },
         ],
       },
       {
