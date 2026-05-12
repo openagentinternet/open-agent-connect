@@ -425,6 +425,15 @@ function renderMarkdown(text) {
 
 // ─── Avatar helpers ─────────────────────────────────────────────────────────
 
+const PROFILE_CACHE_TTL_MS = 60 * 1000;
+const AVATAR_CONTENT_PATH_PREFIXES = [
+  '/content/',
+  '/metafile-indexer/content/',
+  '/metafile-indexer/thumbnail/',
+  '/metafile-indexer/api/v1/files/content/',
+  '/metafile-indexer/api/v1/files/accelerate/content/',
+  '/metafile-indexer/api/v1/users/avatar/accelerate/',
+];
 const profileCache = new Map();
 
 function normalizeAvatarUrl(rawAvatar) {
@@ -437,10 +446,32 @@ function normalizeAvatarUrl(rawAvatar) {
   if (pinRef) {
     return '/api/file/avatar?ref=' + encodeURIComponent(pinRef);
   }
+  if (isAvatarContentReference(raw)) {
+    return '';
+  }
   if (isHttpUrl(raw)) {
     return raw;
   }
   return raw;
+}
+
+function isAvatarContentReference(rawAvatar) {
+  const raw = normalizeText(rawAvatar);
+  if (!raw) return false;
+  if (raw.toLowerCase().indexOf('metafile://') === 0) {
+    return true;
+  }
+  const path = (() => {
+    if (isHttpUrl(raw)) {
+      try {
+        return new URL(raw).pathname;
+      } catch {
+        return '';
+      }
+    }
+    return raw;
+  })();
+  return AVATAR_CONTENT_PATH_PREFIXES.some(prefix => path.toLowerCase().indexOf(prefix.toLowerCase()) === 0);
 }
 
 function extractAvatarPinReference(rawAvatar) {
@@ -460,15 +491,7 @@ function extractAvatarPinReference(rawAvatar) {
     }
     return raw;
   })();
-  const prefixes = [
-    '/content/',
-    '/metafile-indexer/content/',
-    '/metafile-indexer/thumbnail/',
-    '/metafile-indexer/api/v1/files/content/',
-    '/metafile-indexer/api/v1/files/accelerate/content/',
-    '/metafile-indexer/api/v1/users/avatar/accelerate/',
-  ];
-  for (const prefix of prefixes) {
+  for (const prefix of AVATAR_CONTENT_PATH_PREFIXES) {
     if (path.toLowerCase().indexOf(prefix.toLowerCase()) === 0) {
       return decodeURIComponent((path.slice(prefix.length).split(/[?#]/)[0] || '').trim());
     }
@@ -502,28 +525,45 @@ function avatarImg(src, fallback, cls) {
 
 async function resolveProfile(gmid) {
   if (!gmid) return { name: '', avatar: '' };
-  if (profileCache.has(gmid)) {
-    const cached = profileCache.get(gmid);
-    if (cached.fetching) await cached.fetching;
-    return { name: cached.name || gmid, avatar: cached.avatar || getInitialsAvatar(cached.name, gmid) };
+  const cached = profileCache.get(gmid);
+  if (cached) {
+    if (cached.fetching) {
+      await cached.fetching;
+      const updated = profileCache.get(gmid) || cached;
+      return { name: updated.name || gmid, avatar: updated.avatar || '' };
+    }
+    if (Date.now() - (cached.fetchedAt || 0) < PROFILE_CACHE_TTL_MS) {
+      return { name: cached.name || gmid, avatar: cached.avatar || '' };
+    }
   }
   let resolveFn;
   const fetchPromise = new Promise(resolve => { resolveFn = resolve; });
-  profileCache.set(gmid, { name: '', avatar: '', fetching: fetchPromise });
-  let name = '', avatarUrl = '';
+  profileCache.set(gmid, {
+    name: cached?.name || '',
+    avatar: cached?.avatar || '',
+    fetchedAt: cached?.fetchedAt || 0,
+    fetching: fetchPromise,
+  });
+  let name = cached?.name || '', avatarUrl = cached?.avatar || '';
+  let fetched = false;
   try {
     const resp = await fetch('https://file.metaid.io/metafile-indexer/api/v1/info/globalmetaid/' + encodeURIComponent(gmid));
     if (resp.ok) {
       const json = await resp.json();
       const data = json?.data || json || {};
+      fetched = true;
       name = data.name || data.showName || data.nickname || '';
       const rawAvatar = data.avatar || data.avatarUrl || data.avatarId || data.avatarImage || data.avatarUri || data.avatar_uri || '';
       avatarUrl = normalizeAvatarUrl(rawAvatar);
     }
   } catch { /* ignore */ }
-  profileCache.set(gmid, { name, avatar: avatarUrl, fetching: null });
+  if (!fetched && cached) {
+    name = cached.name || '';
+    avatarUrl = cached.avatar || '';
+  }
+  profileCache.set(gmid, { name, avatar: avatarUrl, fetchedAt: Date.now(), fetching: null });
   resolveFn();
-  return { name: name || gmid, avatar: avatarUrl || getInitialsAvatar(name, gmid) };
+  return { name: name || gmid, avatar: avatarUrl || '' };
 }
 
 // ─── Application state ───────────────────────────────────────────────────────
@@ -699,8 +739,8 @@ async function renderSessionDetail() {
     || (peerProfile.name && peerProfile.name !== detail.peerGlobalMetaId
     ? peerProfile.name
     : (detail.peerGlobalMetaId ? detail.peerGlobalMetaId.slice(0, 20) + '…' : 'Peer'));
-  const localAvatar = normalizeAvatarUrl(detail.localMetabotAvatar) || localProfile.avatar || getInitialsAvatar(localName, detail.localMetabotGlobalMetaId);
-  const peerAvatar = normalizeAvatarUrl(detail.peerAvatar) || peerProfile.avatar || getInitialsAvatar(peerName, detail.peerGlobalMetaId);
+  const localAvatar = localProfile.avatar || normalizeAvatarUrl(detail.localMetabotAvatar) || getInitialsAvatar(localName, detail.localMetabotGlobalMetaId);
+  const peerAvatar = peerProfile.avatar || normalizeAvatarUrl(detail.peerAvatar) || getInitialsAvatar(peerName, detail.peerGlobalMetaId);
   const traceCopyValue = detail.traceId || detail.sessionId;
 
   const headerHtml =

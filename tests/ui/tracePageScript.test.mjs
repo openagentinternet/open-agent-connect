@@ -67,6 +67,18 @@ function createDetailElementStub(options = {}) {
   };
 }
 
+function createFakeDate(nowRef) {
+  return class FakeDate extends Date {
+    constructor(...args) {
+      super(...(args.length ? args : [nowRef.value]));
+    }
+
+    static now() {
+      return nowRef.value;
+    }
+  };
+}
+
 async function runTraceScriptWithUrl(search, options = {}) {
   const list = createElementStub();
   const detailStub = createDetailElementStub(options.detail || {});
@@ -79,10 +91,48 @@ async function runTraceScriptWithUrl(search, options = {}) {
   ]);
   const fetchCalls = [];
   let refreshCallback = null;
+  const localMetabotGlobalMetaId = 'idq-local';
+  const peerGlobalMetaId = 'idq14hmv23j5fnlx4ccnmvlyldjd38xjsechzwg9xz';
+  const defaultDetailData = {
+    session: {
+      sessionId: 'session-weather-1',
+      traceId: 'trace-weather-1',
+      role: 'caller',
+      state: 'completed',
+    },
+    localMetabotName: 'Caller',
+    localMetabotGlobalMetaId,
+    localMetabotAvatar: '/content/f77ba5db20c19242f9a5e5025357d29ad83f897f3700d2b1972f6ce1485098d7i0',
+    peerGlobalMetaId,
+    peerName: 'AI_Sunny',
+    peerAvatar: '/content/607b2da84bbd01e01397bb6ea8cd09e4f9b0e87552dd0d0e24b828f18884dd30i0',
+    inspector: {
+      transcriptItems: [
+        {
+          id: 'delivery-1',
+          timestamp: 1_777_000_001_000,
+          type: 'delivery',
+          sender: 'provider',
+          content: [
+            '#### Forecast detail',
+            '',
+            '| Item | Value |',
+            '|------|-------|',
+            '| Weather | **Sunny** |',
+            '',
+            '> Bring sunglasses.',
+          ].join('\n'),
+          metadata: {
+            deliveryPinId: '65a469a273a5d212975309c2eda54b1c6c9ece97cab6e60d07e23e349f41932bi0',
+          },
+        },
+      ],
+    },
+  };
 
   const context = {
     console,
-    Date,
+    Date: options.Date || Date,
     Map,
     Set,
     Number,
@@ -127,8 +177,8 @@ async function runTraceScriptWithUrl(search, options = {}) {
                   createdAt: 1_777_000_000_000,
                   updatedAt: 1_777_000_001_000,
                   localMetabotName: 'Caller',
-                  localMetabotGlobalMetaId: 'idq-local',
-                  peerGlobalMetaId: 'idq14hmv23j5fnlx4ccnmvlyldjd38xjsechzwg9xz',
+                  localMetabotGlobalMetaId,
+                  peerGlobalMetaId,
                   peerName: 'AI_Sunny',
                 },
               ],
@@ -138,46 +188,28 @@ async function runTraceScriptWithUrl(search, options = {}) {
         };
       }
       if (url === '/api/trace/sessions/session-weather-1') {
+        const detailData = typeof options.detailData === 'function'
+          ? options.detailData(structuredClone(defaultDetailData))
+          : defaultDetailData;
         return {
           ok: true,
           json: async () => ({
-            data: {
-              session: {
-                sessionId: 'session-weather-1',
-                traceId: 'trace-weather-1',
-                role: 'caller',
-                state: 'completed',
-              },
-              localMetabotName: 'Caller',
-              localMetabotAvatar: '/content/f77ba5db20c19242f9a5e5025357d29ad83f897f3700d2b1972f6ce1485098d7i0',
-              peerGlobalMetaId: 'idq14hmv23j5fnlx4ccnmvlyldjd38xjsechzwg9xz',
-              peerName: 'AI_Sunny',
-              peerAvatar: '/content/607b2da84bbd01e01397bb6ea8cd09e4f9b0e87552dd0d0e24b828f18884dd30i0',
-              inspector: {
-                transcriptItems: [
-                  {
-                    id: 'delivery-1',
-                    timestamp: 1_777_000_001_000,
-                    type: 'delivery',
-                    sender: 'provider',
-                    content: [
-                      '#### Forecast detail',
-                      '',
-                      '| Item | Value |',
-                      '|------|-------|',
-                      '| Weather | **Sunny** |',
-                      '',
-                      '> Bring sunglasses.',
-                    ].join('\n'),
-                    metadata: {
-                      deliveryPinId: '65a469a273a5d212975309c2eda54b1c6c9ece97cab6e60d07e23e349f41932bi0',
-                    },
-                  },
-                ],
-              },
-            },
+            data: detailData,
           }),
         };
+      }
+      const profilePrefix = 'https://file.metaid.io/metafile-indexer/api/v1/info/globalmetaid/';
+      if (String(url).startsWith(profilePrefix) && options.profiles) {
+        const gmid = decodeURIComponent(String(url).slice(profilePrefix.length));
+        const profile = typeof options.profiles === 'function'
+          ? options.profiles(gmid)
+          : options.profiles[gmid];
+        if (profile) {
+          return {
+            ok: true,
+            json: async () => ({ data: profile }),
+          };
+        }
       }
       throw new Error(`Unexpected fetch: ${url}`);
     },
@@ -249,6 +281,71 @@ test('trace page header renders remote on the left, local on the right, avatars,
   );
   assert.match(detail.innerHTML, /data-copy-text="trace-weather-1"/);
   assert.match(detail.innerHTML, /aria-label="Copy trace id"/);
+});
+
+test('trace page prefers latest profile avatars over stale or placeholder trace avatars', async () => {
+  const latestLocalAvatar = '98a8137e6cc4b4352332faa7a7dd3a48b528eafd182035c15dea746b0e3590bdi0';
+  const staleLocalAvatar = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0';
+  const latestPeerAvatar = 'c16401c0097f86d77672900b91b6f8f4cd39e0d46b686654f0129660182f0812i0';
+  const { detail } = await runTraceScriptWithUrl(
+    '?traceId=trace-weather-1&sessionId=session-weather-1',
+    {
+      detailData(data) {
+        return {
+          ...data,
+          localMetabotAvatar: `/content/${staleLocalAvatar}`,
+          peerAvatar: '/content/',
+        };
+      },
+      profiles: {
+        'idq-local': { name: 'Caller', avatar: `/content/${latestLocalAvatar}` },
+        idq14hmv23j5fnlx4ccnmvlyldjd38xjsechzwg9xz: { name: 'AI_Sunny', avatar: `/content/${latestPeerAvatar}` },
+      },
+    },
+  );
+
+  assert.match(detail.innerHTML, new RegExp(`/api/file/avatar\\?ref=${latestLocalAvatar}`));
+  assert.match(detail.innerHTML, new RegExp(`/api/file/avatar\\?ref=${latestPeerAvatar}`));
+  assert.doesNotMatch(detail.innerHTML, new RegExp(staleLocalAvatar));
+  assert.doesNotMatch(detail.innerHTML, /src="\/content\/"/);
+});
+
+test('trace page refreshes profile avatar cache after a profile initially has no avatar', async () => {
+  const nowRef = { value: 1_777_000_001_000 };
+  const latestLocalAvatar = '98a8137e6cc4b4352332faa7a7dd3a48b528eafd182035c15dea746b0e3590bdi0';
+  let profileHasAvatar = false;
+  let localProfileFetches = 0;
+  const { detail } = await runTraceScriptWithUrl(
+    '?traceId=trace-weather-1&sessionId=session-weather-1',
+    {
+      Date: createFakeDate(nowRef),
+      detailData(data) {
+        return {
+          ...data,
+          localMetabotAvatar: '',
+        };
+      },
+      profiles(gmid) {
+        if (gmid === 'idq-local') {
+          localProfileFetches += 1;
+          return {
+            name: 'Caller',
+            avatar: profileHasAvatar ? `/content/${latestLocalAvatar}` : '',
+          };
+        }
+        return { name: 'AI_Sunny' };
+      },
+    },
+  );
+
+  assert.doesNotMatch(detail.innerHTML, new RegExp(latestLocalAvatar));
+
+  profileHasAvatar = true;
+  nowRef.value += 61_000;
+  await runTraceScriptWithUrl.refreshCallback();
+
+  assert.equal(localProfileFetches, 2);
+  assert.match(detail.innerHTML, new RegExp(`/api/file/avatar\\?ref=${latestLocalAvatar}`));
 });
 
 test('trace page includes a toast target for copy feedback', () => {
