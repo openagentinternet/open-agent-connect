@@ -242,8 +242,8 @@ test('bot page marks profiles whose primary LLM is unavailable in the list', () 
 
   context.renderMetabotList();
 
-  assert.match(list.innerHTML, /Broken Bot[\s\S]*\[LLM 不可用\]/);
-  assert.doesNotMatch(list.innerHTML, /Healthy Bot[\s\S]*\[LLM 不可用\]/);
+  assert.match(list.innerHTML, /Broken Bot[\s\S]*\[LLM unavailable\]/);
+  assert.doesNotMatch(list.innerHTML, /Healthy Bot[\s\S]*\[LLM unavailable\]/);
 });
 
 test('bot page create flow reports chained identity and txids in a success modal', async () => {
