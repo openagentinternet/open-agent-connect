@@ -6,6 +6,7 @@ import {
 } from '@metalet/utxo-wallet-service';
 import type { ChainWriteNetwork } from '../writePin';
 import { parseAddressIndexFromPath } from '../../identity/deriveIdentity';
+import { isRetryableUtxoFundingError } from '../utxoBroadcastErrors';
 import type {
   ChainAdapter,
   ChainBalance,
@@ -52,17 +53,6 @@ function normalizeText(value: unknown): string {
 
 function normalizeOutpointTxid(value: string): string {
   return normalizeText(value).toLowerCase();
-}
-
-function isStaleMvcFundingError(value: unknown): boolean {
-  const normalized = normalizeText(value).toLowerCase();
-  return (
-    normalized.includes('txn-mempool-conflict')
-    || normalized.includes('missingorspent')
-    || normalized.includes('inputs missing/spent')
-    || normalized.includes('inputs missing or spent')
-    || normalized.includes('missing inputs')
-  );
 }
 
 function buildOutpointKey(address: string, txId: string, outputIndex: number): string {
@@ -339,7 +329,7 @@ export const mvcChainAdapter: ChainAdapter = {
     const json = await response.json() as { code?: number; message?: string; data?: string };
     if (json?.code !== 0) {
       const tracker = deferredTrackers.get(rawTx);
-      if (tracker && isStaleMvcFundingError(json?.message)) {
+      if (tracker && isRetryableUtxoFundingError(json?.message)) {
         rememberPendingTransaction({
           address: tracker.address,
           spentUtxos: tracker.spentUtxos,

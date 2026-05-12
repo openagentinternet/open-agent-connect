@@ -927,6 +927,95 @@ test('paid simplemsg service payment finishes before the order is broadcast', as
   ]);
 });
 
+test('paid simplemsg service payment retries after MVC missing-input stale funding rejection', async (t) => {
+  let paymentAttempts = 0;
+  const harness = await createServiceCallHarness(t, {
+    servicePaymentExecutor: {
+      async execute(input) {
+        paymentAttempts += 1;
+        harness.events.push(`payment_attempt_${paymentAttempts}`);
+        if (paymentAttempts === 1) {
+          throw new Error('[-26] missing inputs');
+        }
+        return {
+          paymentTxid: 'e'.repeat(64),
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.ok, false);
+  assert.equal(called.state, 'waiting');
+  assert.equal(paymentAttempts, 2);
+  assert.deepEqual(harness.events, [
+    'payment_attempt_1',
+    'payment_attempt_2',
+    'write:/protocols/simplemsg',
+  ]);
+});
+
+test('paid simplemsg order write retries after MVC missingorspent stale funding rejection', async (t) => {
+  let orderAttempts = 0;
+  const harness = await createServiceCallHarness(t, {
+    writePin(input, { writes, identity }) {
+      if (input.path === '/protocols/simplemsg') {
+        orderAttempts += 1;
+        if (orderAttempts === 1) {
+          throw new Error('mandatory-script-verify-flag-failed (Inputs missing/spent)');
+        }
+      }
+      return {
+        txids: [`${input.path}-tx-${writes.length}`],
+        pinId: `${input.path}-pin-${writes.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      };
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.ok, false);
+  assert.equal(called.state, 'waiting');
+  assert.equal(orderAttempts, 2);
+  assert.equal(harness.writes.filter((entry) => entry.path === '/protocols/simplemsg').length, 2);
+});
+
 test('buyer-side timeout creates a service refund request for paid simplemsg orders', async (t) => {
   const paymentTxid = '1'.repeat(64);
   const harness = await createServiceCallHarness(t, {

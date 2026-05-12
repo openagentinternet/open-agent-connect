@@ -162,6 +162,7 @@ import {
 import { verifyServiceOrderPayment } from '../core/payments/servicePaymentVerification';
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import { createChainAdapterRegistry } from '../core/chain/adapters/registry';
+import { isRetryableUtxoFundingError } from '../core/chain/utxoBroadcastErrors';
 import { mvcChainAdapter } from '../core/chain/adapters/mvc';
 import { btcChainAdapter } from '../core/chain/adapters/btc';
 import { dogeChainAdapter } from '../core/chain/adapters/doge';
@@ -257,8 +258,7 @@ async function sleep(ms: number): Promise<void> {
 }
 
 function isMempoolConflictError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /txn-mempool-conflict|mempool[-\s]?conflict/i.test(message);
+  return isRetryableUtxoFundingError(error);
 }
 
 function normalizeRetryDelays(value: unknown, fallback: number[]): number[] {
