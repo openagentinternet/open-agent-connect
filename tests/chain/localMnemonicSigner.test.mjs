@@ -103,6 +103,13 @@ function makeAdapterRegistry(adapters) {
   return new Map(adapters.map((a) => [a.network, a]));
 }
 
+function inputReferencesTxid(input, txid) {
+  const raw = input?.prevTxId?.toString?.('hex') ?? '';
+  if (raw === txid) return true;
+  if (!/^[0-9a-f]{64}$/i.test(raw)) return false;
+  return Buffer.from(raw, 'hex').reverse().toString('hex') === txid;
+}
+
 // ---- Tests ----
 
 test('createLocalMnemonicSigner derives identity and private chat key material from the stored mnemonic', async () => {
@@ -193,6 +200,154 @@ test('MVC chain writes can spend local pending change after a just-broadcast pay
 
     assert.equal(result2.pinId, `${'1'.repeat(64)}i0`);
     assert.equal(broadcastCount, 2);
+  } finally {
+    __clearPendingMvcSpentOutpointsForTests?.();
+  }
+});
+
+test('MVC transfers serialize spend selection so concurrent sends use local zero-conf change', async () => {
+  __clearPendingMvcSpentOutpointsForTests?.();
+  try {
+    const initialTxid = 'a'.repeat(64);
+    const recipientAddress = '1BKy4CU6WpQoVfVv8fHA1RPny9mtGpCgyQ';
+    const broadcasts = [];
+
+    await withMockedFetch(async (url, init = {}) => {
+      const value = String(url);
+
+      if (value.includes('/wallet-api/v4/mvc/address/utxo-list')) {
+        return {
+          ok: true,
+          json: async () => ({
+            code: 0,
+            data: {
+              list: [{
+                txid: initialTxid,
+                outIndex: 0,
+                value: 100_000,
+                height: 1,
+              }],
+            },
+          }),
+        };
+      }
+
+      if (value.includes('/wallet-api/v3/tx/broadcast')) {
+        const body = JSON.parse(String(init.body));
+        const tx = new mvc.Transaction(body.rawTx);
+        broadcasts.push({
+          txid: tx.id,
+          inputs: tx.inputs,
+        });
+        if (broadcasts.length === 1) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        return {
+          ok: true,
+          json: async () => ({ code: 0, data: tx.id }),
+        };
+      }
+
+      throw new Error(`Unexpected fetch URL: ${value}`);
+    }, async () => {
+      const first = executeTransfer(mvcChainAdapter, {
+        mnemonic: FIXTURE_MNEMONIC,
+        path: FIXTURE_PATH,
+        toAddress: recipientAddress,
+        amountSatoshis: 10_000,
+        feeRate: 1,
+      });
+      const second = executeTransfer(mvcChainAdapter, {
+        mnemonic: FIXTURE_MNEMONIC,
+        path: FIXTURE_PATH,
+        toAddress: recipientAddress,
+        amountSatoshis: 10_000,
+        feeRate: 1,
+      });
+
+      await Promise.all([first, second]);
+    });
+
+    assert.equal(broadcasts.length, 2);
+    assert.equal(inputReferencesTxid(broadcasts[0].inputs[0], initialTxid), true);
+    assert.equal(inputReferencesTxid(broadcasts[1].inputs[0], initialTxid), false);
+    assert.equal(inputReferencesTxid(broadcasts[1].inputs[0], broadcasts[0].txid), true);
+  } finally {
+    __clearPendingMvcSpentOutpointsForTests?.();
+  }
+});
+
+test('MVC transfer retries can avoid a provider-stale outpoint after mempool conflict', async () => {
+  __clearPendingMvcSpentOutpointsForTests?.();
+  try {
+    const staleTxid = 'b'.repeat(64);
+    const freshTxid = 'c'.repeat(64);
+    const recipientAddress = '1BKy4CU6WpQoVfVv8fHA1RPny9mtGpCgyQ';
+    const broadcasts = [];
+
+    await withMockedFetch(async (url, init = {}) => {
+      const value = String(url);
+
+      if (value.includes('/wallet-api/v4/mvc/address/utxo-list')) {
+        return {
+          ok: true,
+          json: async () => ({
+            code: 0,
+            data: {
+              list: [
+                { txid: staleTxid, outIndex: 0, value: 100_000, height: 1 },
+                { txid: freshTxid, outIndex: 1, value: 100_000, height: 0 },
+              ],
+            },
+          }),
+        };
+      }
+
+      if (value.includes('/wallet-api/v3/tx/broadcast')) {
+        const body = JSON.parse(String(init.body));
+        const tx = new mvc.Transaction(body.rawTx);
+        broadcasts.push({
+          txid: tx.id,
+          inputs: tx.inputs,
+        });
+        if (broadcasts.length === 1) {
+          return {
+            ok: true,
+            json: async () => ({ code: -26, message: '[-26]258: txn-mempool-conflict' }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({ code: 0, data: tx.id }),
+        };
+      }
+
+      throw new Error(`Unexpected fetch URL: ${value}`);
+    }, async () => {
+      await assert.rejects(
+        () => executeTransfer(mvcChainAdapter, {
+          mnemonic: FIXTURE_MNEMONIC,
+          path: FIXTURE_PATH,
+          toAddress: recipientAddress,
+          amountSatoshis: 10_000,
+          feeRate: 1,
+        }),
+        /txn-mempool-conflict/
+      );
+
+      await executeTransfer(mvcChainAdapter, {
+        mnemonic: FIXTURE_MNEMONIC,
+        path: FIXTURE_PATH,
+        toAddress: recipientAddress,
+        amountSatoshis: 10_000,
+        feeRate: 1,
+      });
+    });
+
+    assert.equal(broadcasts.length, 2);
+    assert.equal(inputReferencesTxid(broadcasts[0].inputs[0], staleTxid), true);
+    assert.equal(inputReferencesTxid(broadcasts[1].inputs[0], staleTxid), false);
+    assert.equal(inputReferencesTxid(broadcasts[1].inputs[0], freshTxid), true);
   } finally {
     __clearPendingMvcSpentOutpointsForTests?.();
   }

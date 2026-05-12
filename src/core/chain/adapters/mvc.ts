@@ -54,6 +54,17 @@ function normalizeOutpointTxid(value: string): string {
   return normalizeText(value).toLowerCase();
 }
 
+function isStaleMvcFundingError(value: unknown): boolean {
+  const normalized = normalizeText(value).toLowerCase();
+  return (
+    normalized.includes('txn-mempool-conflict')
+    || normalized.includes('missingorspent')
+    || normalized.includes('inputs missing/spent')
+    || normalized.includes('inputs missing or spent')
+    || normalized.includes('missing inputs')
+  );
+}
+
 function buildOutpointKey(address: string, txId: string, outputIndex: number): string {
   return [normalizeText(address), normalizeOutpointTxid(txId), String(outputIndex)].join(':');
 }
@@ -326,7 +337,18 @@ export const mvcChainAdapter: ChainAdapter = {
       body: JSON.stringify({ chain: 'mvc', net: NET, rawTx }),
     });
     const json = await response.json() as { code?: number; message?: string; data?: string };
-    if (json?.code !== 0) throw new Error(json?.message || 'Broadcast failed');
+    if (json?.code !== 0) {
+      const tracker = deferredTrackers.get(rawTx);
+      if (tracker && isStaleMvcFundingError(json?.message)) {
+        rememberPendingTransaction({
+          address: tracker.address,
+          spentUtxos: tracker.spentUtxos,
+          createdUtxos: [],
+        });
+        deferredTrackers.delete(rawTx);
+      }
+      throw new Error(json?.message || 'Broadcast failed');
+    }
     const txid = json.data ?? '';
 
     // Complete deferred pending UTXO tracking
