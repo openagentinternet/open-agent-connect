@@ -6,128 +6,414 @@
     <title>__PAGE_TITLE__</title>
     <link rel="stylesheet" href="/ui/shared.css" />
     <style>
-      .provider-console { display: grid; gap: 18px; }
-      .console-card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 20px;
+      .my-services-shell {
+        display: grid;
+        gap: 16px;
       }
-      .console-grid {
+      .my-services-toolbar {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--border);
+      }
+      .my-services-toolbar h1 {
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0;
+      }
+      .my-services-toolbar p,
+      .ledger-section-header span {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .my-services-toolbar-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .my-services-notice {
         display: grid;
         grid-template-columns: minmax(0, 1fr);
-        gap: 18px;
+        gap: 8px;
+        border: 1px solid var(--border2);
+        border-radius: 8px;
+        padding: 12px;
+        background: var(--surface);
       }
-      .presence-toggle-row {
+      .my-services-notice[data-tone="success"] {
+        border-color: rgba(34,197,94,.34);
+        background: var(--green-dim);
+      }
+      .my-services-notice[data-tone="error"] {
+        border-color: rgba(239,68,68,.34);
+        background: var(--red-dim);
+      }
+      .my-services-notice strong {
+        font-size: 13px;
+      }
+      .my-services-notice p {
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .notice-tx {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .notice-tx code,
+      .my-services-notice code,
+      .mono-text {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--dim);
+        overflow-wrap: anywhere;
+      }
+      .my-services-workspace {
+        display: grid;
+        grid-template-columns: minmax(360px, 1.05fr) minmax(360px, .95fr);
+        gap: 16px;
+        align-items: start;
+      }
+      .my-services-list-panel,
+      .my-services-detail-panel {
+        min-width: 0;
+      }
+      .ledger-section-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        margin-bottom: 16px;
+        margin-bottom: 10px;
       }
-      .presence-header {
+      .ledger-section-header h2 {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text);
+        text-transform: uppercase;
+      }
+      .my-services-list,
+      .my-service-orders {
+        display: grid;
+        gap: 10px;
+      }
+      .service-row,
+      .order-row,
+      .my-service-detail-summary,
+      .ledger-empty {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+      .service-row {
+        display: grid;
+        grid-template-columns: 58px minmax(0, 1fr) auto;
+        gap: 12px;
+        padding: 12px;
+      }
+      .service-row[data-selected="true"] {
+        border-color: rgba(99,102,241,.5);
+        background: rgba(99,102,241,.08);
+      }
+      .service-cover,
+      .edit-cover-preview {
+        width: 58px;
+        height: 58px;
+        border-radius: 8px;
+        border: 1px solid var(--border2);
+        background: var(--surface2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        flex: 0 0 auto;
+      }
+      .service-cover img,
+      .edit-cover-preview img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .service-cover span,
+      .edit-cover-preview span {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .service-main {
+        min-width: 0;
+        display: grid;
+        gap: 7px;
+      }
+      .service-title-line {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .service-title-line h3,
+      .detail-heading h3 {
+        font-size: 14px;
+        font-weight: 600;
+        min-width: 0;
+      }
+      .service-title-line span {
+        font-family: var(--mono);
+        color: var(--green);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .service-main p,
+      .detail-heading p,
+      .ledger-empty p,
+      .modal-heading p {
+        color: var(--muted);
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+      .service-meta {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .service-meta span,
+      .service-metric {
+        border: 1px solid var(--border2);
+        border-radius: 6px;
+        padding: 3px 7px;
+        background: var(--surface2);
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--muted);
+      }
+      .service-metrics {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(72px, 1fr));
+        gap: 6px;
+      }
+      .service-metric {
+        display: grid;
+        gap: 2px;
+      }
+      .service-metric strong {
+        color: var(--text);
+        font-weight: 500;
+        overflow-wrap: anywhere;
+      }
+      .service-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: stretch;
+      }
+      .service-actions small {
+        max-width: 120px;
+        color: var(--amber);
+        font-family: var(--mono);
+        font-size: 10px;
+        overflow-wrap: anywhere;
+      }
+      .my-service-detail-summary {
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+        margin-bottom: 10px;
+      }
+      .detail-heading {
         display: flex;
         justify-content: space-between;
         align-items: start;
         gap: 12px;
-        margin-bottom: 16px;
       }
-      .presence-eyebrow {
-        font-size: 11px;
-        font-family: var(--mono);
-        text-transform: uppercase;
-        letter-spacing: .06em;
+      .detail-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      .detail-fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .detail-fields div {
+        border-top: 1px solid var(--border);
+        padding-top: 8px;
+        min-width: 0;
+      }
+      .detail-fields dt,
+      .order-row span,
+      .edit-form-grid label span,
+      .edit-cover-field > span {
+        display: block;
+        margin-bottom: 4px;
         color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10px;
+        text-transform: uppercase;
+      }
+      .detail-fields dd {
+        margin: 0;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--dim);
+        overflow-wrap: anywhere;
+      }
+      .order-row {
+        display: grid;
+        grid-template-columns: minmax(120px, .8fr) minmax(160px, 1fr) minmax(120px, .8fr) minmax(160px, 1fr) auto;
+        gap: 12px;
+        padding: 12px;
+        align-items: start;
+      }
+      .order-row strong {
+        font-size: 13px;
+      }
+      .order-row p {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+      .ledger-empty {
+        padding: 18px;
+      }
+      .ledger-empty strong {
+        display: block;
         margin-bottom: 4px;
       }
-      .presence-toggle {
-        font-size: 12px;
-        font-family: var(--mono);
-        padding: 6px 14px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--accent);
-        background: var(--accent);
-        color: #fff;
-        cursor: pointer;
-        transition: background .15s;
-        white-space: nowrap;
-      }
-      .presence-toggle:hover { background: #5254cc; }
-      .presence-rows { display: grid; gap: 0; }
-      .presence-row {
-        display: grid;
-        grid-template-columns: 140px minmax(0, 1fr);
-        gap: 12px;
-        padding-top: 10px;
-        border-top: 1px solid var(--border);
-      }
-      .presence-row dt { font-size: 11px; font-family: var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-      .presence-row dd { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
-      .section-header {
+      .my-services-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 30;
         display: flex;
         align-items: center;
-        gap: 10px;
-        margin-bottom: 14px;
+        justify-content: center;
+        padding: 20px;
+        background: rgba(13,15,18,.72);
+        backdrop-filter: blur(8px);
       }
-      .section-header h2 { font-size: 13px; font-family: var(--mono); font-weight: 500; flex: 1; }
-      .section-count {
-        font-size: 11px;
-        font-family: var(--mono);
-        padding: 2px 8px;
-        border-radius: 4px;
-        background: var(--accent-dim);
-        color: var(--accent);
+      .my-services-modal-dialog {
+        width: min(720px, 100%);
+        max-height: min(760px, calc(100vh - 40px));
+        overflow: auto;
+        border: 1px solid var(--border2);
+        border-radius: 8px;
+        background: var(--surface);
+        padding: 18px;
+        box-shadow: 0 22px 60px rgba(0,0,0,.38);
       }
-      .console-table { width: 100%; border-collapse: collapse; }
-      .table-wrap { overflow-x: auto; }
-      .console-table th {
-        font-size: 11px;
-        font-family: var(--mono);
-        color: var(--muted);
-        text-transform: uppercase;
-        letter-spacing: .06em;
-        padding: 8px 12px;
-        text-align: left;
-        background: var(--surface2);
-        border-bottom: 1px solid var(--border);
+      .revoke-dialog {
+        width: min(460px, 100%);
       }
-      .console-table td {
-        padding: 11px 12px;
-        border-bottom: 1px solid var(--border);
-        font-size: 12px;
-        vertical-align: top;
-      }
-      .console-table tbody tr:last-child td { border-bottom: none; }
-      .console-table tbody tr:hover { background: var(--surface2); }
-      .mono-cell, .mono-text { font-family: var(--mono); font-size: 11px; color: var(--dim); overflow-wrap: anywhere; }
-      .refund-cell { min-width: 180px; color: var(--dim); font-size: 11px; }
-      .refund-cell span {
-        display: block;
-        margin-bottom: 2px;
-        color: var(--muted);
-        font-family: var(--mono);
-        text-transform: uppercase;
-        letter-spacing: .06em;
-      }
-      .refund-cell p { margin: 0 0 6px; }
-      .flag-text { margin-top: 4px; color: var(--amber); font-size: 11px; font-family: var(--mono); }
-      .console-empty { color: var(--muted); font-size: 12px; font-family: var(--mono); }
-      .console-empty-cell { text-align: center; color: var(--muted); font-size: 12px; font-family: var(--mono); padding: 24px !important; }
-      .manual-actions { display: grid; gap: 12px; }
-      .manual-action-item {
+      .modal-heading {
         display: flex;
+        align-items: start;
         justify-content: space-between;
         gap: 16px;
-        padding: 14px 0 0;
-        border-top: 1px solid var(--border);
+        margin-bottom: 16px;
       }
-      .manual-action-item p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
-      .manual-action-links { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; flex-shrink: 0; }
-      .manual-action-links a { color: var(--accent); text-decoration: none; font-size: 12px; font-family: var(--mono); }
-      .manual-action-links a:hover { text-decoration: underline; }
-      @media (max-width: 980px) {
-        .manual-action-item { flex-direction: column; }
-        .manual-action-links { align-items: flex-start; }
+      .modal-heading h2 {
+        font-size: 15px;
+      }
+      .modal-close {
+        border: 1px solid var(--border2);
+        border-radius: 6px;
+        background: var(--surface2);
+        color: var(--muted);
+        width: 28px;
+        height: 28px;
+        cursor: pointer;
+      }
+      .edit-form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .wide-field {
+        grid-column: span 2;
+      }
+      .edit-form-grid input,
+      .edit-form-grid select,
+      .edit-form-grid textarea {
+        width: 100%;
+        border: 1px solid var(--border2);
+        border-radius: 6px;
+        background: var(--surface2);
+        color: var(--text);
+        padding: 9px 10px;
+        font-family: var(--sans);
+        font-size: 13px;
+      }
+      .edit-form-grid textarea {
+        resize: vertical;
+      }
+      .edit-cover-row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      .edit-cover-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .edit-cover-controls input[type="file"] {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .edit-cover-controls p {
+        width: 100%;
+        color: var(--dim);
+        font-size: 11px;
+      }
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 16px;
+      }
+      @media (max-width: 1060px) {
+        .my-services-workspace {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      @media (max-width: 720px) {
+        .content { padding: 16px; }
+        .my-services-toolbar,
+        .detail-heading,
+        .edit-cover-row {
+          align-items: stretch;
+          flex-direction: column;
+        }
+        .service-row {
+          grid-template-columns: 48px minmax(0, 1fr);
+        }
+        .service-actions {
+          grid-column: 1 / -1;
+          flex-direction: row;
+          flex-wrap: wrap;
+        }
+        .service-metrics,
+        .detail-fields,
+        .edit-form-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .wide-field {
+          grid-column: auto;
+        }
+        .order-row {
+          grid-template-columns: minmax(0, 1fr);
+        }
       }
     </style>
   </head>

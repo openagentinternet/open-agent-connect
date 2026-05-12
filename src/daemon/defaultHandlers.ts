@@ -4919,9 +4919,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const price = normalizeText(rawInput.price);
     const currency = normalizeText(rawInput.currency);
     const outputType = normalizeText(rawInput.outputType);
-    const serviceIconUri = normalizeText(rawInput.serviceIconUri)
-      || normalizeText(currentService?.serviceIcon)
-      || null;
+    const serviceIconUri = rawInput.removeServiceIcon === true
+      ? null
+      : normalizeText(rawInput.serviceIconUri)
+        || normalizeText(currentService?.serviceIcon)
+        || null;
     const serviceIconDataUrl = normalizeText(rawInput.serviceIconDataUrl) || null;
 
     if (!serviceName || !displayName || !description || !providerSkill || !price || !currency || !outputType) {
