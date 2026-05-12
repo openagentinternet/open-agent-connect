@@ -140,6 +140,12 @@
         min-width: 0;
         flex: 1;
       }
+      .metabot-item-name-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
       .metabot-item-name {
         font-size: 13px;
         font-weight: 500;
@@ -147,6 +153,17 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      .metabot-llm-unavailable {
+        flex-shrink: 0;
+        color: var(--red);
+        background: var(--red-dim);
+        border: 1px solid rgba(239,68,68,.28);
+        border-radius: var(--radius-sm);
+        padding: 1px 5px;
+        font-family: var(--mono);
+        font-size: 10px;
+        line-height: 1.4;
       }
       .metabot-item-id-row {
         display: flex;

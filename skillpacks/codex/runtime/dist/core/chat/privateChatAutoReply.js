@@ -18,10 +18,10 @@ function getCooldownDelayMs(turnCount) {
     if (turnCount <= 5)
         return 0;
     if (turnCount <= 10)
-        return 10_000;
+        return 5_000;
     if (turnCount <= 20)
-        return 30_000;
-    return 60_000;
+        return 10_000;
+    return 15_000;
 }
 function sleep(ms) {
     if (ms <= 0)
@@ -152,8 +152,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 return;
             const conversationId = buildConversationId(selfGlobalMetaId, peerGlobalMetaId);
             const inboundTimestamp = message.timestamp || now;
-            const simplemsgClassification = (0, simplemsgClassifier_1.classifySimplemsgContent)(message.content);
-            // Step 1: Store the inbound message.
+            // ---- Shared: conversation lifecycle & message storage ----
             let conversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId);
             if (!conversation || conversation.state === 'closed') {
                 conversation = {
@@ -184,6 +183,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     turnCount: 0,
                 };
             }
+            const simplemsgClassification = (0, simplemsgClassifier_1.classifySimplemsgContent)(message.content);
             const inboundMessageRecord = {
                 conversationId: conversation.conversationId,
                 messageId: message.messagePinId || buildMessageId(now),
@@ -197,11 +197,9 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             await deps.stateStore.appendMessages([inboundMessageRecord]);
             conversation = {
                 ...conversation,
-                turnCount: conversation.turnCount + 1,
                 lastDirection: 'inbound',
                 updatedAt: now,
             };
-            await deps.stateStore.upsertConversation(conversation);
             await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
                 paths: deps.paths,
                 local: {
@@ -220,27 +218,35 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     raw: message.rawMessage,
                 },
             });
+            // ---- Order-protocol path: record-only, no turn counting, no reply ----
             if (simplemsgClassification.kind === 'order_protocol') {
+                await deps.stateStore.upsertConversation(conversation);
                 return;
             }
-            // Step 2: Check for the natural-language closing signal from peer.
+            // ---- Private-chat path: turn counting, cooldown, reply runner ----
+            conversation = {
+                ...conversation,
+                turnCount: conversation.turnCount + 1,
+            };
+            await deps.stateStore.upsertConversation(conversation);
+            // Check for the natural-language closing signal from peer.
             if (hasFinalByeLine(message.content)) {
                 conversation = { ...conversation, state: 'closed', updatedAt: now };
                 await deps.stateStore.upsertConversation(conversation);
                 return;
             }
-            // Step 3: Check auto-reply eligibility.
+            // Check auto-reply eligibility.
             if (conversation.state !== 'active')
                 return;
             if (!checkRateLimit(rateLimiter, now))
                 return;
             const maxTurns = strategy?.maxTurns ?? DEFAULT_MAX_TURNS;
-            // Step 4: Apply cooldown delay.
+            // Apply cooldown delay.
             const cooldownMs = getCooldownDelayMs(conversation.turnCount);
             if (cooldownMs > 0) {
                 await sleep(cooldownMs);
             }
-            // Step 5: Check hard turn limit.
+            // Check hard turn limit.
             if (conversation.turnCount >= maxTurns) {
                 const closingContent = ensureFinalByeLine('It was great chatting with you. Let us continue another time.');
                 const closingReply = await sendReplyMessage(selfGlobalMetaId, peerGlobalMetaId, closingContent, null);
@@ -285,7 +291,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 await deps.stateStore.upsertConversation(conversation);
                 return;
             }
-            // Step 6: Build context and call reply runner.
+            // Build context and call reply runner.
             const persona = await (0, chatPersonaLoader_1.loadChatPersona)(deps.paths);
             const recentMessages = await deps.stateStore.getRecentMessages(conversation.conversationId, DEFAULT_RECENT_MESSAGES_LIMIT);
             let runnerResult;
@@ -301,7 +307,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             catch {
                 return;
             }
-            // Step 7: Process runner result.
+            // Process runner result.
             if (runnerResult.state === 'skip')
                 return;
             let replyContent = normalizeText(runnerResult.content);
@@ -314,7 +320,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 : runnerResult.extensions ?? null;
             if (!replyContent)
                 return;
-            // Step 8: Send reply.
+            // Send reply.
             const outboundReply = await sendReplyMessage(selfGlobalMetaId, peerGlobalMetaId, replyContent, replyExtensions);
             const outboundPinId = outboundReply?.pinId ?? null;
             const outboundRecord = {

@@ -30,6 +30,8 @@ function shortId(v){v=String(v||'');if(!v)return'-';return v.length>18?v.slice(0
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
 function selectedProfile(){return state.profiles.find(function(p){return p.slug===state.selectedSlug})||null}
 function availableRuntimes(){return state.runtimes.filter(function(r){return (r.health==='healthy'||r.health==='degraded')&&r.provider})}
+function providerHasAvailableRuntime(provider){return availableRuntimes().some(function(r){return r.provider===provider})}
+function profileLlmUnavailable(profile){return !profile||!profile.primaryProvider||!providerHasAvailableRuntime(profile.primaryProvider)}
 function providerDisplayName(provider){var rt=availableRuntimes().find(function(r){return r.provider===provider});return rt?runtimeLabel(rt):(provider||'No provider')}
 function providerRuntime(provider){return state.runtimes.find(function(r){return r.provider===provider})||null}
 function providerLogoPath(provider){var rt=providerRuntime(provider);return rt&&rt.logoPath?rt.logoPath:'/ui/assets/platforms/generic.svg'}
@@ -114,9 +116,10 @@ function renderMetabotList(){
   if(!state.profiles.length){list.innerHTML='<div class="session-empty"><p>No MetaBots yet</p></div>';return}
   list.innerHTML=state.profiles.map(function(p){
     var selected=p.slug===state.selectedSlug?' selected':'';
+    var llmBadge=profileLlmUnavailable(p)?'<span class="metabot-llm-unavailable">[LLM 不可用]</span>':'';
     return'<div class="metabot-item'+selected+'" role="button" tabindex="0" data-slug="'+esc(p.slug)+'">'+
       '<div class="metabot-avatar">'+avatarMarkup(p,false)+'</div>'+
-      '<div class="metabot-item-info"><div class="metabot-item-name">'+esc(p.name||p.slug)+'</div>'+
+      '<div class="metabot-item-info"><div class="metabot-item-name-row"><div class="metabot-item-name">'+esc(p.name||p.slug)+'</div>'+llmBadge+'</div>'+
       '<div class="metabot-item-id-row"><span class="metabot-item-id">'+esc(shortId(p.globalMetaId||p.slug))+'</span>'+
       '<button class="icon-btn" data-act="copy-gmid" data-value="'+esc(p.globalMetaId||'')+'" title="Copy GlobalMetaID" aria-label="Copy GlobalMetaID">⧉</button></div></div></div>'
   }).join('');
@@ -443,7 +446,7 @@ function switchTab(tab,silent){
 
 function loadStats(){return api('/api/bot/stats').then(function(r){state.stats=r.data||{};renderStats()}).catch(function(){renderStats()})}
 function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];if(!state.selectedSlug&&state.profiles.length)state.selectedSlug=state.profiles[0].slug;if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))state.selectedSlug=state.profiles[0]&&state.profiles[0].slug||'';state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
-function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];renderCurrentTab();renderStats()}).catch(function(){state.runtimes=[];renderCurrentTab();renderStats()})}
+function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];renderMetabotList();renderCurrentTab();renderStats()}).catch(function(){state.runtimes=[];renderMetabotList();renderCurrentTab();renderStats()})}
 function loadSessions(slug){var activeSlug=slug||state.selectedSlug;if(!activeSlug){state.sessions=[];renderHistoryTab();renderStats();return Promise.resolve()}return api('/api/bot/sessions?slug='+encodeURIComponent(activeSlug)+'&limit=50').then(function(r){if(activeSlug!==state.selectedSlug)return;state.sessions=(r.data&&r.data.sessions)||[];renderHistoryTab();renderStats()}).catch(function(){if(activeSlug!==state.selectedSlug)return;state.sessions=[];renderHistoryTab();renderStats()})}
 function loadSelectedProfileConfig(force){
   var slug=state.selectedSlug;
@@ -494,7 +497,7 @@ function createMetabot(){
   if(!name){if(status){status.textContent='Name is required';status.className='save-status error'}return}
   if(status){status.textContent='Creating...';status.className='save-status saving'}
   if(btn)btn.disabled=true;
-  return api('/api/bot/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:name})}).then(function(r){
+  return api('/api/bot/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:name,creationSource:'ui'})}).then(function(r){
     closeAddModal();
     var profile=r.data&&r.data.profile||{};
     state.selectedSlug=profile.slug||state.selectedSlug;

@@ -5,6 +5,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.readTextFile = readTextFile;
 exports.validateAvatarDataUrl = validateAvatarDataUrl;
+exports.selectRuntimeForProvider = selectRuntimeForProvider;
+exports.selectDefaultMetabotProviders = selectDefaultMetabotProviders;
 exports.listMetabotProfiles = listMetabotProfiles;
 exports.getMetabotProfile = getMetabotProfile;
 exports.createMetabotProfile = createMetabotProfile;
@@ -121,13 +123,77 @@ function validateProvider(value) {
     }
     return normalized;
 }
+function runtimeHealthRank(runtime) {
+    if (runtime.health === 'healthy')
+        return 2;
+    if (runtime.health === 'degraded')
+        return 1;
+    return 0;
+}
+function runtimeActivityMs(runtime) {
+    return Math.max(Date.parse(runtime.lastSeenAt) || 0, Date.parse(runtime.updatedAt) || 0, Date.parse(runtime.createdAt) || 0);
+}
+function compareRuntimePreference(left, right) {
+    const healthDelta = runtimeHealthRank(right) - runtimeHealthRank(left);
+    if (healthDelta !== 0)
+        return healthDelta;
+    const activityDelta = runtimeActivityMs(right) - runtimeActivityMs(left);
+    if (activityDelta !== 0)
+        return activityDelta;
+    return left.id.localeCompare(right.id);
+}
+function compareRuntimeActivityPreference(left, right) {
+    const activityDelta = runtimeActivityMs(right) - runtimeActivityMs(left);
+    if (activityDelta !== 0)
+        return activityDelta;
+    const healthDelta = runtimeHealthRank(right) - runtimeHealthRank(left);
+    if (healthDelta !== 0)
+        return healthDelta;
+    return left.id.localeCompare(right.id);
+}
+function isDefaultSelectableRuntime(runtime) {
+    return runtime.provider !== 'custom' && runtime.health !== 'unavailable';
+}
 function selectRuntimeForProvider(runtimes, provider) {
-    const candidates = runtimes.filter((runtime) => (runtime.provider === provider && runtime.health !== 'unavailable'));
-    const runtime = candidates.find((entry) => entry.health === 'healthy') ?? candidates[0];
+    const candidates = runtimes.filter((runtime) => (runtime.provider === provider && runtime.health !== 'unavailable')).sort(compareRuntimePreference);
+    const runtime = candidates[0];
     if (!runtime) {
         throw new Error(`No available runtime found for provider: ${provider}`);
     }
     return runtime;
+}
+function selectDefaultMetabotProviders(input) {
+    const availableRuntimes = input.runtimes
+        .filter(isDefaultSelectableRuntime)
+        .sort(compareRuntimeActivityPreference);
+    const availableProviderRows = availableRuntimes.filter((runtime, index, rows) => (rows.findIndex((candidate) => candidate.provider === runtime.provider) === index));
+    const availableProviders = new Set(availableProviderRows.map((runtime) => runtime.provider));
+    const preferredProvider = input.preferredProvider && input.preferredProvider !== 'custom'
+        ? input.preferredProvider
+        : null;
+    let primaryProvider = input.primaryProvider;
+    if (primaryProvider === undefined) {
+        primaryProvider = preferredProvider && availableProviders.has(preferredProvider)
+            ? preferredProvider
+            : availableProviderRows[0]?.provider;
+    }
+    let fallbackProvider = input.fallbackProvider;
+    if (fallbackProvider === undefined) {
+        fallbackProvider = availableProviderRows.find((runtime) => runtime.provider !== primaryProvider)?.provider;
+    }
+    return {
+        primaryProvider,
+        fallbackProvider,
+    };
+}
+async function resolveCreateProviderSelection(input) {
+    const runtimeState = await (0, llmRuntimeStore_1.createLlmRuntimeStore)((0, paths_1.resolveMetabotPaths)(input.homeDir)).read();
+    return selectDefaultMetabotProviders({
+        runtimes: runtimeState.runtimes,
+        preferredProvider: input.preferredProvider,
+        primaryProvider: input.primaryProvider,
+        fallbackProvider: input.fallbackProvider,
+    });
 }
 function buildBindingId(slug, runtimeId, role) {
     const safeRuntime = runtimeId.replace(/[^a-zA-Z0-9._-]+/g, '_');
@@ -236,6 +302,13 @@ async function createMetabotProfile(systemHomeDir, input) {
     if (resolvedHome.status !== 'resolved') {
         throw new Error(resolvedHome.message);
     }
+    const primaryProvider = input.primaryProvider === undefined ? undefined : validateProvider(input.primaryProvider);
+    const fallbackProvider = input.fallbackProvider === undefined ? undefined : validateProvider(input.fallbackProvider);
+    const providerSelection = await resolveCreateProviderSelection({
+        homeDir: resolvedHome.homeDir,
+        primaryProvider,
+        fallbackProvider,
+    });
     await (0, profileWorkspace_1.ensureProfileWorkspace)({
         homeDir: resolvedHome.homeDir,
         name,
@@ -254,6 +327,15 @@ async function createMetabotProfile(systemHomeDir, input) {
         name,
         homeDir: resolvedHome.homeDir,
     });
+    const fullProfile = await buildMetabotProfileFull(profile);
+    const writeProviderBindings = await buildProviderBindingWrite({
+        profile: fullProfile,
+        primaryProvider: providerSelection.primaryProvider,
+        fallbackProvider: providerSelection.fallbackProvider,
+    });
+    if (writeProviderBindings) {
+        await writeProviderBindings();
+    }
     return buildMetabotProfileFull(profile);
 }
 function buildMetabotProfileDraftFromIdentity(input) {
@@ -293,7 +375,16 @@ function buildMetabotProfileDraftFromIdentity(input) {
     };
 }
 async function createMetabotProfileFromIdentity(systemHomeDir, input) {
-    const draft = buildMetabotProfileDraftFromIdentity(input);
+    const providerSelection = await resolveCreateProviderSelection({
+        homeDir: input.homeDir,
+        primaryProvider: input.primaryProvider === undefined ? undefined : validateProvider(input.primaryProvider),
+        fallbackProvider: input.fallbackProvider === undefined ? undefined : validateProvider(input.fallbackProvider),
+    });
+    const draft = buildMetabotProfileDraftFromIdentity({
+        ...input,
+        primaryProvider: providerSelection.primaryProvider,
+        fallbackProvider: providerSelection.fallbackProvider,
+    });
     await (0, profileWorkspace_1.ensureProfileWorkspace)({
         homeDir: draft.homeDir,
         name: draft.name,
@@ -317,8 +408,8 @@ async function createMetabotProfileFromIdentity(systemHomeDir, input) {
     const fullProfile = await buildMetabotProfileFull(profile);
     const writeProviderBindings = await buildProviderBindingWrite({
         profile: fullProfile,
-        primaryProvider: input.primaryProvider === undefined ? undefined : draft.primaryProvider ?? null,
-        fallbackProvider: input.fallbackProvider === undefined ? undefined : draft.fallbackProvider ?? null,
+        primaryProvider: draft.primaryProvider,
+        fallbackProvider: draft.fallbackProvider,
     });
     if (writeProviderBindings) {
         await writeProviderBindings();

@@ -245,6 +245,43 @@ function buildMetabotCreateInput(input) {
     }
     return createInput;
 }
+function normalizePreferredCreateProvider(value) {
+    const provider = normalizeText(value);
+    if (!provider || provider === 'custom' || !(0, llmTypes_1.isLlmProvider)(provider)) {
+        return null;
+    }
+    return provider;
+}
+function resolveMetabotCreatePreferredProvider(input) {
+    if (normalizeText(input.creationSource).toLowerCase() === 'ui') {
+        return null;
+    }
+    return normalizePreferredCreateProvider(input.host)
+        ?? normalizePreferredCreateProvider(process.env.METABOT_HOST)
+        ?? normalizePreferredCreateProvider(process.env.OAC_HOST);
+}
+async function applyDefaultMetabotCreateProviders(input) {
+    const runtimeState = await (0, llmRuntimeStore_1.createLlmRuntimeStore)((0, paths_1.resolveMetabotPaths)(input.homeDir)).read();
+    const defaults = (0, metabotProfileManager_1.selectDefaultMetabotProviders)({
+        runtimes: runtimeState.runtimes,
+        preferredProvider: input.preferredProvider,
+        primaryProvider: input.createInput.primaryProvider,
+        fallbackProvider: input.createInput.fallbackProvider,
+    });
+    return {
+        ...input.createInput,
+        ...(input.createInput.primaryProvider === undefined && defaults.primaryProvider !== undefined
+            ? { primaryProvider: defaults.primaryProvider }
+            : {}),
+        ...(input.createInput.fallbackProvider === undefined && defaults.fallbackProvider !== undefined
+            ? { fallbackProvider: defaults.fallbackProvider }
+            : {}),
+    };
+}
+function buildDefaultBindingId(slug, runtimeId, role) {
+    const safeRuntime = runtimeId.replace(/[^a-zA-Z0-9._-]+/g, '_');
+    return `lb_${slug}_${safeRuntime}_${role}`;
+}
 function calculateMetabotChangedFields(current, update) {
     const changedFields = [];
     if (update.name !== undefined && update.name !== current.name)
@@ -6686,26 +6723,40 @@ function createDefaultMetabotDaemonHandlers(input) {
                 if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
                     await registerActiveIdentityProfile(nextState.identity);
                     await ensureDefaultPersonaFiles(runtimeStateStore.paths, normalizedName);
-                    // Auto-bind to LLM runtime if host is specified or detectable.
                     try {
-                        const resolvedHost = normalizeText(host) || normalizeText(process.env.METABOT_HOST || '') || '';
-                        if (resolvedHost && ['claude-code', 'codex', 'openclaw'].includes(resolvedHost)) {
+                        const preferredProvider = normalizePreferredCreateProvider(host)
+                            ?? normalizePreferredCreateProvider(process.env.METABOT_HOST)
+                            ?? normalizePreferredCreateProvider(process.env.OAC_HOST);
+                        const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
+                        if (preferredProvider) {
                             const discoveryResult = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: process.env });
-                            const matchedRuntime = discoveryResult.runtimes.find((r) => r.provider === resolvedHost);
-                            if (matchedRuntime) {
-                                const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
-                                await runtimeStore.upsertRuntime(matchedRuntime);
-                                const resolvedSlug = node_path_1.default.basename(input.homeDir);
-                                const bindingStore = (0, llmBindingStore_1.createLlmBindingStore)(input.homeDir);
+                            for (const runtime of discoveryResult.runtimes) {
+                                await runtimeStore.upsertRuntime(runtime);
+                            }
+                        }
+                        const runtimeState = await runtimeStore.read();
+                        const defaults = (0, metabotProfileManager_1.selectDefaultMetabotProviders)({
+                            runtimes: runtimeState.runtimes,
+                            preferredProvider,
+                        });
+                        const resolvedSlug = node_path_1.default.basename(input.homeDir);
+                        const bindingStore = (0, llmBindingStore_1.createLlmBindingStore)(input.homeDir);
+                        const now = new Date().toISOString();
+                        for (const entry of [
+                            { role: 'primary', provider: defaults.primaryProvider },
+                            { role: 'fallback', provider: defaults.fallbackProvider },
+                        ]) {
+                            if (entry.provider) {
+                                const matchedRuntime = (0, metabotProfileManager_1.selectRuntimeForProvider)(runtimeState.runtimes, entry.provider);
                                 await bindingStore.upsertBinding({
-                                    id: `lb_${resolvedSlug}_${matchedRuntime.id}_primary`,
+                                    id: buildDefaultBindingId(resolvedSlug, matchedRuntime.id, entry.role),
                                     metaBotSlug: resolvedSlug,
                                     llmRuntimeId: matchedRuntime.id,
-                                    role: 'primary',
+                                    role: entry.role,
                                     priority: 0,
                                     enabled: true,
-                                    createdAt: new Date().toISOString(),
-                                    updatedAt: new Date().toISOString(),
+                                    createdAt: now,
+                                    updatedAt: now,
                                 });
                             }
                         }
@@ -10198,6 +10249,11 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('name_taken', resolvedHome.message);
                 }
                 const profileHomeDir = resolvedHome.homeDir;
+                createInput = await applyDefaultMetabotCreateProviders({
+                    createInput,
+                    homeDir: profileHomeDir,
+                    preferredProvider: resolveMetabotCreatePreferredProvider(body),
+                });
                 const profileRuntimeStateStore = (0, runtimeStateStore_1.createRuntimeStateStore)(profileHomeDir);
                 const profileSecretStore = (0, fileSecretStore_1.createFileSecretStore)(profileHomeDir);
                 const profileSigner = createSignerForProfileHome(profileHomeDir);

@@ -35,4 +35,4 @@ If you already have a bundled CLI entry, set `METABOT_CLI_ENTRY` directly.
 - Compatibility manifest: `release/compatibility.json`
 - Bundled compatibility copy: `runtime/compatibility.json`
 - Bundled CLI entry: `runtime/dist/cli/main.js`
-- Package version: `0.2.10`
+- Package version: `0.2.11`

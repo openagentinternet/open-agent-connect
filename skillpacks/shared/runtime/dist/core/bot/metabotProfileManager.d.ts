@@ -1,5 +1,5 @@
 import type { IdentityProfileRecord } from '../identity/identityProfiles';
-import type { LlmProvider } from '../llm/llmTypes';
+import type { LlmProvider, LlmRuntime } from '../llm/llmTypes';
 import type { ChainWriteResult } from '../chain/writePin';
 import type { Signer } from '../signing/signer';
 export interface MetabotProfileFull extends IdentityProfileRecord {
@@ -58,6 +58,16 @@ export declare function readTextFile(filePath: string): Promise<string>;
 export declare function validateAvatarDataUrl(dataUrl: string, maxBytes?: number): {
     valid: boolean;
     error?: string;
+};
+export declare function selectRuntimeForProvider(runtimes: LlmRuntime[], provider: LlmProvider): LlmRuntime;
+export declare function selectDefaultMetabotProviders(input: {
+    runtimes: LlmRuntime[];
+    preferredProvider?: LlmProvider | null;
+    primaryProvider?: LlmProvider | null;
+    fallbackProvider?: LlmProvider | null;
+}): {
+    primaryProvider?: LlmProvider | null;
+    fallbackProvider?: LlmProvider | null;
 };
 export declare function listMetabotProfiles(systemHomeDir: string): Promise<MetabotProfileFull[]>;
 export declare function getMetabotProfile(systemHomeDir: string, slug: string): Promise<MetabotProfileFull | null>;
