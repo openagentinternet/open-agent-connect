@@ -193,6 +193,59 @@ test('bot page renders provider pickers with icons and only exposes none for fal
   assert.doesNotMatch(fallbackPicker, /data-provider-icon="openclaw"/);
 });
 
+test('bot page marks profiles whose primary LLM is unavailable in the list', () => {
+  const list = {
+    innerHTML: '',
+  };
+  const count = {
+    textContent: '',
+  };
+  const context = {
+    document: {
+      querySelector: (selector) => {
+        if (selector === '[data-metabot-list]') return list;
+        if (selector === '[data-metabot-count]') return count;
+        return null;
+      },
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.runtimes = [
+    {
+      id: 'runtime-codex',
+      provider: 'codex',
+      displayName: 'Codex',
+      health: 'unavailable',
+    },
+    {
+      id: 'runtime-claude',
+      provider: 'claude-code',
+      displayName: 'Claude Code',
+      health: 'healthy',
+    },
+  ];
+  context.state.profiles = [
+    {
+      slug: 'broken-bot',
+      name: 'Broken Bot',
+      primaryProvider: 'codex',
+    },
+    {
+      slug: 'healthy-bot',
+      name: 'Healthy Bot',
+      primaryProvider: 'claude-code',
+    },
+  ];
+
+  context.renderMetabotList();
+
+  assert.match(list.innerHTML, /Broken Bot[\s\S]*\[LLM 不可用\]/);
+  assert.doesNotMatch(list.innerHTML, /Healthy Bot[\s\S]*\[LLM 不可用\]/);
+});
+
 test('bot page create flow reports chained identity and txids in a success modal', async () => {
   const fields = {
     '[data-field="new-name"]': field('Fanny'),
@@ -238,7 +291,7 @@ test('bot page create flow reports chained identity and txids in a success modal
 
   await context.createMetabot();
 
-  assert.deepEqual(requestBody, { name: 'Fanny' });
+  assert.deepEqual(requestBody, { name: 'Fanny', creationSource: 'ui' });
   assert.equal(context.state.selectedSlug, 'fanny');
   assert.equal(success.title, 'MetaBot Created On-Chain');
   assert.equal(success.profile.globalMetaId, 'gm-fanny');

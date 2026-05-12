@@ -71,6 +71,91 @@ test('createMetabotProfile creates a profile workspace with editable persona def
   assert.deepEqual(profiles.map((profile) => profile.slug), ['alice-bot']);
 });
 
+test('createMetabotProfile defaults primary and fallback providers from recently active runtimes', async () => {
+  const systemHomeDir = await createSystemHome();
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'default-llm-bot');
+  await createLlmRuntimeStore(targetHomeDir).write({
+    version: 1,
+    runtimes: [
+      {
+        ...runtime('codex', 'runtime-codex'),
+        lastSeenAt: '2026-05-06T00:01:00.000Z',
+        updatedAt: '2026-05-06T00:01:00.000Z',
+      },
+      {
+        ...runtime('claude-code', 'runtime-claude'),
+        lastSeenAt: '2026-05-06T00:03:00.000Z',
+        updatedAt: '2026-05-06T00:03:00.000Z',
+      },
+      {
+        ...runtime('gemini', 'runtime-gemini', 'unavailable'),
+        lastSeenAt: '2026-05-06T00:05:00.000Z',
+        updatedAt: '2026-05-06T00:05:00.000Z',
+      },
+    ],
+  });
+
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Default LLM Bot' });
+  const bindings = JSON.parse(await readFile(resolveMetabotPaths(created.homeDir).llmBindingsPath, 'utf8')).bindings;
+
+  assert.equal(created.primaryProvider, 'claude-code');
+  assert.equal(created.fallbackProvider, 'codex');
+  assert.deepEqual(
+    bindings.map((binding) => [binding.role, binding.llmRuntimeId]).sort(),
+    [
+      ['fallback', 'runtime-codex'],
+      ['primary', 'runtime-claude'],
+    ],
+  );
+});
+
+test('createMetabotProfile leaves fallback empty when only one provider is available', async () => {
+  const systemHomeDir = await createSystemHome();
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'single-llm-bot');
+  await createLlmRuntimeStore(targetHomeDir).write({
+    version: 1,
+    runtimes: [
+      runtime('codex', 'runtime-codex'),
+      runtime('gemini', 'runtime-gemini', 'unavailable'),
+    ],
+  });
+
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Single LLM Bot' });
+
+  assert.equal(created.primaryProvider, 'codex');
+  assert.equal(created.fallbackProvider, null);
+});
+
+test('createMetabotProfile defaults by recent activity even when a newer runtime is degraded', async () => {
+  const systemHomeDir = await createSystemHome();
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'recent-degraded-bot');
+  await createLlmRuntimeStore(targetHomeDir).write({
+    version: 1,
+    runtimes: [
+      {
+        ...runtime('codex', 'runtime-codex', 'healthy'),
+        lastSeenAt: '2026-05-06T00:01:00.000Z',
+        updatedAt: '2026-05-06T00:01:00.000Z',
+      },
+      {
+        ...runtime('claude-code', 'runtime-claude', 'degraded'),
+        lastSeenAt: '2026-05-06T00:05:00.000Z',
+        updatedAt: '2026-05-06T00:05:00.000Z',
+      },
+      {
+        ...runtime('openclaw', 'runtime-openclaw', 'healthy'),
+        lastSeenAt: '2026-05-06T00:03:00.000Z',
+        updatedAt: '2026-05-06T00:03:00.000Z',
+      },
+    ],
+  });
+
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Recent Degraded Bot' });
+
+  assert.equal(created.primaryProvider, 'claude-code');
+  assert.equal(created.fallbackProvider, 'openclaw');
+});
+
 test('createMetabotProfile validates avatars before creating a profile workspace', async () => {
   const systemHomeDir = await createSystemHome();
 
