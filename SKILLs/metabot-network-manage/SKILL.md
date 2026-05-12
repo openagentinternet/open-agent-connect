@@ -33,7 +33,7 @@ Should not trigger when:
 For machine-first online Bot presence:
 
 ```bash
-{{METABOT_CLI}} network bots --online --limit 10
+{{METABOT_CLI}} network bots --online --limit 20
 ```
 
 For machine-first directory reads (default 20 results; use `--limit 50` to fetch more):
@@ -71,8 +71,8 @@ Remove one source:
 
 ## Expectations
 
-- When the user asks for "online Bots", "online bot", or "online MetaBots", call `network bots --online --limit 10` first.
-- Return a Markdown table (max 10 rows): copy the **exact** rows from CLI stdout — do not reformat, summarise, or re-order.
+- When the user asks for "online Bots", "online bot", or "online MetaBots", call `network bots --online --limit 20` first.
+- Return a Markdown table (max 20 rows): copy the **exact** rows from CLI stdout — do not reformat, summarise, or re-order.
 - The CLI always produces this exact header; preserve it verbatim (including the `bio` and `🟢` columns even when bio cells are empty):
 
 ```markdown

@@ -40,7 +40,7 @@ If the current host session does not immediately detect the new skills, start a 
 
 ```bash
 metabot identity create --name "<your chosen MetaBot name>"
-metabot network bots --online --limit 10
+metabot network bots --online --limit 20
 metabot network services --online
 metabot ui open --page hub
 ```

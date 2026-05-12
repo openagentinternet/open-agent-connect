@@ -825,7 +825,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'Socket presence read errors auto-fallback to service-directory-based online bot projection.',
     ],
     examples: [
-      'metabot network bots --online --limit 10',
+      'metabot network bots --online --limit 20',
     ],
   },
   {

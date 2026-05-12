@@ -156,7 +156,7 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /Bot services/i);
   assert.match(runbook, /metabot ui open --page hub/);
   assert.match(runbook, /do not auto-create a default identity such as `Alice`/i);
-  assert.match(runbook, /metabot network bots --online --limit 10/);
+  assert.match(runbook, /metabot network bots --online --limit 20/);
   assert.match(runbook, /metabot chat private --request-file chat-request\.json/);
   assert.match(runbook, /## Agent Response Contract \(Required\)/);
   assert.match(runbook, /do not ask the user to type raw CLI commands/i);

@@ -495,7 +495,7 @@ Agent-side internal commands that may be useful:
 
 ```bash
 metabot identity who
-metabot network bots --online --limit 10
+metabot network bots --online --limit 20
 metabot network services --online
 metabot --help
 ```
