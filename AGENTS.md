@@ -14,6 +14,7 @@
 
 ## Local Verification Policy
 
+- When creating a new branch or worktree, do not run the full `npm test` as a baseline by default. Use lightweight baseline checks such as `git status`, dependency availability, and only the task-relevant smoke/build command if the next change needs it.
 - For focused documentation, prompt, SKILL, UI copy, or narrowly scoped code changes, targeted tests plus `npm run build` or an equivalent static check are sufficient before committing.
 - Run the full `npm test` locally only when the change touches shared runtime behavior, wallet/chain writes, persistence formats, release artifacts, package/build plumbing, broad cross-host skillpack output, or when the user explicitly asks for full verification.
 - After merging a completed branch into `main`, do not automatically run the full `npm test` for every low-risk branch. Re-run the same targeted checks on the merged result unless the merge combines high-risk areas, resolves conflicts, or changes release/build artifacts.
