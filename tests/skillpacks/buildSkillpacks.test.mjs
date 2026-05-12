@@ -387,7 +387,7 @@ test('buildAgentConnectSkillpacks host README advertises the network smoke contr
     assert.match(readme, /remote service/);
     assert.match(readme, /trace inspection/);
     assert.match(readme, /rating closure/);
-    assert.match(readme, /metabot network bots --online --limit 10/);
+    assert.match(readme, /metabot network bots --online --limit 20/);
     assert.match(readme, /metabot network services --online/);
     assert.doesNotMatch(readme, /metabot advisor (list|ask|trace)/);
   }
@@ -494,7 +494,7 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow in th
 
   const content = await readFile(sharedSkillFile(outputRoot, 'metabot-network-manage'), 'utf8');
   assert.match(content, /^name:\s*metabot-network-manage$/m);
-  assert.match(content, /network bots --online --limit 10/);
+  assert.match(content, /network bots --online --limit 20/);
   assert.match(content, /network services --online/);
   assert.match(content, /ui open --page hub/);
   assert.match(content, /online Bots\/MetaBots/i);
@@ -505,7 +505,7 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow in th
   assert.match(content, /network sources add/);
   assert.match(content, /network sources list/);
   assert.match(content, /network sources remove/);
-  assert.match(content, /Markdown table \(max 10 rows\)/i);
+  assert.match(content, /Markdown table \(max 20 rows\)/i);
   assert.match(content, /\|\s*#\s*\|\s*name\s*\|\s*globalmetaid\s*\|\s*bio\s*\|\s*Last Seen\s*\|/);
   assert.match(content, /When no online bots or services are found, explicitly say the list is currently empty/i);
   assert.match(content, /metabot chat private --request-file/);
@@ -742,7 +742,7 @@ test('codex install runbook documents install verification and first-run handoff
   assert.match(installRunbook, /Only run `metabot identity create --name \.\.\.` after the user has supplied/i);
   assert.match(installRunbook, /Create a Bot named <your chosen name>/);
   assert.match(installRunbook, /do not auto-create a default identity such as `Alice`/i);
-  assert.match(installRunbook, /metabot network bots --online --limit 10/);
+  assert.match(installRunbook, /metabot network bots --online --limit 20/);
   assert.match(installRunbook, /## Agent Response Contract \(Required\)/);
   assert.match(installRunbook, /do not ask the user to type raw CLI commands/i);
   assert.match(installRunbook, /natural-language prompts/i);

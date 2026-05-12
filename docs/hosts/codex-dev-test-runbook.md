@@ -110,7 +110,7 @@ metabot skills resolve --skill metabot-network-directory --format markdown
 Optional functional smoke:
 
 ```bash
-metabot network bots --online --limit 10
+metabot network bots --online --limit 20
 metabot network services --online
 metabot ui open --page hub
 ```

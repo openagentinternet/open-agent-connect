@@ -116,7 +116,7 @@ function renderMetabotList(){
   if(!state.profiles.length){list.innerHTML='<div class="session-empty"><p>No MetaBots yet</p></div>';return}
   list.innerHTML=state.profiles.map(function(p){
     var selected=p.slug===state.selectedSlug?' selected':'';
-    var llmBadge=profileLlmUnavailable(p)?'<span class="metabot-llm-unavailable">[LLM 不可用]</span>':'';
+    var llmBadge=profileLlmUnavailable(p)?'<span class="metabot-llm-unavailable">[LLM unavailable]</span>':'';
     return'<div class="metabot-item'+selected+'" role="button" tabindex="0" data-slug="'+esc(p.slug)+'">'+
       '<div class="metabot-avatar">'+avatarMarkup(p,false)+'</div>'+
       '<div class="metabot-item-info"><div class="metabot-item-name-row"><div class="metabot-item-name">'+esc(p.name||p.slug)+'</div>'+llmBadge+'</div>'+

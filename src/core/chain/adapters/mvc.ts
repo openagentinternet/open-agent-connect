@@ -6,6 +6,7 @@ import {
 } from '@metalet/utxo-wallet-service';
 import type { ChainWriteNetwork } from '../writePin';
 import { parseAddressIndexFromPath } from '../../identity/deriveIdentity';
+import { isRetryableUtxoFundingError } from '../utxoBroadcastErrors';
 import type {
   ChainAdapter,
   ChainBalance,
@@ -326,7 +327,18 @@ export const mvcChainAdapter: ChainAdapter = {
       body: JSON.stringify({ chain: 'mvc', net: NET, rawTx }),
     });
     const json = await response.json() as { code?: number; message?: string; data?: string };
-    if (json?.code !== 0) throw new Error(json?.message || 'Broadcast failed');
+    if (json?.code !== 0) {
+      const tracker = deferredTrackers.get(rawTx);
+      if (tracker && isRetryableUtxoFundingError(json?.message)) {
+        rememberPendingTransaction({
+          address: tracker.address,
+          spentUtxos: tracker.spentUtxos,
+          createdUtxos: [],
+        });
+        deferredTrackers.delete(rawTx);
+      }
+      throw new Error(json?.message || 'Broadcast failed');
+    }
     const txid = json.data ?? '';
 
     // Complete deferred pending UTXO tracking

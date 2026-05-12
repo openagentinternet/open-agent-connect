@@ -122,6 +122,23 @@ test('uninstall guide defines safe, test cleanup, and danger-zone tiers', async 
   assert.match(guide, /~\/\.metabot\/profiles\/<slug>\/\.runtime\/identity-secrets\.json/);
   assert.match(guide, /~\/\.metabot\/profiles\/<slug>\/\.runtime\/provider-secrets\.json/);
   assert.match(guide, /DELETE_OPEN_AGENT_CONNECT_IDENTITY_AND_SECRETS/);
+  assert.match(guide, /Shared standard root: `\$HOME\/\.agents\/skills`/);
+  for (const platform of [
+    'Codex',
+    'Claude Code',
+    'GitHub Copilot CLI',
+    'OpenCode',
+    'OpenClaw',
+    'Hermes',
+    'Gemini CLI',
+    'Pi',
+    'Cursor Agent',
+    'Kimi',
+    'Kiro CLI',
+  ]) {
+    assert.match(guide, new RegExp(platform.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(guide, /The preferred CLI path uses the same platform registry as `oac install`/i);
   assert.match(guide, /For Tier 1 or Tier 2, explicitly state that Bot identities, mnemonics,\s+private keys, profile names, and wallet-related local data were preserved/i);
   assert.doesNotMatch(guide, /\.metabot\/hot/);
 });
@@ -139,7 +156,7 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /Bot services/i);
   assert.match(runbook, /metabot ui open --page hub/);
   assert.match(runbook, /do not auto-create a default identity such as `Alice`/i);
-  assert.match(runbook, /metabot network bots --online --limit 10/);
+  assert.match(runbook, /metabot network bots --online --limit 20/);
   assert.match(runbook, /metabot chat private --request-file chat-request\.json/);
   assert.match(runbook, /## Agent Response Contract \(Required\)/);
   assert.match(runbook, /do not ask the user to type raw CLI commands/i);
@@ -197,6 +214,11 @@ test('Codex update and dev runbooks point back to the unified install guide', as
   }
 
   assert.doesNotMatch(updateRunbook, /cd skillpacks\/codex/);
+  assert.doesNotMatch(updateRunbook, /metabot system update --host codex/);
+  assert.doesNotMatch(updateRunbook, /metaid-developers\/Open Agent Connect/);
+  assert.match(updateRunbook, /Preferred apply command:\s*```bash\s*metabot system update\s*```/s);
+  assert.match(updateRunbook, /no-`--host` npm-first update path/i);
+  assert.match(updateRunbook, /openagentinternet\/open-agent-connect/);
   assert.doesNotMatch(devRunbook, /cd skillpacks\/codex/);
   assert.match(updateRunbook, /Open Agent Connect runtime refreshed; your local agent keeps its Bot\/network abilities/i);
 });
