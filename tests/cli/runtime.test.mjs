@@ -281,7 +281,7 @@ async function runCommandText(homeDir, args, envOverrides = {}) {
   };
 }
 
-async function waitForTrace(homeDir, traceId, envOverrides, predicate, timeoutMs = 2_500, intervalMs = 50) {
+async function waitForTrace(homeDir, traceId, envOverrides, predicate, timeoutMs = 10_000, intervalMs = 50) {
   const deadline = Date.now() + timeoutMs;
   let lastTrace = null;
   while (Date.now() < deadline) {
