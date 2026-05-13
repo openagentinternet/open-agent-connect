@@ -451,6 +451,17 @@ test('runCli prints provider operations help with order inspection and refund se
 });
 
 test('runCli prints services order and refund lifecycle help', async () => {
+  const listStdout = [];
+  const listExitCode = await runCli(['services', 'refunds', 'list', '--help'], {
+    stdout: { write: (chunk) => { listStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(listExitCode, 0);
+  const listOutput = listStdout.join('');
+  assert.match(listOutput, /^Usage:\s+metabot services refunds list \[--from <bot-slug> \| --all\] \[--kind <all\|initiated\|received> \| --initiated \| --received\]/m);
+  assert.match(listOutput, /--kind <all\|initiated\|received>\s+Select all refunds, buyer-side initiated refunds, or seller-side received refund requests\./m);
+
   const orderStdout = [];
   const orderExitCode = await runCli(['services', 'orders', 'inspect', '--help'], {
     stdout: { write: (chunk) => { orderStdout.push(String(chunk)); return true; } },
@@ -588,8 +599,12 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
   assert.match(output.usage, /\[--session-id <session-id>\]/);
   assert.match(output.usage, /\[--service-id <service-pin-id>\]/);
   assert.ok(output.optionalFlags.some((entry) => entry.flag === '--from'));
+  const traceFlag = output.optionalFlags.find((entry) => entry.flag === '--trace-id');
+  assert.ok(traceFlag);
+  assert.match(traceFlag.description, /Optional/);
   assert.ok(output.optionalFlags.some((entry) => entry.flag === '--session-id'));
   assert.ok(output.optionalFlags.some((entry) => entry.flag === '--service-id'));
+  assert.ok(output.successFields.includes('localUiUrl'));
   assert.ok(output.examples.includes('metabot ui open --page publish --from alice'));
 });
 

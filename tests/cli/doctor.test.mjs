@@ -282,6 +282,20 @@ test('runCli dispatches `metabot ui open --page` and returns the local UI URL', 
   });
 });
 
+test('runCli rejects unknown `metabot ui open --page` values before opening', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli(['ui', 'open', '--page', 'unknown'], harness.context);
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(harness.calls.ui, []);
+  assert.deepEqual(parseLastJson(harness.stdout), {
+    ok: false,
+    state: 'failed',
+    code: 'unknown_ui_page',
+    message: 'Unknown UI page: unknown',
+  });
+});
+
 test('runCli dispatches `metabot ui open --page trace --trace-id` and returns the trace inspector URL', async () => {
   const harness = createHarness();
   const exitCode = await runCli(['ui', 'open', '--page', 'trace', '--trace-id', 'trace-123'], harness.context);

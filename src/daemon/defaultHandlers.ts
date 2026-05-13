@@ -84,6 +84,7 @@ import {
   buildProviderSellerOrderInspection,
   buildSellerReceivedRefundItems,
   findSellerOrderBySelector,
+  type SellerReceivedRefundItem,
 } from '../core/provider/providerOperations';
 import {
   createSellerOrderRecord,
@@ -1350,6 +1351,56 @@ function buildProviderRefundsPayload(input: { state: RuntimeState }) {
     receivedByMe,
     totalCount: initiated.totalCount + receivedByMe.length,
     pendingCount: initiated.pendingCount + sellerPendingCount,
+  };
+}
+
+function compareSellerReceivedRefundItems(
+  left: SellerReceivedRefundItem,
+  right: SellerReceivedRefundItem,
+): number {
+  const leftRank = left.status === 'refunded' ? 1 : 0;
+  const rightRank = right.status === 'refunded' ? 1 : 0;
+  if (leftRank !== rightRank) {
+    return leftRank - rightRank;
+  }
+  const delta = right.updatedAt - left.updatedAt;
+  if (delta !== 0) {
+    return delta;
+  }
+  return left.orderId.localeCompare(right.orderId);
+}
+
+function mergeInitiatedRefundsPayloads(
+  payloads: Array<ReturnType<typeof buildInitiatedRefundsPayload>>,
+): ReturnType<typeof buildInitiatedRefundsPayload> {
+  const initiatedByMe = payloads
+    .flatMap((payload) => payload.initiatedByMe)
+    .sort(compareInitiatedRefundItems);
+  return {
+    initiatedByMe,
+    totalCount: initiatedByMe.length,
+    pendingCount: initiatedByMe.filter((entry) => entry.status === 'refund_pending').length,
+  };
+}
+
+function mergeProviderRefundsPayloads(
+  payloads: Array<ReturnType<typeof buildProviderRefundsPayload>>,
+  kind: string,
+): ReturnType<typeof buildProviderRefundsPayload> {
+  const includeInitiated = kind !== 'received';
+  const includeReceived = kind !== 'initiated';
+  const initiatedByMe = includeInitiated
+    ? payloads.flatMap((payload) => payload.initiatedByMe).sort(compareInitiatedRefundItems)
+    : [];
+  const receivedByMe = includeReceived
+    ? payloads.flatMap((payload) => payload.receivedByMe).sort(compareSellerReceivedRefundItems)
+    : [];
+  return {
+    initiatedByMe,
+    receivedByMe,
+    totalCount: initiatedByMe.length + receivedByMe.length,
+    pendingCount: initiatedByMe.filter((entry) => entry.status === 'refund_pending').length
+      + receivedByMe.filter((entry) => entry.status !== 'refunded').length,
   };
 }
 
@@ -5121,6 +5172,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
       });
     }
     return profiles;
+  }
+
+  async function loadProviderRefundProfileStates(): Promise<RuntimeState[]> {
+    const records = await listMyServicesProfileRecords();
+    const states: RuntimeState[] = [];
+    for (const profile of records) {
+      const profileHomeDir = path.resolve(profile.homeDir);
+      const store = profileHomeDir === path.resolve(input.homeDir)
+        ? runtimeStateStore
+        : createRuntimeStateStore(profileHomeDir);
+      states.push(await store.readState());
+    }
+    return states;
   }
 
   async function selectMyServicesProfilesForRequest(
@@ -10415,27 +10479,46 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }));
       },
       getInitiatedRefunds: async (request = {}) => {
+        const requestedFrom = normalizeText(request.from);
         const scoped = await resolveScopedProviderForActor(request.from);
         if (scoped.failure) {
           return scoped.failure;
         }
         if (scoped.provider?.getInitiatedRefunds) {
-          return scoped.provider.getInitiatedRefunds(request);
+          return scoped.provider.getInitiatedRefunds({ from: requestedFrom });
+        }
+        if (!requestedFrom && request.all === true) {
+          const states = await loadProviderRefundProfileStates();
+          return commandSuccess(mergeInitiatedRefundsPayloads(
+            states.map((state) => buildInitiatedRefundsPayload({ state }))
+          ));
         }
         const state = await runtimeStateStore.readState();
         return commandSuccess(buildInitiatedRefundsPayload({ state }));
       },
       getRefunds: async (request = {}) => {
+        const requestedFrom = normalizeText(request.from);
+        const kind = normalizeText(request.kind);
         const scoped = await resolveScopedProviderForActor(request.from);
         if (scoped.failure) {
           return scoped.failure;
         }
         if (scoped.provider?.getRefunds) {
-          return scoped.provider.getRefunds(request);
+          return scoped.provider.getRefunds({
+            from: requestedFrom,
+            ...(kind ? { kind } : {}),
+          });
+        }
+        if (!requestedFrom && request.all === true) {
+          const states = await loadProviderRefundProfileStates();
+          return commandSuccess(mergeProviderRefundsPayloads(
+            states.map((state) => buildProviderRefundsPayload({ state })),
+            kind,
+          ));
         }
         const state = await runtimeStateStore.readState();
         const payload = buildProviderRefundsPayload({ state });
-        if (normalizeText(request.kind) === 'received') {
+        if (kind === 'received') {
           const receivedByMe = payload.receivedByMe;
           return commandSuccess({
             initiatedByMe: [],

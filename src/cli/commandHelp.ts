@@ -1220,10 +1220,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['services', 'refunds', 'list'],
     summary: 'List initiated, received, or all service refunds.',
-    usage: 'metabot services refunds list [--from <bot-slug> | --all] [--initiated | --received]',
+    usage: 'metabot services refunds list [--from <bot-slug> | --all] [--kind <all|initiated|received> | --initiated | --received]',
     optionalFlags: [
       FROM_BOT_FLAG,
       { flag: '--all', description: 'Aggregate refunds across all local MetaBot profiles when supported by the runtime.' },
+      { flag: '--kind', value: '<all|initiated|received>', description: 'Select all refunds, buyer-side initiated refunds, or seller-side received refund requests.' },
       { flag: '--initiated', description: 'Show buyer-side refunds initiated by the selected local MetaBot.' },
       { flag: '--received', description: 'Show seller-side refund requests received by the selected local MetaBot.' },
       HELP_JSON_FLAG,
@@ -1634,20 +1635,20 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['ui', 'open'],
-    summary: 'Open one local MetaBot runtime HTML page such as hub, buzz, chat, publish, my-services, trace, or refund.',
+    summary: 'Open one local MetaBot runtime HTML page such as hub, bot, buzz, chat, publish, my-services, trace, or refund.',
     usage: 'metabot ui open --page <page> [--from <bot-slug>] [--trace-id <trace-id>] [--session-id <session-id>] [--service-id <service-pin-id>]',
     requiredFlags: [
-      { flag: '--page', value: '<page>', description: 'Built-in page name: hub, buzz, chat, publish, my-services, trace, or refund.' },
+      { flag: '--page', value: '<page>', description: 'Built-in page name: hub, bot, buzz, chat, chat-viewer, publish, my-services, trace, or refund.' },
     ],
     optionalFlags: [
       FROM_BOT_FLAG,
-      { flag: '--trace-id', value: '<trace-id>', description: 'Trace identifier required by the trace page.' },
+      { flag: '--trace-id', value: '<trace-id>', description: 'Optional trace identifier for trace page deep links.' },
       { flag: '--session-id', value: '<session-id>', description: 'A2A session identifier for trace or chat-viewer pages.' },
       { flag: '--service-id', value: '<service-pin-id>', description: 'Owned service selector for my-services pages.' },
       HELP_JSON_FLAG,
     ],
     successFields: [
-      'url',
+      'localUiUrl',
       'page',
     ],
     failureSemantics: [

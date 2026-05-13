@@ -40,6 +40,51 @@ function readOwnedListInput(args: string[]): {
   };
 }
 
+type RefundListKind = 'all' | 'initiated' | 'received';
+
+function readRefundListKind(args: string[]): {
+  kind: RefundListKind;
+  error?: MetabotCommandResult<never>;
+} {
+  const selectedKinds: RefundListKind[] = [];
+  if (hasFlag(args, '--initiated')) {
+    selectedKinds.push('initiated');
+  }
+  if (hasFlag(args, '--received')) {
+    selectedKinds.push('received');
+  }
+
+  const rawKind = readFlagValue(args, '--kind');
+  if (rawKind !== null) {
+    if (!rawKind || rawKind.startsWith('--')) {
+      return {
+        kind: 'all',
+        error: commandFailed('invalid_flag', 'Missing value for --kind. Supported values: all, initiated, received.'),
+      };
+    }
+    const normalizedKind = rawKind.trim().toLowerCase();
+    if (normalizedKind !== 'all' && normalizedKind !== 'initiated' && normalizedKind !== 'received') {
+      return {
+        kind: 'all',
+        error: commandFailed('invalid_refund_kind', 'Refund kind must be one of all, initiated, or received.'),
+      };
+    }
+    selectedKinds.push(normalizedKind);
+  }
+
+  const uniqueKinds = [...new Set(selectedKinds)];
+  if (uniqueKinds.length > 1) {
+    return {
+      kind: 'all',
+      error: commandFailed('invalid_flag', 'Use only one refund kind selector: --kind, --initiated, or --received.'),
+    };
+  }
+
+  return {
+    kind: uniqueKinds[0] ?? 'all',
+  };
+}
+
 function readSellerOrderSelector(args: string[]): {
   ok: true;
   selector: { orderId?: string; paymentTxid?: string };
@@ -205,15 +250,18 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
         return commandFailed('not_implemented', 'Services refund list handler is not configured.');
       }
       const from = readFromFlag(refundsArgs);
-      const kind = hasFlag(refundsArgs, '--initiated')
-        ? 'initiated'
-        : hasFlag(refundsArgs, '--received')
-          ? 'received'
-          : 'all';
+      const all = hasFlag(refundsArgs, '--all');
+      if (from && all) {
+        return commandFailed('invalid_flag', 'Use either --from <bot-slug> or --all for refund listing, not both.');
+      }
+      const kindResult = readRefundListKind(refundsArgs);
+      if (kindResult.error) {
+        return kindResult.error;
+      }
       return handler({
         ...(from ? { from } : {}),
-        all: hasFlag(refundsArgs, '--all'),
-        kind,
+        all,
+        kind: kindResult.kind,
       });
     }
 
