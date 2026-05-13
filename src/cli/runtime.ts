@@ -2400,6 +2400,45 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         });
       },
     },
+    bot: {
+      listProfiles: async () => requestJson(context, 'GET', '/api/bot/profiles'),
+      getProfile: async (input) =>
+        requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}`),
+      createProfile: async (input) => requestJson(context, 'POST', '/api/bot/profiles', input),
+      updateProfile: async (input) => {
+        const { slug, ...body } = input;
+        return requestJson(context, 'PUT', `/api/bot/profiles/${encodeURIComponent(slug)}`, body);
+      },
+      deleteProfile: async (input) =>
+        requestJson(context, 'DELETE', `/api/bot/profiles/${encodeURIComponent(input.slug)}`),
+      getConfig: async (input) =>
+        requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}/config`),
+      setConfig: async (input) => {
+        const { slug, ...body } = input;
+        return requestJson(context, 'PUT', `/api/bot/profiles/${encodeURIComponent(slug)}/config`, body);
+      },
+      getWallet: async (input) =>
+        requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}/wallet`),
+      getBackup: async (input) =>
+        requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}/backup`),
+      listRuntimes: async (input = {}) => {
+        const query = new URLSearchParams();
+        if (input.from) query.set('from', input.from);
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/bot/runtimes${suffix}`);
+      },
+      discoverRuntimes: async (input = {}) => {
+        const query = new URLSearchParams();
+        if (input.from) query.set('from', input.from);
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'POST', `/api/bot/runtimes/discover${suffix}`);
+      },
+      listSessions: async (input) => {
+        const query = new URLSearchParams({ limit: String(input.limit) });
+        if (input.slug) query.set('slug', input.slug);
+        return requestJson(context, 'GET', `/api/bot/sessions?${query.toString()}`);
+      },
+    },
   };
 }
 
@@ -2435,6 +2474,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     host: { ...defaults.host, ...provided.host },
     system: { ...defaults.system, ...provided.system },
     llm: { ...defaults.llm, ...provided.llm },
+    bot: { ...defaults.bot, ...provided.bot },
     evolution: { ...defaults.evolution, ...provided.evolution },
   };
 }

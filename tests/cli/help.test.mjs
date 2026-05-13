@@ -19,6 +19,7 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^Usage:\s+metabot <command>/m);
   assert.match(output, /^Commands:/m);
   assert.match(output, /^\s+identity\s+/m);
+  assert.match(output, /^\s+bot\s+/m);
   assert.match(output, /^\s+config\s+/m);
   assert.match(output, /^\s+wallet\s+/m);
   assert.match(output, /^\s+services\s+/m);
@@ -43,8 +44,40 @@ test('runCli prints machine-readable top-level help for `metabot --help --json`'
   assert.deepEqual(output.commandPath, []);
   assert.equal(output.command, 'metabot');
   assert.ok(Array.isArray(output.subcommands));
+  assert.ok(output.subcommands.some((entry) => entry.name === 'bot'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'host'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'provider'));
+});
+
+test('runCli prints bot group help for profile, runtime, and session commands', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['bot', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot bot <subcommand>/m);
+  assert.match(output, /show\s+Show one local MetaBot profile\./);
+  assert.match(output, /runtimes\s+List or discover LLM runtimes for a MetaBot profile\./);
+  assert.match(output, /sessions\s+List runtime sessions for a MetaBot profile\./);
+});
+
+test('runCli prints bot sessions help with actor and limit selectors', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['bot', 'sessions', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot bot sessions \[--from <bot-slug>\] \[--limit <n>\]/m);
+  assert.match(output, /--from <bot-slug>/);
+  assert.match(output, /--limit <n>\s+Maximum session count\. Defaults to 50\./);
 });
 
 test('runCli prints config group help with get and set subcommands', async () => {

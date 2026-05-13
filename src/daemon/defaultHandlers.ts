@@ -12870,14 +12870,29 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('metabot_profile_delete_failed', message);
         }
       },
-      listRuntimes: async () => {
-        const runtimeStore = createLlmRuntimeStore(input.homeDir);
+      listRuntimes: async (request = {}) => {
+        const requestedSlug = normalizeText(request.from);
+        const selectedProfile = requestedSlug
+          ? await getMetabotProfile(normalizedSystemHomeDir, requestedSlug)
+          : null;
+        if (requestedSlug && !selectedProfile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`);
+        }
+        const runtimeStore = createLlmRuntimeStore(selectedProfile?.homeDir ?? input.homeDir);
         const state = await runtimeStore.read();
         return commandSuccess(state);
       },
-      discoverRuntimes: async () => {
+      discoverRuntimes: async (request = {}) => {
+        const requestedSlug = normalizeText(request.from);
+        const selectedProfile = requestedSlug
+          ? await getMetabotProfile(normalizedSystemHomeDir, requestedSlug)
+          : null;
+        if (requestedSlug && !selectedProfile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`);
+        }
+        const profileHomeDir = selectedProfile?.homeDir ?? input.homeDir;
         const result = await discoverLlmRuntimes({ env: process.env });
-        const runtimeStore = createLlmRuntimeStore(input.homeDir);
+        const runtimeStore = createLlmRuntimeStore(profileHomeDir);
         const previous = await runtimeStore.read();
         const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
         for (const runtime of result.runtimes) {

@@ -151,6 +151,20 @@ export interface CliDependencies {
     getPreferredRuntime?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
     setPreferredRuntime?: (input: { slug: string; runtimeId: string | null }) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  bot?: {
+    listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;
+    getProfile?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    createProfile?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    updateProfile?: (input: { slug: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    deleteProfile?: (input: { slug: string; confirm?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    getConfig?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    setConfig?: (input: { slug: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    getWallet?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    getBackup?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    listRuntimes?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    discoverRuntimes?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    listSessions?: (input: { slug?: string; limit: number }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
 }
 
 export interface CliContext {

@@ -200,6 +200,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
   usage: 'metabot <command>',
   subcommands: [
     { name: 'identity', summary: 'Create the local MetaBot identity and bootstrap chain state.' },
+    { name: 'bot', summary: 'Manage local MetaBot profiles, config, wallets, runtimes, and sessions.' },
     { name: 'config', summary: 'Read or change supported public runtime switches.' },
     { name: 'doctor', summary: 'Check daemon health, identity state, and local runtime readiness.' },
     { name: 'daemon', summary: 'Start or stop the local MetaBot daemon process.' },
@@ -230,6 +231,100 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
 
 const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   ROOT_COMMAND_HELP,
+  {
+    commandPath: ['bot'],
+    summary: 'Manage local MetaBot profiles, config, wallets, runtimes, and sessions.',
+    usage: 'metabot bot <subcommand>',
+    subcommands: [
+      { name: 'list', summary: 'List local MetaBot profiles.' },
+      { name: 'show', summary: 'Show one local MetaBot profile.' },
+      { name: 'create', summary: 'Create one local MetaBot profile.' },
+      { name: 'update', summary: 'Update one local MetaBot profile.' },
+      { name: 'delete', summary: 'Delete one local MetaBot profile after confirmation.' },
+      { name: 'config', summary: 'Get or set one MetaBot profile config.' },
+      { name: 'wallet', summary: 'Show wallet metadata for one MetaBot profile.' },
+      { name: 'backup', summary: 'Show mnemonic backup material for one MetaBot profile.' },
+      { name: 'runtimes', summary: 'List or discover LLM runtimes for a MetaBot profile.' },
+      { name: 'sessions', summary: 'List runtime sessions for a MetaBot profile.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['bot', 'show'],
+    summary: 'Show one local MetaBot profile.',
+    usage: 'metabot bot show --from <bot-slug>',
+    requiredFlags: [FROM_BOT_FLAG],
+    examples: ['metabot bot show --from alice'],
+  },
+  {
+    commandPath: ['bot', 'create'],
+    summary: 'Create one local MetaBot profile.',
+    usage: 'metabot bot create --name <name>',
+    requiredFlags: [
+      { flag: '--name', value: '<name>', description: 'Human-facing name for the new local MetaBot profile.' },
+    ],
+    examples: ['metabot bot create --name "Alice"'],
+  },
+  {
+    commandPath: ['bot', 'update'],
+    summary: 'Update one local MetaBot profile.',
+    usage: 'metabot bot update --from <bot-slug> --payload-file <path>',
+    requiredFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--payload-file', value: '<path>', description: 'JSON profile update payload.' },
+    ],
+  },
+  {
+    commandPath: ['bot', 'delete'],
+    summary: 'Delete one local MetaBot profile after confirmation.',
+    usage: 'metabot bot delete --from <bot-slug> --confirm',
+    requiredFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--confirm', description: 'Required explicit confirmation for profile deletion.' },
+    ],
+  },
+  {
+    commandPath: ['bot', 'config'],
+    summary: 'Get or set one MetaBot profile config.',
+    usage: 'metabot bot config <get|set>',
+    subcommands: [
+      { name: 'get', summary: 'Read one MetaBot profile config.' },
+      { name: 'set', summary: 'Write one MetaBot profile config from JSON.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['bot', 'wallet'],
+    summary: 'Show wallet metadata for one MetaBot profile.',
+    usage: 'metabot bot wallet --from <bot-slug>',
+    requiredFlags: [FROM_BOT_FLAG],
+  },
+  {
+    commandPath: ['bot', 'backup'],
+    summary: 'Show mnemonic backup material for one MetaBot profile.',
+    usage: 'metabot bot backup --from <bot-slug>',
+    requiredFlags: [FROM_BOT_FLAG],
+  },
+  {
+    commandPath: ['bot', 'runtimes'],
+    summary: 'List or discover LLM runtimes for a MetaBot profile.',
+    usage: 'metabot bot runtimes <list|discover> [--from <bot-slug>]',
+    subcommands: [
+      { name: 'list', summary: 'List known LLM runtimes.' },
+      { name: 'discover', summary: 'Refresh discovered LLM runtimes.' },
+    ],
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['bot', 'sessions'],
+    summary: 'List runtime sessions for a MetaBot profile.',
+    usage: 'metabot bot sessions [--from <bot-slug>] [--limit <n>]',
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--limit', value: '<n>', description: 'Maximum session count. Defaults to 50.' },
+      HELP_JSON_FLAG,
+    ],
+  },
   {
     commandPath: ['host'],
     summary: 'Host projection commands for binding shared MetaBot skills into one host-native skills root.',
