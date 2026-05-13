@@ -137,3 +137,105 @@ test('online service cache enforces a hard local service limit', () => {
   assert.equal(state.services.length, ONLINE_SERVICE_CACHE_LIMIT);
   assert.equal(state.services[0].servicePinId, `service-${ONLINE_SERVICE_CACHE_LIMIT + 9}`);
 });
+
+test('online service search prefers reliable low-cost relevant services over stronger text-only matches', () => {
+  const services = buildOnlineServiceCacheState({
+    services: [
+      createService({
+        servicePinId: 'paid-exact-weather',
+        sourceServicePinId: 'paid-exact-weather',
+        chainPinIds: ['paid-exact-weather'],
+        providerGlobalMetaId: 'idq1paidweather',
+        providerName: 'PaidWeatherBot',
+        providerSkill: 'metabot-weather-oracle',
+        serviceName: 'tell-me-tomorrow-weather',
+        displayName: 'Tell me tomorrow weather',
+        description: 'Premium weather answer.',
+        price: '0.0001',
+        currency: 'SPACE',
+        ratingAvg: 4,
+        ratingCount: 10,
+        updatedAt: 1_775_000_300_000,
+      }),
+      createService({
+        servicePinId: 'free-reliable-weather',
+        sourceServicePinId: 'free-reliable-weather',
+        chainPinIds: ['free-reliable-weather'],
+        providerGlobalMetaId: 'idq1freeweather',
+        providerName: 'ValueWeatherBot',
+        providerSkill: 'metabot-weather-oracle',
+        serviceName: 'weather-oracle',
+        displayName: 'Weather Oracle',
+        description: 'Returns tomorrow weather forecasts for cities.',
+        price: '0',
+        currency: 'SPACE',
+        ratingAvg: 4.8,
+        ratingCount: 100,
+        updatedAt: 1_775_000_100_000,
+      }),
+    ],
+    ratingDetails: [],
+    discoverySource: 'chain',
+    fallbackUsed: false,
+    now: () => 1_775_000_500_000,
+  }).services;
+
+  const results = searchOnlineServiceCacheServices(services, {
+    query: 'Tell me tomorrow weather',
+    onlineOnly: true,
+    limit: 1,
+  });
+
+  assert.equal(results[0].servicePinId, 'free-reliable-weather');
+});
+
+test('online service search rejects weak provider-name-only keyword matches', () => {
+  const services = buildOnlineServiceCacheState({
+    services: [
+      createService({
+        servicePinId: 'weather-forecast',
+        sourceServicePinId: 'weather-forecast',
+        chainPinIds: ['weather-forecast'],
+        providerGlobalMetaId: 'idq1weatherforecast',
+        providerName: 'ForecastBot',
+        providerSkill: 'metabot-weather-oracle',
+        serviceName: 'weather-forecast',
+        displayName: 'Weather Forecast',
+        description: 'Returns tomorrow weather forecasts.',
+        price: '0.00001',
+        currency: 'SPACE',
+        ratingAvg: 4.5,
+        ratingCount: 20,
+      }),
+      createService({
+        servicePinId: 'keyword-stuffed-tarot',
+        sourceServicePinId: 'keyword-stuffed-tarot',
+        chainPinIds: ['keyword-stuffed-tarot'],
+        providerGlobalMetaId: 'idq1keywordtarot',
+        providerName: 'Tomorrow Weather Deals',
+        providerSkill: 'metabot-tarot-reader',
+        serviceName: 'tarot-reading',
+        displayName: 'Tarot Reading',
+        description: 'Free fortune reading for romance and work.',
+        price: '0',
+        currency: 'SPACE',
+        ratingAvg: 5,
+        ratingCount: 300,
+      }),
+    ],
+    ratingDetails: [],
+    discoverySource: 'chain',
+    fallbackUsed: false,
+    now: () => 1_775_000_500_000,
+  }).services;
+
+  const results = searchOnlineServiceCacheServices(services, {
+    query: 'Tell me tomorrow weather',
+    onlineOnly: true,
+  });
+
+  assert.deepEqual(
+    results.map((service) => service.servicePinId),
+    ['weather-forecast'],
+  );
+});
