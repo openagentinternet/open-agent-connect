@@ -176,6 +176,7 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
     revokeServiceId: '',
     editCoverDataUrl: '',
     editCoverUri: '',
+    editCoverPreviewUri: '',
     editCoverRemoved: false,
     editSkillOptions: [],
   };
@@ -366,7 +367,7 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
 
   const renderEditCover = () => {
     if (!elements.editCoverPreview) return;
-    const source = state.editCoverDataUrl || state.editCoverUri;
+    const source = state.editCoverDataUrl || state.editCoverPreviewUri || state.editCoverUri;
     elements.editCoverPreview.innerHTML = source
       ? '<img alt="" src="' + escapeHtml(source) + '" />'
       : '<span>IMG</span>';
@@ -389,6 +390,7 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
     const raw = getSelectedRawService();
     if (!service || !model.editForm || !elements.editForm) return;
     state.editCoverUri = model.editForm.serviceIconUri;
+    state.editCoverPreviewUri = model.editForm.serviceIconPreviewUri;
     elements.editForm.elements.displayName.value = model.editForm.displayName;
     elements.editForm.elements.serviceName.value = model.editForm.serviceName;
     elements.editForm.elements.description.value = model.editForm.description;
@@ -423,6 +425,7 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
     if (elements.editModal) elements.editModal.hidden = true;
     state.editServiceId = '';
     state.editCoverDataUrl = '';
+    state.editCoverPreviewUri = '';
     state.editCoverRemoved = false;
   };
 
@@ -570,6 +573,7 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
       }
       state.editCoverDataUrl = await readFileAsDataUrl(file);
       state.editCoverRemoved = false;
+      state.editCoverPreviewUri = '';
       renderEditCover();
     });
   }
@@ -577,6 +581,7 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
     elements.editCoverRemove.addEventListener('click', () => {
       state.editCoverDataUrl = '';
       state.editCoverUri = '';
+      state.editCoverPreviewUri = '';
       state.editCoverRemoved = true;
       if (elements.editCoverInput) elements.editCoverInput.value = '';
       renderEditCover();

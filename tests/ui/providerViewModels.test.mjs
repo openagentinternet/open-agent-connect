@@ -393,6 +393,7 @@ test('buildMyServicesPageViewModel renders selected service details, closed orde
   });
 
   assert.equal(model.selectedService.title, 'Weather Oracle');
+  assert.equal(model.selectedService.iconUri, '/api/file/avatar?ref=cover-pin');
   assert.deepEqual(model.editForm, {
     serviceId: 'service-current-pin-1',
     displayName: 'Weather Oracle',
@@ -403,6 +404,7 @@ test('buildMyServicesPageViewModel renders selected service details, closed orde
     price: '0.00004',
     currency: 'BTC',
     serviceIconUri: 'metafile://cover-pin',
+    serviceIconPreviewUri: '/api/file/avatar?ref=cover-pin',
   });
   assert.deepEqual(model.orders.map((order) => ({
     key: order.key,
@@ -442,6 +444,63 @@ test('buildMyServicesPageViewModel renders selected service details, closed orde
     canPrevious: true,
     canNext: false,
   });
+});
+
+test('buildMyServicesPageViewModel normalizes service cover references for browser rendering', () => {
+  const dataUrl = 'data:image/png;base64,abc123';
+  const model = buildMyServicesPageViewModel({
+    servicesPage: {
+      page: 1,
+      pageSize: 20,
+      total: 5,
+      totalPages: 1,
+      items: [
+        {
+          id: 'service-metafile',
+          currentPinId: 'service-metafile',
+          serviceName: 'metafile-service',
+          displayName: 'Metafile Service',
+          serviceIcon: 'metafile://cover-pin?download=1',
+        },
+        {
+          id: 'service-content-path',
+          currentPinId: 'service-content-path',
+          serviceName: 'content-path-service',
+          displayName: 'Content Path Service',
+          serviceIcon: '/content/content-pin-1i0',
+        },
+        {
+          id: 'service-data-url',
+          currentPinId: 'service-data-url',
+          serviceName: 'data-url-service',
+          displayName: 'Data URL Service',
+          serviceIcon: dataUrl,
+        },
+        {
+          id: 'service-remote-url',
+          currentPinId: 'service-remote-url',
+          serviceName: 'remote-url-service',
+          displayName: 'Remote URL Service',
+          serviceIcon: 'https://example.test/cover.png',
+        },
+        {
+          id: 'service-bare-pin',
+          currentPinId: 'service-bare-pin',
+          serviceName: 'bare-pin-service',
+          displayName: 'Bare Pin Service',
+          serviceIcon: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0',
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(model.services.map((service) => service.iconUri), [
+    '/api/file/avatar?ref=cover-pin',
+    '/api/file/avatar?ref=content-pin-1i0',
+    dataUrl,
+    'https://example.test/cover.png',
+    '/api/file/avatar?ref=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0',
+  ]);
 });
 
 test('buildMyServicesPageViewModel exposes mutation txid notices and deterministic error state', () => {

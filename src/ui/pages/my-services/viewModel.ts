@@ -62,6 +62,7 @@ export interface MyServiceEditFormViewModel {
   price: string;
   currency: string;
   serviceIconUri: string;
+  serviceIconPreviewUri: string;
 }
 
 export interface MyServicesNoticeViewModel {
@@ -103,6 +104,92 @@ function normalizeNumber(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function stripQueryAndFragment(value: string): string {
+  return value.split(/[?#]/u)[0] ?? value;
+}
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//iu.test(value);
+}
+
+function isLikelyServiceIconPinId(value: string): boolean {
+  return /^[0-9a-f]{64}(?:i\d+)?$/iu.test(value) || /^[A-Za-z0-9._:-]{8,256}$/u.test(value);
+}
+
+function extractServiceIconPinReference(value: unknown): string {
+  const raw = normalizeText(value);
+  if (!raw || /^(data:|blob:)/iu.test(raw)) return '';
+  if (/^metafile:\/\//iu.test(raw)) {
+    const pinId = stripQueryAndFragment(raw.slice('metafile://'.length).trim());
+    return isLikelyServiceIconPinId(pinId) ? pinId : '';
+  }
+
+  const path = (() => {
+    if (isHttpUrl(raw)) {
+      try {
+        return new URL(raw).pathname;
+      } catch {
+        return '';
+      }
+    }
+    return raw;
+  })();
+  const prefixes = [
+    '/content/',
+    '/metafile-indexer/content/',
+    '/metafile-indexer/thumbnail/',
+    '/metafile-indexer/api/v1/files/content/',
+    '/metafile-indexer/api/v1/files/accelerate/content/',
+    '/metafile-indexer/api/v1/users/avatar/accelerate/',
+  ];
+  for (const prefix of prefixes) {
+    if (path.toLowerCase().startsWith(prefix.toLowerCase())) {
+      const pinId = decodeURIComponent(stripQueryAndFragment(path.slice(prefix.length).trim()));
+      return isLikelyServiceIconPinId(pinId) ? pinId : '';
+    }
+  }
+
+  const bare = stripQueryAndFragment(raw);
+  if (!bare.includes('/') && !bare.includes('\\') && isLikelyServiceIconPinId(bare)) {
+    return bare;
+  }
+  return '';
+}
+
+function isServiceIconContentReference(value: unknown): boolean {
+  const raw = normalizeText(value);
+  if (!raw) return false;
+  if (/^metafile:\/\//iu.test(raw)) return true;
+  const path = (() => {
+    if (isHttpUrl(raw)) {
+      try {
+        return new URL(raw).pathname;
+      } catch {
+        return '';
+      }
+    }
+    return raw;
+  })();
+  return [
+    '/content/',
+    '/metafile-indexer/content/',
+    '/metafile-indexer/thumbnail/',
+    '/metafile-indexer/api/v1/files/content/',
+    '/metafile-indexer/api/v1/files/accelerate/content/',
+    '/metafile-indexer/api/v1/users/avatar/accelerate/',
+  ].some((prefix) => path.toLowerCase().startsWith(prefix.toLowerCase()));
+}
+
+function formatServiceIconRenderUri(value: unknown): string {
+  const raw = normalizeText(value);
+  if (!raw) return '';
+  if (/^(data:|blob:)/iu.test(raw)) return raw;
+  const pinRef = extractServiceIconPinReference(raw);
+  if (pinRef) return `/api/file/avatar?ref=${encodeURIComponent(pinRef)}`;
+  if (isServiceIconContentReference(raw)) return '';
+  return raw;
 }
 
 function readObject(value: unknown): Record<string, unknown> {
@@ -243,7 +330,7 @@ function buildServiceEntry(entry: unknown): MyServiceListEntryViewModel | null {
     title: displayName,
     serviceName,
     description: normalizeText(record.description),
-    iconUri: normalizeText(record.serviceIcon),
+    iconUri: formatServiceIconRenderUri(record.serviceIcon),
     iconLabel: formatServiceInitials(displayName, serviceName),
     skillLabel: normalizeText(record.providerSkill) || 'Unbound skill',
     outputTypeLabel: normalizeText(record.outputType) || 'text',
@@ -309,6 +396,7 @@ function buildEditForm(selected: MyServiceListEntryViewModel | null, rawSelected
     price: normalizeText(rawSelected.price),
     currency: normalizeText(rawSelected.currency) || 'BTC',
     serviceIconUri: normalizeText(rawSelected.serviceIcon),
+    serviceIconPreviewUri: formatServiceIconRenderUri(rawSelected.serviceIcon),
   };
 }
 
@@ -415,6 +503,12 @@ export function buildMyServicesPageViewModelRuntimeSource(): string {
   return [
     normalizeText,
     normalizeNumber,
+    stripQueryAndFragment,
+    isHttpUrl,
+    isLikelyServiceIconPinId,
+    extractServiceIconPinReference,
+    isServiceIconContentReference,
+    formatServiceIconRenderUri,
     readObject,
     readArray,
     formatCount,
