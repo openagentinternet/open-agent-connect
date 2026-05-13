@@ -298,6 +298,33 @@ test('runCli dispatches `metabot ui open --page trace --trace-id` and returns th
   });
 });
 
+test('runCli dispatches `metabot ui open` with actor, session, and service selectors', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli([
+    'ui',
+    'open',
+    '--page',
+    'trace',
+    '--from',
+    'alice',
+    '--trace-id',
+    'trace-123',
+    '--session-id',
+    'session-123',
+    '--service-id',
+    'svc-123',
+  ], harness.context);
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(harness.calls.ui, [{
+    page: 'trace',
+    from: 'alice',
+    traceId: 'trace-123',
+    sessionId: 'session-123',
+    serviceId: 'svc-123',
+  }]);
+});
+
 test('runCli doctor fails closed when no active profile is initialized', async () => {
   const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
   const stdout = [];

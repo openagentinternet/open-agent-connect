@@ -572,6 +572,27 @@ test('runCli documents trace sessions listing with actor selectors', async () =>
   assert.ok(output.examples.includes('metabot trace sessions --from alice --limit 20'));
 });
 
+test('runCli documents ui open selectors for page-specific handoffs', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['ui', 'open', '--help', '--json'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = JSON.parse(stdout.join(''));
+  assert.deepEqual(output.commandPath, ['ui', 'open']);
+  assert.match(output.usage, /\[--from <bot-slug>\]/);
+  assert.match(output.usage, /\[--session-id <session-id>\]/);
+  assert.match(output.usage, /\[--service-id <service-pin-id>\]/);
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--from'));
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--session-id'));
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--service-id'));
+  assert.ok(output.examples.includes('metabot ui open --page publish --from alice'));
+});
+
 test('runCli prints machine-readable help for `metabot chat private --help --json`', async () => {
   const stdout = [];
 

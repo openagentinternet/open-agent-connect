@@ -110,7 +110,13 @@ export interface CliDependencies {
     listSessions?: (input: { from?: string; all: boolean; limit: number }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   ui?: {
-    open?: (input: { page: string; traceId?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    open?: (input: {
+      page: string;
+      from?: string;
+      traceId?: string;
+      sessionId?: string;
+      serviceId?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   skills?: {
     resolve?: (input: { skill: string; host?: ConcreteSkillHost; format: SkillRenderFormat }) => Awaitable<MetabotCommandResult<unknown>>;

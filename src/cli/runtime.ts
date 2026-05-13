@@ -2048,12 +2048,15 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     ui: {
       open: async (input) => {
         const baseUrl = await ensureDaemonBaseUrl(context);
-        const query = input.traceId
-          ? `?traceId=${encodeURIComponent(input.traceId)}`
-          : '';
+        const query = new URLSearchParams();
+        if (input.from) query.set('from', input.from);
+        if (input.traceId) query.set('traceId', input.traceId);
+        if (input.sessionId) query.set('sessionId', input.sessionId);
+        if (input.serviceId) query.set('serviceId', input.serviceId);
+        const suffix = query.size ? `?${query.toString()}` : '';
         return commandSuccess({
           page: input.page,
-          localUiUrl: `${baseUrl}${resolveLocalUiPath(input.page)}${query}`,
+          localUiUrl: `${baseUrl}${resolveLocalUiPath(input.page)}${suffix}`,
         });
       },
     },
