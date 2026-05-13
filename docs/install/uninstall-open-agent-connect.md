@@ -34,10 +34,12 @@ Current supported host roots are registry-driven and match `oac install`:
 - `Cursor Agent`: `$HOME/.cursor/skills`
 - `Kimi`: `$HOME/.kimi/skills` and `$HOME/.config/agents/skills`
 - `Kiro CLI`: `$HOME/.kiro/skills`
+- `Trae`: `$HOME/.trae/skills`
+- `CodeBuddy`: `$HOME/.codebuddy/skills`
 - Shared standard root: `$HOME/.agents/skills`
 
-For other Claude Code-compatible hosts, also remove any `metabot-*` symlinks
-you manually created in that host's documented skill root.
+For other Claude Code-compatible hosts, also remove any `metabot-*` links you
+manually created in that host's documented skill root.
 
 ## Tier 1: Safe Uninstall (Default)
 
@@ -51,13 +53,13 @@ metabot system uninstall
 ```
 
 The preferred CLI path uses the same platform registry as `oac install`. It
-removes guarded `metabot-*` symlinks from all built-in global host roots plus
-the shared standard root, but only when those symlinks point back to
+removes guarded `metabot-*` skill links from all built-in global host roots plus
+the shared standard root, but only when those links point back to
 `~/.metabot/skills/`.
 
 This tier removes:
 
-- `metabot-*` host skill symlinks that point back to `~/.metabot/skills/`
+- `metabot-*` host skill links that point back to `~/.metabot/skills/`
 - `~/.metabot/bin/metabot`
 - the currently active daemon process on a best-effort basis
 
@@ -147,6 +149,8 @@ remove_metabot_host_symlinks "$HOME/.cursor/skills"
 remove_metabot_host_symlinks "$HOME/.kimi/skills"
 remove_metabot_host_symlinks "$HOME/.config/agents/skills"
 remove_metabot_host_symlinks "$HOME/.kiro/skills"
+remove_metabot_host_symlinks "$HOME/.trae/skills"
+remove_metabot_host_symlinks "$HOME/.codebuddy/skills"
 
 rm -f "$HOME/.metabot/bin/metabot"
 ```
@@ -168,7 +172,9 @@ for root in \
   "$HOME/.cursor/skills" \
   "$HOME/.kimi/skills" \
   "$HOME/.config/agents/skills" \
-  "$HOME/.kiro/skills"; do
+  "$HOME/.kiro/skills" \
+  "$HOME/.trae/skills" \
+  "$HOME/.codebuddy/skills"; do
   test ! -L "$root/metabot-identity-manage"
 done
 test -d "$HOME/.metabot/profiles" || true

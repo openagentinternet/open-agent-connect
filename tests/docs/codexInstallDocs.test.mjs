@@ -96,10 +96,13 @@ test('unified install guide documents registry-driven bare install and force hos
   assert.match(guide, /npm i -g open-agent-connect && oac install/);
   assert.match(guide, /supported platforms/i);
   assert.match(guide, /~\/\.metabot\/skills/i);
-  assert.match(guide, /host roots contain symlinks/i);
+  assert.match(guide, /Host roots contain skill\s+links/i);
+  assert.match(guide, /symlinks on POSIX platforms and\s+directory junctions on Windows/i);
   assert.match(guide, /~\/\.metabot\/skills\/metabot-\*/);
   assert.match(guide, /~\/\.agents\/skills/i);
   assert.match(guide, /platformRegistry\.ts/);
+  assert.match(guide, /`USERPROFILE`/);
+  assert.match(guide, /Developer Mode or an elevated shell/i);
 
   assert.match(guide, /bare `oac install` binds\s+`~\/\.agents\/skills` and detected platform roots/i);
   assert.match(guide, /`--host` is only needed when forcing a platform root before that platform home exists/i);
@@ -142,6 +145,8 @@ test('uninstall guide defines safe, test cleanup, and danger-zone tiers', async 
     'Cursor Agent',
     'Kimi',
     'Kiro CLI',
+    'Trae',
+    'CodeBuddy',
   ]) {
     assert.match(guide, new RegExp(platform.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }

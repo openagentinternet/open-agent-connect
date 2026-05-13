@@ -226,7 +226,7 @@ test('runCli prints machine-readable help for `metabot host bind-skills --help -
   const output = JSON.parse(stdout.join(''));
   assert.deepEqual(output.commandPath, ['host', 'bind-skills']);
   assert.equal(output.command, 'metabot host bind-skills');
-  assert.equal(output.usage, 'metabot host bind-skills --host <claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro>');
+  assert.equal(output.usage, 'metabot host bind-skills --host <claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro|trae|codebuddy>');
   assert.ok(output.successFields.includes('hostSkillRoot'));
   assert.ok(output.failureSemantics.includes('Fails with shared_skills_missing when ~/.metabot/skills has no shared metabot-* directories to bind.'));
 });

@@ -65,6 +65,21 @@ function toRelativeSymlinkTarget(destinationPath: string, sourcePath: string): s
   return path.relative(path.dirname(destinationPath), sourcePath) || '.';
 }
 
+export function resolveHostSkillSymlinkType(platform: NodeJS.Platform = process.platform): 'dir' | 'junction' {
+  return platform === 'win32' ? 'junction' : 'dir';
+}
+
+export function resolveHostSkillSymlinkTarget(input: {
+  platform?: NodeJS.Platform;
+  destinationPath: string;
+  sourcePath: string;
+}): string {
+  const linkType = resolveHostSkillSymlinkType(input.platform);
+  return linkType === 'junction'
+    ? path.resolve(input.sourcePath)
+    : toRelativeSymlinkTarget(input.destinationPath, input.sourcePath);
+}
+
 async function ensureHostSkillRoot(input: {
   platformId: PlatformId | 'shared-agents';
   rootId: string;
@@ -252,10 +267,14 @@ async function bindOneSkill(input: {
   }
 
   try {
+    const linkType = resolveHostSkillSymlinkType();
     await fs.symlink(
-      toRelativeSymlinkTarget(destinationHostPath, sourceSharedSkillPath),
+      resolveHostSkillSymlinkTarget({
+        destinationPath: destinationHostPath,
+        sourcePath: sourceSharedSkillPath,
+      }),
       destinationHostPath,
-      'dir',
+      linkType,
     );
   } catch (error) {
     throw new HostSkillBindingError(

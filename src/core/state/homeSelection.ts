@@ -1,10 +1,21 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { resolveIdentityManagerPaths } from '../identity/identityProfiles';
 import { resolveMetabotPaths, type MetabotPaths } from './paths';
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeWindowsProfileHome(env: NodeJS.ProcessEnv): string {
+  const userProfile = normalizeText(env.USERPROFILE);
+  if (userProfile) {
+    return userProfile;
+  }
+  const homeDrive = normalizeText(env.HOMEDRIVE);
+  const homePath = normalizeText(env.HOMEPATH);
+  return homeDrive && homePath ? `${homeDrive}${homePath}` : '';
 }
 
 function readJsonFileSync<T>(filePath: string): T | null {
@@ -71,7 +82,11 @@ interface ResolveMetabotHomeSelectionInput {
 }
 
 export function normalizeSystemHomeDir(env: NodeJS.ProcessEnv, cwd: string): string {
-  const home = normalizeText(env.HOME);
+  const home = normalizeText(env.HOME)
+    || normalizeWindowsProfileHome(env)
+    || normalizeText(process.env.HOME)
+    || normalizeWindowsProfileHome(process.env)
+    || normalizeText(os.homedir());
   const fallback = normalizeText(cwd);
   const systemHomeDir = path.resolve(home || fallback);
   if (!systemHomeDir) {

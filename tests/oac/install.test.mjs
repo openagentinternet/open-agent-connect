@@ -83,7 +83,7 @@ test('runOac help shows primary bare install flow and registry platform host lis
   assert.match(result.stdout, /oac install/);
   assert.match(result.stdout, /oac doctor/);
   assert.match(result.stdout, /uninstall\s+Remove OAC shim/);
-  assert.match(result.stdout, /oac install --host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro>/);
+  assert.match(result.stdout, /oac install --host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro\|trae\|codebuddy>/);
 });
 
 test('runOac installs shared skills, metabot shim, and codex host bindings for an explicit host', async (t) => {
@@ -188,6 +188,53 @@ test('runOac auto-detects codex when CODEX_HOME is the only host signal', async 
   );
 });
 
+test('runOac install uses Windows user profile fallback when HOME is unavailable', async (t) => {
+  const userProfile = await fs.mkdtemp(path.join(os.tmpdir(), 'oac-install-userprofile-'));
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'oac-install-cwd-fallback-'));
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  const previousCwd = process.cwd();
+  t.after(async () => {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    process.chdir(previousCwd);
+    await fs.rm(userProfile, { recursive: true, force: true });
+    await fs.rm(cwd, { recursive: true, force: true });
+  });
+
+  delete process.env.HOME;
+  process.env.USERPROFILE = userProfile;
+  process.chdir(cwd);
+
+  const stdout = [];
+  const stderr = [];
+  const exitCode = await runOac(['install'], {
+    env: {
+      PATH: process.env.PATH,
+      USERPROFILE: userProfile,
+    },
+    cwd,
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: (chunk) => { stderr.push(String(chunk)); return true; } },
+  });
+
+  const payload = JSON.parse(stdout.join('').trim());
+  assert.equal(exitCode, 0, stderr.join(''));
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.sharedSkillRoot, path.join(userProfile, '.metabot', 'skills'));
+  assert.equal(payload.data.metabotShimPath, path.join(userProfile, '.metabot', 'bin', 'metabot'));
+  assert.equal(
+    await fs.stat(path.join(userProfile, '.agents', 'skills', 'metabot-ask-master')).then(() => true),
+    true,
+  );
+  await assert.rejects(
+    fs.stat(path.join(cwd, '.metabot', 'skills', 'metabot-ask-master')),
+    { code: 'ENOENT' },
+  );
+});
+
 test('bare runOac install binds shared agents root and skips platform roots whose parent is absent', async (t) => {
   const { systemHome } = await createSystemHome('oac-install-bare-shared-');
   t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
@@ -218,6 +265,31 @@ test('runOac install --host openclaw force-creates platform-native bindings', as
   assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === 'openclaw' && root.status === 'bound'));
   await assertSymlinkPointsTo(
     path.join(systemHome, '.openclaw', 'skills', 'metabot-ask-master'),
+    path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'),
+  );
+});
+
+test('runOac install can force-bind Trae and CodeBuddy skill roots', async (t) => {
+  const { systemHome } = await createSystemHome('oac-install-force-trae-codebuddy-');
+  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
+
+  const trae = await runOacCli(systemHome, ['install', '--host', 'trae']);
+  assert.equal(trae.exitCode, 0);
+  assert.equal(trae.payload.ok, true);
+  assert.equal(trae.payload.data.host, 'trae');
+  assert.ok(trae.payload.data.boundRoots.some((root) => root.platformId === 'trae' && root.rootId === 'trae-home'));
+  await assertSymlinkPointsTo(
+    path.join(systemHome, '.trae', 'skills', 'metabot-ask-master'),
+    path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'),
+  );
+
+  const codebuddy = await runOacCli(systemHome, ['install', '--host', 'codebuddy']);
+  assert.equal(codebuddy.exitCode, 0);
+  assert.equal(codebuddy.payload.ok, true);
+  assert.equal(codebuddy.payload.data.host, 'codebuddy');
+  assert.ok(codebuddy.payload.data.boundRoots.some((root) => root.platformId === 'codebuddy' && root.rootId === 'codebuddy-home'));
+  await assertSymlinkPointsTo(
+    path.join(systemHome, '.codebuddy', 'skills', 'metabot-ask-master'),
     path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'),
   );
 });

@@ -1,20 +1,20 @@
 import {
-  SUPPORTED_PLATFORM_IDS,
+  RUNTIME_PLATFORM_IDS,
   getPlatformBinaryMap,
   getPlatformDisplayNames,
   getPlatformSearchOrder,
-  isPlatformId,
+  isRuntimePlatformId,
 } from '../platform/platformRegistry';
-import type { PlatformId } from '../platform/platformRegistry';
+import type { RuntimePlatformId } from '../platform/platformRegistry';
 
 export type LlmProvider =
-  | PlatformId
+  | RuntimePlatformId
   | 'custom';
 export type LlmAuthState = 'unknown' | 'authenticated' | 'unauthenticated';
 export type LlmHealth = 'healthy' | 'degraded' | 'unavailable';
 export type LlmBindingRole = 'primary' | 'fallback' | 'reviewer' | 'specialist';
 
-export const SUPPORTED_LLM_PROVIDERS: LlmProvider[] = [...SUPPORTED_PLATFORM_IDS];
+export const SUPPORTED_LLM_PROVIDERS: LlmProvider[] = [...RUNTIME_PLATFORM_IDS];
 
 export const HOST_BINARY_MAP: Record<string, string> = getPlatformBinaryMap();
 
@@ -97,7 +97,7 @@ function normalizeOptionalString(value: unknown): string | undefined {
 // ---- type guards ----
 
 export function isLlmProvider(value: unknown): value is LlmProvider {
-  return isPlatformId(value) || value === 'custom';
+  return isRuntimePlatformId(value) || value === 'custom';
 }
 
 function isLlmAuthState(value: unknown): value is LlmAuthState {

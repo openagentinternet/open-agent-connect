@@ -2,9 +2,9 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
-  getPlatformDefinition,
+  getRuntimePlatformDefinition,
   getRuntimePlatforms,
-  isPlatformId,
+  isRuntimePlatformId,
 } from '../platform/platformRegistry';
 import type { LlmRuntime, LlmProvider, LlmAuthState } from './llmTypes';
 
@@ -98,9 +98,9 @@ export async function discoverProvider(
   options?: { createId?: () => string; now?: () => string; env?: NodeJS.ProcessEnv },
 ): Promise<LlmRuntime | null> {
   if (provider === 'custom') return null; // Custom runtimes are registered manually.
-  if (!isPlatformId(provider)) return null;
+  if (!isRuntimePlatformId(provider)) return null;
 
-  const platform = getPlatformDefinition(provider);
+  const platform = getRuntimePlatformDefinition(provider);
   let binaryPath: string | null = null;
   for (const binaryName of platform.runtime.binaryNames) {
     binaryPath = await findExecutableInPath(binaryName, pathDirs);

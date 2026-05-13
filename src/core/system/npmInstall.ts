@@ -5,6 +5,7 @@ import { bindPlatformSkills, type BoundPlatformSkillRootResult } from '../host/h
 import { CLI_VERSION } from '../../cli/version';
 import { SUPPORTED_PLATFORM_IDS, isPlatformId, resolvePlatformSkillRootPath } from '../platform/platformRegistry';
 import { getInstallSkillRoots, getPlatformSkillRoots } from '../platform/platformRegistry';
+import { normalizeSystemHomeDir } from '../state/homeSelection';
 import type { PlatformId } from '../platform/platformRegistry';
 
 const SUPPORTED_HOSTS: PlatformId[] = [...SUPPORTED_PLATFORM_IDS];
@@ -45,10 +46,6 @@ class NpmInstallError extends Error {
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function resolveSystemHomeDir(env: NodeJS.ProcessEnv): string {
-  return path.resolve(normalizeText(env.HOME) || process.env.HOME || process.cwd());
 }
 
 function resolvePackageRoot(context: NpmInstallContext): string {
@@ -385,7 +382,7 @@ export async function runNpmInstall(
 ): Promise<MetabotCommandResult<NpmInstallResult>> {
   try {
     const host = resolveRequestedHost(input.host);
-    const systemHomeDir = resolveSystemHomeDir(context.env);
+    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
     const packageRoot = resolvePackageRoot(context);
     const { sharedSkillRoot, installedSkills } = await copySharedSkills({
       packageRoot,
@@ -429,7 +426,7 @@ export async function runNpmDoctor(
 ): Promise<MetabotCommandResult<NpmInstallResult>> {
   try {
     const host = resolveRequestedHost(input.host);
-    const systemHomeDir = resolveSystemHomeDir(context.env);
+    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
     const packageRoot = resolvePackageRoot(context);
     return commandSuccess(await verifyInstalledState({
       host,

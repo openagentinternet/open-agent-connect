@@ -170,9 +170,11 @@ Supported platforms:
 - Cursor Agent
 - Kimi
 - Kiro CLI
+- Trae
+- CodeBuddy
 
-Requirements: Node.js 20-24, npm, macOS / Linux / Windows through WSL2 or Git
-Bash.
+Requirements: Node.js 20-24, npm, macOS / Linux / Windows. The npm path works
+from native Windows shells; the release-pack fallback needs WSL2 or Git Bash.
 
 [Unified install guide](docs/install/open-agent-connect.md)
 [Uninstall guide](docs/install/uninstall-open-agent-connect.md)

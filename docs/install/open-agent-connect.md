@@ -58,10 +58,13 @@ Supported execution environments:
 
 - macOS Terminal or an agent shell on macOS
 - Linux shell
-- Windows through WSL2 or Git Bash
+- Windows through PowerShell, Command Prompt, WSL2, or Git Bash for the npm path
+- Windows through WSL2 or Git Bash for the POSIX release-pack fallback
 
-If the user is on native Windows without WSL2 or Git Bash, stop and ask the user
-to run the install from WSL2 or Git Bash with Node.js available.
+On native Windows, prefer the npm path. The shell snippets below use POSIX
+syntax because they are written for local agents that usually run bash-like
+commands; translate the short checks to PowerShell or Command Prompt if the
+current agent shell is native Windows.
 
 ## Prerequisites
 
@@ -122,9 +125,12 @@ Supported platforms:
 - `cursor` - Cursor Agent
 - `kimi` - Kimi
 - `kiro` - Kiro CLI
+- `trae` - Trae
+- `codebuddy` - CodeBuddy
 
-Skills are installed once under `~/.metabot/skills`. Host roots contain symlinks
-pointing to `~/.metabot/skills/metabot-*`. Bare `oac install` binds
+Skills are installed once under `~/.metabot/skills`. Host roots contain skill
+links pointing to `~/.metabot/skills/metabot-*`: symlinks on POSIX platforms and
+directory junctions on Windows. Bare `oac install` binds
 `~/.agents/skills` and detected platform roots. A platform root is detected when
 its parent home directory already exists or when the platform root is the shared
 standard `~/.agents/skills`.
@@ -156,7 +162,17 @@ Host-native roots used by the built-in binder:
 - `Cursor Agent`: `$HOME/.cursor/skills`
 - `Kimi`: `$HOME/.kimi/skills` and `$HOME/.config/agents/skills`
 - `Kiro CLI`: `$HOME/.kiro/skills`
+- `Trae`: `$HOME/.trae/skills`
+- `CodeBuddy`: `$HOME/.codebuddy/skills`
 - Shared standard root: `$HOME/.agents/skills`
+
+On Windows, `$HOME` in this guide means the resolved user home. `oac install`
+uses `HOME` when present, then `USERPROFILE`, then `HOMEDRIVE` + `HOMEPATH`,
+then Node.js `os.homedir()`. If an agent sandbox leaves `HOME` empty, set
+`USERPROFILE` or run the installer from a shell where Node can resolve the user
+home. Windows host skill links are created as directory junctions, so normal
+users do not need Developer Mode or an elevated shell for the default npm
+installer.
 
 ## Recommended NPM Install
 
@@ -201,8 +217,8 @@ This installs:
 
 - shared skills under `~/.metabot/skills/`
 - the primary CLI shim under `~/.metabot/bin/metabot`
-- `metabot-*` skill symlinks under `~/.agents/skills`
-- host-native `metabot-*` skill symlinks for detected platform roots
+- `metabot-*` skill links under `~/.agents/skills`
+- host-native `metabot-*` skill links for detected platform roots
 
 The npm path and the fallback release-pack path are equivalent by final
 installed state. Both should leave `metabot` runnable, shared skills installed
@@ -299,7 +315,7 @@ This fallback installs:
 
 - shared skills under `~/.metabot/skills/`
 - the primary CLI shim under `~/.metabot/bin/metabot`
-- host-native `metabot-*` skill symlinks for the chosen host mode
+- host-native `metabot-*` skill links for the chosen host mode
 
 If the CLI is not on `PATH`, export:
 
@@ -336,7 +352,7 @@ npm i -g open-agent-connect && oac install
 
 If that platform reads `~/.agents/skills`, no extra binding is needed. If the
 platform has a different documented skill root that OAC does not know about yet,
-create Claude Code-style symlinks after install:
+create Claude Code-style links after install. In POSIX shells, use symlinks:
 
 ```bash
 TARGET_SKILL_ROOT="/absolute/path/to/that/agent/skills"
@@ -345,6 +361,18 @@ for skill_dir in "$HOME/.metabot/skills"/metabot-*; do
   [ -d "$skill_dir" ] || continue
   ln -sfn "$skill_dir" "$TARGET_SKILL_ROOT/$(basename "$skill_dir")"
 done
+```
+
+In native Windows PowerShell, create directory junctions instead:
+
+```powershell
+$TargetSkillRoot = "C:\absolute\path\to\that\agent\skills"
+New-Item -ItemType Directory -Force -Path $TargetSkillRoot | Out-Null
+Get-ChildItem "$env:USERPROFILE\.metabot\skills" -Directory -Filter "metabot-*" | ForEach-Object {
+  $LinkPath = Join-Path $TargetSkillRoot $_.Name
+  if (Test-Path $LinkPath) { Remove-Item $LinkPath -Recurse -Force }
+  New-Item -ItemType Junction -Path $LinkPath -Target $_.FullName | Out-Null
+}
 ```
 
 Do not invent platform-specific paths. Use the current host's documented skill

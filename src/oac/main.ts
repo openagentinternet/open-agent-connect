@@ -3,6 +3,7 @@
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
 import { runNpmDoctor, runNpmInstall } from '../core/system/npmInstall';
 import { runSystemUninstall } from '../core/system/uninstall';
+import { normalizeSystemHomeDir } from '../core/state/homeSelection';
 import { SystemCommandError } from '../core/system/types';
 import { CLI_VERSION } from '../cli/version';
 import { SUPPORTED_PLATFORM_IDS } from '../core/platform/platformRegistry';
@@ -96,7 +97,7 @@ async function runOacUninstall(
   }
   try {
     const result = await runSystemUninstall({
-      systemHomeDir: context.env.HOME || process.env.HOME || context.cwd,
+      systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
       all,
       confirmToken,
       env: context.env,

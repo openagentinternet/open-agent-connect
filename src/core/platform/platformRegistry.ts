@@ -11,7 +11,11 @@ export type PlatformId =
   | 'pi'
   | 'cursor'
   | 'kimi'
-  | 'kiro';
+  | 'kiro'
+  | 'trae'
+  | 'codebuddy';
+
+export type RuntimePlatformId = Exclude<PlatformId, 'trae'>;
 
 export type PlatformExecutorKind =
   | 'claude-stream-json'
@@ -24,13 +28,14 @@ export type PlatformExecutorKind =
   | 'pi-json'
   | 'cursor-stream-json'
   | 'acp-kimi'
-  | 'acp-kiro';
+  | 'acp-kiro'
+  | 'codebuddy-stream-json';
 
 export interface PlatformDefinition {
   id: PlatformId;
   displayName: string;
   logoPath: string;
-  runtime: {
+  runtime?: {
     binaryNames: string[];
     versionArgs: string[];
     authEnv: string[];
@@ -39,7 +44,7 @@ export interface PlatformDefinition {
   skills: {
     roots: PlatformSkillRoot[];
   };
-  executor: {
+  executor?: {
     kind: PlatformExecutorKind;
     backendFactoryExport: string;
     launchCommand: string;
@@ -320,9 +325,50 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
       multicaReferencePath: 'agent/kiro.go',
     },
   },
+  {
+    id: 'trae',
+    displayName: 'Trae',
+    logoPath: '/ui/assets/platforms/generic.svg',
+    skills: {
+      roots: [
+        { id: 'trae-home', kind: 'global', path: '~/.trae/skills', autoBind: 'when-parent-exists' },
+        { id: 'trae-project', kind: 'project', path: '.trae/skills', autoBind: 'manual' },
+      ],
+    },
+  },
+  {
+    id: 'codebuddy',
+    displayName: 'CodeBuddy',
+    logoPath: '/ui/assets/platforms/generic.svg',
+    runtime: {
+      binaryNames: ['codebuddy', 'cbc'],
+      versionArgs: ['--version'],
+      authEnv: [],
+      capabilities: DEFAULT_CAPABILITIES,
+    },
+    skills: {
+      roots: [
+        { id: 'codebuddy-home', kind: 'global', path: '~/.codebuddy/skills', autoBind: 'when-parent-exists' },
+        { id: 'codebuddy-project', kind: 'project', path: '.codebuddy/skills', autoBind: 'manual' },
+      ],
+    },
+    executor: {
+      kind: 'codebuddy-stream-json',
+      backendFactoryExport: 'codebuddyBackendFactory',
+      launchCommand: 'codebuddy -p --output-format stream-json',
+      multicaReferencePath: 'agent/codebuddy.go',
+    },
+  },
 ];
 
 export const SUPPORTED_PLATFORM_IDS: PlatformId[] = PLATFORM_DEFINITIONS.map((platform) => platform.id);
+export const RUNTIME_PLATFORM_IDS: RuntimePlatformId[] = PLATFORM_DEFINITIONS
+  .filter((platform): platform is PlatformDefinition & {
+    id: RuntimePlatformId;
+    runtime: NonNullable<PlatformDefinition['runtime']>;
+    executor: NonNullable<PlatformDefinition['executor']>;
+  } => Boolean(platform.runtime && platform.executor))
+  .map((platform) => platform.id);
 
 export function getPlatformDefinition(id: PlatformId): PlatformDefinition {
   const definition = PLATFORM_DEFINITIONS.find((platform) => platform.id === id);
@@ -332,24 +378,44 @@ export function getPlatformDefinition(id: PlatformId): PlatformDefinition {
   return definition;
 }
 
+export function getRuntimePlatformDefinition(id: RuntimePlatformId): RuntimePlatformDefinition {
+  const definition = getPlatformDefinition(id);
+  if (!definition.runtime || !definition.executor) {
+    throw new Error(`Platform id is not a managed runtime provider: ${id}`);
+  }
+  return definition as RuntimePlatformDefinition;
+}
+
 export function isPlatformId(value: unknown): value is PlatformId {
   return typeof value === 'string' && SUPPORTED_PLATFORM_IDS.includes(value as PlatformId);
 }
 
-export function getRuntimePlatforms(): PlatformDefinition[] {
-  return [...PLATFORM_DEFINITIONS];
+export function isRuntimePlatformId(value: unknown): value is RuntimePlatformId {
+  return typeof value === 'string' && RUNTIME_PLATFORM_IDS.includes(value as RuntimePlatformId);
+}
+
+export type RuntimePlatformDefinition = PlatformDefinition & {
+  id: RuntimePlatformId;
+  runtime: NonNullable<PlatformDefinition['runtime']>;
+  executor: NonNullable<PlatformDefinition['executor']>;
+};
+
+export function getRuntimePlatforms(): RuntimePlatformDefinition[] {
+  return PLATFORM_DEFINITIONS.filter((platform): platform is RuntimePlatformDefinition =>
+    Boolean(platform.runtime && platform.executor),
+  );
 }
 
 export function getPlatformDisplayNames(): Record<string, string> {
-  return Object.fromEntries(PLATFORM_DEFINITIONS.map((platform) => [platform.id, platform.displayName]));
+  return Object.fromEntries(getRuntimePlatforms().map((platform) => [platform.id, platform.displayName]));
 }
 
 export function getPlatformBinaryMap(): Record<string, string> {
-  return Object.fromEntries(PLATFORM_DEFINITIONS.map((platform) => [platform.id, platform.runtime.binaryNames[0]]));
+  return Object.fromEntries(getRuntimePlatforms().map((platform) => [platform.id, platform.runtime.binaryNames[0]]));
 }
 
-export function getPlatformSearchOrder(): PlatformId[] {
-  return [...SUPPORTED_PLATFORM_IDS];
+export function getPlatformSearchOrder(): RuntimePlatformId[] {
+  return [...RUNTIME_PLATFORM_IDS];
 }
 
 export function getPlatformSkillRoots(id: PlatformId): PlatformSkillRoot[] {
