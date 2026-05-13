@@ -292,7 +292,8 @@ test('runCli prints services group help with publish skill listing', async () =>
   assert.equal(exitCode, 0);
   const output = stdout.join('');
   assert.match(output, /^Usage:\s+metabot services <subcommand>/m);
-  assert.match(output, /publish-skills\s+List primary-runtime skills available for service publishing\./);
+  assert.match(output, /skills\s+List primary-runtime skills available for service publishing\./);
+  assert.match(output, /publish-skills\s+Compatibility alias for services skills\./);
 });
 
 test('runCli prints services publish and rate help with DOGE and OPCAT chain support', async () => {
@@ -304,7 +305,8 @@ test('runCli prints services publish and rate help with DOGE and OPCAT chain sup
 
   assert.equal(publishExitCode, 0);
   const publishOutput = publishStdout.join('');
-  assert.match(publishOutput, /^Usage:\s+metabot services publish --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(publishOutput, /^Usage:\s+metabot services publish \[--from <bot-slug>\] --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(publishOutput, /--from <bot-slug>\s+Optional local MetaBot actor/m);
   assert.match(publishOutput, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(publishOutput, /service-doge-payload\.json/);
   assert.match(publishOutput, /service-opcat-payload\.json/);
@@ -317,10 +319,27 @@ test('runCli prints services publish and rate help with DOGE and OPCAT chain sup
 
   assert.equal(rateExitCode, 0);
   const rateOutput = rateStdout.join('');
-  assert.match(rateOutput, /^Usage:\s+metabot services rate --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(rateOutput, /^Usage:\s+metabot services rate \[--from <bot-slug>\] --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(rateOutput, /--from <bot-slug>\s+Optional local MetaBot actor/m);
   assert.match(rateOutput, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(rateOutput, /rating-doge\.json/);
   assert.match(rateOutput, /rating-opcat\.json/);
+});
+
+test('runCli prints leaf help text for canonical `metabot services skills --help`', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['services', 'skills', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot services skills \[--from <bot-slug>\]/m);
+  assert.match(output, /Lists skills from one local MetaBot primary runtime only/i);
+  assert.match(output, /--from <bot-slug>\s+Optional local MetaBot actor/m);
+  assert.match(output, /metabot services skills --from alice/);
 });
 
 test('runCli prints leaf help text for `metabot services publish-skills --help`', async () => {
@@ -333,8 +352,9 @@ test('runCli prints leaf help text for `metabot services publish-skills --help`'
 
   assert.equal(exitCode, 0);
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot services publish-skills/m);
-  assert.match(output, /Lists skills from the active MetaBot primary runtime only/i);
+  assert.match(output, /^Usage:\s+metabot services publish-skills \[--slug <bot-slug>\]/m);
+  assert.match(output, /Compatibility alias for `metabot services skills`/i);
+  assert.match(output, /--slug <bot-slug>\s+Compatibility actor selector/m);
   assert.match(output, /metaBotSlug/m);
   assert.match(output, /runtime/m);
   assert.match(output, /skills/m);
@@ -395,9 +415,10 @@ test('runCli prints leaf help text for `metabot services call --help` with reque
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot services call --request-file <path>/m);
+  assert.match(output, /^Usage:\s+metabot services call \[--from <bot-slug>\] --request-file <path>/m);
   assert.match(output, /^Required flags:/m);
   assert.match(output, /--request-file <path>\s+JSON request file\./m);
+  assert.match(output, /--from <bot-slug>\s+Optional local MetaBot actor/m);
   assert.match(output, /^Request shape:/m);
   assert.match(output, /"servicePinId": "service-pin-id"/m);
   assert.match(output, /^Success shape:/m);

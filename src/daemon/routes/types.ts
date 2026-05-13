@@ -52,7 +52,7 @@ export interface MetabotDaemonHttpHandlers {
   };
   services?: {
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    listPublishSkills?: (input?: { slug?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    listPublishSkills?: (input?: { slug?: string; from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     listMyServices?: (input: { page: number; pageSize: number; refresh: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     listMyServiceOrders?: (input: {
       serviceId: string;

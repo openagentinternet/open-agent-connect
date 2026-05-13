@@ -171,6 +171,12 @@ const CHAIN_WRITE_FLAG: CommandHelpFlag = {
   description: `Optional chain network override: mvc, btc, doge, or opcat. ${CONFIGURED_WRITE_NETWORK_TEXT}`,
 };
 
+const FROM_BOT_FLAG: CommandHelpFlag = {
+  flag: '--from',
+  value: '<bot-slug>',
+  description: 'Optional local MetaBot actor. Omit to use the active identity.',
+};
+
 const FILE_UPLOAD_CHAIN_FLAG: CommandHelpFlag = {
   flag: '--chain',
   value: '<mvc|btc|opcat>',
@@ -897,7 +903,8 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot services <subcommand>',
     subcommands: [
       { name: 'publish', summary: 'Publish one paid capability to chain.' },
-      { name: 'publish-skills', summary: 'List primary-runtime skills available for service publishing.' },
+      { name: 'skills', summary: 'List primary-runtime skills available for service publishing.' },
+      { name: 'publish-skills', summary: 'Compatibility alias for services skills.' },
       { name: 'call', summary: 'Delegate one task to a remote MetaBot service.' },
       { name: 'rate', summary: 'Publish one buyer-side service rating after delivery.' },
     ],
@@ -906,7 +913,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['services', 'publish'],
     summary: 'Publish one service to the chain-backed skill-service directory.',
-    usage: 'metabot services publish --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
+    usage: 'metabot services publish [--from <bot-slug>] --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
     requiredFlags: [
       { flag: '--payload-file', value: '<path>', description: 'JSON service payload file.' },
     ],
@@ -934,12 +941,34 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot services publish --payload-file service-doge-payload.json --chain doge',
       'metabot services publish --payload-file service-opcat-payload.json --chain opcat',
     ],
-    optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['services', 'skills'],
+    summary: 'Lists skills from one local MetaBot primary runtime only.',
+    usage: 'metabot services skills [--from <bot-slug>]',
+    successFields: [
+      'metaBotSlug',
+      'identity',
+      'runtime',
+      'platform',
+      'skills',
+      'rootDiagnostics',
+    ],
+    failureSemantics: [
+      'Fails before chain writes when no identity exists, the primary runtime is missing, or the primary runtime is unavailable.',
+      'Fallback runtime skills are intentionally excluded from this list.',
+    ],
+    examples: [
+      'metabot services skills',
+      'metabot services skills --from alice',
+    ],
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['services', 'publish-skills'],
-    summary: 'Lists skills from the active MetaBot primary runtime only.',
-    usage: 'metabot services publish-skills',
+    summary: 'Compatibility alias for `metabot services skills`.',
+    usage: 'metabot services publish-skills [--slug <bot-slug>]',
     successFields: [
       'metaBotSlug',
       'identity',
@@ -954,8 +983,12 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot services publish-skills',
+      'metabot services publish-skills --slug alice',
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [
+      { flag: '--slug', value: '<bot-slug>', description: 'Compatibility actor selector. Prefer --from with `metabot services skills`.' },
+      HELP_JSON_FLAG,
+    ],
   },
   {
     commandPath: ['provider'],
@@ -1048,7 +1081,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['services', 'call'],
     summary: 'Delegate one task to a remote MetaBot and keep the result in the current host session.',
-    usage: 'metabot services call --request-file <path>',
+    usage: 'metabot services call [--from <bot-slug>] --request-file <path>',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -1081,13 +1114,14 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot services call --request-file request.json',
+      'metabot services call --from buyer --request-file request.json',
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['services', 'rate'],
     summary: 'Publish one buyer-side service rating and optionally deliver a follow-up private message back to the provider.',
-    usage: 'metabot services rate --request-file <path> [--chain <mvc|btc|doge|opcat>]',
+    usage: 'metabot services rate [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|doge|opcat>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -1110,10 +1144,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot services rate --request-file rating.json',
+      'metabot services rate --from buyer --request-file rating.json',
       'metabot services rate --request-file rating-doge.json --chain doge',
       'metabot services rate --request-file rating-opcat.json --chain opcat',
     ],
-    optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['chat'],

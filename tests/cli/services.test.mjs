@@ -86,6 +86,52 @@ test('runCli dispatches `metabot services publish --payload-file --chain` for su
   assert.deepEqual(calls.map((entry) => entry.network), ['btc', 'doge', 'opcat']);
 });
 
+test('runCli dispatches `metabot services publish --from --payload-file --chain` with actor slug', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-publish-from-'));
+  const payloadFile = path.join(tempDir, 'payload.json');
+  await writeFile(payloadFile, JSON.stringify({
+    serviceName: 'Tarot Reading',
+    displayName: 'Tarot Reading',
+    description: 'Performs tarot readings.',
+  }), 'utf8');
+
+  const calls = [];
+  const exitCode = await runCli([
+    'services',
+    'publish',
+    '--from',
+    'alice',
+    '--payload-file',
+    payloadFile,
+    '--chain',
+    'doge',
+  ], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        publish: async (input) => {
+          calls.push(input);
+          return commandSuccess({
+            servicePinId: 'service-tarot-doge',
+            network: input.network,
+            from: input.from,
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    serviceName: 'Tarot Reading',
+    displayName: 'Tarot Reading',
+    description: 'Performs tarot readings.',
+    from: 'alice',
+    network: 'doge',
+  }]);
+});
+
 test('runCli fails `metabot services publish` when --chain value is missing', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-publish-missing-chain-'));
   const payloadFile = path.join(tempDir, 'payload.json');
@@ -198,6 +244,46 @@ test('runCli dispatches `metabot services publish-skills` to the primary runtime
   });
 });
 
+test('runCli dispatches canonical `metabot services skills --from` to the publishable skill lister', async () => {
+  const calls = [];
+
+  const exitCode = await runCli(['services', 'skills', '--from', 'alice'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        listPublishSkills: async (input) => {
+          calls.push(input);
+          return commandSuccess({ skills: [] });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ from: 'alice' }]);
+});
+
+test('runCli keeps `metabot services publish-skills --slug` as a compatibility alias', async () => {
+  const calls = [];
+
+  const exitCode = await runCli(['services', 'publish-skills', '--slug', 'alice'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        listPublishSkills: async (input) => {
+          calls.push(input);
+          return commandSuccess({ skills: [] });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ from: 'alice' }]);
+});
+
 test('runCli dispatches `metabot services call --request-file` with parsed JSON request', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-call-'));
   const requestFile = path.join(tempDir, 'request.json');
@@ -248,6 +334,42 @@ test('runCli dispatches `metabot services call --request-file` with parsed JSON 
   });
 });
 
+test('runCli dispatches `metabot services call --from --request-file` with actor slug', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-call-from-'));
+  const requestFile = path.join(tempDir, 'request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'service-weather',
+      providerGlobalMetaId: 'gm-weather-seller',
+      userTask: 'tell me tomorrow weather',
+    },
+  }), 'utf8');
+
+  const calls = [];
+  const exitCode = await runCli(['services', 'call', '--from', 'buyer', '--request-file', requestFile], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        call: async (input) => {
+          calls.push(input);
+          return commandSuccess({ traceId: 'trace-weather-123' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    request: {
+      servicePinId: 'service-weather',
+      providerGlobalMetaId: 'gm-weather-seller',
+      userTask: 'tell me tomorrow weather',
+    },
+    from: 'buyer',
+  }]);
+});
+
 test('runCli dispatches `metabot services rate --request-file --chain` for supported write chains', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-rate-network-'));
   const requestFile = path.join(tempDir, 'rating.json');
@@ -279,6 +401,48 @@ test('runCli dispatches `metabot services rate --request-file --chain` for suppo
   }
 
   assert.deepEqual(calls.map((entry) => entry.network), ['btc', 'doge', 'opcat']);
+});
+
+test('runCli dispatches `metabot services rate --from --request-file --chain` with actor slug', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-rate-from-'));
+  const requestFile = path.join(tempDir, 'rating.json');
+  await writeFile(requestFile, JSON.stringify({
+    traceId: 'trace-123',
+    rate: 5,
+    comment: 'Great result.',
+  }), 'utf8');
+
+  const calls = [];
+  const exitCode = await runCli([
+    'services',
+    'rate',
+    '--from',
+    'buyer',
+    '--request-file',
+    requestFile,
+    '--chain',
+    'opcat',
+  ], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        rate: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'rating-pin-opcat-1' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    traceId: 'trace-123',
+    rate: 5,
+    comment: 'Great result.',
+    from: 'buyer',
+    network: 'opcat',
+  }]);
 });
 
 test('runCli fails `metabot services rate` when --chain value is missing', async () => {

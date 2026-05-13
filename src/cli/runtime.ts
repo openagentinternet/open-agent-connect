@@ -1726,8 +1726,21 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     },
     services: {
       publish: async (input) => requestJson(context, 'POST', '/api/services/publish', input),
-      listPublishSkills: async () => {
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
+      listPublishSkills: async (input = {}) => {
+        let homeDir = normalizeHomeDir(context.env, context.cwd);
+        const requestedFrom = normalizeEnvText(input.from);
+        if (requestedFrom) {
+          const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+          const profiles = await listIdentityProfiles(systemHomeDir).catch(() => []);
+          const resolved = resolveProfileNameMatch(requestedFrom, profiles);
+          if (resolved.status === 'not_found') {
+            return commandFailed('profile_not_found', resolved.message);
+          }
+          if (resolved.status === 'ambiguous') {
+            return commandFailed('identity_profile_ambiguous', resolved.message);
+          }
+          homeDir = resolved.match.homeDir;
+        }
         const runtimeStateStore = createRuntimeStateStore(homeDir);
         const state = await runtimeStateStore.readState();
         if (!state.identity) {

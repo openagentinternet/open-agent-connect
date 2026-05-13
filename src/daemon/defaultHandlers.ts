@@ -4885,6 +4885,37 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
+  async function resolveScopedServicesForActor(rawActor: unknown): Promise<{
+    services?: NonNullable<MetabotDaemonHttpHandlers['services']>;
+    failure?: MetabotCommandResult<never>;
+  }> {
+    const requestedSlug = normalizeText(rawActor);
+    if (!requestedSlug) {
+      return {};
+    }
+
+    const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedSlug);
+    if (!selectedProfile) {
+      return {
+        failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`),
+      };
+    }
+
+    const profileHomeDir = path.resolve(selectedProfile.homeDir);
+    if (profileHomeDir === path.resolve(input.homeDir)) {
+      return {};
+    }
+
+    const scopedHandlers = createDefaultMetabotDaemonHandlers({
+      ...input,
+      homeDir: profileHomeDir,
+      secretStore: createFileSecretStore(profileHomeDir),
+      signer: createSignerForProfileHome(profileHomeDir),
+      servicePaymentExecutor: input.servicePaymentExecutor,
+    });
+    return { services: scopedHandlers.services };
+  }
+
   function getPublishedServicePinIds(service: Partial<PublishedServiceRecord>): string[] {
     return [...new Set([
       ...(Array.isArray(service.chainPinIds) ? service.chainPinIds : []),
@@ -10501,7 +10532,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
       },
       listPublishSkills: async (request = {}) => {
-        const requestedSlug = normalizeText(request.slug);
+        const requestedSlug = normalizeText(request.from) || normalizeText(request.slug);
         const selectedProfile = requestedSlug
           ? await getMetabotProfile(normalizedSystemHomeDir, requestedSlug)
           : null;
@@ -10553,7 +10584,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
       },
       publish: async (rawInput) => {
-        const requestedSlug = normalizeText(rawInput.metaBotSlug ?? rawInput.slug);
+        const requestedSlug = normalizeText(rawInput.from ?? rawInput.metaBotSlug ?? rawInput.slug);
         const selectedProfile = requestedSlug
           ? await getMetabotProfile(normalizedSystemHomeDir, requestedSlug)
           : null;
@@ -10658,6 +10689,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
       },
       call: async (rawInput) => {
+        const scoped = await resolveScopedServicesForActor(rawInput.from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.services?.call) {
+          return scoped.services.call(rawInput);
+        }
+
         const state = await runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before calling services.');
@@ -10775,6 +10814,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }
           if (request.spendCap) {
             confirmRequest.spendCap = request.spendCap;
+          }
+          if (rawInput.from) {
+            confirmRequest.from = rawInput.from;
           }
           return commandAwaitingConfirmation({
             traceId: null,
@@ -11317,6 +11359,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       handleInboundOrderProtocolMessage,
       rate: async (rawInput) => {
+        const scoped = await resolveScopedServicesForActor(rawInput.from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.services?.rate) {
+          return scoped.services.rate(rawInput);
+        }
+
         const request = readServiceRateRequest(rawInput);
         if (!request.traceId) {
           return commandFailed('invalid_service_rating_request', 'Service rating request must include traceId.');

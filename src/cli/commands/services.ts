@@ -2,6 +2,19 @@ import { commandFailed, commandSuccess, type MetabotCommandResult } from '../../
 import { commandMissingFlag, commandUnknownSubcommand, readChainWriteFlag, readFlagValue, readJsonFile } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
+function readFromFlag(args: string[], options: { allowSlugAlias?: boolean } = {}): string | undefined {
+  return readFlagValue(args, '--from')
+    ?? (options.allowSlugAlias ? readFlagValue(args, '--slug') : null)
+    ?? undefined;
+}
+
+function applyOptionalActor(
+  input: Record<string, unknown>,
+  from: string | undefined,
+): Record<string, unknown> {
+  return from ? { ...input, from } : input;
+}
+
 export async function runServicesCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   const shouldPollTrace = Boolean(
     context.stdout
@@ -13,6 +26,7 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
 
   if (subcommand === 'publish') {
     const payloadFile = readFlagValue(args, '--payload-file');
+    const from = readFromFlag(args);
     if (!payloadFile) {
       return commandMissingFlag('--payload-file');
     }
@@ -28,19 +42,24 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
     }
 
     const payload = await readJsonFile(context, payloadFile);
-    return handler(chainFlag.chain ? { ...payload, network: chainFlag.chain } : payload);
+    return handler(applyOptionalActor(
+      chainFlag.chain ? { ...payload, network: chainFlag.chain } : payload,
+      from,
+    ));
   }
 
-  if (subcommand === 'publish-skills') {
+  if (subcommand === 'skills' || subcommand === 'publish-skills') {
+    const from = readFromFlag(args, { allowSlugAlias: subcommand === 'publish-skills' });
     const handler = context.dependencies.services?.listPublishSkills;
     if (!handler) {
       return commandFailed('not_implemented', 'Services publish skills handler is not configured.');
     }
-    return handler();
+    return handler(from ? { from } : undefined);
   }
 
   if (subcommand === 'call') {
     const requestFile = readFlagValue(args, '--request-file');
+    const from = readFromFlag(args);
     if (!requestFile) {
       return commandMissingFlag('--request-file');
     }
@@ -51,7 +70,7 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
     }
 
     const request = await readJsonFile(context, requestFile);
-    const result = await handler(request);
+    const result = await handler(applyOptionalActor(request, from));
 
     if (
       result.state === 'waiting' &&
@@ -110,6 +129,7 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
 
   if (subcommand === 'rate') {
     const requestFile = readFlagValue(args, '--request-file');
+    const from = readFromFlag(args);
     if (!requestFile) {
       return commandMissingFlag('--request-file');
     }
@@ -125,7 +145,10 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
     }
 
     const request = await readJsonFile(context, requestFile);
-    return handler(chainFlag.chain ? { ...request, network: chainFlag.chain } : request);
+    return handler(applyOptionalActor(
+      chainFlag.chain ? { ...request, network: chainFlag.chain } : request,
+      from,
+    ));
   }
 
   return commandUnknownSubcommand(`services ${args.join(' ')}`.trim());

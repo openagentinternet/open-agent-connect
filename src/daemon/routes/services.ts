@@ -37,7 +37,7 @@ export const handleServicesRoutes: RouteHandler = async (context) => {
       return true;
     }
 
-    const slug = url.searchParams.get('slug')?.trim();
+    const slug = url.searchParams.get('slug')?.trim() || url.searchParams.get('from')?.trim();
     const result = handlers.services?.listPublishSkills
       ? await handlers.services.listPublishSkills(slug ? { slug } : {})
       : commandFailed('not_implemented', 'Services publish skills handler is not configured.');
