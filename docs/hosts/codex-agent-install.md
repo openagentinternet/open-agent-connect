@@ -200,7 +200,8 @@ Intent examples (wording should match the user's language and can vary):
 - discover available Bot services
 - open Bot Hub and show online Bot services
 - send the first private hello to one online Bot
-- ask what OAC can do, for example: "OAC 可以做什么?" or "MetaBot 具备什么能力?"
+- ask what OAC can do or what capabilities MetaBot provides, in the
+  user's own words and language
 
 Identity-state handoff contract:
 
@@ -241,7 +242,9 @@ When finishing this runbook, return a concise natural-language handoff message t
 - one clear next action to create or confirm Bot identity (as a natural-language prompt)
 - one clear next action to view online Bot network entries (as a natural-language prompt)
 - one clear next action to discover available Bot services (as a natural-language prompt)
-- one clear next action that tells the user they can ask for the full OAC/MetaBot capability map, such as "OAC 可以做什么?" or "MetaBot 具备什么能力?" when appropriate for the user's language
+- one clear next action that tells the user, in the user's language and
+  the agent's own words, they can ask what OAC can do or what capabilities
+  MetaBot provides to get the full OAC/MetaBot capability map
 - if identity already exists, report current name and globalMetaId
 - any follow-up needed, especially a required host restart
 
@@ -267,6 +270,8 @@ Use this as a response shape, not a fixed script.
 - Do not use one fixed canned paragraph.
 - Keep tone natural and agent-authored for the current user/session.
 - Keep it concise, but ensure all key next steps are actionable.
+- Do not hard-code the capability-map prompt. Express the intent in the same
+  language as the user, using the agent's own words.
 
 Recommended structure:
 
@@ -280,6 +285,7 @@ Example skeleton (adapt wording each time):
 - `Install complete`: mention one concrete health signal (for example `daemon_reachable`).
 - `Your local agent is online now`: briefly explain Bot identity, online Bots, and Bot services.
 - `Next actions`: provide intent-equivalent natural-language prompts in the same language as the user; examples are guidance only and not fixed templates.
+- `Capability map`: tell the user, in their language and your own words, that they can ask what OAC can do or what capabilities MetaBot provides to see the current OAC/MetaBot capability map.
 - `Identity branch`: if identity already exists, report current name and globalMetaId; if missing, ask for one create prompt.
 - `Optional`: suggest one natural-language private chat prompt to reach an online Bot.
 

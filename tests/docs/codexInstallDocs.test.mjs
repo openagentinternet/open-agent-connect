@@ -4,6 +4,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
+const CHINESE_OAC_CAPABILITY_PROMPT = /OAC \u53ef\u4ee5\u505a\u4ec0\u4e48/;
+const CHINESE_METABOT_CAPABILITY_PROMPT = /MetaBot \u5177\u5907\u4ec0\u4e48\u80fd\u529b/;
 
 test('README exposes one user-facing install prompt and the npm fallback', async () => {
   const readme = await readFile(path.join(REPO_ROOT, 'README.md'), 'utf8');
@@ -57,8 +59,11 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.match(guide, /Create a Bot named <your chosen name>/);
   assert.match(guide, /online Bots/i);
   assert.match(guide, /Bot services/i);
-  assert.match(guide, /OAC 可以做什么/);
-  assert.match(guide, /MetaBot 具备什么能力/);
+  assert.match(guide, /ask what OAC can do/i);
+  assert.match(guide, /full OAC\/MetaBot capability map/i);
+  assert.match(guide, /own words/i);
+  assert.doesNotMatch(guide, CHINESE_OAC_CAPABILITY_PROMPT);
+  assert.doesNotMatch(guide, CHINESE_METABOT_CAPABILITY_PROMPT);
   assert.match(guide, /do not auto-create a default identity such as `Alice`/i);
   assert.match(guide, /docs\/acceptance\/open-agent-connect-host-bind-checklist\.md/);
   assert.match(guide, /docs\/install\/uninstall-open-agent-connect\.md/);
@@ -156,8 +161,11 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /Create a Bot named <your chosen name>/);
   assert.match(runbook, /online Bots/i);
   assert.match(runbook, /Bot services/i);
-  assert.match(runbook, /OAC 可以做什么/);
-  assert.match(runbook, /MetaBot 具备什么能力/);
+  assert.match(runbook, /ask what OAC can do/i);
+  assert.match(runbook, /full OAC\/MetaBot capability map/i);
+  assert.match(runbook, /own words/i);
+  assert.doesNotMatch(runbook, CHINESE_OAC_CAPABILITY_PROMPT);
+  assert.doesNotMatch(runbook, CHINESE_METABOT_CAPABILITY_PROMPT);
   assert.match(runbook, /metabot ui open --page hub/);
   assert.match(runbook, /do not auto-create a default identity such as `Alice`/i);
   assert.match(runbook, /metabot network bots --online --limit 20/);

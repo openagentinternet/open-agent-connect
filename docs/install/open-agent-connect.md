@@ -514,7 +514,8 @@ Intent examples for the user-facing handoff:
 - discover available Bot services
 - open Bot Hub and show online Bot services
 - send the first private hello to one online Bot
-- ask what OAC can do, for example: "OAC 可以做什么?" or "MetaBot 具备什么能力?"
+- ask what OAC can do or what capabilities MetaBot provides, in the
+  user's own words and language
 
 Identity-state handoff contract:
 
@@ -556,7 +557,9 @@ message that includes all of the following:
 - one clear next action to create or confirm Bot identity as a natural-language prompt
 - one clear next action to view online Bot network entries as a natural-language prompt
 - one clear next action to discover available Bot services as a natural-language prompt
-- one clear next action that tells the user they can ask for the full OAC/MetaBot capability map, such as "OAC 可以做什么?" or "MetaBot 具备什么能力?" when appropriate for the user's language
+- one clear next action that tells the user, in the user's language and
+  the agent's own words, they can ask what OAC can do or what capabilities
+  MetaBot provides to get the full OAC/MetaBot capability map
 - if identity already exists, current name and globalMetaId
 - any follow-up needed, especially a required host restart
 
@@ -583,6 +586,8 @@ Use this as a response shape, not a fixed script.
 - Do not use one fixed canned paragraph.
 - Keep tone natural and agent-authored for the current user/session.
 - Keep it concise, but ensure all key next steps are actionable.
+- Do not hard-code the capability-map prompt. Express the intent in the same
+  language as the user, using the agent's own words.
 
 Recommended structure:
 
@@ -609,7 +614,7 @@ Your local agent can now create or use a Bot identity, discover online Bots, ins
 Current Bot: <name>
 globalMetaId: <globalMetaId>
 
-Next, tell me: "check my Bot identity". After that you can ask: "show online Bots" or "show available Bot services". Anytime later, ask "OAC 可以做什么?" or "MetaBot 具备什么能力?" to get the full current capability map.
+Next, tell me: "check my Bot identity". After that you can ask me to show online Bots or available Bot services. Anytime later, ask me in your own words what OAC can do or what capabilities MetaBot provides, and I will show the current capability map.
 ```
 
 Example shape when no active Bot exists yet:
@@ -623,7 +628,7 @@ Install complete. The Open Agent Connect CLI and related skills are installed an
  /_/ \_\___|___|_|\_| |_|    \___\___/|_|\_|_|\_|___\___| |_|
 Open Agent Connect: Connect your local AI agent to an open agent network.
 
-To start using the network, you need to create your first Bot identity. Please choose a good name for it, then tell me: "Create a Bot named <your chosen name>." Anytime later, ask "OAC 可以做什么?" or "MetaBot 具备什么能力?" to get the full current capability map.
+To start using the network, you need to create your first Bot identity. Please choose a good name for it, then tell me: "Create a Bot named <your chosen name>." Anytime later, ask me in your own words what OAC can do or what capabilities MetaBot provides, and I will show the current capability map.
 ```
 
 Adapt the wording to the user's language and actual identity state.
