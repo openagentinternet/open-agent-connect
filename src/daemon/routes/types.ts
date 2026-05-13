@@ -43,12 +43,12 @@ export interface MetabotDaemonHttpHandlers {
   };
   provider?: {
     getSummary?: () => Awaitable<MetabotCommandResult<unknown>>;
-    getInitiatedRefunds?: () => Awaitable<MetabotCommandResult<unknown>>;
-    getRefunds?: () => Awaitable<MetabotCommandResult<unknown>>;
-    inspectOrder?: (input: { orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    getInitiatedRefunds?: (input?: { from?: string; all?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    getRefunds?: (input?: { from?: string; all?: boolean; kind?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    inspectOrder?: (input: { from?: string; orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     setPresence?: (input: { enabled: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     confirmRefund?: (input: { orderId: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    settleRefund?: (input: { orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    settleRefund?: (input: { from?: string; orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   services?: {
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

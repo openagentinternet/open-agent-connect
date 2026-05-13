@@ -668,6 +668,115 @@ test('runCli rejects `--all` for owned service mutations', async () => {
   assert.equal(envelopes[1].code, 'invalid_flag');
 });
 
+test('runCli dispatches `metabot services refunds list` with aggregate and kind filters', async () => {
+  const calls = [];
+  const receivedExitCode = await runCli(['services', 'refunds', 'list', '--all', '--received'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        listRefunds: async (input) => {
+          calls.push(input);
+          return commandSuccess({ receivedByMe: [] });
+        },
+      },
+    },
+  });
+
+  const initiatedExitCode = await runCli(['services', 'refunds', 'list', '--from', 'alice', '--initiated'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        listRefunds: async (input) => {
+          calls.push(input);
+          return commandSuccess({ initiatedByMe: [] });
+        },
+      },
+    },
+  });
+
+  assert.equal(receivedExitCode, 0);
+  assert.equal(initiatedExitCode, 0);
+  assert.deepEqual(calls, [
+    { all: true, kind: 'received' },
+    { from: 'alice', all: false, kind: 'initiated' },
+  ]);
+});
+
+test('runCli dispatches `metabot services refunds settle` with actor selector', async () => {
+  const calls = [];
+  const exitCode = await runCli(['services', 'refunds', 'settle', '--from', 'seller', '--order-id', 'order-1'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        settleRefund: async (input) => {
+          calls.push(input);
+          return commandSuccess({ orderId: input.orderId });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ from: 'seller', orderId: 'order-1' }]);
+});
+
+test('runCli dispatches `metabot services orders inspect` with actor selector', async () => {
+  const calls = [];
+  const exitCode = await runCli(['services', 'orders', 'inspect', '--from', 'seller', '--payment-txid', 'tx-1'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        inspectOrder: async (input) => {
+          calls.push(input);
+          return commandSuccess({ paymentTxid: input.paymentTxid });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ from: 'seller', paymentTxid: 'tx-1' }]);
+});
+
+test('runCli keeps provider order/refund commands as service lifecycle aliases', async () => {
+  const calls = [];
+  const orderExitCode = await runCli(['provider', 'order', 'inspect', '--payment-txid', 'tx-1'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        inspectOrder: async (input) => {
+          calls.push(['inspect', input]);
+          return commandSuccess({ paymentTxid: input.paymentTxid });
+        },
+      },
+    },
+  });
+  const refundExitCode = await runCli(['provider', 'refund', 'settle', '--order-id', 'order-1'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        settleRefund: async (input) => {
+          calls.push(['settle', input]);
+          return commandSuccess({ orderId: input.orderId });
+        },
+      },
+    },
+  });
+
+  assert.equal(orderExitCode, 0);
+  assert.equal(refundExitCode, 0);
+  assert.deepEqual(calls, [
+    ['inspect', { paymentTxid: 'tx-1' }],
+    ['settle', { orderId: 'order-1' }],
+  ]);
+});
+
 test('runCli fails `metabot services rate` when --chain value is missing', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-rate-missing-chain-'));
   const requestFile = path.join(tempDir, 'rating.json');

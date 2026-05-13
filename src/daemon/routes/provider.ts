@@ -24,7 +24,10 @@ export const handleProviderRoutes: RouteHandler = async (context) => {
     }
 
     const result = handlers.provider?.getInitiatedRefunds
-      ? await handlers.provider.getInitiatedRefunds()
+      ? await handlers.provider.getInitiatedRefunds({
+          ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from')!.trim() } : {}),
+          ...(url.searchParams.has('all') ? { all: url.searchParams.get('all') === 'true' } : {}),
+        })
       : commandFailed('not_implemented', 'Provider initiated refunds handler is not configured.');
     context.sendJson(200, result);
     return true;
@@ -37,7 +40,11 @@ export const handleProviderRoutes: RouteHandler = async (context) => {
     }
 
     const result = handlers.provider?.getRefunds
-      ? await handlers.provider.getRefunds()
+      ? await handlers.provider.getRefunds({
+          ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from')!.trim() } : {}),
+          ...(url.searchParams.has('all') ? { all: url.searchParams.get('all') === 'true' } : {}),
+          ...(url.searchParams.get('kind')?.trim() ? { kind: url.searchParams.get('kind')!.trim() } : {}),
+        })
       : commandFailed('not_implemented', 'Provider refunds handler is not configured.');
     context.sendJson(200, result);
     return true;
@@ -51,6 +58,7 @@ export const handleProviderRoutes: RouteHandler = async (context) => {
 
     const result = handlers.provider?.inspectOrder
       ? await handlers.provider.inspectOrder({
+          ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from')!.trim() } : {}),
           orderId: url.searchParams.get('orderId') ?? '',
           paymentTxid: url.searchParams.get('paymentTxid') ?? '',
         })
@@ -84,6 +92,7 @@ export const handleProviderRoutes: RouteHandler = async (context) => {
     const input = await context.readJsonBody();
     const result = handlers.provider?.settleRefund
       ? await handlers.provider.settleRefund({
+          from: typeof input.from === 'string' ? input.from : '',
           orderId: typeof input.orderId === 'string' ? input.orderId : '',
           paymentTxid: typeof input.paymentTxid === 'string' ? input.paymentTxid : '',
         })

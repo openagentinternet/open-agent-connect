@@ -295,6 +295,8 @@ test('runCli prints services group help with publish skill listing', async () =>
   assert.match(output, /skills\s+List primary-runtime skills available for service publishing\./);
   assert.match(output, /publish-skills\s+Compatibility alias for services skills\./);
   assert.match(output, /owned\s+List and manage services owned by local MetaBots\./);
+  assert.match(output, /orders\s+Inspect seller-side service orders\./);
+  assert.match(output, /refunds\s+List and settle service refunds\./);
 });
 
 test('runCli prints services publish and rate help with DOGE and OPCAT chain support', async () => {
@@ -409,8 +411,34 @@ test('runCli prints provider operations help with order inspection and refund se
   assert.equal(exitCode, 0);
   const output = stdout.join('');
   assert.match(output, /^Usage:\s+metabot provider <subcommand>/m);
+  assert.match(output, /Compatibility aliases for seller-side service order inspection and refund settlement\./);
+  assert.match(output, /Prefer `metabot services orders inspect` and `metabot services refunds settle`/);
   assert.match(output, /order\s+Inspect seller-side provider orders\./);
   assert.match(output, /refund\s+Process seller-side refund settlement\./);
+});
+
+test('runCli prints services order and refund lifecycle help', async () => {
+  const orderStdout = [];
+  const orderExitCode = await runCli(['services', 'orders', 'inspect', '--help'], {
+    stdout: { write: (chunk) => { orderStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(orderExitCode, 0);
+  const orderOutput = orderStdout.join('');
+  assert.match(orderOutput, /^Usage:\s+metabot services orders inspect \[--from <bot-slug>\] \(\--order-id <id> \| --payment-txid <txid>\)/m);
+  assert.match(orderOutput, /service, buyer, status, trace, payment, runtime session, and refund fields/i);
+
+  const refundStdout = [];
+  const refundExitCode = await runCli(['services', 'refunds', 'settle', '--help'], {
+    stdout: { write: (chunk) => { refundStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(refundExitCode, 0);
+  const refundOutput = refundStdout.join('');
+  assert.match(refundOutput, /^Usage:\s+metabot services refunds settle \[--from <bot-slug>\] \(\--order-id <id> \| --payment-txid <txid>\)/m);
+  assert.match(refundOutput, /refund txid, finalization pin, or a machine-readable blocking reason/i);
 });
 
 test('runCli prints provider order inspect help with order id and payment txid selectors', async () => {
@@ -423,8 +451,8 @@ test('runCli prints provider order inspect help with order id and payment txid s
 
   assert.equal(exitCode, 0);
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot provider order inspect \(\--order-id <id> \| --payment-txid <txid>\)/m);
-  assert.match(output, /service, buyer, status, trace, payment, runtime session, and refund fields/i);
+  assert.match(output, /^Usage:\s+metabot provider order inspect \[--from <bot-slug>\] \(\--order-id <id> \| --payment-txid <txid>\)/m);
+  assert.match(output, /Compatibility alias for `metabot services orders inspect`/i);
 });
 
 test('runCli prints provider refund settle help with settlement proof and blocker semantics', async () => {
@@ -437,8 +465,8 @@ test('runCli prints provider refund settle help with settlement proof and blocke
 
   assert.equal(exitCode, 0);
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot provider refund settle \(\--order-id <id> \| --payment-txid <txid>\)/m);
-  assert.match(output, /refund txid, finalization pin, or a machine-readable blocking reason/i);
+  assert.match(output, /^Usage:\s+metabot provider refund settle \[--from <bot-slug>\] \(\--order-id <id> \| --payment-txid <txid>\)/m);
+  assert.match(output, /Compatibility alias for `metabot services refunds settle`/i);
 });
 
 test('runCli prints leaf help text for `metabot services call --help` with request and result semantics', async () => {

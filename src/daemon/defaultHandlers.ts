@@ -4916,6 +4916,37 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return { services: scopedHandlers.services };
   }
 
+  async function resolveScopedProviderForActor(rawActor: unknown): Promise<{
+    provider?: NonNullable<MetabotDaemonHttpHandlers['provider']>;
+    failure?: MetabotCommandResult<never>;
+  }> {
+    const requestedSlug = normalizeText(rawActor);
+    if (!requestedSlug) {
+      return {};
+    }
+
+    const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedSlug);
+    if (!selectedProfile) {
+      return {
+        failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`),
+      };
+    }
+
+    const profileHomeDir = path.resolve(selectedProfile.homeDir);
+    if (profileHomeDir === path.resolve(input.homeDir)) {
+      return {};
+    }
+
+    const scopedHandlers = createDefaultMetabotDaemonHandlers({
+      ...input,
+      homeDir: profileHomeDir,
+      secretStore: createFileSecretStore(profileHomeDir),
+      signer: createSignerForProfileHome(profileHomeDir),
+      servicePaymentExecutor: input.servicePaymentExecutor,
+    });
+    return { provider: scopedHandlers.provider };
+  }
+
   function getPublishedServicePinIds(service: Partial<PublishedServiceRecord>): string[] {
     return [...new Set([
       ...(Array.isArray(service.chainPinIds) ? service.chainPinIds : []),
@@ -10352,15 +10383,48 @@ export function createDefaultMetabotDaemonHandlers(input: {
           ratingSyncError: ratingSnapshot.ratingSyncError,
         }));
       },
-      getInitiatedRefunds: async () => {
+      getInitiatedRefunds: async (request = {}) => {
+        const scoped = await resolveScopedProviderForActor(request.from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.provider?.getInitiatedRefunds) {
+          return scoped.provider.getInitiatedRefunds(request);
+        }
         const state = await runtimeStateStore.readState();
         return commandSuccess(buildInitiatedRefundsPayload({ state }));
       },
-      getRefunds: async () => {
+      getRefunds: async (request = {}) => {
+        const scoped = await resolveScopedProviderForActor(request.from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.provider?.getRefunds) {
+          return scoped.provider.getRefunds(request);
+        }
         const state = await runtimeStateStore.readState();
-        return commandSuccess(buildProviderRefundsPayload({ state }));
+        const payload = buildProviderRefundsPayload({ state });
+        if (normalizeText(request.kind) === 'received') {
+          const receivedByMe = payload.receivedByMe;
+          return commandSuccess({
+            initiatedByMe: [],
+            receivedByMe,
+            totalCount: receivedByMe.length,
+            pendingCount: receivedByMe.filter((entry) => entry.status !== 'refunded').length,
+          });
+        }
+        return commandSuccess(payload);
       },
-      inspectOrder: async ({ orderId, paymentTxid }) => inspectProviderSellerOrder({ orderId, paymentTxid }),
+      inspectOrder: async ({ from, orderId, paymentTxid }) => {
+        const scoped = await resolveScopedProviderForActor(from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.provider?.inspectOrder) {
+          return scoped.provider.inspectOrder({ from, orderId, paymentTxid });
+        }
+        return inspectProviderSellerOrder({ orderId, paymentTxid });
+      },
       setPresence: async ({ enabled }) => {
         const state = await runtimeStateStore.readState();
         if (!state.identity) {
@@ -10383,7 +10447,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
       },
       confirmRefund: async ({ orderId }) => settleProviderSellerRefund({ orderId }),
-      settleRefund: async ({ orderId, paymentTxid }) => settleProviderSellerRefund({ orderId, paymentTxid }),
+      settleRefund: async ({ from, orderId, paymentTxid }) => {
+        const scoped = await resolveScopedProviderForActor(from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.provider?.settleRefund) {
+          return scoped.provider.settleRefund({ from, orderId, paymentTxid });
+        }
+        return settleProviderSellerRefund({ orderId, paymentTxid });
+      },
     },
     services: {
       listMyServices: async (request) => {

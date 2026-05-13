@@ -68,12 +68,27 @@ export interface CliDependencies {
       from?: string;
       network?: string;
     }) => Awaitable<MetabotCommandResult<unknown>>;
+    listRefunds?: (input: {
+      from?: string;
+      all: boolean;
+      kind: 'initiated' | 'received' | 'all';
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    settleRefund?: (input: {
+      from?: string;
+      orderId?: string;
+      paymentTxid?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    inspectOrder?: (input: {
+      from?: string;
+      orderId?: string;
+      paymentTxid?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
     call?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     rate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   provider?: {
-    inspectOrder?: (input: { orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    settleRefund?: (input: { orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    inspectOrder?: (input: { from?: string; orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    settleRefund?: (input: { from?: string; orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

@@ -906,6 +906,8 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'skills', summary: 'List primary-runtime skills available for service publishing.' },
       { name: 'publish-skills', summary: 'Compatibility alias for services skills.' },
       { name: 'owned', summary: 'List and manage services owned by local MetaBots.' },
+      { name: 'orders', summary: 'Inspect seller-side service orders.' },
+      { name: 'refunds', summary: 'List and settle service refunds.' },
       { name: 'call', summary: 'Delegate one task to a remote MetaBot service.' },
       { name: 'rate', summary: 'Publish one buyer-side service rating after delivery.' },
     ],
@@ -1074,14 +1076,105 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
   },
   {
+    commandPath: ['services', 'orders'],
+    summary: 'Seller-side service order inspection commands.',
+    usage: 'metabot services orders <subcommand>',
+    subcommands: [
+      { name: 'inspect', summary: 'Inspect one seller order by order id or payment txid.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['services', 'orders', 'inspect'],
+    summary: 'Inspect one seller-side service order and return service, buyer, status, trace, payment, runtime session, and refund fields.',
+    usage: 'metabot services orders inspect [--from <bot-slug>] (--order-id <id> | --payment-txid <txid>)',
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--order-id', value: '<id>', description: 'Local seller order id.' },
+      { flag: '--payment-txid', value: '<txid>', description: 'Payment txid associated with the seller order.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'order.orderId',
+      'order.service',
+      'order.buyer',
+      'order.status',
+      'order.trace',
+      'order.payment',
+      'order.runtime',
+      'order.refund',
+    ],
+    failureSemantics: [
+      'Fails when neither selector is provided, both selectors are provided, or no seller order matches the selector.',
+    ],
+    examples: [
+      'metabot services orders inspect --from seller --order-id seller-order-123',
+      'metabot services orders inspect --payment-txid <txid>',
+    ],
+  },
+  {
+    commandPath: ['services', 'refunds'],
+    summary: 'Refund commands for buyer-initiated and seller-received service refunds.',
+    usage: 'metabot services refunds <subcommand>',
+    subcommands: [
+      { name: 'list', summary: 'List initiated, received, or all service refunds.' },
+      { name: 'settle', summary: 'Settle one pending seller refund by order id or payment txid.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['services', 'refunds', 'list'],
+    summary: 'List initiated, received, or all service refunds.',
+    usage: 'metabot services refunds list [--from <bot-slug> | --all] [--initiated | --received]',
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--all', description: 'Aggregate refunds across all local MetaBot profiles when supported by the runtime.' },
+      { flag: '--initiated', description: 'Show buyer-side refunds initiated by the selected local MetaBot.' },
+      { flag: '--received', description: 'Show seller-side refund requests received by the selected local MetaBot.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['initiatedByMe', 'receivedByMe', 'totalCount', 'pendingCount'],
+    examples: [
+      'metabot services refunds list --from buyer --initiated',
+      'metabot services refunds list --all --received',
+    ],
+  },
+  {
+    commandPath: ['services', 'refunds', 'settle'],
+    summary: 'Settle one pending seller refund and return a refund txid, finalization pin, or a machine-readable blocking reason.',
+    usage: 'metabot services refunds settle [--from <bot-slug>] (--order-id <id> | --payment-txid <txid>)',
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--order-id', value: '<id>', description: 'Local seller order id.' },
+      { flag: '--payment-txid', value: '<txid>', description: 'Payment txid associated with the seller order.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'orderId',
+      'paymentTxid',
+      'refundTxid',
+      'refundFinalizePinId',
+      'order',
+      'settlement',
+    ],
+    failureSemantics: [
+      'Returns manual_action_required with order.refund.blockingReason when settlement is blocked by missing proof, unsupported asset, missing destination address, insufficient balance, transfer failure, or finalization failure.',
+    ],
+    examples: [
+      'metabot services refunds settle --from seller --order-id seller-order-123',
+      'metabot services refunds settle --payment-txid <txid>',
+    ],
+  },
+  {
     commandPath: ['provider'],
-    summary: 'Provider operations for local seller-side order inspection and refund settlement.',
+    summary: 'Compatibility aliases for seller-side service order inspection and refund settlement.',
     usage: 'metabot provider <subcommand>',
     subcommands: [
       { name: 'order', summary: 'Inspect seller-side provider orders.' },
       { name: 'refund', summary: 'Process seller-side refund settlement.' },
     ],
     failureSemantics: [
+      'Prefer `metabot services orders inspect` and `metabot services refunds settle` for new automation.',
       'Provider operations resolve the active local MetaBot and fail before settlement when no active identity exists.',
       'Refund settlement returns a machine-readable blocker instead of marking an order refunded without proof.',
     ],
@@ -1102,9 +1195,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['provider', 'order', 'inspect'],
-    summary: 'Inspect one seller-side provider order and return service, buyer, status, trace, payment, runtime session, and refund fields.',
-    usage: 'metabot provider order inspect (--order-id <id> | --payment-txid <txid>)',
+    summary: 'Compatibility alias for `metabot services orders inspect`.',
+    usage: 'metabot provider order inspect [--from <bot-slug>] (--order-id <id> | --payment-txid <txid>)',
     optionalFlags: [
+      FROM_BOT_FLAG,
       { flag: '--order-id', value: '<id>', description: 'Local seller order id.' },
       { flag: '--payment-txid', value: '<txid>', description: 'Payment txid associated with the seller order.' },
       HELP_JSON_FLAG,
@@ -1138,9 +1232,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['provider', 'refund', 'settle'],
-    summary: 'Settle one pending seller refund and return a refund txid, finalization pin, or a machine-readable blocking reason.',
-    usage: 'metabot provider refund settle (--order-id <id> | --payment-txid <txid>)',
+    summary: 'Compatibility alias for `metabot services refunds settle`.',
+    usage: 'metabot provider refund settle [--from <bot-slug>] (--order-id <id> | --payment-txid <txid>)',
     optionalFlags: [
+      FROM_BOT_FLAG,
       { flag: '--order-id', value: '<id>', description: 'Local seller order id.' },
       { flag: '--payment-txid', value: '<txid>', description: 'Payment txid associated with the seller order.' },
       HELP_JSON_FLAG,

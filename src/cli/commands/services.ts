@@ -40,6 +40,42 @@ function readOwnedListInput(args: string[]): {
   };
 }
 
+function readSellerOrderSelector(args: string[]): {
+  ok: true;
+  selector: { orderId?: string; paymentTxid?: string };
+} | {
+  ok: false;
+  result: MetabotCommandResult<unknown>;
+} {
+  const orderId = readFlagValue(args, '--order-id');
+  const paymentTxid = readFlagValue(args, '--payment-txid');
+  if (!orderId && !paymentTxid) {
+    return {
+      ok: false,
+      result: commandFailed(
+        'missing_seller_order_selector',
+        'Provide --order-id <id> or --payment-txid <txid>.',
+      ),
+    };
+  }
+  if (orderId && paymentTxid) {
+    return {
+      ok: false,
+      result: commandFailed(
+        'ambiguous_seller_order_selector',
+        'Use only one seller order selector: --order-id or --payment-txid.',
+      ),
+    };
+  }
+  return {
+    ok: true,
+    selector: {
+      ...(orderId ? { orderId } : {}),
+      ...(paymentTxid ? { paymentTxid } : {}),
+    },
+  };
+}
+
 export async function runServicesCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   const shouldPollTrace = Boolean(
     context.stdout
@@ -157,6 +193,70 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
     }
 
     return commandUnknownSubcommand(`services owned ${ownedArgs.join(' ')}`.trim());
+  }
+
+  if (subcommand === 'refunds') {
+    const refundsSubcommand = args[1];
+    const refundsArgs = args.slice(2);
+
+    if (refundsSubcommand === 'list') {
+      const handler = context.dependencies.services?.listRefunds;
+      if (!handler) {
+        return commandFailed('not_implemented', 'Services refund list handler is not configured.');
+      }
+      const from = readFromFlag(refundsArgs);
+      const kind = hasFlag(refundsArgs, '--initiated')
+        ? 'initiated'
+        : hasFlag(refundsArgs, '--received')
+          ? 'received'
+          : 'all';
+      return handler({
+        ...(from ? { from } : {}),
+        all: hasFlag(refundsArgs, '--all'),
+        kind,
+      });
+    }
+
+    if (refundsSubcommand === 'settle') {
+      const selector = readSellerOrderSelector(refundsArgs);
+      if (!selector.ok) {
+        return selector.result;
+      }
+      const handler = context.dependencies.services?.settleRefund;
+      if (!handler) {
+        return commandFailed('not_implemented', 'Services refund settlement handler is not configured.');
+      }
+      const from = readFromFlag(refundsArgs);
+      return handler({
+        ...(from ? { from } : {}),
+        ...selector.selector,
+      });
+    }
+
+    return commandUnknownSubcommand(`services refunds ${refundsArgs.join(' ')}`.trim());
+  }
+
+  if (subcommand === 'orders') {
+    const ordersSubcommand = args[1];
+    const ordersArgs = args.slice(2);
+
+    if (ordersSubcommand === 'inspect') {
+      const selector = readSellerOrderSelector(ordersArgs);
+      if (!selector.ok) {
+        return selector.result;
+      }
+      const handler = context.dependencies.services?.inspectOrder;
+      if (!handler) {
+        return commandFailed('not_implemented', 'Services order inspection handler is not configured.');
+      }
+      const from = readFromFlag(ordersArgs);
+      return handler({
+        ...(from ? { from } : {}),
+        ...selector.selector,
+      });
+    }
+
+    return commandUnknownSubcommand(`services orders ${ordersArgs.join(' ')}`.trim());
   }
 
   if (subcommand === 'call') {

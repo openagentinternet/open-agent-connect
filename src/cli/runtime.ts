@@ -1809,6 +1809,33 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       },
       modifyOwned: async (input) => requestJson(context, 'POST', '/api/services/my/modify', input),
       revokeOwned: async (input) => requestJson(context, 'POST', '/api/services/my/revoke', input),
+      listRefunds: async (input) => {
+        const query = new URLSearchParams();
+        if (input.from) {
+          query.set('from', input.from);
+        }
+        query.set('all', input.all ? 'true' : 'false');
+        query.set('kind', input.kind);
+        const path = input.kind === 'initiated'
+          ? '/api/provider/refunds/initiated'
+          : '/api/provider/refunds';
+        return requestJson(context, 'GET', `${path}?${query.toString()}`);
+      },
+      settleRefund: async (input) => requestJson(context, 'POST', '/api/provider/refund/settle', input),
+      inspectOrder: async (input) => {
+        const query = new URLSearchParams();
+        if (input.orderId) {
+          query.set('orderId', input.orderId);
+        }
+        if (input.paymentTxid) {
+          query.set('paymentTxid', input.paymentTxid);
+        }
+        if (input.from) {
+          query.set('from', input.from);
+        }
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/provider/order${suffix}`);
+      },
     },
     provider: {
       inspectOrder: async (input) => {
