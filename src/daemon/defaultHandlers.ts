@@ -765,27 +765,6 @@ function markServicesOfflineForPresenceUnavailable(
   }));
 }
 
-function markLocalServicesOnline(
-  services: Array<Record<string, unknown>>,
-  identity: RuntimeIdentityRecord | null,
-): Array<Record<string, unknown>> {
-  const nowMs = Date.now();
-  const nowSec = Math.floor(nowMs / 1000);
-  const providerName = normalizeText(identity?.name);
-  const providerMetaId = normalizeText(identity?.metaId);
-  const providerChatPublicKey = normalizeText(identity?.chatPublicKey);
-  return services.map((service) => ({
-    ...service,
-    providerName: normalizeText(service.providerName) || providerName,
-    providerMetaId: normalizeText(service.providerMetaId) || providerMetaId,
-    providerChatPublicKey: normalizeText(service.providerChatPublicKey) || providerChatPublicKey,
-    online: true,
-    lastSeenAt: nowMs,
-    lastSeenSec: nowSec,
-    lastSeenAgoSeconds: 0,
-  }));
-}
-
 async function decorateServicesWithSocketPresence(input: {
   services: Array<Record<string, unknown>>;
   socketPresenceApiBaseUrl?: string;
@@ -3053,7 +3032,7 @@ async function listRuntimeDirectoryServices(input: {
     .filter((service) => service.available === 1)
     .map((service) => summarizeService(service));
   let directory;
-  const decoratedLocalServices = markLocalServicesOnline(localServices, input.state.identity);
+  let decoratedLocalServices;
 
   try {
     directory = await readChainDirectoryWithFallback({
@@ -3062,6 +3041,12 @@ async function listRuntimeDirectoryServices(input: {
       socketPresenceFailureMode: input.socketPresenceFailureMode,
       onlineOnly: input.onlineOnly,
       fetchSeededDirectoryServices: async () => fetchSeededDirectoryServices(input.directorySeedsPath),
+    });
+    decoratedLocalServices = await decorateServicesWithSocketPresence({
+      services: localServices,
+      socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+      socketPresenceFailureMode: input.socketPresenceFailureMode,
+      onlineOnly: input.onlineOnly,
     });
   } catch (error) {
     const cached = await selectCachedServices(true);
@@ -3073,8 +3058,8 @@ async function listRuntimeDirectoryServices(input: {
 
   const mergedServices = await enrichServicesWithProviderChatPublicKeys({
     services: dedupeServices([
-      ...decoratedLocalServices,
       ...directory.services,
+      ...decoratedLocalServices,
     ]),
     resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
   });

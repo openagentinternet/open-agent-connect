@@ -1386,44 +1386,6 @@ test('services publish persists a local directory entry that network services --
   assert.equal(listed.payload.data.services[0].providerGlobalMetaId, created.payload.data.globalMetaId);
 });
 
-test('network services --online keeps local published services online when socket presence omits the local provider', async (t) => {
-  const homeDir = await createProfileHomeTemp('');
-  const socketPresenceApi = await startFakeSocketPresenceApiServer({ users: [] });
-  const env = { METABOT_SOCKET_PRESENCE_API_BASE_URL: socketPresenceApi.baseUrl };
-  t.after(async () => stopDaemon(homeDir));
-  t.after(async () => socketPresenceApi.close());
-
-  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Eric'], env);
-  assert.equal(created.exitCode, 0);
-
-  const payloadFile = path.join(homeDir, 'payload-local-online.json');
-  await writeFile(payloadFile, JSON.stringify({
-    serviceName: 'local-eric-service',
-    displayName: 'Local Eric Service',
-    description: 'Local service should remain online while the local daemon is running.',
-    providerSkill: 'metabot-local-eric',
-    price: '0.00001',
-    currency: 'SPACE',
-    outputType: 'text',
-    skillDocument: '# Local Eric Service',
-  }), 'utf8');
-  await preparePrimaryRuntimeSkill(homeDir, 'metabot-local-eric');
-
-  const published = await runCommand(homeDir, ['services', 'publish', '--payload-file', payloadFile], env);
-  assert.equal(published.exitCode, 0);
-  assert.equal(published.payload.ok, true);
-
-  const listed = await runCommand(homeDir, ['network', 'services', '--online'], env);
-
-  assert.equal(listed.exitCode, 0);
-  assert.equal(listed.payload.ok, true);
-  assert.equal(listed.payload.data.services.length, 1);
-  assert.equal(listed.payload.data.services[0].servicePinId, published.payload.data.servicePinId);
-  assert.equal(listed.payload.data.services[0].displayName, 'Local Eric Service');
-  assert.equal(listed.payload.data.services[0].online, true);
-  assert.equal(listed.payload.data.services[0].providerGlobalMetaId, created.payload.data.globalMetaId);
-});
-
 test('services publish-skills lists only active MetaBot primary runtime skills', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
