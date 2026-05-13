@@ -7,17 +7,19 @@ export interface PublishProviderCardViewModel {
     summary: string;
     rows: PublishDefinitionRow[];
 }
-export interface PublishResultCardViewModel {
-    hasResult: boolean;
-    title: string;
-    summary: string;
-    rows: PublishDefinitionRow[];
-}
 export interface PublishSkillOptionViewModel {
     value: string;
     label: string;
     title: string;
     description: string;
+}
+export interface PublishMetaBotOptionViewModel {
+    value: string;
+    label: string;
+    title: string;
+    description: string;
+    globalMetaId: string;
+    primaryProvider: string;
 }
 export interface PublishAvailabilityViewModel {
     canPublish: boolean;
@@ -27,12 +29,16 @@ export interface PublishAvailabilityViewModel {
 export interface PublishPageViewModel {
     providerCard: PublishProviderCardViewModel;
     runtimeCard: PublishProviderCardViewModel;
-    resultCard: PublishResultCardViewModel;
+    metabots: PublishMetaBotOptionViewModel[];
+    selectedMetaBotSlug: string;
     skills: PublishSkillOptionViewModel[];
     availability: PublishAvailabilityViewModel;
 }
 export declare function buildPublishPageViewModel(input: {
     providerSummary?: Record<string, unknown> | null;
+    profiles?: unknown[] | null;
+    runtimes?: unknown[] | null;
+    selectedMetaBotSlug?: string | null;
     publishSkills?: Record<string, unknown> | null;
     publishSkillsError?: Record<string, unknown> | null;
     publishResult?: Record<string, unknown> | null;

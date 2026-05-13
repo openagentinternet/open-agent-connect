@@ -7,6 +7,7 @@ export interface PublishedServiceDraft {
     currency: string;
     outputType: string;
     serviceIconUri?: string | null;
+    serviceIconDataUrl?: string | null;
 }
 export interface PublishedServiceRecord {
     id: string;
@@ -21,6 +22,10 @@ export interface PublishedServiceRecord {
     serviceIcon: string | null;
     price: string;
     currency: string;
+    paymentChain: string | null;
+    settlementKind: string | null;
+    mrc20Ticker: string | null;
+    mrc20Id: string | null;
     skillDocument: string;
     inputType: 'text';
     outputType: string;
@@ -32,6 +37,13 @@ export interface PublishedServiceRecord {
     updatedAt: number;
 }
 export declare function normalizePublishedServiceCurrency(value: string): string;
+export declare function resolvePublishedServiceSettlement(value: string): {
+    currency: string;
+    paymentChain: string | null;
+    settlementKind: string | null;
+    mrc20Ticker: string | null;
+    mrc20Id: string | null;
+};
 export declare function buildPublishedService(input: {
     sourceServicePinId: string;
     currentPinId: string;
@@ -42,7 +54,7 @@ export declare function buildPublishedService(input: {
     skillDocument: string;
     now: number;
 }): {
-    payload: Record<string, string>;
+    payload: Record<string, string | null>;
     record: PublishedServiceRecord;
 };
 export declare function buildRevokedPublishedService(input: {
@@ -57,6 +69,10 @@ export declare function buildRevokedPublishedService(input: {
     serviceIcon?: string | null;
     price: string;
     currency: string;
+    paymentChain?: string | null;
+    settlementKind?: string | null;
+    mrc20Ticker?: string | null;
+    mrc20Id?: string | null;
     skillDocument: string;
     now: number;
 }): PublishedServiceRecord;

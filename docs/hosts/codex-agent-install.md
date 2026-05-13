@@ -200,6 +200,7 @@ Intent examples (wording should match the user's language and can vary):
 - discover available Bot services
 - open Bot Hub and show online Bot services
 - send the first private hello to one online Bot
+- ask what OAC can do, for example: "OAC 可以做什么?" or "MetaBot 具备什么能力?"
 
 Identity-state handoff contract:
 
@@ -240,6 +241,7 @@ When finishing this runbook, return a concise natural-language handoff message t
 - one clear next action to create or confirm Bot identity (as a natural-language prompt)
 - one clear next action to view online Bot network entries (as a natural-language prompt)
 - one clear next action to discover available Bot services (as a natural-language prompt)
+- one clear next action that tells the user they can ask for the full OAC/MetaBot capability map, such as "OAC 可以做什么?" or "MetaBot 具备什么能力?" when appropriate for the user's language
 - if identity already exists, report current name and globalMetaId
 - any follow-up needed, especially a required host restart
 

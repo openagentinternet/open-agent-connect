@@ -15,6 +15,7 @@ const SHARED_PACK = 'shared';
 const HOSTS = ['codex', 'claude-code', 'openclaw'];
 const EXPECTED_METABOT_SKILLS = [
   'metabot-ask-master',
+  'metabot-help',
   'metabot-identity-manage',
   'metabot-network-manage',
   'metabot-call-remote-service',
@@ -175,6 +176,22 @@ test('buildAgentConnectSkillpacks includes the Ask Master skill with only master
   assert.match(content, /Do not call `services call` directly/i);
   assert.doesNotMatch(content, /metabot advisor (list|ask|trace)/);
   assert.doesNotMatch(content, /type":\s*"advisor_request"/);
+});
+
+test('buildAgentConnectSkillpacks includes the MetaBot help skill as a dynamic ability map entrypoint', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-help'), 'utf8');
+  assert.match(content, /^name:\s*metabot-help$/m);
+  assert.match(content, /OAC|Open Agent Connect|MetaBot|Bot/i);
+  assert.match(content, /~\/\.metabot\/skills\/metabot-\*/);
+  assert.match(content, /YAML frontmatter/i);
+  assert.match(content, /description/i);
+  assert.match(content, /metabot --help/);
+  assert.match(content, /metabot identity --help/);
+  assert.match(content, /metabot services --help/);
+  assert.match(content, /same language/i);
+  assert.match(content, /natural-language examples/i);
 });
 
 test('buildAgentConnectSkillpacks renders shared skills without host-specific adapter sections or host override flags', async () => {

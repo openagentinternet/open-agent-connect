@@ -6,8 +6,41 @@ const deriveIdentity_1 = require("../identity/deriveIdentity");
 const loadIdentity_1 = require("../identity/loadIdentity");
 const writePin_1 = require("../chain/writePin");
 const DEFAULT_BTC_WRITE_FEE_RATE = 2;
+const walletSpendQueues = new Map();
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
+}
+async function withWalletSpendQueue(key, run) {
+    const previous = walletSpendQueues.get(key) ?? Promise.resolve();
+    let releaseCurrent;
+    const current = new Promise((resolve) => {
+        releaseCurrent = resolve;
+    });
+    const currentChain = previous.catch(() => undefined).then(() => current);
+    walletSpendQueues.set(key, currentChain);
+    await previous.catch(() => undefined);
+    try {
+        return await run();
+    }
+    finally {
+        releaseCurrent();
+        if (walletSpendQueues.get(key) === currentChain) {
+            walletSpendQueues.delete(key);
+        }
+    }
+}
+async function resolveWalletSpendQueueKey(input) {
+    let address = normalizeText(input.fallbackAddress);
+    try {
+        address = normalizeText(await input.adapter.deriveAddress(input.mnemonic, input.path)) || address;
+    }
+    catch {
+        // Fall back to the derivation path so failed address derivation does not remove spend serialization.
+    }
+    return [
+        input.adapter.network,
+        address || normalizeText(input.path) || 'default',
+    ].join(':');
 }
 async function loadSignerIdentity(secretStore) {
     const secrets = await secretStore.readIdentitySecrets();
@@ -54,31 +87,39 @@ function createLocalMnemonicSigner(input) {
             if (!adapter) {
                 throw new Error(`Chain write network ${request.network} is not supported.`);
             }
-            const feeRate = input.feeRates?.[request.network];
-            const inscriptionResult = await adapter.buildInscription({
-                request,
-                identity,
-                feeRate,
+            const lockKey = await resolveWalletSpendQueueKey({
+                adapter,
+                mnemonic: identity.mnemonic,
+                path: identity.path,
+                fallbackAddress: identity.addresses?.[request.network] ?? identity.mvcAddress,
             });
-            // Broadcast all signed transactions in order
-            const broadcastTxids = [];
-            for (const rawTx of inscriptionResult.signedRawTxs) {
-                broadcastTxids.push(await adapter.broadcastTx(rawTx));
-            }
-            const firstRevealTxid = broadcastTxids[inscriptionResult.revealIndices[0]];
-            const revealTxids = inscriptionResult.revealIndices.map((i) => broadcastTxids[i]);
-            return {
-                txids: revealTxids,
-                pinId: `${firstRevealTxid}i0`,
-                totalCost: inscriptionResult.totalCost,
-                network: request.network,
-                operation: request.operation,
-                path: request.path,
-                contentType: request.contentType,
-                encoding: request.encoding,
-                globalMetaId: identity.globalMetaId,
-                mvcAddress: identity.mvcAddress,
-            };
+            return withWalletSpendQueue(lockKey, async () => {
+                const feeRate = input.feeRates?.[request.network];
+                const inscriptionResult = await adapter.buildInscription({
+                    request,
+                    identity,
+                    feeRate,
+                });
+                // Broadcast all signed transactions in order.
+                const broadcastTxids = [];
+                for (const rawTx of inscriptionResult.signedRawTxs) {
+                    broadcastTxids.push(await adapter.broadcastTx(rawTx));
+                }
+                const firstRevealTxid = broadcastTxids[inscriptionResult.revealIndices[0]];
+                const revealTxids = inscriptionResult.revealIndices.map((i) => broadcastTxids[i]);
+                return {
+                    txids: revealTxids,
+                    pinId: `${firstRevealTxid}i0`,
+                    totalCost: inscriptionResult.totalCost,
+                    network: request.network,
+                    operation: request.operation,
+                    path: request.path,
+                    contentType: request.contentType,
+                    encoding: request.encoding,
+                    globalMetaId: identity.globalMetaId,
+                    mvcAddress: identity.mvcAddress,
+                };
+            });
         },
     };
 }
@@ -87,13 +128,20 @@ function createLocalMnemonicSigner(input) {
  * Replaces the old `executeMvcTransfer` / `executeBtcTransfer` per-chain functions.
  */
 async function executeTransfer(adapter, input) {
-    const { rawTx, fee } = await adapter.buildTransfer({
+    const lockKey = await resolveWalletSpendQueueKey({
+        adapter,
         mnemonic: input.mnemonic,
         path: input.path,
-        toAddress: input.toAddress,
-        amountSatoshis: input.amountSatoshis,
-        feeRate: input.feeRate,
     });
-    const txid = await adapter.broadcastTx(rawTx);
-    return { txid, fee };
+    return withWalletSpendQueue(lockKey, async () => {
+        const { rawTx, fee } = await adapter.buildTransfer({
+            mnemonic: input.mnemonic,
+            path: input.path,
+            toAddress: input.toAddress,
+            amountSatoshis: input.amountSatoshis,
+            feeRate: input.feeRate,
+        });
+        const txid = await adapter.broadcastTx(rawTx);
+        return { txid, fee };
+    });
 }

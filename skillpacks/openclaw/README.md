@@ -5,6 +5,7 @@ Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent
 ## Included MetaBot Skills
 
 - `metabot-ask-master`
+- `metabot-help`
 - `metabot-identity-manage`
 - `metabot-network-manage`
 - `metabot-call-remote-service`

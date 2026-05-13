@@ -5,6 +5,7 @@ exports.__clearPendingMvcSpentOutpointsForTests = __clearPendingMvcSpentOutpoint
 const meta_contract_1 = require("meta-contract");
 const utxo_wallet_service_1 = require("@metalet/utxo-wallet-service");
 const deriveIdentity_1 = require("../../identity/deriveIdentity");
+const utxoBroadcastErrors_1 = require("../utxoBroadcastErrors");
 const METALET_HOST = 'https://www.metalet.space';
 const NET = 'livenet';
 const P2PKH_INPUT_SIZE = 148;
@@ -254,8 +255,18 @@ exports.mvcChainAdapter = {
             body: JSON.stringify({ chain: 'mvc', net: NET, rawTx }),
         });
         const json = await response.json();
-        if (json?.code !== 0)
+        if (json?.code !== 0) {
+            const tracker = deferredTrackers.get(rawTx);
+            if (tracker && (0, utxoBroadcastErrors_1.isRetryableUtxoFundingError)(json?.message)) {
+                rememberPendingTransaction({
+                    address: tracker.address,
+                    spentUtxos: tracker.spentUtxos,
+                    createdUtxos: [],
+                });
+                deferredTrackers.delete(rawTx);
+            }
             throw new Error(json?.message || 'Broadcast failed');
+        }
         const txid = json.data ?? '';
         // Complete deferred pending UTXO tracking
         const tracker = deferredTrackers.get(rawTx);

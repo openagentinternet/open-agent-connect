@@ -21,8 +21,9 @@ const handleServicesRoutes = async (context) => {
             context.sendMethodNotAllowed(['GET']);
             return true;
         }
+        const slug = url.searchParams.get('slug')?.trim();
         const result = handlers.services?.listPublishSkills
-            ? await handlers.services.listPublishSkills()
+            ? await handlers.services.listPublishSkills(slug ? { slug } : {})
             : (0, commandResult_1.commandFailed)('not_implemented', 'Services publish skills handler is not configured.');
         context.sendJson(200, result);
         return true;

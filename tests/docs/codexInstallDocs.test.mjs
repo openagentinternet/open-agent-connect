@@ -57,6 +57,8 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.match(guide, /Create a Bot named <your chosen name>/);
   assert.match(guide, /online Bots/i);
   assert.match(guide, /Bot services/i);
+  assert.match(guide, /OAC 可以做什么/);
+  assert.match(guide, /MetaBot 具备什么能力/);
   assert.match(guide, /do not auto-create a default identity such as `Alice`/i);
   assert.match(guide, /docs\/acceptance\/open-agent-connect-host-bind-checklist\.md/);
   assert.match(guide, /docs\/install\/uninstall-open-agent-connect\.md/);
@@ -154,6 +156,8 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /Create a Bot named <your chosen name>/);
   assert.match(runbook, /online Bots/i);
   assert.match(runbook, /Bot services/i);
+  assert.match(runbook, /OAC 可以做什么/);
+  assert.match(runbook, /MetaBot 具备什么能力/);
   assert.match(runbook, /metabot ui open --page hub/);
   assert.match(runbook, /do not auto-create a default identity such as `Alice`/i);
   assert.match(runbook, /metabot network bots --online --limit 20/);

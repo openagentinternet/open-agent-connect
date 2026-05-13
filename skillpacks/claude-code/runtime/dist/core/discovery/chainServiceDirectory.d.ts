@@ -13,6 +13,10 @@ export interface ChainServiceDirectoryItem {
     description: string;
     price: string;
     currency: string;
+    paymentChain: string | null;
+    settlementKind: string | null;
+    mrc20Ticker: string | null;
+    mrc20Id: string | null;
     serviceIcon: string | null;
     providerSkill: string | null;
     skillDocument: string | null;
@@ -33,6 +37,10 @@ export interface ParsedChainServiceRow {
     description: string;
     price: string;
     currency: string;
+    paymentChain: string | null;
+    settlementKind: string | null;
+    mrc20Ticker: string | null;
+    mrc20Id: string | null;
     serviceIcon: string | null;
     providerSkill: string | null;
     skillDocument: string | null;

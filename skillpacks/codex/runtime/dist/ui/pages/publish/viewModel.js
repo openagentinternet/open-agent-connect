@@ -16,6 +16,36 @@ function buildPublishPageViewModel(input) {
     const providerSummary = input.providerSummary && typeof input.providerSummary === 'object'
         ? input.providerSummary
         : {};
+    const selectedMetaBotSlug = normalizeText(input.selectedMetaBotSlug);
+    const profiles = Array.isArray(input.profiles)
+        ? input.profiles.filter((entry) => (entry !== null && typeof entry === 'object' && !Array.isArray(entry)))
+        : [];
+    const runtimes = Array.isArray(input.runtimes)
+        ? input.runtimes.filter((entry) => (entry !== null && typeof entry === 'object' && !Array.isArray(entry)))
+        : [];
+    const availableRuntimeProviders = new Set(runtimes
+        .filter((entry) => {
+        const health = normalizeText(entry.health).toLowerCase();
+        return normalizeText(entry.provider) && (health === 'healthy' || health === 'degraded');
+    })
+        .map((entry) => normalizeText(entry.provider)));
+    const metabots = profiles
+        .map((entry) => {
+        const slug = normalizeText(entry.slug);
+        const name = normalizeText(entry.name) || slug;
+        const primaryProvider = normalizeText(entry.primaryProvider);
+        return {
+            value: slug,
+            label: name,
+            title: name,
+            description: primaryProvider ? `Primary runtime: ${primaryProvider}` : '',
+            globalMetaId: normalizeText(entry.globalMetaId),
+            primaryProvider,
+        };
+    })
+        .filter((entry) => (entry.value
+        && entry.primaryProvider
+        && (availableRuntimeProviders.size === 0 || availableRuntimeProviders.has(entry.primaryProvider))));
     const publishSkills = input.publishSkills && typeof input.publishSkills === 'object'
         ? input.publishSkills
         : {};
@@ -25,13 +55,10 @@ function buildPublishPageViewModel(input) {
     const summaryIdentity = readObject(providerSummary.identity);
     const catalogIdentity = readObject(publishSkills.identity);
     const identity = {
-        ...catalogIdentity,
         ...summaryIdentity,
+        ...catalogIdentity,
     };
     const runtime = readObject(publishSkills.runtime);
-    const publishResult = input.publishResult && typeof input.publishResult === 'object'
-        ? input.publishResult
-        : {};
     const rootDiagnostics = Array.isArray(publishSkills.rootDiagnostics)
         ? publishSkills.rootDiagnostics.filter((entry) => (entry !== null && typeof entry === 'object' && !Array.isArray(entry)))
         : [];
@@ -71,7 +98,9 @@ function buildPublishPageViewModel(input) {
         availability = {
             canPublish: false,
             reasonCode: 'identity_missing',
-            message: 'Create a local MetaBot identity before publishing services.',
+            message: selectedMetaBotSlug
+                ? 'The selected MetaBot has no chained identity yet.'
+                : 'Select a MetaBot with an available primary runtime before publishing.',
         };
     }
     else if (errorCode) {
@@ -121,16 +150,6 @@ function buildPublishPageViewModel(input) {
         : normalizeText(runtime.displayName)
             ? `${normalizeText(runtime.displayName)} is the ${runtimeHealth || 'unknown'} primary runtime used for publish validation.`
             : 'No enabled primary runtime is available for publishing.';
-    const resultRows = [];
-    pushRow(resultRows, 'Service Pin ID', publishResult.servicePinId);
-    pushRow(resultRows, 'Source Pin ID', publishResult.sourceServicePinId);
-    pushRow(resultRows, 'Provider Skill', publishResult.providerSkill);
-    pushRow(resultRows, 'Price', [
-        normalizeText(publishResult.price),
-        normalizeText(publishResult.currency),
-    ].filter(Boolean).join(' '));
-    pushRow(resultRows, 'Output Type', publishResult.outputType);
-    pushRow(resultRows, 'Path', publishResult.path);
     return {
         providerCard: {
             title: 'Provider Identity',
@@ -144,14 +163,8 @@ function buildPublishPageViewModel(input) {
             summary: runtimeSummary,
             rows: runtimeRows,
         },
-        resultCard: {
-            hasResult: Boolean(normalizeText(publishResult.servicePinId)),
-            title: 'Publish Result',
-            summary: normalizeText(publishResult.servicePinId)
-                ? 'The service has been published to MetaWeb and now has a real chain pin.'
-                : 'No publish result yet. Submit the form to create one on-chain.',
-            rows: resultRows,
-        },
+        metabots,
+        selectedMetaBotSlug,
         skills,
         availability,
     };

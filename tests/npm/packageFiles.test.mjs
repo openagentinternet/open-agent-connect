@@ -46,6 +46,7 @@ test('npm package includes runtime install inputs and excludes generated/develop
   assertIncludes(paths, 'dist/cli/main.js');
   assertIncludes(paths, 'dist/oac/main.js');
   assertIncludes(paths, 'SKILLs/metabot-ask-master/SKILL.md');
+  assertIncludes(paths, 'SKILLs/metabot-help/SKILL.md');
   assertIncludes(paths, 'skillpacks/common/templates/system-routing.md');
   assertIncludes(paths, 'scripts/oac-dev-mode.sh');
   assertIncludes(paths, 'docs/install/open-agent-connect.md');
