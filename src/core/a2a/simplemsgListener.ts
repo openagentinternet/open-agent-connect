@@ -25,6 +25,7 @@ const DEFAULT_SOCKET_ENDPOINTS = [
 
 const DEFAULT_RECONNECT_DELAY_MS = 5_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_SEEN_PIN_IDS = 5_000;
 
 export interface A2ASimplemsgSocketEndpoint {
@@ -34,6 +35,7 @@ export interface A2ASimplemsgSocketEndpoint {
 
 export interface A2ASimplemsgSocketClient {
   on(event: string, handler: (...args: any[]) => void | Promise<void>): A2ASimplemsgSocketClient;
+  emit(event: string, ...args: any[]): unknown;
   removeAllListeners(): unknown;
   disconnect(): unknown;
 }
@@ -182,12 +184,44 @@ function createProfileSimplemsgListener(input: {
   persister: A2AConversationMessagePersister;
   reconnectDelayMs: number;
   maxReconnectDelayMs: number;
+  heartbeatIntervalMs: number;
   onMessage?: (profile: IdentityProfileRecord, message: PrivateChatInboundMessage) => void | Promise<void>;
   onError?: (error: Error) => void;
 }): ProfileSimplemsgListener {
   let sockets: A2ASimplemsgSocketClient[] = [];
   const seenPinIds = new Set<string>();
   let activeEndpointIndex = 0;
+  let heartbeatSocket: A2ASimplemsgSocketClient | null = null;
+  let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+
+  const stopHeartbeat = (socket?: A2ASimplemsgSocketClient): void => {
+    if (socket && heartbeatSocket !== socket) return;
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
+    heartbeatSocket = null;
+  };
+
+  const sendHeartbeat = (socket: A2ASimplemsgSocketClient): void => {
+    try {
+      socket.emit('ping');
+    } catch (error) {
+      input.onError?.(error instanceof Error ? error : new Error(String(error)));
+    }
+  };
+
+  const startHeartbeat = (socket: A2ASimplemsgSocketClient): void => {
+    stopHeartbeat();
+    heartbeatSocket = socket;
+    sendHeartbeat(socket);
+    heartbeatInterval = setInterval(() => {
+      if (heartbeatSocket) {
+        sendHeartbeat(heartbeatSocket);
+      }
+    }, input.heartbeatIntervalMs);
+    heartbeatInterval.unref?.();
+  };
 
   const handleSocketPayload = async (payload: unknown): Promise<void> => {
     const message = normalizeSimplemsgSocketMessage(payload);
@@ -259,6 +293,15 @@ function createProfileSimplemsgListener(input: {
   };
 
   const registerSocket = (socket: A2ASimplemsgSocketClient, endpointIndex: number): void => {
+    socket.on('connect', () => {
+      startHeartbeat(socket);
+    });
+    socket.on('disconnect', () => {
+      stopHeartbeat(socket);
+    });
+    socket.on('heartbeat_ack', () => {
+      // The ack is emitted by idchat after a heartbeat ping; no payload is required.
+    });
     socket.on('message', async (data: unknown) => {
       await handleSocketPayload(data).catch((error) => {
         input.onError?.(error instanceof Error ? error : new Error(String(error)));
@@ -276,6 +319,7 @@ function createProfileSimplemsgListener(input: {
     });
     socket.on('connect_error', (error: Error) => {
       input.onError?.(error);
+      stopHeartbeat(socket);
       if (endpointIndex !== activeEndpointIndex || endpointIndex >= input.endpoints.length - 1) {
         return;
       }
@@ -317,6 +361,7 @@ function createProfileSimplemsgListener(input: {
     },
 
     stop() {
+      stopHeartbeat();
       for (const socket of sockets) {
         try {
           socket.removeAllListeners();
@@ -342,6 +387,7 @@ export function createA2ASimplemsgListenerManager(input: {
   onMessage?: (profile: IdentityProfileRecord, message: PrivateChatInboundMessage) => void | Promise<void>;
   reconnectDelayMs?: number;
   maxReconnectDelayMs?: number;
+  heartbeatIntervalMs?: number;
   onError?: (error: Error) => void;
 }): A2ASimplemsgListenerManager {
   const endpoints = input.socketEndpoints ?? DEFAULT_SOCKET_ENDPOINTS;
@@ -351,6 +397,7 @@ export function createA2ASimplemsgListenerManager(input: {
   const loadIdentity = input.loadProfileIdentity ?? loadProfileIdentity;
   const reconnectDelayMs = input.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
   const maxReconnectDelayMs = input.maxReconnectDelayMs ?? MAX_RECONNECT_DELAY_MS;
+  const heartbeatIntervalMs = input.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
   let listeners: ProfileSimplemsgListener[] = [];
   let running = false;
   let lastReport: A2ASimplemsgListenerStartReport = { started: [], skipped: [] };
@@ -403,6 +450,7 @@ export function createA2ASimplemsgListenerManager(input: {
           persister,
           reconnectDelayMs,
           maxReconnectDelayMs,
+          heartbeatIntervalMs,
           onMessage: input.onMessage,
           onError: input.onError,
         });

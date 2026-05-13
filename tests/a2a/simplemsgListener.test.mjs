@@ -86,6 +86,7 @@ function createSocketHarness() {
       endpoint,
       options,
       disconnected: false,
+      emitted: [],
       on(event, handler) {
         const current = handlers.get(event) ?? [];
         current.push(handler);
@@ -98,6 +99,10 @@ function createSocketHarness() {
       },
       disconnect() {
         socket.disconnected = true;
+        return socket;
+      },
+      emit(event, ...args) {
+        socket.emitted.push({ event, args });
         return socket;
       },
       async emitServer(event, payload) {
@@ -183,6 +188,35 @@ test('simplemsg listener manager creates one listener identity per local profile
   );
   manager.stop();
   assert.equal(harness.sockets.every((socket) => socket.disconnected), true);
+});
+
+test('simplemsg listener sends idchat heartbeat ping after socket connect', async (t) => {
+  const systemHomeDir = await createSystemHome(t);
+  const alphaKeys = createIdentityPair();
+  await createProfile(systemHomeDir, {
+    name: 'Alpha Bot',
+    slug: 'alpha-bot',
+    globalMetaId: 'idq1alpha0000000000000000000000000000',
+    keys: alphaKeys,
+  });
+
+  const harness = createSocketHarness();
+  const manager = createA2ASimplemsgListenerManager({
+    systemHomeDir,
+    socketClientFactory: harness.socketClientFactory,
+    socketEndpoints: [{ url: 'wss://idchat.test', path: '/socket/socket.io' }],
+    heartbeatIntervalMs: 20,
+  });
+  t.after(() => manager.stop());
+
+  await manager.start();
+  await harness.sockets[0].emitServer('connect');
+  await new Promise(resolve => setTimeout(resolve, 30));
+
+  assert.ok(
+    harness.sockets[0].emitted.some((entry) => entry.event === 'ping'),
+    'connected idchat sockets should emit ping heartbeats for network-visible presence',
+  );
 });
 
 test('simplemsg listener starts on the primary endpoint and falls back to the secondary endpoint on connect_error', async (t) => {

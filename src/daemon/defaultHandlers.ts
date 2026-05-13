@@ -60,8 +60,22 @@ import {
   buildPublishedService,
   normalizePublishedServiceCurrency,
   resolvePublishedServiceSettlement,
+  type PublishedServiceDraft,
+  type PublishedServiceRecord,
 } from '../core/services/publishService';
-import { publishServiceToChain } from '../core/services/servicePublishChain';
+import { publishServiceToChain, uploadServiceIconDataUrl } from '../core/services/servicePublishChain';
+import {
+  buildMyServiceModifyChainWrite,
+  buildMyServiceModifyRecord,
+  buildMyServiceOrderDetails,
+  buildMyServicePayload,
+  buildMyServiceRevokeChainWrite,
+  buildMyServiceRevokeRecord,
+  buildMyServiceSummaries,
+  resolveMyServicePaymentAddress,
+  validateMyServiceMutation,
+  type MyServicesProfileInput,
+} from '../core/services/myServices';
 import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
 import { validateServicePublishProviderSkill } from '../core/services/servicePublishValidation';
 import { createProviderServiceRunner } from '../core/a2a/provider/providerServiceRunner';
@@ -672,6 +686,7 @@ function buildDaemonLocalUiUrl(
 
 function summarizeService(record: ReturnType<typeof buildPublishedService>['record']) {
   const chainPinIds = [...new Set([
+    ...(Array.isArray(record.chainPinIds) ? record.chainPinIds : []),
     record.sourceServicePinId,
     record.currentPinId,
   ].filter(Boolean))];
@@ -4868,6 +4883,219 @@ export function createDefaultMetabotDaemonHandlers(input: {
       secretStore: createFileSecretStore(normalizedProfileHomeDir),
       adapters: profileAdapters,
     });
+  }
+
+  function getPublishedServicePinIds(service: Partial<PublishedServiceRecord>): string[] {
+    return [...new Set([
+      ...(Array.isArray(service.chainPinIds) ? service.chainPinIds : []),
+      service.sourceServicePinId,
+      service.id,
+      service.currentPinId,
+    ].map((entry) => normalizeText(entry)).filter(Boolean))];
+  }
+
+  function publishedServiceMatchesId(service: PublishedServiceRecord, serviceId: string): boolean {
+    const normalizedServiceId = normalizeText(serviceId);
+    return Boolean(normalizedServiceId) && getPublishedServicePinIds(service).includes(normalizedServiceId);
+  }
+
+  function isSamePublishedService(left: PublishedServiceRecord, right: PublishedServiceRecord): boolean {
+    const rightPins = new Set(getPublishedServicePinIds(right));
+    return getPublishedServicePinIds(left).some((pinId) => rightPins.has(pinId));
+  }
+
+  function normalizeMyServicesPage(value: unknown, fallback: number): number {
+    return normalizePositiveInteger(value) ?? fallback;
+  }
+
+  function readMyServiceDraftInput(
+    rawInput: Record<string, unknown>,
+    currentService?: PublishedServiceRecord | null,
+  ): { draft?: PublishedServiceDraft; error?: MetabotCommandResult<unknown> } {
+    const serviceName = normalizeText(rawInput.serviceName);
+    const displayName = normalizeText(rawInput.displayName);
+    const description = normalizeText(rawInput.description);
+    const providerSkill = normalizeText(rawInput.providerSkill);
+    const price = normalizeText(rawInput.price);
+    const currency = normalizeText(rawInput.currency);
+    const outputType = normalizeText(rawInput.outputType);
+    const serviceIconUri = rawInput.removeServiceIcon === true
+      ? null
+      : normalizeText(rawInput.serviceIconUri)
+        || normalizeText(currentService?.serviceIcon)
+        || null;
+    const serviceIconDataUrl = normalizeText(rawInput.serviceIconDataUrl) || null;
+
+    if (!serviceName || !displayName || !description || !providerSkill || !price || !currency || !outputType) {
+      return {
+        error: commandFailed('invalid_service_payload', 'Service payload is missing one or more required fields.'),
+      };
+    }
+    if (!/^\d+(?:\.\d+)?$/u.test(price) || !Number.isFinite(Number(price)) || Number(price) < 0) {
+      return {
+        error: commandFailed('invalid_service_payload', 'Service price must be a non-negative decimal number.'),
+      };
+    }
+    const settlement = resolvePublishedServiceSettlement(currency);
+    if (!['SPACE', 'BTC', 'DOGE', 'BTC-OPCAT'].includes(settlement.currency)) {
+      return {
+        error: commandFailed('invalid_service_payload', 'Service currency must be one of BTC, SPACE, DOGE, or BTC-OPCAT.'),
+      };
+    }
+    if (!['text', 'image', 'video', 'audio', 'other'].includes(outputType.toLowerCase())) {
+      return {
+        error: commandFailed('invalid_service_payload', 'Service outputType must be one of text, image, video, audio, or other.'),
+      };
+    }
+
+    return {
+      draft: {
+        serviceName,
+        displayName,
+        description,
+        providerSkill,
+        price,
+        currency,
+        outputType,
+        serviceIconUri,
+        serviceIconDataUrl,
+      },
+    };
+  }
+
+  async function listMyServicesProfileRecords(): Promise<Array<{
+    slug: string;
+    name: string;
+    homeDir: string;
+  }>> {
+    const byHomeDir = new Map<string, { slug: string; name: string; homeDir: string }>();
+    const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+    for (const profile of profiles) {
+      const homeDir = normalizeText(profile.homeDir);
+      if (!homeDir) continue;
+      byHomeDir.set(path.resolve(homeDir), {
+        slug: normalizeText(profile.slug) || path.basename(homeDir),
+        name: normalizeText(profile.name) || path.basename(homeDir),
+        homeDir,
+      });
+    }
+
+    const activeHomeDir = path.resolve(input.homeDir);
+    if (!byHomeDir.has(activeHomeDir)) {
+      const state = await runtimeStateStore.readState().catch(() => null);
+      byHomeDir.set(activeHomeDir, {
+        slug: path.basename(activeHomeDir),
+        name: normalizeText(state?.identity?.name) || path.basename(activeHomeDir),
+        homeDir: activeHomeDir,
+      });
+    }
+
+    return [...byHomeDir.values()];
+  }
+
+  async function readMyServicesRatingDetails(profileHomeDir: string, refresh: boolean) {
+    const store = createRatingDetailStateStore(profileHomeDir);
+    if (!refresh) {
+      return (await store.read()).items;
+    }
+    const snapshot = await readRatingDetailSnapshot({
+      ratingDetailStateStore: store,
+      chainApiBaseUrl: input.chainApiBaseUrl,
+    });
+    return snapshot.ratingDetails;
+  }
+
+  async function loadMyServicesProfileInputs(refresh: boolean): Promise<MyServicesProfileInput[]> {
+    const records = await listMyServicesProfileRecords();
+    const profiles: MyServicesProfileInput[] = [];
+    for (const profile of records) {
+      const profileHomeDir = path.resolve(profile.homeDir);
+      const store = profileHomeDir === path.resolve(input.homeDir)
+        ? runtimeStateStore
+        : createRuntimeStateStore(profileHomeDir);
+      const [state, ratingDetails] = await Promise.all([
+        store.readState(),
+        readMyServicesRatingDetails(profileHomeDir, refresh),
+      ]);
+      profiles.push({
+        slug: profile.slug,
+        name: profile.name,
+        homeDir: profileHomeDir,
+        identity: state.identity,
+        services: state.services,
+        sellerOrders: state.sellerOrders,
+        ratingDetails,
+      });
+    }
+    return profiles;
+  }
+
+  async function resolveMyServiceMutationTarget(serviceId: string): Promise<{
+    target: {
+      profileSlug: string;
+      profileName: string;
+      profileHomeDir: string;
+      identity: RuntimeIdentityRecord | null;
+      service: PublishedServiceRecord | null;
+    };
+    state: RuntimeState | null;
+    store: ReturnType<typeof createRuntimeStateStore> | null;
+  }> {
+    const normalizedServiceId = normalizeText(serviceId);
+    if (!normalizedServiceId) {
+      return {
+        target: {
+          profileSlug: '',
+          profileName: '',
+          profileHomeDir: '',
+          identity: null,
+          service: null,
+        },
+        state: null,
+        store: null,
+      };
+    }
+
+    const records = await listMyServicesProfileRecords();
+    for (const profile of records) {
+      const profileHomeDir = path.resolve(profile.homeDir);
+      const store = profileHomeDir === path.resolve(input.homeDir)
+        ? runtimeStateStore
+        : createRuntimeStateStore(profileHomeDir);
+      const state = await store.readState();
+      const service = state.services.find((candidate) => (
+        publishedServiceMatchesId(candidate, normalizedServiceId)
+        && (
+          !normalizeText(state.identity?.globalMetaId)
+          || !normalizeText(candidate.providerGlobalMetaId)
+          || normalizeText(state.identity?.globalMetaId) === normalizeText(candidate.providerGlobalMetaId)
+        )
+      )) ?? null;
+      if (!service) continue;
+      return {
+        target: {
+          profileSlug: profile.slug,
+          profileName: profile.name,
+          profileHomeDir,
+          identity: state.identity,
+          service,
+        },
+        state,
+        store,
+      };
+    }
+
+    return {
+      target: {
+        profileSlug: '',
+        profileName: '',
+        profileHomeDir: '',
+        identity: null,
+        service: null,
+      },
+      state: null,
+      store: null,
+    };
   }
 
   async function publishBuyerServiceRating(request: {
@@ -10085,6 +10313,193 @@ export function createDefaultMetabotDaemonHandlers(input: {
       settleRefund: async ({ orderId, paymentTxid }) => settleProviderSellerRefund({ orderId, paymentTxid }),
     },
     services: {
+      listMyServices: async (request) => {
+        const profiles = await loadMyServicesProfileInputs(Boolean(request.refresh));
+        return commandSuccess(buildMyServiceSummaries({
+          profiles,
+          page: normalizeMyServicesPage(request.page, 1),
+          pageSize: normalizeMyServicesPage(request.pageSize, 20),
+        }));
+      },
+      listMyServiceOrders: async (request) => {
+        const serviceId = normalizeText(request.serviceId);
+        if (!serviceId) {
+          return commandFailed('invalid_service_request', 'My service orders request must include serviceId.');
+        }
+        const profiles = await loadMyServicesProfileInputs(Boolean(request.refresh));
+        return commandSuccess(buildMyServiceOrderDetails({
+          serviceId,
+          profiles,
+          page: normalizeMyServicesPage(request.page, 1),
+          pageSize: normalizeMyServicesPage(request.pageSize, 20),
+        }));
+      },
+      modifyMyService: async (rawInput) => {
+        const serviceId = normalizeText(rawInput.serviceId ?? rawInput.servicePinId ?? rawInput.currentPinId);
+        if (!serviceId) {
+          return commandFailed('invalid_service_request', 'My service modify request must include serviceId.');
+        }
+
+        const resolved = await resolveMyServiceMutationTarget(serviceId);
+        const validation = validateMyServiceMutation({
+          action: 'modify',
+          target: resolved.target,
+        });
+        if (!validation.ok || !resolved.target.service || !resolved.target.identity || !resolved.store || !resolved.state) {
+          return commandFailed(
+            validation.errorCode ?? 'my_service_modify_unavailable',
+            validation.error ?? 'Service is not available for modification.'
+          );
+        }
+
+        const draftInput = readMyServiceDraftInput(rawInput, resolved.target.service);
+        if (draftInput.error) {
+          return draftInput.error;
+        }
+        const draft = draftInput.draft!;
+        const providerSkillValidation = await validateServicePublishProviderSkill({
+          metaBotSlug: resolved.target.profileSlug,
+          providerSkill: draft.providerSkill,
+          runtimeStore: resolved.target.profileHomeDir === path.resolve(input.homeDir)
+            ? llmRuntimeStore
+            : createLlmRuntimeStore(resolved.target.profileHomeDir),
+          bindingStore: resolved.target.profileHomeDir === path.resolve(input.homeDir)
+            ? llmBindingStore
+            : createLlmBindingStore(resolved.target.profileHomeDir),
+          systemHomeDir: resolved.store.paths.systemHomeDir,
+          projectRoot: resolved.store.paths.profileRoot,
+          env: process.env,
+        });
+        if (!providerSkillValidation.ok) {
+          return commandFailed(providerSkillValidation.code, providerSkillValidation.message);
+        }
+
+        try {
+          const now = Date.now();
+          const network = await resolveWriteNetworkForHome(rawInput.network, resolved.target.profileHomeDir);
+          const profileSigner = createSignerForProfileHome(resolved.target.profileHomeDir);
+          const icon = await uploadServiceIconDataUrl({
+            signer: profileSigner,
+            serviceIconDataUrl: draft.serviceIconDataUrl,
+            network,
+          });
+          const preparedDraft: PublishedServiceDraft = {
+            ...draft,
+            serviceIconUri: icon.serviceIconUri || draft.serviceIconUri || null,
+          };
+          const paymentAddress = resolveMyServicePaymentAddress({
+            identity: resolved.target.identity,
+            currency: preparedDraft.currency,
+            fallback: resolved.target.service.paymentAddress,
+          });
+          const payload = buildMyServicePayload({
+            draft: preparedDraft,
+            providerGlobalMetaId: resolved.target.identity.globalMetaId,
+            paymentAddress,
+          });
+          const payloadJson = JSON.stringify(payload);
+          const chainWrite = await profileSigner.writePin(buildMyServiceModifyChainWrite({
+            targetPinId: resolved.target.service.currentPinId,
+            payloadJson,
+            network,
+          }));
+          const updatedRecord = buildMyServiceModifyRecord({
+            service: resolved.target.service,
+            currentPinId: normalizeText(chainWrite.pinId) || resolved.target.service.currentPinId,
+            providerGlobalMetaId: resolved.target.identity.globalMetaId,
+            paymentAddress,
+            draft: preparedDraft,
+            payloadJson,
+            now,
+          });
+          await resolved.store.writeState({
+            ...resolved.state,
+            services: [
+              updatedRecord,
+              ...resolved.state.services.filter((service) => !isSamePublishedService(service, resolved.target.service!)),
+            ],
+          });
+
+          return commandSuccess({
+            ...summarizeService(updatedRecord),
+            creatorMetabotId: validation.creatorMetabotId,
+            creatorMetabotSlug: resolved.target.profileSlug,
+            creatorMetabotName: resolved.target.profileName,
+            txids: chainWrite.txids,
+            pinId: chainWrite.pinId,
+            totalCost: chainWrite.totalCost,
+            network: chainWrite.network,
+            operation: chainWrite.operation,
+            path: chainWrite.path,
+            contentType: chainWrite.contentType,
+            ...(icon.upload ? { serviceIconUpload: icon.upload } : {}),
+          });
+        } catch (error) {
+          return commandFailed(
+            'service_modify_failed',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      },
+      revokeMyService: async (rawInput) => {
+        const serviceId = normalizeText(rawInput.serviceId ?? rawInput.servicePinId ?? rawInput.currentPinId);
+        if (!serviceId) {
+          return commandFailed('invalid_service_request', 'My service revoke request must include serviceId.');
+        }
+
+        const resolved = await resolveMyServiceMutationTarget(serviceId);
+        const validation = validateMyServiceMutation({
+          action: 'revoke',
+          target: resolved.target,
+        });
+        if (!validation.ok || !resolved.target.service || !resolved.store || !resolved.state) {
+          return commandFailed(
+            validation.errorCode ?? 'my_service_revoke_unavailable',
+            validation.error ?? 'Service is not available for revocation.'
+          );
+        }
+
+        try {
+          const now = Date.now();
+          const network = await resolveWriteNetworkForHome(rawInput.network, resolved.target.profileHomeDir);
+          const profileSigner = createSignerForProfileHome(resolved.target.profileHomeDir);
+          const chainWrite = await profileSigner.writePin(buildMyServiceRevokeChainWrite({
+            targetPinId: resolved.target.service.currentPinId,
+            network,
+          }));
+          const updatedRecord = buildMyServiceRevokeRecord({
+            service: resolved.target.service,
+            now,
+          });
+          await resolved.store.writeState({
+            ...resolved.state,
+            services: [
+              updatedRecord,
+              ...resolved.state.services.filter((service) => !isSamePublishedService(service, resolved.target.service!)),
+            ],
+          });
+
+          return commandSuccess({
+            ...summarizeService(updatedRecord),
+            creatorMetabotId: validation.creatorMetabotId,
+            creatorMetabotSlug: resolved.target.profileSlug,
+            creatorMetabotName: resolved.target.profileName,
+            txids: chainWrite.txids,
+            pinId: chainWrite.pinId,
+            revokedPinId: chainWrite.pinId,
+            totalCost: chainWrite.totalCost,
+            network: chainWrite.network,
+            operation: chainWrite.operation,
+            path: chainWrite.path,
+            contentType: chainWrite.contentType,
+          });
+        } catch (error) {
+          return commandFailed(
+            'service_revoke_failed',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      },
       listPublishSkills: async (request = {}) => {
         const requestedSlug = normalizeText(request.slug);
         const selectedProfile = requestedSlug

@@ -2056,7 +2056,7 @@ test('GET /ui/publish serves the primary-runtime-aware publish console', async (
   assert.match(html, /href="\/ui\/publish"/);
 });
 
-test('GET /ui/my-services renders provider operations console', async (t) => {
+test('GET /ui/my-services renders the IDBots-style My Services workspace', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
@@ -2066,12 +2066,26 @@ test('GET /ui/my-services renders provider operations console', async (t) => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /My Services/);
-  assert.match(html, /data-recent-orders/);
-  assert.match(html, /data-manual-actions/);
+  assert.match(html, /data-my-services-list/);
+  assert.match(html, /data-my-service-orders/);
+  assert.match(html, /data-services-page-prev/);
+  assert.match(html, /data-services-page-next/);
+  assert.match(html, /data-orders-page-prev/);
+  assert.match(html, /data-orders-page-next/);
+  assert.match(html, /data-my-service-edit-modal/);
+  assert.match(html, /data-my-service-revoke-modal/);
+  assert.match(html, /Details/);
+  assert.match(html, /Edit/);
+  assert.match(html, /Revoke/);
   assert.match(html, /Payment/);
   assert.match(html, /Runtime/);
-  assert.match(html, /Refund/);
-  assert.match(html, /\/api\/provider\/summary/);
+  assert.match(html, /Rating/);
+  assert.match(html, /Session/);
+  assert.match(html, /\/api\/services\/my/);
+  assert.match(html, /\/api\/services\/my\/orders/);
+  assert.match(html, /\/api\/services\/my\/modify/);
+  assert.match(html, /\/api\/services\/my\/revoke/);
+  assert.doesNotMatch(html, /\/api\/provider\/summary/);
 });
 
 test('GET /ui/refund renders buyer and seller refund operations', async (t) => {

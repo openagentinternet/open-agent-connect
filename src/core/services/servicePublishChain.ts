@@ -60,7 +60,7 @@ function parseServiceIconDataUrl(value: unknown): { mimeType: string; base64: st
   return { mimeType, base64, bytes };
 }
 
-async function uploadServiceIconDataUrl(input: {
+export async function uploadServiceIconDataUrl(input: {
   signer: Pick<Signer, 'writePin'>;
   serviceIconDataUrl?: string | null;
   network?: string;

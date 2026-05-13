@@ -229,324 +229,378 @@ test('buildPublishPageViewModel keeps publish results out of the side-card model
   assert.equal(model.resultCard, undefined);
 });
 
-test('buildMyServicesPageViewModel renders provider presence, current services, and chain publish metadata', () => {
+test('buildMyServicesPageViewModel renders IDBots-style local service rows with metrics and actions', () => {
   const model = buildMyServicesPageViewModel({
-    providerSummary: {
-      identity: {
-        name: 'Provider Bot',
-        globalMetaId: 'idq1provider000000000000000000000000000000000000',
-      },
-      presence: {
-        enabled: true,
-        lastHeartbeatAt: 1775000030000,
-        lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-1',
-      },
-      services: [
+    servicesPage: {
+      page: 1,
+      pageSize: 20,
+      total: 24,
+      totalPages: 2,
+      items: [
         {
-          servicePinId: '/protocols/skill-service-pin-1',
-          sourceServicePinId: '/protocols/skill-service-pin-1',
-          serviceName: 'tarot-rws-service',
-          displayName: 'Tarot Reading',
-          price: '0.00001',
-          currency: 'SPACE',
-          available: true,
+          id: 'service-current-pin-1',
+          currentPinId: 'service-current-pin-1',
+          sourceServicePinId: 'service-source-pin-1',
+          chainPinIds: ['service-source-pin-1', 'service-current-pin-1'],
+          serviceName: 'weather-oracle',
+          displayName: 'Weather Oracle',
+          description: 'Returns a concise forecast.',
+          price: '0.00004',
+          currency: 'BTC-OPCAT',
+          providerSkill: 'metabot-weather-oracle',
+          outputType: 'text',
+          creatorMetabotName: 'Alice Bot',
+          creatorMetabotSlug: 'alice-bot',
           updatedAt: 1775000010000,
+          successCount: 3,
+          refundCount: 1,
+          grossRevenue: '0.00016',
+          netIncome: '0.00012',
+          ratingAvg: 4.5,
+          ratingCount: 2,
+          canModify: true,
+          canRevoke: true,
         },
       ],
-      totals: {
-        serviceCount: 1,
-        activeServiceCount: 1,
-        sellerOrderCount: 0,
-        manualActionCount: 0,
-      },
     },
   });
 
-  assert.equal(model.presenceCard.title, 'Provider Presence');
-  assert.equal(model.presenceCard.statusLabel, 'Online');
-  assert.equal(model.presenceCard.actionLabel, 'Go offline');
-  assert.deepEqual(model.presenceCard.rows, [
-    { label: 'Provider', value: 'Provider Bot' },
-    {
-      label: 'GlobalMetaId',
-      value: 'idq1provider000000000000000000000000000000000000',
-    },
-    { label: 'Last Heartbeat', value: '1775000030000' },
-    { label: 'Heartbeat Pin', value: '/protocols/metabot-heartbeat-pin-1' },
-    { label: 'Active Services', value: '1 / 1' },
-  ]);
-
-  assert.equal(model.serviceInventory.length, 1);
-  assert.deepEqual(model.serviceInventory[0], {
-    key: '/protocols/skill-service-pin-1',
-    displayName: 'Tarot Reading',
-    serviceName: 'tarot-rws-service',
-    availabilityLabel: 'Available',
-    priceLabel: '0.00001 SPACE',
-    servicePinId: '/protocols/skill-service-pin-1',
-    lastPublishAt: '1775000010000',
+  assert.equal(model.services.length, 1);
+  assert.deepEqual(model.services[0], {
+    key: 'service-current-pin-1',
+    id: 'service-current-pin-1',
+    currentPinId: 'service-current-pin-1',
+    sourceServicePinId: 'service-source-pin-1',
+    title: 'Weather Oracle',
+    serviceName: 'weather-oracle',
+    description: 'Returns a concise forecast.',
+    iconUri: '',
+    iconLabel: 'WO',
+    skillLabel: 'metabot-weather-oracle',
+    outputTypeLabel: 'text',
+    priceLabel: '0.00004 BTC-OPCAT',
+    creatorLabel: 'Alice Bot · alice-bot',
+    updatedAtLabel: '2026-03-31 23:33',
+    metrics: [
+      { label: 'Success', value: '3' },
+      { label: 'Refunded', value: '1' },
+      { label: 'Gross', value: '0.00016 BTC-OPCAT' },
+      { label: 'Net', value: '0.00012 BTC-OPCAT' },
+      { label: 'Rating', value: '4.5 / 5 · 2' },
+    ],
+    canModify: true,
+    canRevoke: true,
+    blockedReason: '',
   });
+  assert.equal(model.pageLabel, '1 / 2 · 24 services');
+  assert.deepEqual(model.pagination, {
+    page: 1,
+    pageSize: 20,
+    total: 24,
+    totalPages: 2,
+    canPrevious: false,
+    canNext: true,
+  });
+  assert.equal(model.emptyState.title, 'No published services');
 });
 
-test('buildMyServicesPageViewModel renders recent seller orders with trace linkage and manual refund state', () => {
+test('buildMyServicesPageViewModel renders selected service details, closed orders, and edit defaults', () => {
   const model = buildMyServicesPageViewModel({
-    providerSummary: {
-      recentOrders: [
+    selectedServiceId: 'service-current-pin-1',
+    servicesPage: {
+      page: 1,
+      pageSize: 20,
+      total: 1,
+      totalPages: 1,
+      items: [
         {
-          traceId: 'trace-provider-refund',
-          orderId: 'order-refund-1',
-          servicePinId: '/protocols/skill-service-pin-1',
-          serviceName: 'Tarot Reading',
-          buyerGlobalMetaId: 'idq1buyer0000000000000000000000000000000000000',
-          buyerName: 'Buyer Bot',
-          publicStatus: 'manual_action_required',
-          state: 'refund_pending',
-          ratingStatus: 'requested_unrated',
-          ratingValue: null,
-          ratingComment: null,
-          ratingPinId: null,
-          ratingCreatedAt: null,
+          id: 'service-current-pin-1',
+          currentPinId: 'service-current-pin-1',
+          sourceServicePinId: 'service-source-pin-1',
+          serviceName: 'weather-oracle',
+          displayName: 'Weather Oracle',
+          description: 'Returns a concise forecast.',
+          serviceIcon: 'metafile://cover-pin',
+          price: '0.00004',
+          currency: 'BTC',
+          providerSkill: 'metabot-weather-oracle',
+          outputType: 'image',
+          creatorMetabotName: 'Alice Bot',
+          creatorMetabotSlug: 'alice-bot',
+          updatedAt: 1775000010000,
+          successCount: 1,
+          refundCount: 1,
+          grossRevenue: '0.00008',
+          netIncome: '0.00004',
+          ratingAvg: 5,
+          ratingCount: 1,
+          canModify: true,
+          canRevoke: true,
+        },
+      ],
+    },
+    ordersPage: {
+      page: 2,
+      pageSize: 10,
+      total: 12,
+      totalPages: 2,
+      items: [
+        {
+          id: 'order-refunded',
+          status: 'refunded',
+          traceId: 'trace-refunded',
+          paymentTxid: 'payment-refunded',
+          orderMessageTxid: 'order-message-refunded',
+          paymentAmount: '0.00004',
+          paymentCurrency: 'BTC',
           createdAt: 1775000020000,
+          deliveredAt: null,
+          refundCompletedAt: 1775000040000,
+          counterpartyGlobalMetaid: 'idq1buyerrefund',
+          coworkSessionId: 'session-refunded',
+          runtimeId: 'runtime-codex',
+          runtimeProvider: 'codex',
+          llmSessionId: 'llm-refunded',
+          rating: null,
         },
         {
-          traceId: 'trace-provider-rated',
-          orderId: 'order-rated-1',
-          servicePinId: '/protocols/skill-service-pin-2',
-          serviceName: 'Tarot Reading',
-          buyerGlobalMetaId: 'idq1buyer1111111111111111111111111111111111111',
-          buyerName: 'Buyer Rated',
-          publicStatus: 'completed',
-          ratingStatus: 'rated_on_chain',
-          ratingValue: 4,
-          ratingComment: '解释得很清楚。',
-          ratingPinId: 'rating-pin-1',
-          ratingCreatedAt: 1775000030000,
-          createdAt: 1775000025000,
-        },
-        {
-          traceId: 'trace-provider-unconfirmed',
-          orderId: 'order-rated-2',
-          servicePinId: '/protocols/skill-service-pin-3',
-          serviceName: 'Tarot Reading',
-          buyerGlobalMetaId: 'idq1buyer2222222222222222222222222222222222222',
-          buyerName: 'Buyer Unconfirmed',
-          publicStatus: 'completed',
-          ratingStatus: 'rated_on_chain_followup_unconfirmed',
-          ratingValue: 5,
-          ratingComment: '闭环完整，回复及时。',
-          ratingPinId: 'rating-pin-2',
-          ratingCreatedAt: 1775000040000,
-          createdAt: 1775000026000,
-        },
-        {
-          traceId: 'trace-provider-sync-error',
-          orderId: 'order-rated-3',
-          servicePinId: '/protocols/skill-service-pin-4',
-          serviceName: 'Tarot Reading',
-          buyerGlobalMetaId: 'idq1buyer3333333333333333333333333333333333333',
-          buyerName: 'Buyer Sync Error',
-          publicStatus: 'completed',
-          ratingStatus: 'sync_error',
-          ratingValue: null,
-          ratingComment: null,
-          ratingPinId: null,
-          ratingCreatedAt: null,
-          createdAt: 1775000027000,
-        },
-      ],
-      manualActions: [
-        {
-          kind: 'refund',
-          traceId: 'trace-provider-refund',
-          orderId: 'order-refund-1',
-          refundRequestPinId: 'refund-pin-1',
-          sessionId: 'seller-session-1',
+          id: 'order-completed',
+          status: 'completed',
+          traceId: 'trace-completed',
+          paymentTxid: 'payment-completed',
+          orderMessageTxid: 'order-message-completed',
+          paymentAmount: '0.00004',
+          paymentCurrency: 'BTC',
+          createdAt: 1775000020000,
+          deliveredAt: 1775000030000,
+          refundCompletedAt: null,
+          counterpartyGlobalMetaid: 'idq1buyercomplete',
+          coworkSessionId: 'session-completed',
+          runtimeId: 'runtime-codex',
+          runtimeProvider: 'codex',
+          llmSessionId: 'llm-completed',
+          rating: {
+            pinId: 'rating-pin-1',
+            rate: 5,
+            comment: 'Excellent.',
+            createdAt: 1775000050000,
+            raterGlobalMetaId: 'idq1buyercomplete',
+            raterMetaId: 'metaid-buyer',
+          },
         },
       ],
     },
   });
 
-  assert.equal(model.recentOrders.length, 4);
-  assert.deepEqual(model.recentOrders[0], {
-    key: 'order-refund-1',
-    serviceName: 'Tarot Reading',
-    buyerLabel: 'Buyer Bot · idq1buyer0000000000000000000000000000000000000',
-    stateLabel: 'Refund pending · 未评价',
-    statusDetail: 'manual_action_required',
-    traceHref: '/ui/trace?traceId=trace-provider-refund',
-    traceLabel: 'trace-provider-refund',
-    paymentLabel: '—',
-    runtimeLabel: 'Runtime unavailable',
-    refundRequestPinId: '',
-    refundTxid: '',
-    refundFinalizePinId: '',
-    refundBlockingReason: '',
-    createdAt: '1775000020000',
-    requiresManualRefund: true,
-    ratingCommentPreview: '',
-    ratingPinId: '',
+  assert.equal(model.selectedService.title, 'Weather Oracle');
+  assert.equal(model.selectedService.iconUri, '/api/file/avatar?ref=cover-pin');
+  assert.deepEqual(model.editForm, {
+    serviceId: 'service-current-pin-1',
+    displayName: 'Weather Oracle',
+    serviceName: 'weather-oracle',
+    description: 'Returns a concise forecast.',
+    providerSkill: 'metabot-weather-oracle',
+    outputType: 'image',
+    price: '0.00004',
+    currency: 'BTC',
+    serviceIconUri: 'metafile://cover-pin',
+    serviceIconPreviewUri: '/api/file/avatar?ref=cover-pin',
   });
-
-  assert.deepEqual(model.recentOrders[1], {
-    key: 'order-rated-1',
-    serviceName: 'Tarot Reading',
-    buyerLabel: 'Buyer Rated · idq1buyer1111111111111111111111111111111111111',
-    stateLabel: '已评价 · 4/5',
-    statusDetail: 'completed',
-    traceHref: '/ui/trace?traceId=trace-provider-rated',
-    traceLabel: 'trace-provider-rated',
-    paymentLabel: '—',
-    runtimeLabel: 'Runtime unavailable',
-    refundRequestPinId: '',
-    refundTxid: '',
-    refundFinalizePinId: '',
-    refundBlockingReason: '',
-    createdAt: '1775000025000',
-    requiresManualRefund: false,
-    ratingCommentPreview: '解释得很清楚。',
-    ratingPinId: 'rating-pin-1',
-  });
-
-  assert.deepEqual(model.recentOrders[2], {
-    key: 'order-rated-2',
-    serviceName: 'Tarot Reading',
-    buyerLabel: 'Buyer Unconfirmed · idq1buyer2222222222222222222222222222222222222',
-    stateLabel: '已评价 · 5/5 · 回传未确认',
-    statusDetail: 'completed',
-    traceHref: '/ui/trace?traceId=trace-provider-unconfirmed',
-    traceLabel: 'trace-provider-unconfirmed',
-    paymentLabel: '—',
-    runtimeLabel: 'Runtime unavailable',
-    refundRequestPinId: '',
-    refundTxid: '',
-    refundFinalizePinId: '',
-    refundBlockingReason: '',
-    createdAt: '1775000026000',
-    requiresManualRefund: false,
-    ratingCommentPreview: '闭环完整，回复及时。',
-    ratingPinId: 'rating-pin-2',
-  });
-
-  assert.deepEqual(model.recentOrders[3], {
-    key: 'order-rated-3',
-    serviceName: 'Tarot Reading',
-    buyerLabel: 'Buyer Sync Error · idq1buyer3333333333333333333333333333333333333',
-    stateLabel: '评分同步异常',
-    statusDetail: 'completed',
-    traceHref: '/ui/trace?traceId=trace-provider-sync-error',
-    traceLabel: 'trace-provider-sync-error',
-    paymentLabel: '—',
-    runtimeLabel: 'Runtime unavailable',
-    refundRequestPinId: '',
-    refundTxid: '',
-    refundFinalizePinId: '',
-    refundBlockingReason: '',
-    createdAt: '1775000027000',
-    requiresManualRefund: false,
-    ratingCommentPreview: '',
-    ratingPinId: '',
-  });
-
-  assert.equal(model.manualActions.length, 1);
-  assert.deepEqual(model.manualActions[0], {
-    key: 'order-refund-1',
-    kindLabel: 'Refund confirmation',
-    orderId: 'order-refund-1',
-    refundRequestPinId: 'refund-pin-1',
-    refundHref: '/ui/refund?orderId=order-refund-1',
-    traceHref: '/ui/trace?traceId=trace-provider-refund',
+  assert.deepEqual(model.orders.map((order) => ({
+    key: order.key,
+    statusLabel: order.statusLabel,
+    paymentLabel: order.paymentLabel,
+    ratingLabel: order.ratingLabel,
+    traceHref: order.traceHref,
+    sessionHref: order.sessionHref,
+    timeLabel: order.timeLabel,
+  })), [
+    {
+      key: 'order-refunded',
+      statusLabel: 'Refunded',
+      paymentLabel: '0.00004 BTC · payment-refunded',
+      ratingLabel: 'No rating',
+      traceHref: '/ui/trace?traceId=trace-refunded',
+      sessionHref: '/ui/trace?sessionId=session-refunded',
+      timeLabel: '2026-03-31 23:34',
+    },
+    {
+      key: 'order-completed',
+      statusLabel: 'Completed',
+      paymentLabel: '0.00004 BTC · payment-completed',
+      ratingLabel: '5 / 5',
+      traceHref: '/ui/trace?traceId=trace-completed',
+      sessionHref: '/ui/trace?sessionId=session-completed',
+      timeLabel: '2026-03-31 23:33',
+    },
+  ]);
+  assert.equal(model.orders[1].ratingComment, 'Excellent.');
+  assert.equal(model.orderPageLabel, '2 / 2 · 12 orders');
+  assert.deepEqual(model.orderPagination, {
+    page: 2,
+    pageSize: 10,
+    total: 12,
+    totalPages: 2,
+    canPrevious: true,
+    canNext: false,
   });
 });
 
-test('buildMyServicesPageViewModel exposes payment, runtime session, and refund proof fields for seller operations', () => {
+test('buildMyServicesPageViewModel normalizes service cover references for browser rendering', () => {
+  const dataUrl = 'data:image/png;base64,abc123';
   const model = buildMyServicesPageViewModel({
-    providerSummary: {
-      recentOrders: [
+    servicesPage: {
+      page: 1,
+      pageSize: 20,
+      total: 5,
+      totalPages: 1,
+      items: [
         {
-          traceId: 'trace-provider-refund-detail',
-          orderId: 'order-refund-detail-1',
-          serviceName: 'Tarot Reading',
-          buyerGlobalMetaId: 'idq1buyerrefunddetail',
-          publicStatus: 'manual_action_required',
-          state: 'refund_pending',
-          paymentTxid: 'payment-txid-1',
-          paymentAmount: '0.00001',
-          paymentCurrency: 'SPACE',
-          llmSessionId: 'llm-session-1',
-          runtimeId: 'runtime-codex-1',
-          runtimeProvider: 'codex',
-          fallbackSelected: false,
-          refundRequestPinId: 'refund-request-pin-1',
-          refundTxid: 'refund-transfer-txid-1',
-          refundFinalizePinId: 'refund-finalize-pin-1',
-          refundBlockingReason: 'insufficient_balance',
-          ratingStatus: 'requested_unrated',
-          createdAt: 1_775_000_020_000,
+          id: 'service-metafile',
+          currentPinId: 'service-metafile',
+          serviceName: 'metafile-service',
+          displayName: 'Metafile Service',
+          serviceIcon: 'metafile://cover-pin?download=1',
         },
-      ],
-      manualActions: [
         {
-          kind: 'refund',
-          traceId: 'trace-provider-refund-detail',
-          orderId: 'order-refund-detail-1',
-          refundRequestPinId: 'refund-request-pin-1',
+          id: 'service-content-path',
+          currentPinId: 'service-content-path',
+          serviceName: 'content-path-service',
+          displayName: 'Content Path Service',
+          serviceIcon: '/content/content-pin-1i0',
+        },
+        {
+          id: 'service-data-url',
+          currentPinId: 'service-data-url',
+          serviceName: 'data-url-service',
+          displayName: 'Data URL Service',
+          serviceIcon: dataUrl,
+        },
+        {
+          id: 'service-remote-url',
+          currentPinId: 'service-remote-url',
+          serviceName: 'remote-url-service',
+          displayName: 'Remote URL Service',
+          serviceIcon: 'https://example.test/cover.png',
+        },
+        {
+          id: 'service-bare-pin',
+          currentPinId: 'service-bare-pin',
+          serviceName: 'bare-pin-service',
+          displayName: 'Bare Pin Service',
+          serviceIcon: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0',
         },
       ],
     },
   });
 
-  assert.equal(model.recentOrders.length, 1);
-  assert.deepEqual(model.recentOrders[0], {
-    key: 'order-refund-detail-1',
-    serviceName: 'Tarot Reading',
-    buyerLabel: 'idq1buyerrefunddetail',
-    stateLabel: 'Refund pending · 未评价',
-    statusDetail: 'manual_action_required',
-    traceHref: '/ui/trace?traceId=trace-provider-refund-detail',
-    traceLabel: 'trace-provider-refund-detail',
-    paymentLabel: '0.00001 SPACE · payment-txid-1',
-    runtimeLabel: 'codex · runtime-codex-1 · llm-session-1',
-    refundRequestPinId: 'refund-request-pin-1',
-    refundTxid: 'refund-transfer-txid-1',
-    refundFinalizePinId: 'refund-finalize-pin-1',
-    refundBlockingReason: 'insufficient_balance',
-    createdAt: '1775000020000',
-    requiresManualRefund: true,
-    ratingCommentPreview: '',
-    ratingPinId: '',
+  assert.deepEqual(model.services.map((service) => service.iconUri), [
+    '/api/file/avatar?ref=cover-pin',
+    '/api/file/avatar?ref=content-pin-1i0',
+    dataUrl,
+    'https://example.test/cover.png',
+    '/api/file/avatar?ref=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0',
+  ]);
+});
+
+test('buildMyServicesPageViewModel exposes mutation txid notices and deterministic error state', () => {
+  const success = buildMyServicesPageViewModel({
+    mutationResult: {
+      operation: 'modify',
+      txids: ['modify-txid-1'],
+      pinId: 'modify-pin-1',
+    },
+  });
+  assert.deepEqual(success.notice, {
+    tone: 'success',
+    title: 'Modify broadcast',
+    message: 'Local state has been updated after the chain write.',
+    txids: ['modify-txid-1'],
+    pinId: 'modify-pin-1',
+  });
+
+  const warning = buildMyServicesPageViewModel({
+    mutationResult: {
+      operation: 'revoke',
+      txids: ['revoke-txid-1'],
+      pinId: 'revoke-pin-1',
+      warning: 'Chain write broadcast, but directory refresh is pending.',
+    },
+  });
+  assert.deepEqual(warning.notice, {
+    tone: 'warning',
+    title: 'Revoke warning',
+    message: 'Chain write broadcast, but directory refresh is pending.',
+    txids: ['revoke-txid-1'],
+    pinId: 'revoke-pin-1',
+  });
+
+  const failed = buildMyServicesPageViewModel({
+    error: {
+      message: 'network offline',
+    },
+  });
+  assert.deepEqual(failed.notice, {
+    tone: 'error',
+    title: 'My Services error',
+    message: 'network offline',
+    txids: [],
+    pinId: '',
   });
 });
 
 test('buildMyServicesPageViewModelRuntimeSource executes with helper functions in browser-like context', () => {
   const context = {
     input: {
-      providerSummary: {
-        services: [
+      servicesPage: {
+        page: 1,
+        pageSize: 20,
+        total: 1,
+        totalPages: 1,
+        items: [
           {
-            servicePinId: 'service-pin-runtime-source',
+            id: 'service-pin-runtime-source',
+            currentPinId: 'service-pin-runtime-source',
             serviceName: 'weather-runtime',
             displayName: 'Weather Runtime',
             price: '0.00001',
             currency: 'SPACE',
-            available: true,
+            providerSkill: 'metabot-weather-oracle',
+            outputType: 'text',
+            creatorMetabotName: 'Runtime Bot',
+            creatorMetabotSlug: 'runtime-bot',
             updatedAt: 1_775_000_010_000,
+            successCount: 1,
+            refundCount: 0,
+            grossRevenue: '0.00001',
+            netIncome: '0.00001',
+            ratingAvg: 0,
+            ratingCount: 0,
+            canModify: true,
+            canRevoke: true,
           },
         ],
-        recentOrders: [
+      },
+      ordersPage: {
+        page: 1,
+        pageSize: 10,
+        total: 1,
+        totalPages: 1,
+        items: [
           {
+            id: 'order-runtime-source',
+            status: 'completed',
             traceId: 'trace-runtime-source',
-            orderId: 'order-runtime-source',
-            serviceName: 'Weather Runtime',
-            buyerGlobalMetaId: 'idq1buyerruntime',
-            publicStatus: 'provider_running',
-            state: 'in_progress',
             paymentTxid: 'payment-runtime-source',
             paymentAmount: '0.00001',
             paymentCurrency: 'SPACE',
+            counterpartyGlobalMetaid: 'idq1buyerruntime',
             runtimeProvider: 'codex',
             runtimeId: 'runtime-codex',
             llmSessionId: 'llm-session-runtime',
             createdAt: 1_775_000_020_000,
+            deliveredAt: 1_775_000_030_000,
+            rating: null,
           },
         ],
       },
@@ -559,9 +613,9 @@ test('buildMyServicesPageViewModelRuntimeSource executes with helper functions i
     context,
   );
 
-  assert.equal(context.result.serviceInventory.length, 1);
-  assert.equal(context.result.serviceInventory[0].displayName, 'Weather Runtime');
-  assert.equal(context.result.recentOrders.length, 1);
-  assert.equal(context.result.recentOrders[0].paymentLabel, '0.00001 SPACE · payment-runtime-source');
-  assert.equal(context.result.recentOrders[0].runtimeLabel, 'codex · runtime-codex · llm-session-runtime');
+  assert.equal(context.result.services.length, 1);
+  assert.equal(context.result.services[0].title, 'Weather Runtime');
+  assert.equal(context.result.orders.length, 1);
+  assert.equal(context.result.orders[0].paymentLabel, '0.00001 SPACE · payment-runtime-source');
+  assert.equal(context.result.orders[0].runtimeLabel, 'codex · runtime-codex · llm-session-runtime');
 });
