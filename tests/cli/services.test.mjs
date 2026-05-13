@@ -445,6 +445,229 @@ test('runCli dispatches `metabot services rate --from --request-file --chain` wi
   }]);
 });
 
+test('runCli dispatches `metabot services owned list` with owner filters and paging', async () => {
+  const calls = [];
+  const exitCode = await runCli([
+    'services',
+    'owned',
+    'list',
+    '--from',
+    'alice',
+    '--page',
+    '2',
+    '--page-size',
+    '10',
+    '--refresh',
+  ], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        listOwned: async (input) => {
+          calls.push(input);
+          return commandSuccess({ items: [] });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    from: 'alice',
+    all: false,
+    page: 2,
+    pageSize: 10,
+    refresh: true,
+  }]);
+});
+
+test('runCli dispatches `metabot services owned list --all` for aggregate owner view', async () => {
+  const calls = [];
+  const exitCode = await runCli(['services', 'owned', 'list', '--all'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        listOwned: async (input) => {
+          calls.push(input);
+          return commandSuccess({ items: [] });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    all: true,
+    page: 1,
+    pageSize: 20,
+    refresh: false,
+  }]);
+});
+
+test('runCli dispatches `metabot services owned orders` with service id and pagination', async () => {
+  const calls = [];
+  const exitCode = await runCli([
+    'services',
+    'owned',
+    'orders',
+    '--service-id',
+    'svc-1',
+    '--all',
+    '--page',
+    '3',
+  ], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        listOwnedOrders: async (input) => {
+          calls.push(input);
+          return commandSuccess({ items: [] });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    serviceId: 'svc-1',
+    all: true,
+    page: 3,
+    pageSize: 20,
+    refresh: false,
+  }]);
+});
+
+test('runCli dispatches `metabot services owned modify` from payload with actor and chain', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-owned-modify-'));
+  const payloadFile = path.join(tempDir, 'payload.json');
+  await writeFile(payloadFile, JSON.stringify({
+    serviceId: 'svc-1',
+    displayName: 'Updated service',
+  }), 'utf8');
+
+  const calls = [];
+  const exitCode = await runCli([
+    'services',
+    'owned',
+    'modify',
+    '--from',
+    'alice',
+    '--payload-file',
+    payloadFile,
+    '--chain',
+    'btc',
+  ], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        modifyOwned: async (input) => {
+          calls.push(input);
+          return commandSuccess({ serviceId: input.serviceId });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    serviceId: 'svc-1',
+    displayName: 'Updated service',
+    from: 'alice',
+    network: 'btc',
+  }]);
+});
+
+test('runCli dispatches `metabot services owned revoke` with actor and chain', async () => {
+  const calls = [];
+  const exitCode = await runCli([
+    'services',
+    'owned',
+    'revoke',
+    '--from',
+    'alice',
+    '--service-id',
+    'svc-1',
+    '--chain',
+    'doge',
+  ], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        revokeOwned: async (input) => {
+          calls.push(input);
+          return commandSuccess({ serviceId: input.serviceId });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    serviceId: 'svc-1',
+    from: 'alice',
+    network: 'doge',
+  }]);
+});
+
+test('runCli rejects `--all` for owned service mutations', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-owned-invalid-all-'));
+  const payloadFile = path.join(tempDir, 'payload.json');
+  await writeFile(payloadFile, JSON.stringify({ serviceId: 'svc-1' }), 'utf8');
+
+  const stdout = [];
+  const calls = [];
+  const modifyExitCode = await runCli([
+    'services',
+    'owned',
+    'modify',
+    '--all',
+    '--payload-file',
+    payloadFile,
+  ], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        modifyOwned: async (input) => {
+          calls.push(input);
+          return commandSuccess({});
+        },
+      },
+    },
+  });
+
+  const revokeExitCode = await runCli([
+    'services',
+    'owned',
+    'revoke',
+    '--all',
+    '--service-id',
+    'svc-1',
+  ], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        revokeOwned: async (input) => {
+          calls.push(input);
+          return commandSuccess({});
+        },
+      },
+    },
+  });
+
+  assert.equal(modifyExitCode, 1);
+  assert.equal(revokeExitCode, 1);
+  assert.deepEqual(calls, []);
+  const envelopes = stdout.join('').trim().split(/\n(?=\{)/u).map((line) => JSON.parse(line));
+  assert.equal(envelopes[0].code, 'invalid_flag');
+  assert.equal(envelopes[1].code, 'invalid_flag');
+});
+
 test('runCli fails `metabot services rate` when --chain value is missing', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-rate-missing-chain-'));
   const requestFile = path.join(tempDir, 'rating.json');

@@ -53,6 +53,8 @@ export const handleServicesRoutes: RouteHandler = async (context) => {
 
     const result = handlers.services?.listMyServices
       ? await handlers.services.listMyServices({
+          ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from')!.trim() } : {}),
+          ...(url.searchParams.has('all') ? { all: readBoolean(url.searchParams.get('all')) } : {}),
           page: readPositiveInteger(url.searchParams.get('page'), 1),
           pageSize: readPositiveInteger(url.searchParams.get('pageSize'), 20),
           refresh: readBoolean(url.searchParams.get('refresh')),
@@ -72,6 +74,8 @@ export const handleServicesRoutes: RouteHandler = async (context) => {
     const result = handlers.services?.listMyServiceOrders
       ? await handlers.services.listMyServiceOrders({
           serviceId,
+          ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from')!.trim() } : {}),
+          ...(url.searchParams.has('all') ? { all: readBoolean(url.searchParams.get('all')) } : {}),
           page: readPositiveInteger(url.searchParams.get('page'), 1),
           pageSize: readPositiveInteger(url.searchParams.get('pageSize'), 20),
           refresh: readBoolean(url.searchParams.get('refresh')),

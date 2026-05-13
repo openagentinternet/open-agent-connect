@@ -1782,6 +1782,33 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       },
       call: async (input) => requestJson(context, 'POST', '/api/services/call', input),
       rate: async (input) => requestJson(context, 'POST', '/api/services/rate', input),
+      listOwned: async (input) => {
+        const query = new URLSearchParams({
+          page: String(input.page),
+          pageSize: String(input.pageSize),
+          refresh: input.refresh ? 'true' : 'false',
+          all: input.all ? 'true' : 'false',
+        });
+        if (input.from) {
+          query.set('from', input.from);
+        }
+        return requestJson(context, 'GET', `/api/services/my?${query.toString()}`);
+      },
+      listOwnedOrders: async (input) => {
+        const query = new URLSearchParams({
+          serviceId: input.serviceId,
+          page: String(input.page),
+          pageSize: String(input.pageSize),
+          refresh: input.refresh ? 'true' : 'false',
+          all: input.all ? 'true' : 'false',
+        });
+        if (input.from) {
+          query.set('from', input.from);
+        }
+        return requestJson(context, 'GET', `/api/services/my/orders?${query.toString()}`);
+      },
+      modifyOwned: async (input) => requestJson(context, 'POST', '/api/services/my/modify', input),
+      revokeOwned: async (input) => requestJson(context, 'POST', '/api/services/my/revoke', input),
     },
     provider: {
       inspectOrder: async (input) => {

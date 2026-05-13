@@ -294,6 +294,7 @@ test('runCli prints services group help with publish skill listing', async () =>
   assert.match(output, /^Usage:\s+metabot services <subcommand>/m);
   assert.match(output, /skills\s+List primary-runtime skills available for service publishing\./);
   assert.match(output, /publish-skills\s+Compatibility alias for services skills\./);
+  assert.match(output, /owned\s+List and manage services owned by local MetaBots\./);
 });
 
 test('runCli prints services publish and rate help with DOGE and OPCAT chain support', async () => {
@@ -359,6 +360,42 @@ test('runCli prints leaf help text for `metabot services publish-skills --help`'
   assert.match(output, /runtime/m);
   assert.match(output, /skills/m);
   assert.match(output, /primary runtime is missing/i);
+});
+
+test('runCli prints services owned help with read and mutation subcommands', async () => {
+  const groupStdout = [];
+  const groupExitCode = await runCli(['services', 'owned', '--help'], {
+    stdout: { write: (chunk) => { groupStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(groupExitCode, 0);
+  const groupOutput = groupStdout.join('');
+  assert.match(groupOutput, /^Usage:\s+metabot services owned <subcommand>/m);
+  assert.match(groupOutput, /list\s+List services owned by the active, selected, or all local MetaBots\./);
+  assert.match(groupOutput, /modify\s+Publish an on-chain modification for one owned service\./);
+
+  const listStdout = [];
+  const listExitCode = await runCli(['services', 'owned', 'list', '--help'], {
+    stdout: { write: (chunk) => { listStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(listExitCode, 0);
+  const listOutput = listStdout.join('');
+  assert.match(listOutput, /^Usage:\s+metabot services owned list \[--from <bot-slug> \| --all\]/m);
+  assert.match(listOutput, /--all\s+Aggregate owned services across all local MetaBot profiles\./);
+
+  const modifyStdout = [];
+  const modifyExitCode = await runCli(['services', 'owned', 'modify', '--help'], {
+    stdout: { write: (chunk) => { modifyStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(modifyExitCode, 0);
+  const modifyOutput = modifyStdout.join('');
+  assert.match(modifyOutput, /^Usage:\s+metabot services owned modify \[--from <bot-slug>\] --payload-file <path>/m);
+  assert.match(modifyOutput, /Rejects --all because service mutations must choose exactly one local MetaBot actor\./);
 });
 
 test('runCli prints provider operations help with order inspection and refund settlement', async () => {

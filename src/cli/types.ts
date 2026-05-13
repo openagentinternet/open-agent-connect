@@ -47,6 +47,27 @@ export interface CliDependencies {
   services?: {
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     listPublishSkills?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    listOwned?: (input: {
+      from?: string;
+      all: boolean;
+      page: number;
+      pageSize: number;
+      refresh: boolean;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    listOwnedOrders?: (input: {
+      serviceId: string;
+      from?: string;
+      all: boolean;
+      page: number;
+      pageSize: number;
+      refresh: boolean;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    modifyOwned?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    revokeOwned?: (input: {
+      serviceId: string;
+      from?: string;
+      network?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
     call?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     rate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };

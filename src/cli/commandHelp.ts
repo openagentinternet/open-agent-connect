@@ -905,6 +905,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'publish', summary: 'Publish one paid capability to chain.' },
       { name: 'skills', summary: 'List primary-runtime skills available for service publishing.' },
       { name: 'publish-skills', summary: 'Compatibility alias for services skills.' },
+      { name: 'owned', summary: 'List and manage services owned by local MetaBots.' },
       { name: 'call', summary: 'Delegate one task to a remote MetaBot service.' },
       { name: 'rate', summary: 'Publish one buyer-side service rating after delivery.' },
     ],
@@ -988,6 +989,88 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     optionalFlags: [
       { flag: '--slug', value: '<bot-slug>', description: 'Compatibility actor selector. Prefer --from with `metabot services skills`.' },
       HELP_JSON_FLAG,
+    ],
+  },
+  {
+    commandPath: ['services', 'owned'],
+    summary: 'Owner-side service commands backing the my-services UI.',
+    usage: 'metabot services owned <subcommand>',
+    subcommands: [
+      { name: 'list', summary: 'List services owned by the active, selected, or all local MetaBots.' },
+      { name: 'orders', summary: 'List completed/refunded orders for one owned service.' },
+      { name: 'modify', summary: 'Publish an on-chain modification for one owned service.' },
+      { name: 'revoke', summary: 'Publish an on-chain revocation for one owned service.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['services', 'owned', 'list'],
+    summary: 'List services owned by the active, selected, or all local MetaBots.',
+    usage: 'metabot services owned list [--from <bot-slug> | --all] [--page <n>] [--page-size <n>] [--refresh]',
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--all', description: 'Aggregate owned services across all local MetaBot profiles.' },
+      { flag: '--page', value: '<n>', description: 'Page number. Defaults to 1.' },
+      { flag: '--page-size', value: '<n>', description: 'Page size. Defaults to 20.' },
+      { flag: '--refresh', description: 'Refresh rating details before rendering the owner view.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['items', 'page', 'pageSize', 'total', 'totalPages'],
+    examples: [
+      'metabot services owned list',
+      'metabot services owned list --from alice',
+      'metabot services owned list --all --refresh',
+    ],
+  },
+  {
+    commandPath: ['services', 'owned', 'orders'],
+    summary: 'List completed/refunded orders for one owned service.',
+    usage: 'metabot services owned orders --service-id <service-pin-id> [--from <bot-slug> | --all] [--page <n>] [--page-size <n>] [--refresh]',
+    requiredFlags: [
+      { flag: '--service-id', value: '<service-pin-id>', description: 'Current or source service pin id.' },
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--all', description: 'Search all local MetaBot profiles for the service.' },
+      { flag: '--page', value: '<n>', description: 'Page number. Defaults to 1.' },
+      { flag: '--page-size', value: '<n>', description: 'Page size. Defaults to 20.' },
+      { flag: '--refresh', description: 'Refresh rating details before rendering order rows.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['items', 'page', 'pageSize', 'total', 'totalPages'],
+    examples: [
+      'metabot services owned orders --service-id <service-pin-id>',
+      'metabot services owned orders --service-id <service-pin-id> --all',
+    ],
+  },
+  {
+    commandPath: ['services', 'owned', 'modify'],
+    summary: 'Publish an on-chain modification for one owned service.',
+    usage: 'metabot services owned modify [--from <bot-slug>] --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
+    requiredFlags: [
+      { flag: '--payload-file', value: '<path>', description: 'JSON modification payload, including serviceId.' },
+    ],
+    optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+    failureSemantics: [
+      'Rejects --all because service mutations must choose exactly one local MetaBot actor.',
+    ],
+    examples: [
+      'metabot services owned modify --from alice --payload-file service-update.json --chain btc',
+    ],
+  },
+  {
+    commandPath: ['services', 'owned', 'revoke'],
+    summary: 'Publish an on-chain revocation for one owned service.',
+    usage: 'metabot services owned revoke [--from <bot-slug>] --service-id <service-pin-id> [--chain <mvc|btc|doge|opcat>]',
+    requiredFlags: [
+      { flag: '--service-id', value: '<service-pin-id>', description: 'Current or source service pin id.' },
+    ],
+    optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+    failureSemantics: [
+      'Rejects --all because service mutations must choose exactly one local MetaBot actor.',
+    ],
+    examples: [
+      'metabot services owned revoke --from alice --service-id <service-pin-id> --chain doge',
     ],
   },
   {

@@ -5061,7 +5061,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return profiles;
   }
 
-  async function resolveMyServiceMutationTarget(serviceId: string): Promise<{
+  async function selectMyServicesProfilesForRequest(
+    profiles: MyServicesProfileInput[],
+    request: { from?: unknown; all?: unknown },
+  ): Promise<{
+    profiles: MyServicesProfileInput[];
+    failure?: MetabotCommandResult<never>;
+  }> {
+    const requestedFrom = normalizeText(request.from);
+    if (requestedFrom) {
+      const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedFrom);
+      if (!selectedProfile) {
+        return {
+          profiles: [],
+          failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedFrom}`),
+        };
+      }
+      const selectedHomeDir = path.resolve(selectedProfile.homeDir);
+      return {
+        profiles: profiles.filter((profile) => path.resolve(normalizeText(profile.homeDir)) === selectedHomeDir),
+      };
+    }
+
+    if (request.all === false) {
+      const activeHomeDir = path.resolve(input.homeDir);
+      return {
+        profiles: profiles.filter((profile) => path.resolve(normalizeText(profile.homeDir)) === activeHomeDir),
+      };
+    }
+
+    return { profiles };
+  }
+
+  async function resolveMyServiceMutationTarget(serviceId: string, actor?: unknown): Promise<{
     target: {
       profileSlug: string;
       profileName: string;
@@ -5087,7 +5119,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
       };
     }
 
-    const records = await listMyServicesProfileRecords();
+    let records = await listMyServicesProfileRecords();
+    const requestedFrom = normalizeText(actor);
+    if (requestedFrom) {
+      const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedFrom);
+      if (!selectedProfile) {
+        records = [];
+      } else {
+        const selectedHomeDir = path.resolve(selectedProfile.homeDir);
+        records = records.filter((profile) => path.resolve(profile.homeDir) === selectedHomeDir);
+      }
+    }
     for (const profile of records) {
       const profileHomeDir = path.resolve(profile.homeDir);
       const store = profileHomeDir === path.resolve(input.homeDir)
@@ -10345,9 +10387,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
     services: {
       listMyServices: async (request) => {
-        const profiles = await loadMyServicesProfileInputs(Boolean(request.refresh));
+        const loadedProfiles = await loadMyServicesProfileInputs(Boolean(request.refresh));
+        const selected = await selectMyServicesProfilesForRequest(loadedProfiles, request);
+        if (selected.failure) {
+          return selected.failure;
+        }
         return commandSuccess(buildMyServiceSummaries({
-          profiles,
+          profiles: selected.profiles,
           page: normalizeMyServicesPage(request.page, 1),
           pageSize: normalizeMyServicesPage(request.pageSize, 20),
         }));
@@ -10357,10 +10403,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if (!serviceId) {
           return commandFailed('invalid_service_request', 'My service orders request must include serviceId.');
         }
-        const profiles = await loadMyServicesProfileInputs(Boolean(request.refresh));
+        const loadedProfiles = await loadMyServicesProfileInputs(Boolean(request.refresh));
+        const selected = await selectMyServicesProfilesForRequest(loadedProfiles, request);
+        if (selected.failure) {
+          return selected.failure;
+        }
         return commandSuccess(buildMyServiceOrderDetails({
           serviceId,
-          profiles,
+          profiles: selected.profiles,
           page: normalizeMyServicesPage(request.page, 1),
           pageSize: normalizeMyServicesPage(request.pageSize, 20),
         }));
@@ -10371,7 +10421,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('invalid_service_request', 'My service modify request must include serviceId.');
         }
 
-        const resolved = await resolveMyServiceMutationTarget(serviceId);
+        const resolved = await resolveMyServiceMutationTarget(serviceId, rawInput.from);
         const validation = validateMyServiceMutation({
           action: 'modify',
           target: resolved.target,
@@ -10478,7 +10528,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('invalid_service_request', 'My service revoke request must include serviceId.');
         }
 
-        const resolved = await resolveMyServiceMutationTarget(serviceId);
+        const resolved = await resolveMyServiceMutationTarget(serviceId, rawInput.from);
         const validation = validateMyServiceMutation({
           action: 'revoke',
           target: resolved.target,
