@@ -105,10 +105,10 @@ export interface MetabotDaemonHttpHandlers {
     upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   trace?: {
-    getTrace?: (input: { traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    watchTrace?: (input: { traceId: string }) => Awaitable<string>;
-    listSessions?: () => Awaitable<MetabotCommandResult<unknown>>;
-    getSession?: (input: { sessionId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    getTrace?: (input: { from?: string; traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    watchTrace?: (input: { from?: string; traceId: string }) => Awaitable<string>;
+    listSessions?: (input?: { from?: string; all?: boolean; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    getSession?: (input: { from?: string; sessionId: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   ui?: {
     renderPage?: (page: MetabotUiPageName) => Awaitable<string>;

@@ -2022,10 +2022,28 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       },
     },
     trace: {
-      get: async (input) => input.sessionId
-        ? requestJson(context, 'GET', `/api/trace/sessions/${encodeURIComponent(input.sessionId)}`)
-        : requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId || '')}`),
-      watch: async (input) => requestText(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}/watch`),
+      get: async (input) => {
+        const query = new URLSearchParams();
+        if (input.from) query.set('from', input.from);
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return input.sessionId
+          ? requestJson(context, 'GET', `/api/trace/sessions/${encodeURIComponent(input.sessionId)}${suffix}`)
+          : requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId || '')}${suffix}`);
+      },
+      watch: async (input) => {
+        const query = new URLSearchParams();
+        if (input.from) query.set('from', input.from);
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestText(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}/watch${suffix}`);
+      },
+      listSessions: async (input) => {
+        const query = new URLSearchParams({
+          all: input.all ? 'true' : 'false',
+          limit: String(input.limit),
+        });
+        if (input.from) query.set('from', input.from);
+        return requestJson(context, 'GET', `/api/trace/sessions?${query.toString()}`);
+      },
     },
     ui: {
       open: async (input) => {

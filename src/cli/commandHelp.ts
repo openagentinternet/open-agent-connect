@@ -1473,15 +1473,32 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'Trace commands for following remote delegation progress and inspecting final artifacts.',
     usage: 'metabot trace <subcommand>',
     subcommands: [
+      { name: 'sessions', summary: 'List trace-capable A2A sessions.' },
       { name: 'watch', summary: 'Stream public status events for one trace as NDJSON.' },
       { name: 'get', summary: 'Read the full structured trace and export paths.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
   {
+    commandPath: ['trace', 'sessions'],
+    summary: 'List trace-capable A2A sessions.',
+    usage: 'metabot trace sessions [--from <bot-slug> | --all] [--limit <n>]',
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--all', description: 'Aggregate sessions across all local MetaBot profiles.' },
+      { flag: '--limit', value: '<n>', description: 'Maximum session count. Defaults to 50.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['sessions', 'stats'],
+    examples: [
+      'metabot trace sessions --from alice --limit 20',
+      'metabot trace sessions --all --limit 50',
+    ],
+  },
+  {
     commandPath: ['trace', 'watch'],
     summary: 'Stream public status events for one trace as NDJSON until the watch completes.',
-    usage: 'metabot trace watch --trace-id <trace-id>',
+    usage: 'metabot trace watch [--from <bot-slug>] --trace-id <trace-id>',
     requiredFlags: [
       { flag: '--trace-id', value: '<trace-id>', description: 'Trace identifier returned by a remote service call.' },
     ],
@@ -1494,12 +1511,12 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot trace watch --trace-id trace-123',
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['trace', 'get'],
     summary: 'Read the full structured trace or exact A2A session record plus exported transcript and inspector evidence paths.',
-    usage: 'metabot trace get --trace-id <trace-id> | metabot trace get --session-id <session-id>',
+    usage: 'metabot trace get [--from <bot-slug>] (--trace-id <trace-id> | --session-id <session-id>)',
     requiredFlags: [
       { flag: '--trace-id', value: '<trace-id>', description: 'Trace identifier returned by a remote service call. Required when --session-id is not provided.' },
       { flag: '--session-id', value: '<session-id>', description: 'A2A session identifier returned by a private chat or service call. Required when --trace-id is not provided.' },
@@ -1526,7 +1543,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot trace get --trace-id trace-123',
       'metabot trace get --session-id session-a2a-123',
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['system'],

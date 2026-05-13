@@ -539,6 +539,7 @@ test('runCli documents trace get lookup by trace id or session id', async () => 
 
   const output = JSON.parse(stdout.join(''));
   assert.deepEqual(output.commandPath, ['trace', 'get']);
+  assert.match(output.usage, /\[--from <bot-slug>\]/);
   assert.match(output.usage, /--trace-id <trace-id>/);
   assert.match(output.usage, /--session-id <session-id>/);
   assert.ok(output.requiredFlags.some((entry) => entry.flag === '--trace-id'));
@@ -549,6 +550,26 @@ test('runCli documents trace get lookup by trace id or session id', async () => 
   assert.ok(output.successFields.includes('paymentTxid'));
   assert.ok(output.successFields.includes('localUiUrl'));
   assert.ok(output.examples.includes('metabot trace get --session-id session-a2a-123'));
+});
+
+test('runCli documents trace sessions listing with actor selectors', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['trace', 'sessions', '--help', '--json'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = JSON.parse(stdout.join(''));
+  assert.deepEqual(output.commandPath, ['trace', 'sessions']);
+  assert.match(output.usage, /\[--from <bot-slug> \| --all\]/);
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--from'));
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--all'));
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--limit'));
+  assert.ok(output.successFields.includes('sessions'));
+  assert.ok(output.examples.includes('metabot trace sessions --from alice --limit 20'));
 });
 
 test('runCli prints machine-readable help for `metabot chat private --help --json`', async () => {

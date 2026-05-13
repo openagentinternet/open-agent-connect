@@ -4947,6 +4947,37 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return { provider: scopedHandlers.provider };
   }
 
+  async function resolveScopedTraceForActor(rawActor: unknown): Promise<{
+    trace?: NonNullable<MetabotDaemonHttpHandlers['trace']>;
+    failure?: MetabotCommandResult<never>;
+  }> {
+    const requestedSlug = normalizeText(rawActor);
+    if (!requestedSlug) {
+      return {};
+    }
+
+    const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedSlug);
+    if (!selectedProfile) {
+      return {
+        failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`),
+      };
+    }
+
+    const profileHomeDir = path.resolve(selectedProfile.homeDir);
+    if (profileHomeDir === path.resolve(input.homeDir)) {
+      return {};
+    }
+
+    const scopedHandlers = createDefaultMetabotDaemonHandlers({
+      ...input,
+      homeDir: profileHomeDir,
+      secretStore: createFileSecretStore(profileHomeDir),
+      signer: createSignerForProfileHome(profileHomeDir),
+      servicePaymentExecutor: input.servicePaymentExecutor,
+    });
+    return { trace: scopedHandlers.trace };
+  }
+
   function getPublishedServicePinIds(service: Partial<PublishedServiceRecord>): string[] {
     return [...new Set([
       ...(Array.isArray(service.chainPinIds) ? service.chainPinIds : []),
@@ -12289,7 +12320,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     },
     trace: {
-      getTrace: async ({ traceId }) => {
+      getTrace: async ({ from, traceId }) => {
+        const scoped = await resolveScopedTraceForActor(from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.trace?.getTrace) {
+          return scoped.trace.getTrace({ from, traceId });
+        }
         const state = await runtimeStateStore.readState();
         const trace = state.traces.find((entry) => entry.traceId === traceId);
         if (!trace) {
@@ -12317,7 +12355,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
           })
         );
       },
-      watchTrace: async ({ traceId }) => {
+      watchTrace: async ({ from, traceId }) => {
+        const scoped = await resolveScopedTraceForActor(from);
+        if (scoped.failure || scoped.trace?.watchTrace) {
+          return scoped.trace?.watchTrace ? scoped.trace.watchTrace({ from, traceId }) : '';
+        }
         const normalizedTraceId = normalizeText(traceId);
         if (!normalizedTraceId) {
           return '';
@@ -12370,8 +12412,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
           await sleep(Math.min(TRACE_WATCH_POLL_INTERVAL_MS, remainingMs));
         }
       },
-      listSessions: async () => {
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+      listSessions: async (request = {}) => {
+        let profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        const requestedFrom = normalizeText(request.from);
+        if (requestedFrom) {
+          const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedFrom);
+          if (!selectedProfile) {
+            return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedFrom}`);
+          }
+          const selectedHomeDir = path.resolve(selectedProfile.homeDir);
+          profiles = profiles.filter((profile) => path.resolve(profile.homeDir) === selectedHomeDir);
+        } else if (request.all === false) {
+          const activeHomeDir = path.resolve(input.homeDir);
+          profiles = profiles.filter((profile) => path.resolve(profile.homeDir) === activeHomeDir);
+        }
         const results: Array<Record<string, unknown>> = [];
         const seenSessionIds = new Set<string>();
         const seenPeerWindowKeys = new Set<string>();
@@ -12460,19 +12514,31 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const callerCount = results.filter((s) => s.role === 'caller').length;
         const providerCount = results.filter((s) => s.role === 'provider').length;
         const lastUpdatedAt = results[0]?.updatedAt ?? null;
+        const limit = Number.isFinite(Number(request.limit)) && Number(request.limit) > 0
+          ? Math.floor(Number(request.limit))
+          : results.length;
 
         return commandSuccess({
-          sessions: results,
+          sessions: results.slice(0, limit),
           stats: { totalCount, callerCount, providerCount, lastUpdatedAt },
         });
       },
-      getSession: async ({ sessionId }) => {
+      getSession: async ({ from, sessionId }) => {
         const normalizedSessionId = normalizeText(sessionId);
         if (!normalizedSessionId) {
           return commandFailed('missing_session_id', 'Session ID is required.');
         }
 
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        let profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        const requestedFrom = normalizeText(from);
+        if (requestedFrom) {
+          const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedFrom);
+          if (!selectedProfile) {
+            return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedFrom}`);
+          }
+          const selectedHomeDir = path.resolve(selectedProfile.homeDir);
+          profiles = profiles.filter((profile) => path.resolve(profile.homeDir) === selectedHomeDir);
+        }
 
         for (const profile of profiles) {
           try {

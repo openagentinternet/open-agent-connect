@@ -105,8 +105,9 @@ export interface CliDependencies {
     transfer?: (input: { toAddress: string; amountRaw: string; confirm: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   trace?: {
-    get?: (input: { traceId?: string; sessionId?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    watch?: (input: { traceId: string }) => Awaitable<string>;
+    get?: (input: { from?: string; traceId?: string; sessionId?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    watch?: (input: { from?: string; traceId: string }) => Awaitable<string>;
+    listSessions?: (input: { from?: string; all: boolean; limit: number }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   ui?: {
     open?: (input: { page: string; traceId?: string }) => Awaitable<MetabotCommandResult<unknown>>;
