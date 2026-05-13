@@ -12,6 +12,7 @@ const hostSkillBinding_1 = require("../host/hostSkillBinding");
 const version_1 = require("../../cli/version");
 const platformRegistry_1 = require("../platform/platformRegistry");
 const platformRegistry_2 = require("../platform/platformRegistry");
+const homeSelection_1 = require("../state/homeSelection");
 const SUPPORTED_HOSTS = [...platformRegistry_1.SUPPORTED_PLATFORM_IDS];
 class NpmInstallError extends Error {
     code;
@@ -23,9 +24,6 @@ class NpmInstallError extends Error {
 }
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
-}
-function resolveSystemHomeDir(env) {
-    return node_path_1.default.resolve(normalizeText(env.HOME) || process.env.HOME || process.cwd());
 }
 function resolvePackageRoot(context) {
     return node_path_1.default.resolve(context.packageRoot ?? node_path_1.default.join(__dirname, '..', '..', '..'));
@@ -279,7 +277,7 @@ function splitRootResults(results) {
 async function runNpmInstall(input, context) {
     try {
         const host = resolveRequestedHost(input.host);
-        const systemHomeDir = resolveSystemHomeDir(context.env);
+        const systemHomeDir = (0, homeSelection_1.normalizeSystemHomeDir)(context.env, context.cwd);
         const packageRoot = resolvePackageRoot(context);
         const { sharedSkillRoot, installedSkills } = await copySharedSkills({
             packageRoot,
@@ -316,7 +314,7 @@ async function runNpmInstall(input, context) {
 async function runNpmDoctor(input, context) {
     try {
         const host = resolveRequestedHost(input.host);
-        const systemHomeDir = resolveSystemHomeDir(context.env);
+        const systemHomeDir = (0, homeSelection_1.normalizeSystemHomeDir)(context.env, context.cwd);
         const packageRoot = resolvePackageRoot(context);
         return (0, commandResult_1.commandSuccess)(await verifyInstalledState({
             host,

@@ -95,6 +95,10 @@ function buildPublishedService(input) {
         id: normalizeText(input.sourceServicePinId),
         sourceServicePinId: normalizeText(input.sourceServicePinId),
         currentPinId: normalizeText(input.currentPinId) || normalizeText(input.sourceServicePinId),
+        chainPinIds: [...new Set([
+                normalizeText(input.sourceServicePinId),
+                normalizeText(input.currentPinId) || normalizeText(input.sourceServicePinId),
+            ].filter(Boolean))],
         creatorMetabotId: input.creatorMetabotId,
         providerGlobalMetaId: normalizeText(input.providerGlobalMetaId),
         providerSkill: draft.providerSkill,
@@ -126,6 +130,10 @@ function buildRevokedPublishedService(input) {
         id: normalizeText(input.sourceServicePinId),
         sourceServicePinId: normalizeText(input.sourceServicePinId),
         currentPinId: normalizeText(input.currentPinId) || normalizeText(input.sourceServicePinId),
+        chainPinIds: [...new Set([
+                normalizeText(input.sourceServicePinId),
+                normalizeText(input.currentPinId) || normalizeText(input.sourceServicePinId),
+            ].filter(Boolean))],
         creatorMetabotId: input.creatorMetabotId,
         providerGlobalMetaId: normalizeText(input.providerGlobalMetaId),
         providerSkill: normalizeText(input.providerSkill),

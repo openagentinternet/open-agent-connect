@@ -8,7 +8,7 @@ exports.normalizeLlmBinding = normalizeLlmBinding;
 exports.normalizeLlmRuntimesState = normalizeLlmRuntimesState;
 exports.normalizeLlmBindingsState = normalizeLlmBindingsState;
 const platformRegistry_1 = require("../platform/platformRegistry");
-exports.SUPPORTED_LLM_PROVIDERS = [...platformRegistry_1.SUPPORTED_PLATFORM_IDS];
+exports.SUPPORTED_LLM_PROVIDERS = [...platformRegistry_1.RUNTIME_PLATFORM_IDS];
 exports.HOST_BINARY_MAP = (0, platformRegistry_1.getPlatformBinaryMap)();
 exports.PROVIDER_DISPLAY_NAMES = (0, platformRegistry_1.getPlatformDisplayNames)();
 exports.HOST_SEARCH_ORDER = (0, platformRegistry_1.getPlatformSearchOrder)();
@@ -40,7 +40,7 @@ function normalizeOptionalString(value) {
 }
 // ---- type guards ----
 function isLlmProvider(value) {
-    return (0, platformRegistry_1.isPlatformId)(value) || value === 'custom';
+    return (0, platformRegistry_1.isRuntimePlatformId)(value) || value === 'custom';
 }
 function isLlmAuthState(value) {
     return typeof value === 'string' && ['unknown', 'authenticated', 'unauthenticated'].includes(value);

@@ -3,9 +3,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SUPPORTED_PLATFORM_IDS = exports.PLATFORM_DEFINITIONS = void 0;
+exports.RUNTIME_PLATFORM_IDS = exports.SUPPORTED_PLATFORM_IDS = exports.PLATFORM_DEFINITIONS = void 0;
 exports.getPlatformDefinition = getPlatformDefinition;
+exports.getRuntimePlatformDefinition = getRuntimePlatformDefinition;
 exports.isPlatformId = isPlatformId;
+exports.isRuntimePlatformId = isRuntimePlatformId;
 exports.getRuntimePlatforms = getRuntimePlatforms;
 exports.getPlatformDisplayNames = getPlatformDisplayNames;
 exports.getPlatformBinaryMap = getPlatformBinaryMap;
@@ -273,8 +275,33 @@ exports.PLATFORM_DEFINITIONS = [
             multicaReferencePath: 'agent/kiro.go',
         },
     },
+    {
+        id: 'trae',
+        displayName: 'Trae',
+        logoPath: '/ui/assets/platforms/generic.svg',
+        skills: {
+            roots: [
+                { id: 'trae-home', kind: 'global', path: '~/.trae/skills', autoBind: 'when-parent-exists' },
+                { id: 'trae-project', kind: 'project', path: '.trae/skills', autoBind: 'manual' },
+            ],
+        },
+    },
+    {
+        id: 'codebuddy',
+        displayName: 'CodeBuddy',
+        logoPath: '/ui/assets/platforms/generic.svg',
+        skills: {
+            roots: [
+                { id: 'codebuddy-home', kind: 'global', path: '~/.codebuddy/skills', autoBind: 'when-parent-exists' },
+                { id: 'codebuddy-project', kind: 'project', path: '.codebuddy/skills', autoBind: 'manual' },
+            ],
+        },
+    },
 ];
 exports.SUPPORTED_PLATFORM_IDS = exports.PLATFORM_DEFINITIONS.map((platform) => platform.id);
+exports.RUNTIME_PLATFORM_IDS = exports.PLATFORM_DEFINITIONS
+    .filter((platform) => Boolean(platform.runtime && platform.executor))
+    .map((platform) => platform.id);
 function getPlatformDefinition(id) {
     const definition = exports.PLATFORM_DEFINITIONS.find((platform) => platform.id === id);
     if (!definition) {
@@ -282,20 +309,30 @@ function getPlatformDefinition(id) {
     }
     return definition;
 }
+function getRuntimePlatformDefinition(id) {
+    const definition = getPlatformDefinition(id);
+    if (!definition.runtime || !definition.executor) {
+        throw new Error(`Platform id is not a managed runtime provider: ${id}`);
+    }
+    return definition;
+}
 function isPlatformId(value) {
     return typeof value === 'string' && exports.SUPPORTED_PLATFORM_IDS.includes(value);
 }
+function isRuntimePlatformId(value) {
+    return typeof value === 'string' && exports.RUNTIME_PLATFORM_IDS.includes(value);
+}
 function getRuntimePlatforms() {
-    return [...exports.PLATFORM_DEFINITIONS];
+    return exports.PLATFORM_DEFINITIONS.filter((platform) => Boolean(platform.runtime && platform.executor));
 }
 function getPlatformDisplayNames() {
-    return Object.fromEntries(exports.PLATFORM_DEFINITIONS.map((platform) => [platform.id, platform.displayName]));
+    return Object.fromEntries(getRuntimePlatforms().map((platform) => [platform.id, platform.displayName]));
 }
 function getPlatformBinaryMap() {
-    return Object.fromEntries(exports.PLATFORM_DEFINITIONS.map((platform) => [platform.id, platform.runtime.binaryNames[0]]));
+    return Object.fromEntries(getRuntimePlatforms().map((platform) => [platform.id, platform.runtime.binaryNames[0]]));
 }
 function getPlatformSearchOrder() {
-    return [...exports.SUPPORTED_PLATFORM_IDS];
+    return [...exports.RUNTIME_PLATFORM_IDS];
 }
 function getPlatformSkillRoots(id) {
     return getPlatformDefinition(id).skills.roots.map((root) => ({ ...root }));

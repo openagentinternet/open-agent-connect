@@ -37,5 +37,11 @@ export declare class HostSkillBindingError extends Error {
     data: Record<string, unknown>;
     constructor(code: 'shared_skills_missing' | 'host_skill_root_unresolved' | 'host_skill_bind_failed', message: string, data: Record<string, unknown>);
 }
+export declare function resolveHostSkillSymlinkType(platform?: NodeJS.Platform): 'dir' | 'junction';
+export declare function resolveHostSkillSymlinkTarget(input: {
+    platform?: NodeJS.Platform;
+    destinationPath: string;
+    sourcePath: string;
+}): string;
 export declare function bindPlatformSkills(input: BindPlatformSkillsInput): Promise<BoundPlatformSkillRootResult[]>;
 export declare function bindHostSkills(input: BindHostSkillsInput): Promise<BoundHostSkillsResult>;

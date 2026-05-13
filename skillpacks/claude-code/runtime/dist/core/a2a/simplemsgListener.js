@@ -15,6 +15,7 @@ const DEFAULT_SOCKET_ENDPOINTS = [
 ];
 const DEFAULT_RECONNECT_DELAY_MS = 5_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_SEEN_PIN_IDS = 5_000;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -90,6 +91,36 @@ function createProfileSimplemsgListener(input) {
     let sockets = [];
     const seenPinIds = new Set();
     let activeEndpointIndex = 0;
+    let heartbeatSocket = null;
+    let heartbeatInterval = null;
+    const stopHeartbeat = (socket) => {
+        if (socket && heartbeatSocket !== socket)
+            return;
+        if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+            heartbeatInterval = null;
+        }
+        heartbeatSocket = null;
+    };
+    const sendHeartbeat = (socket) => {
+        try {
+            socket.emit('ping');
+        }
+        catch (error) {
+            input.onError?.(error instanceof Error ? error : new Error(String(error)));
+        }
+    };
+    const startHeartbeat = (socket) => {
+        stopHeartbeat();
+        heartbeatSocket = socket;
+        sendHeartbeat(socket);
+        heartbeatInterval = setInterval(() => {
+            if (heartbeatSocket) {
+                sendHeartbeat(heartbeatSocket);
+            }
+        }, input.heartbeatIntervalMs);
+        heartbeatInterval.unref?.();
+    };
     const handleSocketPayload = async (payload) => {
         const message = normalizeSimplemsgSocketMessage(payload);
         if (!message)
@@ -157,6 +188,15 @@ function createProfileSimplemsgListener(input) {
         await input.onMessage?.(input.profile, inboundMessage);
     };
     const registerSocket = (socket, endpointIndex) => {
+        socket.on('connect', () => {
+            startHeartbeat(socket);
+        });
+        socket.on('disconnect', () => {
+            stopHeartbeat(socket);
+        });
+        socket.on('heartbeat_ack', () => {
+            // The ack is emitted by idchat after a heartbeat ping; no payload is required.
+        });
         socket.on('message', async (data) => {
             await handleSocketPayload(data).catch((error) => {
                 input.onError?.(error instanceof Error ? error : new Error(String(error)));
@@ -174,6 +214,7 @@ function createProfileSimplemsgListener(input) {
         });
         socket.on('connect_error', (error) => {
             input.onError?.(error);
+            stopHeartbeat(socket);
             if (endpointIndex !== activeEndpointIndex || endpointIndex >= input.endpoints.length - 1) {
                 return;
             }
@@ -214,6 +255,7 @@ function createProfileSimplemsgListener(input) {
             connectEndpoint(activeEndpointIndex);
         },
         stop() {
+            stopHeartbeat();
             for (const socket of sockets) {
                 try {
                     socket.removeAllListeners();
@@ -236,6 +278,7 @@ function createA2ASimplemsgListenerManager(input) {
     const loadIdentity = input.loadProfileIdentity ?? loadProfileIdentity;
     const reconnectDelayMs = input.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
     const maxReconnectDelayMs = input.maxReconnectDelayMs ?? MAX_RECONNECT_DELAY_MS;
+    const heartbeatIntervalMs = input.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
     let listeners = [];
     let running = false;
     let lastReport = { started: [], skipped: [] };
@@ -284,6 +327,7 @@ function createA2ASimplemsgListenerManager(input) {
                     persister,
                     reconnectDelayMs,
                     maxReconnectDelayMs,
+                    heartbeatIntervalMs,
                     onMessage: input.onMessage,
                     onError: input.onError,
                 });

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildServicePublishChainWrite = buildServicePublishChainWrite;
+exports.uploadServiceIconDataUrl = uploadServiceIconDataUrl;
 exports.publishServiceToChain = publishServiceToChain;
 const publishService_1 = require("./publishService");
 const SKILL_SERVICE_PROTOCOL_PATH = '/protocols/skill-service';

@@ -13,6 +13,7 @@ export interface PublishedServiceRecord {
     id: string;
     sourceServicePinId: string;
     currentPinId: string;
+    chainPinIds?: string[];
     creatorMetabotId: number;
     providerGlobalMetaId: string;
     providerSkill: string;

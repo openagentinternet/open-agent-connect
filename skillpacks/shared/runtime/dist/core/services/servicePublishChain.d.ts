@@ -17,6 +17,14 @@ export interface PublishServiceToChainResult {
     serviceIconUpload?: ChainWriteResult;
     chainWrite: ChainWriteResult;
 }
+export declare function uploadServiceIconDataUrl(input: {
+    signer: Pick<Signer, 'writePin'>;
+    serviceIconDataUrl?: string | null;
+    network?: string;
+}): Promise<{
+    serviceIconUri: string | null;
+    upload?: ChainWriteResult;
+}>;
 export declare function publishServiceToChain(input: {
     signer: Pick<Signer, 'writePin'>;
     creatorMetabotId: number;

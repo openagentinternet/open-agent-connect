@@ -10,11 +10,21 @@ exports.readIndexedActiveMetabotHomeSync = readIndexedActiveMetabotHomeSync;
 exports.resolveMetabotHomeSelection = resolveMetabotHomeSelection;
 exports.resolveMetabotHomeSelectionSync = resolveMetabotHomeSelectionSync;
 const node_fs_1 = __importDefault(require("node:fs"));
+const node_os_1 = __importDefault(require("node:os"));
 const node_path_1 = __importDefault(require("node:path"));
 const identityProfiles_1 = require("../identity/identityProfiles");
 const paths_1 = require("./paths");
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
+}
+function normalizeWindowsProfileHome(env) {
+    const userProfile = normalizeText(env.USERPROFILE);
+    if (userProfile) {
+        return userProfile;
+    }
+    const homeDrive = normalizeText(env.HOMEDRIVE);
+    const homePath = normalizeText(env.HOMEPATH);
+    return homeDrive && homePath ? `${homeDrive}${homePath}` : '';
 }
 function readJsonFileSync(filePath) {
     try {
@@ -54,7 +64,11 @@ function parseActiveHomePayload(value) {
     return homeDir ? node_path_1.default.resolve(homeDir) : null;
 }
 function normalizeSystemHomeDir(env, cwd) {
-    const home = normalizeText(env.HOME);
+    const home = normalizeText(env.HOME)
+        || normalizeWindowsProfileHome(env)
+        || normalizeText(process.env.HOME)
+        || normalizeWindowsProfileHome(process.env)
+        || normalizeText(node_os_1.default.homedir());
     const fallback = normalizeText(cwd);
     const systemHomeDir = node_path_1.default.resolve(home || fallback);
     if (!systemHomeDir) {

@@ -1,5 +1,5 @@
-import type { PlatformId } from '../platform/platformRegistry';
-export type LlmProvider = PlatformId | 'custom';
+import type { RuntimePlatformId } from '../platform/platformRegistry';
+export type LlmProvider = RuntimePlatformId | 'custom';
 export type LlmAuthState = 'unknown' | 'authenticated' | 'unauthenticated';
 export type LlmHealth = 'healthy' | 'degraded' | 'unavailable';
 export type LlmBindingRole = 'primary' | 'fallback' | 'reviewer' | 'specialist';

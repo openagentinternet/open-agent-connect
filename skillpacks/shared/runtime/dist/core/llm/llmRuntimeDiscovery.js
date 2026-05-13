@@ -76,9 +76,9 @@ function detectAuthState(authEnv, env) {
 async function discoverProvider(provider, pathDirs, options) {
     if (provider === 'custom')
         return null; // Custom runtimes are registered manually.
-    if (!(0, platformRegistry_1.isPlatformId)(provider))
+    if (!(0, platformRegistry_1.isRuntimePlatformId)(provider))
         return null;
-    const platform = (0, platformRegistry_1.getPlatformDefinition)(provider);
+    const platform = (0, platformRegistry_1.getRuntimePlatformDefinition)(provider);
     let binaryPath = null;
     for (const binaryName of platform.runtime.binaryNames) {
         binaryPath = await findExecutableInPath(binaryName, pathDirs);

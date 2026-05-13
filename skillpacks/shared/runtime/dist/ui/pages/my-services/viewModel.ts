@@ -1,270 +1,531 @@
-export interface ProviderConsoleRow {
+export interface MyServiceMetricViewModel {
   label: string;
   value: string;
 }
 
-export interface ProviderPresenceCardViewModel {
+export interface MyServicesPaginationViewModel {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  canPrevious: boolean;
+  canNext: boolean;
+}
+
+export interface MyServiceListEntryViewModel {
+  key: string;
+  id: string;
+  currentPinId: string;
+  sourceServicePinId: string;
   title: string;
-  statusLabel: string;
-  actionLabel: string;
-  rows: ProviderConsoleRow[];
-}
-
-export interface ProviderServiceInventoryEntry {
-  key: string;
-  displayName: string;
   serviceName: string;
-  availabilityLabel: string;
+  description: string;
+  iconUri: string;
+  iconLabel: string;
+  skillLabel: string;
+  outputTypeLabel: string;
   priceLabel: string;
-  servicePinId: string;
-  lastPublishAt: string;
+  creatorLabel: string;
+  updatedAtLabel: string;
+  metrics: MyServiceMetricViewModel[];
+  canModify: boolean;
+  canRevoke: boolean;
+  blockedReason: string;
 }
 
-export interface ProviderRecentOrderEntry {
+export interface MyServiceOrderEntryViewModel {
   key: string;
-  serviceName: string;
+  statusLabel: string;
   buyerLabel: string;
-  stateLabel: string;
-  statusDetail: string;
+  paymentLabel: string;
+  paymentTxid: string;
+  orderTxid: string;
+  servicePinId: string;
+  timeLabel: string;
+  ratingLabel: string;
+  ratingComment: string;
+  ratingPinId: string;
   traceHref: string;
   traceLabel: string;
-  paymentLabel: string;
+  sessionHref: string;
+  sessionLabel: string;
   runtimeLabel: string;
-  refundRequestPinId: string;
-  refundTxid: string;
-  refundFinalizePinId: string;
-  refundBlockingReason: string;
-  createdAt: string;
-  requiresManualRefund: boolean;
-  ratingCommentPreview: string;
-  ratingPinId: string;
 }
 
-export interface ProviderManualActionEntry {
-  key: string;
-  kindLabel: string;
-  orderId: string;
-  refundRequestPinId: string;
-  refundHref: string;
-  traceHref: string;
+export interface MyServiceEditFormViewModel {
+  serviceId: string;
+  displayName: string;
+  serviceName: string;
+  description: string;
+  providerSkill: string;
+  outputType: string;
+  price: string;
+  currency: string;
+  serviceIconUri: string;
+  serviceIconPreviewUri: string;
+}
+
+export interface MyServicesNoticeViewModel {
+  tone: 'success' | 'error' | 'warning' | 'neutral';
+  title: string;
+  message: string;
+  txids: string[];
+  pinId: string;
+}
+
+export interface MyServicesEmptyStateViewModel {
+  title: string;
+  message: string;
 }
 
 export interface MyServicesPageViewModel {
-  presenceCard: ProviderPresenceCardViewModel;
-  serviceInventory: ProviderServiceInventoryEntry[];
-  recentOrders: ProviderRecentOrderEntry[];
-  manualActions: ProviderManualActionEntry[];
+  services: MyServiceListEntryViewModel[];
+  selectedService: MyServiceListEntryViewModel | null;
+  orders: MyServiceOrderEntryViewModel[];
+  editForm: MyServiceEditFormViewModel | null;
+  notice: MyServicesNoticeViewModel | null;
+  pageLabel: string;
+  orderPageLabel: string;
+  pagination: MyServicesPaginationViewModel;
+  orderPagination: MyServicesPaginationViewModel;
+  emptyState: MyServicesEmptyStateViewModel;
+  orderEmptyState: MyServicesEmptyStateViewModel;
+  currencyOptions: string[];
+  outputTypeOptions: string[];
 }
 
 function normalizeText(value: unknown): string {
-  if (typeof value === 'string') {
-    return value.trim();
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return '';
+}
+
+function normalizeNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function stripQueryAndFragment(value: string): string {
+  return value.split(/[?#]/u)[0] ?? value;
+}
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//iu.test(value);
+}
+
+function isLikelyServiceIconPinId(value: string): boolean {
+  return /^[0-9a-f]{64}(?:i\d+)?$/iu.test(value) || /^[A-Za-z0-9._:-]{8,256}$/u.test(value);
+}
+
+function extractServiceIconPinReference(value: unknown): string {
+  const raw = normalizeText(value);
+  if (!raw || /^(data:|blob:)/iu.test(raw)) return '';
+  if (/^metafile:\/\//iu.test(raw)) {
+    const pinId = stripQueryAndFragment(raw.slice('metafile://'.length).trim());
+    return isLikelyServiceIconPinId(pinId) ? pinId : '';
   }
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return String(value);
+
+  const path = (() => {
+    if (isHttpUrl(raw)) {
+      try {
+        return new URL(raw).pathname;
+      } catch {
+        return '';
+      }
+    }
+    return raw;
+  })();
+  const prefixes = [
+    '/content/',
+    '/metafile-indexer/content/',
+    '/metafile-indexer/thumbnail/',
+    '/metafile-indexer/api/v1/files/content/',
+    '/metafile-indexer/api/v1/files/accelerate/content/',
+    '/metafile-indexer/api/v1/users/avatar/accelerate/',
+  ];
+  for (const prefix of prefixes) {
+    if (path.toLowerCase().startsWith(prefix.toLowerCase())) {
+      const pinId = decodeURIComponent(stripQueryAndFragment(path.slice(prefix.length).trim()));
+      return isLikelyServiceIconPinId(pinId) ? pinId : '';
+    }
+  }
+
+  const bare = stripQueryAndFragment(raw);
+  if (!bare.includes('/') && !bare.includes('\\') && isLikelyServiceIconPinId(bare)) {
+    return bare;
   }
   return '';
 }
 
+function isServiceIconContentReference(value: unknown): boolean {
+  const raw = normalizeText(value);
+  if (!raw) return false;
+  if (/^metafile:\/\//iu.test(raw)) return true;
+  const path = (() => {
+    if (isHttpUrl(raw)) {
+      try {
+        return new URL(raw).pathname;
+      } catch {
+        return '';
+      }
+    }
+    return raw;
+  })();
+  return [
+    '/content/',
+    '/metafile-indexer/content/',
+    '/metafile-indexer/thumbnail/',
+    '/metafile-indexer/api/v1/files/content/',
+    '/metafile-indexer/api/v1/files/accelerate/content/',
+    '/metafile-indexer/api/v1/users/avatar/accelerate/',
+  ].some((prefix) => path.toLowerCase().startsWith(prefix.toLowerCase()));
+}
+
+function formatServiceIconRenderUri(value: unknown): string {
+  const raw = normalizeText(value);
+  if (!raw) return '';
+  if (/^(data:|blob:)/iu.test(raw)) return raw;
+  const pinRef = extractServiceIconPinReference(raw);
+  if (pinRef) return `/api/file/avatar?ref=${encodeURIComponent(pinRef)}`;
+  if (isServiceIconContentReference(raw)) return '';
+  return raw;
+}
+
 function readObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
-function pushRow(rows: ProviderConsoleRow[], label: string, value: unknown): void {
-  const normalized = normalizeText(value);
-  if (!normalized) {
-    return;
-  }
-  rows.push({ label, value: normalized });
+function readArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
-function formatRatingStateLabel(record: Record<string, unknown>): string {
-  const ratingStatus = normalizeText(record.ratingStatus);
-  const ratingValue = normalizeText(record.ratingValue);
-
-  if (ratingStatus === 'rated_on_chain_followup_unconfirmed') {
-    return ratingValue ? `已评价 · ${ratingValue}/5 · 回传未确认` : '已评价 · 回传未确认';
-  }
-  if (ratingStatus === 'rated_on_chain') {
-    return ratingValue ? `已评价 · ${ratingValue}/5` : '已评价';
-  }
-  if (ratingStatus === 'sync_error') {
-    return '评分同步异常';
-  }
-  return '未评价';
+function formatCount(value: unknown): string {
+  const numeric = normalizeNumber(value);
+  return Number.isFinite(numeric) ? String(Math.trunc(numeric)) : '0';
 }
 
-function formatLifecycleStateLabel(record: Record<string, unknown>): string {
-  switch (normalizeText(record.state)) {
-    case 'received':
-      return 'Received';
-    case 'acknowledged':
-      return 'Acknowledged';
-    case 'in_progress':
-      return 'In progress';
-    case 'completed':
-      return 'Completed';
-    case 'rating_pending':
-      return 'Rating pending';
-    case 'failed':
-      return 'Failed';
-    case 'refund_pending':
-      return 'Refund pending';
-    case 'refunded':
-      return 'Refunded';
-    case 'ended':
-      return 'Ended';
-    default:
-      return '';
+function formatTimestamp(value: unknown): string {
+  const raw = normalizeText(value);
+  const numeric = Number(value);
+  let date: Date | null = null;
+  if (Number.isFinite(numeric) && numeric > 0) {
+    date = new Date(numeric < 10_000_000_000 ? numeric * 1000 : numeric);
+  } else if (raw) {
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) date = new Date(parsed);
   }
+  if (!date || !Number.isFinite(date.getTime())) return raw || 'Unknown';
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return [
+    `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`,
+    `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`,
+  ].join(' ');
 }
 
-function formatOrderStateLabel(record: Record<string, unknown>): string {
-  const lifecycle = formatLifecycleStateLabel(record);
-  const rating = formatRatingStateLabel(record);
-  return [lifecycle, rating].filter(Boolean).join(' · ') || rating;
+function formatPrice(record: Record<string, unknown>): string {
+  const price = normalizeText(record.price);
+  const currency = normalizeText(record.currency);
+  return [price, currency].filter(Boolean).join(' ') || 'No price';
 }
 
-function formatPaymentLabel(record: Record<string, unknown>): string {
+function formatAmount(record: Record<string, unknown>): string {
   const amount = normalizeText(record.paymentAmount);
   const currency = normalizeText(record.paymentCurrency);
-  const paymentTxid = normalizeText(record.paymentTxid);
-  const amountLabel = [amount, currency].filter(Boolean).join(' ');
-  return [amountLabel, paymentTxid].filter(Boolean).join(' · ') || '—';
+  return [amount, currency].filter(Boolean).join(' ') || 'No payment';
 }
 
-function formatRuntimeLabel(record: Record<string, unknown>): string {
-  const runtimeProvider = normalizeText(record.runtimeProvider);
-  const runtimeId = normalizeText(record.runtimeId);
-  const llmSessionId = normalizeText(record.llmSessionId);
-  const fallbackSelected = record.fallbackSelected === true ? 'fallback selected' : '';
-  return [runtimeProvider, runtimeId, llmSessionId, fallbackSelected].filter(Boolean).join(' · ')
-    || 'Runtime unavailable';
+function formatServiceInitials(displayName: string, serviceName: string): string {
+  const source = displayName || serviceName || 'Service';
+  const words = source.split(/[\s_-]+/u).map((part) => part.trim()).filter(Boolean);
+  const initials = words.length > 1
+    ? `${words[0][0] ?? ''}${words[1][0] ?? ''}`
+    : source.slice(0, 2);
+  return initials.toUpperCase() || 'SV';
+}
+
+function formatRating(record: Record<string, unknown>): string {
+  const ratingAvg = normalizeNumber(record.ratingAvg);
+  const ratingCount = normalizeNumber(record.ratingCount);
+  if (!ratingCount || !ratingAvg) return 'No rating';
+  const rounded = Number.isInteger(ratingAvg) ? String(ratingAvg) : ratingAvg.toFixed(1).replace(/\.0$/u, '');
+  return `${rounded} / 5 · ${Math.trunc(ratingCount)}`;
+}
+
+function formatStatusLabel(value: unknown): string {
+  switch (normalizeText(value)) {
+    case 'completed':
+      return 'Completed';
+    case 'refunded':
+      return 'Refunded';
+    default:
+      return normalizeText(value) || 'Unknown';
+  }
+}
+
+function formatOrderTime(record: Record<string, unknown>): string {
+  const status = normalizeText(record.status);
+  const timestamp = status === 'refunded'
+    ? record.refundCompletedAt || record.createdAt
+    : record.deliveredAt || record.createdAt;
+  return formatTimestamp(timestamp);
+}
+
+function formatOrderRating(record: Record<string, unknown>): {
+  label: string;
+  comment: string;
+  pinId: string;
+} {
+  const rating = readObject(record.rating);
+  const rate = normalizeNumber(rating.rate);
+  if (!rate) {
+    return { label: 'No rating', comment: '', pinId: '' };
+  }
+  return {
+    label: `${Number.isInteger(rate) ? String(rate) : rate.toFixed(1)} / 5`,
+    comment: normalizeText(rating.comment),
+    pinId: normalizeText(rating.pinId),
+  };
+}
+
+function formatPageLabel(page: Record<string, unknown>, noun: string): string {
+  const currentPage = Math.max(1, Math.trunc(normalizeNumber(page.page) || 1));
+  const totalPages = Math.max(1, Math.trunc(normalizeNumber(page.totalPages) || 1));
+  const total = Math.max(0, Math.trunc(normalizeNumber(page.total)));
+  return `${currentPage} / ${totalPages} · ${total} ${noun}`;
+}
+
+function buildPagination(page: Record<string, unknown>): MyServicesPaginationViewModel {
+  const currentPage = Math.max(1, Math.trunc(normalizeNumber(page.page) || 1));
+  const pageSize = Math.max(1, Math.trunc(normalizeNumber(page.pageSize) || 1));
+  const total = Math.max(0, Math.trunc(normalizeNumber(page.total)));
+  const totalPages = Math.max(1, Math.trunc(normalizeNumber(page.totalPages) || 1));
+  return {
+    page: currentPage,
+    pageSize,
+    total,
+    totalPages,
+    canPrevious: currentPage > 1,
+    canNext: total > 0 && currentPage < totalPages,
+  };
+}
+
+function buildServiceEntry(entry: unknown): MyServiceListEntryViewModel | null {
+  const record = readObject(entry);
+  const currentPinId = normalizeText(record.currentPinId) || normalizeText(record.id);
+  if (!currentPinId) return null;
+  const displayName = normalizeText(record.displayName) || normalizeText(record.serviceName) || 'Service';
+  const serviceName = normalizeText(record.serviceName) || 'unknown-service';
+  const currency = normalizeText(record.currency);
+  const creatorName = normalizeText(record.creatorMetabotName);
+  const creatorSlug = normalizeText(record.creatorMetabotSlug);
+  const priceLabel = formatPrice(record);
+  return {
+    key: currentPinId,
+    id: normalizeText(record.id) || currentPinId,
+    currentPinId,
+    sourceServicePinId: normalizeText(record.sourceServicePinId) || currentPinId,
+    title: displayName,
+    serviceName,
+    description: normalizeText(record.description),
+    iconUri: formatServiceIconRenderUri(record.serviceIcon),
+    iconLabel: formatServiceInitials(displayName, serviceName),
+    skillLabel: normalizeText(record.providerSkill) || 'Unbound skill',
+    outputTypeLabel: normalizeText(record.outputType) || 'text',
+    priceLabel,
+    creatorLabel: [creatorName, creatorSlug].filter(Boolean).join(' · ') || 'Unknown MetaBot',
+    updatedAtLabel: formatTimestamp(record.updatedAt),
+    metrics: [
+      { label: 'Success', value: formatCount(record.successCount) },
+      { label: 'Refunded', value: formatCount(record.refundCount) },
+      { label: 'Gross', value: [normalizeText(record.grossRevenue) || '0', currency].filter(Boolean).join(' ') },
+      { label: 'Net', value: [normalizeText(record.netIncome) || '0', currency].filter(Boolean).join(' ') },
+      { label: 'Rating', value: formatRating(record) },
+    ],
+    canModify: record.canModify === true,
+    canRevoke: record.canRevoke === true,
+    blockedReason: normalizeText(record.blockedReason),
+  };
+}
+
+function buildOrderEntry(entry: unknown): MyServiceOrderEntryViewModel | null {
+  const record = readObject(entry);
+  const id = normalizeText(record.id);
+  if (!id) return null;
+  const paymentTxid = normalizeText(record.paymentTxid);
+  const orderTxid = normalizeText(record.orderMessageTxid);
+  const traceId = normalizeText(record.traceId);
+  const sessionId = normalizeText(record.coworkSessionId);
+  const rating = formatOrderRating(record);
+  const runtimeLabel = [
+    normalizeText(record.runtimeProvider),
+    normalizeText(record.runtimeId),
+    normalizeText(record.llmSessionId),
+  ].filter(Boolean).join(' · ') || 'Runtime unavailable';
+  return {
+    key: id,
+    statusLabel: formatStatusLabel(record.status),
+    buyerLabel: normalizeText(record.counterpartyName) || normalizeText(record.counterpartyGlobalMetaid) || 'Unknown buyer',
+    paymentLabel: [formatAmount(record), paymentTxid].filter(Boolean).join(' · '),
+    paymentTxid,
+    orderTxid,
+    servicePinId: normalizeText(record.servicePinId),
+    timeLabel: formatOrderTime(record),
+    ratingLabel: rating.label,
+    ratingComment: rating.comment,
+    ratingPinId: rating.pinId,
+    traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '/ui/trace',
+    traceLabel: traceId || 'Trace unavailable',
+    sessionHref: sessionId ? `/ui/trace?sessionId=${encodeURIComponent(sessionId)}` : '',
+    sessionLabel: sessionId || 'No session',
+    runtimeLabel,
+  };
+}
+
+function buildEditForm(selected: MyServiceListEntryViewModel | null, rawSelected: Record<string, unknown> | null): MyServiceEditFormViewModel | null {
+  if (!selected || !rawSelected) return null;
+  return {
+    serviceId: selected.currentPinId,
+    displayName: selected.title,
+    serviceName: selected.serviceName,
+    description: selected.description,
+    providerSkill: normalizeText(rawSelected.providerSkill),
+    outputType: normalizeText(rawSelected.outputType) || 'text',
+    price: normalizeText(rawSelected.price),
+    currency: normalizeText(rawSelected.currency) || 'BTC',
+    serviceIconUri: normalizeText(rawSelected.serviceIcon),
+    serviceIconPreviewUri: formatServiceIconRenderUri(rawSelected.serviceIcon),
+  };
+}
+
+function buildNotice(input: {
+  mutationResult?: Record<string, unknown> | null;
+  error?: Record<string, unknown> | null;
+}): MyServicesNoticeViewModel | null {
+  const error = readObject(input.error);
+  const errorMessage = normalizeText(error.message);
+  if (errorMessage) {
+    return {
+      tone: 'error',
+      title: 'My Services error',
+      message: errorMessage,
+      txids: [],
+      pinId: '',
+    };
+  }
+
+  const result = readObject(input.mutationResult);
+  const txids = readArray(result.txids).map((entry) => normalizeText(entry)).filter(Boolean);
+  const operation = normalizeText(result.operation);
+  if (!operation && txids.length === 0 && !normalizeText(result.pinId)) {
+    return null;
+  }
+  const operationLabel = operation === 'revoke'
+    ? 'Revoke'
+    : operation === 'modify'
+      ? 'Modify'
+      : 'Service';
+  const warning = normalizeText(result.warning);
+  if (warning) {
+    return {
+      tone: 'warning',
+      title: `${operationLabel} warning`,
+      message: warning,
+      txids,
+      pinId: normalizeText(result.pinId),
+    };
+  }
+  return {
+    tone: 'success',
+    title: `${operationLabel} broadcast`,
+    message: 'Local state has been updated after the chain write.',
+    txids,
+    pinId: normalizeText(result.pinId),
+  };
 }
 
 export function buildMyServicesPageViewModel(input: {
-  providerSummary?: Record<string, unknown> | null;
+  servicesPage?: Record<string, unknown> | null;
+  ordersPage?: Record<string, unknown> | null;
+  selectedServiceId?: string | null;
+  mutationResult?: Record<string, unknown> | null;
+  error?: Record<string, unknown> | null;
 }): MyServicesPageViewModel {
-  const providerSummary = readObject(input.providerSummary);
-  const identity = readObject(providerSummary.identity);
-  const presence = readObject(providerSummary.presence);
-  const totals = readObject(providerSummary.totals);
-
-  const serviceInventory = Array.isArray(providerSummary.services)
-    ? providerSummary.services
-      .map((entry) => {
-        const record = readObject(entry);
-        const servicePinId = normalizeText(record.servicePinId);
-        const displayName = normalizeText(record.displayName) || normalizeText(record.serviceName) || 'Unnamed service';
-        const serviceName = normalizeText(record.serviceName) || 'unknown-service';
-        return {
-          key: servicePinId || displayName,
-          displayName,
-          serviceName,
-          availabilityLabel: record.available === true ? 'Available' : 'Offline',
-          priceLabel: [
-            normalizeText(record.price),
-            normalizeText(record.currency),
-          ].filter(Boolean).join(' ') || 'Unknown price',
-          servicePinId: servicePinId || 'No chain pin yet',
-          lastPublishAt: normalizeText(record.updatedAt) || 'Unknown',
-        } satisfies ProviderServiceInventoryEntry;
-      })
-      .filter((entry) => Boolean(entry.key))
-    : [];
-
-  const manualActionKeys = new Set(
-    Array.isArray(providerSummary.manualActions)
-      ? providerSummary.manualActions.map((entry) => normalizeText(readObject(entry).orderId)).filter(Boolean)
-      : []
-  );
-
-  const recentOrders = Array.isArray(providerSummary.recentOrders)
-    ? providerSummary.recentOrders
-      .map((entry) => {
-        const record = readObject(entry);
-        const orderId = normalizeText(record.orderId);
-        const traceId = normalizeText(record.traceId);
-        const buyerName = normalizeText(record.buyerName);
-        const buyerGlobalMetaId = normalizeText(record.buyerGlobalMetaId);
-        return {
-          key: orderId || traceId,
-          serviceName: normalizeText(record.serviceName) || 'Unknown service',
-          buyerLabel: [buyerName, buyerGlobalMetaId].filter(Boolean).join(' · ') || 'Unknown buyer',
-          stateLabel: formatOrderStateLabel(record),
-          statusDetail: normalizeText(record.publicStatus) || 'unknown',
-          traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '/ui/trace',
-          traceLabel: traceId || 'Trace unavailable',
-          paymentLabel: formatPaymentLabel(record),
-          runtimeLabel: formatRuntimeLabel(record),
-          refundRequestPinId: normalizeText(record.refundRequestPinId),
-          refundTxid: normalizeText(record.refundTxid),
-          refundFinalizePinId: normalizeText(record.refundFinalizePinId),
-          refundBlockingReason: normalizeText(record.refundBlockingReason),
-          createdAt: normalizeText(record.createdAt) || 'Unknown',
-          requiresManualRefund: manualActionKeys.has(orderId),
-          ratingCommentPreview: normalizeText(record.ratingComment),
-          ratingPinId: normalizeText(record.ratingPinId),
-        } satisfies ProviderRecentOrderEntry;
-      })
-      .filter((entry) => Boolean(entry.key))
-    : [];
-
-  const manualActions = Array.isArray(providerSummary.manualActions)
-    ? providerSummary.manualActions
-      .map((entry) => {
-        const record = readObject(entry);
-        const orderId = normalizeText(record.orderId);
-        const traceId = normalizeText(record.traceId);
-        return {
-          key: orderId || traceId,
-          kindLabel: normalizeText(record.kind) === 'refund' ? 'Refund confirmation' : 'Manual action',
-          orderId: orderId || 'Unknown order',
-          refundRequestPinId: normalizeText(record.refundRequestPinId) || 'Missing refund request pin',
-          refundHref: orderId ? `/ui/refund?orderId=${encodeURIComponent(orderId)}` : '/ui/refund',
-          traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '/ui/trace',
-        } satisfies ProviderManualActionEntry;
-      })
-      .filter((entry) => Boolean(entry.key))
-    : [];
-
-  const presenceRows: ProviderConsoleRow[] = [];
-  pushRow(presenceRows, 'Provider', identity.name);
-  pushRow(presenceRows, 'GlobalMetaId', identity.globalMetaId);
-  pushRow(presenceRows, 'Last Heartbeat', presence.lastHeartbeatAt);
-  pushRow(presenceRows, 'Heartbeat Pin', presence.lastHeartbeatPinId);
-  const serviceCount = normalizeText(totals.serviceCount);
-  const activeServiceCount = normalizeText(totals.activeServiceCount);
-  if (serviceCount || activeServiceCount) {
-    presenceRows.push({
-      label: 'Active Services',
-      value: `${activeServiceCount || '0'} / ${serviceCount || '0'}`,
-    });
-  }
+  const servicesPage = readObject(input.servicesPage);
+  const rawServices = readArray(servicesPage.items);
+  const services = rawServices
+    .map((entry) => buildServiceEntry(entry))
+    .filter((entry): entry is MyServiceListEntryViewModel => Boolean(entry));
+  const selectedServiceId = normalizeText(input.selectedServiceId);
+  const selectedIndex = selectedServiceId
+    ? services.findIndex((service) => service.currentPinId === selectedServiceId || service.sourceServicePinId === selectedServiceId || service.id === selectedServiceId)
+    : -1;
+  const selectedService = selectedIndex >= 0 ? services[selectedIndex] : services[0] ?? null;
+  const rawSelected = selectedIndex >= 0
+    ? readObject(rawServices[selectedIndex])
+    : selectedService
+      ? readObject(rawServices[0])
+      : null;
+  const ordersPage = readObject(input.ordersPage);
+  const orders = readArray(ordersPage.items)
+    .map((entry) => buildOrderEntry(entry))
+    .filter((entry): entry is MyServiceOrderEntryViewModel => Boolean(entry));
 
   return {
-    presenceCard: {
-      title: 'Provider Presence',
-      statusLabel: presence.enabled === true ? 'Online' : 'Offline',
-      actionLabel: presence.enabled === true ? 'Go offline' : 'Go online',
-      rows: presenceRows,
+    services,
+    selectedService,
+    orders,
+    editForm: buildEditForm(selectedService, rawSelected),
+    notice: buildNotice({
+      mutationResult: input.mutationResult ?? null,
+      error: input.error ?? null,
+    }),
+    pageLabel: formatPageLabel(servicesPage, 'services'),
+    orderPageLabel: formatPageLabel(ordersPage, 'orders'),
+    pagination: buildPagination(servicesPage),
+    orderPagination: buildPagination(ordersPage),
+    emptyState: {
+      title: 'No published services',
+      message: 'Local MetaBot profiles have no active skill services yet.',
     },
-    serviceInventory,
-    recentOrders,
-    manualActions,
+    orderEmptyState: {
+      title: 'No closed orders',
+      message: 'Completed and refunded seller orders for this service will appear here.',
+    },
+    currencyOptions: ['BTC', 'SPACE', 'DOGE', 'BTC-OPCAT'],
+    outputTypeOptions: ['text', 'image', 'video', 'audio', 'other'],
   };
 }
 
 export function buildMyServicesPageViewModelRuntimeSource(): string {
   return [
     normalizeText,
+    normalizeNumber,
+    stripQueryAndFragment,
+    isHttpUrl,
+    isLikelyServiceIconPinId,
+    extractServiceIconPinReference,
+    isServiceIconContentReference,
+    formatServiceIconRenderUri,
     readObject,
-    pushRow,
-    formatRatingStateLabel,
-    formatLifecycleStateLabel,
-    formatOrderStateLabel,
-    formatPaymentLabel,
-    formatRuntimeLabel,
+    readArray,
+    formatCount,
+    formatTimestamp,
+    formatPrice,
+    formatAmount,
+    formatServiceInitials,
+    formatRating,
+    formatStatusLabel,
+    formatOrderTime,
+    formatOrderRating,
+    formatPageLabel,
+    buildPagination,
+    buildServiceEntry,
+    buildOrderEntry,
+    buildEditForm,
+    buildNotice,
     buildMyServicesPageViewModel,
   ].map((fn) => fn.toString()).join('\n\n');
 }

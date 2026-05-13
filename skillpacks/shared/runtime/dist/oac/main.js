@@ -5,6 +5,7 @@ exports.runOac = runOac;
 const commandResult_1 = require("../core/contracts/commandResult");
 const npmInstall_1 = require("../core/system/npmInstall");
 const uninstall_1 = require("../core/system/uninstall");
+const homeSelection_1 = require("../core/state/homeSelection");
 const types_1 = require("../core/system/types");
 const version_1 = require("../cli/version");
 const platformRegistry_1 = require("../core/platform/platformRegistry");
@@ -71,7 +72,7 @@ async function runOacUninstall(args, context) {
     }
     try {
         const result = await (0, uninstall_1.runSystemUninstall)({
-            systemHomeDir: context.env.HOME || process.env.HOME || context.cwd,
+            systemHomeDir: (0, homeSelection_1.normalizeSystemHomeDir)(context.env, context.cwd),
             all,
             confirmToken,
             env: context.env,

@@ -82,6 +82,19 @@ export interface MetabotDaemonHttpHandlers {
         listPublishSkills?: (input?: {
             slug?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        listMyServices?: (input: {
+            page: number;
+            pageSize: number;
+            refresh: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        listMyServiceOrders?: (input: {
+            serviceId: string;
+            page: number;
+            pageSize: number;
+            refresh: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        modifyMyService?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        revokeMyService?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         call?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         rate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         execute?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

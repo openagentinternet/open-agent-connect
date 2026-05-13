@@ -9,6 +9,7 @@ export interface A2ASimplemsgSocketEndpoint {
 }
 export interface A2ASimplemsgSocketClient {
     on(event: string, handler: (...args: any[]) => void | Promise<void>): A2ASimplemsgSocketClient;
+    emit(event: string, ...args: any[]): unknown;
     removeAllListeners(): unknown;
     disconnect(): unknown;
 }
@@ -62,6 +63,7 @@ export declare function createA2ASimplemsgListenerManager(input: {
     onMessage?: (profile: IdentityProfileRecord, message: PrivateChatInboundMessage) => void | Promise<void>;
     reconnectDelayMs?: number;
     maxReconnectDelayMs?: number;
+    heartbeatIntervalMs?: number;
     onError?: (error: Error) => void;
 }): A2ASimplemsgListenerManager;
 export {};

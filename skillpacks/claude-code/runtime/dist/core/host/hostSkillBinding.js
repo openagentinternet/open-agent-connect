@@ -4,6 +4,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.HostSkillBindingError = void 0;
+exports.resolveHostSkillSymlinkType = resolveHostSkillSymlinkType;
+exports.resolveHostSkillSymlinkTarget = resolveHostSkillSymlinkTarget;
 exports.bindPlatformSkills = bindPlatformSkills;
 exports.bindHostSkills = bindHostSkills;
 const node_fs_1 = require("node:fs");
@@ -22,6 +24,15 @@ class HostSkillBindingError extends Error {
 exports.HostSkillBindingError = HostSkillBindingError;
 function toRelativeSymlinkTarget(destinationPath, sourcePath) {
     return node_path_1.default.relative(node_path_1.default.dirname(destinationPath), sourcePath) || '.';
+}
+function resolveHostSkillSymlinkType(platform = process.platform) {
+    return platform === 'win32' ? 'junction' : 'dir';
+}
+function resolveHostSkillSymlinkTarget(input) {
+    const linkType = resolveHostSkillSymlinkType(input.platform);
+    return linkType === 'junction'
+        ? node_path_1.default.resolve(input.sourcePath)
+        : toRelativeSymlinkTarget(input.destinationPath, input.sourcePath);
 }
 async function ensureHostSkillRoot(input) {
     const { platformId, rootId, hostSkillRoot } = input;
@@ -144,7 +155,11 @@ async function bindOneSkill(input) {
         }
     }
     try {
-        await node_fs_1.promises.symlink(toRelativeSymlinkTarget(destinationHostPath, sourceSharedSkillPath), destinationHostPath, 'dir');
+        const linkType = resolveHostSkillSymlinkType();
+        await node_fs_1.promises.symlink(resolveHostSkillSymlinkTarget({
+            destinationPath: destinationHostPath,
+            sourcePath: sourceSharedSkillPath,
+        }), destinationHostPath, linkType);
     }
     catch (error) {
         throw new HostSkillBindingError('host_skill_bind_failed', `Unable to bind ${skillName} into the host skill root.`, {

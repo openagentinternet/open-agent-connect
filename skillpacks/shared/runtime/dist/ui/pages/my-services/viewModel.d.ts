@@ -1,56 +1,96 @@
-export interface ProviderConsoleRow {
+export interface MyServiceMetricViewModel {
     label: string;
     value: string;
 }
-export interface ProviderPresenceCardViewModel {
+export interface MyServicesPaginationViewModel {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    canPrevious: boolean;
+    canNext: boolean;
+}
+export interface MyServiceListEntryViewModel {
+    key: string;
+    id: string;
+    currentPinId: string;
+    sourceServicePinId: string;
     title: string;
-    statusLabel: string;
-    actionLabel: string;
-    rows: ProviderConsoleRow[];
-}
-export interface ProviderServiceInventoryEntry {
-    key: string;
-    displayName: string;
     serviceName: string;
-    availabilityLabel: string;
+    description: string;
+    iconUri: string;
+    iconLabel: string;
+    skillLabel: string;
+    outputTypeLabel: string;
     priceLabel: string;
-    servicePinId: string;
-    lastPublishAt: string;
+    creatorLabel: string;
+    updatedAtLabel: string;
+    metrics: MyServiceMetricViewModel[];
+    canModify: boolean;
+    canRevoke: boolean;
+    blockedReason: string;
 }
-export interface ProviderRecentOrderEntry {
+export interface MyServiceOrderEntryViewModel {
     key: string;
-    serviceName: string;
+    statusLabel: string;
     buyerLabel: string;
-    stateLabel: string;
-    statusDetail: string;
+    paymentLabel: string;
+    paymentTxid: string;
+    orderTxid: string;
+    servicePinId: string;
+    timeLabel: string;
+    ratingLabel: string;
+    ratingComment: string;
+    ratingPinId: string;
     traceHref: string;
     traceLabel: string;
-    paymentLabel: string;
+    sessionHref: string;
+    sessionLabel: string;
     runtimeLabel: string;
-    refundRequestPinId: string;
-    refundTxid: string;
-    refundFinalizePinId: string;
-    refundBlockingReason: string;
-    createdAt: string;
-    requiresManualRefund: boolean;
-    ratingCommentPreview: string;
-    ratingPinId: string;
 }
-export interface ProviderManualActionEntry {
-    key: string;
-    kindLabel: string;
-    orderId: string;
-    refundRequestPinId: string;
-    refundHref: string;
-    traceHref: string;
+export interface MyServiceEditFormViewModel {
+    serviceId: string;
+    displayName: string;
+    serviceName: string;
+    description: string;
+    providerSkill: string;
+    outputType: string;
+    price: string;
+    currency: string;
+    serviceIconUri: string;
+    serviceIconPreviewUri: string;
+}
+export interface MyServicesNoticeViewModel {
+    tone: 'success' | 'error' | 'warning' | 'neutral';
+    title: string;
+    message: string;
+    txids: string[];
+    pinId: string;
+}
+export interface MyServicesEmptyStateViewModel {
+    title: string;
+    message: string;
 }
 export interface MyServicesPageViewModel {
-    presenceCard: ProviderPresenceCardViewModel;
-    serviceInventory: ProviderServiceInventoryEntry[];
-    recentOrders: ProviderRecentOrderEntry[];
-    manualActions: ProviderManualActionEntry[];
+    services: MyServiceListEntryViewModel[];
+    selectedService: MyServiceListEntryViewModel | null;
+    orders: MyServiceOrderEntryViewModel[];
+    editForm: MyServiceEditFormViewModel | null;
+    notice: MyServicesNoticeViewModel | null;
+    pageLabel: string;
+    orderPageLabel: string;
+    pagination: MyServicesPaginationViewModel;
+    orderPagination: MyServicesPaginationViewModel;
+    emptyState: MyServicesEmptyStateViewModel;
+    orderEmptyState: MyServicesEmptyStateViewModel;
+    currencyOptions: string[];
+    outputTypeOptions: string[];
 }
 export declare function buildMyServicesPageViewModel(input: {
-    providerSummary?: Record<string, unknown> | null;
+    servicesPage?: Record<string, unknown> | null;
+    ordersPage?: Record<string, unknown> | null;
+    selectedServiceId?: string | null;
+    mutationResult?: Record<string, unknown> | null;
+    error?: Record<string, unknown> | null;
 }): MyServicesPageViewModel;
 export declare function buildMyServicesPageViewModelRuntimeSource(): string;
