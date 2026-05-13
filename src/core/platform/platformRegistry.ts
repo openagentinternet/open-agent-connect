@@ -15,7 +15,7 @@ export type PlatformId =
   | 'trae'
   | 'codebuddy';
 
-export type RuntimePlatformId = Exclude<PlatformId, 'trae'>;
+export type RuntimePlatformId = Exclude<PlatformId, 'trae' | 'codebuddy'>;
 
 export type PlatformExecutorKind =
   | 'claude-stream-json'
@@ -28,8 +28,7 @@ export type PlatformExecutorKind =
   | 'pi-json'
   | 'cursor-stream-json'
   | 'acp-kimi'
-  | 'acp-kiro'
-  | 'codebuddy-stream-json';
+  | 'acp-kiro';
 
 export interface PlatformDefinition {
   id: PlatformId;
@@ -340,23 +339,11 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
     id: 'codebuddy',
     displayName: 'CodeBuddy',
     logoPath: '/ui/assets/platforms/generic.svg',
-    runtime: {
-      binaryNames: ['codebuddy', 'cbc'],
-      versionArgs: ['--version'],
-      authEnv: [],
-      capabilities: DEFAULT_CAPABILITIES,
-    },
     skills: {
       roots: [
         { id: 'codebuddy-home', kind: 'global', path: '~/.codebuddy/skills', autoBind: 'when-parent-exists' },
         { id: 'codebuddy-project', kind: 'project', path: '.codebuddy/skills', autoBind: 'manual' },
       ],
-    },
-    executor: {
-      kind: 'codebuddy-stream-json',
-      backendFactoryExport: 'codebuddyBackendFactory',
-      launchCommand: 'codebuddy -p --output-format stream-json',
-      multicaReferencePath: 'agent/codebuddy.go',
     },
   },
 ];

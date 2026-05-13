@@ -10,10 +10,8 @@ const require = createRequire(import.meta.url);
 const {
   LlmExecutor,
   claudeBackendFactory,
-  codebuddyBackendFactory,
   codexBackendFactory,
   createClaudeBackend,
-  createCodeBuddyBackend,
   createCodexBackend,
   createCopilotBackend,
   createCursorBackend,
@@ -193,9 +191,7 @@ test('registry preserves Claude Code and Codex executor metadata', async () => {
   const codebuddy = getPlatformDefinition('codebuddy');
   assert.equal(codebuddy.id, 'codebuddy');
   assert.equal(codebuddy.displayName, 'CodeBuddy');
-  assert.equal(codebuddy.executor.kind, 'codebuddy-stream-json');
-  assert.equal(codebuddy.executor.backendFactoryExport, 'codebuddyBackendFactory');
-  assert.equal(codebuddy.executor.launchCommand, 'codebuddy -p --output-format stream-json');
+  assert.equal(codebuddy.executor, undefined);
 });
 
 test('registry backend factory helper covers every managed provider and CLI runtime uses it', async () => {
@@ -207,7 +203,7 @@ test('registry backend factory helper covers every managed provider and CLI runt
   assert.equal(factories['claude-code'], claudeBackendFactory);
   assert.equal(factories.codex, codexBackendFactory);
   assert.equal(factories.openclaw, openClawBackendFactory);
-  assert.equal(factories.codebuddy, codebuddyBackendFactory);
+  assert.equal(factories.codebuddy, undefined);
 
   const base = await createTempDir();
   const executor = new LlmExecutor({
@@ -221,86 +217,6 @@ test('registry backend factory helper covers every managed provider and CLI runt
   const runtimeSource = await fs.readFile(path.resolve('src/cli/runtime.ts'), 'utf8');
   assert.match(runtimeSource, /createRegistryBackendFactories\(\)/);
   assert.doesNotMatch(runtimeSource, /backends:\s*\{\s*codex:\s*codexBackendFactory,\s*['"]claude-code['"]:\s*claudeBackendFactory,\s*openclaw:\s*openClawBackendFactory,\s*\}/s);
-});
-
-test('CodeBuddy backend speaks stream-json with non-interactive permissions', async () => {
-  const base = await createTempDir();
-  const argsPath = path.join(base, 'args.json');
-  const inputPath = path.join(base, 'input.jsonl');
-  const binaryPath = await writeExecutableScript(base, 'fake-codebuddy.js', `#!/usr/bin/env node
-const fs = require('node:fs');
-const readline = require('node:readline');
-fs.writeFileSync(process.env.FAKE_CODEBUDDY_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
-const rl = readline.createInterface({ input: process.stdin });
-rl.once('line', (line) => {
-  fs.writeFileSync(process.env.FAKE_CODEBUDDY_INPUT_PATH, line + '\\n');
-  function send(message) {
-    process.stdout.write(JSON.stringify(message) + '\\n');
-  }
-  send({ type: 'system', session_id: 'codebuddy-session-1' });
-  send({ type: 'assistant', message: { usage: { input_tokens: 4, output_tokens: 2 }, content: [
-    { type: 'text', text: 'Hello ' },
-    { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'pwd' } }
-  ] } });
-  send({ type: 'user', message: { content: [
-    { type: 'tool_result', tool_use_id: 'tool-1', content: 'ok' }
-  ] } });
-  send({ type: 'assistant', message: { content: [
-    { type: 'text', text: 'CodeBuddy' }
-  ] } });
-  send({ type: 'result', session_id: 'codebuddy-session-1', result: 'Hello CodeBuddy', duration_ms: 234 });
-  setTimeout(() => process.exit(0), 10);
-});
-`);
-
-  const backend = createCodeBuddyBackend(binaryPath, {
-    FAKE_CODEBUDDY_ARGS_PATH: argsPath,
-    FAKE_CODEBUDDY_INPUT_PATH: inputPath,
-  });
-  const events = [];
-  const result = await backend.execute(
-    {
-      runtimeId: 'llm_codebuddy',
-      runtime: { ...runtime, provider: 'codebuddy', binaryPath },
-      prompt: 'hello codebuddy',
-      cwd: base,
-      systemPrompt: 'Be useful.',
-      maxTurns: 2,
-      model: 'gpt-5',
-      extraArgs: ['--permission-mode', 'plan', '--debug'],
-    },
-    { emit: (event) => events.push(event) },
-    new AbortController().signal,
-  );
-
-  const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
-  assert.ok(args.includes('-p'));
-  assert.ok(args.includes('--output-format'));
-  assert.ok(args.includes('stream-json'));
-  assert.ok(args.includes('--input-format'));
-  assert.ok(args.includes('--verbose'));
-  assert.ok(args.includes('-y'));
-  assert.ok(args.includes('--permission-mode'));
-  assert.ok(args.includes('acceptEdits'));
-  assert.ok(args.includes('--max-turns'));
-  assert.ok(args.includes('2'));
-  assert.ok(args.includes('--model'));
-  assert.ok(args.includes('gpt-5'));
-  assert.ok(args.includes('--debug'));
-  assert.equal(args.includes('plan'), false);
-
-  const input = JSON.parse((await fs.readFile(inputPath, 'utf8')).trim());
-  assert.equal(input.type, 'user');
-  assert.equal(input.message.content[0].text, 'hello codebuddy');
-
-  assert.equal(result.status, 'completed');
-  assert.equal(result.output, 'Hello CodeBuddy');
-  assert.equal(result.providerSessionId, 'codebuddy-session-1');
-  assert.equal(result.durationMs, 234);
-  assert.equal(result.usage.codebuddy.inputTokens, 4);
-  assert.deepEqual(events.filter((event) => event.type === 'text').map((event) => event.content), ['Hello ', 'CodeBuddy']);
-  assert.equal(events.some((event) => event.type === 'tool_use' && event.tool === 'Bash'), true);
-  assert.equal(events.some((event) => event.type === 'tool_result' && event.output === 'ok'), true);
 });
 
 test('file session manager persists, updates, lists, and deletes session records', async () => {

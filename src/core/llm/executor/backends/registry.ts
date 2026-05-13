@@ -1,6 +1,5 @@
 import { getRuntimePlatforms, type PlatformExecutorKind } from '../../../platform/platformRegistry';
 import { claudeBackendFactory } from './claude';
-import { codebuddyBackendFactory } from './codebuddy';
 import { codexBackendFactory } from './codex';
 import { copilotBackendFactory } from './copilot';
 import { cursorBackendFactory } from './cursor';
@@ -25,7 +24,6 @@ const FACTORY_BY_EXECUTOR_KIND: Record<PlatformExecutorKind, LlmBackendFactory> 
   'cursor-stream-json': cursorBackendFactory,
   'acp-kimi': kimiBackendFactory,
   'acp-kiro': kiroBackendFactory,
-  'codebuddy-stream-json': codebuddyBackendFactory,
 };
 
 export function createRegistryBackendFactories(): Record<string, LlmBackendFactory> {

@@ -10,7 +10,6 @@ export type {
 export type { LlmBackend, LlmBackendFactory } from './backends/backend';
 export { LlmExecutor } from './executor';
 export { createClaudeBackend, claudeBackendFactory } from './backends/claude';
-export { createCodeBuddyBackend, codebuddyBackendFactory } from './backends/codebuddy';
 export { createCodexBackend, codexBackendFactory } from './backends/codex';
 export { createCopilotBackend, copilotBackendFactory } from './backends/copilot';
 export { createCursorBackend, cursorBackendFactory } from './backends/cursor';
