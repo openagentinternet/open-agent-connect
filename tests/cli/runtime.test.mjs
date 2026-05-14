@@ -2859,6 +2859,57 @@ test('master publish --from uses the selected actor identity, default write netw
   assert.equal(bobMasterState.masters.length, 0);
 });
 
+test('wallet balance --from reads the selected actor identity and address', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-wallet-from-'));
+  const aliceHome = await createProfileHome(systemHome, 'actor-alice');
+  const bobHome = await createProfileHome(systemHome, 'actor-bob');
+  t.after(async () => {
+    await stopDaemon(aliceHome);
+    await stopDaemon(bobHome);
+  });
+
+  const aliceCreated = await runCommand(aliceHome, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(aliceCreated.exitCode, 0);
+  const bobCreated = await runCommand(bobHome, ['identity', 'create', '--name', 'Bob']);
+  assert.equal(bobCreated.exitCode, 0);
+  assert.notEqual(aliceCreated.payload.data.globalMetaId, bobCreated.payload.data.globalMetaId);
+
+  const aliceState = await createRuntimeStateStore(aliceHome).readState();
+  const aliceBtcAddress = aliceState.identity?.addresses?.btc;
+  assert.equal(typeof aliceBtcAddress, 'string');
+  assert.ok(aliceBtcAddress.length > 0);
+
+  const originalFetch = globalThis.fetch;
+  const fetchedUrls = [];
+  globalThis.fetch = async (url) => {
+    fetchedUrls.push(String(url));
+    return new Response(JSON.stringify({
+      code: 0,
+      data: {
+        balance: 0.125,
+        safeBalance: 0.125,
+        pendingBalance: 0,
+      },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const balance = await runCommand(bobHome, ['wallet', 'balance', '--from', 'actor-alice', '--chain', 'btc']);
+
+  assert.equal(balance.exitCode, 0);
+  assert.equal(balance.payload.ok, true);
+  assert.equal(balance.payload.data.globalMetaId, aliceCreated.payload.data.globalMetaId);
+  assert.equal(balance.payload.data.balances.btc.address, aliceBtcAddress);
+  assert.equal(balance.payload.data.balances.btc.totalSatoshis, 12_500_000);
+  assert.equal(fetchedUrls.length, 1);
+  assert.match(fetchedUrls[0], new RegExp(`address=${encodeURIComponent(aliceBtcAddress)}`));
+});
+
 test('network sources add/list/remove manages the local demo provider registry without manual file edits', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));

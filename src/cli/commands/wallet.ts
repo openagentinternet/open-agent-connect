@@ -1,5 +1,5 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandUnknownSubcommand } from './helpers';
+import { commandUnknownSubcommand, readFromFlag } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function readStringFlag(args: string[], flag: string): string | null {
@@ -58,7 +58,8 @@ export async function runWalletCommand(
       return commandFailed('not_implemented', 'Wallet balance handler is not configured.');
     }
 
-    return handler({ chain: chainFlag.chain });
+    const from = readFromFlag(args);
+    return handler({ ...(from ? { from } : {}), chain: chainFlag.chain });
   }
 
   if (args[0] === 'transfer') {
@@ -79,7 +80,8 @@ export async function runWalletCommand(
       return commandFailed('not_implemented', 'Wallet transfer handler is not configured.');
     }
 
-    return handler({ toAddress, amountRaw, confirm });
+    const from = readFromFlag(args);
+    return handler({ ...(from ? { from } : {}), toAddress, amountRaw, confirm });
   }
 
   return commandUnknownSubcommand(`wallet ${args.join(' ')}`.trim());

@@ -177,7 +177,8 @@ test('runCli prints wallet transfer help with every supported transfer unit', as
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot wallet transfer --to <address> --amount <amount><UNIT> \[--confirm\]/m);
+  assert.match(output, /^Usage:\s+metabot wallet transfer \[--from <bot-slug>\] --to <address> --amount <amount><UNIT> \[--confirm\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /BTC, SPACE, DOGE, or OPCAT/);
   assert.match(output, /10OPCAT/);
   assert.match(output, /Fails with invalid_argument when --to or --amount is missing, or the currency unit is not BTC, SPACE, DOGE, or OPCAT\./);
@@ -194,10 +195,11 @@ test('runCli prints wallet balance help with every supported balance chain', asy
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot wallet balance \[--chain <all\|mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /^Usage:\s+metabot wallet balance \[--from <bot-slug>\] \[--chain <all\|mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /wallet balances for mvc, btc, doge, and opcat/i);
-  assert.match(output, /metabot wallet balance --chain doge/);
-  assert.match(output, /metabot wallet balance --chain opcat/);
+  assert.match(output, /metabot wallet balance --from alice --chain doge/);
+  assert.match(output, /metabot wallet balance --from alice --chain opcat/);
 });
 
 test('runCli prints chain write help with every supported write chain', async () => {

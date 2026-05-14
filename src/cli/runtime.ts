@@ -637,6 +637,27 @@ function normalizeSystemHomeDir(env: NodeJS.ProcessEnv, cwd: string): string {
   return normalizeSelectedSystemHomeDir(env, cwd);
 }
 
+async function resolveActorHomeDir(
+  context: CliRuntimeContext,
+  from?: string,
+): Promise<{ homeDir: string } | MetabotCommandResult<never>> {
+  const requestedFrom = normalizeEnvText(from);
+  if (!requestedFrom) {
+    return { homeDir: normalizeHomeDir(context.env, context.cwd) };
+  }
+
+  const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+  const profiles = await listIdentityProfiles(systemHomeDir).catch(() => []);
+  const resolved = resolveProfileNameMatch(requestedFrom, profiles);
+  if (resolved.status === 'not_found') {
+    return commandFailed('profile_not_found', resolved.message);
+  }
+  if (resolved.status === 'ambiguous') {
+    return commandFailed('identity_profile_ambiguous', resolved.message);
+  }
+  return { homeDir: resolved.match.homeDir };
+}
+
 function cloneContextWithHomeDir(context: CliRuntimeContext, homeDir: string): CliRuntimeContext {
   return {
     ...context,
@@ -1882,7 +1903,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     },
     wallet: {
       balance: async (input) => {
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) {
+          return actor;
+        }
+        const homeDir = actor.homeDir;
         const runtimeStateStore = createRuntimeStateStore(homeDir);
         const state = await runtimeStateStore.readState();
         if (!state.identity) {
@@ -1934,7 +1959,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
       },
       transfer: async (input) => {
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) {
+          return actor;
+        }
+        const homeDir = actor.homeDir;
         const runtimeStateStore = createRuntimeStateStore(homeDir);
         const state = await runtimeStateStore.readState();
         if (!state.identity) {

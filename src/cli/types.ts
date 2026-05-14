@@ -101,8 +101,8 @@ export interface CliDependencies {
     upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   wallet?: {
-    balance?: (input: { chain: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    transfer?: (input: { toAddress: string; amountRaw: string; confirm: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    balance?: (input: { from?: string; chain: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    transfer?: (input: { from?: string; toAddress: string; amountRaw: string; confirm: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   trace?: {
     get?: (input: { from?: string; traceId?: string; sessionId?: string }) => Awaitable<MetabotCommandResult<unknown>>;

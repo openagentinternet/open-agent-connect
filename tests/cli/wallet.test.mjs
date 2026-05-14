@@ -62,6 +62,25 @@ test('runCli dispatches `metabot wallet balance --chain btc`', async () => {
   assert.deepEqual(calls, [{ chain: 'btc' }]);
 });
 
+test('runCli dispatches `metabot wallet balance --from --chain` with actor selection', async () => {
+  const calls = [];
+  const exitCode = await runCli(['wallet', 'balance', '--from', 'alice', '--chain', 'btc'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      wallet: {
+        balance: async (input) => {
+          calls.push(input);
+          return commandSuccess({ chain: input.chain, from: input.from });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ from: 'alice', chain: 'btc' }]);
+});
+
 test('runCli fails `metabot wallet balance` when --chain value is missing', async () => {
   const calls = [];
   const stdout = [];
@@ -158,6 +177,23 @@ test('runCli dispatches `metabot wallet transfer --confirm` with confirm=true an
   assert.equal(result.state, 'success');
   assert.equal(result.data.txid, 'abc123');
   assert.match(result.data.explorerUrl, /mempool\.space/);
+});
+
+test('runCli dispatches `metabot wallet transfer --from --confirm` with actor selection', async () => {
+  const { calls, context } = makeTransferContext();
+
+  const exitCode = await runCli(
+    ['wallet', 'transfer', '--from', 'alice', '--to', '1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw', '--amount', '0.00001BTC', '--confirm'],
+    context,
+  );
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    from: 'alice',
+    toAddress: '1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw',
+    amountRaw: '0.00001BTC',
+    confirm: true,
+  }]);
 });
 
 test('runCli fails `metabot wallet transfer` when --to is missing', async () => {

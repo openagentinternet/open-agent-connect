@@ -729,12 +729,13 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['wallet', 'transfer'],
     summary: 'Preview or execute a BTC, SPACE, DOGE, or OPCAT transfer to a target address. Without --confirm, returns a preview for confirmation. With --confirm, executes the transfer.',
-    usage: 'metabot wallet transfer --to <address> --amount <amount><UNIT> [--confirm]',
+    usage: 'metabot wallet transfer [--from <bot-slug>] --to <address> --amount <amount><UNIT> [--confirm]',
     requiredFlags: [
       { flag: '--to', value: '<address>', description: 'Recipient address.' },
       { flag: '--amount', value: '<amount><UNIT>', description: 'Amount with currency unit: BTC, SPACE, DOGE, or OPCAT (case-insensitive). Example: 0.00001BTC, 1SPACE, 0.01DOGE, 10OPCAT.' },
     ],
     optionalFlags: [
+      FROM_BOT_FLAG,
       { flag: '--confirm', description: 'Execute the transfer. Omit to preview only.' },
       HELP_JSON_FLAG,
     ],
@@ -751,16 +752,16 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'Fails with transfer_broadcast_failed when the network rejects the transaction.',
     ],
     examples: [
-      'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC',
-      'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC --confirm',
-      'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 1SPACE --confirm',
-      'metabot wallet transfer --to o1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 10OPCAT',
+      'metabot wallet transfer --from alice --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC',
+      'metabot wallet transfer --from alice --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC --confirm',
+      'metabot wallet transfer --from alice --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 1SPACE --confirm',
+      'metabot wallet transfer --from alice --to o1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 10OPCAT',
     ],
   },
   {
     commandPath: ['wallet', 'balance'],
     summary: 'Query local wallet balances for mvc, btc, doge, and opcat. Defaults to all chains.',
-    usage: 'metabot wallet balance [--chain <all|mvc|btc|doge|opcat>]',
+    usage: 'metabot wallet balance [--from <bot-slug>] [--chain <all|mvc|btc|doge|opcat>]',
     successFields: [
       'chain',
       'globalMetaId',
@@ -773,12 +774,12 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'Fails when no local identity is loaded or the selected chain balance API is unavailable.',
     ],
     examples: [
-      'metabot wallet balance',
-      'metabot wallet balance --chain btc',
-      'metabot wallet balance --chain doge',
-      'metabot wallet balance --chain opcat',
+      'metabot wallet balance --from alice',
+      'metabot wallet balance --from alice --chain btc',
+      'metabot wallet balance --from alice --chain doge',
+      'metabot wallet balance --from alice --chain opcat',
     ],
-    optionalFlags: [WALLET_CHAIN_ALL_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, WALLET_CHAIN_ALL_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['master'],
