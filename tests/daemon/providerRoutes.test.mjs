@@ -579,7 +579,7 @@ test('POST /api/provider/refund/confirm preserves failed paid seller orders with
   assert.equal(state.sellerOrders[0].refundFinalizePinId, null);
 });
 
-test('GET /api/provider/refunds/initiated returns local buyer-side initiated refunds', async (t) => {
+test('GET /api/services/refunds?kind=initiated returns local buyer-side initiated refunds', async (t) => {
   const app = await startProviderServer();
   t.after(async () => app.close());
 
@@ -589,7 +589,7 @@ test('GET /api/provider/refunds/initiated returns local buyer-side initiated ref
     traces: [createRefundPendingTrace(), createBuyerRefundTrace()],
   });
 
-  const response = await fetchJson(app.baseUrl, '/api/provider/refunds/initiated');
+  const response = await fetchJson(app.baseUrl, '/api/services/refunds?kind=initiated');
   assert.equal(response.status, 200);
   assert.equal(response.payload.ok, true);
   assert.equal(response.payload.data.totalCount, 1);
@@ -601,7 +601,7 @@ test('GET /api/provider/refunds/initiated returns local buyer-side initiated ref
   assert.equal(response.payload.data.initiatedByMe[0].counterpartyGlobalMetaId, 'idq1seller');
 });
 
-test('GET /api/provider/refunds returns buyer initiated and seller received refund work', async (t) => {
+test('GET /api/services/refunds returns buyer initiated and seller received refund work', async (t) => {
   const app = await startProviderServer();
   t.after(async () => app.close());
 
@@ -651,7 +651,7 @@ test('GET /api/provider/refunds returns buyer initiated and seller received refu
     sellerOrders: [sellerPendingOrder, sellerRefundedOrder],
   });
 
-  const response = await fetchJson(app.baseUrl, '/api/provider/refunds');
+  const response = await fetchJson(app.baseUrl, '/api/services/refunds');
 
   assert.equal(response.status, 200);
   assert.equal(response.payload.ok, true);
@@ -672,7 +672,7 @@ test('GET /api/provider/refunds returns buyer initiated and seller received refu
   assert.equal(response.payload.data.receivedByMe[1].refundFinalizePinId, 'refund-finalize-pin-2');
 });
 
-test('GET /api/provider/refunds/initiated all=true aggregates buyer refunds across local profiles', async (t) => {
+test('GET /api/services/refunds kind=initiated all=true aggregates buyer refunds across local profiles', async (t) => {
   const app = await startProviderServer();
   t.after(async () => app.close());
 
@@ -721,14 +721,14 @@ test('GET /api/provider/refunds/initiated all=true aggregates buyer refunds acro
     ],
   });
 
-  const scopedResponse = await fetchJson(app.baseUrl, '/api/provider/refunds/initiated');
+  const scopedResponse = await fetchJson(app.baseUrl, '/api/services/refunds?kind=initiated');
   assert.equal(scopedResponse.payload.ok, true);
   assert.deepEqual(
     scopedResponse.payload.data.initiatedByMe.map((entry) => entry.orderId),
     ['order-buyer-refund-active'],
   );
 
-  const allResponse = await fetchJson(app.baseUrl, '/api/provider/refunds/initiated?all=true');
+  const allResponse = await fetchJson(app.baseUrl, '/api/services/refunds?kind=initiated&all=true');
   assert.equal(allResponse.status, 200);
   assert.equal(allResponse.payload.ok, true);
   assert.deepEqual(
@@ -739,7 +739,7 @@ test('GET /api/provider/refunds/initiated all=true aggregates buyer refunds acro
   assert.equal(allResponse.payload.data.pendingCount, 2);
 });
 
-test('GET /api/provider/refunds all=true aggregates received refund work across local profiles', async (t) => {
+test('GET /api/services/refunds all=true aggregates received refund work across local profiles', async (t) => {
   const app = await startProviderServer();
   t.after(async () => app.close());
 
@@ -798,14 +798,14 @@ test('GET /api/provider/refunds all=true aggregates received refund work across 
     ],
   });
 
-  const scopedResponse = await fetchJson(app.baseUrl, '/api/provider/refunds?kind=received');
+  const scopedResponse = await fetchJson(app.baseUrl, '/api/services/refunds?kind=received');
   assert.equal(scopedResponse.payload.ok, true);
   assert.deepEqual(
     scopedResponse.payload.data.receivedByMe.map((entry) => entry.orderId),
     ['seller-order-active'],
   );
 
-  const allResponse = await fetchJson(app.baseUrl, '/api/provider/refunds?kind=received&all=true');
+  const allResponse = await fetchJson(app.baseUrl, '/api/services/refunds?kind=received&all=true');
   assert.equal(allResponse.status, 200);
   assert.equal(allResponse.payload.ok, true);
   assert.deepEqual(
@@ -817,7 +817,7 @@ test('GET /api/provider/refunds all=true aggregates received refund work across 
   assert.equal(allResponse.payload.data.pendingCount, 2);
 });
 
-test('provider order inspection supports order id and payment txid selectors', async (t) => {
+test('service order inspection supports order id and payment txid selectors', async (t) => {
   const app = await startProviderServer();
   t.after(async () => app.close());
 
@@ -857,7 +857,7 @@ test('provider order inspection supports order id and payment txid selectors', a
     sellerOrders: [sellerOrder],
   });
 
-  const byOrder = await fetchJson(app.baseUrl, '/api/provider/order?orderId=seller-order-inspect-1');
+  const byOrder = await fetchJson(app.baseUrl, '/api/services/orders/inspect?orderId=seller-order-inspect-1');
   assert.equal(byOrder.status, 200);
   assert.equal(byOrder.payload.ok, true);
   assert.equal(byOrder.payload.data.order.orderId, 'seller-order-inspect-1');
@@ -870,13 +870,13 @@ test('provider order inspection supports order id and payment txid selectors', a
   assert.equal(byOrder.payload.data.order.refund.refundRequestPinId, 'seller-refund-request-pin-inspect-1');
   assert.equal(byOrder.payload.data.order.refund.blockingReason, 'transfer_failed');
 
-  const byPayment = await fetchJson(app.baseUrl, `/api/provider/order?paymentTxid=${'f'.repeat(64)}`);
+  const byPayment = await fetchJson(app.baseUrl, `/api/services/orders/inspect?paymentTxid=${'f'.repeat(64)}`);
   assert.equal(byPayment.status, 200);
   assert.equal(byPayment.payload.ok, true);
   assert.equal(byPayment.payload.data.order.orderId, 'seller-order-inspect-1');
 });
 
-test('provider order inspection and refund settlement reject multiple seller order selectors', async (t) => {
+test('service order inspection and refund settlement reject multiple seller order selectors', async (t) => {
   const app = await startProviderServer();
   t.after(async () => app.close());
 
@@ -912,14 +912,14 @@ test('provider order inspection and refund settlement reject multiple seller ord
 
   const inspected = await fetchJson(
     app.baseUrl,
-    `/api/provider/order?orderId=seller-order-selector-1&paymentTxid=${'8'.repeat(64)}`,
+    `/api/services/orders/inspect?orderId=seller-order-selector-1&paymentTxid=${'8'.repeat(64)}`,
   );
   assert.equal(inspected.status, 200);
   assert.equal(inspected.payload.ok, false);
   assert.equal(inspected.payload.state, 'failed');
   assert.equal(inspected.payload.code, 'seller_order_selector_ambiguous');
 
-  const settled = await fetchJson(app.baseUrl, '/api/provider/refund/settle', {
+  const settled = await fetchJson(app.baseUrl, '/api/services/refunds/settle', {
     method: 'POST',
     body: {
       orderId: 'seller-order-selector-1',
@@ -936,7 +936,7 @@ test('provider order inspection and refund settlement reject multiple seller ord
   assert.equal(state.sellerOrders[0].refundTxid, null);
 });
 
-test('POST /api/provider/refund/settle accepts payment txid and returns structured blocker details', async (t) => {
+test('POST /api/services/refunds/settle accepts payment txid and returns structured blocker details', async (t) => {
   const app = await startProviderServer();
   t.after(async () => app.close());
 
@@ -973,7 +973,7 @@ test('POST /api/provider/refund/settle accepts payment txid and returns structur
     sellerOrders: [sellerOrder],
   });
 
-  const response = await fetchJson(app.baseUrl, '/api/provider/refund/settle', {
+  const response = await fetchJson(app.baseUrl, '/api/services/refunds/settle', {
     method: 'POST',
     body: { paymentTxid: 'a'.repeat(64) },
   });
@@ -985,4 +985,22 @@ test('POST /api/provider/refund/settle accepts payment txid and returns structur
   assert.equal(response.payload.data.order.orderId, 'seller-order-settle-blocked-1');
   assert.equal(response.payload.data.order.refund.blockingReason, 'refund_request_missing');
   assert.equal(response.payload.data.order.trace.id, 'trace-provider-settle-blocked-1');
+});
+
+test('legacy provider order and refund HTTP routes are not registered', async (t) => {
+  const app = await startProviderServer();
+  t.after(async () => app.close());
+
+  const oldRefunds = await fetchJson(app.baseUrl, '/api/provider/refunds');
+  const oldInitiatedRefunds = await fetchJson(app.baseUrl, '/api/provider/refunds/initiated');
+  const oldOrder = await fetchJson(app.baseUrl, '/api/provider/order?orderId=seller-order-1');
+  const oldSettle = await fetchJson(app.baseUrl, '/api/provider/refund/settle', {
+    method: 'POST',
+    body: { orderId: 'seller-order-1' },
+  });
+
+  assert.equal(oldRefunds.status, 404);
+  assert.equal(oldInitiatedRefunds.status, 404);
+  assert.equal(oldOrder.status, 404);
+  assert.equal(oldSettle.status, 404);
 });

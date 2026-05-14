@@ -1847,7 +1847,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (input.from) {
           query.set('from', input.from);
         }
-        return requestJson(context, 'GET', `/api/services/my?${query.toString()}`);
+        return requestJson(context, 'GET', `/api/services/owned?${query.toString()}`);
       },
       listOwnedOrders: async (input) => {
         const query = new URLSearchParams({
@@ -1860,10 +1860,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (input.from) {
           query.set('from', input.from);
         }
-        return requestJson(context, 'GET', `/api/services/my/orders?${query.toString()}`);
+        return requestJson(context, 'GET', `/api/services/owned/orders?${query.toString()}`);
       },
-      modifyOwned: async (input) => requestJson(context, 'POST', '/api/services/my/modify', input),
-      revokeOwned: async (input) => requestJson(context, 'POST', '/api/services/my/revoke', input),
+      modifyOwned: async (input) => requestJson(context, 'POST', '/api/services/owned/modify', input),
+      revokeOwned: async (input) => requestJson(context, 'POST', '/api/services/owned/revoke', input),
       listRefunds: async (input) => {
         const query = new URLSearchParams();
         if (input.from) {
@@ -1871,12 +1871,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
         query.set('all', input.all ? 'true' : 'false');
         query.set('kind', input.kind);
-        const path = input.kind === 'initiated'
-          ? '/api/provider/refunds/initiated'
-          : '/api/provider/refunds';
-        return requestJson(context, 'GET', `${path}?${query.toString()}`);
+        return requestJson(context, 'GET', `/api/services/refunds?${query.toString()}`);
       },
-      settleRefund: async (input) => requestJson(context, 'POST', '/api/provider/refund/settle', input),
+      settleRefund: async (input) => requestJson(context, 'POST', '/api/services/refunds/settle', input),
       inspectOrder: async (input) => {
         const query = new URLSearchParams();
         if (input.orderId) {
@@ -1889,7 +1886,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           query.set('from', input.from);
         }
         const suffix = query.size ? `?${query.toString()}` : '';
-        return requestJson(context, 'GET', `/api/provider/order${suffix}`);
+        return requestJson(context, 'GET', `/api/services/orders/inspect${suffix}`);
       },
     },
     provider: {
@@ -1901,10 +1898,13 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (input.paymentTxid) {
           query.set('paymentTxid', input.paymentTxid);
         }
+        if (input.from) {
+          query.set('from', input.from);
+        }
         const suffix = query.size ? `?${query.toString()}` : '';
-        return requestJson(context, 'GET', `/api/provider/order${suffix}`);
+        return requestJson(context, 'GET', `/api/services/orders/inspect${suffix}`);
       },
-      settleRefund: async (input) => requestJson(context, 'POST', '/api/provider/refund/settle', input),
+      settleRefund: async (input) => requestJson(context, 'POST', '/api/services/refunds/settle', input),
     },
     chat: {
       private: async (input) => requestJson(context, 'POST', '/api/chat/private', input),

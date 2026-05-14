@@ -192,6 +192,7 @@ This keeps browser behavior simple while preserving CLI-first semantics.
 4. Existing command results should keep machine-readable JSON envelopes.
 5. New canonical commands should be documented first in help output.
 6. Compatibility aliases should be tested so existing scripts do not break.
+7. Human UI and canonical daemon routes should not keep old HTTP aliases for renamed service capabilities; missing rewiring should fail loudly with `not_found`.
 
 ## Testing Requirements
 
@@ -218,12 +219,14 @@ Add or update CLI tests to prove:
 
 Route tests or handler-level tests should prove:
 
-- daemon `/api/services/publish/skills?slug=alice` maps to the same capability as `services skills --from alice`;
-- daemon `/api/services/my*` maps to the same capability as `services owned *`;
-- daemon `/api/provider/refunds` maps to the same capability as `services refunds list`;
-- daemon `/api/provider/refund/settle` maps to the same capability as `services refunds settle`;
-- daemon `/api/trace/sessions` maps to the same capability as `trace sessions --all`;
+- daemon `/api/services/skills?from=alice` maps to the same capability as `services skills --from alice`;
+- daemon `/api/services/owned*` maps to the same capability as `services owned *`;
+- daemon `/api/services/refunds` maps to the same capability as `services refunds list`;
+- daemon `/api/services/refunds/settle` maps to the same capability as `services refunds settle`;
+- daemon `/api/services/orders/inspect` maps to the same capability as `services orders inspect`;
+- daemon `/api/trace/sessions?all=true` maps to the same capability as `trace sessions --all`;
 - daemon `/api/bot/*` maps to the same capability group as `metabot bot *`.
+- old service HTTP paths such as `/api/services/my*`, `/api/services/publish/skills`, and `/api/provider/refund*` are not mounted for these UI-backed capabilities.
 
 ### Focused Build Verification
 

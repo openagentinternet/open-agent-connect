@@ -70,6 +70,9 @@ export interface MetabotDaemonHttpHandlers {
     }) => Awaitable<MetabotCommandResult<unknown>>;
     modifyMyService?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     revokeMyService?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    listRefunds?: (input?: { from?: string; all?: boolean; kind?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    inspectOrder?: (input: { from?: string; orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    settleRefund?: (input: { from?: string; orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     call?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     rate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     execute?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
