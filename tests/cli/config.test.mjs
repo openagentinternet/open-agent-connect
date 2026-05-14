@@ -52,6 +52,51 @@ function createProfileHome(prefix, slug = 'test-profile') {
   return homeDir;
 }
 
+function createProfilePair(prefix) {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const aliceHome = path.join(systemHome, '.metabot', 'profiles', 'actor-alice');
+  const bobHome = path.join(systemHome, '.metabot', 'profiles', 'actor-bob');
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
+  mkdirSync(aliceHome, { recursive: true });
+  mkdirSync(bobHome, { recursive: true });
+  mkdirSync(managerRoot, { recursive: true });
+  const now = Date.now();
+  writeFileSync(
+    path.join(managerRoot, 'identity-profiles.json'),
+    `${JSON.stringify({
+      profiles: [
+        {
+          name: 'actor-alice',
+          slug: 'actor-alice',
+          aliases: ['actor-alice', 'alice'],
+          homeDir: aliceHome,
+          globalMetaId: '',
+          mvcAddress: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          name: 'actor-bob',
+          slug: 'actor-bob',
+          aliases: ['actor-bob', 'bob'],
+          homeDir: bobHome,
+          globalMetaId: '',
+          mvcAddress: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    }, null, 2)}\n`,
+    'utf8',
+  );
+  writeFileSync(
+    path.join(managerRoot, 'active-home.json'),
+    `${JSON.stringify({ homeDir: bobHome, updatedAt: now }, null, 2)}\n`,
+    'utf8',
+  );
+  return { aliceHome, bobHome };
+}
+
 function createRuntimeEnv(homeDir) {
   return {
     ...process.env,
@@ -74,6 +119,75 @@ async function runConfigCli(homeDir, args) {
     payload: JSON.parse(stdout.join('').trim()),
   };
 }
+
+test('runCli dispatches `metabot config get --from` with actor selection', async () => {
+  const calls = [];
+  const stdout = [];
+  const exitCode = await runCli(['config', 'get', '--from', 'alice', 'chain.defaultWriteNetwork'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      config: {
+        get: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'success',
+            data: { key: input.key, value: 'mvc' },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ from: 'alice', key: 'chain.defaultWriteNetwork' }]);
+});
+
+test('runCli dispatches `metabot config set --from` with actor selection', async () => {
+  const calls = [];
+  const stdout = [];
+  const exitCode = await runCli(['config', 'set', '--from', 'alice', 'chain.defaultWriteNetwork', 'opcat'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      config: {
+        set: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'success',
+            data: { key: input.key, value: input.value },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ from: 'alice', key: 'chain.defaultWriteNetwork', value: 'opcat' }]);
+});
+
+test('runCli config --from reads and writes the selected profile config store', async () => {
+  const { aliceHome, bobHome } = createProfilePair('metabot-cli-config-from-runtime-');
+
+  const setResult = await runConfigCli(bobHome, ['config', 'set', '--from', 'actor-alice', 'chain.defaultWriteNetwork', 'opcat']);
+  assert.equal(setResult.exitCode, 0);
+  assert.equal(setResult.payload.ok, true);
+
+  const aliceResult = await runConfigCli(bobHome, ['config', 'get', '--from', 'actor-alice', 'chain.defaultWriteNetwork']);
+  assert.equal(aliceResult.exitCode, 0);
+  assert.equal(aliceResult.payload.data.value, 'opcat');
+
+  const bobResult = await runConfigCli(bobHome, ['config', 'get', 'chain.defaultWriteNetwork']);
+  assert.equal(bobResult.exitCode, 0);
+  assert.equal(bobResult.payload.data.value, 'mvc');
+
+  const aliceConfig = JSON.parse(readFileSync(resolveMetabotPaths(aliceHome).configPath, 'utf8'));
+  assert.equal(aliceConfig.chain.defaultWriteNetwork, 'opcat');
+  const bobConfig = JSON.parse(readFileSync(resolveMetabotPaths(bobHome).configPath, 'utf8'));
+  assert.equal(bobConfig.chain.defaultWriteNetwork, 'mvc');
+});
 
 test('runCli supports `metabot config get evolution_network.enabled`', async () => {
   const homeDir = createProfileHome('metabot-cli-config-get-');

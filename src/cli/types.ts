@@ -7,8 +7,8 @@ export type Awaitable<T> = T | Promise<T>;
 
 export interface CliDependencies {
   config?: {
-    get?: (input: { key: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    set?: (input: { key: string; value: boolean | string }) => Awaitable<MetabotCommandResult<unknown>>;
+    get?: (input: { from?: string; key: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    set?: (input: { from?: string; key: string; value: boolean | string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   buzz?: {
     post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
@@ -125,17 +125,18 @@ export interface CliDependencies {
     bindSkills?: (input: { host: ConcreteSkillHost }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   evolution?: {
-    status?: () => Awaitable<MetabotCommandResult<unknown>>;
+    status?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     adopt?: (input: {
+      from?: string;
       skill: string;
       variantId: string;
       source?: 'local' | 'remote';
     }) => Awaitable<MetabotCommandResult<unknown>>;
-    publish?: (input: { skill: string; variantId: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    rollback?: (input: { skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    search?: (input: { skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    import?: (input: { pinId: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    imported?: (input: { skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    publish?: (input: { from?: string; skill: string; variantId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    rollback?: (input: { from?: string; skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    search?: (input: { from?: string; skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    import?: (input: { from?: string; pinId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    imported?: (input: { from?: string; skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   system?: {
     update?: (input: {
@@ -152,11 +153,11 @@ export interface CliDependencies {
   llm?: {
     listRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
     discoverRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
-    listBindings?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    upsertBindings?: (input: { slug: string; bindings: Record<string, unknown>[] }) => Awaitable<MetabotCommandResult<unknown>>;
-    removeBinding?: (input: { bindingId: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    getPreferredRuntime?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    setPreferredRuntime?: (input: { slug: string; runtimeId: string | null }) => Awaitable<MetabotCommandResult<unknown>>;
+    listBindings?: (input: { from?: string; slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    upsertBindings?: (input: { from?: string; slug: string; bindings: Record<string, unknown>[] }) => Awaitable<MetabotCommandResult<unknown>>;
+    removeBinding?: (input: { from?: string; bindingId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    getPreferredRuntime?: (input: { from?: string; slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    setPreferredRuntime?: (input: { from?: string; slug: string; runtimeId: string | null }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   bot?: {
     listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;

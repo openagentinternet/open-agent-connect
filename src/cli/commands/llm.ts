@@ -1,6 +1,6 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { CliRuntimeContext } from '../types';
-import { commandUnknownSubcommand } from './helpers';
+import { commandUnknownSubcommand, readFromFlag } from './helpers';
 
 function readFlagValue(args: string[], flag: string): string | undefined {
   const idx = args.findIndex((a) => a === flag || a.startsWith(`${flag}=`));
@@ -41,6 +41,7 @@ async function requestJson(
 
 export async function runLlmCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   const subcommand = args[0];
+  const from = readFromFlag(args);
 
   if (subcommand === 'list-runtimes') {
     const result = await requestJson(context, 'GET', '/api/llm/runtimes');
@@ -53,22 +54,22 @@ export async function runLlmCommand(args: string[], context: CliRuntimeContext):
   }
 
   if (subcommand === 'bindings') {
-    const slug = readFlagValue(args, '--slug');
+    const slug = from ?? readFlagValue(args, '--slug');
     if (!slug) {
-      return commandFailed('missing_flag', '--slug is required for bindings list.');
+      return commandFailed('missing_flag', '--from or --slug is required for bindings list.');
     }
     const result = await requestJson(context, 'GET', `/api/llm/bindings/${encodeURIComponent(slug)}`);
     return result;
   }
 
   if (subcommand === 'bind') {
-    const slug = readFlagValue(args, '--slug');
+    const slug = from ?? readFlagValue(args, '--slug');
     const runtimeId = readFlagValue(args, '--runtime-id');
     const role = readFlagValue(args, '--role') ?? 'primary';
     const priorityArg = readFlagValue(args, '--priority');
     const priority = priorityArg ? parseInt(priorityArg, 10) : 0;
 
-    if (!slug) return commandFailed('missing_flag', '--slug is required.');
+    if (!slug) return commandFailed('missing_flag', '--from or --slug is required.');
     if (!runtimeId) return commandFailed('missing_flag', '--runtime-id is required.');
 
     const binding = {
@@ -91,14 +92,15 @@ export async function runLlmCommand(args: string[], context: CliRuntimeContext):
   if (subcommand === 'unbind') {
     const bindingId = readFlagValue(args, '--binding-id');
     if (!bindingId) return commandFailed('missing_flag', '--binding-id is required.');
-    const result = await requestJson(context, 'DELETE', `/api/llm/bindings/${encodeURIComponent(bindingId)}/delete`);
+    const suffix = from ? `?from=${encodeURIComponent(from)}` : '';
+    const result = await requestJson(context, 'DELETE', `/api/llm/bindings/${encodeURIComponent(bindingId)}/delete${suffix}`);
     return result;
   }
 
   if (subcommand === 'set-preferred') {
-    const slug = readFlagValue(args, '--slug');
+    const slug = from ?? readFlagValue(args, '--slug');
     const runtimeId = readFlagValue(args, '--runtime-id');
-    if (!slug) return commandFailed('missing_flag', '--slug is required.');
+    if (!slug) return commandFailed('missing_flag', '--from or --slug is required.');
 
     const result = await requestJson(context, 'PUT', `/api/llm/preferred-runtime/${encodeURIComponent(slug)}`, {
       runtimeId: runtimeId ?? null,
@@ -107,8 +109,8 @@ export async function runLlmCommand(args: string[], context: CliRuntimeContext):
   }
 
   if (subcommand === 'get-preferred') {
-    const slug = readFlagValue(args, '--slug');
-    if (!slug) return commandFailed('missing_flag', '--slug is required.');
+    const slug = from ?? readFlagValue(args, '--slug');
+    if (!slug) return commandFailed('missing_flag', '--from or --slug is required.');
     const result = await requestJson(context, 'GET', `/api/llm/preferred-runtime/${encodeURIComponent(slug)}`);
     return result;
   }

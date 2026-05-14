@@ -139,7 +139,7 @@ export const handleLlmRoutes: RouteHandler = async (context) => {
   if (bindingsSlugMatch && req.method === 'GET') {
     const slug = decodeURIComponent(bindingsSlugMatch[1]);
     const result = handlers.llm?.listBindings
-      ? await handlers.llm.listBindings({ slug })
+      ? await handlers.llm.listBindings({ from: url.searchParams.get('from')?.trim() || undefined, slug })
       : commandFailed('not_implemented', 'LLM bindings handler not configured.');
     context.sendJson(200, result);
     return true;
@@ -150,7 +150,11 @@ export const handleLlmRoutes: RouteHandler = async (context) => {
     const slug = decodeURIComponent(bindingsSlugMatch[1]);
     const body = await context.readJsonBody();
     const result = handlers.llm?.upsertBindings
-      ? await handlers.llm.upsertBindings({ slug, bindings: Array.isArray(body.bindings) ? body.bindings : [] })
+      ? await handlers.llm.upsertBindings({
+          from: url.searchParams.get('from')?.trim() || undefined,
+          slug,
+          bindings: Array.isArray(body.bindings) ? body.bindings : [],
+        })
       : commandFailed('not_implemented', 'LLM bindings handler not configured.');
     context.sendJson(200, result);
     return true;
@@ -161,7 +165,7 @@ export const handleLlmRoutes: RouteHandler = async (context) => {
   if (bindingIdMatch && req.method === 'DELETE') {
     const bindingId = decodeURIComponent(bindingIdMatch[1]);
     const result = handlers.llm?.removeBinding
-      ? await handlers.llm.removeBinding({ bindingId })
+      ? await handlers.llm.removeBinding({ from: url.searchParams.get('from')?.trim() || undefined, bindingId })
       : commandFailed('not_implemented', 'LLM remove binding handler not configured.');
     context.sendJson(200, result);
     return true;
@@ -172,7 +176,7 @@ export const handleLlmRoutes: RouteHandler = async (context) => {
   if (preferredMatch && req.method === 'GET') {
     const slug = decodeURIComponent(preferredMatch[1]);
     const result = handlers.llm?.getPreferredRuntime
-      ? await handlers.llm.getPreferredRuntime({ slug })
+      ? await handlers.llm.getPreferredRuntime({ from: url.searchParams.get('from')?.trim() || undefined, slug })
       : commandFailed('not_implemented', 'LLM preferred runtime handler not configured.');
     context.sendJson(200, result);
     return true;
@@ -184,7 +188,11 @@ export const handleLlmRoutes: RouteHandler = async (context) => {
     const body = await context.readJsonBody();
     const runtimeId = typeof body.runtimeId === 'string' ? body.runtimeId : null;
     const result = handlers.llm?.setPreferredRuntime
-      ? await handlers.llm.setPreferredRuntime({ slug, runtimeId })
+      ? await handlers.llm.setPreferredRuntime({
+          from: url.searchParams.get('from')?.trim() || undefined,
+          slug,
+          runtimeId,
+        })
       : commandFailed('not_implemented', 'LLM preferred runtime handler not configured.');
     context.sendJson(200, result);
     return true;

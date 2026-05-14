@@ -98,6 +98,7 @@ test('runCli prints config group help with get and set subcommands', async () =>
   assert.match(output, /chain\.defaultWriteNetwork/);
   assert.match(output, /askMaster\.enabled/);
   assert.match(output, /askMaster\.triggerMode suggest/);
+  assert.match(output, /--from alice/);
 });
 
 test('runCli prints config set help with the public Ask Master trigger modes only', async () => {
@@ -111,7 +112,8 @@ test('runCli prints config set help with the public Ask Master trigger modes onl
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot config set <key> <value>/m);
+  assert.match(output, /^Usage:\s+metabot config set \[--from <bot-slug>\] <key> <value>/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /Ask Master trigger mode is intentionally limited to manual or suggest/i);
   assert.match(output, /Fails when askMaster\.triggerMode is not one of `manual` or `suggest`\./);
   assert.doesNotMatch(output, /`manual`, `suggest`, or `auto`/);
@@ -845,4 +847,32 @@ test('runCli prints identity create help with MetaBot terminology', async () => 
   assert.match(output, /metabot identity create --name "<your chosen MetaBot name>"/);
   assert.doesNotMatch(output, /metabot identity create --name "Alice"/);
   assert.doesNotMatch(output, /connected-agent/i);
+});
+
+test('runCli prints LLM group help with canonical --from examples', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['llm', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /--from my-bot/);
+  assert.match(output, /--slug remains a compatibility alias/i);
+});
+
+test('runCli prints evolution help with actor selection', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['evolution', 'publish', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot evolution publish \[--from <bot-slug>\] --skill <skill> --variant-id <variant-id>/m);
+  assert.match(output, /--from <bot-slug>/);
 });

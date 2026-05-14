@@ -13344,33 +13344,42 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const updated = await runtimeStore.read();
         return commandSuccess({ discovered: result.runtimes.length, runtimes: updated.runtimes, errors: result.errors });
       },
-      listBindings: async ({ slug }) => {
+      listBindings: async ({ from, slug }) => {
+        const requestedSlug = normalizeText(from) || slug;
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        const profile = profiles.find((p) => p.slug === slug);
-        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${slug}`);
+        const profile = profiles.find((p) => p.slug === requestedSlug);
+        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${requestedSlug}`);
         const paths = resolveMetabotPaths(profile.homeDir);
         const bindingStore = createLlmBindingStore(paths);
         const state = await bindingStore.read();
         return commandSuccess(state);
       },
-      upsertBindings: async ({ slug, bindings }) => {
+      upsertBindings: async ({ from, slug, bindings }) => {
+        const requestedSlug = normalizeText(from) || slug;
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        const profile = profiles.find((p) => p.slug === slug);
-        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${slug}`);
+        const profile = profiles.find((p) => p.slug === requestedSlug);
+        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${requestedSlug}`);
         const paths = resolveMetabotPaths(profile.homeDir);
         const bindingStore = createLlmBindingStore(paths);
         const state = await bindingStore.read();
-        const otherBindings = state.bindings.filter((b) => b.metaBotSlug !== slug);
+        const otherBindings = state.bindings.filter((b) => b.metaBotSlug !== requestedSlug);
         const normalizedBindings = bindings
-          .map((b) => normalizeLlmBinding({ ...b, metaBotSlug: slug }))
+          .map((b) => normalizeLlmBinding({ ...b, metaBotSlug: requestedSlug }))
           .filter((b): b is NonNullable<ReturnType<typeof normalizeLlmBinding>> => b !== null);
         const nextState = { ...state, bindings: [...otherBindings, ...normalizedBindings], version: state.version + 1 };
         const written = await bindingStore.write(nextState);
         return commandSuccess(written);
       },
-      removeBinding: async ({ bindingId }) => {
+      removeBinding: async ({ from, bindingId }) => {
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        for (const profile of profiles) {
+        const requestedFrom = normalizeText(from);
+        const scopedProfiles = requestedFrom
+          ? profiles.filter((profile) => profile.slug === requestedFrom)
+          : profiles;
+        if (requestedFrom && scopedProfiles.length === 0) {
+          return commandFailed('profile_not_found', `Profile not found: ${requestedFrom}`);
+        }
+        for (const profile of scopedProfiles) {
           const paths = resolveMetabotPaths(profile.homeDir);
           const bindingStore = createLlmBindingStore(paths);
           const state = await bindingStore.read();
@@ -13381,10 +13390,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
         return commandFailed('binding_not_found', `Binding not found: ${bindingId}`);
       },
-      getPreferredRuntime: async ({ slug }) => {
+      getPreferredRuntime: async ({ from, slug }) => {
+        const requestedSlug = normalizeText(from) || slug;
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        const profile = profiles.find((p) => p.slug === slug);
-        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${slug}`);
+        const profile = profiles.find((p) => p.slug === requestedSlug);
+        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${requestedSlug}`);
         const paths = resolveMetabotPaths(profile.homeDir);
         try {
           const raw = await fs.readFile(paths.preferredLlmRuntimePath, 'utf8');
@@ -13394,10 +13404,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandSuccess({ runtimeId: null });
         }
       },
-      setPreferredRuntime: async ({ slug, runtimeId }) => {
+      setPreferredRuntime: async ({ from, slug, runtimeId }) => {
+        const requestedSlug = normalizeText(from) || slug;
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        const profile = profiles.find((p) => p.slug === slug);
-        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${slug}`);
+        const profile = profiles.find((p) => p.slug === requestedSlug);
+        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${requestedSlug}`);
         const paths = resolveMetabotPaths(profile.homeDir);
         await fs.mkdir(path.dirname(paths.preferredLlmRuntimePath), { recursive: true });
         await fs.writeFile(paths.preferredLlmRuntimePath, JSON.stringify({ runtimeId }, null, 2) + '\n', 'utf8');

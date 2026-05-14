@@ -1494,7 +1494,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             `Unsupported config key: ${input.key}`,
           );
         }
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) {
+          return actor;
+        }
+        const homeDir = actor.homeDir;
         const configStore = createConfigStore(homeDir);
         const config = await configStore.read();
         return commandSuccess({
@@ -1519,7 +1523,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             normalizedValue.message,
           );
         }
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) {
+          return actor;
+        }
+        const homeDir = actor.homeDir;
         const configStore = createConfigStore(homeDir);
         const config = await configStore.read();
         const nextConfig = writeConfigValue(config, input.key, normalizedValue.value);
@@ -2212,8 +2220,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       setPreferredRuntime: async (input) => requestJson(context, 'PUT', `/api/llm/preferred-runtime/${encodeURIComponent(input.slug)}`, { runtimeId: input.runtimeId }),
     },
     evolution: {
-      status: async () => {
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
+      status: async (input = {}) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const homeDir = actor.homeDir;
         const configStore = createConfigStore(homeDir);
         const config = await configStore.read();
         const evolutionStore = createLocalEvolutionStore(homeDir);
@@ -2228,7 +2238,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         });
       },
       search: async (input) => {
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const homeDir = actor.homeDir;
+        const actorContext = cloneContextWithHomeDir(context, homeDir);
         const configStore = createConfigStore(homeDir);
         const config = await configStore.read();
         if (!config.evolution_network.enabled) {
@@ -2246,7 +2259,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
 
         try {
           const resolvedScopeHash = await resolveEvolutionScopeHashForSkill({
-            context,
+            context: actorContext,
             skillName: input.skill,
             evolutionNetworkEnabled: config.evolution_network.enabled,
           });
@@ -2270,7 +2283,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
       },
       publish: async (input) => {
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const homeDir = actor.homeDir;
         const configStore = createConfigStore(homeDir);
         const config = await configStore.read();
         if (!config.evolution_network.enabled) {
@@ -2319,7 +2334,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
       },
       import: async (input) => {
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const homeDir = actor.homeDir;
+        const actorContext = cloneContextWithHomeDir(context, homeDir);
         const configStore = createConfigStore(homeDir);
         const config = await configStore.read();
         if (!config.evolution_network.enabled) {
@@ -2331,7 +2349,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
 
         try {
           const resolvedScopeHash = await resolveEvolutionScopeHashForSkill({
-            context,
+            context: actorContext,
             skillName: EVOLUTION_IMPORT_SKILL_NAME,
             evolutionNetworkEnabled: config.evolution_network.enabled,
           });
@@ -2357,7 +2375,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
       },
       imported: async (input) => {
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const homeDir = actor.homeDir;
         const configStore = createConfigStore(homeDir);
         const config = await configStore.read();
         if (!config.evolution_network.enabled) {
@@ -2387,7 +2407,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
       },
       adopt: async (input) => {
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const homeDir = actor.homeDir;
+        const actorContext = cloneContextWithHomeDir(context, homeDir);
         if (input.source === 'remote') {
           const configStore = createConfigStore(homeDir);
           const config = await configStore.read();
@@ -2406,7 +2429,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
 
           try {
             const resolvedScopeHash = await resolveEvolutionScopeHashForSkill({
-              context,
+              context: actorContext,
               skillName: input.skill,
               evolutionNetworkEnabled: config.evolution_network.enabled,
             });
@@ -2457,7 +2480,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         });
       },
       rollback: async (input) => {
-        const rollback = await clearActiveVariantMapping(context, input.skill);
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const rollback = await clearActiveVariantMapping(cloneContextWithHomeDir(context, actor.homeDir), input.skill);
         return commandSuccess({
           skillName: input.skill,
           rolledBack: rollback.removed,

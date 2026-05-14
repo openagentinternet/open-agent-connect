@@ -120,11 +120,11 @@ export interface MetabotDaemonHttpHandlers {
   llm?: {
     listRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
     discoverRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
-    listBindings?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    upsertBindings?: (input: { slug: string; bindings: Record<string, unknown>[] }) => Awaitable<MetabotCommandResult<unknown>>;
-    removeBinding?: (input: { bindingId: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    getPreferredRuntime?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    setPreferredRuntime?: (input: { slug: string; runtimeId: string | null }) => Awaitable<MetabotCommandResult<unknown>>;
+    listBindings?: (input: { from?: string; slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    upsertBindings?: (input: { from?: string; slug: string; bindings: Record<string, unknown>[] }) => Awaitable<MetabotCommandResult<unknown>>;
+    removeBinding?: (input: { from?: string; bindingId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    getPreferredRuntime?: (input: { from?: string; slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    setPreferredRuntime?: (input: { from?: string; slug: string; runtimeId: string | null }) => Awaitable<MetabotCommandResult<unknown>>;
     execute?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     getSession?: (input: { sessionId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     cancelSession?: (input: { sessionId: string }) => Awaitable<MetabotCommandResult<unknown>>;

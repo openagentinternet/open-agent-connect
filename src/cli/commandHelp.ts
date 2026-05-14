@@ -218,6 +218,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'ui', summary: 'Open local human-only HTML pages backed by the MetaBot runtime.' },
     { name: 'skills', summary: 'Resolve shared-default or host-specific skill contracts for install/runtime use.' },
     { name: 'system', summary: 'Update or uninstall local Open Agent Connect runtime assets.' },
+    { name: 'evolution', summary: 'Inspect, publish, import, and adopt skill evolution artifacts.' },
 	{ name: 'llm', summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings.' },
   ],
   optionalFlags: [VERSION_FLAG, HELP_JSON_FLAG],
@@ -412,22 +413,22 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'Read or change supported public runtime switches such as Ask Master availability and default write network.',
     usage: 'metabot config <subcommand>',
     subcommands: [
-      { name: 'get', summary: 'Read one supported config key from the active local runtime home.' },
-      { name: 'set', summary: 'Persist one supported config key for the active local runtime home.' },
+      { name: 'get', summary: 'Read one supported config key for one MetaBot actor.' },
+      { name: 'set', summary: 'Persist one supported config key for one MetaBot actor.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
     examples: [
-      'metabot config get chain.defaultWriteNetwork',
-      'metabot config set chain.defaultWriteNetwork opcat',
-      'metabot config get askMaster.enabled',
-      'metabot config get a2a.simplemsgListenerEnabled',
-      'metabot config set askMaster.triggerMode suggest',
+      'metabot config get --from alice chain.defaultWriteNetwork',
+      'metabot config set --from alice chain.defaultWriteNetwork opcat',
+      'metabot config get --from alice askMaster.enabled',
+      'metabot config get --from alice a2a.simplemsgListenerEnabled',
+      'metabot config set --from alice askMaster.triggerMode suggest',
     ],
   },
   {
     commandPath: ['config', 'get'],
     summary: 'Read one supported public config key such as the default write network, Ask Master availability, or trigger mode.',
-    usage: 'metabot config get <key>',
+    usage: 'metabot config get [--from <bot-slug>] <key>',
     successFields: [
       'key',
       'value',
@@ -437,17 +438,17 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'Fails with unsupported_config_key when the requested key is not in the public CLI allowlist.',
     ],
     examples: [
-      'metabot config get chain.defaultWriteNetwork',
-      'metabot config get askMaster.enabled',
-      'metabot config get askMaster.triggerMode',
-      'metabot config get a2a.simplemsgListenerEnabled',
+      'metabot config get --from alice chain.defaultWriteNetwork',
+      'metabot config get --from alice askMaster.enabled',
+      'metabot config get --from alice askMaster.triggerMode',
+      'metabot config get --from alice a2a.simplemsgListenerEnabled',
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['config', 'set'],
     summary: 'Persist one supported public config key. Ask Master trigger mode is intentionally limited to manual or suggest for the current release.',
-    usage: 'metabot config set <key> <value>',
+    usage: 'metabot config set [--from <bot-slug>] <key> <value>',
     successFields: [
       'key',
       'value',
@@ -459,12 +460,12 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'Fails when askMaster.triggerMode is not one of `manual` or `suggest`.',
     ],
     examples: [
-      'metabot config set chain.defaultWriteNetwork opcat',
-      'metabot config set askMaster.enabled false',
-      'metabot config set a2a.simplemsgListenerEnabled false',
-      'metabot config set askMaster.triggerMode suggest',
+      'metabot config set --from alice chain.defaultWriteNetwork opcat',
+      'metabot config set --from alice askMaster.enabled false',
+      'metabot config set --from alice a2a.simplemsgListenerEnabled false',
+      'metabot config set --from alice askMaster.triggerMode suggest',
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['identity'],
@@ -1736,7 +1737,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
 
   {
     commandPath: ['llm'],
-    summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings.',
+    summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings. Use --from as the canonical actor selector; --slug remains a compatibility alias where accepted.',
     usage: 'metabot llm <subcommand>',
     subcommands: [
       { name: 'list-runtimes', summary: 'List all discovered LLM runtimes on this machine.' },
@@ -1751,8 +1752,60 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot llm discover',
       'metabot llm list-runtimes',
-      'metabot llm bind --slug my-bot --runtime-id llm_claude_code_0 --role primary',
+      'metabot llm bind --from my-bot --runtime-id llm_claude_code_0 --role primary',
+      'metabot llm bindings --from my-bot',
       'metabot llm bindings --slug my-bot',
+    ],
+  },
+
+  {
+    commandPath: ['evolution'],
+    summary: 'Inspect and manage local or published skill evolution artifacts for one MetaBot actor.',
+    usage: 'metabot evolution <subcommand>',
+    subcommands: [
+      { name: 'status', summary: 'Show local evolution counts and active variants.' },
+      { name: 'adopt', summary: 'Adopt a local or imported remote variant.' },
+      { name: 'publish', summary: 'Publish a verified local variant artifact on-chain.' },
+      { name: 'rollback', summary: 'Clear the active variant for one skill.' },
+      { name: 'search', summary: 'Search compatible published artifacts.' },
+      { name: 'import', summary: 'Import one published artifact by pin id.' },
+      { name: 'imported', summary: 'List imported artifacts for one skill.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+    examples: [
+      'metabot evolution status --from alice',
+      'metabot evolution publish --from alice --skill metabot-network-directory --variant-id variant-1',
+      'metabot evolution adopt --from alice --skill metabot-network-directory --variant-id variant-1',
+    ],
+  },
+  {
+    commandPath: ['evolution', 'status'],
+    summary: 'Show local evolution state for one MetaBot actor.',
+    usage: 'metabot evolution status [--from <bot-slug>]',
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['evolution', 'publish'],
+    summary: 'Publish one verified local evolution artifact using the selected actor signer.',
+    usage: 'metabot evolution publish [--from <bot-slug>] --skill <skill> --variant-id <variant-id>',
+    requiredFlags: [
+      { flag: '--skill', value: '<skill>', description: 'Skill name.' },
+      { flag: '--variant-id', value: '<variant-id>', description: 'Local variant id.' },
+    ],
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['evolution', 'adopt'],
+    summary: 'Adopt a local or remote evolution variant for one MetaBot actor.',
+    usage: 'metabot evolution adopt [--from <bot-slug>] --skill <skill> --variant-id <variant-id> [--source <local|remote>]',
+    requiredFlags: [
+      { flag: '--skill', value: '<skill>', description: 'Skill name.' },
+      { flag: '--variant-id', value: '<variant-id>', description: 'Variant id.' },
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--source', value: '<local|remote>', description: 'Artifact source. Defaults to local.' },
+      HELP_JSON_FLAG,
     ],
   },
 
