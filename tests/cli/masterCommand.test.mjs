@@ -172,6 +172,59 @@ test('runCli dispatches `metabot master publish --payload-file --chain` for supp
   assert.deepEqual(calls.map((entry) => entry.network), ['btc', 'doge', 'opcat']);
 });
 
+test('runCli dispatches `metabot master publish --from` to the publish dependency', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-publish-from-'));
+  const payloadFile = path.join(tempDir, 'master-service.json');
+  await writeFile(payloadFile, JSON.stringify({
+    serviceName: 'official-debug-master',
+    displayName: 'Official Debug Master',
+    description: 'Structured debugging help.',
+    masterKind: 'debug',
+    specialties: ['debugging'],
+    hostModes: ['codex'],
+    modelInfo: {
+      provider: 'metaweb',
+      model: 'official-debug-master-v1',
+    },
+    style: 'direct_and_structured',
+    pricingMode: 'free',
+    price: '0',
+    currency: 'SPACE',
+    responseMode: 'structured',
+    contextPolicy: 'standard',
+    official: true,
+    trustedTier: 'official',
+  }), 'utf8');
+
+  const calls = [];
+
+  const exitCode = await runCli(['master', 'publish', '--from', 'alice', '--payload-file', payloadFile, '--chain', 'opcat'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        publish: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'success',
+            data: {
+              masterPinId: 'master-pin-opcat',
+              network: input.network,
+            },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].serviceName, 'official-debug-master');
+  assert.equal(calls[0].from, 'alice');
+  assert.equal(calls[0].network, 'opcat');
+});
+
 test('runCli dispatches `metabot master ask --request-file` and returns not_implemented when the handler is missing', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-ask-'));
   const requestFile = path.join(tempDir, 'master-request.json');
@@ -205,6 +258,80 @@ test('runCli dispatches `metabot master ask --request-file` and returns not_impl
     code: 'not_implemented',
     message: 'Master ask handler is not configured.',
   });
+});
+
+test('runCli dispatches `metabot master ask --from --request-file` to the ask dependency', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-ask-from-'));
+  const requestFile = path.join(tempDir, 'master-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      type: 'master_request',
+      masterServicePinId: 'master-pin-1',
+      providerGlobalMetaId: 'gm-debug-master',
+      masterKind: 'debug',
+      userTask: 'help me debug a failing test',
+      question: 'What should I check first?',
+    },
+  }), 'utf8');
+
+  const calls = [];
+
+  const exitCode = await runCli(['master', 'ask', '--from', 'alice', '--request-file', requestFile], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        ask: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'awaiting_confirmation',
+            data: {
+              traceId: 'trace-master-cli-ask-from',
+            },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].from, 'alice');
+  assert.equal(calls[0].confirm, false);
+  assert.equal(calls[0].request.masterServicePinId, 'master-pin-1');
+});
+
+test('runCli dispatches `metabot master ask --from --trace-id --confirm` to the ask dependency', async () => {
+  const calls = [];
+
+  const exitCode = await runCli(['master', 'ask', '--from', 'alice', '--trace-id', 'trace-master-cli-1', '--confirm'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        ask: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'waiting',
+            data: {
+              traceId: input.traceId,
+            },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [
+    {
+      from: 'alice',
+      traceId: 'trace-master-cli-1',
+      confirm: true,
+    },
+  ]);
 });
 
 test('runCli rejects `metabot master ask --request-file ... --confirm` before it reaches the runtime handler', async () => {
@@ -533,6 +660,38 @@ test('runCli dispatches `metabot master trace --id` with the parsed trace id', a
   assert.equal(exitCode, 0);
   assert.deepEqual(calls, [
     {
+      traceId: 'trace-master-cli-1',
+    },
+  ]);
+});
+
+test('runCli dispatches `metabot master trace --from --id` with the selected actor', async () => {
+  const calls = [];
+
+  const exitCode = await runCli(['master', 'trace', '--from', 'alice', '--id', 'trace-master-cli-1'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        trace: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'success',
+            data: {
+              traceId: input.traceId,
+              flow: 'master',
+            },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [
+    {
+      from: 'alice',
       traceId: 'trace-master-cli-1',
     },
   ]);

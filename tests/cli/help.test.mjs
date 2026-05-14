@@ -145,7 +145,8 @@ test('runCli prints master ask help with confirm limited to the trace-id continu
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot master ask --request-file <path> \| metabot master ask --trace-id <trace-id> \[--confirm\]/m);
+  assert.match(output, /^Usage:\s+metabot master ask \[--from <bot-slug>\] --request-file <path> \| metabot master ask \[--from <bot-slug>\] --trace-id <trace-id> \[--confirm\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /Only valid together with `--trace-id`\./);
 });
 
@@ -264,10 +265,26 @@ test('runCli prints master publish help with DOGE and OPCAT chain support', asyn
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot master publish --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /^Usage:\s+metabot master publish \[--from <bot-slug>\] --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(output, /master-doge-payload\.json/);
   assert.match(output, /master-opcat-payload\.json/);
+});
+
+test('runCli prints master trace help with actor selection', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['master', 'trace', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot master trace \[--from <bot-slug>\] --id <trace-id>/m);
+  assert.match(output, /--from <bot-slug>/);
 });
 
 test('runCli prints system group help with update and uninstall subcommands', async () => {

@@ -797,16 +797,16 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['master', 'publish'],
     summary: 'Publish one master-service payload for a remote master/provider.',
-    usage: 'metabot master publish --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
+    usage: 'metabot master publish [--from <bot-slug>] --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
     requiredFlags: [
       { flag: '--payload-file', value: '<path>', description: 'JSON master-service payload file.' },
     ],
     examples: [
-      'metabot master publish --payload-file master-payload.json',
-      'metabot master publish --payload-file master-doge-payload.json --chain doge',
-      'metabot master publish --payload-file master-opcat-payload.json --chain opcat',
+      'metabot master publish --from alice --payload-file master-payload.json',
+      'metabot master publish --from alice --payload-file master-doge-payload.json --chain doge',
+      'metabot master publish --from alice --payload-file master-opcat-payload.json --chain opcat',
     ],
-    optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['master', 'list'],
@@ -821,7 +821,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['master', 'ask'],
     summary: 'Preview or confirm one Ask Master request from a request file or pending trace.',
-    usage: 'metabot master ask --request-file <path> | metabot master ask --trace-id <trace-id> [--confirm]',
+    usage: 'metabot master ask [--from <bot-slug>] --request-file <path> | metabot master ask [--from <bot-slug>] --trace-id <trace-id> [--confirm]',
     requiredFlags: [
       {
         flag: '--request-file | --trace-id',
@@ -830,6 +830,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       },
     ],
     optionalFlags: [
+      FROM_BOT_FLAG,
       { flag: '--confirm', description: 'Send a previously previewed Ask Master request. Only valid together with `--trace-id`.' },
       HELP_JSON_FLAG,
     ],
@@ -867,11 +868,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['master', 'trace'],
     summary: 'Inspect one Ask Master trace record.',
-    usage: 'metabot master trace --id <trace-id>',
+    usage: 'metabot master trace [--from <bot-slug>] --id <trace-id>',
     requiredFlags: [
       { flag: '--id', value: '<trace-id>', description: 'Ask Master trace id.' },
     ],
-    optionalFlags: [HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['network'],

@@ -17,6 +17,7 @@ const { createSellerOrderRecord } = require('../../dist/core/orders/sellerOrderS
 const { createSessionStateStore } = require('../../dist/core/a2a/sessionStateStore.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
+const { createPublishedMasterStateStore } = require('../../dist/core/master/masterPublishedState.js');
 const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
 const { createRemoteEvolutionStore } = require('../../dist/core/evolution/remoteEvolutionStore.js');
 const { createTestServicePaymentExecutor } = require('../../dist/core/payments/servicePayment.js');
@@ -2801,6 +2802,61 @@ test('master list merges remote debug-master directory seeds and returns provide
   assert.equal(listed.payload.data.masters[0].providerGlobalMetaId, providerIdentity.payload.data.globalMetaId);
   assert.equal(listed.payload.data.masters[0].providerDaemonBaseUrl, providerDaemon.payload.data.baseUrl);
   assert.equal(listed.payload.data.masters[0].online, true);
+});
+
+test('master publish --from uses the selected actor identity, default write network, and local registry', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-master-from-'));
+  const aliceHome = await createProfileHome(systemHome, 'actor-alice');
+  const bobHome = await createProfileHome(systemHome, 'actor-bob');
+  t.after(async () => {
+    await stopDaemon(aliceHome);
+    await stopDaemon(bobHome);
+  });
+
+  const aliceCreated = await runCommand(aliceHome, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(aliceCreated.exitCode, 0);
+  const bobCreated = await runCommand(bobHome, ['identity', 'create', '--name', 'Bob']);
+  assert.equal(bobCreated.exitCode, 0);
+  assert.notEqual(aliceCreated.payload.data.globalMetaId, bobCreated.payload.data.globalMetaId);
+
+  const configured = await runCommand(aliceHome, ['config', 'set', 'chain.defaultWriteNetwork', 'opcat']);
+  assert.equal(configured.exitCode, 0);
+
+  const publishFile = path.join(bobHome, 'master-from-alice.json');
+  await writeFile(publishFile, JSON.stringify({
+    serviceName: 'official-debug-master',
+    displayName: 'Official Debug Master',
+    description: 'Structured debugging help from the official Ask Master fixture.',
+    masterKind: 'debug',
+    specialties: ['debugging'],
+    hostModes: ['codex'],
+    modelInfo: {
+      provider: 'metaweb',
+      model: 'official-debug-master-v1',
+    },
+    style: 'direct_and_structured',
+    pricingMode: 'free',
+    price: '0',
+    currency: 'SPACE',
+    responseMode: 'structured',
+    contextPolicy: 'standard',
+    official: true,
+    trustedTier: 'official',
+  }), 'utf8');
+
+  const published = await runCommand(bobHome, ['master', 'publish', '--from', 'actor-alice', '--payload-file', publishFile]);
+
+  assert.equal(published.exitCode, 0);
+  assert.equal(published.payload.ok, true);
+  assert.equal(published.payload.data.providerGlobalMetaId, aliceCreated.payload.data.globalMetaId);
+  assert.equal(published.payload.data.network, 'opcat');
+
+  const aliceMasterState = await createPublishedMasterStateStore(aliceHome).read();
+  const bobMasterState = await createPublishedMasterStateStore(bobHome).read();
+  assert.equal(aliceMasterState.masters.length, 1);
+  assert.equal(aliceMasterState.masters[0].providerGlobalMetaId, aliceCreated.payload.data.globalMetaId);
+  assert.equal(aliceMasterState.masters[0].currentPinId, published.payload.data.masterPinId);
+  assert.equal(bobMasterState.masters.length, 0);
 });
 
 test('network sources add/list/remove manages the local demo provider registry without manual file edits', async (t) => {

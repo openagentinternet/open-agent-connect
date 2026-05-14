@@ -3344,6 +3344,7 @@ async function createMasterAskPreviewResult(input: {
   config: Awaited<ReturnType<ReturnType<typeof createConfigStore>['read']>>;
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
   pendingMasterAskStateStore: ReturnType<typeof createPendingMasterAskStateStore>;
+  from?: string | null;
   triggerModeOverride?: string | null;
   callerHostOverride?: string | null;
   traceIdOverride?: string | null;
@@ -3401,6 +3402,20 @@ async function createMasterAskPreviewResult(input: {
       'invalid_master_ask_draft',
       error instanceof Error ? error.message : String(error)
     );
+  }
+
+  const actorSlug = normalizeText(input.from);
+  if (actorSlug) {
+    prepared = {
+      ...prepared,
+      preview: {
+        ...prepared.preview,
+        confirmation: {
+          ...prepared.preview.confirmation,
+          confirmCommand: `metabot master ask --from ${actorSlug} --trace-id ${traceId} --confirm`,
+        },
+      },
+    };
   }
 
   const pendingAskRecord: PendingMasterAskRecord = {
@@ -4866,13 +4881,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
       : null;
   }
 
-  async function readMasterAutoFeedback(traceId: string | null | undefined) {
+  async function readMasterAutoFeedback(
+    traceId: string | null | undefined,
+    store = masterAutoFeedbackStateStore,
+  ) {
     const normalizedTraceId = normalizeText(traceId);
     if (!normalizedTraceId) {
       return null;
     }
     try {
-      return await masterAutoFeedbackStateStore.get(normalizedTraceId);
+      return await store.get(normalizedTraceId);
     } catch {
       return null;
     }
@@ -4886,13 +4904,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
     triggerReasonSignature?: string | null;
     updatedAt?: number | null;
     createdAt?: number | null;
-  }): Promise<void> {
+  }, store = masterAutoFeedbackStateStore): Promise<void> {
     const traceId = normalizeText(input.traceId);
     if (!traceId) {
       return;
     }
 
-    const existing = await readMasterAutoFeedback(traceId);
+    const existing = await readMasterAutoFeedback(traceId, store);
     const createdAt = Number.isFinite(input.createdAt) && input.createdAt !== null
       ? Math.max(0, Math.trunc(Number(input.createdAt)))
       : existing?.createdAt ?? Date.now();
@@ -4900,7 +4918,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       ? Math.max(0, Math.trunc(Number(input.updatedAt)))
       : Date.now();
 
-    await masterAutoFeedbackStateStore.put({
+    await store.put({
       traceId,
       masterKind: normalizeText(input.masterKind) || existing?.masterKind || null,
       masterServicePinId: normalizeText(input.masterServicePinId) || existing?.masterServicePinId || null,
@@ -5008,6 +5026,38 @@ export function createDefaultMetabotDaemonHandlers(input: {
         ? privateChatStateStore
         : createPrivateChatStateStore(actor.homeDir),
       autoReplyConfig: resolveAutoReplyConfigForHome(actor.homeDir),
+    };
+  }
+
+  async function resolveActorMasterContext(rawActor: unknown): Promise<
+    | {
+      homeDir: string;
+      runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+      signer: Signer;
+      configStore: ReturnType<typeof createConfigStore>;
+      masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
+      pendingMasterAskStateStore: ReturnType<typeof createPendingMasterAskStateStore>;
+      masterSuggestStateStore: ReturnType<typeof createMasterSuggestStateStore>;
+      masterAutoFeedbackStateStore: ReturnType<typeof createMasterAutoFeedbackStateStore>;
+      providerPresenceStore: ReturnType<typeof createProviderPresenceStateStore>;
+    }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const actor = await resolveActorWriteContext(rawActor);
+    if ('failure' in actor) {
+      return actor;
+    }
+    const activeHome = path.resolve(input.homeDir);
+    const actorHome = path.resolve(actor.homeDir);
+    const isActiveHome = actorHome === activeHome;
+    return {
+      ...actor,
+      configStore: isActiveHome ? configStore : createConfigStore(actorHome),
+      masterStateStore: isActiveHome ? masterStateStore : createPublishedMasterStateStore(actorHome),
+      pendingMasterAskStateStore: isActiveHome ? pendingMasterAskStateStore : createPendingMasterAskStateStore(actorHome),
+      masterSuggestStateStore: isActiveHome ? masterSuggestStateStore : createMasterSuggestStateStore(actorHome),
+      masterAutoFeedbackStateStore: isActiveHome ? masterAutoFeedbackStateStore : createMasterAutoFeedbackStateStore(actorHome),
+      providerPresenceStore: isActiveHome ? providerPresenceStore : createProviderPresenceStateStore(actorHome),
     };
   }
 
@@ -8016,8 +8066,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
     resolvedTarget: MasterDirectoryItem;
     state: RuntimeState;
     config: Awaited<ReturnType<ReturnType<typeof createConfigStore>['read']>>;
+    runtimeStateStore?: ReturnType<typeof createRuntimeStateStore>;
+    pendingMasterAskStateStore?: ReturnType<typeof createPendingMasterAskStateStore>;
+    masterAutoFeedbackStateStore?: ReturnType<typeof createMasterAutoFeedbackStateStore>;
+    signer?: Signer;
   }) {
-    const initialState = await runtimeStateStore.readState();
+    const scopedRuntimeStateStore = input.runtimeStateStore ?? runtimeStateStore;
+    const scopedPendingMasterAskStateStore = input.pendingMasterAskStateStore ?? pendingMasterAskStateStore;
+    const scopedMasterAutoFeedbackStateStore = input.masterAutoFeedbackStateStore ?? masterAutoFeedbackStateStore;
+    const scopedSigner = input.signer ?? signer;
+    const initialState = await scopedRuntimeStateStore.readState();
     const currentIdentity = initialState.identity ?? input.state.identity;
     if (!currentIdentity) {
       return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
@@ -8115,7 +8173,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             ],
           },
         });
-        await persistTraceRecord(runtimeStateStore, failedTrace);
+        await persistTraceRecord(scopedRuntimeStateStore, failedTrace);
       }
       if (isAutoAsk) {
         await putMasterAutoFeedback({
@@ -8123,7 +8181,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           status: 'prepared',
           masterKind: existingTrace?.askMaster?.masterKind ?? input.resolvedTarget.masterKind,
           masterServicePinId: existingTrace?.askMaster?.servicePinId ?? input.resolvedTarget.masterPinId,
-        });
+        }, scopedMasterAutoFeedbackStateStore);
       }
 
       const traceSuffix = existingTrace ? ` Trace ID: ${input.traceId}` : '';
@@ -8132,7 +8190,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
     let privateChatIdentity;
     try {
-      privateChatIdentity = await signer.getPrivateChatIdentity();
+      privateChatIdentity = await scopedSigner.getPrivateChatIdentity();
     } catch (error) {
       return markSendFailure(
         'identity_secret_missing',
@@ -8170,7 +8228,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
     let messagePinId = '';
     try {
-      const write = await signer.writePin({
+      const write = await scopedSigner.writePin({
         operation: 'create',
         path: outboundRequest.path,
         encryption: outboundRequest.encryption,
@@ -8196,7 +8254,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       sentAt,
       messagePinId: messagePinId || null,
     };
-    await pendingMasterAskStateStore.put(sentPendingAsk);
+    await scopedPendingMasterAskStateStore.put(sentPendingAsk);
     if (isAutoAsk) {
       await putMasterAutoFeedback({
         traceId: input.traceId,
@@ -8204,10 +8262,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
         masterKind: input.resolvedTarget.masterKind,
         masterServicePinId: input.resolvedTarget.masterPinId,
         updatedAt: sentAt,
-      });
+      }, scopedMasterAutoFeedbackStateStore);
     }
 
-    const currentState = await runtimeStateStore.readState();
+    const currentState = await scopedRuntimeStateStore.readState();
     const currentTrace = currentState.traces.find((entry) => entry.traceId === input.traceId);
     const updatedTrace = currentTrace
       ? {
@@ -8255,7 +8313,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       : buildSessionTrace({
           traceId: input.traceId,
           channel: 'a2a',
-          exportRoot: runtimeStateStore.paths.exportsRoot,
+          exportRoot: scopedRuntimeStateStore.paths.exportsRoot,
           session: {
             id: `master-${input.traceId}`,
             title: `${input.resolvedTarget.displayName} Ask`,
@@ -8335,7 +8393,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     });
 
-    await persistTraceRecord(runtimeStateStore, updatedTrace);
+    await persistTraceRecord(scopedRuntimeStateStore, updatedTrace);
 
     let finalTrace = updatedTrace;
     let finalArtifacts = artifacts;
@@ -8788,7 +8846,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
     master: {
       publish: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
+        const actor = await resolveActorMasterContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing masters.');
         }
@@ -8800,9 +8862,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         try {
           const now = Date.now();
-          const network = await resolveWriteNetwork(rawInput.network);
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
           const published = await publishMasterToChain({
-            signer,
+            signer: actor.signer,
             creatorMetabotId: state.identity.metabotId,
             providerGlobalMetaId: state.identity.globalMetaId,
             providerAddress: state.identity.mvcAddress,
@@ -8811,14 +8873,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
             network,
           });
 
-          await masterStateStore.update((currentState) => ({
+          await actor.masterStateStore.update((currentState) => ({
             masters: [
               published.record,
               ...currentState.masters.filter((master) => master.currentPinId !== published.record.currentPinId),
             ],
           }));
 
-          const presence = await providerPresenceStore.read();
+          const presence = await actor.providerPresenceStore.read();
           const daemon = input.getDaemonRecord();
           const online = isProviderPresenceOnline(presence, now);
           const lastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
@@ -9352,18 +9414,35 @@ export function createDefaultMetabotDaemonHandlers(input: {
         };
       },
       ask: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
+        const actor = await resolveActorMasterContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
         }
 
-        const config = await configStore.read();
+        const config = await actor.configStore.read();
         if (!config.askMaster.enabled) {
           return commandFailed('ask_master_disabled', 'Ask Master is disabled in the local config.');
         }
+        const sendPreparedRequestForActor = (sendInput: {
+          traceId: string;
+          pendingAsk: PendingMasterAskRecord;
+          resolvedTarget: MasterDirectoryItem;
+          state: RuntimeState;
+          config: Awaited<ReturnType<ReturnType<typeof createConfigStore>['read']>>;
+        }) => sendPendingMasterAskRequest({
+          ...sendInput,
+          runtimeStateStore: actor.runtimeStateStore,
+          pendingMasterAskStateStore: actor.pendingMasterAskStateStore,
+          masterAutoFeedbackStateStore: actor.masterAutoFeedbackStateStore,
+          signer: actor.signer,
+        });
 
         const daemon = input.getDaemonRecord();
-        const presence = await providerPresenceStore.read();
+        const presence = await actor.providerPresenceStore.read();
         const localProviderOnline = isProviderPresenceOnline(presence);
         const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
           ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
@@ -9377,7 +9456,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
           let pendingAsk;
           try {
-            pendingAsk = await pendingMasterAskStateStore.get(traceId);
+            pendingAsk = await actor.pendingMasterAskStateStore.get(traceId);
           } catch {
             return commandFailed('pending_master_ask_not_found', `Pending Ask Master record not found: ${traceId}`);
           }
@@ -9389,7 +9468,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             );
           }
           if (isAutoPreview) {
-            const feedback = await readMasterAutoFeedback(traceId);
+            const feedback = await readMasterAutoFeedback(traceId, actor.masterAutoFeedbackStateStore);
             if (feedback?.status === 'rejected') {
               return commandFailed(
                 'auto_preview_rejected',
@@ -9419,8 +9498,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
               constraints: [],
               desiredOutput: null,
             },
-            masterStateStore,
-            directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+            masterStateStore: actor.masterStateStore,
+            directorySeedsPath: actor.runtimeStateStore.paths.directorySeedsPath,
             chainApiBaseUrl: input.chainApiBaseUrl,
             host: normalizeText(pendingAsk.request.caller.host) || DEFAULT_MASTER_HOST_MODE,
             localProviderOnline,
@@ -9438,7 +9517,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
           let privateChatIdentity;
           try {
-            privateChatIdentity = await signer.getPrivateChatIdentity();
+            privateChatIdentity = await actor.signer.getPrivateChatIdentity();
           } catch (error) {
             return commandFailed(
               'identity_secret_missing',
@@ -9476,7 +9555,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
           let messagePinId = '';
           try {
-            const write = await signer.writePin({
+            const write = await actor.signer.writePin({
               operation: 'create',
               path: outboundRequest.path,
               encryption: outboundRequest.encryption,
@@ -9494,7 +9573,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             );
           }
 
-          await pendingMasterAskStateStore.put({
+          await actor.pendingMasterAskStateStore.put({
             ...pendingAsk,
             confirmationState: 'sent',
             updatedAt: Date.now(),
@@ -9508,7 +9587,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               masterKind: pendingAsk.request.target.masterKind,
               masterServicePinId: pendingAsk.request.target.masterServicePinId,
               updatedAt: Date.now(),
-            });
+            }, actor.masterAutoFeedbackStateStore);
           }
 
           const currentTrace = state.traces.find((entry) => entry.traceId === traceId);
@@ -9558,7 +9637,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             : buildSessionTrace({
                 traceId,
                 channel: 'a2a',
-                exportRoot: runtimeStateStore.paths.exportsRoot,
+                exportRoot: actor.runtimeStateStore.paths.exportsRoot,
                 session: {
                   id: `master-${traceId}`,
                   title: `${selectedTarget.displayName} Ask`,
@@ -9635,7 +9714,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             },
           });
 
-          await persistTraceRecord(runtimeStateStore, updatedTrace);
+          await persistTraceRecord(actor.runtimeStateStore, updatedTrace);
 
           let finalTrace = updatedTrace;
           let finalArtifacts = artifacts;
@@ -9720,8 +9799,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const draft = readMasterAskDraft(rawInput);
         const resolvedTarget = await resolveExplicitMasterTarget({
           draft,
-          masterStateStore,
-          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+          masterStateStore: actor.masterStateStore,
+          directorySeedsPath: actor.runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           localProviderOnline,
           localLastSeenSec,
@@ -9741,10 +9820,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
           resolvedTarget: selectedTarget,
           state,
           config,
-          runtimeStateStore,
-          pendingMasterAskStateStore,
+          runtimeStateStore: actor.runtimeStateStore,
+          pendingMasterAskStateStore: actor.pendingMasterAskStateStore,
+          from: normalizeText(rawInput.from) || null,
           triggerModeOverride: 'manual',
-          sendPreparedRequest: sendPendingMasterAskRequest,
+          sendPreparedRequest: sendPreparedRequestForActor,
         });
         if (previewResult.ok && previewResult.state === 'awaiting_confirmation') {
           masterTriggerMemoryState = recordMasterTriggerOutcome({
@@ -10397,8 +10477,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
           transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
         });
       },
-      trace: async ({ traceId }) => {
-        const state = await runtimeStateStore.readState();
+      trace: async ({ from, traceId }) => {
+        const actor = await resolveActorMasterContext(from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         const trace = state.traces.find((entry) => entry.traceId === traceId);
         if (!trace) {
           return commandFailed('trace_not_found', `Trace not found: ${traceId}`);

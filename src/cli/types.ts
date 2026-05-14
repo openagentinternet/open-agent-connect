@@ -35,7 +35,7 @@ export interface CliDependencies {
     ask?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     suggest?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     hostAction?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    trace?: (input: { traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    trace?: (input: { from?: string; traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   network?: {
     listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;

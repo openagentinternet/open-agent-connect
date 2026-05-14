@@ -1691,8 +1691,12 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       ask: async (input) => requestJson(context, 'POST', '/api/master/ask', input),
       suggest: async (input) => requestJson(context, 'POST', '/api/master/suggest', input),
       hostAction: async (input) => requestJson(context, 'POST', '/api/master/host-action', input),
-      trace: async (input) =>
-        requestJson(context, 'GET', `/api/master/trace/${encodeURIComponent(input.traceId)}`),
+      trace: async (input) => {
+        const params = new URLSearchParams();
+        if (input.from) params.set('from', input.from);
+        const suffix = params.size ? `?${params.toString()}` : '';
+        return requestJson(context, 'GET', `/api/master/trace/${encodeURIComponent(input.traceId)}${suffix}`);
+      },
     },
     network: {
       listServices: async (input) => {
