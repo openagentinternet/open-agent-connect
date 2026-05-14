@@ -616,7 +616,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['file', 'upload'],
     summary: 'Upload one local file to MetaWeb and return the resulting metafile URI.',
-    usage: 'metabot file upload --request-file <path> [--chain <mvc|btc|opcat>]',
+    usage: 'metabot file upload [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|opcat>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -636,10 +636,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'DOGE is not supported for file upload.',
     ],
     examples: [
-      'metabot file upload --request-file file-request.json',
-      'metabot file upload --request-file file-opcat-request.json --chain opcat',
+      'metabot file upload --from alice --request-file file-request.json',
+      'metabot file upload --from alice --request-file file-opcat-request.json --chain opcat',
     ],
-    optionalFlags: [FILE_UPLOAD_CHAIN_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, FILE_UPLOAD_CHAIN_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['buzz'],
@@ -653,7 +653,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['buzz', 'post'],
     summary: 'Publish one simplebuzz post through the validated MetaWeb buzz contract.',
-    usage: 'metabot buzz post --request-file <path> [--chain <mvc|btc|doge|opcat>]',
+    usage: 'metabot buzz post [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|doge|opcat>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -670,11 +670,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'Fails when no local identity exists, attachment upload fails, or the chain write is rejected.',
     ],
     examples: [
-      'metabot buzz post --request-file buzz-request.json',
-      'metabot buzz post --request-file buzz-doge-request.json --chain doge',
-      'metabot buzz post --request-file buzz-opcat-request.json --chain opcat',
+      'metabot buzz post --from alice --request-file buzz-request.json',
+      'metabot buzz post --from alice --request-file buzz-doge-request.json --chain doge',
+      'metabot buzz post --from alice --request-file buzz-opcat-request.json --chain opcat',
     ],
-    optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['chain'],
@@ -688,7 +688,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['chain', 'write'],
     summary: 'Write one arbitrary MetaID tuple using the public chain-write interface.',
-    usage: 'metabot chain write --request-file <path> [--chain <mvc|btc|doge|opcat>]',
+    usage: 'metabot chain write [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|doge|opcat>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -710,11 +710,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'Fails when the local signer cannot build or broadcast the requested chain write.',
     ],
     examples: [
-      'metabot chain write --request-file chain-request.json',
-      'metabot chain write --request-file chain-doge-request.json --chain doge',
-      'metabot chain write --request-file chain-opcat-request.json --chain opcat',
+      'metabot chain write --from alice --request-file chain-request.json',
+      'metabot chain write --from alice --request-file chain-doge-request.json --chain doge',
+      'metabot chain write --from alice --request-file chain-opcat-request.json --chain opcat',
     ],
-    optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['wallet'],

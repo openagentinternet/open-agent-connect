@@ -82,6 +82,39 @@ test('runCli dispatches `metabot buzz post --request-file --chain` for supported
   assert.deepEqual(calls.map((entry) => entry.network), ['btc', 'doge', 'opcat']);
 });
 
+test('runCli dispatches `metabot buzz post --from` to the post dependency', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-buzz-from-'));
+  const requestFile = path.join(tempDir, 'request.json');
+  await writeFile(requestFile, JSON.stringify({
+    content: 'hello from alice',
+  }), 'utf8');
+
+  const calls = [];
+  const exitCode = await runCli(['buzz', 'post', '--from', 'alice', '--request-file', requestFile, '--chain', 'doge'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      buzz: {
+        post: async (input) => {
+          calls.push(input);
+          return commandSuccess({
+            pinId: 'buzz-pin-alice-1',
+            network: input.network,
+            from: input.from,
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    content: 'hello from alice',
+    network: 'doge',
+    from: 'alice',
+  }]);
+});
+
 test('runCli fails `metabot buzz post` when --chain value is unsupported', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-buzz-invalid-chain-'));
   const requestFile = path.join(tempDir, 'request.json');

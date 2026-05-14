@@ -2576,6 +2576,15 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     masterReplyWaiter,
     servicePaymentExecutor,
     requestMvcGasSubsidy,
+    createSignerForHome: (profileHomeDir) => {
+      const profileBaseSigner = createLocalMnemonicSigner({
+        secretStore: createFileSecretStore(profileHomeDir),
+        adapters,
+      });
+      return context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+        ? createTestChainWriteSigner(profileBaseSigner)
+        : profileBaseSigner;
+    },
     autoReplyConfig: sharedAutoReplyConfig,
     llmExecutor,
     providerRuntimeCanStart: useFakeProviderLlm ? async () => true : undefined,

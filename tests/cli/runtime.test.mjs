@@ -1341,6 +1341,38 @@ test('buzz post succeeds immediately after bootstrap identity create', async (t)
   assert.match(buzzViewHtml, /IDFramework - Buzz Feed Demo/);
 });
 
+test('buzz post --from uses the selected actor identity and default write network', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-buzz-from-'));
+  const aliceHome = await createProfileHome(systemHome, 'actor-alice');
+  const bobHome = await createProfileHome(systemHome, 'actor-bob');
+  t.after(async () => {
+    await stopDaemon(aliceHome);
+    await stopDaemon(bobHome);
+  });
+
+  const aliceCreated = await runCommand(aliceHome, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(aliceCreated.exitCode, 0);
+  const bobCreated = await runCommand(bobHome, ['identity', 'create', '--name', 'Bob']);
+  assert.equal(bobCreated.exitCode, 0);
+  assert.notEqual(aliceCreated.payload.data.globalMetaId, bobCreated.payload.data.globalMetaId);
+
+  const configured = await runCommand(aliceHome, ['config', 'set', 'chain.defaultWriteNetwork', 'opcat']);
+  assert.equal(configured.exitCode, 0);
+
+  const requestFile = path.join(bobHome, 'buzz-from-alice.json');
+  await writeFile(requestFile, JSON.stringify({
+    content: 'alice speaks through an explicit actor flag',
+  }), 'utf8');
+
+  const posted = await runCommand(bobHome, ['buzz', 'post', '--from', 'actor-alice', '--request-file', requestFile]);
+
+  assert.equal(posted.exitCode, 0);
+  assert.equal(posted.payload.ok, true);
+  assert.equal(posted.payload.data.content, 'alice speaks through an explicit actor flag');
+  assert.equal(posted.payload.data.globalMetaId, aliceCreated.payload.data.globalMetaId);
+  assert.equal(posted.payload.data.network, 'opcat');
+});
+
 test('services publish persists a local directory entry that network services --online can read back', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));

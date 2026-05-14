@@ -87,6 +87,44 @@ test('runCli dispatches `metabot chain write --request-file --chain` and overrid
   assert.deepEqual(calls.map((entry) => entry.network), ['btc', 'doge', 'opcat']);
 });
 
+test('runCli dispatches `metabot chain write --from` to the write dependency', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-chain-from-'));
+  const requestFile = path.join(tempDir, 'request.json');
+  await writeFile(requestFile, JSON.stringify({
+    path: '/protocols/simplebuzz',
+    payload: '{"content":"hello alice"}',
+    contentType: 'application/json',
+    network: 'mvc',
+  }), 'utf8');
+
+  const calls = [];
+  const exitCode = await runCli(['chain', 'write', '--from', 'alice', '--request-file', requestFile, '--chain', 'opcat'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      chain: {
+        write: async (input) => {
+          calls.push(input);
+          return commandSuccess({
+            pinId: 'pin-chain-write-alice-1',
+            network: input.network,
+            from: input.from,
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    path: '/protocols/simplebuzz',
+    payload: '{"content":"hello alice"}',
+    contentType: 'application/json',
+    network: 'opcat',
+    from: 'alice',
+  }]);
+});
+
 test('runCli fails `metabot chain write` when --chain value is missing', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-chain-missing-chain-'));
   const requestFile = path.join(tempDir, 'request.json');

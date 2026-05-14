@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, readFileUploadChainFlag, readFlagValue, readJsonFile } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, readFileUploadChainFlag, readFlagValue, readFromFlag, readJsonFile } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function resolveMaybeRelativePath(baseDir: string, filePath: unknown): string | undefined {
@@ -17,6 +17,7 @@ export async function runFileCommand(args: string[], context: CliRuntimeContext)
   if (!requestFile) {
     return commandMissingFlag('--request-file');
   }
+  const from = readFromFlag(args);
 
   const chainFlag = readFileUploadChainFlag(args);
   if (chainFlag.error) {
@@ -34,6 +35,7 @@ export async function runFileCommand(args: string[], context: CliRuntimeContext)
     ...request,
     filePath: resolveMaybeRelativePath(requestDir, request.filePath) ?? request.filePath,
     ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
+    ...(from ? { from } : {}),
   };
   return handler(resolvedRequest);
 }

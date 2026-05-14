@@ -12,6 +12,15 @@ export function readFlagValue(args: string[], flag: string): string | null {
   return typeof value === 'string' ? value : null;
 }
 
+export function readFromFlag(
+  args: string[],
+  options: { allowSlugAlias?: boolean } = {},
+): string | undefined {
+  return readFlagValue(args, '--from')
+    ?? (options.allowSlugAlias ? readFlagValue(args, '--slug') : null)
+    ?? undefined;
+}
+
 function readSupportedChainFlag<TChain extends string>(
   args: string[],
   supportedValues: readonly TChain[],

@@ -4345,8 +4345,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const config = await createConfigStore(homeDir).read();
     return config.chain.defaultWriteNetwork;
   }
-  async function resolveFileUploadNetwork(rawNetwork: unknown): Promise<Exclude<DefaultWriteNetwork, 'doge'>> {
-    const network = await resolveWriteNetwork(rawNetwork);
+  async function resolveFileUploadNetworkForHome(
+    rawNetwork: unknown,
+    homeDir: string,
+  ): Promise<Exclude<DefaultWriteNetwork, 'doge'>> {
+    const network = await resolveWriteNetworkForHome(rawNetwork, homeDir);
     if (network === 'doge') {
       throw new Error('DOGE is not supported for file upload. Use mvc, btc, or opcat.');
     }
@@ -4934,6 +4937,36 @@ export function createDefaultMetabotDaemonHandlers(input: {
       secretStore: createFileSecretStore(normalizedProfileHomeDir),
       adapters: profileAdapters,
     });
+  }
+
+  async function resolveActorWriteContext(rawActor: unknown): Promise<
+    | {
+      homeDir: string;
+      runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+      signer: Signer;
+    }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const requestedSlug = normalizeText(rawActor);
+    let profileHomeDir = input.homeDir;
+    if (requestedSlug) {
+      const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedSlug);
+      if (!selectedProfile) {
+        return {
+          failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`),
+        };
+      }
+      profileHomeDir = selectedProfile.homeDir;
+    }
+
+    const normalizedProfileHomeDir = path.resolve(profileHomeDir);
+    return {
+      homeDir: normalizedProfileHomeDir,
+      runtimeStateStore: normalizedProfileHomeDir === path.resolve(input.homeDir)
+        ? runtimeStateStore
+        : createRuntimeStateStore(normalizedProfileHomeDir),
+      signer: createSignerForProfileHome(normalizedProfileHomeDir),
+    };
   }
 
   async function resolveScopedServicesForActor(rawActor: unknown): Promise<{
@@ -8471,8 +8504,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
     chain: {
       write: async (rawInput) => {
         try {
-          const network = await resolveWriteNetwork(rawInput.network);
-          const result = await signer.writePin({
+          const actor = await resolveActorWriteContext(rawInput.from);
+          if ('failure' in actor) {
+            return actor.failure;
+          }
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const result = await actor.signer.writePin({
             operation: typeof rawInput.operation === 'string' ? rawInput.operation : undefined,
             path: typeof rawInput.path === 'string' ? rawInput.path : undefined,
             encryption: typeof rawInput.encryption === 'string' ? rawInput.encryption : undefined,
@@ -8493,20 +8530,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
     buzz: {
       post: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before posting buzz.');
         }
 
         try {
-          const network = await resolveWriteNetwork(rawInput.network);
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
           const result = await postBuzzToChain({
             content: normalizeText(rawInput.content),
             contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
             attachments: readStringArray(rawInput.attachments),
             quotePin: typeof rawInput.quotePin === 'string' ? rawInput.quotePin : undefined,
             network,
-            signer,
+            signer: actor.signer,
           });
           return commandSuccess({
             ...result,
@@ -12380,18 +12421,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
     file: {
       upload: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before uploading files.');
         }
 
         try {
-          const network = await resolveFileUploadNetwork(rawInput.network);
+          const network = await resolveFileUploadNetworkForHome(rawInput.network, actor.homeDir);
           const result = await uploadLocalFileToChain({
             filePath: normalizeText(rawInput.filePath),
             contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
             network,
-            signer,
+            signer: actor.signer,
           });
           return commandSuccess(result);
         } catch (error) {

@@ -210,7 +210,8 @@ test('runCli prints chain write help with every supported write chain', async ()
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot chain write --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /^Usage:\s+metabot chain write \[--from <bot-slug>\] --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /optional chain network override: mvc, btc, doge, or opcat/i);
   assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(output, /chain-doge-request\.json/);
@@ -228,7 +229,8 @@ test('runCli prints buzz post help with DOGE and OPCAT chain support', async () 
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot buzz post --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /^Usage:\s+metabot buzz post \[--from <bot-slug>\] --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(output, /buzz-doge-request\.json/);
   assert.match(output, /buzz-opcat-request\.json/);
@@ -245,7 +247,8 @@ test('runCli prints file upload help with OPCAT support and DOGE exclusion', asy
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot file upload --request-file <path> \[--chain <mvc\|btc\|opcat>\]/m);
+  assert.match(output, /^Usage:\s+metabot file upload \[--from <bot-slug>\] --request-file <path> \[--chain <mvc\|btc\|opcat>\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /DOGE is not supported for file upload/i);
   assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
 });
