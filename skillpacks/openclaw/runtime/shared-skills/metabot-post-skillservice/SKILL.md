@@ -1,11 +1,11 @@
 ---
 name: metabot-post-skillservice
-description: Use when a local Bot/MetaBot should publish one paid capability as a discoverable MetaWeb service. Treat Bot, bot, and MetaBot wording as equivalent and case-insensitive for provider identity; do not use this skill for service consumption (services call), trace follow-up, or network source registry management.
+description: Use when a local Bot/MetaBot should publish, list, modify, revoke, or manage one of its discoverable MetaWeb services. Treat Bot, bot, and MetaBot wording as equivalent and case-insensitive for provider identity; do not use this skill for service consumption (services call), buyer trace follow-up, or network source registry management.
 ---
 
 # Bot Publish Service
 
-Publish a local capability as a MetaWeb service while preserving provider identity, price, and availability semantics validated in runtime.
+Publish or manage a local capability as a MetaWeb service while preserving provider identity, price, availability, order, and refund semantics validated in runtime.
 
 
 
@@ -18,12 +18,20 @@ Route natural-language intent through `metabot`, then reason over the returned J
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
 
+## Actor Selection
+
+Provider service commands accept optional `--from <bot-slug>`.
+Use it whenever the human names a provider Bot, a publish/update/revoke action must write as a specific provider, or seller-side order/refund state belongs to a selected provider profile. If `--from` is omitted, the CLI uses the active identity. Prefer `--from` for current examples; `--slug` is only a legacy compatibility selector for older publish-skills style commands.
+
 ## Trigger Guidance
 
 Should trigger when:
 
 - The user asks a local Bot, bot, or MetaBot to publish/register one paid skill service.
 - The user asks to update a service listing payload for discovery.
+- The user asks which local skills can be published as services.
+- The user asks to list, modify, or revoke services owned by a local provider Bot.
+- The user asks a seller/provider Bot to inspect service orders, view refund requests, or settle a refund.
 
 Should not trigger when:
 
@@ -32,6 +40,12 @@ Should not trigger when:
 - The user asks to maintain local network sources.
 
 ## Command
+
+List publishable local runtime skills for a selected provider Bot:
+
+```bash
+metabot services skills --from <bot-slug>
+```
 
 Prepare a publish payload file:
 
@@ -69,6 +83,27 @@ metabot services publish --from <bot-slug> --payload-file payload.json --chain d
 metabot services publish --from <bot-slug> --payload-file payload.json --chain opcat
 ```
 
+## Provider Service Lifecycle
+
+Use the canonical `services` namespace for provider-owned service management:
+
+```bash
+metabot services owned list --from <bot-slug>
+metabot services owned orders --from <bot-slug> --service-id <service-pin-id>
+metabot services owned modify --from <bot-slug> --payload-file service-update.json
+metabot services owned revoke --from <bot-slug> --service-id <service-pin-id>
+```
+
+For refund and order operations, keep the selected seller/provider actor:
+
+```bash
+metabot services refunds list --from <bot-slug> --received
+metabot services orders inspect --from <bot-slug> --order-id <order-id>
+metabot services refunds settle --from <bot-slug> --order-id <order-id>
+```
+
+`provider summary`, `provider refunds`, `provider order inspect`, and `provider refund settle` remain compatibility aliases. Prefer the `services ...` command names in new skill instructions because the lifecycle belongs to service ownership rather than a separate provider subsystem.
+
 ## Required Semantics
 
 - Preserve provider `globalMetaId` as on-chain service identity.
@@ -79,12 +114,14 @@ metabot services publish --from <bot-slug> --payload-file payload.json --chain o
 
 ## In Scope
 
+- `services skills --from` for publishable local skill discovery.
 - Service metadata publication on-chain.
+- Provider-owned service listing, modification, revocation, order inspection, and refund settlement.
 - MVC/BTC/DOGE/OPCAT chain selection for service publish writes.
 
 ## Out of Scope
 
-- Remote service consumption/order lifecycle.
+- Buyer-side remote service consumption (`services call`) and trace/rating lifecycle.
 - Network source registry operations.
 - Identity create/switch operations.
 

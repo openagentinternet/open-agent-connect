@@ -18,6 +18,11 @@ Route natural-language intent through `metabot`, then reason over the returned J
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
 
+## Actor Selection
+
+`master ask` and `master trace` accept optional `--from <bot-slug>`.
+Use the same `--from` value for preview, confirm, and trace inspection so the local Ask Master trace remains tied to the caller Bot. If `--from` is omitted, the CLI uses the active identity. `master list --online` is discovery and does not need an actor selector.
+
 ## Trigger Guidance
 
 Should trigger when:

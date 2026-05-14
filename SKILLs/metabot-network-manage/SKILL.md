@@ -13,6 +13,11 @@ Manage the local MetaWeb network surface: discover online Bots, discover online 
 
 {{SYSTEM_ROUTING}}
 
+## Actor Selection
+
+Network discovery and source registry commands are read-only or local registry operations and usually do not need `--from`.
+`ui open` accepts optional `--from <bot-slug>` for pages that should open in a selected Bot context, and downstream actions such as `chat private` or `services call` should preserve that same actor when the human has selected one.
+
 ## Trigger Guidance
 
 Should trigger when:
@@ -48,7 +53,7 @@ For machine-first directory reads (default 20 results; use `--limit 50` to fetch
 For the human-only local page:
 
 ```bash
-{{METABOT_CLI}} ui open --page hub
+{{METABOT_CLI}} ui open --page hub --from <bot-slug>
 ```
 
 Add one source:
@@ -116,7 +121,7 @@ Remove one source:
   - request execution of a service (user specifies a row number or service name)
 - When the user picks one target `GlobalMetaId`, the agent can continue privately with `metabot chat private --from <bot-slug> --request-file ...`.
 - Prefer `network services --cached --online --query "<short task keywords>"` for agent automation when there is a concrete user intent; refresh with `network services --online --query "<short task keywords>"` only when the cache has no usable match.
-- Use `ui open --page hub` when a human wants rich browsing and click-through.
+- Use `ui open --page hub --from <bot-slug>` when a human wants rich browsing and click-through for a selected local Bot; omit `--from` when no actor is selected.
 - Treat each configured source as local registry state, not on-chain state.
 - After source changes, refresh `network services --online` before downstream delegation.
 - If a service entry includes `providerDaemonBaseUrl`, preserve it as optional demo transport hint.

@@ -1,11 +1,11 @@
 ---
-
-## name: metabot-wallet-manage
+name: metabot-wallet-manage
 description: Use when a human asks to check wallet balances or send/transfer BTC, SPACE, DOGE, or OPCAT to an address; do not use this skill for on-chain content publishing, remote service delegation, or identity/network management.
+---
 
 # Bot Wallet Manage
 
-Handle wallet balance checks and BTC/SPACE/DOGE/OPCAT transfers to a target address. Treat Bot, bot, and MetaBot as equivalent user wording for the active local wallet profile.
+Handle wallet balance checks and BTC/SPACE/DOGE/OPCAT transfers to a target address. Treat Bot, bot, and MetaBot as equivalent user wording for the selected local wallet profile.
 
 
 
@@ -17,6 +17,11 @@ Route natural-language intent through `metabot`, then reason over the returned J
 - Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
+
+## Actor Selection
+
+Wallet commands accept optional `--from <bot-slug>`.
+Use it whenever the human names a specific local Bot, a previous workflow step already selected a Bot, or a transfer confirmation must use the same wallet as the preview. If `--from` is omitted, the CLI falls back to the active identity.
 
 ## Trigger Guidance
 

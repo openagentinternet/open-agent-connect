@@ -18,6 +18,11 @@ Route natural-language intent through `metabot`, then reason over the returned J
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
 
+## Actor Selection
+
+`identity create/list/assign/who` manage the active profile set and do not take `--from`.
+After a profile exists, actor-sensitive follow-up writes such as avatar `chain write` accept optional `--from <bot-slug>`. Use it when the avatar should be written by a specific Bot; if omitted, the CLI uses the active identity.
+
 ## Trigger Guidance
 
 Should trigger when:

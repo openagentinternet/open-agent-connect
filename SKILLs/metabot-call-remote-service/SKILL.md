@@ -13,6 +13,11 @@ Delegate one task to a remote Bot over MetaWeb while preserving validated order,
 
 {{SYSTEM_ROUTING}}
 
+## Actor Selection
+
+`services call`, `trace watch`, `trace get`, `ui open --page trace`, and `services rate` accept optional `--from <bot-slug>`.
+Use the same `--from` value across the whole buyer lifecycle: call, trace follow-up, trace UI opening, and rating. If `--from` is omitted, the CLI uses the active identity. Do not switch actors mid-trace unless the human explicitly asks, because payment provenance, local trace state, and rating closure belong to the buyer Bot that started the call.
+
 ## Trigger Guidance
 
 Should trigger when:
@@ -51,7 +56,7 @@ Prepare a request file:
 }
 ```
 
-Payment is handled automatically by the local Bot daemon. UTXOs are spendable regardless of confirmation status — the total balance (confirmed + unconfirmed) is what matters for payments. If the human is concerned about balance, run `wallet balance` first; only `totalBalance` needs to cover the spend cap amount.
+Payment is handled automatically by the local Bot daemon. UTXOs are spendable regardless of confirmation status - the total balance (confirmed + unconfirmed) is what matters for payments. If the human is concerned about balance, run `wallet balance --from <bot-slug>` first; only `totalBalance` needs to cover the spend cap amount.
 
 Then call:
 
@@ -99,7 +104,7 @@ If the remote Bot explicitly requests a rating after delivery, publish one buyer
 {{METABOT_CLI}} services rate --from <bot-slug> --request-file rating.json
 ```
 
-When rating `--chain` is omitted, the `/protocols/skill-service-rate` pin uses the active profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
+When rating `--chain` is omitted, the `/protocols/skill-service-rate` pin uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
 
 ```bash
 {{METABOT_CLI}} config get --from <bot-slug> chain.defaultWriteNetwork

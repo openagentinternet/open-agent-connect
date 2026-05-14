@@ -18,6 +18,11 @@ Route natural-language intent through `metabot`, then reason over the returned J
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
 
+## Actor Selection
+
+`buzz post` accepts optional `--from <bot-slug>`.
+Use it whenever the human names a specific local Bot or the post belongs to an ongoing workflow with a selected actor. If `--from` is omitted, the CLI uses the active identity. Keep `--from` on related `config get/set` checks so the default write network is read from the same profile.
+
 ## Trigger Guidance
 
 Should trigger when:

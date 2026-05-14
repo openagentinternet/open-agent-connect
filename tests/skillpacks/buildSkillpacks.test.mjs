@@ -57,6 +57,10 @@ function hostWrapperSharedSkillFile(root, host, skillName) {
   return path.join(root, host, 'runtime', 'shared-skills', skillName, 'SKILL.md');
 }
 
+function sourceSkillFile(skillName) {
+  return path.join(REPO_ROOT, 'SKILLs', skillName, 'SKILL.md');
+}
+
 function expectedHostSkillRoot(homeDir, host) {
   switch (host) {
     case 'codex':
@@ -126,6 +130,17 @@ async function getBuiltSkillpacks() {
   return builtSkillpacksPromise;
 }
 
+test('source MetaBot skills keep valid frontmatter and actor selection guidance', async () => {
+  for (const skillName of EXPECTED_METABOT_SKILLS) {
+    const content = await readFile(sourceSkillFile(skillName), 'utf8');
+    const frontmatter = content.match(/^---\n([\s\S]*?)\n---\n/);
+    assert.ok(frontmatter, `${skillName} should have YAML frontmatter`);
+    assert.match(frontmatter[1], new RegExp(`^name:\\s*${escapeForRegex(skillName)}$`, 'm'));
+    assert.match(frontmatter[1], /^description:\s+\S.+$/m);
+    assert.match(content, /## Actor Selection/);
+  }
+});
+
 test('buildAgentConnectSkillpacks renders one shared pack plus self-contained host wrapper packs', async () => {
   const { outputRoot, result } = await getBuiltSkillpacks();
 
@@ -190,6 +205,12 @@ test('buildAgentConnectSkillpacks includes the MetaBot help skill as a dynamic a
   assert.match(content, /metabot --help/);
   assert.match(content, /metabot identity --help/);
   assert.match(content, /metabot services --help/);
+  assert.match(content, /metabot trace --help/);
+  assert.match(content, /metabot config --help/);
+  assert.match(content, /metabot ui --help/);
+  assert.match(content, /metabot llm --help/);
+  assert.match(content, /metabot evolution --help/);
+  assert.match(content, /optional `--from <bot-slug>`/);
   assert.match(content, /same language/i);
   assert.match(content, /natural-language examples/i);
 });
@@ -498,6 +519,9 @@ test('buildAgentConnectSkillpacks publishes shared remote-call plus trace-inspec
   assert.match(content, new RegExp(escapeForRegex(EXPECTED_TRACE_WATCH_LINE)));
   assert.match(content, new RegExp(escapeForRegex(EXPECTED_TRACE_GET_LINE)));
   assert.match(content, new RegExp(escapeForRegex(EXPECTED_TRACE_UI_LINE)));
+  assert.match(content, /## Actor Selection/);
+  assert.match(content, /wallet balance --from <bot-slug>/);
+  assert.match(content, /selected profile's configured `chain\.defaultWriteNetwork`/);
   assert.match(content, /timeout/i);
   assert.match(content, /clarification/i);
   assert.match(content, /manual action/i);
@@ -513,7 +537,7 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow in th
   assert.match(content, /^name:\s*metabot-network-manage$/m);
   assert.match(content, /network bots --online --limit 20/);
   assert.match(content, /network services --online/);
-  assert.match(content, /ui open --page hub/);
+  assert.match(content, /ui open --page hub --from <bot-slug>/);
   assert.match(content, /online Bots\/MetaBots/i);
   assert.match(content, /Bot, bot, and MetaBot as equivalent and case-insensitive/i);
   assert.match(content, /"online Bots", "online bot", or "online MetaBots"/i);
@@ -570,6 +594,23 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   assert.match(content, /## Handoff To/);
   assert.doesNotMatch(content, /PROFILE_SLUG/);
   assert.doesNotMatch(content, /\.metabot\/hot/);
+});
+
+test('buildAgentConnectSkillpacks publishes provider service lifecycle commands in the shared pack', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-post-skillservice'), 'utf8');
+  assert.match(content, /^name:\s*metabot-post-skillservice$/m);
+  assert.match(content, /services skills --from <bot-slug>/);
+  assert.match(content, /services publish --from <bot-slug> --payload-file/);
+  assert.match(content, /services owned list --from <bot-slug>/);
+  assert.match(content, /services owned modify --from <bot-slug> --payload-file/);
+  assert.match(content, /services owned revoke --from <bot-slug> --service-id/);
+  assert.match(content, /services refunds list --from <bot-slug> --received/);
+  assert.match(content, /services orders inspect --from <bot-slug> --order-id/);
+  assert.match(content, /services refunds settle --from <bot-slug> --order-id/);
+  assert.match(content, /provider summary.*compatibility aliases/s);
+  assert.match(content, /Prefer the `services \.\.\.` command names/);
 });
 
 test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skills in the shared pack', async () => {

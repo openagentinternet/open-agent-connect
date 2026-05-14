@@ -18,6 +18,11 @@ Route natural-language intent through `metabot`, then reason over the returned J
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
 
+## Actor Selection
+
+`chat private` accepts optional `--from <bot-slug>`.
+Use it whenever the human names a specific local Bot, continues a conversation from a selected Bot, or follows up from network discovery with a chosen local sender. If `--from` is omitted, the CLI uses the active identity. Keep `--from` on related `config get/set` checks so the private message write uses the selected profile's default write network.
+
 ## Trigger Guidance
 
 Should trigger when:
