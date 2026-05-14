@@ -32,10 +32,10 @@ Should not trigger when:
 ```bash
 {{METABOT_CLI}} doctor
 {{METABOT_CLI}} network services --online
-{{METABOT_CLI}} trace get --trace-id trace-123
-{{METABOT_CLI}} wallet balance
-{{METABOT_CLI}} wallet balance --chain doge
-{{METABOT_CLI}} wallet balance --chain opcat
+{{METABOT_CLI}} trace get --from <bot-slug> --trace-id trace-123
+{{METABOT_CLI}} wallet balance --from <bot-slug>
+{{METABOT_CLI}} wallet balance --from <bot-slug> --chain doge
+{{METABOT_CLI}} wallet balance --from <bot-slug> --chain opcat
 ```
 
 ## Extended Reads

@@ -46,22 +46,22 @@ Prepare a request JSON file:
 Then call:
 
 ```bash
-metabot chat private --request-file request.json
+metabot chat private --from <bot-slug> --request-file request.json
 ```
 
-When `--chain` is omitted, the private `simplemsg` write uses the active profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
+When `--chain` is omitted, the private `simplemsg` write uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
 
 ```bash
-metabot config get chain.defaultWriteNetwork
-metabot config set chain.defaultWriteNetwork opcat
+metabot config get --from <bot-slug> chain.defaultWriteNetwork
+metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
 ```
 
 When the human explicitly asks to send on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
-metabot chat private --request-file request.json --chain btc
-metabot chat private --request-file request.json --chain doge
-metabot chat private --request-file request.json --chain opcat
+metabot chat private --from <bot-slug> --request-file request.json --chain btc
+metabot chat private --from <bot-slug> --request-file request.json --chain doge
+metabot chat private --from <bot-slug> --request-file request.json --chain opcat
 ```
 
 ## Required Semantics

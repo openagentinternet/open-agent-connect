@@ -37,9 +37,9 @@ const EXPECTED_COMPATIBILITY_MANIFEST = 'release/compatibility.json';
 const EXPECTED_BUNDLED_COMPATIBILITY_COPY = 'runtime/compatibility.json';
 const EXPECTED_CONFIRMATION_CONTRACT_LINE =
   'Before any paid remote call, show the provider, service, price, currency, and wait for explicit confirmation.';
-const EXPECTED_TRACE_WATCH_LINE = 'metabot trace watch --trace-id trace-123';
-const EXPECTED_TRACE_GET_LINE = 'metabot trace get --trace-id trace-123';
-const EXPECTED_TRACE_UI_LINE = 'metabot ui open --page trace --trace-id trace-123';
+const EXPECTED_TRACE_WATCH_LINE = 'metabot trace watch --from <bot-slug> --trace-id trace-123';
+const EXPECTED_TRACE_GET_LINE = 'metabot trace get --from <bot-slug> --trace-id trace-123';
+const EXPECTED_TRACE_UI_LINE = 'metabot ui open --page trace --from <bot-slug> --trace-id trace-123';
 
 function escapeForRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -167,8 +167,8 @@ test('buildAgentConnectSkillpacks includes the Ask Master skill with only master
   assert.match(content, /^name:\s*metabot-ask-master$/m);
   assert.match(content, /metabot master list/);
   assert.match(content, /metabot master suggest --request-file/);
-  assert.match(content, /metabot master ask --request-file/);
-  assert.match(content, /metabot master trace --id/);
+  assert.match(content, /metabot master ask --from <bot-slug> --request-file/);
+  assert.match(content, /metabot master trace --from <bot-slug> --id/);
   assert.match(content, /manual \/ suggest|manual and suggest/i);
   assert.match(content, /preview first, then explicit confirmation|preview\/confirm\/send path/i);
   assert.match(content, /accepted `suggest` enters the same preview\/confirm\/send path as `manual`/i);
@@ -494,7 +494,7 @@ test('buildAgentConnectSkillpacks publishes shared remote-call plus trace-inspec
   const { outputRoot } = await getBuiltSkillpacks();
 
   const content = await readFile(sharedSkillFile(outputRoot, 'metabot-call-remote-service'), 'utf8');
-  assert.match(content, /services call --request-file/);
+  assert.match(content, /services call --from <bot-slug> --request-file/);
   assert.match(content, new RegExp(escapeForRegex(EXPECTED_TRACE_WATCH_LINE)));
   assert.match(content, new RegExp(escapeForRegex(EXPECTED_TRACE_GET_LINE)));
   assert.match(content, new RegExp(escapeForRegex(EXPECTED_TRACE_UI_LINE)));
@@ -525,7 +525,7 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow in th
   assert.match(content, /Markdown table \(max 20 rows\)/i);
   assert.match(content, /\|\s*#\s*\|\s*name\s*\|\s*globalmetaid\s*\|\s*bio\s*\|\s*Last Seen\s*\|/);
   assert.match(content, /When no online bots or services are found, explicitly say the list is currently empty/i);
-  assert.match(content, /metabot chat private --request-file/);
+  assert.match(content, /metabot chat private --from <bot-slug> --request-file/);
   assert.match(content, /offer natural-language follow-up prompts/i);
   assert.match(content, /Do not ask the human to type CLI commands directly/i);
   assert.match(content, /same language the human is currently using/i);
@@ -657,7 +657,7 @@ test('shared install.sh copies shared skills and installs a runnable metabot shi
   assert.doesNotMatch(shim, /exec node "\$CLI_ENTRY"/);
 
   const installedAskMaster = await readFile(path.join(skillDest, 'metabot-ask-master', 'SKILL.md'), 'utf8');
-  assert.match(installedAskMaster, /metabot master ask --request-file/);
+  assert.match(installedAskMaster, /metabot master ask --from <bot-slug> --request-file/);
   assert.doesNotMatch(installedAskMaster, /metabot advisor ask/);
 
   const fakeNodePath = path.join(fakeHome, 'fake-node22');

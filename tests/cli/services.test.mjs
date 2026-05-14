@@ -7,7 +7,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
-const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
+const { commandSuccess, commandWaiting } = require('../../dist/core/contracts/commandResult.js');
 
 test('runCli dispatches `metabot services publish --payload-file` with parsed JSON payload', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-publish-'));
@@ -368,6 +368,44 @@ test('runCli dispatches `metabot services call --from --request-file` with actor
     },
     from: 'buyer',
   }]);
+});
+
+test('runCli services call TTY trace polling preserves the selected actor', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-call-poll-from-'));
+  const requestFile = path.join(tempDir, 'request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'service-weather',
+      providerGlobalMetaId: 'gm-weather-seller',
+      userTask: 'tell me tomorrow weather',
+    },
+  }), 'utf8');
+
+  const traceGetCalls = [];
+  const exitCode = await runCli(['services', 'call', '--from', 'buyer', '--request-file', requestFile], {
+    stdout: { isTTY: true, write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        call: async () => commandWaiting('remote_waiting', 'Waiting for provider.', 100, {
+          localUiUrl: 'http://127.0.0.1:24042/ui/trace?traceId=trace-weather-123',
+          data: { traceId: 'trace-weather-123' },
+        }),
+      },
+      trace: {
+        get: async (input) => {
+          traceGetCalls.push(input);
+          return commandSuccess({
+            traceId: input.traceId,
+            sessions: [{ publicStatus: 'completed', responseText: 'weather done' }],
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(traceGetCalls, [{ from: 'buyer', traceId: 'trace-weather-123' }]);
 });
 
 test('runCli dispatches `metabot services rate --request-file --chain` for supported write chains', async () => {

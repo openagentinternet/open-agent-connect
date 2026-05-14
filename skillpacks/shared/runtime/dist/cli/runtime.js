@@ -485,6 +485,36 @@ function normalizeHomeDir(env, cwd, options = {}) {
 function normalizeSystemHomeDir(env, cwd) {
     return (0, homeSelection_1.normalizeSystemHomeDir)(env, cwd);
 }
+async function resolveActorHomeDir(context, from) {
+    const requestedFrom = normalizeEnvText(from);
+    if (!requestedFrom) {
+        return { homeDir: normalizeHomeDir(context.env, context.cwd) };
+    }
+    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+    const profiles = await (0, identityProfiles_1.listIdentityProfiles)(systemHomeDir).catch(() => []);
+    const resolved = (0, profileNameResolution_1.resolveProfileNameMatch)(requestedFrom, profiles);
+    if (resolved.status === 'not_found') {
+        return (0, commandResult_1.commandFailed)('profile_not_found', resolved.message);
+    }
+    if (resolved.status === 'ambiguous') {
+        return (0, commandResult_1.commandFailed)('identity_profile_ambiguous', resolved.message);
+    }
+    return { homeDir: resolved.match.homeDir };
+}
+async function resolveActorProfileSlug(context, input = {}) {
+    const requestedSelector = normalizeEnvText(input.from) || normalizeEnvText(input.slug);
+    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+    if (requestedSelector) {
+        return { slug: requestedSelector };
+    }
+    const profiles = await (0, identityProfiles_1.listIdentityProfiles)(systemHomeDir).catch(() => []);
+    const activeHomeDir = node_path_1.default.resolve(normalizeHomeDir(context.env, context.cwd));
+    const activeProfile = profiles.find((profile) => node_path_1.default.resolve(profile.homeDir) === activeHomeDir);
+    if (!activeProfile?.slug) {
+        return (0, commandResult_1.commandFailed)('profile_not_found', `Active MetaBot profile not found in the manager index for home: ${activeHomeDir}`);
+    }
+    return { slug: activeProfile.slug };
+}
 function cloneContextWithHomeDir(context, homeDir) {
     return {
         ...context,
@@ -1138,7 +1168,11 @@ function createDefaultCliDependencies(context) {
                 if (!isSupportedConfigKey(input.key)) {
                     return (0, commandResult_1.commandFailed)('unsupported_config_key', `Unsupported config key: ${input.key}`);
                 }
-                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor)) {
+                    return actor;
+                }
+                const homeDir = actor.homeDir;
                 const configStore = (0, configStore_1.createConfigStore)(homeDir);
                 const config = await configStore.read();
                 return (0, commandResult_1.commandSuccess)({
@@ -1157,7 +1191,11 @@ function createDefaultCliDependencies(context) {
                 if (!normalizedValue.ok) {
                     return (0, commandResult_1.commandFailed)('invalid_argument', normalizedValue.message);
                 }
-                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor)) {
+                    return actor;
+                }
+                const homeDir = actor.homeDir;
                 const configStore = (0, configStore_1.createConfigStore)(homeDir);
                 const config = await configStore.read();
                 const nextConfig = writeConfigValue(config, input.key, normalizedValue.value);
@@ -1324,7 +1362,13 @@ function createDefaultCliDependencies(context) {
             ask: async (input) => requestJson(context, 'POST', '/api/master/ask', input),
             suggest: async (input) => requestJson(context, 'POST', '/api/master/suggest', input),
             hostAction: async (input) => requestJson(context, 'POST', '/api/master/host-action', input),
-            trace: async (input) => requestJson(context, 'GET', `/api/master/trace/${encodeURIComponent(input.traceId)}`),
+            trace: async (input) => {
+                const params = new URLSearchParams();
+                if (input.from)
+                    params.set('from', input.from);
+                const suffix = params.size ? `?${params.toString()}` : '';
+                return requestJson(context, 'GET', `/api/master/trace/${encodeURIComponent(input.traceId)}${suffix}`);
+            },
         },
         network: {
             listServices: async (input) => {
@@ -1358,8 +1402,21 @@ function createDefaultCliDependencies(context) {
         },
         services: {
             publish: async (input) => requestJson(context, 'POST', '/api/services/publish', input),
-            listPublishSkills: async () => {
-                const homeDir = normalizeHomeDir(context.env, context.cwd);
+            listPublishSkills: async (input = {}) => {
+                let homeDir = normalizeHomeDir(context.env, context.cwd);
+                const requestedFrom = normalizeEnvText(input.from);
+                if (requestedFrom) {
+                    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+                    const profiles = await (0, identityProfiles_1.listIdentityProfiles)(systemHomeDir).catch(() => []);
+                    const resolved = (0, profileNameResolution_1.resolveProfileNameMatch)(requestedFrom, profiles);
+                    if (resolved.status === 'not_found') {
+                        return (0, commandResult_1.commandFailed)('profile_not_found', resolved.message);
+                    }
+                    if (resolved.status === 'ambiguous') {
+                        return (0, commandResult_1.commandFailed)('identity_profile_ambiguous', resolved.message);
+                    }
+                    homeDir = resolved.match.homeDir;
+                }
                 const runtimeStateStore = (0, runtimeStateStore_1.createRuntimeStateStore)(homeDir);
                 const state = await runtimeStateStore.readState();
                 if (!state.identity) {
@@ -1400,6 +1457,60 @@ function createDefaultCliDependencies(context) {
             },
             call: async (input) => requestJson(context, 'POST', '/api/services/call', input),
             rate: async (input) => requestJson(context, 'POST', '/api/services/rate', input),
+            listOwned: async (input) => {
+                const query = new URLSearchParams({
+                    page: String(input.page),
+                    pageSize: String(input.pageSize),
+                    refresh: input.refresh ? 'true' : 'false',
+                    all: input.all ? 'true' : 'false',
+                });
+                if (input.from) {
+                    query.set('from', input.from);
+                }
+                return requestJson(context, 'GET', `/api/services/my?${query.toString()}`);
+            },
+            listOwnedOrders: async (input) => {
+                const query = new URLSearchParams({
+                    serviceId: input.serviceId,
+                    page: String(input.page),
+                    pageSize: String(input.pageSize),
+                    refresh: input.refresh ? 'true' : 'false',
+                    all: input.all ? 'true' : 'false',
+                });
+                if (input.from) {
+                    query.set('from', input.from);
+                }
+                return requestJson(context, 'GET', `/api/services/my/orders?${query.toString()}`);
+            },
+            modifyOwned: async (input) => requestJson(context, 'POST', '/api/services/my/modify', input),
+            revokeOwned: async (input) => requestJson(context, 'POST', '/api/services/my/revoke', input),
+            listRefunds: async (input) => {
+                const query = new URLSearchParams();
+                if (input.from) {
+                    query.set('from', input.from);
+                }
+                query.set('all', input.all ? 'true' : 'false');
+                query.set('kind', input.kind);
+                const path = input.kind === 'initiated'
+                    ? '/api/provider/refunds/initiated'
+                    : '/api/provider/refunds';
+                return requestJson(context, 'GET', `${path}?${query.toString()}`);
+            },
+            settleRefund: async (input) => requestJson(context, 'POST', '/api/provider/refund/settle', input),
+            inspectOrder: async (input) => {
+                const query = new URLSearchParams();
+                if (input.orderId) {
+                    query.set('orderId', input.orderId);
+                }
+                if (input.paymentTxid) {
+                    query.set('paymentTxid', input.paymentTxid);
+                }
+                if (input.from) {
+                    query.set('from', input.from);
+                }
+                const suffix = query.size ? `?${query.toString()}` : '';
+                return requestJson(context, 'GET', `/api/provider/order${suffix}`);
+            },
         },
         provider: {
             inspectOrder: async (input) => {
@@ -1417,14 +1528,28 @@ function createDefaultCliDependencies(context) {
         },
         chat: {
             private: async (input) => requestJson(context, 'POST', '/api/chat/private', input),
-            conversations: async () => requestJson(context, 'GET', '/api/chat/private/conversations'),
+            conversations: async (input = {}) => {
+                const params = new URLSearchParams();
+                if (input.from)
+                    params.set('from', input.from);
+                const suffix = params.size ? `?${params.toString()}` : '';
+                return requestJson(context, 'GET', `/api/chat/private/conversations${suffix}`);
+            },
             messages: async (input) => {
                 const params = new URLSearchParams({ conversationId: input.conversationId });
                 if (input.limit != null)
                     params.set('limit', String(input.limit));
+                if (input.from)
+                    params.set('from', input.from);
                 return requestJson(context, 'GET', `/api/chat/private/messages?${params.toString()}`);
             },
-            autoReplyStatus: async () => requestJson(context, 'GET', '/api/chat/auto-reply/status'),
+            autoReplyStatus: async (input = {}) => {
+                const params = new URLSearchParams();
+                if (input.from)
+                    params.set('from', input.from);
+                const suffix = params.size ? `?${params.toString()}` : '';
+                return requestJson(context, 'GET', `/api/chat/auto-reply/status${suffix}`);
+            },
             setAutoReply: async (input) => requestJson(context, 'POST', '/api/chat/auto-reply/config', input),
         },
         file: {
@@ -1432,7 +1557,11 @@ function createDefaultCliDependencies(context) {
         },
         wallet: {
             balance: async (input) => {
-                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor)) {
+                    return actor;
+                }
+                const homeDir = actor.homeDir;
                 const runtimeStateStore = (0, runtimeStateStore_1.createRuntimeStateStore)(homeDir);
                 const state = await runtimeStateStore.readState();
                 if (!state.identity) {
@@ -1471,7 +1600,11 @@ function createDefaultCliDependencies(context) {
                 }
             },
             transfer: async (input) => {
-                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor)) {
+                    return actor;
+                }
+                const homeDir = actor.homeDir;
                 const runtimeStateStore = (0, runtimeStateStore_1.createRuntimeStateStore)(homeDir);
                 const state = await runtimeStateStore.readState();
                 if (!state.identity) {
@@ -1558,20 +1691,48 @@ function createDefaultCliDependencies(context) {
             },
         },
         trace: {
-            get: async (input) => input.sessionId
-                ? requestJson(context, 'GET', `/api/trace/sessions/${encodeURIComponent(input.sessionId)}`)
-                : requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId || '')}`),
-            watch: async (input) => requestText(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}/watch`),
+            get: async (input) => {
+                const query = new URLSearchParams();
+                if (input.from)
+                    query.set('from', input.from);
+                const suffix = query.size ? `?${query.toString()}` : '';
+                return input.sessionId
+                    ? requestJson(context, 'GET', `/api/trace/sessions/${encodeURIComponent(input.sessionId)}${suffix}`)
+                    : requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId || '')}${suffix}`);
+            },
+            watch: async (input) => {
+                const query = new URLSearchParams();
+                if (input.from)
+                    query.set('from', input.from);
+                const suffix = query.size ? `?${query.toString()}` : '';
+                return requestText(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}/watch${suffix}`);
+            },
+            listSessions: async (input) => {
+                const query = new URLSearchParams({
+                    all: input.all ? 'true' : 'false',
+                    limit: String(input.limit),
+                });
+                if (input.from)
+                    query.set('from', input.from);
+                return requestJson(context, 'GET', `/api/trace/sessions?${query.toString()}`);
+            },
         },
         ui: {
             open: async (input) => {
                 const baseUrl = await ensureDaemonBaseUrl(context);
-                const query = input.traceId
-                    ? `?traceId=${encodeURIComponent(input.traceId)}`
-                    : '';
+                const query = new URLSearchParams();
+                if (input.from)
+                    query.set('from', input.from);
+                if (input.traceId)
+                    query.set('traceId', input.traceId);
+                if (input.sessionId)
+                    query.set('sessionId', input.sessionId);
+                if (input.serviceId)
+                    query.set('serviceId', input.serviceId);
+                const suffix = query.size ? `?${query.toString()}` : '';
                 return (0, commandResult_1.commandSuccess)({
                     page: input.page,
-                    localUiUrl: `${baseUrl}${resolveLocalUiPath(input.page)}${query}`,
+                    localUiUrl: `${baseUrl}${resolveLocalUiPath(input.page)}${suffix}`,
                 });
             },
         },
@@ -1670,15 +1831,55 @@ function createDefaultCliDependencies(context) {
         llm: {
             listRuntimes: async () => requestJson(context, 'GET', '/api/llm/runtimes'),
             discoverRuntimes: async () => requestJson(context, 'POST', '/api/llm/runtimes/discover'),
-            listBindings: async (input) => requestJson(context, 'GET', `/api/llm/bindings/${encodeURIComponent(input.slug)}`),
-            upsertBindings: async (input) => requestJson(context, 'PUT', `/api/llm/bindings/${encodeURIComponent(input.slug)}`, { bindings: input.bindings }),
-            removeBinding: async (input) => requestJson(context, 'DELETE', `/api/llm/bindings/${encodeURIComponent(input.bindingId)}/delete`),
-            getPreferredRuntime: async (input) => requestJson(context, 'GET', `/api/llm/preferred-runtime/${encodeURIComponent(input.slug)}`),
-            setPreferredRuntime: async (input) => requestJson(context, 'PUT', `/api/llm/preferred-runtime/${encodeURIComponent(input.slug)}`, { runtimeId: input.runtimeId }),
+            listBindings: async (input = {}) => {
+                const actor = await resolveActorProfileSlug(context, input);
+                if (!('slug' in actor))
+                    return actor;
+                return requestJson(context, 'GET', `/api/llm/bindings/${encodeURIComponent(actor.slug)}`);
+            },
+            upsertBindings: async (input) => {
+                const actor = await resolveActorProfileSlug(context, input);
+                if (!('slug' in actor))
+                    return actor;
+                const bindings = input.bindings.map((binding) => {
+                    const runtimeId = typeof binding.llmRuntimeId === 'string' ? normalizeEnvText(binding.llmRuntimeId) : '';
+                    const role = typeof binding.role === 'string' ? normalizeEnvText(binding.role) : '';
+                    const existingId = typeof binding.id === 'string' ? normalizeEnvText(binding.id) : '';
+                    const id = existingId || (runtimeId && role ? `lb_${actor.slug}_${runtimeId}_${role}` : '');
+                    return {
+                        ...binding,
+                        id,
+                        metaBotSlug: actor.slug,
+                    };
+                });
+                return requestJson(context, 'PUT', `/api/llm/bindings/${encodeURIComponent(actor.slug)}`, { bindings });
+            },
+            removeBinding: async (input) => {
+                const actor = await resolveActorProfileSlug(context, { from: input.from });
+                if (!('slug' in actor))
+                    return actor;
+                const query = new URLSearchParams({ from: actor.slug });
+                return requestJson(context, 'DELETE', `/api/llm/bindings/${encodeURIComponent(input.bindingId)}/delete?${query.toString()}`);
+            },
+            getPreferredRuntime: async (input = {}) => {
+                const actor = await resolveActorProfileSlug(context, input);
+                if (!('slug' in actor))
+                    return actor;
+                return requestJson(context, 'GET', `/api/llm/preferred-runtime/${encodeURIComponent(actor.slug)}`);
+            },
+            setPreferredRuntime: async (input) => {
+                const actor = await resolveActorProfileSlug(context, input);
+                if (!('slug' in actor))
+                    return actor;
+                return requestJson(context, 'PUT', `/api/llm/preferred-runtime/${encodeURIComponent(actor.slug)}`, { runtimeId: input.runtimeId });
+            },
         },
         evolution: {
-            status: async () => {
-                const homeDir = normalizeHomeDir(context.env, context.cwd);
+            status: async (input = {}) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const homeDir = actor.homeDir;
                 const configStore = (0, configStore_1.createConfigStore)(homeDir);
                 const config = await configStore.read();
                 const evolutionStore = (0, localEvolutionStore_1.createLocalEvolutionStore)(homeDir);
@@ -1693,7 +1894,11 @@ function createDefaultCliDependencies(context) {
                 });
             },
             search: async (input) => {
-                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const homeDir = actor.homeDir;
+                const actorContext = cloneContextWithHomeDir(context, homeDir);
                 const configStore = (0, configStore_1.createConfigStore)(homeDir);
                 const config = await configStore.read();
                 if (!config.evolution_network.enabled) {
@@ -1704,7 +1909,7 @@ function createDefaultCliDependencies(context) {
                 }
                 try {
                     const resolvedScopeHash = await resolveEvolutionScopeHashForSkill({
-                        context,
+                        context: actorContext,
                         skillName: input.skill,
                         evolutionNetworkEnabled: config.evolution_network.enabled,
                     });
@@ -1729,7 +1934,10 @@ function createDefaultCliDependencies(context) {
                 }
             },
             publish: async (input) => {
-                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const homeDir = actor.homeDir;
                 const configStore = (0, configStore_1.createConfigStore)(homeDir);
                 const config = await configStore.read();
                 if (!config.evolution_network.enabled) {
@@ -1773,7 +1981,11 @@ function createDefaultCliDependencies(context) {
                 }
             },
             import: async (input) => {
-                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const homeDir = actor.homeDir;
+                const actorContext = cloneContextWithHomeDir(context, homeDir);
                 const configStore = (0, configStore_1.createConfigStore)(homeDir);
                 const config = await configStore.read();
                 if (!config.evolution_network.enabled) {
@@ -1781,7 +1993,7 @@ function createDefaultCliDependencies(context) {
                 }
                 try {
                     const resolvedScopeHash = await resolveEvolutionScopeHashForSkill({
-                        context,
+                        context: actorContext,
                         skillName: EVOLUTION_IMPORT_SKILL_NAME,
                         evolutionNetworkEnabled: config.evolution_network.enabled,
                     });
@@ -1808,7 +2020,10 @@ function createDefaultCliDependencies(context) {
                 }
             },
             imported: async (input) => {
-                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const homeDir = actor.homeDir;
                 const configStore = (0, configStore_1.createConfigStore)(homeDir);
                 const config = await configStore.read();
                 if (!config.evolution_network.enabled) {
@@ -1835,7 +2050,11 @@ function createDefaultCliDependencies(context) {
                 }
             },
             adopt: async (input) => {
-                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const homeDir = actor.homeDir;
+                const actorContext = cloneContextWithHomeDir(context, homeDir);
                 if (input.source === 'remote') {
                     const configStore = (0, configStore_1.createConfigStore)(homeDir);
                     const config = await configStore.read();
@@ -1847,7 +2066,7 @@ function createDefaultCliDependencies(context) {
                     }
                     try {
                         const resolvedScopeHash = await resolveEvolutionScopeHashForSkill({
-                            context,
+                            context: actorContext,
                             skillName: input.skill,
                             evolutionNetworkEnabled: config.evolution_network.enabled,
                         });
@@ -1894,12 +2113,52 @@ function createDefaultCliDependencies(context) {
                 });
             },
             rollback: async (input) => {
-                const rollback = await clearActiveVariantMapping(context, input.skill);
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const rollback = await clearActiveVariantMapping(cloneContextWithHomeDir(context, actor.homeDir), input.skill);
                 return (0, commandResult_1.commandSuccess)({
                     skillName: input.skill,
                     rolledBack: rollback.removed,
                     previousVariantId: rollback.previousVariantId,
                 });
+            },
+        },
+        bot: {
+            listProfiles: async () => requestJson(context, 'GET', '/api/bot/profiles'),
+            getProfile: async (input) => requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}`),
+            createProfile: async (input) => requestJson(context, 'POST', '/api/bot/profiles', input),
+            updateProfile: async (input) => {
+                const { slug, ...body } = input;
+                return requestJson(context, 'PUT', `/api/bot/profiles/${encodeURIComponent(slug)}`, body);
+            },
+            deleteProfile: async (input) => requestJson(context, 'DELETE', `/api/bot/profiles/${encodeURIComponent(input.slug)}`),
+            getConfig: async (input) => requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}/config`),
+            setConfig: async (input) => {
+                const { slug, ...body } = input;
+                return requestJson(context, 'PUT', `/api/bot/profiles/${encodeURIComponent(slug)}/config`, body);
+            },
+            getWallet: async (input) => requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}/wallet`),
+            getBackup: async (input) => requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}/backup`),
+            listRuntimes: async (input = {}) => {
+                const query = new URLSearchParams();
+                if (input.from)
+                    query.set('from', input.from);
+                const suffix = query.size ? `?${query.toString()}` : '';
+                return requestJson(context, 'GET', `/api/bot/runtimes${suffix}`);
+            },
+            discoverRuntimes: async (input = {}) => {
+                const query = new URLSearchParams();
+                if (input.from)
+                    query.set('from', input.from);
+                const suffix = query.size ? `?${query.toString()}` : '';
+                return requestJson(context, 'POST', `/api/bot/runtimes/discover${suffix}`);
+            },
+            listSessions: async (input) => {
+                const query = new URLSearchParams({ limit: String(input.limit) });
+                if (input.slug)
+                    query.set('slug', input.slug);
+                return requestJson(context, 'GET', `/api/bot/sessions?${query.toString()}`);
             },
         },
     };
@@ -1933,6 +2192,7 @@ function mergeCliDependencies(context) {
         host: { ...defaults.host, ...provided.host },
         system: { ...defaults.system, ...provided.system },
         llm: { ...defaults.llm, ...provided.llm },
+        bot: { ...defaults.bot, ...provided.bot },
         evolution: { ...defaults.evolution, ...provided.evolution },
     };
 }
@@ -2009,6 +2269,15 @@ async function serveCliDaemonProcess(context) {
         masterReplyWaiter,
         servicePaymentExecutor,
         requestMvcGasSubsidy,
+        createSignerForHome: (profileHomeDir) => {
+            const profileBaseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
+                secretStore: (0, fileSecretStore_1.createFileSecretStore)(profileHomeDir),
+                adapters,
+            });
+            return context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+                ? createTestChainWriteSigner(profileBaseSigner)
+                : profileBaseSigner;
+        },
         autoReplyConfig: sharedAutoReplyConfig,
         llmExecutor,
         providerRuntimeCanStart: useFakeProviderLlm ? async () => true : undefined,

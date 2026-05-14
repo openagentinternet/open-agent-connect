@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.readFlagValue = readFlagValue;
+exports.readFromFlag = readFromFlag;
 exports.readChainWriteFlag = readChainWriteFlag;
 exports.readFileUploadChainFlag = readFileUploadChainFlag;
 exports.hasFlag = hasFlag;
@@ -18,6 +19,11 @@ function readFlagValue(args, flag) {
         return null;
     const value = args[index + 1];
     return typeof value === 'string' ? value : null;
+}
+function readFromFlag(args, options = {}) {
+    return readFlagValue(args, '--from')
+        ?? (options.allowSlugAlias ? readFlagValue(args, '--slug') : null)
+        ?? undefined;
 }
 function readSupportedChainFlag(args, supportedValues, unsupportedSuffix = '') {
     const index = args.indexOf('--chain');

@@ -123,6 +123,11 @@ const CHAIN_WRITE_FLAG = {
     value: '<mvc|btc|doge|opcat>',
     description: `Optional chain network override: mvc, btc, doge, or opcat. ${CONFIGURED_WRITE_NETWORK_TEXT}`,
 };
+const FROM_BOT_FLAG = {
+    flag: '--from',
+    value: '<bot-slug>',
+    description: 'Optional local MetaBot actor. Omit to use the active identity.',
+};
 const FILE_UPLOAD_CHAIN_FLAG = {
     flag: '--chain',
     value: '<mvc|btc|opcat>',
@@ -143,6 +148,7 @@ exports.ROOT_COMMAND_HELP = {
     usage: 'metabot <command>',
     subcommands: [
         { name: 'identity', summary: 'Create the local MetaBot identity and bootstrap chain state.' },
+        { name: 'bot', summary: 'Manage local MetaBot profiles, config, wallets, runtimes, and sessions.' },
         { name: 'config', summary: 'Read or change supported public runtime switches.' },
         { name: 'doctor', summary: 'Check daemon health, identity state, and local runtime readiness.' },
         { name: 'daemon', summary: 'Start or stop the local MetaBot daemon process.' },
@@ -160,18 +166,113 @@ exports.ROOT_COMMAND_HELP = {
         { name: 'ui', summary: 'Open local human-only HTML pages backed by the MetaBot runtime.' },
         { name: 'skills', summary: 'Resolve shared-default or host-specific skill contracts for install/runtime use.' },
         { name: 'system', summary: 'Update or uninstall local Open Agent Connect runtime assets.' },
+        { name: 'evolution', summary: 'Inspect, publish, import, and adopt skill evolution artifacts.' },
         { name: 'llm', summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings.' },
     ],
     optionalFlags: [VERSION_FLAG, HELP_JSON_FLAG],
     examples: [
         'metabot --version',
-        'metabot config get askMaster.enabled',
+        'metabot config get --from alice askMaster.enabled',
         'metabot services call --help',
         'metabot chat private --help --json',
     ],
 };
 const COMMAND_HELP_SPECS = [
     exports.ROOT_COMMAND_HELP,
+    {
+        commandPath: ['bot'],
+        summary: 'Manage local MetaBot profiles, config, wallets, runtimes, and sessions.',
+        usage: 'metabot bot <subcommand>',
+        subcommands: [
+            { name: 'list', summary: 'List local MetaBot profiles.' },
+            { name: 'show', summary: 'Show one local MetaBot profile.' },
+            { name: 'create', summary: 'Create one local MetaBot profile.' },
+            { name: 'update', summary: 'Update one local MetaBot profile.' },
+            { name: 'delete', summary: 'Delete one local MetaBot profile after confirmation.' },
+            { name: 'config', summary: 'Get or set one MetaBot profile config.' },
+            { name: 'wallet', summary: 'Show wallet metadata for one MetaBot profile.' },
+            { name: 'backup', summary: 'Show mnemonic backup material for one MetaBot profile.' },
+            { name: 'runtimes', summary: 'List or discover LLM runtimes for a MetaBot profile.' },
+            { name: 'sessions', summary: 'List runtime sessions for a MetaBot profile.' },
+        ],
+        optionalFlags: [HELP_JSON_FLAG],
+    },
+    {
+        commandPath: ['bot', 'show'],
+        summary: 'Show one local MetaBot profile.',
+        usage: 'metabot bot show --from <bot-slug>',
+        requiredFlags: [FROM_BOT_FLAG],
+        examples: ['metabot bot show --from alice'],
+    },
+    {
+        commandPath: ['bot', 'create'],
+        summary: 'Create one local MetaBot profile.',
+        usage: 'metabot bot create --name <name>',
+        requiredFlags: [
+            { flag: '--name', value: '<name>', description: 'Human-facing name for the new local MetaBot profile.' },
+        ],
+        examples: ['metabot bot create --name "Alice"'],
+    },
+    {
+        commandPath: ['bot', 'update'],
+        summary: 'Update one local MetaBot profile.',
+        usage: 'metabot bot update --from <bot-slug> --payload-file <path>',
+        requiredFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--payload-file', value: '<path>', description: 'JSON profile update payload.' },
+        ],
+    },
+    {
+        commandPath: ['bot', 'delete'],
+        summary: 'Delete one local MetaBot profile after confirmation.',
+        usage: 'metabot bot delete --from <bot-slug> --confirm',
+        requiredFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--confirm', description: 'Required explicit confirmation for profile deletion.' },
+        ],
+    },
+    {
+        commandPath: ['bot', 'config'],
+        summary: 'Get or set one MetaBot profile config.',
+        usage: 'metabot bot config <get|set>',
+        subcommands: [
+            { name: 'get', summary: 'Read one MetaBot profile config.' },
+            { name: 'set', summary: 'Write one MetaBot profile config from JSON.' },
+        ],
+        optionalFlags: [HELP_JSON_FLAG],
+    },
+    {
+        commandPath: ['bot', 'wallet'],
+        summary: 'Show wallet metadata for one MetaBot profile.',
+        usage: 'metabot bot wallet --from <bot-slug>',
+        requiredFlags: [FROM_BOT_FLAG],
+    },
+    {
+        commandPath: ['bot', 'backup'],
+        summary: 'Show mnemonic backup material for one MetaBot profile.',
+        usage: 'metabot bot backup --from <bot-slug>',
+        requiredFlags: [FROM_BOT_FLAG],
+    },
+    {
+        commandPath: ['bot', 'runtimes'],
+        summary: 'List or discover LLM runtimes for a MetaBot profile.',
+        usage: 'metabot bot runtimes <list|discover> [--from <bot-slug>]',
+        subcommands: [
+            { name: 'list', summary: 'List known LLM runtimes.' },
+            { name: 'discover', summary: 'Refresh discovered LLM runtimes.' },
+        ],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+    },
+    {
+        commandPath: ['bot', 'sessions'],
+        summary: 'List runtime sessions for a MetaBot profile.',
+        usage: 'metabot bot sessions [--from <bot-slug>] [--limit <n>]',
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--limit', value: '<n>', description: 'Maximum session count. Defaults to 50.' },
+            HELP_JSON_FLAG,
+        ],
+    },
     {
         commandPath: ['host'],
         summary: 'Host projection commands for binding shared MetaBot skills into one host-native skills root.',
@@ -259,22 +360,22 @@ const COMMAND_HELP_SPECS = [
         summary: 'Read or change supported public runtime switches such as Ask Master availability and default write network.',
         usage: 'metabot config <subcommand>',
         subcommands: [
-            { name: 'get', summary: 'Read one supported config key from the active local runtime home.' },
-            { name: 'set', summary: 'Persist one supported config key for the active local runtime home.' },
+            { name: 'get', summary: 'Read one supported config key for one MetaBot actor.' },
+            { name: 'set', summary: 'Persist one supported config key for one MetaBot actor.' },
         ],
         optionalFlags: [HELP_JSON_FLAG],
         examples: [
-            'metabot config get chain.defaultWriteNetwork',
-            'metabot config set chain.defaultWriteNetwork opcat',
-            'metabot config get askMaster.enabled',
-            'metabot config get a2a.simplemsgListenerEnabled',
-            'metabot config set askMaster.triggerMode suggest',
+            'metabot config get --from alice chain.defaultWriteNetwork',
+            'metabot config set --from alice chain.defaultWriteNetwork opcat',
+            'metabot config get --from alice askMaster.enabled',
+            'metabot config get --from alice a2a.simplemsgListenerEnabled',
+            'metabot config set --from alice askMaster.triggerMode suggest',
         ],
     },
     {
         commandPath: ['config', 'get'],
         summary: 'Read one supported public config key such as the default write network, Ask Master availability, or trigger mode.',
-        usage: 'metabot config get <key>',
+        usage: 'metabot config get [--from <bot-slug>] <key>',
         successFields: [
             'key',
             'value',
@@ -284,17 +385,17 @@ const COMMAND_HELP_SPECS = [
             'Fails with unsupported_config_key when the requested key is not in the public CLI allowlist.',
         ],
         examples: [
-            'metabot config get chain.defaultWriteNetwork',
-            'metabot config get askMaster.enabled',
-            'metabot config get askMaster.triggerMode',
-            'metabot config get a2a.simplemsgListenerEnabled',
+            'metabot config get --from alice chain.defaultWriteNetwork',
+            'metabot config get --from alice askMaster.enabled',
+            'metabot config get --from alice askMaster.triggerMode',
+            'metabot config get --from alice a2a.simplemsgListenerEnabled',
         ],
-        optionalFlags: [HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['config', 'set'],
         summary: 'Persist one supported public config key. Ask Master trigger mode is intentionally limited to manual or suggest for the current release.',
-        usage: 'metabot config set <key> <value>',
+        usage: 'metabot config set [--from <bot-slug>] <key> <value>',
         successFields: [
             'key',
             'value',
@@ -306,12 +407,12 @@ const COMMAND_HELP_SPECS = [
             'Fails when askMaster.triggerMode is not one of `manual` or `suggest`.',
         ],
         examples: [
-            'metabot config set chain.defaultWriteNetwork opcat',
-            'metabot config set askMaster.enabled false',
-            'metabot config set a2a.simplemsgListenerEnabled false',
-            'metabot config set askMaster.triggerMode suggest',
+            'metabot config set --from alice chain.defaultWriteNetwork opcat',
+            'metabot config set --from alice askMaster.enabled false',
+            'metabot config set --from alice a2a.simplemsgListenerEnabled false',
+            'metabot config set --from alice askMaster.triggerMode suggest',
         ],
-        optionalFlags: [HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['identity'],
@@ -463,7 +564,7 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['file', 'upload'],
         summary: 'Upload one local file to MetaWeb and return the resulting metafile URI.',
-        usage: 'metabot file upload --request-file <path> [--chain <mvc|btc|opcat>]',
+        usage: 'metabot file upload [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|opcat>]',
         requiredFlags: [
             { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
         ],
@@ -483,10 +584,10 @@ const COMMAND_HELP_SPECS = [
             'DOGE is not supported for file upload.',
         ],
         examples: [
-            'metabot file upload --request-file file-request.json',
-            'metabot file upload --request-file file-opcat-request.json --chain opcat',
+            'metabot file upload --from alice --request-file file-request.json',
+            'metabot file upload --from alice --request-file file-opcat-request.json --chain opcat',
         ],
-        optionalFlags: [FILE_UPLOAD_CHAIN_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, FILE_UPLOAD_CHAIN_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['buzz'],
@@ -500,7 +601,7 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['buzz', 'post'],
         summary: 'Publish one simplebuzz post through the validated MetaWeb buzz contract.',
-        usage: 'metabot buzz post --request-file <path> [--chain <mvc|btc|doge|opcat>]',
+        usage: 'metabot buzz post [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|doge|opcat>]',
         requiredFlags: [
             { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
         ],
@@ -517,11 +618,11 @@ const COMMAND_HELP_SPECS = [
             'Fails when no local identity exists, attachment upload fails, or the chain write is rejected.',
         ],
         examples: [
-            'metabot buzz post --request-file buzz-request.json',
-            'metabot buzz post --request-file buzz-doge-request.json --chain doge',
-            'metabot buzz post --request-file buzz-opcat-request.json --chain opcat',
+            'metabot buzz post --from alice --request-file buzz-request.json',
+            'metabot buzz post --from alice --request-file buzz-doge-request.json --chain doge',
+            'metabot buzz post --from alice --request-file buzz-opcat-request.json --chain opcat',
         ],
-        optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['chain'],
@@ -535,7 +636,7 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['chain', 'write'],
         summary: 'Write one arbitrary MetaID tuple using the public chain-write interface.',
-        usage: 'metabot chain write --request-file <path> [--chain <mvc|btc|doge|opcat>]',
+        usage: 'metabot chain write [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|doge|opcat>]',
         requiredFlags: [
             { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
         ],
@@ -557,11 +658,11 @@ const COMMAND_HELP_SPECS = [
             'Fails when the local signer cannot build or broadcast the requested chain write.',
         ],
         examples: [
-            'metabot chain write --request-file chain-request.json',
-            'metabot chain write --request-file chain-doge-request.json --chain doge',
-            'metabot chain write --request-file chain-opcat-request.json --chain opcat',
+            'metabot chain write --from alice --request-file chain-request.json',
+            'metabot chain write --from alice --request-file chain-doge-request.json --chain doge',
+            'metabot chain write --from alice --request-file chain-opcat-request.json --chain opcat',
         ],
-        optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['wallet'],
@@ -576,12 +677,13 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['wallet', 'transfer'],
         summary: 'Preview or execute a BTC, SPACE, DOGE, or OPCAT transfer to a target address. Without --confirm, returns a preview for confirmation. With --confirm, executes the transfer.',
-        usage: 'metabot wallet transfer --to <address> --amount <amount><UNIT> [--confirm]',
+        usage: 'metabot wallet transfer [--from <bot-slug>] --to <address> --amount <amount><UNIT> [--confirm]',
         requiredFlags: [
             { flag: '--to', value: '<address>', description: 'Recipient address.' },
             { flag: '--amount', value: '<amount><UNIT>', description: 'Amount with currency unit: BTC, SPACE, DOGE, or OPCAT (case-insensitive). Example: 0.00001BTC, 1SPACE, 0.01DOGE, 10OPCAT.' },
         ],
         optionalFlags: [
+            FROM_BOT_FLAG,
             { flag: '--confirm', description: 'Execute the transfer. Omit to preview only.' },
             HELP_JSON_FLAG,
         ],
@@ -598,16 +700,16 @@ const COMMAND_HELP_SPECS = [
             'Fails with transfer_broadcast_failed when the network rejects the transaction.',
         ],
         examples: [
-            'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC',
-            'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC --confirm',
-            'metabot wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 1SPACE --confirm',
-            'metabot wallet transfer --to o1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 10OPCAT',
+            'metabot wallet transfer --from alice --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC',
+            'metabot wallet transfer --from alice --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC --confirm',
+            'metabot wallet transfer --from alice --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 1SPACE --confirm',
+            'metabot wallet transfer --from alice --to o1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 10OPCAT',
         ],
     },
     {
         commandPath: ['wallet', 'balance'],
         summary: 'Query local wallet balances for mvc, btc, doge, and opcat. Defaults to all chains.',
-        usage: 'metabot wallet balance [--chain <all|mvc|btc|doge|opcat>]',
+        usage: 'metabot wallet balance [--from <bot-slug>] [--chain <all|mvc|btc|doge|opcat>]',
         successFields: [
             'chain',
             'globalMetaId',
@@ -620,12 +722,12 @@ const COMMAND_HELP_SPECS = [
             'Fails when no local identity is loaded or the selected chain balance API is unavailable.',
         ],
         examples: [
-            'metabot wallet balance',
-            'metabot wallet balance --chain btc',
-            'metabot wallet balance --chain doge',
-            'metabot wallet balance --chain opcat',
+            'metabot wallet balance --from alice',
+            'metabot wallet balance --from alice --chain btc',
+            'metabot wallet balance --from alice --chain doge',
+            'metabot wallet balance --from alice --chain opcat',
         ],
-        optionalFlags: [WALLET_CHAIN_ALL_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, WALLET_CHAIN_ALL_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['master'],
@@ -644,16 +746,16 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['master', 'publish'],
         summary: 'Publish one master-service payload for a remote master/provider.',
-        usage: 'metabot master publish --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
+        usage: 'metabot master publish [--from <bot-slug>] --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
         requiredFlags: [
             { flag: '--payload-file', value: '<path>', description: 'JSON master-service payload file.' },
         ],
         examples: [
-            'metabot master publish --payload-file master-payload.json',
-            'metabot master publish --payload-file master-doge-payload.json --chain doge',
-            'metabot master publish --payload-file master-opcat-payload.json --chain opcat',
+            'metabot master publish --from alice --payload-file master-payload.json',
+            'metabot master publish --from alice --payload-file master-doge-payload.json --chain doge',
+            'metabot master publish --from alice --payload-file master-opcat-payload.json --chain opcat',
         ],
-        optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['master', 'list'],
@@ -668,7 +770,7 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['master', 'ask'],
         summary: 'Preview or confirm one Ask Master request from a request file or pending trace.',
-        usage: 'metabot master ask --request-file <path> | metabot master ask --trace-id <trace-id> [--confirm]',
+        usage: 'metabot master ask [--from <bot-slug>] --request-file <path> | metabot master ask [--from <bot-slug>] --trace-id <trace-id> [--confirm]',
         requiredFlags: [
             {
                 flag: '--request-file | --trace-id',
@@ -677,6 +779,7 @@ const COMMAND_HELP_SPECS = [
             },
         ],
         optionalFlags: [
+            FROM_BOT_FLAG,
             { flag: '--confirm', description: 'Send a previously previewed Ask Master request. Only valid together with `--trace-id`.' },
             HELP_JSON_FLAG,
         ],
@@ -714,11 +817,11 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['master', 'trace'],
         summary: 'Inspect one Ask Master trace record.',
-        usage: 'metabot master trace --id <trace-id>',
+        usage: 'metabot master trace [--from <bot-slug>] --id <trace-id>',
         requiredFlags: [
             { flag: '--id', value: '<trace-id>', description: 'Ask Master trace id.' },
         ],
-        optionalFlags: [HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['network'],
@@ -845,7 +948,11 @@ const COMMAND_HELP_SPECS = [
         usage: 'metabot services <subcommand>',
         subcommands: [
             { name: 'publish', summary: 'Publish one paid capability to chain.' },
-            { name: 'publish-skills', summary: 'List primary-runtime skills available for service publishing.' },
+            { name: 'skills', summary: 'List primary-runtime skills available for service publishing.' },
+            { name: 'publish-skills', summary: 'Compatibility alias for services skills.' },
+            { name: 'owned', summary: 'List and manage services owned by local MetaBots.' },
+            { name: 'orders', summary: 'Inspect seller-side service orders.' },
+            { name: 'refunds', summary: 'List and settle service refunds.' },
             { name: 'call', summary: 'Delegate one task to a remote MetaBot service.' },
             { name: 'rate', summary: 'Publish one buyer-side service rating after delivery.' },
         ],
@@ -854,7 +961,7 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['services', 'publish'],
         summary: 'Publish one service to the chain-backed skill-service directory.',
-        usage: 'metabot services publish --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
+        usage: 'metabot services publish [--from <bot-slug>] --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
         requiredFlags: [
             { flag: '--payload-file', value: '<path>', description: 'JSON service payload file.' },
         ],
@@ -878,16 +985,38 @@ const COMMAND_HELP_SPECS = [
             'Fails when no local identity exists, payload validation fails, or the service chain write is rejected.',
         ],
         examples: [
-            'metabot services publish --payload-file service-payload.json',
-            'metabot services publish --payload-file service-doge-payload.json --chain doge',
-            'metabot services publish --payload-file service-opcat-payload.json --chain opcat',
+            'metabot services publish --from provider --payload-file service-payload.json',
+            'metabot services publish --from provider --payload-file service-doge-payload.json --chain doge',
+            'metabot services publish --from provider --payload-file service-opcat-payload.json --chain opcat',
         ],
-        optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+    },
+    {
+        commandPath: ['services', 'skills'],
+        summary: 'Lists skills from one local MetaBot primary runtime only.',
+        usage: 'metabot services skills [--from <bot-slug>]',
+        successFields: [
+            'metaBotSlug',
+            'identity',
+            'runtime',
+            'platform',
+            'skills',
+            'rootDiagnostics',
+        ],
+        failureSemantics: [
+            'Fails before chain writes when no identity exists, the primary runtime is missing, or the primary runtime is unavailable.',
+            'Fallback runtime skills are intentionally excluded from this list.',
+        ],
+        examples: [
+            'metabot services skills',
+            'metabot services skills --from alice',
+        ],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['services', 'publish-skills'],
-        summary: 'Lists skills from the active MetaBot primary runtime only.',
-        usage: 'metabot services publish-skills',
+        summary: 'Compatibility alias for `metabot services skills`.',
+        usage: 'metabot services publish-skills [--slug <bot-slug>]',
         successFields: [
             'metaBotSlug',
             'identity',
@@ -902,18 +1031,196 @@ const COMMAND_HELP_SPECS = [
         ],
         examples: [
             'metabot services publish-skills',
+            'metabot services publish-skills --slug alice',
+        ],
+        optionalFlags: [
+            { flag: '--slug', value: '<bot-slug>', description: 'Compatibility actor selector. Prefer --from with `metabot services skills`.' },
+            HELP_JSON_FLAG,
+        ],
+    },
+    {
+        commandPath: ['services', 'owned'],
+        summary: 'Owner-side service commands backing the my-services UI.',
+        usage: 'metabot services owned <subcommand>',
+        subcommands: [
+            { name: 'list', summary: 'List services owned by the active, selected, or all local MetaBots.' },
+            { name: 'orders', summary: 'List completed/refunded orders for one owned service.' },
+            { name: 'modify', summary: 'Publish an on-chain modification for one owned service.' },
+            { name: 'revoke', summary: 'Publish an on-chain revocation for one owned service.' },
         ],
         optionalFlags: [HELP_JSON_FLAG],
     },
     {
+        commandPath: ['services', 'owned', 'list'],
+        summary: 'List services owned by the active, selected, or all local MetaBots.',
+        usage: 'metabot services owned list [--from <bot-slug> | --all] [--page <n>] [--page-size <n>] [--refresh]',
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--all', description: 'Aggregate owned services across all local MetaBot profiles.' },
+            { flag: '--page', value: '<n>', description: 'Page number. Defaults to 1.' },
+            { flag: '--page-size', value: '<n>', description: 'Page size. Defaults to 20.' },
+            { flag: '--refresh', description: 'Refresh rating details before rendering the owner view.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: ['items', 'page', 'pageSize', 'total', 'totalPages'],
+        examples: [
+            'metabot services owned list',
+            'metabot services owned list --from alice',
+            'metabot services owned list --all --refresh',
+        ],
+    },
+    {
+        commandPath: ['services', 'owned', 'orders'],
+        summary: 'List completed/refunded orders for one owned service.',
+        usage: 'metabot services owned orders --service-id <service-pin-id> [--from <bot-slug> | --all] [--page <n>] [--page-size <n>] [--refresh]',
+        requiredFlags: [
+            { flag: '--service-id', value: '<service-pin-id>', description: 'Current or source service pin id.' },
+        ],
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--all', description: 'Search all local MetaBot profiles for the service.' },
+            { flag: '--page', value: '<n>', description: 'Page number. Defaults to 1.' },
+            { flag: '--page-size', value: '<n>', description: 'Page size. Defaults to 20.' },
+            { flag: '--refresh', description: 'Refresh rating details before rendering order rows.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: ['items', 'page', 'pageSize', 'total', 'totalPages'],
+        examples: [
+            'metabot services owned orders --service-id <service-pin-id>',
+            'metabot services owned orders --service-id <service-pin-id> --all',
+        ],
+    },
+    {
+        commandPath: ['services', 'owned', 'modify'],
+        summary: 'Publish an on-chain modification for one owned service.',
+        usage: 'metabot services owned modify [--from <bot-slug>] --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
+        requiredFlags: [
+            { flag: '--payload-file', value: '<path>', description: 'JSON modification payload, including serviceId.' },
+        ],
+        optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+        failureSemantics: [
+            'Rejects --all because service mutations must choose exactly one local MetaBot actor.',
+        ],
+        examples: [
+            'metabot services owned modify --from alice --payload-file service-update.json --chain btc',
+        ],
+    },
+    {
+        commandPath: ['services', 'owned', 'revoke'],
+        summary: 'Publish an on-chain revocation for one owned service.',
+        usage: 'metabot services owned revoke [--from <bot-slug>] --service-id <service-pin-id> [--chain <mvc|btc|doge|opcat>]',
+        requiredFlags: [
+            { flag: '--service-id', value: '<service-pin-id>', description: 'Current or source service pin id.' },
+        ],
+        optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+        failureSemantics: [
+            'Rejects --all because service mutations must choose exactly one local MetaBot actor.',
+        ],
+        examples: [
+            'metabot services owned revoke --from alice --service-id <service-pin-id> --chain doge',
+        ],
+    },
+    {
+        commandPath: ['services', 'orders'],
+        summary: 'Seller-side service order inspection commands.',
+        usage: 'metabot services orders <subcommand>',
+        subcommands: [
+            { name: 'inspect', summary: 'Inspect one seller order by order id or payment txid.' },
+        ],
+        optionalFlags: [HELP_JSON_FLAG],
+    },
+    {
+        commandPath: ['services', 'orders', 'inspect'],
+        summary: 'Inspect one seller-side service order and return service, buyer, status, trace, payment, runtime session, and refund fields.',
+        usage: 'metabot services orders inspect [--from <bot-slug>] (--order-id <id> | --payment-txid <txid>)',
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--order-id', value: '<id>', description: 'Local seller order id.' },
+            { flag: '--payment-txid', value: '<txid>', description: 'Payment txid associated with the seller order.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: [
+            'order.orderId',
+            'order.service',
+            'order.buyer',
+            'order.status',
+            'order.trace',
+            'order.payment',
+            'order.runtime',
+            'order.refund',
+        ],
+        failureSemantics: [
+            'Fails when neither selector is provided, both selectors are provided, or no seller order matches the selector.',
+        ],
+        examples: [
+            'metabot services orders inspect --from seller --order-id seller-order-123',
+            'metabot services orders inspect --payment-txid <txid>',
+        ],
+    },
+    {
+        commandPath: ['services', 'refunds'],
+        summary: 'Refund commands for buyer-initiated and seller-received service refunds.',
+        usage: 'metabot services refunds <subcommand>',
+        subcommands: [
+            { name: 'list', summary: 'List initiated, received, or all service refunds.' },
+            { name: 'settle', summary: 'Settle one pending seller refund by order id or payment txid.' },
+        ],
+        optionalFlags: [HELP_JSON_FLAG],
+    },
+    {
+        commandPath: ['services', 'refunds', 'list'],
+        summary: 'List initiated, received, or all service refunds.',
+        usage: 'metabot services refunds list [--from <bot-slug> | --all] [--kind <all|initiated|received> | --initiated | --received]',
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--all', description: 'Aggregate refunds across all local MetaBot profiles when supported by the runtime.' },
+            { flag: '--kind', value: '<all|initiated|received>', description: 'Select all refunds, buyer-side initiated refunds, or seller-side received refund requests.' },
+            { flag: '--initiated', description: 'Show buyer-side refunds initiated by the selected local MetaBot.' },
+            { flag: '--received', description: 'Show seller-side refund requests received by the selected local MetaBot.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: ['initiatedByMe', 'receivedByMe', 'totalCount', 'pendingCount'],
+        examples: [
+            'metabot services refunds list --from buyer --initiated',
+            'metabot services refunds list --all --received',
+        ],
+    },
+    {
+        commandPath: ['services', 'refunds', 'settle'],
+        summary: 'Settle one pending seller refund and return a refund txid, finalization pin, or a machine-readable blocking reason.',
+        usage: 'metabot services refunds settle [--from <bot-slug>] (--order-id <id> | --payment-txid <txid>)',
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--order-id', value: '<id>', description: 'Local seller order id.' },
+            { flag: '--payment-txid', value: '<txid>', description: 'Payment txid associated with the seller order.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: [
+            'orderId',
+            'paymentTxid',
+            'refundTxid',
+            'refundFinalizePinId',
+            'order',
+            'settlement',
+        ],
+        failureSemantics: [
+            'Returns manual_action_required with order.refund.blockingReason when settlement is blocked by missing proof, unsupported asset, missing destination address, insufficient balance, transfer failure, or finalization failure.',
+        ],
+        examples: [
+            'metabot services refunds settle --from seller --order-id seller-order-123',
+            'metabot services refunds settle --payment-txid <txid>',
+        ],
+    },
+    {
         commandPath: ['provider'],
-        summary: 'Provider operations for local seller-side order inspection and refund settlement.',
+        summary: 'Compatibility aliases for seller-side service order inspection and refund settlement.',
         usage: 'metabot provider <subcommand>',
         subcommands: [
             { name: 'order', summary: 'Inspect seller-side provider orders.' },
             { name: 'refund', summary: 'Process seller-side refund settlement.' },
         ],
         failureSemantics: [
+            'Prefer `metabot services orders inspect` and `metabot services refunds settle` for new automation.',
             'Provider operations resolve the active local MetaBot and fail before settlement when no active identity exists.',
             'Refund settlement returns a machine-readable blocker instead of marking an order refunded without proof.',
         ],
@@ -934,9 +1241,10 @@ const COMMAND_HELP_SPECS = [
     },
     {
         commandPath: ['provider', 'order', 'inspect'],
-        summary: 'Inspect one seller-side provider order and return service, buyer, status, trace, payment, runtime session, and refund fields.',
-        usage: 'metabot provider order inspect (--order-id <id> | --payment-txid <txid>)',
+        summary: 'Compatibility alias for `metabot services orders inspect`.',
+        usage: 'metabot provider order inspect [--from <bot-slug>] (--order-id <id> | --payment-txid <txid>)',
         optionalFlags: [
+            FROM_BOT_FLAG,
             { flag: '--order-id', value: '<id>', description: 'Local seller order id.' },
             { flag: '--payment-txid', value: '<txid>', description: 'Payment txid associated with the seller order.' },
             HELP_JSON_FLAG,
@@ -970,9 +1278,10 @@ const COMMAND_HELP_SPECS = [
     },
     {
         commandPath: ['provider', 'refund', 'settle'],
-        summary: 'Settle one pending seller refund and return a refund txid, finalization pin, or a machine-readable blocking reason.',
-        usage: 'metabot provider refund settle (--order-id <id> | --payment-txid <txid>)',
+        summary: 'Compatibility alias for `metabot services refunds settle`.',
+        usage: 'metabot provider refund settle [--from <bot-slug>] (--order-id <id> | --payment-txid <txid>)',
         optionalFlags: [
+            FROM_BOT_FLAG,
             { flag: '--order-id', value: '<id>', description: 'Local seller order id.' },
             { flag: '--payment-txid', value: '<txid>', description: 'Payment txid associated with the seller order.' },
             HELP_JSON_FLAG,
@@ -996,7 +1305,7 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['services', 'call'],
         summary: 'Delegate one task to a remote MetaBot and keep the result in the current host session.',
-        usage: 'metabot services call --request-file <path>',
+        usage: 'metabot services call [--from <bot-slug>] --request-file <path>',
         requiredFlags: [
             { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
         ],
@@ -1028,14 +1337,14 @@ const COMMAND_HELP_SPECS = [
             'manual_action_required means the runtime needs a local UI handoff before the workflow can continue.',
         ],
         examples: [
-            'metabot services call --request-file request.json',
+            'metabot services call --from buyer --request-file request.json',
         ],
-        optionalFlags: [HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['services', 'rate'],
         summary: 'Publish one buyer-side service rating and optionally deliver a follow-up private message back to the provider.',
-        usage: 'metabot services rate --request-file <path> [--chain <mvc|btc|doge|opcat>]',
+        usage: 'metabot services rate [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|doge|opcat>]',
         requiredFlags: [
             { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
         ],
@@ -1057,11 +1366,11 @@ const COMMAND_HELP_SPECS = [
             'ratingMessageSent can be false even when the on-chain rating write succeeded.',
         ],
         examples: [
-            'metabot services rate --request-file rating.json',
-            'metabot services rate --request-file rating-doge.json --chain doge',
-            'metabot services rate --request-file rating-opcat.json --chain opcat',
+            'metabot services rate --from buyer --request-file rating.json',
+            'metabot services rate --from buyer --request-file rating-doge.json --chain doge',
+            'metabot services rate --from buyer --request-file rating-opcat.json --chain opcat',
         ],
-        optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['chat'],
@@ -1078,7 +1387,7 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['chat', 'private'],
         summary: 'Send one encrypted private MetaWeb message to another MetaBot.',
-        usage: 'metabot chat private --request-file <path> [--chain <mvc|btc|doge|opcat>]',
+        usage: 'metabot chat private [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|doge|opcat>]',
         requiredFlags: [
             { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
         ],
@@ -1102,26 +1411,111 @@ const COMMAND_HELP_SPECS = [
             'Fails with chat_broadcast_failed when the simplemsg chain write is rejected.',
         ],
         examples: [
-            'metabot chat private --request-file chat-request.json',
-            'metabot chat private --request-file chat-doge-request.json --chain doge',
-            'metabot chat private --request-file chat-opcat-request.json --chain opcat',
+            'metabot chat private --from alice --request-file chat-request.json',
+            'metabot chat private --from alice --request-file chat-doge-request.json --chain doge',
+            'metabot chat private --from alice --request-file chat-opcat-request.json --chain opcat',
         ],
-        optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+    },
+    {
+        commandPath: ['chat', 'conversations'],
+        summary: 'List local private chat conversations for one MetaBot actor.',
+        usage: 'metabot chat conversations [--from <bot-slug>]',
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        successFields: ['conversations'],
+        examples: [
+            'metabot chat conversations',
+            'metabot chat conversations --from alice',
+        ],
+    },
+    {
+        commandPath: ['chat', 'messages'],
+        summary: 'Show recent messages for one local private chat conversation.',
+        usage: 'metabot chat messages [--from <bot-slug>] --conversation-id <conversation-id> [--limit <n>]',
+        requiredFlags: [
+            { flag: '--conversation-id', value: '<conversation-id>', description: 'Local private chat conversation id.' },
+        ],
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--limit', value: '<n>', description: 'Maximum message count. Defaults to 50.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: ['messages'],
+        examples: [
+            'metabot chat messages --conversation-id c1',
+            'metabot chat messages --from alice --conversation-id c1 --limit 25',
+        ],
+    },
+    {
+        commandPath: ['chat', 'auto-reply'],
+        summary: 'Manage private chat auto-reply settings.',
+        usage: 'metabot chat auto-reply <status|enable|disable>',
+        subcommands: [
+            { name: 'status', summary: 'Show auto-reply settings for one MetaBot actor.' },
+            { name: 'enable', summary: 'Enable auto-reply for one MetaBot actor.' },
+            { name: 'disable', summary: 'Disable auto-reply for one MetaBot actor.' },
+        ],
+        optionalFlags: [HELP_JSON_FLAG],
+    },
+    {
+        commandPath: ['chat', 'auto-reply', 'status'],
+        summary: 'Show private chat auto-reply settings for one MetaBot actor.',
+        usage: 'metabot chat auto-reply status [--from <bot-slug>]',
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        successFields: ['enabled', 'acceptPolicy', 'defaultStrategyId'],
+        examples: ['metabot chat auto-reply status --from alice'],
+    },
+    {
+        commandPath: ['chat', 'auto-reply', 'enable'],
+        summary: 'Enable private chat auto-reply for one MetaBot actor.',
+        usage: 'metabot chat auto-reply enable [--from <bot-slug>] [--strategy <strategy-id>]',
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--strategy', value: '<strategy-id>', description: 'Optional default reply strategy id.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: ['enabled', 'defaultStrategyId'],
+        examples: ['metabot chat auto-reply enable --from alice --strategy default'],
+    },
+    {
+        commandPath: ['chat', 'auto-reply', 'disable'],
+        summary: 'Disable private chat auto-reply for one MetaBot actor.',
+        usage: 'metabot chat auto-reply disable [--from <bot-slug>]',
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        successFields: ['enabled', 'defaultStrategyId'],
+        examples: ['metabot chat auto-reply disable --from alice'],
     },
     {
         commandPath: ['trace'],
         summary: 'Trace commands for following remote delegation progress and inspecting final artifacts.',
         usage: 'metabot trace <subcommand>',
         subcommands: [
+            { name: 'sessions', summary: 'List trace-capable A2A sessions.' },
             { name: 'watch', summary: 'Stream public status events for one trace as NDJSON.' },
             { name: 'get', summary: 'Read the full structured trace and export paths.' },
         ],
         optionalFlags: [HELP_JSON_FLAG],
     },
     {
+        commandPath: ['trace', 'sessions'],
+        summary: 'List trace-capable A2A sessions.',
+        usage: 'metabot trace sessions [--from <bot-slug> | --all] [--limit <n>]',
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--all', description: 'Aggregate sessions across all local MetaBot profiles.' },
+            { flag: '--limit', value: '<n>', description: 'Maximum session count. Defaults to 50.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: ['sessions', 'stats'],
+        examples: [
+            'metabot trace sessions --from alice --limit 20',
+            'metabot trace sessions --all --limit 50',
+        ],
+    },
+    {
         commandPath: ['trace', 'watch'],
         summary: 'Stream public status events for one trace as NDJSON until the watch completes.',
-        usage: 'metabot trace watch --trace-id <trace-id>',
+        usage: 'metabot trace watch [--from <bot-slug>] --trace-id <trace-id>',
         requiredFlags: [
             { flag: '--trace-id', value: '<trace-id>', description: 'Trace identifier returned by a remote service call.' },
         ],
@@ -1132,14 +1526,14 @@ const COMMAND_HELP_SPECS = [
             'A watch can emit timeout and later remote_received or completed in the same follow-up; do not stop at the first timeout line if the command is still running.',
         ],
         examples: [
-            'metabot trace watch --trace-id trace-123',
+            'metabot trace watch --from alice --trace-id trace-123',
         ],
-        optionalFlags: [HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['trace', 'get'],
         summary: 'Read the full structured trace or exact A2A session record plus exported transcript and inspector evidence paths.',
-        usage: 'metabot trace get --trace-id <trace-id> | metabot trace get --session-id <session-id>',
+        usage: 'metabot trace get [--from <bot-slug>] (--trace-id <trace-id> | --session-id <session-id>)',
         requiredFlags: [
             { flag: '--trace-id', value: '<trace-id>', description: 'Trace identifier returned by a remote service call. Required when --session-id is not provided.' },
             { flag: '--session-id', value: '<session-id>', description: 'A2A session identifier returned by a private chat or service call. Required when --trace-id is not provided.' },
@@ -1163,10 +1557,10 @@ const COMMAND_HELP_SPECS = [
             'Fails when the traceId or sessionId is unknown in the local runtime state.',
         ],
         examples: [
-            'metabot trace get --trace-id trace-123',
-            'metabot trace get --session-id session-a2a-123',
+            'metabot trace get --from alice --trace-id trace-123',
+            'metabot trace get --from alice --session-id session-a2a-123',
         ],
-        optionalFlags: [HELP_JSON_FLAG],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
     },
     {
         commandPath: ['system'],
@@ -1257,17 +1651,20 @@ const COMMAND_HELP_SPECS = [
     },
     {
         commandPath: ['ui', 'open'],
-        summary: 'Open one local MetaBot runtime HTML page such as hub, buzz, chat, publish, my-services, trace, or refund.',
-        usage: 'metabot ui open --page <page> [--trace-id <trace-id>]',
+        summary: 'Open one local MetaBot runtime HTML page such as hub, bot, buzz, chat, publish, my-services, trace, or refund.',
+        usage: 'metabot ui open --page <page> [--from <bot-slug>] [--trace-id <trace-id>] [--session-id <session-id>] [--service-id <service-pin-id>]',
         requiredFlags: [
-            { flag: '--page', value: '<page>', description: 'Built-in page name: hub, buzz, chat, publish, my-services, trace, or refund.' },
+            { flag: '--page', value: '<page>', description: 'Built-in page name: hub, bot, buzz, chat, chat-viewer, publish, my-services, trace, or refund.' },
         ],
         optionalFlags: [
-            { flag: '--trace-id', value: '<trace-id>', description: 'Trace identifier required by the trace page.' },
+            FROM_BOT_FLAG,
+            { flag: '--trace-id', value: '<trace-id>', description: 'Optional trace identifier for trace page deep links.' },
+            { flag: '--session-id', value: '<session-id>', description: 'A2A session identifier for trace or chat-viewer pages.' },
+            { flag: '--service-id', value: '<service-pin-id>', description: 'Owned service selector for my-services pages.' },
             HELP_JSON_FLAG,
         ],
         successFields: [
-            'url',
+            'localUiUrl',
             'page',
         ],
         failureSemantics: [
@@ -1277,12 +1674,14 @@ const COMMAND_HELP_SPECS = [
             'metabot ui open --page hub',
             'metabot ui open --page buzz',
             'metabot ui open --page chat',
-            'metabot ui open --page trace --trace-id trace-123',
+            'metabot ui open --page trace --from alice --trace-id trace-123',
+            'metabot ui open --page publish --from alice',
+            'metabot ui open --page my-services --service-id <service-pin-id>',
         ],
     },
     {
         commandPath: ['llm'],
-        summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings.',
+        summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings. Use --from as the canonical actor selector; --slug remains a compatibility alias where accepted.',
         usage: 'metabot llm <subcommand>',
         subcommands: [
             { name: 'list-runtimes', summary: 'List all discovered LLM runtimes on this machine.' },
@@ -1297,8 +1696,138 @@ const COMMAND_HELP_SPECS = [
         examples: [
             'metabot llm discover',
             'metabot llm list-runtimes',
-            'metabot llm bind --slug my-bot --runtime-id llm_claude_code_0 --role primary',
+            'metabot llm bind --from my-bot --runtime-id llm_claude_code_0 --role primary',
+            'metabot llm bindings --from my-bot',
             'metabot llm bindings --slug my-bot',
+        ],
+    },
+    {
+        commandPath: ['llm', 'bindings'],
+        summary: 'List LLM bindings for one MetaBot profile. Omit --from to use the active identity.',
+        usage: 'metabot llm bindings [--from <bot-slug>]',
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--slug', value: '<bot-slug>', description: 'Compatibility alias for --from.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: ['version', 'bindings'],
+        examples: [
+            'metabot llm bindings --from my-bot',
+            'metabot llm bindings',
+        ],
+    },
+    {
+        commandPath: ['llm', 'bind'],
+        summary: 'Create or update a binding between one MetaBot profile and one discovered LLM runtime.',
+        usage: 'metabot llm bind [--from <bot-slug>] --runtime-id <runtime-id> [--role <role>] [--priority <n>]',
+        requiredFlags: [
+            { flag: '--runtime-id', value: '<runtime-id>', description: 'Discovered LLM runtime identifier to bind.' },
+        ],
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--slug', value: '<bot-slug>', description: 'Compatibility alias for --from.' },
+            { flag: '--role', value: '<role>', description: 'Binding role: primary, fallback, reviewer, or specialist. Defaults to primary.' },
+            { flag: '--priority', value: '<n>', description: 'Non-negative priority for bindings with the same role. Defaults to 0.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: ['version', 'bindings'],
+        examples: [
+            'metabot llm bind --from my-bot --runtime-id llm_codex_0 --role primary',
+            'metabot llm bind --runtime-id llm_claude_code_0 --role fallback',
+        ],
+    },
+    {
+        commandPath: ['llm', 'unbind'],
+        summary: 'Remove one LLM binding from the selected MetaBot profile. Omit --from to use the active identity.',
+        usage: 'metabot llm unbind [--from <bot-slug>] --binding-id <binding-id>',
+        requiredFlags: [
+            { flag: '--binding-id', value: '<binding-id>', description: 'Binding identifier to remove.' },
+        ],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        successFields: ['version', 'bindings'],
+        examples: [
+            'metabot llm unbind --from my-bot --binding-id lb_my-bot_llm_codex_0_primary',
+        ],
+    },
+    {
+        commandPath: ['llm', 'set-preferred'],
+        summary: 'Set or clear the preferred LLM runtime for one MetaBot profile.',
+        usage: 'metabot llm set-preferred [--from <bot-slug>] [--runtime-id <runtime-id>]',
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--slug', value: '<bot-slug>', description: 'Compatibility alias for --from.' },
+            { flag: '--runtime-id', value: '<runtime-id>', description: 'Preferred runtime identifier. Omit to clear the preference.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: ['runtimeId'],
+        examples: [
+            'metabot llm set-preferred --from my-bot --runtime-id llm_codex_0',
+            'metabot llm set-preferred',
+        ],
+    },
+    {
+        commandPath: ['llm', 'get-preferred'],
+        summary: 'Read the preferred LLM runtime for one MetaBot profile. Omit --from to use the active identity.',
+        usage: 'metabot llm get-preferred [--from <bot-slug>]',
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--slug', value: '<bot-slug>', description: 'Compatibility alias for --from.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: ['runtimeId'],
+        examples: [
+            'metabot llm get-preferred --from my-bot',
+            'metabot llm get-preferred',
+        ],
+    },
+    {
+        commandPath: ['evolution'],
+        summary: 'Inspect and manage local or published skill evolution artifacts for one MetaBot actor.',
+        usage: 'metabot evolution <subcommand>',
+        subcommands: [
+            { name: 'status', summary: 'Show local evolution counts and active variants.' },
+            { name: 'adopt', summary: 'Adopt a local or imported remote variant.' },
+            { name: 'publish', summary: 'Publish a verified local variant artifact on-chain.' },
+            { name: 'rollback', summary: 'Clear the active variant for one skill.' },
+            { name: 'search', summary: 'Search compatible published artifacts.' },
+            { name: 'import', summary: 'Import one published artifact by pin id.' },
+            { name: 'imported', summary: 'List imported artifacts for one skill.' },
+        ],
+        optionalFlags: [HELP_JSON_FLAG],
+        examples: [
+            'metabot evolution status --from alice',
+            'metabot evolution publish --from alice --skill metabot-network-directory --variant-id variant-1',
+            'metabot evolution adopt --from alice --skill metabot-network-directory --variant-id variant-1',
+        ],
+    },
+    {
+        commandPath: ['evolution', 'status'],
+        summary: 'Show local evolution state for one MetaBot actor.',
+        usage: 'metabot evolution status [--from <bot-slug>]',
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+    },
+    {
+        commandPath: ['evolution', 'publish'],
+        summary: 'Publish one verified local evolution artifact using the selected actor signer.',
+        usage: 'metabot evolution publish [--from <bot-slug>] --skill <skill> --variant-id <variant-id>',
+        requiredFlags: [
+            { flag: '--skill', value: '<skill>', description: 'Skill name.' },
+            { flag: '--variant-id', value: '<variant-id>', description: 'Local variant id.' },
+        ],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+    },
+    {
+        commandPath: ['evolution', 'adopt'],
+        summary: 'Adopt a local or remote evolution variant for one MetaBot actor.',
+        usage: 'metabot evolution adopt [--from <bot-slug>] --skill <skill> --variant-id <variant-id> [--source <local|remote>]',
+        requiredFlags: [
+            { flag: '--skill', value: '<skill>', description: 'Skill name.' },
+            { flag: '--variant-id', value: '<variant-id>', description: 'Variant id.' },
+        ],
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--source', value: '<local|remote>', description: 'Artifact source. Defaults to local.' },
+            HELP_JSON_FLAG,
         ],
     },
 ];

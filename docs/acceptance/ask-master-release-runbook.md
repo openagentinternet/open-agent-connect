@@ -33,8 +33,8 @@ Before starting the acceptance flow:
 Verify the public Ask Master controls first:
 
 ```bash
-metabot config get askMaster.enabled
-metabot config get askMaster.triggerMode
+metabot config get --from <bot-slug> askMaster.enabled
+metabot config get --from <bot-slug> askMaster.triggerMode
 ```
 
 Release expectation:
@@ -45,12 +45,12 @@ Release expectation:
 Optional switch checks:
 
 ```bash
-metabot config set askMaster.enabled false
-metabot config get askMaster.enabled
-metabot config set askMaster.enabled true
-metabot config set askMaster.triggerMode manual
-metabot config get askMaster.triggerMode
-metabot config set askMaster.triggerMode suggest
+metabot config set --from <bot-slug> askMaster.enabled false
+metabot config get --from <bot-slug> askMaster.enabled
+metabot config set --from <bot-slug> askMaster.enabled true
+metabot config set --from <bot-slug> askMaster.triggerMode manual
+metabot config get --from <bot-slug> askMaster.triggerMode
+metabot config set --from <bot-slug> askMaster.triggerMode suggest
 ```
 
 Release expectation:
@@ -65,7 +65,7 @@ Provider terminal:
 
 ```bash
 metabot identity create --name "Debug Master Provider"
-metabot master publish --payload-file e2e/fixtures/master-service-debug.json
+metabot master publish --from debug-master-provider --payload-file e2e/fixtures/master-service-debug.json
 metabot daemon start
 ```
 
@@ -89,9 +89,9 @@ Before sending, edit `/tmp/master-request.json` so `target.servicePinId` and `ta
 Run:
 
 ```bash
-metabot master ask --request-file /tmp/master-request.json
-metabot master ask --trace-id <preview-trace-id> --confirm
-metabot master trace --id <real-trace-id>
+metabot master ask --from caller-bot --request-file /tmp/master-request.json
+metabot master ask --from caller-bot --trace-id <preview-trace-id> --confirm
+metabot master trace --from caller-bot --id <real-trace-id>
 ```
 
 Pass criteria:
@@ -131,7 +131,7 @@ cat >/tmp/master-accept-suggest.json <<EOF
 }
 EOF
 metabot master host-action --request-file /tmp/master-accept-suggest.json
-metabot master ask --trace-id <preview-trace-id> --confirm
+metabot master ask --from caller-bot --trace-id <preview-trace-id> --confirm
 ```
 
 Pass criteria:

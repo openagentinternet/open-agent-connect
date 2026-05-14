@@ -153,11 +153,11 @@ export interface CliDependencies {
   llm?: {
     listRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
     discoverRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
-    listBindings?: (input: { from?: string; slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    upsertBindings?: (input: { from?: string; slug: string; bindings: Record<string, unknown>[] }) => Awaitable<MetabotCommandResult<unknown>>;
+    listBindings?: (input?: { from?: string; slug?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    upsertBindings?: (input: { from?: string; slug?: string; bindings: Record<string, unknown>[] }) => Awaitable<MetabotCommandResult<unknown>>;
     removeBinding?: (input: { from?: string; bindingId: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    getPreferredRuntime?: (input: { from?: string; slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    setPreferredRuntime?: (input: { from?: string; slug: string; runtimeId: string | null }) => Awaitable<MetabotCommandResult<unknown>>;
+    getPreferredRuntime?: (input?: { from?: string; slug?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    setPreferredRuntime?: (input: { from?: string; slug?: string; runtimeId: string | null }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   bot?: {
     listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;

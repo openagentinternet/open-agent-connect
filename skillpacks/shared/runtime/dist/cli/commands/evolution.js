@@ -5,12 +5,14 @@ const commandResult_1 = require("../../core/contracts/commandResult");
 const helpers_1 = require("./helpers");
 async function runEvolutionCommand(args, context) {
     const subcommand = args[0];
+    const from = (0, helpers_1.readFromFlag)(args);
+    const actorInput = from ? { from } : {};
     if (subcommand === 'status') {
         const handler = context.dependencies.evolution?.status;
         if (!handler) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'Evolution status handler is not configured.');
         }
-        return handler();
+        return handler(actorInput);
     }
     if (subcommand === 'adopt') {
         const handler = context.dependencies.evolution?.adopt;
@@ -30,6 +32,7 @@ async function runEvolutionCommand(args, context) {
             return (0, commandResult_1.commandFailed)('evolution_remote_adopt_not_supported', `Unsupported evolution adoption source: ${source}.`);
         }
         return handler({
+            ...actorInput,
             skill,
             variantId,
             source,
@@ -48,7 +51,7 @@ async function runEvolutionCommand(args, context) {
         if (!variantId) {
             return (0, helpers_1.commandMissingFlag)('--variant-id');
         }
-        return handler({ skill, variantId });
+        return handler({ ...actorInput, skill, variantId });
     }
     if (subcommand === 'rollback') {
         const handler = context.dependencies.evolution?.rollback;
@@ -59,7 +62,7 @@ async function runEvolutionCommand(args, context) {
         if (!skill) {
             return (0, helpers_1.commandMissingFlag)('--skill');
         }
-        return handler({ skill });
+        return handler({ ...actorInput, skill });
     }
     if (subcommand === 'search') {
         const handler = context.dependencies.evolution?.search;
@@ -70,7 +73,7 @@ async function runEvolutionCommand(args, context) {
         if (!skill) {
             return (0, helpers_1.commandMissingFlag)('--skill');
         }
-        return handler({ skill });
+        return handler({ ...actorInput, skill });
     }
     if (subcommand === 'import') {
         const handler = context.dependencies.evolution?.import;
@@ -81,7 +84,7 @@ async function runEvolutionCommand(args, context) {
         if (!pinId) {
             return (0, helpers_1.commandMissingFlag)('--pin-id');
         }
-        return handler({ pinId });
+        return handler({ ...actorInput, pinId });
     }
     if (subcommand === 'imported') {
         const handler = context.dependencies.evolution?.imported;
@@ -92,7 +95,7 @@ async function runEvolutionCommand(args, context) {
         if (!skill) {
             return (0, helpers_1.commandMissingFlag)('--skill');
         }
-        return handler({ skill });
+        return handler({ ...actorInput, skill });
     }
     return (0, helpers_1.commandUnknownSubcommand)(`evolution ${args.join(' ')}`.trim());
 }

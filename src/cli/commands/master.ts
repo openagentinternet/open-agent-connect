@@ -15,6 +15,12 @@ export async function runMasterCommand(
   context: CliRuntimeContext
 ): Promise<MetabotCommandResult<unknown>> {
   const subcommand = args[0];
+  const shouldPollTrace = Boolean(
+    context.stdout
+    && typeof context.stdout === 'object'
+    && 'isTTY' in (context.stdout as Record<string, unknown>)
+    && (context.stdout as { isTTY?: boolean }).isTTY,
+  );
 
   if (subcommand === 'publish') {
     const payloadFile = readFlagValue(args, '--payload-file');
@@ -86,20 +92,23 @@ export async function runMasterCommand(
       'data' in result &&
       result.data &&
       typeof result.data === 'object' &&
-      'traceId' in result.data &&
-      result.localUiUrl &&
-      process.stdout.isTTY
-    ) {
+	      'traceId' in result.data &&
+	      result.localUiUrl &&
+	      shouldPollTrace
+	    ) {
       const { pollTraceUntilComplete } = await import('./pollTraceHelper');
       const traceGet = context.dependencies.trace?.get;
       if (traceGet) {
         const poll = await pollTraceUntilComplete({
           traceId: String((result.data as Record<string, unknown>).traceId),
           localUiUrl: result.localUiUrl,
-          requestFn: async (_method, path) => {
-            const id = path.split('/').pop() || '';
-            return traceGet({ traceId: decodeURIComponent(id) });
-          },
+	          requestFn: async (_method, path) => {
+	            const id = path.split('/').pop() || '';
+	            return traceGet({
+	              ...(from ? { from } : {}),
+	              traceId: decodeURIComponent(id),
+	            });
+	          },
           stderr: context.stderr,
         });
         if (poll.completed && poll.trace) {

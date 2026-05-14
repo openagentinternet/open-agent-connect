@@ -48,31 +48,31 @@ Should not trigger when:
 For default multi-chain balance (MVC/SPACE + BTC + DOGE + OPCAT):
 
 ```bash
-{{METABOT_CLI}} wallet balance
+{{METABOT_CLI}} wallet balance --from <bot-slug>
 ```
 
 When the human asks for BTC, Bitcoin, or 比特币:
 
 ```bash
-{{METABOT_CLI}} wallet balance --chain btc
+{{METABOT_CLI}} wallet balance --from <bot-slug> --chain btc
 ```
 
 When the human asks for DOGE or Dogecoin:
 
 ```bash
-{{METABOT_CLI}} wallet balance --chain doge
+{{METABOT_CLI}} wallet balance --from <bot-slug> --chain doge
 ```
 
 When the human asks for OPCAT:
 
 ```bash
-{{METABOT_CLI}} wallet balance --chain opcat
+{{METABOT_CLI}} wallet balance --from <bot-slug> --chain opcat
 ```
 
 When the human asks for SPACE, MVC, 太空币, or any MVC-network currency:
 
 ```bash
-{{METABOT_CLI}} wallet balance --chain mvc
+{{METABOT_CLI}} wallet balance --from <bot-slug> --chain mvc
 ```
 
 The `mvc` balance response includes `balances.mvc.totalMvc` (the SPACE amount) and `balances.mvc.address` (the MVC/SPACE receiving address). DOGE and OPCAT balances are returned under `balances.doge` and `balances.opcat`.
@@ -84,11 +84,11 @@ Wallet balance and transfer do not use the default write-network setting. Balanc
 Use these commands only when the human asks to inspect or change the default chain for on-chain write commands such as buzz, service publish, rating, private chat, or generic chain write:
 
 ```bash
-{{METABOT_CLI}} config get chain.defaultWriteNetwork
-{{METABOT_CLI}} config set chain.defaultWriteNetwork opcat
+{{METABOT_CLI}} config get --from <bot-slug> chain.defaultWriteNetwork
+{{METABOT_CLI}} config set --from <bot-slug> chain.defaultWriteNetwork opcat
 ```
 
-Supported values are `mvc`, `btc`, `doge`, and `opcat`. The setting is scoped to the active local Bot profile.
+Supported values are `mvc`, `btc`, `doge`, and `opcat`. The setting is scoped to the selected local Bot profile.
 
 ## Transfer Command
 
@@ -112,31 +112,31 @@ Supported values are `mvc`, `btc`, `doge`, and `opcat`. The setting is scoped to
 Run the transfer command **without `--confirm`** to get a preview. Never skip this step.
 
 ```bash
-{{METABOT_CLI}} wallet transfer --to <address> --amount <amount><UNIT>
+{{METABOT_CLI}} wallet transfer --from <bot-slug> --to <address> --amount <amount><UNIT>
 ```
 
 Example — preview a BTC transfer:
 
 ```bash
-{{METABOT_CLI}} wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC
+{{METABOT_CLI}} wallet transfer --from <bot-slug> --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC
 ```
 
 Example — preview a SPACE transfer:
 
 ```bash
-{{METABOT_CLI}} wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 1SPACE
+{{METABOT_CLI}} wallet transfer --from <bot-slug> --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 1SPACE
 ```
 
 Example — preview an OPCAT transfer:
 
 ```bash
-{{METABOT_CLI}} wallet transfer --to o1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 10OPCAT
+{{METABOT_CLI}} wallet transfer --from <bot-slug> --to o1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 10OPCAT
 ```
 
 Example — preview a DOGE transfer:
 
 ```bash
-{{METABOT_CLI}} wallet transfer --to D9UuD6sjdEUNv8hPC8WtUXZapBCsFn67jo --amount 0.01DOGE
+{{METABOT_CLI}} wallet transfer --from <bot-slug> --to D9UuD6sjdEUNv8hPC8WtUXZapBCsFn67jo --amount 0.01DOGE
 ```
 
 The response has `state: "awaiting_confirmation"` and `data` containing:
@@ -156,13 +156,13 @@ Present this information clearly to the human and ask for explicit approval befo
 After the human explicitly approves, re-run the same command with `--confirm` appended:
 
 ```bash
-{{METABOT_CLI}} wallet transfer --to <address> --amount <amount><UNIT> --confirm
+{{METABOT_CLI}} wallet transfer --from <bot-slug> --to <address> --amount <amount><UNIT> --confirm
 ```
 
 Example:
 
 ```bash
-{{METABOT_CLI}} wallet transfer --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC --confirm
+{{METABOT_CLI}} wallet transfer --from <bot-slug> --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC --confirm
 ```
 
 On success the response contains:
@@ -177,14 +177,14 @@ Always show the `explorerUrl` to the human so they can verify the transaction on
 ### Natural language → CLI mapping examples
 
 
-| User says                       | CLI command                                          |
-| ------------------------------- | ---------------------------------------------------- |
-| "帮我往地址1EX5NN...转账 0.00001 BTC"  | `wallet transfer --to 1EX5NN... --amount 0.00001BTC` |
-| "给地址1EX5NN...转 1 SPACE"         | `wallet transfer --to 1EX5NN... --amount 1SPACE`     |
-| "send 0.0001 btc to 1EX5NN..."  | `wallet transfer --to 1EX5NN... --amount 0.0001BTC`  |
-| "transfer 5 space to 1EX5NN..." | `wallet transfer --to 1EX5NN... --amount 5SPACE`     |
-| "transfer 0.01 doge to D9UuD..." | `wallet transfer --to D9UuD... --amount 0.01DOGE`    |
-| "transfer 10 opcat to o1EX5..." | `wallet transfer --to o1EX5... --amount 10OPCAT`     |
+| User says                       | CLI command                                                            |
+| ------------------------------- | ---------------------------------------------------------------------- |
+| "帮我往地址1EX5NN...转账 0.00001 BTC"  | `wallet transfer --from <bot-slug> --to 1EX5NN... --amount 0.00001BTC` |
+| "给地址1EX5NN...转 1 SPACE"         | `wallet transfer --from <bot-slug> --to 1EX5NN... --amount 1SPACE`     |
+| "send 0.0001 btc to 1EX5NN..."  | `wallet transfer --from <bot-slug> --to 1EX5NN... --amount 0.0001BTC`  |
+| "transfer 5 space to 1EX5NN..." | `wallet transfer --from <bot-slug> --to 1EX5NN... --amount 5SPACE`     |
+| "transfer 0.01 doge to D9UuD..." | `wallet transfer --from <bot-slug> --to D9UuD... --amount 0.01DOGE`    |
+| "transfer 10 opcat to o1EX5..." | `wallet transfer --from <bot-slug> --to o1EX5... --amount 10OPCAT`     |
 
 
 ## Error Handling

@@ -337,10 +337,13 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
         const poll = await pollTraceUntilComplete({
           traceId: String(result.data.traceId),
           localUiUrl: result.localUiUrl,
-          requestFn: async (method, path) => {
-            const traceId = path.split('/').pop() || '';
-            return traceGet({ traceId: decodeURIComponent(traceId) });
-          },
+	          requestFn: async (method, path) => {
+	            const traceId = path.split('/').pop() || '';
+	            return traceGet({
+	              ...(from ? { from } : {}),
+	              traceId: decodeURIComponent(traceId),
+	            });
+	          },
           stderr: context.stderr,
         });
         if (poll.completed && poll.trace) {

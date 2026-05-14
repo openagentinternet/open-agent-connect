@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
+import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const { TxComposer, mvc } = require('meta-contract');
@@ -24,6 +24,8 @@ const {
 } = require('../../dist/core/orders/orderLifecycle.js');
 const { parseDeliveryMessage, parseNeedsRatingMessage } = require('../../dist/core/a2a/protocol/orderProtocol.js');
 const { buildA2ASimplemsgInboundDispatcher } = require('../../dist/cli/runtime.js');
+const { upsertIdentityProfile, setActiveMetabotHome } = require('../../dist/core/identity/identityProfiles.js');
+const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretStore.js');
 
 const MVC_PAYMENT_ADDRESS = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 const MVC_OTHER_ADDRESS = '1dice8EMZmqKvrGE4Qc9bUFf9PX3xaYDp';
@@ -192,6 +194,7 @@ async function createInboundProviderOrderHarness(t, options = {}) {
   const fetchUtxosCalls = [];
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
+    systemHomeDir: options.systemHomeDir ?? deriveSystemHome(homeDir),
     chainApiBaseUrl: 'http://127.0.0.1:9',
     socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
     socketPresenceFailureMode: 'assume_service_providers_online',
@@ -383,6 +386,7 @@ async function createServiceCallHarness(t, options = {}) {
   const events = [];
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
+    systemHomeDir: options.systemHomeDir ?? deriveSystemHome(homeDir),
     chainApiBaseUrl: 'http://127.0.0.1:9',
     socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
     socketPresenceFailureMode: 'assume_service_providers_online',
@@ -425,6 +429,8 @@ async function createServiceCallHarness(t, options = {}) {
         };
       },
     },
+    adapters: options.adapters,
+    createSignerForHome: options.createSignerForHome,
     fetchPeerChatPublicKey: options.fetchPeerChatPublicKey ?? (async () => providerPair.publicKeyHex),
     ratingFollowupRetryDelaysMs: options.ratingFollowupRetryDelaysMs,
     callerReplyWaiter: options.callerReplyWaiter ?? {
@@ -586,6 +592,142 @@ function decryptSimplemsgFromProviderToBuyer(write, input) {
     },
   }).plaintext;
 }
+
+test('services call --from pays with the selected profile wallet instead of the active profile executor', async (t) => {
+  const transferCalls = [];
+  const selectedWrites = [];
+  const selectedPaymentTxid = 'c'.repeat(64);
+  let selectedPair = null;
+  let selectedIdentity = null;
+  const adapters = new Map([
+    ['mvc', {
+      network: 'mvc',
+      explorerBaseUrl: 'https://www.mvcscan.com',
+      feeRateUnit: 'sat/byte',
+      minTransferSatoshis: 600,
+      async deriveAddress() { return 'mvc-selected-address'; },
+      async fetchUtxos() { return []; },
+      async fetchBalance() {
+        return {
+          chain: 'mvc',
+          address: 'mvc-selected-address',
+          totalSatoshis: 0,
+          confirmedSatoshis: 0,
+          unconfirmedSatoshis: 0,
+          utxoCount: 0,
+        };
+      },
+      async fetchFeeRate() { return 1; },
+      async fetchRawTx() { return ''; },
+      async broadcastTx(rawTx) {
+        assert.equal(rawTx, 'selected-payment-rawtx');
+        return selectedPaymentTxid;
+      },
+      async buildTransfer(input) {
+        transferCalls.push(input);
+        return { rawTx: 'selected-payment-rawtx', fee: 42 };
+      },
+      async buildInscription() { throw new Error('not used'); },
+    }],
+  ]);
+  const harness = await createServiceCallHarness(t, {
+    adapters,
+    createSignerForHome: () => ({
+      async getIdentity() {
+        return selectedIdentity;
+      },
+      async getPrivateChatIdentity() {
+        return {
+          globalMetaId: selectedIdentity.globalMetaId,
+          chatPublicKey: selectedPair.publicKeyHex,
+          privateKeyHex: selectedPair.privateKeyHex,
+        };
+      },
+      async writePin(input) {
+        selectedWrites.push(input);
+        return {
+          txids: [`selected-order-tx-${selectedWrites.length}`],
+          pinId: `selected-order-pin-${selectedWrites.length}`,
+          totalCost: 1,
+          network: input.network,
+          operation: input.operation,
+          path: input.path,
+          contentType: input.contentType,
+          encoding: input.encoding,
+          globalMetaId: selectedIdentity.globalMetaId,
+          mvcAddress: selectedIdentity.mvcAddress,
+        };
+      },
+    }),
+    servicePaymentExecutor: {
+      async execute() {
+        throw new Error('active payment executor must not be used for --from buyer-bot');
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return { state: 'timeout' };
+      },
+    },
+  });
+  const systemHomeDir = deriveSystemHome(harness.homeDir);
+  const selectedHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'buyer-bot');
+  selectedPair = createIdentityPair();
+  selectedIdentity = {
+    ...createIdentity(selectedPair.publicKeyHex),
+    name: 'Buyer Bot',
+    publicKey: 'buyer-public-key',
+    mvcAddress: 'mvc-selected-address',
+    globalMetaId: 'idq1buyer',
+  };
+
+  await mkdir(selectedHomeDir, { recursive: true });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: 'Active Bot',
+    homeDir: harness.homeDir,
+    globalMetaId: 'idq1active',
+    mvcAddress: 'mvc-active-address',
+  });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: 'Buyer Bot',
+    homeDir: selectedHomeDir,
+    globalMetaId: selectedIdentity.globalMetaId,
+    mvcAddress: selectedIdentity.mvcAddress,
+  });
+  await setActiveMetabotHome({ systemHomeDir, homeDir: harness.homeDir });
+  await createFileSecretStore(selectedHomeDir).writeIdentitySecrets({
+    mnemonic: 'selected buyer seed phrase',
+    path: "m/44'/10001'/0'/0/0",
+  });
+  await createRuntimeStateStore(selectedHomeDir).writeState({
+    identity: selectedIdentity,
+    services: [createService()],
+    traces: [],
+  });
+
+  const called = await harness.handlers.services.call({
+    from: 'buyer-bot',
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting', JSON.stringify(called));
+  assert.equal(transferCalls.length, 1);
+  assert.equal(transferCalls[0].mnemonic, 'selected buyer seed phrase');
+  assert.equal(transferCalls[0].toAddress, MVC_PAYMENT_ADDRESS);
+  const selectedState = await createRuntimeStateStore(selectedHomeDir).readState();
+  assert.equal(selectedState.traces.at(-1).order.paymentTxid, selectedPaymentTxid);
+});
 
 test('free simplemsg service orders use an order reference instead of a payment txid', async (t) => {
   const harness = await createServiceCallHarness(t, {

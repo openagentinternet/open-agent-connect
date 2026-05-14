@@ -248,7 +248,7 @@ test('runCli supports `metabot skills resolve --skill metabot-ask-master --host 
   assert.equal(result.payload.ok, true);
   assert.equal(typeof result.payload.data, 'string');
   assert.equal(result.payload.data.includes('# Resolved Skill Contract: metabot-ask-master'), true);
-  assert.match(result.payload.data, /metabot master ask --request-file/);
+  assert.match(result.payload.data, /metabot master ask --from <bot-slug> --request-file/);
   assert.match(result.payload.data, /metabot master suggest --request-file/);
   assert.match(result.payload.data, /manual \/ suggest|manual and suggest/i);
   assert.match(result.payload.data, /preview first, explicit confirm second|preview\/confirm\/send path/i);
@@ -276,6 +276,6 @@ test('runCli supports `metabot skills resolve --skill metabot-ask-master --host 
   assert.match(result.payload.data.contract.summary, /manual \/ suggest|manual and suggest/i);
   assert.match(result.payload.data.contract.instructions, /metabot master suggest --request-file/);
   assert.match(result.payload.data.contract.outputExpectation, /suggest flows first surface a structured suggestion/i);
-  assert.match(result.payload.data.contract.commandTemplate, /metabot master ask --request-file/);
+  assert.match(result.payload.data.contract.commandTemplate, /metabot master ask --from <bot-slug> --request-file/);
   assert.doesNotMatch(result.payload.data.contract.commandTemplate, /metabot advisor ask/);
 });

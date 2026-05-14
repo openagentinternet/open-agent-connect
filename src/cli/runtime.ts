@@ -658,6 +658,28 @@ async function resolveActorHomeDir(
   return { homeDir: resolved.match.homeDir };
 }
 
+async function resolveActorProfileSlug(
+  context: CliRuntimeContext,
+  input: { from?: string; slug?: string } = {},
+): Promise<{ slug: string } | MetabotCommandResult<never>> {
+  const requestedSelector = normalizeEnvText(input.from) || normalizeEnvText(input.slug);
+  const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+  if (requestedSelector) {
+    return { slug: requestedSelector };
+  }
+
+  const profiles = await listIdentityProfiles(systemHomeDir).catch(() => []);
+  const activeHomeDir = path.resolve(normalizeHomeDir(context.env, context.cwd));
+  const activeProfile = profiles.find((profile) => path.resolve(profile.homeDir) === activeHomeDir);
+  if (!activeProfile?.slug) {
+    return commandFailed(
+      'profile_not_found',
+      `Active MetaBot profile not found in the manager index for home: ${activeHomeDir}`,
+    );
+  }
+  return { slug: activeProfile.slug };
+}
+
 function cloneContextWithHomeDir(context: CliRuntimeContext, homeDir: string): CliRuntimeContext {
   return {
     ...context,
@@ -2213,11 +2235,43 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     llm: {
       listRuntimes: async () => requestJson(context, 'GET', '/api/llm/runtimes'),
       discoverRuntimes: async () => requestJson(context, 'POST', '/api/llm/runtimes/discover'),
-      listBindings: async (input) => requestJson(context, 'GET', `/api/llm/bindings/${encodeURIComponent(input.slug)}`),
-      upsertBindings: async (input) => requestJson(context, 'PUT', `/api/llm/bindings/${encodeURIComponent(input.slug)}`, { bindings: input.bindings }),
-      removeBinding: async (input) => requestJson(context, 'DELETE', `/api/llm/bindings/${encodeURIComponent(input.bindingId)}/delete`),
-      getPreferredRuntime: async (input) => requestJson(context, 'GET', `/api/llm/preferred-runtime/${encodeURIComponent(input.slug)}`),
-      setPreferredRuntime: async (input) => requestJson(context, 'PUT', `/api/llm/preferred-runtime/${encodeURIComponent(input.slug)}`, { runtimeId: input.runtimeId }),
+      listBindings: async (input = {}) => {
+        const actor = await resolveActorProfileSlug(context, input);
+        if (!('slug' in actor)) return actor;
+        return requestJson(context, 'GET', `/api/llm/bindings/${encodeURIComponent(actor.slug)}`);
+      },
+      upsertBindings: async (input) => {
+        const actor = await resolveActorProfileSlug(context, input);
+        if (!('slug' in actor)) return actor;
+        const bindings = input.bindings.map((binding) => {
+          const runtimeId = typeof binding.llmRuntimeId === 'string' ? normalizeEnvText(binding.llmRuntimeId) : '';
+          const role = typeof binding.role === 'string' ? normalizeEnvText(binding.role) : '';
+          const existingId = typeof binding.id === 'string' ? normalizeEnvText(binding.id) : '';
+          const id = existingId || (runtimeId && role ? `lb_${actor.slug}_${runtimeId}_${role}` : '');
+          return {
+            ...binding,
+            id,
+            metaBotSlug: actor.slug,
+          };
+        });
+        return requestJson(context, 'PUT', `/api/llm/bindings/${encodeURIComponent(actor.slug)}`, { bindings });
+      },
+      removeBinding: async (input) => {
+        const actor = await resolveActorProfileSlug(context, { from: input.from });
+        if (!('slug' in actor)) return actor;
+        const query = new URLSearchParams({ from: actor.slug });
+        return requestJson(context, 'DELETE', `/api/llm/bindings/${encodeURIComponent(input.bindingId)}/delete?${query.toString()}`);
+      },
+      getPreferredRuntime: async (input = {}) => {
+        const actor = await resolveActorProfileSlug(context, input);
+        if (!('slug' in actor)) return actor;
+        return requestJson(context, 'GET', `/api/llm/preferred-runtime/${encodeURIComponent(actor.slug)}`);
+      },
+      setPreferredRuntime: async (input) => {
+        const actor = await resolveActorProfileSlug(context, input);
+        if (!('slug' in actor)) return actor;
+        return requestJson(context, 'PUT', `/api/llm/preferred-runtime/${encodeURIComponent(actor.slug)}`, { runtimeId: input.runtimeId });
+      },
     },
     evolution: {
       status: async (input = {}) => {

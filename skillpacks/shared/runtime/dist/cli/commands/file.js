@@ -20,6 +20,7 @@ async function runFileCommand(args, context) {
     if (!requestFile) {
         return (0, helpers_1.commandMissingFlag)('--request-file');
     }
+    const from = (0, helpers_1.readFromFlag)(args);
     const chainFlag = (0, helpers_1.readFileUploadChainFlag)(args);
     if (chainFlag.error) {
         return chainFlag.error;
@@ -34,6 +35,7 @@ async function runFileCommand(args, context) {
         ...request,
         filePath: resolveMaybeRelativePath(requestDir, request.filePath) ?? request.filePath,
         ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
+        ...(from ? { from } : {}),
     };
     return handler(resolvedRequest);
 }

@@ -584,7 +584,7 @@ test('runCli documents trace get lookup by trace id or session id', async () => 
   assert.ok(output.successFields.includes('orderTxid'));
   assert.ok(output.successFields.includes('paymentTxid'));
   assert.ok(output.successFields.includes('localUiUrl'));
-  assert.ok(output.examples.includes('metabot trace get --session-id session-a2a-123'));
+  assert.ok(output.examples.includes('metabot trace get --from alice --session-id session-a2a-123'));
 });
 
 test('runCli documents trace sessions listing with actor selectors', async () => {
@@ -861,6 +861,28 @@ test('runCli prints LLM group help with canonical --from examples', async () => 
   const output = stdout.join('');
   assert.match(output, /--from my-bot/);
   assert.match(output, /--slug remains a compatibility alias/i);
+});
+
+test('runCli prints LLM leaf JSON help for actor-scoped binding commands', async () => {
+  for (const [subcommand, usage] of [
+    ['bindings', 'metabot llm bindings [--from <bot-slug>]'],
+    ['bind', 'metabot llm bind [--from <bot-slug>] --runtime-id <runtime-id> [--role <role>] [--priority <n>]'],
+    ['unbind', 'metabot llm unbind [--from <bot-slug>] --binding-id <binding-id>'],
+    ['set-preferred', 'metabot llm set-preferred [--from <bot-slug>] [--runtime-id <runtime-id>]'],
+    ['get-preferred', 'metabot llm get-preferred [--from <bot-slug>]'],
+  ]) {
+    const stdout = [];
+    const exitCode = await runCli(['llm', subcommand, '--help', '--json'], {
+      stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+      stderr: { write: () => true },
+    });
+
+    assert.equal(exitCode, 0);
+    const payload = JSON.parse(stdout.join(''));
+    assert.deepEqual(payload.commandPath, ['llm', subcommand]);
+    assert.equal(payload.usage, usage);
+    assert.ok(payload.optionalFlags.some((entry) => entry.flag === '--from'));
+  }
 });
 
 test('runCli prints evolution help with actor selection', async () => {

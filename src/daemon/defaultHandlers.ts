@@ -3887,7 +3887,7 @@ async function exportAndPersistMasterCallerTrace(input: {
   const shouldIncludeTimeoutNote = input.includeTimeoutNote === true
     || input.trace.askMaster?.canonicalStatus === 'timed_out'
     || input.trace.a2a?.publicStatus === 'timeout';
-  const confirmCommand = `metabot master ask --trace-id ${input.trace.traceId} --confirm`;
+  const confirmCommand = readPendingMasterConfirmCommand(input.pendingAsk, input.trace.traceId);
   const messages: Parameters<typeof exportSessionArtifacts>[0]['transcript']['messages'] = [
     {
       id: `${input.trace.traceId}-user`,
@@ -3971,6 +3971,20 @@ async function exportAndPersistMasterCallerTrace(input: {
   });
   await persistTraceRecord(input.runtimeStateStore, input.trace);
   return artifacts;
+}
+
+function readPendingMasterConfirmCommand(pendingAsk: PendingMasterAskRecord, traceId: string): string {
+  const preview = pendingAsk.preview;
+  if (preview && typeof preview === 'object') {
+    const confirmation = (preview as { confirmation?: unknown }).confirmation;
+    if (confirmation && typeof confirmation === 'object') {
+      const confirmCommand = normalizeText((confirmation as { confirmCommand?: unknown }).confirmCommand);
+      if (confirmCommand) {
+        return confirmCommand;
+      }
+    }
+  }
+  return `metabot master ask --trace-id ${traceId} --confirm`;
 }
 
 async function applyMasterCallerReplyResult(input: {
@@ -5061,6 +5075,36 @@ export function createDefaultMetabotDaemonHandlers(input: {
     };
   }
 
+  async function resolveLlmProfileForActor(inputProfile: { from?: unknown; slug?: unknown } = {}): Promise<
+    | { slug: string; homeDir: string }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const requestedSelector = normalizeText(inputProfile.from) || normalizeText(inputProfile.slug);
+    const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+    if (requestedSelector) {
+      const resolved = resolveProfileNameMatch(requestedSelector, profiles);
+      if (resolved.status === 'not_found' || resolved.status === 'ambiguous') {
+        return {
+          failure: commandFailed(
+            resolved.status === 'ambiguous' ? 'identity_profile_ambiguous' : 'profile_not_found',
+            resolved.message,
+          ),
+        };
+      }
+      return {
+        slug: resolved.match.slug,
+        homeDir: resolved.match.homeDir,
+      };
+    }
+
+    const activeHomeDir = path.resolve(input.homeDir);
+    const activeProfile = profiles.find((profile) => path.resolve(profile.homeDir) === activeHomeDir);
+    return {
+      slug: activeProfile?.slug || path.basename(resolveMetabotPaths(activeHomeDir).profileRoot),
+      homeDir: activeHomeDir,
+    };
+  }
+
   async function resolveScopedServicesForActor(rawActor: unknown): Promise<{
     services?: NonNullable<MetabotDaemonHttpHandlers['services']>;
     failure?: MetabotCommandResult<never>;
@@ -5087,7 +5131,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       homeDir: profileHomeDir,
       secretStore: createFileSecretStore(profileHomeDir),
       signer: createSignerForProfileHome(profileHomeDir),
-      servicePaymentExecutor: input.servicePaymentExecutor,
+      servicePaymentExecutor: undefined,
     });
     return { services: scopedHandlers.services };
   }
@@ -5118,7 +5162,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       homeDir: profileHomeDir,
       secretStore: createFileSecretStore(profileHomeDir),
       signer: createSignerForProfileHome(profileHomeDir),
-      servicePaymentExecutor: input.servicePaymentExecutor,
+      servicePaymentExecutor: undefined,
     });
     return { provider: scopedHandlers.provider };
   }
@@ -5149,7 +5193,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       homeDir: profileHomeDir,
       secretStore: createFileSecretStore(profileHomeDir),
       signer: createSignerForProfileHome(profileHomeDir),
-      servicePaymentExecutor: input.servicePaymentExecutor,
+      servicePaymentExecutor: undefined,
     });
     return { trace: scopedHandlers.trace };
   }
@@ -8157,7 +8201,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 content: `Preview prepared for ${normalizeText(input.pendingAsk.target.displayName) || input.resolvedTarget.displayName}.`,
                 metadata: requiresConfirmation
                   ? {
-                      confirmCommand: `metabot master ask --trace-id ${input.traceId} --confirm`,
+                      confirmCommand: readPendingMasterConfirmCommand(input.pendingAsk, input.traceId),
                     }
                   : undefined,
               },
@@ -8354,7 +8398,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }),
         });
 
-    const confirmCommand = `metabot master ask --trace-id ${input.traceId} --confirm`;
+    const confirmCommand = readPendingMasterConfirmCommand(input.pendingAsk, input.traceId);
     const transcriptMessages = [
       {
         id: `${input.traceId}-user`,
@@ -9264,7 +9308,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   timestamp: updatedTrace.createdAt,
                   content: `Preview prepared for ${normalizeText(pendingAsk.target.displayName) || updatedTrace.session.peerName || 'the Master'}.`,
                   metadata: {
-                    confirmCommand: `metabot master ask --trace-id ${traceId} --confirm`,
+                    confirmCommand: readPendingMasterConfirmCommand(pendingAsk, traceId),
                   },
                 },
                 {
@@ -9678,7 +9722,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 }),
               });
 
-          const confirmCommand = `metabot master ask --trace-id ${traceId} --confirm`;
+          const confirmCommand = readPendingMasterConfirmCommand(pendingAsk, traceId);
           const artifacts = await exportSessionArtifacts({
             trace: updatedTrace,
             transcript: {
@@ -13344,57 +13388,52 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const updated = await runtimeStore.read();
         return commandSuccess({ discovered: result.runtimes.length, runtimes: updated.runtimes, errors: result.errors });
       },
-      listBindings: async ({ from, slug }) => {
-        const requestedSlug = normalizeText(from) || slug;
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        const profile = profiles.find((p) => p.slug === requestedSlug);
-        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${requestedSlug}`);
+      listBindings: async (request = {}) => {
+        const profile = await resolveLlmProfileForActor(request);
+        if ('failure' in profile) return profile.failure;
         const paths = resolveMetabotPaths(profile.homeDir);
         const bindingStore = createLlmBindingStore(paths);
         const state = await bindingStore.read();
         return commandSuccess(state);
       },
       upsertBindings: async ({ from, slug, bindings }) => {
-        const requestedSlug = normalizeText(from) || slug;
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        const profile = profiles.find((p) => p.slug === requestedSlug);
-        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${requestedSlug}`);
+        const profile = await resolveLlmProfileForActor({ from, slug });
+        if ('failure' in profile) return profile.failure;
         const paths = resolveMetabotPaths(profile.homeDir);
         const bindingStore = createLlmBindingStore(paths);
         const state = await bindingStore.read();
-        const otherBindings = state.bindings.filter((b) => b.metaBotSlug !== requestedSlug);
+        const otherBindings = state.bindings.filter((b) => b.metaBotSlug !== profile.slug);
         const normalizedBindings = bindings
-          .map((b) => normalizeLlmBinding({ ...b, metaBotSlug: requestedSlug }))
+          .map((b) => {
+            const runtimeId = normalizeText(b.llmRuntimeId);
+            const role = normalizeText(b.role);
+            const id = normalizeText(b.id) || (runtimeId && role ? `lb_${profile.slug}_${runtimeId}_${role}` : '');
+            return normalizeLlmBinding({
+              ...b,
+              id,
+              metaBotSlug: profile.slug,
+            });
+          })
           .filter((b): b is NonNullable<ReturnType<typeof normalizeLlmBinding>> => b !== null);
         const nextState = { ...state, bindings: [...otherBindings, ...normalizedBindings], version: state.version + 1 };
         const written = await bindingStore.write(nextState);
         return commandSuccess(written);
       },
       removeBinding: async ({ from, bindingId }) => {
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        const requestedFrom = normalizeText(from);
-        const scopedProfiles = requestedFrom
-          ? profiles.filter((profile) => profile.slug === requestedFrom)
-          : profiles;
-        if (requestedFrom && scopedProfiles.length === 0) {
-          return commandFailed('profile_not_found', `Profile not found: ${requestedFrom}`);
-        }
-        for (const profile of scopedProfiles) {
-          const paths = resolveMetabotPaths(profile.homeDir);
-          const bindingStore = createLlmBindingStore(paths);
-          const state = await bindingStore.read();
-          if (state.bindings.some((b) => b.id === bindingId)) {
-            const next = await bindingStore.removeBinding(bindingId);
-            return commandSuccess(next);
-          }
+        const profile = await resolveLlmProfileForActor({ from });
+        if ('failure' in profile) return profile.failure;
+        const paths = resolveMetabotPaths(profile.homeDir);
+        const bindingStore = createLlmBindingStore(paths);
+        const state = await bindingStore.read();
+        if (state.bindings.some((b) => b.id === bindingId)) {
+          const next = await bindingStore.removeBinding(bindingId);
+          return commandSuccess(next);
         }
         return commandFailed('binding_not_found', `Binding not found: ${bindingId}`);
       },
-      getPreferredRuntime: async ({ from, slug }) => {
-        const requestedSlug = normalizeText(from) || slug;
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        const profile = profiles.find((p) => p.slug === requestedSlug);
-        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${requestedSlug}`);
+      getPreferredRuntime: async (request = {}) => {
+        const profile = await resolveLlmProfileForActor(request);
+        if ('failure' in profile) return profile.failure;
         const paths = resolveMetabotPaths(profile.homeDir);
         try {
           const raw = await fs.readFile(paths.preferredLlmRuntimePath, 'utf8');
@@ -13405,10 +13444,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
       },
       setPreferredRuntime: async ({ from, slug, runtimeId }) => {
-        const requestedSlug = normalizeText(from) || slug;
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        const profile = profiles.find((p) => p.slug === requestedSlug);
-        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${requestedSlug}`);
+        const profile = await resolveLlmProfileForActor({ from, slug });
+        if ('failure' in profile) return profile.failure;
         const paths = resolveMetabotPaths(profile.homeDir);
         await fs.mkdir(path.dirname(paths.preferredLlmRuntimePath), { recursive: true });
         await fs.writeFile(paths.preferredLlmRuntimePath, JSON.stringify({ runtimeId }, null, 2) + '\n', 'utf8');

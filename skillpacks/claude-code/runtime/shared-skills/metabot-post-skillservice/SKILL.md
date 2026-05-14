@@ -51,22 +51,22 @@ Prepare a publish payload file:
 Then call:
 
 ```bash
-metabot services publish --payload-file payload.json
+metabot services publish --from <bot-slug> --payload-file payload.json
 ```
 
-When `--chain` is omitted, the daemon uses the active profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
+When `--chain` is omitted, the daemon uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
 
 ```bash
-metabot config get chain.defaultWriteNetwork
-metabot config set chain.defaultWriteNetwork opcat
+metabot config get --from <bot-slug> chain.defaultWriteNetwork
+metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
 ```
 
 When the human explicitly asks to publish the service record on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
-metabot services publish --payload-file payload.json --chain btc
-metabot services publish --payload-file payload.json --chain doge
-metabot services publish --payload-file payload.json --chain opcat
+metabot services publish --from <bot-slug> --payload-file payload.json --chain btc
+metabot services publish --from <bot-slug> --payload-file payload.json --chain doge
+metabot services publish --from <bot-slug> --payload-file payload.json --chain opcat
 ```
 
 ## Required Semantics

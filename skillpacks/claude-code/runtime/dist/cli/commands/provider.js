@@ -33,22 +33,24 @@ async function runProviderCommand(args, context) {
         if (!selector.ok) {
             return selector.result;
         }
-        const handler = context.dependencies.provider?.inspectOrder;
+        const from = (0, helpers_1.readFlagValue)(args.slice(2), '--from') || undefined;
+        const handler = context.dependencies.services?.inspectOrder ?? context.dependencies.provider?.inspectOrder;
         if (!handler) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'Provider order inspection handler is not configured.');
         }
-        return handler(selector.selector);
+        return handler({ ...(from ? { from } : {}), ...selector.selector });
     }
     if (group === 'refund' && subcommand === 'settle') {
         const selector = readSellerOrderSelector(args.slice(2));
         if (!selector.ok) {
             return selector.result;
         }
-        const handler = context.dependencies.provider?.settleRefund;
+        const from = (0, helpers_1.readFlagValue)(args.slice(2), '--from') || undefined;
+        const handler = context.dependencies.services?.settleRefund ?? context.dependencies.provider?.settleRefund;
         if (!handler) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'Provider refund settlement handler is not configured.');
         }
-        return handler(selector.selector);
+        return handler({ ...(from ? { from } : {}), ...selector.selector });
     }
     return (0, helpers_1.commandUnknownSubcommand)(`provider ${args.join(' ')}`.trim());
 }

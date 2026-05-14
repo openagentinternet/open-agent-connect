@@ -5,6 +5,11 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function readFromQuery(url: URL): string | undefined {
+  const from = normalizeText(url.searchParams.get('from'));
+  return from || undefined;
+}
+
 function readOptionalNumber(value: string | null): number | undefined {
   if (value == null || value.trim() === '') return undefined;
   const numeric = Number(value);
@@ -63,10 +68,11 @@ export const handleChatRoutes: RouteHandler = async (context) => {
       return true;
     }
 
-    const result = await handler({
-      from: normalizeText(url.searchParams.get('from')) || undefined,
-      peer,
-      afterIndex: readOptionalNumber(url.searchParams.get('afterIndex')),
+	    const from = readFromQuery(url);
+	    const result = await handler({
+	      ...(from ? { from } : {}),
+	      peer,
+	      afterIndex: readOptionalNumber(url.searchParams.get('afterIndex')),
       limit: readOptionalNumber(url.searchParams.get('limit')),
     });
     sendConversationResult(context, result);

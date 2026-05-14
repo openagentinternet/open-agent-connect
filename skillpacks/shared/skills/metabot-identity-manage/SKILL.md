@@ -145,22 +145,22 @@ NODE
 Write avatar pin:
 
 ```bash
-metabot chain write --request-file avatar-request.json
+metabot chain write --from <bot-slug> --request-file avatar-request.json
 ```
 
-When `--chain` is omitted for this manual `chain write`, the daemon uses the active profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
+When `--chain` is omitted for this manual `chain write`, the daemon uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
 
 ```bash
-metabot config get chain.defaultWriteNetwork
-metabot config set chain.defaultWriteNetwork opcat
+metabot config get --from <bot-slug> chain.defaultWriteNetwork
+metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
 ```
 
 If the human explicitly asks to write avatar on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
-metabot chain write --request-file avatar-request.json --chain btc
-metabot chain write --request-file avatar-request.json --chain doge
-metabot chain write --request-file avatar-request.json --chain opcat
+metabot chain write --from <bot-slug> --request-file avatar-request.json --chain btc
+metabot chain write --from <bot-slug> --request-file avatar-request.json --chain doge
+metabot chain write --from <bot-slug> --request-file avatar-request.json --chain opcat
 ```
 
 ## In Scope

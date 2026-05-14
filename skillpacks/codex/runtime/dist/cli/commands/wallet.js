@@ -47,7 +47,8 @@ async function runWalletCommand(args, context) {
         if (!handler) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'Wallet balance handler is not configured.');
         }
-        return handler({ chain: chainFlag.chain });
+        const from = (0, helpers_1.readFromFlag)(args);
+        return handler({ ...(from ? { from } : {}), chain: chainFlag.chain });
     }
     if (args[0] === 'transfer') {
         const toAddress = readStringFlag(args, '--to');
@@ -63,7 +64,8 @@ async function runWalletCommand(args, context) {
         if (!handler) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'Wallet transfer handler is not configured.');
         }
-        return handler({ toAddress, amountRaw, confirm });
+        const from = (0, helpers_1.readFromFlag)(args);
+        return handler({ ...(from ? { from } : {}), toAddress, amountRaw, confirm });
     }
     return (0, helpers_1.commandUnknownSubcommand)(`wallet ${args.join(' ')}`.trim());
 }

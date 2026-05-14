@@ -7,6 +7,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
+const { commandSuccess, commandWaiting } = require('../../dist/core/contracts/commandResult.js');
 
 function parseJsonEnvelope(chunks) {
   return JSON.parse(chunks.join('').trim());
@@ -300,6 +301,47 @@ test('runCli dispatches `metabot master ask --from --request-file` to the ask de
   assert.equal(calls[0].from, 'alice');
   assert.equal(calls[0].confirm, false);
   assert.equal(calls[0].request.masterServicePinId, 'master-pin-1');
+});
+
+test('runCli master ask TTY trace polling preserves the selected actor', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-master-ask-poll-from-'));
+  const requestFile = path.join(tempDir, 'master-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      type: 'master_request',
+      masterServicePinId: 'master-pin-1',
+      providerGlobalMetaId: 'gm-debug-master',
+      masterKind: 'debug',
+      userTask: 'help me debug a failing test',
+      question: 'What should I check first?',
+    },
+  }), 'utf8');
+
+  const traceGetCalls = [];
+  const exitCode = await runCli(['master', 'ask', '--from', 'alice', '--request-file', requestFile], {
+    stdout: { isTTY: true, write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      master: {
+        ask: async () => commandWaiting('master_waiting', 'Waiting for Master.', 100, {
+          localUiUrl: 'http://127.0.0.1:24042/ui/trace?traceId=trace-master-cli-ask-from',
+          data: { traceId: 'trace-master-cli-ask-from' },
+        }),
+      },
+      trace: {
+        get: async (input) => {
+          traceGetCalls.push(input);
+          return commandSuccess({
+            traceId: input.traceId,
+            sessions: [{ publicStatus: 'completed', responseText: 'master answer' }],
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(traceGetCalls, [{ from: 'alice', traceId: 'trace-master-cli-ask-from' }]);
 });
 
 test('runCli dispatches `metabot master ask --from --trace-id --confirm` to the ask dependency', async () => {

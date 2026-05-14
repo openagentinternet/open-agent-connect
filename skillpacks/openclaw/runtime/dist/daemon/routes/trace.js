@@ -3,6 +3,17 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleTraceRoutes = void 0;
 const commandResult_1 = require("../../core/contracts/commandResult");
 const TRACE_ROUTE_PREFIX = '/api/trace/';
+function readBoolean(value) {
+    const normalized = (value ?? '').trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes';
+}
+function readPositiveInteger(value, fallback) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+    return Math.floor(parsed);
+}
 function serializeWatchNdjsonAsSse(ndjson) {
     const lines = ndjson
         .split(/\r?\n/u)
@@ -22,8 +33,13 @@ const handleTraceRoutes = async (context) => {
     const routeSuffix = decodeURIComponent(url.pathname.slice(TRACE_ROUTE_PREFIX.length)).trim();
     // GET /api/trace/sessions — list all A2A sessions across all local MetaBot profiles
     if (routeSuffix === 'sessions') {
+        const from = url.searchParams.get('from')?.trim();
         const result = handlers.trace?.listSessions
-            ? await handlers.trace.listSessions()
+            ? await handlers.trace.listSessions({
+                ...(from ? { from } : {}),
+                ...(url.searchParams.has('all') ? { all: readBoolean(url.searchParams.get('all')) } : {}),
+                limit: readPositiveInteger(url.searchParams.get('limit'), 50),
+            })
             : (0, commandResult_1.commandFailed)('not_implemented', 'Trace session list handler is not configured.');
         context.sendJson(200, result);
         return true;
@@ -36,7 +52,10 @@ const handleTraceRoutes = async (context) => {
             return true;
         }
         const result = handlers.trace?.getSession
-            ? await handlers.trace.getSession({ sessionId })
+            ? await handlers.trace.getSession({
+                sessionId,
+                ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from').trim() } : {}),
+            })
             : (0, commandResult_1.commandFailed)('not_implemented', 'Trace session detail handler is not configured.');
         context.sendJson(200, result);
         return true;
@@ -44,7 +63,10 @@ const handleTraceRoutes = async (context) => {
     if (routeSuffix.endsWith('/events')) {
         const traceId = routeSuffix.slice(0, -'/events'.length).trim();
         const result = handlers.trace?.watchTrace
-            ? await handlers.trace.watchTrace({ traceId })
+            ? await handlers.trace.watchTrace({
+                traceId,
+                ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from').trim() } : {}),
+            })
             : '';
         if (!result) {
             context.sendJson(404, (0, commandResult_1.commandFailed)('trace_not_found', `Trace event stream not found: ${traceId}`));
@@ -56,7 +78,10 @@ const handleTraceRoutes = async (context) => {
     if (routeSuffix.endsWith('/watch')) {
         const traceId = routeSuffix.slice(0, -'/watch'.length).trim();
         const result = handlers.trace?.watchTrace
-            ? await handlers.trace.watchTrace({ traceId })
+            ? await handlers.trace.watchTrace({
+                traceId,
+                ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from').trim() } : {}),
+            })
             : '';
         if (!result) {
             context.sendJson(404, (0, commandResult_1.commandFailed)('trace_not_found', `Trace watch not found: ${traceId}`));
@@ -67,7 +92,10 @@ const handleTraceRoutes = async (context) => {
     }
     const traceId = routeSuffix;
     const result = handlers.trace?.getTrace
-        ? await handlers.trace.getTrace({ traceId })
+        ? await handlers.trace.getTrace({
+            traceId,
+            ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from').trim() } : {}),
+        })
         : (0, commandResult_1.commandFailed)('not_implemented', 'Trace handler is not configured.');
     context.sendJson(200, result);
     return true;

@@ -37,10 +37,10 @@ Should not trigger when:
 ```bash
 metabot doctor
 metabot network services --online
-metabot trace get --trace-id trace-123
-metabot wallet balance
-metabot wallet balance --chain doge
-metabot wallet balance --chain opcat
+metabot trace get --from <bot-slug> --trace-id trace-123
+metabot wallet balance --from <bot-slug>
+metabot wallet balance --from <bot-slug> --chain doge
+metabot wallet balance --from <bot-slug> --chain opcat
 ```
 
 ## Extended Reads

@@ -3,6 +3,11 @@ import type { RouteHandler } from './types';
 
 const MASTER_TRACE_PREFIX = '/api/master/trace/';
 
+function readFromQuery(url: URL): string | undefined {
+  const from = url.searchParams.get('from')?.trim();
+  return from || undefined;
+}
+
 export const handleMasterRoutes: RouteHandler = async (context) => {
   const { req, url, handlers } = context;
 
@@ -100,12 +105,13 @@ export const handleMasterRoutes: RouteHandler = async (context) => {
       return true;
     }
 
-    const traceId = decodeURIComponent(url.pathname.slice(MASTER_TRACE_PREFIX.length)).trim();
-    const result = handlers.master?.trace
-      ? await handlers.master.trace({
-          from: url.searchParams.get('from')?.trim() || undefined,
-          traceId,
-        })
+	    const traceId = decodeURIComponent(url.pathname.slice(MASTER_TRACE_PREFIX.length)).trim();
+	    const from = readFromQuery(url);
+	    const result = handlers.master?.trace
+	      ? await handlers.master.trace({
+	          ...(from ? { from } : {}),
+	          traceId,
+	        })
       : commandFailed('not_implemented', 'Master trace handler is not configured.');
     context.sendJson(200, result);
     return true;
