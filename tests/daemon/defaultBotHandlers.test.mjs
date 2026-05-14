@@ -12,7 +12,7 @@ const {
   getMetabotProfile,
   updateMetabotProfile,
 } = require('../../dist/core/bot/metabotProfileManager.js');
-const { listIdentityProfiles, upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
+const { listIdentityProfiles, setActiveMetabotHome, upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
@@ -130,6 +130,51 @@ test('default bot config handlers persist default write network per MetaBot prof
   assert.equal(ericConfig.data.chain.defaultWriteNetwork, 'mvc');
   assert.equal(aliceConfigOnDisk.chain.defaultWriteNetwork, 'opcat');
   assert.equal(ericConfigOnDisk.chain.defaultWriteNetwork, 'mvc');
+});
+
+test('default LLM handlers use the active profile when actor selectors are omitted', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-llm-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: 'Active Bot',
+    homeDir,
+    globalMetaId: 'gm-active',
+    mvcAddress: 'mvc-active',
+  });
+  await setActiveMetabotHome({ systemHomeDir, homeDir });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+  });
+
+  const upserted = await handlers.llm.upsertBindings({
+    bindings: [
+      {
+        llmRuntimeId: 'runtime-codex',
+        role: 'primary',
+        priority: 0,
+        enabled: true,
+      },
+    ],
+  });
+  const listed = await handlers.llm.listBindings({});
+  const setPreferred = await handlers.llm.setPreferredRuntime({ runtimeId: 'runtime-codex' });
+  const gotPreferred = await handlers.llm.getPreferredRuntime({});
+  const bindingState = await createLlmBindingStore(homeDir).read();
+
+  assert.equal(upserted.ok, true);
+  assert.equal(listed.ok, true);
+  assert.equal(setPreferred.ok, true);
+  assert.equal(gotPreferred.ok, true);
+  assert.equal(bindingState.bindings[0].metaBotSlug, 'active-bot');
+  assert.equal(bindingState.bindings[0].id, 'lb_active-bot_runtime-codex_primary');
+  assert.equal(gotPreferred.data.runtimeId, 'runtime-codex');
 });
 
 test('default bot createProfile rejects missing or duplicate names', async (t) => {

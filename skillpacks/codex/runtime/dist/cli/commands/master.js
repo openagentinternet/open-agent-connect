@@ -38,6 +38,10 @@ const commandResult_1 = require("../../core/contracts/commandResult");
 const helpers_1 = require("./helpers");
 async function runMasterCommand(args, context) {
     const subcommand = args[0];
+    const shouldPollTrace = Boolean(context.stdout
+        && typeof context.stdout === 'object'
+        && 'isTTY' in context.stdout
+        && context.stdout.isTTY);
     if (subcommand === 'publish') {
         const payloadFile = (0, helpers_1.readFlagValue)(args, '--payload-file');
         if (!payloadFile) {
@@ -51,8 +55,13 @@ async function runMasterCommand(args, context) {
         if (!handler) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'Master publish handler is not configured.');
         }
+        const from = (0, helpers_1.readFromFlag)(args);
         const payload = await (0, helpers_1.readJsonFile)(context, payloadFile);
-        return handler(chainFlag.chain ? { ...payload, network: chainFlag.chain } : payload);
+        return handler({
+            ...payload,
+            ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
+            ...(from ? { from } : {}),
+        });
     }
     if (subcommand === 'list') {
         const handler = context.dependencies.master?.list;
@@ -71,9 +80,10 @@ async function runMasterCommand(args, context) {
         }
         const confirm = (0, helpers_1.hasFlag)(args, '--confirm');
         const traceId = (0, helpers_1.readFlagValue)(args, '--trace-id');
+        const from = (0, helpers_1.readFromFlag)(args);
         let result;
         if (traceId) {
-            result = await handler({ traceId, confirm });
+            result = await handler({ ...(from ? { from } : {}), traceId, confirm });
         }
         else {
             const requestFile = (0, helpers_1.readFlagValue)(args, '--request-file');
@@ -84,7 +94,7 @@ async function runMasterCommand(args, context) {
                 return (0, commandResult_1.commandFailed)('invalid_argument', '`metabot master ask --confirm` requires `--trace-id <trace-id>` and cannot be combined with `--request-file`.');
             }
             const payload = await (0, helpers_1.readJsonFile)(context, requestFile);
-            result = await handler({ ...payload, confirm });
+            result = await handler({ ...payload, confirm, ...(from ? { from } : {}) });
         }
         if (result.state === 'waiting' &&
             'data' in result &&
@@ -92,7 +102,7 @@ async function runMasterCommand(args, context) {
             typeof result.data === 'object' &&
             'traceId' in result.data &&
             result.localUiUrl &&
-            process.stdout.isTTY) {
+            shouldPollTrace) {
             const { pollTraceUntilComplete } = await Promise.resolve().then(() => __importStar(require('./pollTraceHelper')));
             const traceGet = context.dependencies.trace?.get;
             if (traceGet) {
@@ -101,7 +111,10 @@ async function runMasterCommand(args, context) {
                     localUiUrl: result.localUiUrl,
                     requestFn: async (_method, path) => {
                         const id = path.split('/').pop() || '';
-                        return traceGet({ traceId: decodeURIComponent(id) });
+                        return traceGet({
+                            ...(from ? { from } : {}),
+                            traceId: decodeURIComponent(id),
+                        });
                     },
                     stderr: context.stderr,
                 });
@@ -152,7 +165,8 @@ async function runMasterCommand(args, context) {
         if (!handler) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'Master trace handler is not configured.');
         }
-        return handler({ traceId });
+        const from = (0, helpers_1.readFromFlag)(args);
+        return handler({ ...(from ? { from } : {}), traceId });
     }
     return (0, helpers_1.commandUnknownSubcommand)(`master ${args.join(' ')}`.trim());
 }

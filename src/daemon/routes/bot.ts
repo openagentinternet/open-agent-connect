@@ -125,7 +125,9 @@ export const handleBotRoutes: RouteHandler = async (context) => {
 
   if (url.pathname === '/api/bot/runtimes' && req.method === 'GET') {
     const result = handlers.bot?.listRuntimes
-      ? await handlers.bot.listRuntimes()
+      ? await handlers.bot.listRuntimes({
+          ...(normalizeSlug(url.searchParams.get('from') ?? '') ? { from: normalizeSlug(url.searchParams.get('from') ?? '') } : {}),
+        })
       : commandFailed('not_implemented', 'MetaBot runtime handler not configured.');
     context.sendJson(200, result);
     return true;
@@ -133,7 +135,9 @@ export const handleBotRoutes: RouteHandler = async (context) => {
 
   if (url.pathname === '/api/bot/runtimes/discover' && req.method === 'POST') {
     const result = handlers.bot?.discoverRuntimes
-      ? await handlers.bot.discoverRuntimes()
+      ? await handlers.bot.discoverRuntimes({
+          ...(normalizeSlug(url.searchParams.get('from') ?? '') ? { from: normalizeSlug(url.searchParams.get('from') ?? '') } : {}),
+        })
       : commandFailed('not_implemented', 'MetaBot runtime discovery handler not configured.');
     context.sendJson(200, result);
     return true;

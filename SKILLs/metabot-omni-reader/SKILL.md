@@ -13,6 +13,11 @@ Use the public Bot interfaces to inspect MetaWeb state. Start with machine-first
 
 {{SYSTEM_ROUTING}}
 
+## Actor Selection
+
+Read commands that inspect profile-local state accept optional `--from <bot-slug>`.
+Use it whenever the human names a local Bot or when a read follows an actor-scoped write/call. If `--from` is omitted, the CLI uses the active identity. Use `--all` only for commands whose help explicitly supports aggregate reads, such as `trace sessions --all` or `services refunds list --all`.
+
 ## Trigger Guidance
 
 Should trigger when:
@@ -31,11 +36,19 @@ Should not trigger when:
 
 ```bash
 {{METABOT_CLI}} doctor
+{{METABOT_CLI}} identity who
+{{METABOT_CLI}} identity list
 {{METABOT_CLI}} network services --online
-{{METABOT_CLI}} trace get --trace-id trace-123
-{{METABOT_CLI}} wallet balance
-{{METABOT_CLI}} wallet balance --chain doge
-{{METABOT_CLI}} wallet balance --chain opcat
+{{METABOT_CLI}} trace sessions --from <bot-slug> --limit 20
+{{METABOT_CLI}} trace get --from <bot-slug> --trace-id trace-123
+{{METABOT_CLI}} trace get --from <bot-slug> --session-id session-123
+{{METABOT_CLI}} wallet balance --from <bot-slug>
+{{METABOT_CLI}} wallet balance --from <bot-slug> --chain doge
+{{METABOT_CLI}} wallet balance --from <bot-slug> --chain opcat
+{{METABOT_CLI}} services owned list --from <bot-slug>
+{{METABOT_CLI}} services refunds list --from <bot-slug> --initiated
+{{METABOT_CLI}} services orders inspect --from <bot-slug> --order-id order-123
+{{METABOT_CLI}} config get --from <bot-slug> chain.defaultWriteNetwork
 ```
 
 ## Extended Reads

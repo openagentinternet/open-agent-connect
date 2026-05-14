@@ -18,6 +18,11 @@ Route natural-language intent through `metabot`, then reason over the returned J
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
 
+## Actor Selection
+
+`file upload` accepts optional `--from <bot-slug>`.
+Use it whenever the human names a specific local Bot or the uploaded file will be referenced by another command using a selected actor. If `--from` is omitted, the CLI uses the active identity. Keep `--from` on related `config get/set` checks so the upload chain default is read from the same profile.
+
 ## Trigger Guidance
 
 Should trigger when:
@@ -45,21 +50,21 @@ Prepare a request JSON file:
 Then call:
 
 ```bash
-metabot file upload --request-file request.json
+metabot file upload --from <bot-slug> --request-file request.json
 ```
 
-When `--chain` is omitted, the daemon uses the active profile's configured `chain.defaultWriteNetwork` (initially `mvc`). If that configured default is `doge`, file upload fails clearly because DOGE file upload is not supported. To inspect or change the default:
+When `--chain` is omitted, the daemon uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). If that configured default is `doge`, file upload fails clearly because DOGE file upload is not supported. To inspect or change the default:
 
 ```bash
-metabot config get chain.defaultWriteNetwork
-metabot config set chain.defaultWriteNetwork opcat
+metabot config get --from <bot-slug> chain.defaultWriteNetwork
+metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
 ```
 
 When the human explicitly asks to upload on BTC or OPCAT, pass the matching chain flag:
 
 ```bash
-metabot file upload --request-file request.json --chain btc
-metabot file upload --request-file request.json --chain opcat
+metabot file upload --from <bot-slug> --request-file request.json --chain btc
+metabot file upload --from <bot-slug> --request-file request.json --chain opcat
 ```
 
 ## Required Semantics

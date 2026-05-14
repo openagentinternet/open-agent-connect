@@ -181,7 +181,7 @@ async function startServer(options = {}) {
       listPublishSkills: async (input) => {
         calls.publishSkills.push(input);
         return commandSuccess({
-          metaBotSlug: input?.slug || 'alice',
+          metaBotSlug: input?.from || input?.slug || 'alice',
           runtime: {
             id: 'runtime-codex',
             provider: 'codex',
@@ -1794,15 +1794,15 @@ test('POST /api/services/publish forwards the JSON payload to services.publish',
   });
 });
 
-test('GET /api/services/publish/skills forwards to services.listPublishSkills', async (t) => {
+test('GET /api/services/skills forwards actor selection to services.listPublishSkills', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/api/services/publish/skills?slug=alice-weather-bot`);
+  const response = await fetch(`${server.baseUrl}/api/services/skills?from=alice-weather-bot`);
   const payload = await response.json();
 
   assert.equal(response.status, 200);
-  assert.deepEqual(server.calls.publishSkills, [{ slug: 'alice-weather-bot' }]);
+  assert.deepEqual(server.calls.publishSkills, [{ from: 'alice-weather-bot' }]);
   assert.equal(payload.ok, true);
   assert.equal(payload.data.metaBotSlug, 'alice-weather-bot');
   assert.equal(payload.data.runtime.provider, 'codex');
@@ -1810,6 +1810,9 @@ test('GET /api/services/publish/skills forwards to services.listPublishSkills', 
     payload.data.skills.map((skill) => skill.skillName),
     ['metabot-weather-oracle'],
   );
+
+  const legacyResponse = await fetch(`${server.baseUrl}/api/services/publish/skills?slug=alice-weather-bot`);
+  assert.equal(legacyResponse.status, 404);
 });
 
 test('GET /api/trace/:traceId forwards the route parameter to trace.getTrace', async (t) => {
@@ -1951,7 +1954,7 @@ test('GET /ui/trace serves a built-in trace inspector wired to the trace API, SS
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /A2A Trace/);
-  assert.match(html, /\/api\/trace\/sessions/);
+  assert.match(html, /\/api\/trace\/sessions\?all=true/);
   assert.match(html, /data-session-list/);
   assert.match(html, /data-session-detail/);
   assert.match(html, /data-trace-total/);
@@ -2035,7 +2038,7 @@ test('GET /ui/publish serves the primary-runtime-aware publish console', async (
   assert.match(html, /Publish Service/);
   assert.match(html, /data-metabot-select/);
   assert.match(html, /data-provider-skill-select/);
-  assert.match(html, /\/api\/services\/publish\/skills/);
+  assert.match(html, /\/api\/services\/skills\?from=/);
   assert.match(html, /name="inputType"/);
   assert.match(html, /value="BTC-OPCAT"/);
   assert.match(html, /value="DOGE"/);
@@ -2046,6 +2049,8 @@ test('GET /ui/publish serves the primary-runtime-aware publish console', async (
   assert.match(html, /for="publish-service-cover-input"/);
   assert.match(html, /data-publish-status-txid/);
   assert.match(html, /data-publish-status-copy/);
+  assert.doesNotMatch(html, /\/api\/services\/publish\/skills/);
+  assert.doesNotMatch(html, /\/api\/provider\/summary/);
   assert.doesNotMatch(html, /Skill Document/);
   assert.doesNotMatch(html, /Service Icon URI/);
   assert.doesNotMatch(html, /Service Icon/);
@@ -2081,10 +2086,11 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.match(html, /Runtime/);
   assert.match(html, /Rating/);
   assert.match(html, /Session/);
-  assert.match(html, /\/api\/services\/my/);
-  assert.match(html, /\/api\/services\/my\/orders/);
-  assert.match(html, /\/api\/services\/my\/modify/);
-  assert.match(html, /\/api\/services\/my\/revoke/);
+  assert.match(html, /\/api\/services\/owned/);
+  assert.match(html, /\/api\/services\/owned\/orders/);
+  assert.match(html, /\/api\/services\/owned\/modify/);
+  assert.match(html, /\/api\/services\/owned\/revoke/);
+  assert.doesNotMatch(html, /\/api\/services\/my/);
   assert.doesNotMatch(html, /\/api\/provider\/summary/);
 });
 
@@ -2104,8 +2110,10 @@ test('GET /ui/refund renders buyer and seller refund operations', async (t) => {
   assert.match(html, /data-refund-pending-count/);
   assert.match(html, /data-refund-buyer-list/);
   assert.match(html, /data-refund-seller-list/);
-  assert.match(html, /\/api\/provider\/refunds/);
-  assert.match(html, /\/api\/provider\/refund\/settle/);
+  assert.match(html, /\/api\/services\/refunds/);
+  assert.match(html, /\/api\/services\/refunds\/settle/);
+  assert.doesNotMatch(html, /\/api\/provider\/refunds/);
+  assert.doesNotMatch(html, /\/api\/provider\/refund\/settle/);
 });
 
 test('GET /ui/buzz serves the bundled Buzz MetaApp entry from the daemon server', async (t) => {

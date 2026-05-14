@@ -26,6 +26,7 @@ async function runBuzzCommand(args, context) {
     if (!requestFile) {
         return (0, helpers_1.commandMissingFlag)('--request-file');
     }
+    const from = (0, helpers_1.readFromFlag)(args);
     const chainFlag = (0, helpers_1.readChainWriteFlag)(args);
     if (chainFlag.error) {
         return chainFlag.error;
@@ -41,6 +42,7 @@ async function runBuzzCommand(args, context) {
         ...request,
         ...(resolvedAttachments === undefined ? {} : { attachments: resolvedAttachments }),
         ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
+        ...(from ? { from } : {}),
     };
     return handler(resolvedRequest);
 }

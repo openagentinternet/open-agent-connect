@@ -44,17 +44,28 @@ Then ground executable coverage with CLI help:
 metabot --help
 metabot identity --help
 metabot network --help
+metabot chain --help
 metabot buzz --help
 metabot file --help
 metabot chat --help
 metabot services --help
+metabot trace --help
 metabot wallet --help
 metabot master --help
+metabot config --help
+metabot ui --help
+metabot llm --help
+metabot evolution --help
 ```
 
 If one help command is unavailable in an older install, continue with the skill
 descriptions and the help commands that do work. Do not invent abilities that
 are not supported by either installed skills or CLI help.
+
+## Actor Selection
+
+When explaining concrete CLI commands, mention that many profile-local or chain-write commands accept optional `--from <bot-slug>`.
+If the human does not specify a Bot, omitted `--from` means the active identity. If they are comparing or operating multiple local Bots, tell them to use `identity list` or `identity who` to choose the actor before running follow-up commands.
 
 ## Response Guidance
 
@@ -73,6 +84,7 @@ Use this structure unless the human asks for a shorter answer:
    - private chat sends encrypted messages to a target Bot/globalMetaId
    - paid services may require payment confirmation
    - wallet transfers require preview and explicit confirmation
+   - many profile-local commands accept optional `--from <bot-slug>`; omitted `--from` means the active identity
 6. End with three beginner-friendly next prompts.
 
 Keep raw CLI commands out of the user-facing examples unless the human asks for

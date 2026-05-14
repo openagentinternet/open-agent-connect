@@ -19,6 +19,7 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^Usage:\s+metabot <command>/m);
   assert.match(output, /^Commands:/m);
   assert.match(output, /^\s+identity\s+/m);
+  assert.match(output, /^\s+bot\s+/m);
   assert.match(output, /^\s+config\s+/m);
   assert.match(output, /^\s+wallet\s+/m);
   assert.match(output, /^\s+services\s+/m);
@@ -43,8 +44,40 @@ test('runCli prints machine-readable top-level help for `metabot --help --json`'
   assert.deepEqual(output.commandPath, []);
   assert.equal(output.command, 'metabot');
   assert.ok(Array.isArray(output.subcommands));
+  assert.ok(output.subcommands.some((entry) => entry.name === 'bot'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'host'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'provider'));
+});
+
+test('runCli prints bot group help for profile, runtime, and session commands', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['bot', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot bot <subcommand>/m);
+  assert.match(output, /show\s+Show one local MetaBot profile\./);
+  assert.match(output, /runtimes\s+List or discover LLM runtimes for a MetaBot profile\./);
+  assert.match(output, /sessions\s+List runtime sessions for a MetaBot profile\./);
+});
+
+test('runCli prints bot sessions help with actor and limit selectors', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['bot', 'sessions', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot bot sessions \[--from <bot-slug>\] \[--limit <n>\]/m);
+  assert.match(output, /--from <bot-slug>/);
+  assert.match(output, /--limit <n>\s+Maximum session count\. Defaults to 50\./);
 });
 
 test('runCli prints config group help with get and set subcommands', async () => {
@@ -65,6 +98,7 @@ test('runCli prints config group help with get and set subcommands', async () =>
   assert.match(output, /chain\.defaultWriteNetwork/);
   assert.match(output, /askMaster\.enabled/);
   assert.match(output, /askMaster\.triggerMode suggest/);
+  assert.match(output, /--from alice/);
 });
 
 test('runCli prints config set help with the public Ask Master trigger modes only', async () => {
@@ -78,7 +112,8 @@ test('runCli prints config set help with the public Ask Master trigger modes onl
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot config set <key> <value>/m);
+  assert.match(output, /^Usage:\s+metabot config set \[--from <bot-slug>\] <key> <value>/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /Ask Master trigger mode is intentionally limited to manual or suggest/i);
   assert.match(output, /Fails when askMaster\.triggerMode is not one of `manual` or `suggest`\./);
   assert.doesNotMatch(output, /`manual`, `suggest`, or `auto`/);
@@ -112,7 +147,8 @@ test('runCli prints master ask help with confirm limited to the trace-id continu
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot master ask --request-file <path> \| metabot master ask --trace-id <trace-id> \[--confirm\]/m);
+  assert.match(output, /^Usage:\s+metabot master ask \[--from <bot-slug>\] --request-file <path> \| metabot master ask \[--from <bot-slug>\] --trace-id <trace-id> \[--confirm\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /Only valid together with `--trace-id`\./);
 });
 
@@ -143,7 +179,8 @@ test('runCli prints wallet transfer help with every supported transfer unit', as
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot wallet transfer --to <address> --amount <amount><UNIT> \[--confirm\]/m);
+  assert.match(output, /^Usage:\s+metabot wallet transfer \[--from <bot-slug>\] --to <address> --amount <amount><UNIT> \[--confirm\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /BTC, SPACE, DOGE, or OPCAT/);
   assert.match(output, /10OPCAT/);
   assert.match(output, /Fails with invalid_argument when --to or --amount is missing, or the currency unit is not BTC, SPACE, DOGE, or OPCAT\./);
@@ -160,10 +197,11 @@ test('runCli prints wallet balance help with every supported balance chain', asy
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot wallet balance \[--chain <all\|mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /^Usage:\s+metabot wallet balance \[--from <bot-slug>\] \[--chain <all\|mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /wallet balances for mvc, btc, doge, and opcat/i);
-  assert.match(output, /metabot wallet balance --chain doge/);
-  assert.match(output, /metabot wallet balance --chain opcat/);
+  assert.match(output, /metabot wallet balance --from alice --chain doge/);
+  assert.match(output, /metabot wallet balance --from alice --chain opcat/);
 });
 
 test('runCli prints chain write help with every supported write chain', async () => {
@@ -177,7 +215,8 @@ test('runCli prints chain write help with every supported write chain', async ()
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot chain write --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /^Usage:\s+metabot chain write \[--from <bot-slug>\] --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /optional chain network override: mvc, btc, doge, or opcat/i);
   assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(output, /chain-doge-request\.json/);
@@ -195,7 +234,8 @@ test('runCli prints buzz post help with DOGE and OPCAT chain support', async () 
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot buzz post --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /^Usage:\s+metabot buzz post \[--from <bot-slug>\] --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(output, /buzz-doge-request\.json/);
   assert.match(output, /buzz-opcat-request\.json/);
@@ -212,7 +252,8 @@ test('runCli prints file upload help with OPCAT support and DOGE exclusion', asy
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot file upload --request-file <path> \[--chain <mvc\|btc\|opcat>\]/m);
+  assert.match(output, /^Usage:\s+metabot file upload \[--from <bot-slug>\] --request-file <path> \[--chain <mvc\|btc\|opcat>\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /DOGE is not supported for file upload/i);
   assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
 });
@@ -228,10 +269,26 @@ test('runCli prints master publish help with DOGE and OPCAT chain support', asyn
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot master publish --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /^Usage:\s+metabot master publish \[--from <bot-slug>\] --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(output, /--from <bot-slug>/);
   assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(output, /master-doge-payload\.json/);
   assert.match(output, /master-opcat-payload\.json/);
+});
+
+test('runCli prints master trace help with actor selection', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['master', 'trace', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot master trace \[--from <bot-slug>\] --id <trace-id>/m);
+  assert.match(output, /--from <bot-slug>/);
 });
 
 test('runCli prints system group help with update and uninstall subcommands', async () => {
@@ -292,7 +349,11 @@ test('runCli prints services group help with publish skill listing', async () =>
   assert.equal(exitCode, 0);
   const output = stdout.join('');
   assert.match(output, /^Usage:\s+metabot services <subcommand>/m);
-  assert.match(output, /publish-skills\s+List primary-runtime skills available for service publishing\./);
+  assert.match(output, /skills\s+List primary-runtime skills available for service publishing\./);
+  assert.match(output, /publish-skills\s+Compatibility alias for services skills\./);
+  assert.match(output, /owned\s+List and manage services owned by local MetaBots\./);
+  assert.match(output, /orders\s+Inspect seller-side service orders\./);
+  assert.match(output, /refunds\s+List and settle service refunds\./);
 });
 
 test('runCli prints services publish and rate help with DOGE and OPCAT chain support', async () => {
@@ -304,7 +365,8 @@ test('runCli prints services publish and rate help with DOGE and OPCAT chain sup
 
   assert.equal(publishExitCode, 0);
   const publishOutput = publishStdout.join('');
-  assert.match(publishOutput, /^Usage:\s+metabot services publish --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(publishOutput, /^Usage:\s+metabot services publish \[--from <bot-slug>\] --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(publishOutput, /--from <bot-slug>\s+Optional local MetaBot actor/m);
   assert.match(publishOutput, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(publishOutput, /service-doge-payload\.json/);
   assert.match(publishOutput, /service-opcat-payload\.json/);
@@ -317,10 +379,27 @@ test('runCli prints services publish and rate help with DOGE and OPCAT chain sup
 
   assert.equal(rateExitCode, 0);
   const rateOutput = rateStdout.join('');
-  assert.match(rateOutput, /^Usage:\s+metabot services rate --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(rateOutput, /^Usage:\s+metabot services rate \[--from <bot-slug>\] --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(rateOutput, /--from <bot-slug>\s+Optional local MetaBot actor/m);
   assert.match(rateOutput, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
   assert.match(rateOutput, /rating-doge\.json/);
   assert.match(rateOutput, /rating-opcat\.json/);
+});
+
+test('runCli prints leaf help text for canonical `metabot services skills --help`', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['services', 'skills', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot services skills \[--from <bot-slug>\]/m);
+  assert.match(output, /Lists skills from one local MetaBot primary runtime only/i);
+  assert.match(output, /--from <bot-slug>\s+Optional local MetaBot actor/m);
+  assert.match(output, /metabot services skills --from alice/);
 });
 
 test('runCli prints leaf help text for `metabot services publish-skills --help`', async () => {
@@ -333,12 +412,49 @@ test('runCli prints leaf help text for `metabot services publish-skills --help`'
 
   assert.equal(exitCode, 0);
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot services publish-skills/m);
-  assert.match(output, /Lists skills from the active MetaBot primary runtime only/i);
+  assert.match(output, /^Usage:\s+metabot services publish-skills \[--slug <bot-slug>\]/m);
+  assert.match(output, /Compatibility alias for `metabot services skills`/i);
+  assert.match(output, /--slug <bot-slug>\s+Compatibility actor selector/m);
   assert.match(output, /metaBotSlug/m);
   assert.match(output, /runtime/m);
   assert.match(output, /skills/m);
   assert.match(output, /primary runtime is missing/i);
+});
+
+test('runCli prints services owned help with read and mutation subcommands', async () => {
+  const groupStdout = [];
+  const groupExitCode = await runCli(['services', 'owned', '--help'], {
+    stdout: { write: (chunk) => { groupStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(groupExitCode, 0);
+  const groupOutput = groupStdout.join('');
+  assert.match(groupOutput, /^Usage:\s+metabot services owned <subcommand>/m);
+  assert.match(groupOutput, /list\s+List services owned by the active, selected, or all local MetaBots\./);
+  assert.match(groupOutput, /modify\s+Publish an on-chain modification for one owned service\./);
+
+  const listStdout = [];
+  const listExitCode = await runCli(['services', 'owned', 'list', '--help'], {
+    stdout: { write: (chunk) => { listStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(listExitCode, 0);
+  const listOutput = listStdout.join('');
+  assert.match(listOutput, /^Usage:\s+metabot services owned list \[--from <bot-slug> \| --all\]/m);
+  assert.match(listOutput, /--all\s+Aggregate owned services across all local MetaBot profiles\./);
+
+  const modifyStdout = [];
+  const modifyExitCode = await runCli(['services', 'owned', 'modify', '--help'], {
+    stdout: { write: (chunk) => { modifyStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(modifyExitCode, 0);
+  const modifyOutput = modifyStdout.join('');
+  assert.match(modifyOutput, /^Usage:\s+metabot services owned modify \[--from <bot-slug>\] --payload-file <path>/m);
+  assert.match(modifyOutput, /Rejects --all because service mutations must choose exactly one local MetaBot actor\./);
 });
 
 test('runCli prints provider operations help with order inspection and refund settlement', async () => {
@@ -352,8 +468,45 @@ test('runCli prints provider operations help with order inspection and refund se
   assert.equal(exitCode, 0);
   const output = stdout.join('');
   assert.match(output, /^Usage:\s+metabot provider <subcommand>/m);
+  assert.match(output, /Compatibility aliases for seller-side service order inspection and refund settlement\./);
+  assert.match(output, /Prefer `metabot services orders inspect` and `metabot services refunds settle`/);
   assert.match(output, /order\s+Inspect seller-side provider orders\./);
   assert.match(output, /refund\s+Process seller-side refund settlement\./);
+});
+
+test('runCli prints services order and refund lifecycle help', async () => {
+  const listStdout = [];
+  const listExitCode = await runCli(['services', 'refunds', 'list', '--help'], {
+    stdout: { write: (chunk) => { listStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(listExitCode, 0);
+  const listOutput = listStdout.join('');
+  assert.match(listOutput, /^Usage:\s+metabot services refunds list \[--from <bot-slug> \| --all\] \[--kind <all\|initiated\|received> \| --initiated \| --received\]/m);
+  assert.match(listOutput, /--kind <all\|initiated\|received>\s+Select all refunds, buyer-side initiated refunds, or seller-side received refund requests\./m);
+
+  const orderStdout = [];
+  const orderExitCode = await runCli(['services', 'orders', 'inspect', '--help'], {
+    stdout: { write: (chunk) => { orderStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(orderExitCode, 0);
+  const orderOutput = orderStdout.join('');
+  assert.match(orderOutput, /^Usage:\s+metabot services orders inspect \[--from <bot-slug>\] \(\--order-id <id> \| --payment-txid <txid>\)/m);
+  assert.match(orderOutput, /service, buyer, status, trace, payment, runtime session, and refund fields/i);
+
+  const refundStdout = [];
+  const refundExitCode = await runCli(['services', 'refunds', 'settle', '--help'], {
+    stdout: { write: (chunk) => { refundStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(refundExitCode, 0);
+  const refundOutput = refundStdout.join('');
+  assert.match(refundOutput, /^Usage:\s+metabot services refunds settle \[--from <bot-slug>\] \(\--order-id <id> \| --payment-txid <txid>\)/m);
+  assert.match(refundOutput, /refund txid, finalization pin, or a machine-readable blocking reason/i);
 });
 
 test('runCli prints provider order inspect help with order id and payment txid selectors', async () => {
@@ -366,8 +519,8 @@ test('runCli prints provider order inspect help with order id and payment txid s
 
   assert.equal(exitCode, 0);
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot provider order inspect \(\--order-id <id> \| --payment-txid <txid>\)/m);
-  assert.match(output, /service, buyer, status, trace, payment, runtime session, and refund fields/i);
+  assert.match(output, /^Usage:\s+metabot provider order inspect \[--from <bot-slug>\] \(\--order-id <id> \| --payment-txid <txid>\)/m);
+  assert.match(output, /Compatibility alias for `metabot services orders inspect`/i);
 });
 
 test('runCli prints provider refund settle help with settlement proof and blocker semantics', async () => {
@@ -380,8 +533,8 @@ test('runCli prints provider refund settle help with settlement proof and blocke
 
   assert.equal(exitCode, 0);
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot provider refund settle \(\--order-id <id> \| --payment-txid <txid>\)/m);
-  assert.match(output, /refund txid, finalization pin, or a machine-readable blocking reason/i);
+  assert.match(output, /^Usage:\s+metabot provider refund settle \[--from <bot-slug>\] \(\--order-id <id> \| --payment-txid <txid>\)/m);
+  assert.match(output, /Compatibility alias for `metabot services refunds settle`/i);
 });
 
 test('runCli prints leaf help text for `metabot services call --help` with request and result semantics', async () => {
@@ -395,9 +548,10 @@ test('runCli prints leaf help text for `metabot services call --help` with reque
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot services call --request-file <path>/m);
+  assert.match(output, /^Usage:\s+metabot services call \[--from <bot-slug>\] --request-file <path>/m);
   assert.match(output, /^Required flags:/m);
   assert.match(output, /--request-file <path>\s+JSON request file\./m);
+  assert.match(output, /--from <bot-slug>\s+Optional local MetaBot actor/m);
   assert.match(output, /^Request shape:/m);
   assert.match(output, /"servicePinId": "service-pin-id"/m);
   assert.match(output, /^Success shape:/m);
@@ -420,6 +574,7 @@ test('runCli documents trace get lookup by trace id or session id', async () => 
 
   const output = JSON.parse(stdout.join(''));
   assert.deepEqual(output.commandPath, ['trace', 'get']);
+  assert.match(output.usage, /\[--from <bot-slug>\]/);
   assert.match(output.usage, /--trace-id <trace-id>/);
   assert.match(output.usage, /--session-id <session-id>/);
   assert.ok(output.requiredFlags.some((entry) => entry.flag === '--trace-id'));
@@ -429,7 +584,52 @@ test('runCli documents trace get lookup by trace id or session id', async () => 
   assert.ok(output.successFields.includes('orderTxid'));
   assert.ok(output.successFields.includes('paymentTxid'));
   assert.ok(output.successFields.includes('localUiUrl'));
-  assert.ok(output.examples.includes('metabot trace get --session-id session-a2a-123'));
+  assert.ok(output.examples.includes('metabot trace get --from alice --session-id session-a2a-123'));
+});
+
+test('runCli documents trace sessions listing with actor selectors', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['trace', 'sessions', '--help', '--json'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = JSON.parse(stdout.join(''));
+  assert.deepEqual(output.commandPath, ['trace', 'sessions']);
+  assert.match(output.usage, /\[--from <bot-slug> \| --all\]/);
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--from'));
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--all'));
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--limit'));
+  assert.ok(output.successFields.includes('sessions'));
+  assert.ok(output.examples.includes('metabot trace sessions --from alice --limit 20'));
+});
+
+test('runCli documents ui open selectors for page-specific handoffs', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['ui', 'open', '--help', '--json'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = JSON.parse(stdout.join(''));
+  assert.deepEqual(output.commandPath, ['ui', 'open']);
+  assert.match(output.usage, /\[--from <bot-slug>\]/);
+  assert.match(output.usage, /\[--session-id <session-id>\]/);
+  assert.match(output.usage, /\[--service-id <service-pin-id>\]/);
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--from'));
+  const traceFlag = output.optionalFlags.find((entry) => entry.flag === '--trace-id');
+  assert.ok(traceFlag);
+  assert.match(traceFlag.description, /Optional/);
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--session-id'));
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--service-id'));
+  assert.ok(output.successFields.includes('localUiUrl'));
+  assert.ok(output.examples.includes('metabot ui open --page publish --from alice'));
 });
 
 test('runCli prints machine-readable help for `metabot chat private --help --json`', async () => {
@@ -445,7 +645,7 @@ test('runCli prints machine-readable help for `metabot chat private --help --jso
   const output = JSON.parse(stdout.join(''));
   assert.deepEqual(output.commandPath, ['chat', 'private']);
   assert.equal(output.command, 'metabot chat private');
-  assert.match(output.usage, /^metabot chat private --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]$/);
+  assert.match(output.usage, /^metabot chat private \[--from <bot-slug>\] --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]$/);
   assert.equal(output.summary, 'Send one encrypted private MetaWeb message to another MetaBot.');
   assert.deepEqual(output.requiredFlags, [
     {
@@ -459,6 +659,7 @@ test('runCli prints machine-readable help for `metabot chat private --help --jso
     && entry.value === '<mvc|btc|doge|opcat>'
     && /chain\.defaultWriteNetwork/.test(entry.description)
   )));
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--from'));
   assert.equal(output.requestShape.to, 'remote globalMetaId');
   assert.equal(output.requestShape.content, 'message text');
   assert.equal(output.requestShape.replyPin, 'optional prior message pin id');
@@ -471,6 +672,44 @@ test('runCli prints machine-readable help for `metabot chat private --help --jso
   assert.equal(output.successFields.includes('payload'), false);
   assert.equal(output.successFields.includes('encryptedContent'), false);
   assert.equal(output.successFields.includes('peerChatPublicKey'), false);
+});
+
+test('runCli documents actor selection for chat history and auto-reply commands', async () => {
+  const cases = [
+    {
+      args: ['chat', 'conversations', '--help'],
+      usage: /^Usage:\s+metabot chat conversations \[--from <bot-slug>\]/m,
+    },
+    {
+      args: ['chat', 'messages', '--help'],
+      usage: /^Usage:\s+metabot chat messages \[--from <bot-slug>\] --conversation-id <conversation-id> \[--limit <n>\]/m,
+    },
+    {
+      args: ['chat', 'auto-reply', 'status', '--help'],
+      usage: /^Usage:\s+metabot chat auto-reply status \[--from <bot-slug>\]/m,
+    },
+    {
+      args: ['chat', 'auto-reply', 'enable', '--help'],
+      usage: /^Usage:\s+metabot chat auto-reply enable \[--from <bot-slug>\] \[--strategy <strategy-id>\]/m,
+    },
+    {
+      args: ['chat', 'auto-reply', 'disable', '--help'],
+      usage: /^Usage:\s+metabot chat auto-reply disable \[--from <bot-slug>\]/m,
+    },
+  ];
+
+  for (const entry of cases) {
+    const stdout = [];
+    const exitCode = await runCli(entry.args, {
+      stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+      stderr: { write: () => true },
+    });
+
+    assert.equal(exitCode, 0);
+    const output = stdout.join('');
+    assert.match(output, entry.usage);
+    assert.match(output, /--from <bot-slug>/);
+  }
 });
 
 test('runCli prints nested group help for `metabot network sources --help`', async () => {
@@ -608,4 +847,54 @@ test('runCli prints identity create help with MetaBot terminology', async () => 
   assert.match(output, /metabot identity create --name "<your chosen MetaBot name>"/);
   assert.doesNotMatch(output, /metabot identity create --name "Alice"/);
   assert.doesNotMatch(output, /connected-agent/i);
+});
+
+test('runCli prints LLM group help with canonical --from examples', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['llm', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /--from my-bot/);
+  assert.match(output, /--slug remains a compatibility alias/i);
+});
+
+test('runCli prints LLM leaf JSON help for actor-scoped binding commands', async () => {
+  for (const [subcommand, usage] of [
+    ['bindings', 'metabot llm bindings [--from <bot-slug>]'],
+    ['bind', 'metabot llm bind [--from <bot-slug>] --runtime-id <runtime-id> [--role <role>] [--priority <n>]'],
+    ['unbind', 'metabot llm unbind [--from <bot-slug>] --binding-id <binding-id>'],
+    ['set-preferred', 'metabot llm set-preferred [--from <bot-slug>] [--runtime-id <runtime-id>]'],
+    ['get-preferred', 'metabot llm get-preferred [--from <bot-slug>]'],
+  ]) {
+    const stdout = [];
+    const exitCode = await runCli(['llm', subcommand, '--help', '--json'], {
+      stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+      stderr: { write: () => true },
+    });
+
+    assert.equal(exitCode, 0);
+    const payload = JSON.parse(stdout.join(''));
+    assert.deepEqual(payload.commandPath, ['llm', subcommand]);
+    assert.equal(payload.usage, usage);
+    assert.ok(payload.optionalFlags.some((entry) => entry.flag === '--from'));
+  }
+});
+
+test('runCli prints evolution help with actor selection', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['evolution', 'publish', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot evolution publish \[--from <bot-slug>\] --skill <skill> --variant-id <variant-id>/m);
+  assert.match(output, /--from <bot-slug>/);
 });

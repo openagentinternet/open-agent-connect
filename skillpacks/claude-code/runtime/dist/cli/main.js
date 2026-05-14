@@ -12,6 +12,7 @@ const network_1 = require("./commands/network");
 const provider_1 = require("./commands/provider");
 const services_1 = require("./commands/services");
 const buzz_1 = require("./commands/buzz");
+const bot_1 = require("./commands/bot");
 const chain_1 = require("./commands/chain");
 const chat_1 = require("./commands/chat");
 const file_1 = require("./commands/file");
@@ -66,6 +67,9 @@ async function runCli(argv, cliContext = {}) {
             switch (command) {
                 case 'buzz':
                     result = await (0, buzz_1.runBuzzCommand)(rest, context);
+                    break;
+                case 'bot':
+                    result = await (0, bot_1.runBotCommand)(rest, context);
                     break;
                 case 'chain':
                     result = await (0, chain_1.runChainCommand)(rest, context);

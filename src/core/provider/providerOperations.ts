@@ -83,6 +83,7 @@ export interface SellerReceivedRefundItem {
   refundCompletedAt: number | null;
   counterpartyGlobalMetaId: string | null;
   counterpartyName: string | null;
+  localMetabotSlug: string | null;
   traceId: string | null;
   traceHref: string | null;
   runtimeSessionId: string | null;
@@ -268,6 +269,7 @@ export function buildSellerReceivedRefundItems(state: RuntimeState): SellerRecei
         refundCompletedAt,
         counterpartyGlobalMetaId: normalizeText(order.buyerGlobalMetaId) || null,
         counterpartyName: null,
+        localMetabotSlug: normalizeText(order.localMetabotSlug) || null,
         traceId: traceId || null,
         traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : null,
         runtimeSessionId: normalizeText(order.llmSessionId) || null,

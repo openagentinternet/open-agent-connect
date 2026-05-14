@@ -12,6 +12,10 @@ function normalizeLimit(value) {
 function acceptsSse(header) {
     return (header ?? '').toLowerCase().includes('text/event-stream');
 }
+function readFromQuery(url) {
+    const from = url.searchParams.get('from')?.trim();
+    return from || undefined;
+}
 function decodeSafeSessionId(segment) {
     let sessionId;
     try {
@@ -128,8 +132,9 @@ const handleLlmRoutes = async (context) => {
     const bindingsSlugMatch = url.pathname.match(/^\/api\/llm\/bindings\/([^/]+)$/);
     if (bindingsSlugMatch && req.method === 'GET') {
         const slug = decodeURIComponent(bindingsSlugMatch[1]);
+        const from = readFromQuery(url);
         const result = handlers.llm?.listBindings
-            ? await handlers.llm.listBindings({ slug })
+            ? await handlers.llm.listBindings({ ...(from ? { from } : {}), slug })
             : (0, commandResult_1.commandFailed)('not_implemented', 'LLM bindings handler not configured.');
         context.sendJson(200, result);
         return true;
@@ -138,8 +143,13 @@ const handleLlmRoutes = async (context) => {
     if (bindingsSlugMatch && req.method === 'PUT') {
         const slug = decodeURIComponent(bindingsSlugMatch[1]);
         const body = await context.readJsonBody();
+        const from = readFromQuery(url);
         const result = handlers.llm?.upsertBindings
-            ? await handlers.llm.upsertBindings({ slug, bindings: Array.isArray(body.bindings) ? body.bindings : [] })
+            ? await handlers.llm.upsertBindings({
+                ...(from ? { from } : {}),
+                slug,
+                bindings: Array.isArray(body.bindings) ? body.bindings : [],
+            })
             : (0, commandResult_1.commandFailed)('not_implemented', 'LLM bindings handler not configured.');
         context.sendJson(200, result);
         return true;
@@ -148,8 +158,9 @@ const handleLlmRoutes = async (context) => {
     const bindingIdMatch = url.pathname.match(/^\/api\/llm\/bindings\/([^/]+)\/delete$/);
     if (bindingIdMatch && req.method === 'DELETE') {
         const bindingId = decodeURIComponent(bindingIdMatch[1]);
+        const from = readFromQuery(url);
         const result = handlers.llm?.removeBinding
-            ? await handlers.llm.removeBinding({ bindingId })
+            ? await handlers.llm.removeBinding({ ...(from ? { from } : {}), bindingId })
             : (0, commandResult_1.commandFailed)('not_implemented', 'LLM remove binding handler not configured.');
         context.sendJson(200, result);
         return true;
@@ -158,8 +169,9 @@ const handleLlmRoutes = async (context) => {
     const preferredMatch = url.pathname.match(/^\/api\/llm\/preferred-runtime\/([^/]+)$/);
     if (preferredMatch && req.method === 'GET') {
         const slug = decodeURIComponent(preferredMatch[1]);
+        const from = readFromQuery(url);
         const result = handlers.llm?.getPreferredRuntime
-            ? await handlers.llm.getPreferredRuntime({ slug })
+            ? await handlers.llm.getPreferredRuntime({ ...(from ? { from } : {}), slug })
             : (0, commandResult_1.commandFailed)('not_implemented', 'LLM preferred runtime handler not configured.');
         context.sendJson(200, result);
         return true;
@@ -169,8 +181,13 @@ const handleLlmRoutes = async (context) => {
         const slug = decodeURIComponent(preferredMatch[1]);
         const body = await context.readJsonBody();
         const runtimeId = typeof body.runtimeId === 'string' ? body.runtimeId : null;
+        const from = readFromQuery(url);
         const result = handlers.llm?.setPreferredRuntime
-            ? await handlers.llm.setPreferredRuntime({ slug, runtimeId })
+            ? await handlers.llm.setPreferredRuntime({
+                ...(from ? { from } : {}),
+                slug,
+                runtimeId,
+            })
             : (0, commandResult_1.commandFailed)('not_implemented', 'LLM preferred runtime handler not configured.');
         context.sendJson(200, result);
         return true;

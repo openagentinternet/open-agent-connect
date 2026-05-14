@@ -18,6 +18,11 @@ Route natural-language intent through `metabot`, then reason over the returned J
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
 
+## Actor Selection
+
+Read commands that inspect profile-local state accept optional `--from <bot-slug>`.
+Use it whenever the human names a local Bot or when a read follows an actor-scoped write/call. If `--from` is omitted, the CLI uses the active identity. Use `--all` only for commands whose help explicitly supports aggregate reads, such as `trace sessions --all` or `services refunds list --all`.
+
 ## Trigger Guidance
 
 Should trigger when:
@@ -36,11 +41,19 @@ Should not trigger when:
 
 ```bash
 metabot doctor
+metabot identity who
+metabot identity list
 metabot network services --online
-metabot trace get --trace-id trace-123
-metabot wallet balance
-metabot wallet balance --chain doge
-metabot wallet balance --chain opcat
+metabot trace sessions --from <bot-slug> --limit 20
+metabot trace get --from <bot-slug> --trace-id trace-123
+metabot trace get --from <bot-slug> --session-id session-123
+metabot wallet balance --from <bot-slug>
+metabot wallet balance --from <bot-slug> --chain doge
+metabot wallet balance --from <bot-slug> --chain opcat
+metabot services owned list --from <bot-slug>
+metabot services refunds list --from <bot-slug> --initiated
+metabot services orders inspect --from <bot-slug> --order-id order-123
+metabot config get --from <bot-slug> chain.defaultWriteNetwork
 ```
 
 ## Extended Reads

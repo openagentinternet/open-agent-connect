@@ -3,6 +3,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleMasterRoutes = void 0;
 const commandResult_1 = require("../../core/contracts/commandResult");
 const MASTER_TRACE_PREFIX = '/api/master/trace/';
+function readFromQuery(url) {
+    const from = url.searchParams.get('from')?.trim();
+    return from || undefined;
+}
 const handleMasterRoutes = async (context) => {
     const { req, url, handlers } = context;
     if (url.pathname === '/api/master/publish') {
@@ -87,8 +91,12 @@ const handleMasterRoutes = async (context) => {
             return true;
         }
         const traceId = decodeURIComponent(url.pathname.slice(MASTER_TRACE_PREFIX.length)).trim();
+        const from = readFromQuery(url);
         const result = handlers.master?.trace
-            ? await handlers.master.trace({ traceId })
+            ? await handlers.master.trace({
+                ...(from ? { from } : {}),
+                traceId,
+            })
             : (0, commandResult_1.commandFailed)('not_implemented', 'Master trace handler is not configured.');
         context.sendJson(200, result);
         return true;

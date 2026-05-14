@@ -5,6 +5,7 @@ import {
   hasFlag,
   readChainWriteFlag,
   readFlagValue,
+  readFromFlag,
   readJsonFile,
 } from './helpers';
 import type { CliRuntimeContext } from '../types';
@@ -14,6 +15,12 @@ export async function runMasterCommand(
   context: CliRuntimeContext
 ): Promise<MetabotCommandResult<unknown>> {
   const subcommand = args[0];
+  const shouldPollTrace = Boolean(
+    context.stdout
+    && typeof context.stdout === 'object'
+    && 'isTTY' in (context.stdout as Record<string, unknown>)
+    && (context.stdout as { isTTY?: boolean }).isTTY,
+  );
 
   if (subcommand === 'publish') {
     const payloadFile = readFlagValue(args, '--payload-file');
@@ -31,8 +38,13 @@ export async function runMasterCommand(
       return commandFailed('not_implemented', 'Master publish handler is not configured.');
     }
 
+    const from = readFromFlag(args);
     const payload = await readJsonFile(context, payloadFile);
-    return handler(chainFlag.chain ? { ...payload, network: chainFlag.chain } : payload);
+    return handler({
+      ...payload,
+      ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
+      ...(from ? { from } : {}),
+    });
   }
 
   if (subcommand === 'list') {
@@ -55,10 +67,11 @@ export async function runMasterCommand(
 
     const confirm = hasFlag(args, '--confirm');
     const traceId = readFlagValue(args, '--trace-id');
+    const from = readFromFlag(args);
 
     let result: MetabotCommandResult<unknown>;
     if (traceId) {
-      result = await handler({ traceId, confirm });
+      result = await handler({ ...(from ? { from } : {}), traceId, confirm });
     } else {
       const requestFile = readFlagValue(args, '--request-file');
       if (!requestFile) {
@@ -71,7 +84,7 @@ export async function runMasterCommand(
         );
       }
       const payload = await readJsonFile(context, requestFile);
-      result = await handler({ ...payload, confirm });
+      result = await handler({ ...payload, confirm, ...(from ? { from } : {}) });
     }
 
     if (
@@ -79,20 +92,23 @@ export async function runMasterCommand(
       'data' in result &&
       result.data &&
       typeof result.data === 'object' &&
-      'traceId' in result.data &&
-      result.localUiUrl &&
-      process.stdout.isTTY
-    ) {
+	      'traceId' in result.data &&
+	      result.localUiUrl &&
+	      shouldPollTrace
+	    ) {
       const { pollTraceUntilComplete } = await import('./pollTraceHelper');
       const traceGet = context.dependencies.trace?.get;
       if (traceGet) {
         const poll = await pollTraceUntilComplete({
           traceId: String((result.data as Record<string, unknown>).traceId),
           localUiUrl: result.localUiUrl,
-          requestFn: async (_method, path) => {
-            const id = path.split('/').pop() || '';
-            return traceGet({ traceId: decodeURIComponent(id) });
-          },
+	          requestFn: async (_method, path) => {
+	            const id = path.split('/').pop() || '';
+	            return traceGet({
+	              ...(from ? { from } : {}),
+	              traceId: decodeURIComponent(id),
+	            });
+	          },
           stderr: context.stderr,
         });
         if (poll.completed && poll.trace) {
@@ -152,7 +168,8 @@ export async function runMasterCommand(
       return commandFailed('not_implemented', 'Master trace handler is not configured.');
     }
 
-    return handler({ traceId });
+    const from = readFromFlag(args);
+    return handler({ ...(from ? { from } : {}), traceId });
   }
 
   return commandUnknownSubcommand(`master ${args.join(' ')}`.trim());

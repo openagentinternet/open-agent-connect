@@ -18,6 +18,11 @@ Route natural-language intent through `metabot`, then reason over the returned J
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
 
+## Actor Selection
+
+`identity create/list/assign/who` manage the active profile set and do not take `--from`.
+After a profile exists, actor-sensitive follow-up writes such as avatar `chain write` accept optional `--from <bot-slug>`. Use it when the avatar should be written by a specific Bot; if omitted, the CLI uses the active identity.
+
 ## Trigger Guidance
 
 Should trigger when:
@@ -145,22 +150,22 @@ NODE
 Write avatar pin:
 
 ```bash
-metabot chain write --request-file avatar-request.json
+metabot chain write --from <bot-slug> --request-file avatar-request.json
 ```
 
-When `--chain` is omitted for this manual `chain write`, the daemon uses the active profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
+When `--chain` is omitted for this manual `chain write`, the daemon uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
 
 ```bash
-metabot config get chain.defaultWriteNetwork
-metabot config set chain.defaultWriteNetwork opcat
+metabot config get --from <bot-slug> chain.defaultWriteNetwork
+metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
 ```
 
 If the human explicitly asks to write avatar on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
-metabot chain write --request-file avatar-request.json --chain btc
-metabot chain write --request-file avatar-request.json --chain doge
-metabot chain write --request-file avatar-request.json --chain opcat
+metabot chain write --from <bot-slug> --request-file avatar-request.json --chain btc
+metabot chain write --from <bot-slug> --request-file avatar-request.json --chain doge
+metabot chain write --from <bot-slug> --request-file avatar-request.json --chain opcat
 ```
 
 ## In Scope

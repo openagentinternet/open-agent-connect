@@ -32,6 +32,51 @@ function createProfileHome(prefix, slug = 'test-profile') {
   return homeDir;
 }
 
+function createProfilePair(prefix) {
+  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const aliceHome = path.join(systemHome, '.metabot', 'profiles', 'actor-alice');
+  const bobHome = path.join(systemHome, '.metabot', 'profiles', 'actor-bob');
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
+  mkdirSync(aliceHome, { recursive: true });
+  mkdirSync(bobHome, { recursive: true });
+  mkdirSync(managerRoot, { recursive: true });
+  const now = Date.now();
+  writeFileSync(
+    path.join(managerRoot, 'identity-profiles.json'),
+    `${JSON.stringify({
+      profiles: [
+        {
+          name: 'actor-alice',
+          slug: 'actor-alice',
+          aliases: ['actor-alice', 'alice'],
+          homeDir: aliceHome,
+          globalMetaId: '',
+          mvcAddress: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          name: 'actor-bob',
+          slug: 'actor-bob',
+          aliases: ['actor-bob', 'bob'],
+          homeDir: bobHome,
+          globalMetaId: '',
+          mvcAddress: '',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    }, null, 2)}\n`,
+    'utf8',
+  );
+  writeFileSync(
+    path.join(managerRoot, 'active-home.json'),
+    `${JSON.stringify({ homeDir: bobHome, updatedAt: now }, null, 2)}\n`,
+    'utf8',
+  );
+  return { aliceHome, bobHome };
+}
+
 function ensureIndexedProfileHome(homeDir) {
   const systemHome = deriveSystemHome(homeDir);
   const managerRoot = path.join(systemHome, '.metabot', 'manager');
@@ -84,6 +129,22 @@ async function runEvolutionCli(homeDir, args, envOverrides = {}, dependencies = 
     stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
     stderr: { write: () => true },
     dependencies,
+  });
+
+  return {
+    exitCode,
+    stdout: stdout.join(''),
+    payload: JSON.parse(stdout.join('').trim()),
+  };
+}
+
+async function runPreparedEvolutionCli(homeDir, args, envOverrides = {}) {
+  const stdout = [];
+  const exitCode = await runCli(args, {
+    env: createRuntimeEnv(homeDir, envOverrides),
+    cwd: homeDir,
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
   });
 
   return {
@@ -168,6 +229,111 @@ test('runCli supports `metabot evolution status`', async () => {
   assert.equal(result.payload.data.analyses, 0);
   assert.equal(result.payload.data.artifacts, 0);
   assert.deepEqual(result.payload.data.activeVariants, {});
+});
+
+test('runCli forwards `--from` to evolution status and publish handlers', async () => {
+  const homeDir = createProfileHome('metabot-cli-evolution-from-');
+  const calls = [];
+  const status = await runEvolutionCli(
+    homeDir,
+    ['evolution', 'status', '--from', 'alice'],
+    {},
+    {
+      evolution: {
+        status: async (input) => {
+          calls.push(['status', input]);
+          return commandSuccess({ ok: true });
+        },
+      },
+    },
+  );
+  const publish = await runEvolutionCli(
+    homeDir,
+    ['evolution', 'publish', '--from', 'alice', '--skill', 'metabot-network-directory', '--variant-id', 'variant-1'],
+    {},
+    {
+      evolution: {
+        publish: async (input) => {
+          calls.push(['publish', input]);
+          return commandSuccess({ ok: true });
+        },
+      },
+    },
+  );
+
+  assert.equal(status.exitCode, 0);
+  assert.equal(publish.exitCode, 0);
+  assert.deepEqual(calls, [
+    ['status', { from: 'alice' }],
+    ['publish', { from: 'alice', skill: 'metabot-network-directory', variantId: 'variant-1' }],
+  ]);
+});
+
+test('runCli forwards `--from` to evolution local state commands', async () => {
+  const homeDir = createProfileHome('metabot-cli-evolution-from-state-');
+  const calls = [];
+  const dependencies = {
+    evolution: {
+      adopt: async (input) => {
+        calls.push(['adopt', input]);
+        return commandSuccess({ ok: true });
+      },
+      rollback: async (input) => {
+        calls.push(['rollback', input]);
+        return commandSuccess({ ok: true });
+      },
+      search: async (input) => {
+        calls.push(['search', input]);
+        return commandSuccess({ ok: true });
+      },
+      import: async (input) => {
+        calls.push(['import', input]);
+        return commandSuccess({ ok: true });
+      },
+      imported: async (input) => {
+        calls.push(['imported', input]);
+        return commandSuccess({ ok: true });
+      },
+    },
+  };
+
+  await runEvolutionCli(homeDir, ['evolution', 'adopt', '--from', 'alice', '--skill', 'metabot-network-directory', '--variant-id', 'variant-1'], {}, dependencies);
+  await runEvolutionCli(homeDir, ['evolution', 'rollback', '--from', 'alice', '--skill', 'metabot-network-directory'], {}, dependencies);
+  await runEvolutionCli(homeDir, ['evolution', 'search', '--from', 'alice', '--skill', 'metabot-network-directory'], {}, dependencies);
+  await runEvolutionCli(homeDir, ['evolution', 'import', '--from', 'alice', '--pin-id', 'pin-1'], {}, dependencies);
+  await runEvolutionCli(homeDir, ['evolution', 'imported', '--from', 'alice', '--skill', 'metabot-network-directory'], {}, dependencies);
+
+  assert.deepEqual(calls, [
+    ['adopt', { from: 'alice', skill: 'metabot-network-directory', variantId: 'variant-1', source: 'local' }],
+    ['rollback', { from: 'alice', skill: 'metabot-network-directory' }],
+    ['search', { from: 'alice', skill: 'metabot-network-directory' }],
+    ['import', { from: 'alice', pinId: 'pin-1' }],
+    ['imported', { from: 'alice', skill: 'metabot-network-directory' }],
+  ]);
+});
+
+test('runCli evolution status --from reads the selected profile local state', async () => {
+  const { aliceHome, bobHome } = createProfilePair('metabot-cli-evolution-from-runtime-');
+  const aliceStore = createLocalEvolutionStore(aliceHome);
+  const bobStore = createLocalEvolutionStore(bobHome);
+  await aliceStore.setActiveVariantRef('metabot-network-directory', {
+    source: 'local',
+    variantId: 'variant-alice-1',
+  });
+
+  const result = await runPreparedEvolutionCli(bobHome, [
+    'evolution',
+    'status',
+    '--from',
+    'actor-alice',
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.deepEqual(result.payload.data.activeVariants, {
+    'metabot-network-directory': 'variant-alice-1',
+  });
+  assert.deepEqual((await bobStore.readIndex()).activeVariants, {});
 });
 
 test('runCli `metabot evolution status` projects active variant refs as skill->variantId strings', async () => {

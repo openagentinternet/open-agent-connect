@@ -5,9 +5,11 @@ export type Awaitable<T> = T | Promise<T>;
 export interface CliDependencies {
     config?: {
         get?: (input: {
+            from?: string;
             key: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         set?: (input: {
+            from?: string;
             key: string;
             value: boolean | string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
@@ -46,6 +48,7 @@ export interface CliDependencies {
         suggest?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         hostAction?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         trace?: (input: {
+            from?: string;
             traceId: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
@@ -70,31 +73,77 @@ export interface CliDependencies {
     };
     services?: {
         publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-        listPublishSkills?: () => Awaitable<MetabotCommandResult<unknown>>;
+        listPublishSkills?: (input?: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        listOwned?: (input: {
+            from?: string;
+            all: boolean;
+            page: number;
+            pageSize: number;
+            refresh: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        listOwnedOrders?: (input: {
+            serviceId: string;
+            from?: string;
+            all: boolean;
+            page: number;
+            pageSize: number;
+            refresh: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        modifyOwned?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        revokeOwned?: (input: {
+            serviceId: string;
+            from?: string;
+            network?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        listRefunds?: (input: {
+            from?: string;
+            all: boolean;
+            kind: 'initiated' | 'received' | 'all';
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        settleRefund?: (input: {
+            from?: string;
+            orderId?: string;
+            paymentTxid?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        inspectOrder?: (input: {
+            from?: string;
+            orderId?: string;
+            paymentTxid?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         call?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         rate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
     provider?: {
         inspectOrder?: (input: {
+            from?: string;
             orderId?: string;
             paymentTxid?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         settleRefund?: (input: {
+            from?: string;
             orderId?: string;
             paymentTxid?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     chat?: {
         private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-        conversations?: () => Awaitable<MetabotCommandResult<unknown>>;
+        conversations?: (input?: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         messages?: (input: {
             conversationId: string;
             limit?: number;
+            from?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
-        autoReplyStatus?: () => Awaitable<MetabotCommandResult<unknown>>;
+        autoReplyStatus?: (input?: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         setAutoReply?: (input: {
             enabled: boolean;
             defaultStrategyId?: string;
+            from?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     file?: {
@@ -102,9 +151,11 @@ export interface CliDependencies {
     };
     wallet?: {
         balance?: (input: {
+            from?: string;
             chain: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         transfer?: (input: {
+            from?: string;
             toAddress: string;
             amountRaw: string;
             confirm: boolean;
@@ -112,17 +163,27 @@ export interface CliDependencies {
     };
     trace?: {
         get?: (input: {
+            from?: string;
             traceId?: string;
             sessionId?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         watch?: (input: {
+            from?: string;
             traceId: string;
         }) => Awaitable<string>;
+        listSessions?: (input: {
+            from?: string;
+            all: boolean;
+            limit: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     ui?: {
         open?: (input: {
             page: string;
+            from?: string;
             traceId?: string;
+            sessionId?: string;
+            serviceId?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     skills?: {
@@ -138,26 +199,34 @@ export interface CliDependencies {
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     evolution?: {
-        status?: () => Awaitable<MetabotCommandResult<unknown>>;
+        status?: (input?: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         adopt?: (input: {
+            from?: string;
             skill: string;
             variantId: string;
             source?: 'local' | 'remote';
         }) => Awaitable<MetabotCommandResult<unknown>>;
         publish?: (input: {
+            from?: string;
             skill: string;
             variantId: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         rollback?: (input: {
+            from?: string;
             skill: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         search?: (input: {
+            from?: string;
             skill: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         import?: (input: {
+            from?: string;
             pinId: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         imported?: (input: {
+            from?: string;
             skill: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
@@ -176,22 +245,63 @@ export interface CliDependencies {
     llm?: {
         listRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
         discoverRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
-        listBindings?: (input: {
-            slug: string;
+        listBindings?: (input?: {
+            from?: string;
+            slug?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         upsertBindings?: (input: {
-            slug: string;
+            from?: string;
+            slug?: string;
             bindings: Record<string, unknown>[];
         }) => Awaitable<MetabotCommandResult<unknown>>;
         removeBinding?: (input: {
+            from?: string;
             bindingId: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
-        getPreferredRuntime?: (input: {
-            slug: string;
+        getPreferredRuntime?: (input?: {
+            from?: string;
+            slug?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         setPreferredRuntime?: (input: {
-            slug: string;
+            from?: string;
+            slug?: string;
             runtimeId: string | null;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    bot?: {
+        listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;
+        getProfile?: (input: {
+            slug: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        createProfile?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        updateProfile?: (input: {
+            slug: string;
+        } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        deleteProfile?: (input: {
+            slug: string;
+            confirm?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        getConfig?: (input: {
+            slug: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        setConfig?: (input: {
+            slug: string;
+        } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        getWallet?: (input: {
+            slug: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        getBackup?: (input: {
+            slug: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        listRuntimes?: (input?: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        discoverRuntimes?: (input?: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        listSessions?: (input: {
+            slug?: string;
+            limit: number;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
 }

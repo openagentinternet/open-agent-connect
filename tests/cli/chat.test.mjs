@@ -83,6 +83,114 @@ test('runCli dispatches `metabot chat private --request-file --chain` for suppor
   assert.deepEqual(calls.map((entry) => entry.network), ['btc', 'doge', 'opcat']);
 });
 
+test('runCli dispatches `metabot chat private --from` to the private dependency', async () => {
+  const requestFile = await createChatRequestFile('metabot-cli-chat-from-');
+  const calls = [];
+
+  const exitCode = await runCli(['chat', 'private', '--from', 'alice', '--request-file', requestFile, '--chain', 'doge'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      chat: {
+        private: async (input) => {
+          calls.push(input);
+          return commandSuccess({
+            pinId: 'chat-pin-alice',
+            network: input.network,
+            from: input.from,
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    to: 'gm-remote-bob',
+    content: 'hello from private chat',
+    network: 'doge',
+    from: 'alice',
+  }]);
+});
+
+test('runCli dispatches chat history commands with --from', async () => {
+  const calls = {
+    conversations: [],
+    messages: [],
+  };
+  const dependencies = {
+    chat: {
+      conversations: async (input) => {
+        calls.conversations.push(input);
+        return commandSuccess({ conversations: [] });
+      },
+      messages: async (input) => {
+        calls.messages.push(input);
+        return commandSuccess({ messages: [] });
+      },
+    },
+  };
+
+  assert.equal(await runCli(['chat', 'conversations', '--from', 'alice'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  }), 0);
+  assert.equal(await runCli(['chat', 'messages', '--from', 'alice', '--conversation-id', 'c1', '--limit', '25'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  }), 0);
+
+  assert.deepEqual(calls.conversations, [{ from: 'alice' }]);
+  assert.deepEqual(calls.messages, [{
+    conversationId: 'c1',
+    limit: 25,
+    from: 'alice',
+  }]);
+});
+
+test('runCli dispatches chat auto-reply commands with --from', async () => {
+  const calls = {
+    status: [],
+    set: [],
+  };
+  const dependencies = {
+    chat: {
+      autoReplyStatus: async (input) => {
+        calls.status.push(input);
+        return commandSuccess({ enabled: false });
+      },
+      setAutoReply: async (input) => {
+        calls.set.push(input);
+        return commandSuccess({ enabled: input.enabled });
+      },
+    },
+  };
+
+  assert.equal(await runCli(['chat', 'auto-reply', 'status', '--from', 'alice'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  }), 0);
+  assert.equal(await runCli(['chat', 'auto-reply', 'enable', '--from', 'alice', '--strategy', 'default'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  }), 0);
+  assert.equal(await runCli(['chat', 'auto-reply', 'disable', '--from', 'alice'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  }), 0);
+
+  assert.deepEqual(calls.status, [{ from: 'alice' }]);
+  assert.deepEqual(calls.set, [
+    { enabled: true, defaultStrategyId: 'default', from: 'alice' },
+    { enabled: false, from: 'alice' },
+  ]);
+});
+
 test('runCli fails `metabot chat private` when --chain value is missing', async () => {
   const requestFile = await createChatRequestFile('metabot-cli-chat-missing-chain-');
   const stdout = [];

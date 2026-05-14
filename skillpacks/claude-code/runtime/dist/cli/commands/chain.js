@@ -11,6 +11,7 @@ async function runChainCommand(args, context) {
     if (!requestFile) {
         return (0, helpers_1.commandMissingFlag)('--request-file');
     }
+    const from = (0, helpers_1.readFromFlag)(args);
     const chainFlag = (0, helpers_1.readChainWriteFlag)(args);
     if (chainFlag.error) {
         return chainFlag.error;
@@ -20,5 +21,9 @@ async function runChainCommand(args, context) {
         return (0, commandResult_1.commandFailed)('not_implemented', 'Chain write handler is not configured.');
     }
     const request = await (0, helpers_1.readJsonFile)(context, requestFile);
-    return handler(chainFlag.chain ? { ...request, network: chainFlag.chain } : request);
+    return handler({
+        ...request,
+        ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
+        ...(from ? { from } : {}),
+    });
 }

@@ -173,7 +173,7 @@ async function fetchJson(baseUrl, routePath, options = {}) {
   };
 }
 
-test('/api/services/my routes forward queries and mutation bodies', async (t) => {
+test('/api/services/owned routes forward queries and mutation bodies', async (t) => {
   const calls = [];
   const app = await startServer({
     services: {
@@ -197,23 +197,25 @@ test('/api/services/my routes forward queries and mutation bodies', async (t) =>
   });
   t.after(async () => app.close());
 
-  await fetchJson(app.baseUrl, '/api/services/my?page=2&pageSize=5&refresh=true');
-  await fetchJson(app.baseUrl, '/api/services/my/orders?serviceId=alpha-service-v2&page=3&pageSize=4');
-  await fetchJson(app.baseUrl, '/api/services/my/modify', {
+  await fetchJson(app.baseUrl, '/api/services/owned?from=alice&page=2&pageSize=5&refresh=true');
+  await fetchJson(app.baseUrl, '/api/services/owned/orders?serviceId=alpha-service-v2&all=true&page=3&pageSize=4');
+  await fetchJson(app.baseUrl, '/api/services/owned/modify', {
     method: 'POST',
     body: { serviceId: 'alpha-service-v2', displayName: 'Updated' },
   });
-  await fetchJson(app.baseUrl, '/api/services/my/revoke', {
+  await fetchJson(app.baseUrl, '/api/services/owned/revoke', {
     method: 'POST',
     body: { serviceId: 'alpha-service-v2' },
   });
+  const legacyList = await fetchJson(app.baseUrl, '/api/services/my?page=1');
 
   assert.deepEqual(calls, [
-    ['list', { page: 2, pageSize: 5, refresh: true }],
-    ['orders', { serviceId: 'alpha-service-v2', page: 3, pageSize: 4, refresh: false }],
+    ['list', { from: 'alice', page: 2, pageSize: 5, refresh: true }],
+    ['orders', { serviceId: 'alpha-service-v2', all: true, page: 3, pageSize: 4, refresh: false }],
     ['modify', { serviceId: 'alpha-service-v2', displayName: 'Updated' }],
     ['revoke', { serviceId: 'alpha-service-v2' }],
   ]);
+  assert.equal(legacyList.status, 404);
 });
 
 test('default my-services handlers aggregate all local profiles and closed order details', async (t) => {
@@ -292,7 +294,7 @@ test('default my-services handlers aggregate all local profiles and closed order
   }));
   t.after(async () => app.close());
 
-  const list = await fetchJson(app.baseUrl, '/api/services/my?page=1&pageSize=10&refresh=false');
+  const list = await fetchJson(app.baseUrl, '/api/services/owned?all=true&page=1&pageSize=10&refresh=false');
   assert.equal(list.status, 200);
   assert.equal(list.payload.ok, true);
   assert.equal(list.payload.data.items.length, 2);
@@ -306,7 +308,7 @@ test('default my-services handlers aggregate all local profiles and closed order
   assert.equal(alpha.ratingAvg, 5);
   assert.equal(alpha.ratingCount, 1);
 
-  const orders = await fetchJson(app.baseUrl, '/api/services/my/orders?serviceId=alpha-service-v2&page=1&pageSize=10&refresh=false');
+  const orders = await fetchJson(app.baseUrl, '/api/services/owned/orders?serviceId=alpha-service-v2&all=true&page=1&pageSize=10&refresh=false');
   assert.equal(orders.payload.ok, true);
   assert.deepEqual(orders.payload.data.items.map((item) => item.id), ['order-refunded-1', 'order-completed-1']);
   assert.equal(orders.payload.data.items[1].rating.comment, 'sharp result');
@@ -355,7 +357,7 @@ test('default my-services modify writes a modify pin and updates local profile s
   }));
   t.after(async () => app.close());
 
-  const response = await fetchJson(app.baseUrl, '/api/services/my/modify', {
+  const response = await fetchJson(app.baseUrl, '/api/services/owned/modify', {
     method: 'POST',
     body: {
       serviceId: 'alpha-service-v2',
@@ -429,7 +431,7 @@ test('default my-services revoke writes a revoke pin and hides the service from 
   }));
   t.after(async () => app.close());
 
-  const response = await fetchJson(app.baseUrl, '/api/services/my/revoke', {
+  const response = await fetchJson(app.baseUrl, '/api/services/owned/revoke', {
     method: 'POST',
     body: { serviceId: 'alpha-service-v2' },
   });
@@ -444,7 +446,7 @@ test('default my-services revoke writes a revoke pin and hides the service from 
   assert.equal(state.services[0].available, 0);
   assert.ok(state.services[0].revokedAt > 0);
 
-  const list = await fetchJson(app.baseUrl, '/api/services/my?page=1&pageSize=10&refresh=false');
+  const list = await fetchJson(app.baseUrl, '/api/services/owned?all=true&page=1&pageSize=10&refresh=false');
   assert.equal(list.payload.ok, true);
   assert.equal(list.payload.data.items.length, 0);
 });

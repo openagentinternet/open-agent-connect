@@ -84,6 +84,7 @@ import {
   buildProviderSellerOrderInspection,
   buildSellerReceivedRefundItems,
   findSellerOrderBySelector,
+  type SellerReceivedRefundItem,
 } from '../core/provider/providerOperations';
 import {
   createSellerOrderRecord,
@@ -1350,6 +1351,56 @@ function buildProviderRefundsPayload(input: { state: RuntimeState }) {
     receivedByMe,
     totalCount: initiated.totalCount + receivedByMe.length,
     pendingCount: initiated.pendingCount + sellerPendingCount,
+  };
+}
+
+function compareSellerReceivedRefundItems(
+  left: SellerReceivedRefundItem,
+  right: SellerReceivedRefundItem,
+): number {
+  const leftRank = left.status === 'refunded' ? 1 : 0;
+  const rightRank = right.status === 'refunded' ? 1 : 0;
+  if (leftRank !== rightRank) {
+    return leftRank - rightRank;
+  }
+  const delta = right.updatedAt - left.updatedAt;
+  if (delta !== 0) {
+    return delta;
+  }
+  return left.orderId.localeCompare(right.orderId);
+}
+
+function mergeInitiatedRefundsPayloads(
+  payloads: Array<ReturnType<typeof buildInitiatedRefundsPayload>>,
+): ReturnType<typeof buildInitiatedRefundsPayload> {
+  const initiatedByMe = payloads
+    .flatMap((payload) => payload.initiatedByMe)
+    .sort(compareInitiatedRefundItems);
+  return {
+    initiatedByMe,
+    totalCount: initiatedByMe.length,
+    pendingCount: initiatedByMe.filter((entry) => entry.status === 'refund_pending').length,
+  };
+}
+
+function mergeProviderRefundsPayloads(
+  payloads: Array<ReturnType<typeof buildProviderRefundsPayload>>,
+  kind: string,
+): ReturnType<typeof buildProviderRefundsPayload> {
+  const includeInitiated = kind !== 'received';
+  const includeReceived = kind !== 'initiated';
+  const initiatedByMe = includeInitiated
+    ? payloads.flatMap((payload) => payload.initiatedByMe).sort(compareInitiatedRefundItems)
+    : [];
+  const receivedByMe = includeReceived
+    ? payloads.flatMap((payload) => payload.receivedByMe).sort(compareSellerReceivedRefundItems)
+    : [];
+  return {
+    initiatedByMe,
+    receivedByMe,
+    totalCount: initiatedByMe.length + receivedByMe.length,
+    pendingCount: initiatedByMe.filter((entry) => entry.status === 'refund_pending').length
+      + receivedByMe.filter((entry) => entry.status !== 'refunded').length,
   };
 }
 
@@ -3293,6 +3344,7 @@ async function createMasterAskPreviewResult(input: {
   config: Awaited<ReturnType<ReturnType<typeof createConfigStore>['read']>>;
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
   pendingMasterAskStateStore: ReturnType<typeof createPendingMasterAskStateStore>;
+  from?: string | null;
   triggerModeOverride?: string | null;
   callerHostOverride?: string | null;
   traceIdOverride?: string | null;
@@ -3350,6 +3402,20 @@ async function createMasterAskPreviewResult(input: {
       'invalid_master_ask_draft',
       error instanceof Error ? error.message : String(error)
     );
+  }
+
+  const actorSlug = normalizeText(input.from);
+  if (actorSlug) {
+    prepared = {
+      ...prepared,
+      preview: {
+        ...prepared.preview,
+        confirmation: {
+          ...prepared.preview.confirmation,
+          confirmCommand: `metabot master ask --from ${actorSlug} --trace-id ${traceId} --confirm`,
+        },
+      },
+    };
   }
 
   const pendingAskRecord: PendingMasterAskRecord = {
@@ -3821,7 +3887,7 @@ async function exportAndPersistMasterCallerTrace(input: {
   const shouldIncludeTimeoutNote = input.includeTimeoutNote === true
     || input.trace.askMaster?.canonicalStatus === 'timed_out'
     || input.trace.a2a?.publicStatus === 'timeout';
-  const confirmCommand = `metabot master ask --trace-id ${input.trace.traceId} --confirm`;
+  const confirmCommand = readPendingMasterConfirmCommand(input.pendingAsk, input.trace.traceId);
   const messages: Parameters<typeof exportSessionArtifacts>[0]['transcript']['messages'] = [
     {
       id: `${input.trace.traceId}-user`,
@@ -3905,6 +3971,20 @@ async function exportAndPersistMasterCallerTrace(input: {
   });
   await persistTraceRecord(input.runtimeStateStore, input.trace);
   return artifacts;
+}
+
+function readPendingMasterConfirmCommand(pendingAsk: PendingMasterAskRecord, traceId: string): string {
+  const preview = pendingAsk.preview;
+  if (preview && typeof preview === 'object') {
+    const confirmation = (preview as { confirmation?: unknown }).confirmation;
+    if (confirmation && typeof confirmation === 'object') {
+      const confirmCommand = normalizeText((confirmation as { confirmCommand?: unknown }).confirmCommand);
+      if (confirmCommand) {
+        return confirmCommand;
+      }
+    }
+  }
+  return `metabot master ask --trace-id ${traceId} --confirm`;
 }
 
 async function applyMasterCallerReplyResult(input: {
@@ -4294,8 +4374,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const config = await createConfigStore(homeDir).read();
     return config.chain.defaultWriteNetwork;
   }
-  async function resolveFileUploadNetwork(rawNetwork: unknown): Promise<Exclude<DefaultWriteNetwork, 'doge'>> {
-    const network = await resolveWriteNetwork(rawNetwork);
+  async function resolveFileUploadNetworkForHome(
+    rawNetwork: unknown,
+    homeDir: string,
+  ): Promise<Exclude<DefaultWriteNetwork, 'doge'>> {
+    const network = await resolveWriteNetworkForHome(rawNetwork, homeDir);
     if (network === 'doge') {
       throw new Error('DOGE is not supported for file upload. Use mvc, btc, or opcat.');
     }
@@ -4343,6 +4426,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     acceptPolicy: 'accept_all',
     defaultStrategyId: null,
   };
+  const scopedAutoReplyConfigs = new Map<string, PrivateChatAutoReplyConfig>();
   const sessionEngine = createA2ASessionEngine();
   const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey
     ?? ((globalMetaId: string) => fetchPeerChatPublicKey(globalMetaId, {
@@ -4811,13 +4895,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
       : null;
   }
 
-  async function readMasterAutoFeedback(traceId: string | null | undefined) {
+  async function readMasterAutoFeedback(
+    traceId: string | null | undefined,
+    store = masterAutoFeedbackStateStore,
+  ) {
     const normalizedTraceId = normalizeText(traceId);
     if (!normalizedTraceId) {
       return null;
     }
     try {
-      return await masterAutoFeedbackStateStore.get(normalizedTraceId);
+      return await store.get(normalizedTraceId);
     } catch {
       return null;
     }
@@ -4831,13 +4918,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
     triggerReasonSignature?: string | null;
     updatedAt?: number | null;
     createdAt?: number | null;
-  }): Promise<void> {
+  }, store = masterAutoFeedbackStateStore): Promise<void> {
     const traceId = normalizeText(input.traceId);
     if (!traceId) {
       return;
     }
 
-    const existing = await readMasterAutoFeedback(traceId);
+    const existing = await readMasterAutoFeedback(traceId, store);
     const createdAt = Number.isFinite(input.createdAt) && input.createdAt !== null
       ? Math.max(0, Math.trunc(Number(input.createdAt)))
       : existing?.createdAt ?? Date.now();
@@ -4845,7 +4932,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       ? Math.max(0, Math.trunc(Number(input.updatedAt)))
       : Date.now();
 
-    await masterAutoFeedbackStateStore.put({
+    await store.put({
       traceId,
       masterKind: normalizeText(input.masterKind) || existing?.masterKind || null,
       masterServicePinId: normalizeText(input.masterServicePinId) || existing?.masterServicePinId || null,
@@ -4883,6 +4970,232 @@ export function createDefaultMetabotDaemonHandlers(input: {
       secretStore: createFileSecretStore(normalizedProfileHomeDir),
       adapters: profileAdapters,
     });
+  }
+
+  async function resolveActorWriteContext(rawActor: unknown): Promise<
+    | {
+      homeDir: string;
+      runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+      signer: Signer;
+    }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const requestedSlug = normalizeText(rawActor);
+    let profileHomeDir = input.homeDir;
+    if (requestedSlug) {
+      const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedSlug);
+      if (!selectedProfile) {
+        return {
+          failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`),
+        };
+      }
+      profileHomeDir = selectedProfile.homeDir;
+    }
+
+    const normalizedProfileHomeDir = path.resolve(profileHomeDir);
+    return {
+      homeDir: normalizedProfileHomeDir,
+      runtimeStateStore: normalizedProfileHomeDir === path.resolve(input.homeDir)
+        ? runtimeStateStore
+        : createRuntimeStateStore(normalizedProfileHomeDir),
+      signer: createSignerForProfileHome(normalizedProfileHomeDir),
+    };
+  }
+
+  function resolveAutoReplyConfigForHome(homeDir: string): PrivateChatAutoReplyConfig {
+    const normalizedProfileHomeDir = path.resolve(homeDir);
+    if (normalizedProfileHomeDir === path.resolve(input.homeDir)) {
+      return autoReplyConfig;
+    }
+    const existing = scopedAutoReplyConfigs.get(normalizedProfileHomeDir);
+    if (existing) {
+      return existing;
+    }
+    const created: PrivateChatAutoReplyConfig = {
+      enabled: autoReplyConfig.enabled,
+      acceptPolicy: autoReplyConfig.acceptPolicy,
+      defaultStrategyId: autoReplyConfig.defaultStrategyId,
+    };
+    scopedAutoReplyConfigs.set(normalizedProfileHomeDir, created);
+    return created;
+  }
+
+  async function resolveActorChatContext(rawActor: unknown): Promise<
+    | {
+      homeDir: string;
+      runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+      privateChatStateStore: ReturnType<typeof createPrivateChatStateStore>;
+      signer: Signer;
+      autoReplyConfig: PrivateChatAutoReplyConfig;
+    }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const actor = await resolveActorWriteContext(rawActor);
+    if ('failure' in actor) {
+      return actor;
+    }
+    return {
+      ...actor,
+      privateChatStateStore: actor.homeDir === path.resolve(input.homeDir)
+        ? privateChatStateStore
+        : createPrivateChatStateStore(actor.homeDir),
+      autoReplyConfig: resolveAutoReplyConfigForHome(actor.homeDir),
+    };
+  }
+
+  async function resolveActorMasterContext(rawActor: unknown): Promise<
+    | {
+      homeDir: string;
+      runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+      signer: Signer;
+      configStore: ReturnType<typeof createConfigStore>;
+      masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
+      pendingMasterAskStateStore: ReturnType<typeof createPendingMasterAskStateStore>;
+      masterSuggestStateStore: ReturnType<typeof createMasterSuggestStateStore>;
+      masterAutoFeedbackStateStore: ReturnType<typeof createMasterAutoFeedbackStateStore>;
+      providerPresenceStore: ReturnType<typeof createProviderPresenceStateStore>;
+    }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const actor = await resolveActorWriteContext(rawActor);
+    if ('failure' in actor) {
+      return actor;
+    }
+    const activeHome = path.resolve(input.homeDir);
+    const actorHome = path.resolve(actor.homeDir);
+    const isActiveHome = actorHome === activeHome;
+    return {
+      ...actor,
+      configStore: isActiveHome ? configStore : createConfigStore(actorHome),
+      masterStateStore: isActiveHome ? masterStateStore : createPublishedMasterStateStore(actorHome),
+      pendingMasterAskStateStore: isActiveHome ? pendingMasterAskStateStore : createPendingMasterAskStateStore(actorHome),
+      masterSuggestStateStore: isActiveHome ? masterSuggestStateStore : createMasterSuggestStateStore(actorHome),
+      masterAutoFeedbackStateStore: isActiveHome ? masterAutoFeedbackStateStore : createMasterAutoFeedbackStateStore(actorHome),
+      providerPresenceStore: isActiveHome ? providerPresenceStore : createProviderPresenceStateStore(actorHome),
+    };
+  }
+
+  async function resolveLlmProfileForActor(inputProfile: { from?: unknown; slug?: unknown } = {}): Promise<
+    | { slug: string; homeDir: string }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const requestedSelector = normalizeText(inputProfile.from) || normalizeText(inputProfile.slug);
+    const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+    if (requestedSelector) {
+      const resolved = resolveProfileNameMatch(requestedSelector, profiles);
+      if (resolved.status === 'not_found' || resolved.status === 'ambiguous') {
+        return {
+          failure: commandFailed(
+            resolved.status === 'ambiguous' ? 'identity_profile_ambiguous' : 'profile_not_found',
+            resolved.message,
+          ),
+        };
+      }
+      return {
+        slug: resolved.match.slug,
+        homeDir: resolved.match.homeDir,
+      };
+    }
+
+    const activeHomeDir = path.resolve(input.homeDir);
+    const activeProfile = profiles.find((profile) => path.resolve(profile.homeDir) === activeHomeDir);
+    return {
+      slug: activeProfile?.slug || path.basename(resolveMetabotPaths(activeHomeDir).profileRoot),
+      homeDir: activeHomeDir,
+    };
+  }
+
+  async function resolveScopedServicesForActor(rawActor: unknown): Promise<{
+    services?: NonNullable<MetabotDaemonHttpHandlers['services']>;
+    failure?: MetabotCommandResult<never>;
+  }> {
+    const requestedSlug = normalizeText(rawActor);
+    if (!requestedSlug) {
+      return {};
+    }
+
+    const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedSlug);
+    if (!selectedProfile) {
+      return {
+        failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`),
+      };
+    }
+
+    const profileHomeDir = path.resolve(selectedProfile.homeDir);
+    if (profileHomeDir === path.resolve(input.homeDir)) {
+      return {};
+    }
+
+    const scopedHandlers = createDefaultMetabotDaemonHandlers({
+      ...input,
+      homeDir: profileHomeDir,
+      secretStore: createFileSecretStore(profileHomeDir),
+      signer: createSignerForProfileHome(profileHomeDir),
+      servicePaymentExecutor: undefined,
+    });
+    return { services: scopedHandlers.services };
+  }
+
+  async function resolveScopedProviderForActor(rawActor: unknown): Promise<{
+    provider?: NonNullable<MetabotDaemonHttpHandlers['provider']>;
+    failure?: MetabotCommandResult<never>;
+  }> {
+    const requestedSlug = normalizeText(rawActor);
+    if (!requestedSlug) {
+      return {};
+    }
+
+    const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedSlug);
+    if (!selectedProfile) {
+      return {
+        failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`),
+      };
+    }
+
+    const profileHomeDir = path.resolve(selectedProfile.homeDir);
+    if (profileHomeDir === path.resolve(input.homeDir)) {
+      return {};
+    }
+
+    const scopedHandlers = createDefaultMetabotDaemonHandlers({
+      ...input,
+      homeDir: profileHomeDir,
+      secretStore: createFileSecretStore(profileHomeDir),
+      signer: createSignerForProfileHome(profileHomeDir),
+      servicePaymentExecutor: undefined,
+    });
+    return { provider: scopedHandlers.provider };
+  }
+
+  async function resolveScopedTraceForActor(rawActor: unknown): Promise<{
+    trace?: NonNullable<MetabotDaemonHttpHandlers['trace']>;
+    failure?: MetabotCommandResult<never>;
+  }> {
+    const requestedSlug = normalizeText(rawActor);
+    if (!requestedSlug) {
+      return {};
+    }
+
+    const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedSlug);
+    if (!selectedProfile) {
+      return {
+        failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`),
+      };
+    }
+
+    const profileHomeDir = path.resolve(selectedProfile.homeDir);
+    if (profileHomeDir === path.resolve(input.homeDir)) {
+      return {};
+    }
+
+    const scopedHandlers = createDefaultMetabotDaemonHandlers({
+      ...input,
+      homeDir: profileHomeDir,
+      secretStore: createFileSecretStore(profileHomeDir),
+      signer: createSignerForProfileHome(profileHomeDir),
+      servicePaymentExecutor: undefined,
+    });
+    return { trace: scopedHandlers.trace };
   }
 
   function getPublishedServicePinIds(service: Partial<PublishedServiceRecord>): string[] {
@@ -5030,7 +5343,52 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return profiles;
   }
 
-  async function resolveMyServiceMutationTarget(serviceId: string): Promise<{
+  async function loadProviderRefundProfileStates(): Promise<RuntimeState[]> {
+    const records = await listMyServicesProfileRecords();
+    const states: RuntimeState[] = [];
+    for (const profile of records) {
+      const profileHomeDir = path.resolve(profile.homeDir);
+      const store = profileHomeDir === path.resolve(input.homeDir)
+        ? runtimeStateStore
+        : createRuntimeStateStore(profileHomeDir);
+      states.push(await store.readState());
+    }
+    return states;
+  }
+
+  async function selectMyServicesProfilesForRequest(
+    profiles: MyServicesProfileInput[],
+    request: { from?: unknown; all?: unknown },
+  ): Promise<{
+    profiles: MyServicesProfileInput[];
+    failure?: MetabotCommandResult<never>;
+  }> {
+    const requestedFrom = normalizeText(request.from);
+    if (requestedFrom) {
+      const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedFrom);
+      if (!selectedProfile) {
+        return {
+          profiles: [],
+          failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedFrom}`),
+        };
+      }
+      const selectedHomeDir = path.resolve(selectedProfile.homeDir);
+      return {
+        profiles: profiles.filter((profile) => path.resolve(normalizeText(profile.homeDir)) === selectedHomeDir),
+      };
+    }
+
+    if (request.all === false) {
+      const activeHomeDir = path.resolve(input.homeDir);
+      return {
+        profiles: profiles.filter((profile) => path.resolve(normalizeText(profile.homeDir)) === activeHomeDir),
+      };
+    }
+
+    return { profiles };
+  }
+
+  async function resolveMyServiceMutationTarget(serviceId: string, actor?: unknown): Promise<{
     target: {
       profileSlug: string;
       profileName: string;
@@ -5056,7 +5414,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
       };
     }
 
-    const records = await listMyServicesProfileRecords();
+    let records = await listMyServicesProfileRecords();
+    const requestedFrom = normalizeText(actor);
+    if (requestedFrom) {
+      const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedFrom);
+      if (!selectedProfile) {
+        records = [];
+      } else {
+        const selectedHomeDir = path.resolve(selectedProfile.homeDir);
+        records = records.filter((profile) => path.resolve(profile.homeDir) === selectedHomeDir);
+      }
+    }
     for (const profile of records) {
       const profileHomeDir = path.resolve(profile.homeDir);
       const store = profileHomeDir === path.resolve(input.homeDir)
@@ -7742,8 +8110,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
     resolvedTarget: MasterDirectoryItem;
     state: RuntimeState;
     config: Awaited<ReturnType<ReturnType<typeof createConfigStore>['read']>>;
+    runtimeStateStore?: ReturnType<typeof createRuntimeStateStore>;
+    pendingMasterAskStateStore?: ReturnType<typeof createPendingMasterAskStateStore>;
+    masterAutoFeedbackStateStore?: ReturnType<typeof createMasterAutoFeedbackStateStore>;
+    signer?: Signer;
   }) {
-    const initialState = await runtimeStateStore.readState();
+    const scopedRuntimeStateStore = input.runtimeStateStore ?? runtimeStateStore;
+    const scopedPendingMasterAskStateStore = input.pendingMasterAskStateStore ?? pendingMasterAskStateStore;
+    const scopedMasterAutoFeedbackStateStore = input.masterAutoFeedbackStateStore ?? masterAutoFeedbackStateStore;
+    const scopedSigner = input.signer ?? signer;
+    const initialState = await scopedRuntimeStateStore.readState();
     const currentIdentity = initialState.identity ?? input.state.identity;
     if (!currentIdentity) {
       return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
@@ -7825,7 +8201,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 content: `Preview prepared for ${normalizeText(input.pendingAsk.target.displayName) || input.resolvedTarget.displayName}.`,
                 metadata: requiresConfirmation
                   ? {
-                      confirmCommand: `metabot master ask --trace-id ${input.traceId} --confirm`,
+                      confirmCommand: readPendingMasterConfirmCommand(input.pendingAsk, input.traceId),
                     }
                   : undefined,
               },
@@ -7841,7 +8217,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             ],
           },
         });
-        await persistTraceRecord(runtimeStateStore, failedTrace);
+        await persistTraceRecord(scopedRuntimeStateStore, failedTrace);
       }
       if (isAutoAsk) {
         await putMasterAutoFeedback({
@@ -7849,7 +8225,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           status: 'prepared',
           masterKind: existingTrace?.askMaster?.masterKind ?? input.resolvedTarget.masterKind,
           masterServicePinId: existingTrace?.askMaster?.servicePinId ?? input.resolvedTarget.masterPinId,
-        });
+        }, scopedMasterAutoFeedbackStateStore);
       }
 
       const traceSuffix = existingTrace ? ` Trace ID: ${input.traceId}` : '';
@@ -7858,7 +8234,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
     let privateChatIdentity;
     try {
-      privateChatIdentity = await signer.getPrivateChatIdentity();
+      privateChatIdentity = await scopedSigner.getPrivateChatIdentity();
     } catch (error) {
       return markSendFailure(
         'identity_secret_missing',
@@ -7896,7 +8272,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
     let messagePinId = '';
     try {
-      const write = await signer.writePin({
+      const write = await scopedSigner.writePin({
         operation: 'create',
         path: outboundRequest.path,
         encryption: outboundRequest.encryption,
@@ -7922,7 +8298,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       sentAt,
       messagePinId: messagePinId || null,
     };
-    await pendingMasterAskStateStore.put(sentPendingAsk);
+    await scopedPendingMasterAskStateStore.put(sentPendingAsk);
     if (isAutoAsk) {
       await putMasterAutoFeedback({
         traceId: input.traceId,
@@ -7930,10 +8306,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
         masterKind: input.resolvedTarget.masterKind,
         masterServicePinId: input.resolvedTarget.masterPinId,
         updatedAt: sentAt,
-      });
+      }, scopedMasterAutoFeedbackStateStore);
     }
 
-    const currentState = await runtimeStateStore.readState();
+    const currentState = await scopedRuntimeStateStore.readState();
     const currentTrace = currentState.traces.find((entry) => entry.traceId === input.traceId);
     const updatedTrace = currentTrace
       ? {
@@ -7981,7 +8357,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       : buildSessionTrace({
           traceId: input.traceId,
           channel: 'a2a',
-          exportRoot: runtimeStateStore.paths.exportsRoot,
+          exportRoot: scopedRuntimeStateStore.paths.exportsRoot,
           session: {
             id: `master-${input.traceId}`,
             title: `${input.resolvedTarget.displayName} Ask`,
@@ -8022,7 +8398,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }),
         });
 
-    const confirmCommand = `metabot master ask --trace-id ${input.traceId} --confirm`;
+    const confirmCommand = readPendingMasterConfirmCommand(input.pendingAsk, input.traceId);
     const transcriptMessages = [
       {
         id: `${input.traceId}-user`,
@@ -8061,7 +8437,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     });
 
-    await persistTraceRecord(runtimeStateStore, updatedTrace);
+    await persistTraceRecord(scopedRuntimeStateStore, updatedTrace);
 
     let finalTrace = updatedTrace;
     let finalArtifacts = artifacts;
@@ -8272,8 +8648,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
     chain: {
       write: async (rawInput) => {
         try {
-          const network = await resolveWriteNetwork(rawInput.network);
-          const result = await signer.writePin({
+          const actor = await resolveActorWriteContext(rawInput.from);
+          if ('failure' in actor) {
+            return actor.failure;
+          }
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const result = await actor.signer.writePin({
             operation: typeof rawInput.operation === 'string' ? rawInput.operation : undefined,
             path: typeof rawInput.path === 'string' ? rawInput.path : undefined,
             encryption: typeof rawInput.encryption === 'string' ? rawInput.encryption : undefined,
@@ -8294,20 +8674,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
     buzz: {
       post: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before posting buzz.');
         }
 
         try {
-          const network = await resolveWriteNetwork(rawInput.network);
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
           const result = await postBuzzToChain({
             content: normalizeText(rawInput.content),
             contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
             attachments: readStringArray(rawInput.attachments),
             quotePin: typeof rawInput.quotePin === 'string' ? rawInput.quotePin : undefined,
             network,
-            signer,
+            signer: actor.signer,
           });
           return commandSuccess({
             ...result,
@@ -8506,7 +8890,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
     master: {
       publish: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
+        const actor = await resolveActorMasterContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing masters.');
         }
@@ -8518,9 +8906,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         try {
           const now = Date.now();
-          const network = await resolveWriteNetwork(rawInput.network);
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
           const published = await publishMasterToChain({
-            signer,
+            signer: actor.signer,
             creatorMetabotId: state.identity.metabotId,
             providerGlobalMetaId: state.identity.globalMetaId,
             providerAddress: state.identity.mvcAddress,
@@ -8529,14 +8917,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
             network,
           });
 
-          await masterStateStore.update((currentState) => ({
+          await actor.masterStateStore.update((currentState) => ({
             masters: [
               published.record,
               ...currentState.masters.filter((master) => master.currentPinId !== published.record.currentPinId),
             ],
           }));
 
-          const presence = await providerPresenceStore.read();
+          const presence = await actor.providerPresenceStore.read();
           const daemon = input.getDaemonRecord();
           const online = isProviderPresenceOnline(presence, now);
           const lastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
@@ -8920,7 +9308,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   timestamp: updatedTrace.createdAt,
                   content: `Preview prepared for ${normalizeText(pendingAsk.target.displayName) || updatedTrace.session.peerName || 'the Master'}.`,
                   metadata: {
-                    confirmCommand: `metabot master ask --trace-id ${traceId} --confirm`,
+                    confirmCommand: readPendingMasterConfirmCommand(pendingAsk, traceId),
                   },
                 },
                 {
@@ -9070,18 +9458,35 @@ export function createDefaultMetabotDaemonHandlers(input: {
         };
       },
       ask: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
+        const actor = await resolveActorMasterContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before asking a Master.');
         }
 
-        const config = await configStore.read();
+        const config = await actor.configStore.read();
         if (!config.askMaster.enabled) {
           return commandFailed('ask_master_disabled', 'Ask Master is disabled in the local config.');
         }
+        const sendPreparedRequestForActor = (sendInput: {
+          traceId: string;
+          pendingAsk: PendingMasterAskRecord;
+          resolvedTarget: MasterDirectoryItem;
+          state: RuntimeState;
+          config: Awaited<ReturnType<ReturnType<typeof createConfigStore>['read']>>;
+        }) => sendPendingMasterAskRequest({
+          ...sendInput,
+          runtimeStateStore: actor.runtimeStateStore,
+          pendingMasterAskStateStore: actor.pendingMasterAskStateStore,
+          masterAutoFeedbackStateStore: actor.masterAutoFeedbackStateStore,
+          signer: actor.signer,
+        });
 
         const daemon = input.getDaemonRecord();
-        const presence = await providerPresenceStore.read();
+        const presence = await actor.providerPresenceStore.read();
         const localProviderOnline = isProviderPresenceOnline(presence);
         const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
           ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
@@ -9095,7 +9500,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
           let pendingAsk;
           try {
-            pendingAsk = await pendingMasterAskStateStore.get(traceId);
+            pendingAsk = await actor.pendingMasterAskStateStore.get(traceId);
           } catch {
             return commandFailed('pending_master_ask_not_found', `Pending Ask Master record not found: ${traceId}`);
           }
@@ -9107,7 +9512,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             );
           }
           if (isAutoPreview) {
-            const feedback = await readMasterAutoFeedback(traceId);
+            const feedback = await readMasterAutoFeedback(traceId, actor.masterAutoFeedbackStateStore);
             if (feedback?.status === 'rejected') {
               return commandFailed(
                 'auto_preview_rejected',
@@ -9137,8 +9542,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
               constraints: [],
               desiredOutput: null,
             },
-            masterStateStore,
-            directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+            masterStateStore: actor.masterStateStore,
+            directorySeedsPath: actor.runtimeStateStore.paths.directorySeedsPath,
             chainApiBaseUrl: input.chainApiBaseUrl,
             host: normalizeText(pendingAsk.request.caller.host) || DEFAULT_MASTER_HOST_MODE,
             localProviderOnline,
@@ -9156,7 +9561,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
           let privateChatIdentity;
           try {
-            privateChatIdentity = await signer.getPrivateChatIdentity();
+            privateChatIdentity = await actor.signer.getPrivateChatIdentity();
           } catch (error) {
             return commandFailed(
               'identity_secret_missing',
@@ -9194,7 +9599,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
           let messagePinId = '';
           try {
-            const write = await signer.writePin({
+            const write = await actor.signer.writePin({
               operation: 'create',
               path: outboundRequest.path,
               encryption: outboundRequest.encryption,
@@ -9212,7 +9617,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             );
           }
 
-          await pendingMasterAskStateStore.put({
+          await actor.pendingMasterAskStateStore.put({
             ...pendingAsk,
             confirmationState: 'sent',
             updatedAt: Date.now(),
@@ -9226,7 +9631,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               masterKind: pendingAsk.request.target.masterKind,
               masterServicePinId: pendingAsk.request.target.masterServicePinId,
               updatedAt: Date.now(),
-            });
+            }, actor.masterAutoFeedbackStateStore);
           }
 
           const currentTrace = state.traces.find((entry) => entry.traceId === traceId);
@@ -9276,7 +9681,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             : buildSessionTrace({
                 traceId,
                 channel: 'a2a',
-                exportRoot: runtimeStateStore.paths.exportsRoot,
+                exportRoot: actor.runtimeStateStore.paths.exportsRoot,
                 session: {
                   id: `master-${traceId}`,
                   title: `${selectedTarget.displayName} Ask`,
@@ -9317,7 +9722,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 }),
               });
 
-          const confirmCommand = `metabot master ask --trace-id ${traceId} --confirm`;
+          const confirmCommand = readPendingMasterConfirmCommand(pendingAsk, traceId);
           const artifacts = await exportSessionArtifacts({
             trace: updatedTrace,
             transcript: {
@@ -9353,7 +9758,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             },
           });
 
-          await persistTraceRecord(runtimeStateStore, updatedTrace);
+          await persistTraceRecord(actor.runtimeStateStore, updatedTrace);
 
           let finalTrace = updatedTrace;
           let finalArtifacts = artifacts;
@@ -9438,8 +9843,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const draft = readMasterAskDraft(rawInput);
         const resolvedTarget = await resolveExplicitMasterTarget({
           draft,
-          masterStateStore,
-          directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
+          masterStateStore: actor.masterStateStore,
+          directorySeedsPath: actor.runtimeStateStore.paths.directorySeedsPath,
           chainApiBaseUrl: input.chainApiBaseUrl,
           localProviderOnline,
           localLastSeenSec,
@@ -9459,10 +9864,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
           resolvedTarget: selectedTarget,
           state,
           config,
-          runtimeStateStore,
-          pendingMasterAskStateStore,
+          runtimeStateStore: actor.runtimeStateStore,
+          pendingMasterAskStateStore: actor.pendingMasterAskStateStore,
+          from: normalizeText(rawInput.from) || null,
           triggerModeOverride: 'manual',
-          sendPreparedRequest: sendPendingMasterAskRequest,
+          sendPreparedRequest: sendPreparedRequestForActor,
         });
         if (previewResult.ok && previewResult.state === 'awaiting_confirmation') {
           masterTriggerMemoryState = recordMasterTriggerOutcome({
@@ -10115,8 +10521,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
           transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
         });
       },
-      trace: async ({ traceId }) => {
-        const state = await runtimeStateStore.readState();
+      trace: async ({ from, traceId }) => {
+        const actor = await resolveActorMasterContext(from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         const trace = state.traces.find((entry) => entry.traceId === traceId);
         if (!trace) {
           return commandFailed('trace_not_found', `Trace not found: ${traceId}`);
@@ -10279,15 +10689,67 @@ export function createDefaultMetabotDaemonHandlers(input: {
           ratingSyncError: ratingSnapshot.ratingSyncError,
         }));
       },
-      getInitiatedRefunds: async () => {
+      getInitiatedRefunds: async (request = {}) => {
+        const requestedFrom = normalizeText(request.from);
+        const scoped = await resolveScopedProviderForActor(request.from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.provider?.getInitiatedRefunds) {
+          return scoped.provider.getInitiatedRefunds({ from: requestedFrom });
+        }
+        if (!requestedFrom && request.all === true) {
+          const states = await loadProviderRefundProfileStates();
+          return commandSuccess(mergeInitiatedRefundsPayloads(
+            states.map((state) => buildInitiatedRefundsPayload({ state }))
+          ));
+        }
         const state = await runtimeStateStore.readState();
         return commandSuccess(buildInitiatedRefundsPayload({ state }));
       },
-      getRefunds: async () => {
+      getRefunds: async (request = {}) => {
+        const requestedFrom = normalizeText(request.from);
+        const kind = normalizeText(request.kind);
+        const scoped = await resolveScopedProviderForActor(request.from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.provider?.getRefunds) {
+          return scoped.provider.getRefunds({
+            from: requestedFrom,
+            ...(kind ? { kind } : {}),
+          });
+        }
+        if (!requestedFrom && request.all === true) {
+          const states = await loadProviderRefundProfileStates();
+          return commandSuccess(mergeProviderRefundsPayloads(
+            states.map((state) => buildProviderRefundsPayload({ state })),
+            kind,
+          ));
+        }
         const state = await runtimeStateStore.readState();
-        return commandSuccess(buildProviderRefundsPayload({ state }));
+        const payload = buildProviderRefundsPayload({ state });
+        if (kind === 'received') {
+          const receivedByMe = payload.receivedByMe;
+          return commandSuccess({
+            initiatedByMe: [],
+            receivedByMe,
+            totalCount: receivedByMe.length,
+            pendingCount: receivedByMe.filter((entry) => entry.status !== 'refunded').length,
+          });
+        }
+        return commandSuccess(payload);
       },
-      inspectOrder: async ({ orderId, paymentTxid }) => inspectProviderSellerOrder({ orderId, paymentTxid }),
+      inspectOrder: async ({ from, orderId, paymentTxid }) => {
+        const scoped = await resolveScopedProviderForActor(from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.provider?.inspectOrder) {
+          return scoped.provider.inspectOrder({ from, orderId, paymentTxid });
+        }
+        return inspectProviderSellerOrder({ orderId, paymentTxid });
+      },
       setPresence: async ({ enabled }) => {
         const state = await runtimeStateStore.readState();
         if (!state.identity) {
@@ -10310,13 +10772,26 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
       },
       confirmRefund: async ({ orderId }) => settleProviderSellerRefund({ orderId }),
-      settleRefund: async ({ orderId, paymentTxid }) => settleProviderSellerRefund({ orderId, paymentTxid }),
+      settleRefund: async ({ from, orderId, paymentTxid }) => {
+        const scoped = await resolveScopedProviderForActor(from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.provider?.settleRefund) {
+          return scoped.provider.settleRefund({ from, orderId, paymentTxid });
+        }
+        return settleProviderSellerRefund({ orderId, paymentTxid });
+      },
     },
     services: {
       listMyServices: async (request) => {
-        const profiles = await loadMyServicesProfileInputs(Boolean(request.refresh));
+        const loadedProfiles = await loadMyServicesProfileInputs(Boolean(request.refresh));
+        const selected = await selectMyServicesProfilesForRequest(loadedProfiles, request);
+        if (selected.failure) {
+          return selected.failure;
+        }
         return commandSuccess(buildMyServiceSummaries({
-          profiles,
+          profiles: selected.profiles,
           page: normalizeMyServicesPage(request.page, 1),
           pageSize: normalizeMyServicesPage(request.pageSize, 20),
         }));
@@ -10326,10 +10801,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if (!serviceId) {
           return commandFailed('invalid_service_request', 'My service orders request must include serviceId.');
         }
-        const profiles = await loadMyServicesProfileInputs(Boolean(request.refresh));
+        const loadedProfiles = await loadMyServicesProfileInputs(Boolean(request.refresh));
+        const selected = await selectMyServicesProfilesForRequest(loadedProfiles, request);
+        if (selected.failure) {
+          return selected.failure;
+        }
         return commandSuccess(buildMyServiceOrderDetails({
           serviceId,
-          profiles,
+          profiles: selected.profiles,
           page: normalizeMyServicesPage(request.page, 1),
           pageSize: normalizeMyServicesPage(request.pageSize, 20),
         }));
@@ -10340,7 +10819,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('invalid_service_request', 'My service modify request must include serviceId.');
         }
 
-        const resolved = await resolveMyServiceMutationTarget(serviceId);
+        const resolved = await resolveMyServiceMutationTarget(serviceId, rawInput.from);
         const validation = validateMyServiceMutation({
           action: 'modify',
           target: resolved.target,
@@ -10447,7 +10926,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('invalid_service_request', 'My service revoke request must include serviceId.');
         }
 
-        const resolved = await resolveMyServiceMutationTarget(serviceId);
+        const resolved = await resolveMyServiceMutationTarget(serviceId, rawInput.from);
         const validation = validateMyServiceMutation({
           action: 'revoke',
           target: resolved.target,
@@ -10500,8 +10979,70 @@ export function createDefaultMetabotDaemonHandlers(input: {
           );
         }
       },
+      listRefunds: async (request = {}) => {
+        const requestedFrom = normalizeText(request.from);
+        const kind = normalizeText(request.kind);
+        const scoped = await resolveScopedProviderForActor(request.from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.provider?.getRefunds) {
+          return scoped.provider.getRefunds({
+            from: requestedFrom,
+            ...(kind ? { kind } : {}),
+          });
+        }
+        if (!requestedFrom && request.all === true) {
+          const states = await loadProviderRefundProfileStates();
+          return commandSuccess(mergeProviderRefundsPayloads(
+            states.map((state) => buildProviderRefundsPayload({ state })),
+            kind,
+          ));
+        }
+        const state = await runtimeStateStore.readState();
+        const payload = buildProviderRefundsPayload({ state });
+        if (kind === 'initiated') {
+          const initiatedByMe = payload.initiatedByMe;
+          return commandSuccess({
+            initiatedByMe,
+            receivedByMe: [],
+            totalCount: initiatedByMe.length,
+            pendingCount: initiatedByMe.filter((entry) => entry.status === 'refund_pending').length,
+          });
+        }
+        if (kind === 'received') {
+          const receivedByMe = payload.receivedByMe;
+          return commandSuccess({
+            initiatedByMe: [],
+            receivedByMe,
+            totalCount: receivedByMe.length,
+            pendingCount: receivedByMe.filter((entry) => entry.status !== 'refunded').length,
+          });
+        }
+        return commandSuccess(payload);
+      },
+      inspectOrder: async ({ from, orderId, paymentTxid }) => {
+        const scoped = await resolveScopedProviderForActor(from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.provider?.inspectOrder) {
+          return scoped.provider.inspectOrder({ from, orderId, paymentTxid });
+        }
+        return inspectProviderSellerOrder({ orderId, paymentTxid });
+      },
+      settleRefund: async ({ from, orderId, paymentTxid }) => {
+        const scoped = await resolveScopedProviderForActor(from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.provider?.settleRefund) {
+          return scoped.provider.settleRefund({ from, orderId, paymentTxid });
+        }
+        return settleProviderSellerRefund({ orderId, paymentTxid });
+      },
       listPublishSkills: async (request = {}) => {
-        const requestedSlug = normalizeText(request.slug);
+        const requestedSlug = normalizeText(request.from) || normalizeText(request.slug);
         const selectedProfile = requestedSlug
           ? await getMetabotProfile(normalizedSystemHomeDir, requestedSlug)
           : null;
@@ -10553,7 +11094,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
       },
       publish: async (rawInput) => {
-        const requestedSlug = normalizeText(rawInput.metaBotSlug ?? rawInput.slug);
+        const requestedSlug = normalizeText(rawInput.from ?? rawInput.metaBotSlug ?? rawInput.slug);
         const selectedProfile = requestedSlug
           ? await getMetabotProfile(normalizedSystemHomeDir, requestedSlug)
           : null;
@@ -10658,6 +11199,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
       },
       call: async (rawInput) => {
+        const scoped = await resolveScopedServicesForActor(rawInput.from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.services?.call) {
+          return scoped.services.call(rawInput);
+        }
+
         const state = await runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before calling services.');
@@ -10775,6 +11324,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }
           if (request.spendCap) {
             confirmRequest.spendCap = request.spendCap;
+          }
+          if (rawInput.from) {
+            confirmRequest.from = rawInput.from;
           }
           return commandAwaitingConfirmation({
             traceId: null,
@@ -11317,6 +11869,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       handleInboundOrderProtocolMessage,
       rate: async (rawInput) => {
+        const scoped = await resolveScopedServicesForActor(rawInput.from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.services?.rate) {
+          return scoped.services.rate(rawInput);
+        }
+
         const request = readServiceRateRequest(rawInput);
         if (!request.traceId) {
           return commandFailed('invalid_service_rating_request', 'Service rating request must include traceId.');
@@ -11796,7 +12356,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
     chat: {
       privateConversation: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
+        const actor = await resolveActorChatContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before viewing private chat.');
         }
@@ -11808,7 +12372,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         let privateChatIdentity;
         try {
-          privateChatIdentity = await signer.getPrivateChatIdentity();
+          privateChatIdentity = await actor.signer.getPrivateChatIdentity();
         } catch (error) {
           return commandFailed(
             'identity_secret_missing',
@@ -11849,7 +12413,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
       },
       private: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
+        const actor = await resolveActorChatContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before sending private chat.');
         }
@@ -11861,7 +12429,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         let privateChatIdentity;
         try {
-          privateChatIdentity = await signer.getPrivateChatIdentity();
+          privateChatIdentity = await actor.signer.getPrivateChatIdentity();
         } catch (error) {
           return commandFailed(
             'identity_secret_missing',
@@ -11895,8 +12463,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
         let chatWrite;
         try {
-          const network = await resolveWriteNetwork(rawInput.network);
-          chatWrite = await signer.writePin({
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          chatWrite = await actor.signer.writePin({
             operation: 'create',
             path: sent.path,
             encryption: sent.encryption,
@@ -11916,9 +12484,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           ? chatWrite.txids.map((entry) => normalizeText(entry)).filter(Boolean)
           : [];
         const chatA2AStoreResult = await persistA2AConversationMessageBestEffort({
-          paths: runtimeStateStore.paths,
+          paths: actor.runtimeStateStore.paths,
           local: {
-            profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+            profileSlug: path.basename(actor.runtimeStateStore.paths.profileRoot),
             globalMetaId: state.identity.globalMetaId,
             name: state.identity.name,
             chatPublicKey: state.identity.chatPublicKey,
@@ -11959,7 +12527,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const trace = buildSessionTrace({
           traceId,
           channel: 'simplemsg',
-          exportRoot: runtimeStateStore.paths.exportsRoot,
+          exportRoot: actor.runtimeStateStore.paths.exportsRoot,
           session: {
             id: `chat-${traceId}`,
             title: 'Private Chat',
@@ -12002,7 +12570,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           },
         });
 
-        await runtimeStateStore.writeState({
+        await actor.runtimeStateStore.writeState({
           ...state,
           traces: [
             trace,
@@ -12040,13 +12608,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
       },
 
-      privateChatConversations: async () => {
-        const state = await privateChatStateStore.readState();
+      privateChatConversations: async (rawInput = {}) => {
+        const actor = await resolveActorChatContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.privateChatStateStore.readState();
         return commandSuccess({ conversations: state.conversations });
       },
 
       privateChatMessages: async (msgInput) => {
-        const messages = await privateChatStateStore.getRecentMessages(
+        const actor = await resolveActorChatContext(msgInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const messages = await actor.privateChatStateStore.getRecentMessages(
           normalizeText(msgInput.conversationId),
           typeof msgInput.limit === 'number' && Number.isFinite(msgInput.limit)
             ? Math.max(1, Math.trunc(msgInput.limit))
@@ -12055,35 +12631,47 @@ export function createDefaultMetabotDaemonHandlers(input: {
         return commandSuccess({ messages });
       },
 
-      autoReplyStatus: async () => {
+      autoReplyStatus: async (rawInput = {}) => {
+        const actor = await resolveActorChatContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
         return commandSuccess({
-          enabled: autoReplyConfig.enabled,
-          acceptPolicy: autoReplyConfig.acceptPolicy,
-          defaultStrategyId: autoReplyConfig.defaultStrategyId,
+          enabled: actor.autoReplyConfig.enabled,
+          acceptPolicy: actor.autoReplyConfig.acceptPolicy,
+          defaultStrategyId: actor.autoReplyConfig.defaultStrategyId,
         });
       },
 
       setAutoReply: async (autoReplyInput) => {
-        autoReplyConfig.enabled = autoReplyInput.enabled === true;
+        const actor = await resolveActorChatContext(autoReplyInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        actor.autoReplyConfig.enabled = autoReplyInput.enabled === true;
         if (autoReplyInput.defaultStrategyId !== undefined) {
-          autoReplyConfig.defaultStrategyId = normalizeText(autoReplyInput.defaultStrategyId) || null;
+          actor.autoReplyConfig.defaultStrategyId = normalizeText(autoReplyInput.defaultStrategyId) || null;
         }
         return commandSuccess({
-          enabled: autoReplyConfig.enabled,
-          defaultStrategyId: autoReplyConfig.defaultStrategyId,
+          enabled: actor.autoReplyConfig.enabled,
+          defaultStrategyId: actor.autoReplyConfig.defaultStrategyId,
         });
       },
 
-      stopConversation: async ({ peer }) => {
+      stopConversation: async ({ from, peer }) => {
+        const actor = await resolveActorChatContext(from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
         const normalizedPeer = normalizeText(peer);
         if (!normalizedPeer) {
           return commandFailed('missing_peer', 'Peer globalMetaId is required.');
         }
-        const conversation = await privateChatStateStore.getConversationByPeer(normalizedPeer);
+        const conversation = await actor.privateChatStateStore.getConversationByPeer(normalizedPeer);
         if (!conversation) {
           return commandFailed('conversation_not_found', 'No conversation found for this peer.');
         }
-        await privateChatStateStore.upsertConversation({
+        await actor.privateChatStateStore.upsertConversation({
           ...conversation,
           state: 'closed',
           updatedAt: Date.now(),
@@ -12093,18 +12681,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
     file: {
       upload: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before uploading files.');
         }
 
         try {
-          const network = await resolveFileUploadNetwork(rawInput.network);
+          const network = await resolveFileUploadNetworkForHome(rawInput.network, actor.homeDir);
           const result = await uploadLocalFileToChain({
             filePath: normalizeText(rawInput.filePath),
             contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
             network,
-            signer,
+            signer: actor.signer,
           });
           return commandSuccess(result);
         } catch (error) {
@@ -12116,7 +12708,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     },
     trace: {
-      getTrace: async ({ traceId }) => {
+      getTrace: async ({ from, traceId }) => {
+        const scoped = await resolveScopedTraceForActor(from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.trace?.getTrace) {
+          return scoped.trace.getTrace({ from, traceId });
+        }
         const state = await runtimeStateStore.readState();
         const trace = state.traces.find((entry) => entry.traceId === traceId);
         if (!trace) {
@@ -12144,7 +12743,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
           })
         );
       },
-      watchTrace: async ({ traceId }) => {
+      watchTrace: async ({ from, traceId }) => {
+        const scoped = await resolveScopedTraceForActor(from);
+        if (scoped.failure || scoped.trace?.watchTrace) {
+          return scoped.trace?.watchTrace ? scoped.trace.watchTrace({ from, traceId }) : '';
+        }
         const normalizedTraceId = normalizeText(traceId);
         if (!normalizedTraceId) {
           return '';
@@ -12197,8 +12800,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
           await sleep(Math.min(TRACE_WATCH_POLL_INTERVAL_MS, remainingMs));
         }
       },
-      listSessions: async () => {
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+      listSessions: async (request = {}) => {
+        let profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        const requestedFrom = normalizeText(request.from);
+        if (requestedFrom) {
+          const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedFrom);
+          if (!selectedProfile) {
+            return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedFrom}`);
+          }
+          const selectedHomeDir = path.resolve(selectedProfile.homeDir);
+          profiles = profiles.filter((profile) => path.resolve(profile.homeDir) === selectedHomeDir);
+        } else if (request.all === false) {
+          const activeHomeDir = path.resolve(input.homeDir);
+          profiles = profiles.filter((profile) => path.resolve(profile.homeDir) === activeHomeDir);
+        }
         const results: Array<Record<string, unknown>> = [];
         const seenSessionIds = new Set<string>();
         const seenPeerWindowKeys = new Set<string>();
@@ -12287,19 +12902,31 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const callerCount = results.filter((s) => s.role === 'caller').length;
         const providerCount = results.filter((s) => s.role === 'provider').length;
         const lastUpdatedAt = results[0]?.updatedAt ?? null;
+        const limit = Number.isFinite(Number(request.limit)) && Number(request.limit) > 0
+          ? Math.floor(Number(request.limit))
+          : results.length;
 
         return commandSuccess({
-          sessions: results,
+          sessions: results.slice(0, limit),
           stats: { totalCount, callerCount, providerCount, lastUpdatedAt },
         });
       },
-      getSession: async ({ sessionId }) => {
+      getSession: async ({ from, sessionId }) => {
         const normalizedSessionId = normalizeText(sessionId);
         if (!normalizedSessionId) {
           return commandFailed('missing_session_id', 'Session ID is required.');
         }
 
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        let profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        const requestedFrom = normalizeText(from);
+        if (requestedFrom) {
+          const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedFrom);
+          if (!selectedProfile) {
+            return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedFrom}`);
+          }
+          const selectedHomeDir = path.resolve(selectedProfile.homeDir);
+          profiles = profiles.filter((profile) => path.resolve(profile.homeDir) === selectedHomeDir);
+        }
 
         for (const profile of profiles) {
           try {
@@ -12697,14 +13324,29 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('metabot_profile_delete_failed', message);
         }
       },
-      listRuntimes: async () => {
-        const runtimeStore = createLlmRuntimeStore(input.homeDir);
+      listRuntimes: async (request = {}) => {
+        const requestedSlug = normalizeText(request.from);
+        const selectedProfile = requestedSlug
+          ? await getMetabotProfile(normalizedSystemHomeDir, requestedSlug)
+          : null;
+        if (requestedSlug && !selectedProfile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`);
+        }
+        const runtimeStore = createLlmRuntimeStore(selectedProfile?.homeDir ?? input.homeDir);
         const state = await runtimeStore.read();
         return commandSuccess(state);
       },
-      discoverRuntimes: async () => {
+      discoverRuntimes: async (request = {}) => {
+        const requestedSlug = normalizeText(request.from);
+        const selectedProfile = requestedSlug
+          ? await getMetabotProfile(normalizedSystemHomeDir, requestedSlug)
+          : null;
+        if (requestedSlug && !selectedProfile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`);
+        }
+        const profileHomeDir = selectedProfile?.homeDir ?? input.homeDir;
         const result = await discoverLlmRuntimes({ env: process.env });
-        const runtimeStore = createLlmRuntimeStore(input.homeDir);
+        const runtimeStore = createLlmRuntimeStore(profileHomeDir);
         const previous = await runtimeStore.read();
         const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
         for (const runtime of result.runtimes) {
@@ -12808,47 +13450,52 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const updated = await runtimeStore.read();
         return commandSuccess({ discovered: result.runtimes.length, runtimes: updated.runtimes, errors: result.errors });
       },
-      listBindings: async ({ slug }) => {
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        const profile = profiles.find((p) => p.slug === slug);
-        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${slug}`);
+      listBindings: async (request = {}) => {
+        const profile = await resolveLlmProfileForActor(request);
+        if ('failure' in profile) return profile.failure;
         const paths = resolveMetabotPaths(profile.homeDir);
         const bindingStore = createLlmBindingStore(paths);
         const state = await bindingStore.read();
         return commandSuccess(state);
       },
-      upsertBindings: async ({ slug, bindings }) => {
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        const profile = profiles.find((p) => p.slug === slug);
-        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${slug}`);
+      upsertBindings: async ({ from, slug, bindings }) => {
+        const profile = await resolveLlmProfileForActor({ from, slug });
+        if ('failure' in profile) return profile.failure;
         const paths = resolveMetabotPaths(profile.homeDir);
         const bindingStore = createLlmBindingStore(paths);
         const state = await bindingStore.read();
-        const otherBindings = state.bindings.filter((b) => b.metaBotSlug !== slug);
+        const otherBindings = state.bindings.filter((b) => b.metaBotSlug !== profile.slug);
         const normalizedBindings = bindings
-          .map((b) => normalizeLlmBinding({ ...b, metaBotSlug: slug }))
+          .map((b) => {
+            const runtimeId = normalizeText(b.llmRuntimeId);
+            const role = normalizeText(b.role);
+            const id = normalizeText(b.id) || (runtimeId && role ? `lb_${profile.slug}_${runtimeId}_${role}` : '');
+            return normalizeLlmBinding({
+              ...b,
+              id,
+              metaBotSlug: profile.slug,
+            });
+          })
           .filter((b): b is NonNullable<ReturnType<typeof normalizeLlmBinding>> => b !== null);
         const nextState = { ...state, bindings: [...otherBindings, ...normalizedBindings], version: state.version + 1 };
         const written = await bindingStore.write(nextState);
         return commandSuccess(written);
       },
-      removeBinding: async ({ bindingId }) => {
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        for (const profile of profiles) {
-          const paths = resolveMetabotPaths(profile.homeDir);
-          const bindingStore = createLlmBindingStore(paths);
-          const state = await bindingStore.read();
-          if (state.bindings.some((b) => b.id === bindingId)) {
-            const next = await bindingStore.removeBinding(bindingId);
-            return commandSuccess(next);
-          }
+      removeBinding: async ({ from, bindingId }) => {
+        const profile = await resolveLlmProfileForActor({ from });
+        if ('failure' in profile) return profile.failure;
+        const paths = resolveMetabotPaths(profile.homeDir);
+        const bindingStore = createLlmBindingStore(paths);
+        const state = await bindingStore.read();
+        if (state.bindings.some((b) => b.id === bindingId)) {
+          const next = await bindingStore.removeBinding(bindingId);
+          return commandSuccess(next);
         }
         return commandFailed('binding_not_found', `Binding not found: ${bindingId}`);
       },
-      getPreferredRuntime: async ({ slug }) => {
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        const profile = profiles.find((p) => p.slug === slug);
-        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${slug}`);
+      getPreferredRuntime: async (request = {}) => {
+        const profile = await resolveLlmProfileForActor(request);
+        if ('failure' in profile) return profile.failure;
         const paths = resolveMetabotPaths(profile.homeDir);
         try {
           const raw = await fs.readFile(paths.preferredLlmRuntimePath, 'utf8');
@@ -12858,10 +13505,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandSuccess({ runtimeId: null });
         }
       },
-      setPreferredRuntime: async ({ slug, runtimeId }) => {
-        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-        const profile = profiles.find((p) => p.slug === slug);
-        if (!profile) return commandFailed('profile_not_found', `Profile not found: ${slug}`);
+      setPreferredRuntime: async ({ from, slug, runtimeId }) => {
+        const profile = await resolveLlmProfileForActor({ from, slug });
+        if ('failure' in profile) return profile.failure;
         const paths = resolveMetabotPaths(profile.homeDir);
         await fs.mkdir(path.dirname(paths.preferredLlmRuntimePath), { recursive: true });
         await fs.writeFile(paths.preferredLlmRuntimePath, JSON.stringify({ runtimeId }, null, 2) + '\n', 'utf8');

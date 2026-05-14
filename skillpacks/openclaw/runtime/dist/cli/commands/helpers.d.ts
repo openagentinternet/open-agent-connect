@@ -3,6 +3,9 @@ import type { CliRuntimeContext } from '../types';
 export type CliWriteChainValue = 'mvc' | 'btc' | 'doge' | 'opcat';
 export type CliFileUploadChainValue = 'mvc' | 'btc' | 'opcat';
 export declare function readFlagValue(args: string[], flag: string): string | null;
+export declare function readFromFlag(args: string[], options?: {
+    allowSlugAlias?: boolean;
+}): string | undefined;
 export declare function readChainWriteFlag(args: string[]): {
     chain: CliWriteChainValue | null;
     error: MetabotCommandResult<never> | null;

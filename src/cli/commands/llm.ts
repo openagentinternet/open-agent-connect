@@ -1,79 +1,40 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { CliRuntimeContext } from '../types';
-import { commandUnknownSubcommand } from './helpers';
-
-function readFlagValue(args: string[], flag: string): string | undefined {
-  const idx = args.findIndex((a) => a === flag || a.startsWith(`${flag}=`));
-  if (idx < 0) return undefined;
-  const arg = args[idx];
-  if (arg.includes('=')) return arg.slice(flag.length + 1);
-  const next = args[idx + 1];
-  if (next && !next.startsWith('-')) return next;
-  return undefined;
-}
-
-async function requestJson(
-  context: CliRuntimeContext,
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<MetabotCommandResult<unknown>> {
-  const port = context.env.METABOT_DAEMON_PORT ?? '24042';
-  const baseUrl = `http://127.0.0.1:${port}`;
-  let url = `${baseUrl}${path}`;
-
-  const fetchOpts: Record<string, unknown> = { method };
-  if (body && method !== 'GET') {
-    fetchOpts.body = JSON.stringify(body);
-    fetchOpts.headers = { 'content-type': 'application/json' };
-  }
-
-  try {
-    const res = await fetch(url, fetchOpts);
-    return (await res.json()) as MetabotCommandResult<unknown>;
-  } catch {
-    return commandFailed(
-      'daemon_unreachable',
-      `Could not reach metabot daemon at ${baseUrl}. Start it with: metabot daemon start`,
-    );
-  }
-}
+import { commandUnknownSubcommand, readFlagValue, readFromFlag } from './helpers';
 
 export async function runLlmCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   const subcommand = args[0];
+  const from = readFromFlag(args);
+  const slug = readFlagValue(args, '--slug') ?? undefined;
+  const llm = context.dependencies.llm;
 
   if (subcommand === 'list-runtimes') {
-    const result = await requestJson(context, 'GET', '/api/llm/runtimes');
-    return result;
+    return llm?.listRuntimes
+      ? llm.listRuntimes()
+      : commandFailed('not_implemented', 'LLM runtime handler not configured.');
   }
 
   if (subcommand === 'discover') {
-    const result = await requestJson(context, 'POST', '/api/llm/runtimes/discover');
-    return result;
+    return llm?.discoverRuntimes
+      ? llm.discoverRuntimes()
+      : commandFailed('not_implemented', 'LLM discover handler not configured.');
   }
 
   if (subcommand === 'bindings') {
-    const slug = readFlagValue(args, '--slug');
-    if (!slug) {
-      return commandFailed('missing_flag', '--slug is required for bindings list.');
-    }
-    const result = await requestJson(context, 'GET', `/api/llm/bindings/${encodeURIComponent(slug)}`);
-    return result;
+    return llm?.listBindings
+      ? llm.listBindings({ from: from ?? undefined, slug })
+      : commandFailed('not_implemented', 'LLM bindings handler not configured.');
   }
 
   if (subcommand === 'bind') {
-    const slug = readFlagValue(args, '--slug');
     const runtimeId = readFlagValue(args, '--runtime-id');
     const role = readFlagValue(args, '--role') ?? 'primary';
     const priorityArg = readFlagValue(args, '--priority');
     const priority = priorityArg ? parseInt(priorityArg, 10) : 0;
 
-    if (!slug) return commandFailed('missing_flag', '--slug is required.');
     if (!runtimeId) return commandFailed('missing_flag', '--runtime-id is required.');
 
     const binding = {
-      id: `lb_${slug}_${runtimeId}_${role}`,
-      metaBotSlug: slug,
       llmRuntimeId: runtimeId,
       role,
       priority: Number.isFinite(priority) ? priority : 0,
@@ -82,35 +43,30 @@ export async function runLlmCommand(args: string[], context: CliRuntimeContext):
       updatedAt: new Date().toISOString(),
     };
 
-    const result = await requestJson(context, 'PUT', `/api/llm/bindings/${encodeURIComponent(slug)}`, {
-      bindings: [binding],
-    });
-    return result;
+    return llm?.upsertBindings
+      ? llm.upsertBindings({ from: from ?? undefined, slug, bindings: [binding] })
+      : commandFailed('not_implemented', 'LLM bindings handler not configured.');
   }
 
   if (subcommand === 'unbind') {
     const bindingId = readFlagValue(args, '--binding-id');
     if (!bindingId) return commandFailed('missing_flag', '--binding-id is required.');
-    const result = await requestJson(context, 'DELETE', `/api/llm/bindings/${encodeURIComponent(bindingId)}/delete`);
-    return result;
+    return llm?.removeBinding
+      ? llm.removeBinding({ from: from ?? slug, bindingId })
+      : commandFailed('not_implemented', 'LLM remove binding handler not configured.');
   }
 
   if (subcommand === 'set-preferred') {
-    const slug = readFlagValue(args, '--slug');
     const runtimeId = readFlagValue(args, '--runtime-id');
-    if (!slug) return commandFailed('missing_flag', '--slug is required.');
-
-    const result = await requestJson(context, 'PUT', `/api/llm/preferred-runtime/${encodeURIComponent(slug)}`, {
-      runtimeId: runtimeId ?? null,
-    });
-    return result;
+    return llm?.setPreferredRuntime
+      ? llm.setPreferredRuntime({ from: from ?? undefined, slug, runtimeId: runtimeId ?? null })
+      : commandFailed('not_implemented', 'LLM preferred runtime handler not configured.');
   }
 
   if (subcommand === 'get-preferred') {
-    const slug = readFlagValue(args, '--slug');
-    if (!slug) return commandFailed('missing_flag', '--slug is required.');
-    const result = await requestJson(context, 'GET', `/api/llm/preferred-runtime/${encodeURIComponent(slug)}`);
-    return result;
+    return llm?.getPreferredRuntime
+      ? llm.getPreferredRuntime({ from: from ?? undefined, slug })
+      : commandFailed('not_implemented', 'LLM preferred runtime handler not configured.');
   }
 
   return commandUnknownSubcommand(`llm ${args.join(' ')}`.trim());

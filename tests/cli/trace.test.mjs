@@ -56,6 +56,26 @@ test('runCli dispatches `metabot trace watch --trace-id` and writes NDJSON publi
   assert.equal(stderr.join(''), '');
 });
 
+test('runCli dispatches `metabot trace watch --trace-id --from` with actor hint', async () => {
+  const calls = [];
+
+  const exitCode = await runCli(['trace', 'watch', '--trace-id', 'trace-123', '--from', 'alice'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      trace: {
+        watch: async (input) => {
+          calls.push(input);
+          return '';
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ traceId: 'trace-123', from: 'alice' }]);
+});
+
 test('runCli dispatches `metabot trace get --session-id` to the trace session detail handler', async () => {
   const stdout = [];
   const calls = [];
@@ -92,4 +112,71 @@ test('runCli dispatches `metabot trace get --session-id` to the trace session de
       },
     },
   });
+});
+
+test('runCli dispatches `metabot trace get --session-id --from` with actor hint', async () => {
+  const calls = [];
+
+  const exitCode = await runCli(['trace', 'get', '--session-id', 'session-a2a-123', '--from', 'alice'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      trace: {
+        get: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'success',
+            data: {},
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ sessionId: 'session-a2a-123', from: 'alice' }]);
+});
+
+test('runCli dispatches `metabot trace sessions` with actor, aggregate, and limit selectors', async () => {
+  const calls = [];
+  const allExitCode = await runCli(['trace', 'sessions', '--all', '--limit', '50'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      trace: {
+        listSessions: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'success',
+            data: { sessions: [] },
+          };
+        },
+      },
+    },
+  });
+  const fromExitCode = await runCli(['trace', 'sessions', '--from', 'alice', '--limit', '20'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      trace: {
+        listSessions: async (input) => {
+          calls.push(input);
+          return {
+            ok: true,
+            state: 'success',
+            data: { sessions: [] },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(allExitCode, 0);
+  assert.equal(fromExitCode, 0);
+  assert.deepEqual(calls, [
+    { all: true, limit: 50 },
+    { from: 'alice', all: false, limit: 20 },
+  ]);
 });

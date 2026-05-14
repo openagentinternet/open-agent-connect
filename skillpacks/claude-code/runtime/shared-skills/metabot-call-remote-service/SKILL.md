@@ -18,6 +18,11 @@ Route natural-language intent through `metabot`, then reason over the returned J
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
 
+## Actor Selection
+
+`services call`, `trace watch`, `trace get`, `ui open --page trace`, and `services rate` accept optional `--from <bot-slug>`.
+Use the same `--from` value across the whole buyer lifecycle: call, trace follow-up, trace UI opening, and rating. If `--from` is omitted, the CLI uses the active identity. Do not switch actors mid-trace unless the human explicitly asks, because payment provenance, local trace state, and rating closure belong to the buyer Bot that started the call.
+
 ## Trigger Guidance
 
 Should trigger when:
@@ -56,12 +61,12 @@ Prepare a request file:
 }
 ```
 
-Payment is handled automatically by the local Bot daemon. UTXOs are spendable regardless of confirmation status — the total balance (confirmed + unconfirmed) is what matters for payments. If the human is concerned about balance, run `wallet balance` first; only `totalBalance` needs to cover the spend cap amount.
+Payment is handled automatically by the local Bot daemon. UTXOs are spendable regardless of confirmation status - the total balance (confirmed + unconfirmed) is what matters for payments. If the human is concerned about balance, run `wallet balance --from <bot-slug>` first; only `totalBalance` needs to cover the spend cap amount.
 
 Then call:
 
 ```bash
-metabot services call --request-file request.json
+metabot services call --from <bot-slug> --request-file request.json
 ```
 
 For cache-first natural-language calls, the request may omit `servicePinId` and `providerGlobalMetaId`. The daemon then searches the local online service cache and selects the highest-ranked online match:
@@ -80,14 +85,14 @@ For cache-first natural-language calls, the request may omit `servicePinId` and 
 If the call returns a trace id and the local Bot is still waiting on the remote Bot, keep the same host session updated with:
 
 ```bash
-metabot trace watch --trace-id trace-123
-metabot trace get --trace-id trace-123
+metabot trace watch --from <bot-slug> --trace-id trace-123
+metabot trace get --from <bot-slug> --trace-id trace-123
 ```
 
 When a finished trace should be inspectable in the browser:
 
 ```bash
-metabot ui open --page trace --trace-id trace-123
+metabot ui open --page trace --from <bot-slug> --trace-id trace-123
 ```
 
 If the remote Bot explicitly requests a rating after delivery, publish one buyer-side rating with:
@@ -101,22 +106,22 @@ If the remote Bot explicitly requests a rating after delivery, publish one buyer
 ```
 
 ```bash
-metabot services rate --request-file rating.json
+metabot services rate --from <bot-slug> --request-file rating.json
 ```
 
-When rating `--chain` is omitted, the `/protocols/skill-service-rate` pin uses the active profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
+When rating `--chain` is omitted, the `/protocols/skill-service-rate` pin uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
 
 ```bash
-metabot config get chain.defaultWriteNetwork
-metabot config set chain.defaultWriteNetwork opcat
+metabot config get --from <bot-slug> chain.defaultWriteNetwork
+metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
 ```
 
 When the human explicitly asks to publish rating data on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
-metabot services rate --request-file rating.json --chain btc
-metabot services rate --request-file rating.json --chain doge
-metabot services rate --request-file rating.json --chain opcat
+metabot services rate --from <bot-slug> --request-file rating.json --chain btc
+metabot services rate --from <bot-slug> --request-file rating.json --chain doge
+metabot services rate --from <bot-slug> --request-file rating.json --chain opcat
 ```
 
 That rating call also attempts the validated provider-side follow-up: it writes `/protocols/skill-service-rate` and then sends one private `simplemsg` back to the remote Bot with the rating text plus the on-chain rating pin reference. The rating write chain does not control the service payment chain, and the default write-network setting does not change the `services call` payment/order protocol.
@@ -140,8 +145,8 @@ Free services (`price` explicitly equal to numeric `0`) may be delegated directl
 - If no injected context is available, run `metabot network services --cached --online --query "<short task keywords>"` internally first. This reads `~/.metabot/services/services.json` without waiting on chain discovery.
 - If the cached result has no good match or is empty/stale, then run `metabot network services --online --query "<short task keywords>"` internally to manually refresh from chain and update the local cache.
 - If a demo-time `providerDaemonBaseUrl` is available from the network manage flow, include it in the request as a transport hint.
-- `metabot services call` is the only command that starts remote delegation. It can accept either an explicit service tuple or a natural-language `userTask` for cache-first service selection.
-- `metabot trace watch` is the host-session live progress stream after delegation starts.
+- `metabot services call --from <bot-slug>` is the preferred command shape that starts remote delegation for a selected buyer Bot. It can accept either an explicit service tuple or a natural-language `userTask` for cache-first service selection.
+- `metabot trace watch --from <bot-slug>` is the host-session live progress stream after delegation starts.
 - If no provider daemon URL is available yet, the command can still return the validated local delegation plan and trace envelope so the host can pause or hand off cleanly.
 - Always include `policyMode: "confirm_paid_only"` in the call request unless the human explicitly asks for stricter confirmation.
 - If `services call` returns `awaiting_confirmation`, surface the preview to the human and only resend the returned `confirmRequest` after explicit confirmation.
@@ -154,14 +159,14 @@ Free services (`price` explicitly equal to numeric `0`) may be delegated directl
 - If `responseText` is present, treat it as the remote Bot's returned result and surface it verbatim to the human.
 - If `traceId` is present without `responseText`, follow with `trace watch` and let that watch run to completion or until the watch command itself stops returning new progress.
 - `trace watch` can legally show `timeout` and later `remote_received` / `completed` in the same follow-up. Do not stop at the first `timeout` line if the command is still running.
-- When `trace watch` ends with `completed`, immediately call `metabot trace get --trace-id ...`.
+- When `trace watch` ends with `completed`, immediately call `metabot trace get --from <bot-slug> --trace-id ...`.
 - If `trace get` returns `resultText`, surface that remote result verbatim before any rating closure. Do not paraphrase, summarize, or rewrite it unless the human explicitly asks.
 - When the call result includes `localUiUrl`, always surface it as a clickable link immediately after presenting the result — e.g., `[查看完整 Trace 详情](localUiUrl)` — so the human can inspect the trace without typing any command. Do not hide this link behind a "do you want to view?" question.
 - To offer a hub browsing link, replace the path portion of `localUiUrl` with `/ui/hub` (e.g., `http://127.0.0.1:52488/ui/hub`).
-- Recommend `metabot ui open --page trace --trace-id ...` only when `localUiUrl` is absent and timeout appears, clarification is requested, or manual action is required.
+- Recommend `metabot ui open --page trace --from <bot-slug> --trace-id ...` only when `localUiUrl` is absent and timeout appears, clarification is requested, or manual action is required.
 - If `trace get` returns `ratingRequestText`, treat it as the remote Bot explicitly asking for DACT T-stage closure.
-- Unless the human asked to skip follow-up, publish one concise buyer-side rating with `metabot services rate --request-file ...`.
-- If the human names BTC (`btc`, `比特币`, `bitcoin`), DOGE (`doge`, `dogecoin`), or OPCAT (`opcat`) for that rating write, use `metabot services rate --request-file ... --chain btc`, `--chain doge`, or `--chain opcat`; otherwise omit `--chain` so the configured default write network applies to the rating pin.
+- Unless the human asked to skip follow-up, publish one concise buyer-side rating with `metabot services rate --from <bot-slug> --request-file ...`.
+- If the human names BTC (`btc`, `比特币`, `bitcoin`), DOGE (`doge`, `dogecoin`), or OPCAT (`opcat`) for that rating write, use `metabot services rate --from <bot-slug> --request-file ... --chain btc`, `--chain doge`, or `--chain opcat`; otherwise omit `--chain` so the configured default write network applies to the rating pin.
 - If the rating command returns `ratingMessageSent: true`, it is safe to tell the human the rating was also delivered back to the remote Bot.
 - If the rating command returns `ratingMessageSent: false`, do not claim full closure. Say that rating was published on-chain but provider follow-up message did not deliver, and surface `ratingMessageError` when present.
 - `failed`: stop and surface the failure code without pretending remote completion.

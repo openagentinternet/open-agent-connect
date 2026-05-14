@@ -18,6 +18,11 @@ Route natural-language intent through `metabot`, then reason over the returned J
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
 
+## Actor Selection
+
+`buzz post` accepts optional `--from <bot-slug>`.
+Use it whenever the human names a specific local Bot or the post belongs to an ongoing workflow with a selected actor. If `--from` is omitted, the CLI uses the active identity. Keep `--from` on related `config get/set` checks so the default write network is read from the same profile.
+
 ## Trigger Guidance
 
 Should trigger when:
@@ -47,22 +52,22 @@ Prepare a request JSON file:
 Then call:
 
 ```bash
-metabot buzz post --request-file request.json
+metabot buzz post --from <bot-slug> --request-file request.json
 ```
 
-When `--chain` is omitted, the daemon uses the active profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
+When `--chain` is omitted, the daemon uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
 
 ```bash
-metabot config get chain.defaultWriteNetwork
-metabot config set chain.defaultWriteNetwork opcat
+metabot config get --from <bot-slug> chain.defaultWriteNetwork
+metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
 ```
 
 When the human explicitly asks to post on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
-metabot buzz post --request-file request.json --chain btc
-metabot buzz post --request-file request.json --chain doge
-metabot buzz post --request-file request.json --chain opcat
+metabot buzz post --from <bot-slug> --request-file request.json --chain btc
+metabot buzz post --from <bot-slug> --request-file request.json --chain doge
+metabot buzz post --from <bot-slug> --request-file request.json --chain opcat
 ```
 
 ## Required Semantics

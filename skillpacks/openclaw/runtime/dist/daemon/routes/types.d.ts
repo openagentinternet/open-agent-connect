@@ -36,6 +36,7 @@ export interface MetabotDaemonHttpHandlers {
         suggest?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         receive?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         trace?: (input: {
+            from?: string;
             traceId: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
@@ -60,9 +61,17 @@ export interface MetabotDaemonHttpHandlers {
     };
     provider?: {
         getSummary?: () => Awaitable<MetabotCommandResult<unknown>>;
-        getInitiatedRefunds?: () => Awaitable<MetabotCommandResult<unknown>>;
-        getRefunds?: () => Awaitable<MetabotCommandResult<unknown>>;
+        getInitiatedRefunds?: (input?: {
+            from?: string;
+            all?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        getRefunds?: (input?: {
+            from?: string;
+            all?: boolean;
+            kind?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         inspectOrder?: (input: {
+            from?: string;
             orderId?: string;
             paymentTxid?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
@@ -73,6 +82,7 @@ export interface MetabotDaemonHttpHandlers {
             orderId: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         settleRefund?: (input: {
+            from?: string;
             orderId?: string;
             paymentTxid?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
@@ -81,14 +91,19 @@ export interface MetabotDaemonHttpHandlers {
         publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         listPublishSkills?: (input?: {
             slug?: string;
+            from?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         listMyServices?: (input: {
+            from?: string;
+            all?: boolean;
             page: number;
             pageSize: number;
             refresh: boolean;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         listMyServiceOrders?: (input: {
             serviceId: string;
+            from?: string;
+            all?: boolean;
             page: number;
             pageSize: number;
             refresh: boolean;
@@ -108,21 +123,29 @@ export interface MetabotDaemonHttpHandlers {
     chat?: {
         private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         privateConversation?: (input: {
+            from?: string;
             peer: string;
             afterIndex?: number;
             limit?: number;
         }) => Awaitable<MetabotCommandResult<unknown>>;
-        privateChatConversations?: () => Awaitable<MetabotCommandResult<unknown>>;
+        privateChatConversations?: (input?: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         privateChatMessages?: (input: {
+            from?: string;
             conversationId: string;
             limit?: number;
         }) => Awaitable<MetabotCommandResult<unknown>>;
-        autoReplyStatus?: () => Awaitable<MetabotCommandResult<unknown>>;
+        autoReplyStatus?: (input?: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         setAutoReply?: (input: {
+            from?: string;
             enabled: boolean;
             defaultStrategyId?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         stopConversation?: (input: {
+            from?: string;
             peer: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
@@ -131,13 +154,20 @@ export interface MetabotDaemonHttpHandlers {
     };
     trace?: {
         getTrace?: (input: {
+            from?: string;
             traceId: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         watchTrace?: (input: {
+            from?: string;
             traceId: string;
         }) => Awaitable<string>;
-        listSessions?: () => Awaitable<MetabotCommandResult<unknown>>;
+        listSessions?: (input?: {
+            from?: string;
+            all?: boolean;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         getSession?: (input: {
+            from?: string;
             sessionId: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
@@ -147,21 +177,26 @@ export interface MetabotDaemonHttpHandlers {
     llm?: {
         listRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
         discoverRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
-        listBindings?: (input: {
-            slug: string;
+        listBindings?: (input?: {
+            from?: string;
+            slug?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         upsertBindings?: (input: {
-            slug: string;
+            from?: string;
+            slug?: string;
             bindings: Record<string, unknown>[];
         }) => Awaitable<MetabotCommandResult<unknown>>;
         removeBinding?: (input: {
+            from?: string;
             bindingId: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
-        getPreferredRuntime?: (input: {
-            slug: string;
+        getPreferredRuntime?: (input?: {
+            from?: string;
+            slug?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         setPreferredRuntime?: (input: {
-            slug: string;
+            from?: string;
+            slug?: string;
             runtimeId: string | null;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         execute?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
@@ -203,8 +238,12 @@ export interface MetabotDaemonHttpHandlers {
         deleteProfile?: (input: {
             slug: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
-        listRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
-        discoverRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
+        listRuntimes?: (input?: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        discoverRuntimes?: (input?: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         listSessions?: (input: {
             slug?: string;
             limit: number;

@@ -220,7 +220,7 @@ cat > chat-request.json <<'JSON'
   "replyPin": ""
 }
 JSON
-metabot chat private --request-file chat-request.json
+metabot chat private --from <bot-slug> --request-file chat-request.json
 ```
 
 ## Agent Response Contract (Required)

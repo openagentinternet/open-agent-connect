@@ -31,7 +31,7 @@ test('Ask Master release runbook documents the shipped manual and suggest releas
   assert.match(runbook, /reject `askMaster\.triggerMode auto`/i);
   assert.match(runbook, /preview\/confirm/i);
   assert.match(runbook, /private chat, `\/protocols\/simplemsg`, or old advisor commands/i);
-  assert.match(runbook, /metabot master ask --request-file/);
+  assert.match(runbook, /metabot master ask --from caller-bot --request-file/);
   assert.match(runbook, /metabot master suggest --request-file/);
   assert.match(runbook, /accept_suggest/);
   assert.match(runbook, /metabot master host-action --request-file/);

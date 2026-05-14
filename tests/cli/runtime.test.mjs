@@ -17,6 +17,7 @@ const { createSellerOrderRecord } = require('../../dist/core/orders/sellerOrderS
 const { createSessionStateStore } = require('../../dist/core/a2a/sessionStateStore.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
+const { createPublishedMasterStateStore } = require('../../dist/core/master/masterPublishedState.js');
 const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
 const { createRemoteEvolutionStore } = require('../../dist/core/evolution/remoteEvolutionStore.js');
 const { createTestServicePaymentExecutor } = require('../../dist/core/payments/servicePayment.js');
@@ -1339,6 +1340,38 @@ test('buzz post succeeds immediately after bootstrap identity create', async (t)
   assert.equal(buzzViewResponse.status, 200);
   assert.match(buzzViewResponse.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(buzzViewHtml, /IDFramework - Buzz Feed Demo/);
+});
+
+test('buzz post --from uses the selected actor identity and default write network', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-buzz-from-'));
+  const aliceHome = await createProfileHome(systemHome, 'actor-alice');
+  const bobHome = await createProfileHome(systemHome, 'actor-bob');
+  t.after(async () => {
+    await stopDaemon(aliceHome);
+    await stopDaemon(bobHome);
+  });
+
+  const aliceCreated = await runCommand(aliceHome, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(aliceCreated.exitCode, 0);
+  const bobCreated = await runCommand(bobHome, ['identity', 'create', '--name', 'Bob']);
+  assert.equal(bobCreated.exitCode, 0);
+  assert.notEqual(aliceCreated.payload.data.globalMetaId, bobCreated.payload.data.globalMetaId);
+
+  const configured = await runCommand(aliceHome, ['config', 'set', 'chain.defaultWriteNetwork', 'opcat']);
+  assert.equal(configured.exitCode, 0);
+
+  const requestFile = path.join(bobHome, 'buzz-from-alice.json');
+  await writeFile(requestFile, JSON.stringify({
+    content: 'alice speaks through an explicit actor flag',
+  }), 'utf8');
+
+  const posted = await runCommand(bobHome, ['buzz', 'post', '--from', 'actor-alice', '--request-file', requestFile]);
+
+  assert.equal(posted.exitCode, 0);
+  assert.equal(posted.payload.ok, true);
+  assert.equal(posted.payload.data.content, 'alice speaks through an explicit actor flag');
+  assert.equal(posted.payload.data.globalMetaId, aliceCreated.payload.data.globalMetaId);
+  assert.equal(posted.payload.data.network, 'opcat');
 });
 
 test('services publish persists a local directory entry that network services --online can read back', async (t) => {
@@ -2771,6 +2804,112 @@ test('master list merges remote debug-master directory seeds and returns provide
   assert.equal(listed.payload.data.masters[0].online, true);
 });
 
+test('master publish --from uses the selected actor identity, default write network, and local registry', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-master-from-'));
+  const aliceHome = await createProfileHome(systemHome, 'actor-alice');
+  const bobHome = await createProfileHome(systemHome, 'actor-bob');
+  t.after(async () => {
+    await stopDaemon(aliceHome);
+    await stopDaemon(bobHome);
+  });
+
+  const aliceCreated = await runCommand(aliceHome, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(aliceCreated.exitCode, 0);
+  const bobCreated = await runCommand(bobHome, ['identity', 'create', '--name', 'Bob']);
+  assert.equal(bobCreated.exitCode, 0);
+  assert.notEqual(aliceCreated.payload.data.globalMetaId, bobCreated.payload.data.globalMetaId);
+
+  const configured = await runCommand(aliceHome, ['config', 'set', 'chain.defaultWriteNetwork', 'opcat']);
+  assert.equal(configured.exitCode, 0);
+
+  const publishFile = path.join(bobHome, 'master-from-alice.json');
+  await writeFile(publishFile, JSON.stringify({
+    serviceName: 'official-debug-master',
+    displayName: 'Official Debug Master',
+    description: 'Structured debugging help from the official Ask Master fixture.',
+    masterKind: 'debug',
+    specialties: ['debugging'],
+    hostModes: ['codex'],
+    modelInfo: {
+      provider: 'metaweb',
+      model: 'official-debug-master-v1',
+    },
+    style: 'direct_and_structured',
+    pricingMode: 'free',
+    price: '0',
+    currency: 'SPACE',
+    responseMode: 'structured',
+    contextPolicy: 'standard',
+    official: true,
+    trustedTier: 'official',
+  }), 'utf8');
+
+  const published = await runCommand(bobHome, ['master', 'publish', '--from', 'actor-alice', '--payload-file', publishFile]);
+
+  assert.equal(published.exitCode, 0);
+  assert.equal(published.payload.ok, true);
+  assert.equal(published.payload.data.providerGlobalMetaId, aliceCreated.payload.data.globalMetaId);
+  assert.equal(published.payload.data.network, 'opcat');
+
+  const aliceMasterState = await createPublishedMasterStateStore(aliceHome).read();
+  const bobMasterState = await createPublishedMasterStateStore(bobHome).read();
+  assert.equal(aliceMasterState.masters.length, 1);
+  assert.equal(aliceMasterState.masters[0].providerGlobalMetaId, aliceCreated.payload.data.globalMetaId);
+  assert.equal(aliceMasterState.masters[0].currentPinId, published.payload.data.masterPinId);
+  assert.equal(bobMasterState.masters.length, 0);
+});
+
+test('wallet balance --from reads the selected actor identity and address', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-wallet-from-'));
+  const aliceHome = await createProfileHome(systemHome, 'actor-alice');
+  const bobHome = await createProfileHome(systemHome, 'actor-bob');
+  t.after(async () => {
+    await stopDaemon(aliceHome);
+    await stopDaemon(bobHome);
+  });
+
+  const aliceCreated = await runCommand(aliceHome, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(aliceCreated.exitCode, 0);
+  const bobCreated = await runCommand(bobHome, ['identity', 'create', '--name', 'Bob']);
+  assert.equal(bobCreated.exitCode, 0);
+  assert.notEqual(aliceCreated.payload.data.globalMetaId, bobCreated.payload.data.globalMetaId);
+
+  const aliceState = await createRuntimeStateStore(aliceHome).readState();
+  const aliceBtcAddress = aliceState.identity?.addresses?.btc;
+  assert.equal(typeof aliceBtcAddress, 'string');
+  assert.ok(aliceBtcAddress.length > 0);
+
+  const originalFetch = globalThis.fetch;
+  const fetchedUrls = [];
+  globalThis.fetch = async (url) => {
+    fetchedUrls.push(String(url));
+    return new Response(JSON.stringify({
+      code: 0,
+      data: {
+        balance: 0.125,
+        safeBalance: 0.125,
+        pendingBalance: 0,
+      },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const balance = await runCommand(bobHome, ['wallet', 'balance', '--from', 'actor-alice', '--chain', 'btc']);
+
+  assert.equal(balance.exitCode, 0);
+  assert.equal(balance.payload.ok, true);
+  assert.equal(balance.payload.data.globalMetaId, aliceCreated.payload.data.globalMetaId);
+  assert.equal(balance.payload.data.balances.btc.address, aliceBtcAddress);
+  assert.equal(balance.payload.data.balances.btc.totalSatoshis, 12_500_000);
+  assert.equal(fetchedUrls.length, 1);
+  assert.match(fetchedUrls[0], new RegExp(`address=${encodeURIComponent(aliceBtcAddress)}`));
+});
+
 test('network sources add/list/remove manages the local demo provider registry without manual file edits', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
@@ -4077,6 +4216,90 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
 
   const transcriptMarkdown = await readFile(sent.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /hello from loopback/);
+});
+
+test('chat private --from uses the selected actor identity, default write network, and local stores', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-chat-from-'));
+  const aliceHome = await createProfileHome(systemHome, 'actor-alice');
+  const bobHome = await createProfileHome(systemHome, 'actor-bob');
+  t.after(async () => {
+    await stopDaemon(aliceHome);
+    await stopDaemon(bobHome);
+  });
+
+  const aliceCreated = await runCommand(aliceHome, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(aliceCreated.exitCode, 0);
+  const bobCreated = await runCommand(bobHome, ['identity', 'create', '--name', 'Bob']);
+  assert.equal(bobCreated.exitCode, 0);
+  assert.notEqual(aliceCreated.payload.data.globalMetaId, bobCreated.payload.data.globalMetaId);
+
+  const configured = await runCommand(aliceHome, ['config', 'set', 'chain.defaultWriteNetwork', 'opcat']);
+  assert.equal(configured.exitCode, 0);
+
+  const requestFile = path.join(bobHome, 'chat-from-alice.json');
+  await writeFile(requestFile, JSON.stringify({
+    to: bobCreated.payload.data.globalMetaId,
+    peerChatPublicKey: bobCreated.payload.data.chatPublicKey,
+    content: 'alice speaks through explicit chat actor selection',
+    replyPin: 'reply-pin-from-alice',
+  }), 'utf8');
+
+  const sent = await runCommand(bobHome, ['chat', 'private', '--from', 'actor-alice', '--request-file', requestFile]);
+
+  assert.equal(sent.exitCode, 0);
+  assert.equal(sent.payload.ok, true);
+  assert.equal(sent.payload.data.to, bobCreated.payload.data.globalMetaId);
+  assert.equal(sent.payload.data.network, 'opcat');
+  assert.equal(sent.payload.data.deliveryMode, 'onchain_simplemsg');
+
+  const aliceState = await createRuntimeStateStore(aliceHome).readState();
+  const bobState = await createRuntimeStateStore(bobHome).readState();
+  assert.equal(
+    aliceState.traces.some((trace) => trace.traceId === sent.payload.data.traceId),
+    true,
+  );
+  assert.equal(
+    bobState.traces.some((trace) => trace.traceId === sent.payload.data.traceId),
+    false,
+  );
+
+  const aliceConversation = await createA2AConversationStore({
+    homeDir: aliceHome,
+    local: {
+      globalMetaId: aliceCreated.payload.data.globalMetaId,
+      name: aliceCreated.payload.data.name,
+      chatPublicKey: aliceCreated.payload.data.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: bobCreated.payload.data.globalMetaId,
+      name: bobCreated.payload.data.name,
+      chatPublicKey: bobCreated.payload.data.chatPublicKey,
+    },
+  }).readConversation();
+  const aliceMessage = aliceConversation.messages.find(
+    (message) => message.content === 'alice speaks through explicit chat actor selection',
+  );
+  assert.ok(aliceMessage, 'expected outgoing private chat message in the selected actor store');
+  assert.equal(aliceMessage.chain, 'opcat');
+  assert.equal(aliceMessage.replyPinId, 'reply-pin-from-alice');
+
+  const bobConversation = await createA2AConversationStore({
+    homeDir: bobHome,
+    local: {
+      globalMetaId: bobCreated.payload.data.globalMetaId,
+      name: bobCreated.payload.data.name,
+      chatPublicKey: bobCreated.payload.data.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: bobCreated.payload.data.globalMetaId,
+      name: bobCreated.payload.data.name,
+      chatPublicKey: bobCreated.payload.data.chatPublicKey,
+    },
+  }).readConversation();
+  assert.equal(
+    bobConversation.messages.some((message) => message.content === 'alice speaks through explicit chat actor selection'),
+    false,
+  );
 });
 
 test('file upload fails clearly when default write network is DOGE', async (t) => {

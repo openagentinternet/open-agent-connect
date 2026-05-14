@@ -1,16 +1,18 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, readFlagValue } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, readFlagValue, readFromFlag } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 export async function runEvolutionCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   const subcommand = args[0];
+  const from = readFromFlag(args);
+  const actorInput = from ? { from } : {};
 
   if (subcommand === 'status') {
     const handler = context.dependencies.evolution?.status;
     if (!handler) {
       return commandFailed('not_implemented', 'Evolution status handler is not configured.');
     }
-    return handler();
+    return handler(actorInput);
   }
 
   if (subcommand === 'adopt') {
@@ -34,6 +36,7 @@ export async function runEvolutionCommand(args: string[], context: CliRuntimeCon
       );
     }
     return handler({
+      ...actorInput,
       skill,
       variantId,
       source,
@@ -53,7 +56,7 @@ export async function runEvolutionCommand(args: string[], context: CliRuntimeCon
     if (!variantId) {
       return commandMissingFlag('--variant-id');
     }
-    return handler({ skill, variantId });
+    return handler({ ...actorInput, skill, variantId });
   }
 
   if (subcommand === 'rollback') {
@@ -65,7 +68,7 @@ export async function runEvolutionCommand(args: string[], context: CliRuntimeCon
     if (!skill) {
       return commandMissingFlag('--skill');
     }
-    return handler({ skill });
+    return handler({ ...actorInput, skill });
   }
 
   if (subcommand === 'search') {
@@ -77,7 +80,7 @@ export async function runEvolutionCommand(args: string[], context: CliRuntimeCon
     if (!skill) {
       return commandMissingFlag('--skill');
     }
-    return handler({ skill });
+    return handler({ ...actorInput, skill });
   }
 
   if (subcommand === 'import') {
@@ -89,7 +92,7 @@ export async function runEvolutionCommand(args: string[], context: CliRuntimeCon
     if (!pinId) {
       return commandMissingFlag('--pin-id');
     }
-    return handler({ pinId });
+    return handler({ ...actorInput, pinId });
   }
 
   if (subcommand === 'imported') {
@@ -101,7 +104,7 @@ export async function runEvolutionCommand(args: string[], context: CliRuntimeCon
     if (!skill) {
       return commandMissingFlag('--skill');
     }
-    return handler({ skill });
+    return handler({ ...actorInput, skill });
   }
 
   return commandUnknownSubcommand(`evolution ${args.join(' ')}`.trim());

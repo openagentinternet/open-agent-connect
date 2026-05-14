@@ -49,7 +49,7 @@ Before any paid remote call, show the provider, service, price, currency, and wa
 When you need the first remote service flow:
 
 ```bash
-metabot services call --request-file request.json
-metabot trace watch --trace-id trace-123
-metabot trace get --trace-id trace-123
+metabot services call --from <bot-slug> --request-file request.json
+metabot trace watch --from <bot-slug> --trace-id trace-123
+metabot trace get --from <bot-slug> --trace-id trace-123
 ```

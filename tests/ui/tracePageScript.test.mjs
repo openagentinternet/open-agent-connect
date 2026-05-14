@@ -7,6 +7,8 @@ import vm from 'node:vm';
 const require = createRequire(import.meta.url);
 const { buildTraceInspectorScript } = require('../../dist/ui/pages/trace/sseClient.js');
 
+const TRACE_SESSIONS_ENDPOINT = '/api/trace/sessions?all=true';
+
 function createElementStub() {
   return {
     innerHTML: '',
@@ -163,7 +165,7 @@ async function runTraceScriptWithUrl(search, options = {}) {
     },
     fetch: async (url) => {
       fetchCalls.push(String(url));
-      if (url === '/api/trace/sessions') {
+      if (url === TRACE_SESSIONS_ENDPOINT) {
         return {
           ok: true,
           json: async () => ({
@@ -229,7 +231,7 @@ test('trace page URL with sessionId auto-loads that A2A session detail', async (
   );
 
   assert.deepEqual(fetchCalls.filter((url) => url.startsWith('/api/')).slice(0, 2), [
-    '/api/trace/sessions',
+    TRACE_SESSIONS_ENDPOINT,
     '/api/trace/sessions/session-weather-1',
   ]);
   assert.match(detail.innerHTML, /Forecast detail/);
@@ -241,7 +243,7 @@ test('trace page URL with only traceId selects the matching A2A session', async 
   const { fetchCalls, detail } = await runTraceScriptWithUrl('?traceId=trace-weather-1');
 
   assert.deepEqual(fetchCalls.filter((url) => url.startsWith('/api/')).slice(0, 2), [
-    '/api/trace/sessions',
+    TRACE_SESSIONS_ENDPOINT,
     '/api/trace/sessions/session-weather-1',
   ]);
   assert.match(detail.innerHTML, /Forecast detail/);
@@ -403,7 +405,7 @@ test('trace page background refresh keeps the current detail while the next fetc
       },
     },
     fetch: async (url) => {
-      if (url === '/api/trace/sessions') {
+      if (url === TRACE_SESSIONS_ENDPOINT) {
         return {
           ok: true,
           json: async () => ({
@@ -584,7 +586,7 @@ test('trace page silent refresh recovers from a transient detail fetch error whe
       },
     },
     fetch: async (url) => {
-      if (url === '/api/trace/sessions') {
+      if (url === TRACE_SESSIONS_ENDPOINT) {
         return {
           ok: true,
           json: async () => ({
@@ -678,7 +680,7 @@ test('trace page metadata-only message refresh preserves historical scroll posit
       },
     },
     fetch: async (url) => {
-      if (url === '/api/trace/sessions') {
+      if (url === TRACE_SESSIONS_ENDPOINT) {
         return {
           ok: true,
           json: async () => ({
