@@ -4,6 +4,7 @@ import {
   commandUnknownSubcommand,
   readChainWriteFlag,
   readFlagValue,
+  readFromFlag,
   readJsonFile,
 } from './helpers';
 import type { CliRuntimeContext } from '../types';
@@ -22,12 +23,17 @@ export async function runChatCommand(args: string[], context: CliRuntimeContext)
     if (!handler) {
       return commandFailed('not_implemented', 'Chat private handler is not configured.');
     }
+    const from = readFromFlag(args);
     const chainFlag = readChainWriteFlag(args);
     if (chainFlag.error) {
       return chainFlag.error;
     }
     const request = await readJsonFile(context, requestFile);
-    return handler(chainFlag.chain ? { ...request, network: chainFlag.chain } : request);
+    return handler({
+      ...request,
+      ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
+      ...(from ? { from } : {}),
+    });
   }
 
   if (args[0] === 'conversations') {
@@ -35,7 +41,8 @@ export async function runChatCommand(args: string[], context: CliRuntimeContext)
     if (!handler) {
       return commandFailed('not_implemented', 'Chat conversations handler is not configured.');
     }
-    return handler();
+    const from = readFromFlag(args);
+    return handler(from ? { from } : {});
   }
 
   if (args[0] === 'messages') {
@@ -49,9 +56,11 @@ export async function runChatCommand(args: string[], context: CliRuntimeContext)
     if (!handler) {
       return commandFailed('not_implemented', 'Chat messages handler is not configured.');
     }
+    const from = readFromFlag(args);
     return handler({
       conversationId: normalizeText(conversationId),
       limit: Number.isFinite(limit) ? limit : undefined,
+      ...(from ? { from } : {}),
     });
   }
 
@@ -62,7 +71,8 @@ export async function runChatCommand(args: string[], context: CliRuntimeContext)
       if (!handler) {
         return commandFailed('not_implemented', 'Auto-reply status handler is not configured.');
       }
-      return handler();
+      const from = readFromFlag(args);
+      return handler(from ? { from } : {});
     }
 
     if (subAction === 'enable') {
@@ -71,7 +81,8 @@ export async function runChatCommand(args: string[], context: CliRuntimeContext)
         return commandFailed('not_implemented', 'Auto-reply config handler is not configured.');
       }
       const strategyId = readFlagValue(args, '--strategy') || undefined;
-      return handler({ enabled: true, defaultStrategyId: strategyId });
+      const from = readFromFlag(args);
+      return handler({ enabled: true, defaultStrategyId: strategyId, ...(from ? { from } : {}) });
     }
 
     if (subAction === 'disable') {
@@ -79,7 +90,8 @@ export async function runChatCommand(args: string[], context: CliRuntimeContext)
       if (!handler) {
         return commandFailed('not_implemented', 'Auto-reply config handler is not configured.');
       }
-      return handler({ enabled: false });
+      const from = readFromFlag(args);
+      return handler({ enabled: false, ...(from ? { from } : {}) });
     }
 
     return commandUnknownSubcommand(`chat auto-reply ${normalizeText(subAction)}`);

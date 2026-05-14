@@ -1439,7 +1439,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['chat', 'private'],
     summary: 'Send one encrypted private MetaWeb message to another MetaBot.',
-    usage: 'metabot chat private --request-file <path> [--chain <mvc|btc|doge|opcat>]',
+    usage: 'metabot chat private [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|doge|opcat>]',
     requiredFlags: [
       { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
     ],
@@ -1463,11 +1463,79 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'Fails with chat_broadcast_failed when the simplemsg chain write is rejected.',
     ],
     examples: [
-      'metabot chat private --request-file chat-request.json',
-      'metabot chat private --request-file chat-doge-request.json --chain doge',
-      'metabot chat private --request-file chat-opcat-request.json --chain opcat',
+      'metabot chat private --from alice --request-file chat-request.json',
+      'metabot chat private --from alice --request-file chat-doge-request.json --chain doge',
+      'metabot chat private --from alice --request-file chat-opcat-request.json --chain opcat',
     ],
-    optionalFlags: [CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+    optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['chat', 'conversations'],
+    summary: 'List local private chat conversations for one MetaBot actor.',
+    usage: 'metabot chat conversations [--from <bot-slug>]',
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+    successFields: ['conversations'],
+    examples: [
+      'metabot chat conversations',
+      'metabot chat conversations --from alice',
+    ],
+  },
+  {
+    commandPath: ['chat', 'messages'],
+    summary: 'Show recent messages for one local private chat conversation.',
+    usage: 'metabot chat messages [--from <bot-slug>] --conversation-id <conversation-id> [--limit <n>]',
+    requiredFlags: [
+      { flag: '--conversation-id', value: '<conversation-id>', description: 'Local private chat conversation id.' },
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--limit', value: '<n>', description: 'Maximum message count. Defaults to 50.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['messages'],
+    examples: [
+      'metabot chat messages --conversation-id c1',
+      'metabot chat messages --from alice --conversation-id c1 --limit 25',
+    ],
+  },
+  {
+    commandPath: ['chat', 'auto-reply'],
+    summary: 'Manage private chat auto-reply settings.',
+    usage: 'metabot chat auto-reply <status|enable|disable>',
+    subcommands: [
+      { name: 'status', summary: 'Show auto-reply settings for one MetaBot actor.' },
+      { name: 'enable', summary: 'Enable auto-reply for one MetaBot actor.' },
+      { name: 'disable', summary: 'Disable auto-reply for one MetaBot actor.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['chat', 'auto-reply', 'status'],
+    summary: 'Show private chat auto-reply settings for one MetaBot actor.',
+    usage: 'metabot chat auto-reply status [--from <bot-slug>]',
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+    successFields: ['enabled', 'acceptPolicy', 'defaultStrategyId'],
+    examples: ['metabot chat auto-reply status --from alice'],
+  },
+  {
+    commandPath: ['chat', 'auto-reply', 'enable'],
+    summary: 'Enable private chat auto-reply for one MetaBot actor.',
+    usage: 'metabot chat auto-reply enable [--from <bot-slug>] [--strategy <strategy-id>]',
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--strategy', value: '<strategy-id>', description: 'Optional default reply strategy id.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['enabled', 'defaultStrategyId'],
+    examples: ['metabot chat auto-reply enable --from alice --strategy default'],
+  },
+  {
+    commandPath: ['chat', 'auto-reply', 'disable'],
+    summary: 'Disable private chat auto-reply for one MetaBot actor.',
+    usage: 'metabot chat auto-reply disable [--from <bot-slug>]',
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+    successFields: ['enabled', 'defaultStrategyId'],
+    examples: ['metabot chat auto-reply disable --from alice'],
   },
   {
     commandPath: ['trace'],

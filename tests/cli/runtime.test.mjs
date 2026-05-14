@@ -4111,6 +4111,90 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
   assert.match(transcriptMarkdown, /hello from loopback/);
 });
 
+test('chat private --from uses the selected actor identity, default write network, and local stores', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-chat-from-'));
+  const aliceHome = await createProfileHome(systemHome, 'actor-alice');
+  const bobHome = await createProfileHome(systemHome, 'actor-bob');
+  t.after(async () => {
+    await stopDaemon(aliceHome);
+    await stopDaemon(bobHome);
+  });
+
+  const aliceCreated = await runCommand(aliceHome, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(aliceCreated.exitCode, 0);
+  const bobCreated = await runCommand(bobHome, ['identity', 'create', '--name', 'Bob']);
+  assert.equal(bobCreated.exitCode, 0);
+  assert.notEqual(aliceCreated.payload.data.globalMetaId, bobCreated.payload.data.globalMetaId);
+
+  const configured = await runCommand(aliceHome, ['config', 'set', 'chain.defaultWriteNetwork', 'opcat']);
+  assert.equal(configured.exitCode, 0);
+
+  const requestFile = path.join(bobHome, 'chat-from-alice.json');
+  await writeFile(requestFile, JSON.stringify({
+    to: bobCreated.payload.data.globalMetaId,
+    peerChatPublicKey: bobCreated.payload.data.chatPublicKey,
+    content: 'alice speaks through explicit chat actor selection',
+    replyPin: 'reply-pin-from-alice',
+  }), 'utf8');
+
+  const sent = await runCommand(bobHome, ['chat', 'private', '--from', 'actor-alice', '--request-file', requestFile]);
+
+  assert.equal(sent.exitCode, 0);
+  assert.equal(sent.payload.ok, true);
+  assert.equal(sent.payload.data.to, bobCreated.payload.data.globalMetaId);
+  assert.equal(sent.payload.data.network, 'opcat');
+  assert.equal(sent.payload.data.deliveryMode, 'onchain_simplemsg');
+
+  const aliceState = await createRuntimeStateStore(aliceHome).readState();
+  const bobState = await createRuntimeStateStore(bobHome).readState();
+  assert.equal(
+    aliceState.traces.some((trace) => trace.traceId === sent.payload.data.traceId),
+    true,
+  );
+  assert.equal(
+    bobState.traces.some((trace) => trace.traceId === sent.payload.data.traceId),
+    false,
+  );
+
+  const aliceConversation = await createA2AConversationStore({
+    homeDir: aliceHome,
+    local: {
+      globalMetaId: aliceCreated.payload.data.globalMetaId,
+      name: aliceCreated.payload.data.name,
+      chatPublicKey: aliceCreated.payload.data.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: bobCreated.payload.data.globalMetaId,
+      name: bobCreated.payload.data.name,
+      chatPublicKey: bobCreated.payload.data.chatPublicKey,
+    },
+  }).readConversation();
+  const aliceMessage = aliceConversation.messages.find(
+    (message) => message.content === 'alice speaks through explicit chat actor selection',
+  );
+  assert.ok(aliceMessage, 'expected outgoing private chat message in the selected actor store');
+  assert.equal(aliceMessage.chain, 'opcat');
+  assert.equal(aliceMessage.replyPinId, 'reply-pin-from-alice');
+
+  const bobConversation = await createA2AConversationStore({
+    homeDir: bobHome,
+    local: {
+      globalMetaId: bobCreated.payload.data.globalMetaId,
+      name: bobCreated.payload.data.name,
+      chatPublicKey: bobCreated.payload.data.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: bobCreated.payload.data.globalMetaId,
+      name: bobCreated.payload.data.name,
+      chatPublicKey: bobCreated.payload.data.chatPublicKey,
+    },
+  }).readConversation();
+  assert.equal(
+    bobConversation.messages.some((message) => message.content === 'alice speaks through explicit chat actor selection'),
+    false,
+  );
+});
+
 test('file upload fails clearly when default write network is DOGE', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));

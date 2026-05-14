@@ -1853,13 +1853,24 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     },
     chat: {
       private: async (input) => requestJson(context, 'POST', '/api/chat/private', input),
-      conversations: async () => requestJson(context, 'GET', '/api/chat/private/conversations'),
+      conversations: async (input = {}) => {
+        const params = new URLSearchParams();
+        if (input.from) params.set('from', input.from);
+        const suffix = params.size ? `?${params.toString()}` : '';
+        return requestJson(context, 'GET', `/api/chat/private/conversations${suffix}`);
+      },
       messages: async (input) => {
         const params = new URLSearchParams({ conversationId: input.conversationId });
         if (input.limit != null) params.set('limit', String(input.limit));
+        if (input.from) params.set('from', input.from);
         return requestJson(context, 'GET', `/api/chat/private/messages?${params.toString()}`);
       },
-      autoReplyStatus: async () => requestJson(context, 'GET', '/api/chat/auto-reply/status'),
+      autoReplyStatus: async (input = {}) => {
+        const params = new URLSearchParams();
+        if (input.from) params.set('from', input.from);
+        const suffix = params.size ? `?${params.toString()}` : '';
+        return requestJson(context, 'GET', `/api/chat/auto-reply/status${suffix}`);
+      },
       setAutoReply: async (input) => requestJson(context, 'POST', '/api/chat/auto-reply/config', input),
     },
     file: {

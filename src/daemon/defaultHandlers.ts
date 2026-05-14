@@ -4397,6 +4397,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     acceptPolicy: 'accept_all',
     defaultStrategyId: null,
   };
+  const scopedAutoReplyConfigs = new Map<string, PrivateChatAutoReplyConfig>();
   const sessionEngine = createA2ASessionEngine();
   const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey
     ?? ((globalMetaId: string) => fetchPeerChatPublicKey(globalMetaId, {
@@ -4966,6 +4967,47 @@ export function createDefaultMetabotDaemonHandlers(input: {
         ? runtimeStateStore
         : createRuntimeStateStore(normalizedProfileHomeDir),
       signer: createSignerForProfileHome(normalizedProfileHomeDir),
+    };
+  }
+
+  function resolveAutoReplyConfigForHome(homeDir: string): PrivateChatAutoReplyConfig {
+    const normalizedProfileHomeDir = path.resolve(homeDir);
+    if (normalizedProfileHomeDir === path.resolve(input.homeDir)) {
+      return autoReplyConfig;
+    }
+    const existing = scopedAutoReplyConfigs.get(normalizedProfileHomeDir);
+    if (existing) {
+      return existing;
+    }
+    const created: PrivateChatAutoReplyConfig = {
+      enabled: autoReplyConfig.enabled,
+      acceptPolicy: autoReplyConfig.acceptPolicy,
+      defaultStrategyId: autoReplyConfig.defaultStrategyId,
+    };
+    scopedAutoReplyConfigs.set(normalizedProfileHomeDir, created);
+    return created;
+  }
+
+  async function resolveActorChatContext(rawActor: unknown): Promise<
+    | {
+      homeDir: string;
+      runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+      privateChatStateStore: ReturnType<typeof createPrivateChatStateStore>;
+      signer: Signer;
+      autoReplyConfig: PrivateChatAutoReplyConfig;
+    }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const actor = await resolveActorWriteContext(rawActor);
+    if ('failure' in actor) {
+      return actor;
+    }
+    return {
+      ...actor,
+      privateChatStateStore: actor.homeDir === path.resolve(input.homeDir)
+        ? privateChatStateStore
+        : createPrivateChatStateStore(actor.homeDir),
+      autoReplyConfig: resolveAutoReplyConfigForHome(actor.homeDir),
     };
   }
 
@@ -12124,7 +12166,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
     chat: {
       privateConversation: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
+        const actor = await resolveActorChatContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before viewing private chat.');
         }
@@ -12136,7 +12182,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         let privateChatIdentity;
         try {
-          privateChatIdentity = await signer.getPrivateChatIdentity();
+          privateChatIdentity = await actor.signer.getPrivateChatIdentity();
         } catch (error) {
           return commandFailed(
             'identity_secret_missing',
@@ -12177,7 +12223,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
       },
       private: async (rawInput) => {
-        const state = await runtimeStateStore.readState();
+        const actor = await resolveActorChatContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before sending private chat.');
         }
@@ -12189,7 +12239,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         let privateChatIdentity;
         try {
-          privateChatIdentity = await signer.getPrivateChatIdentity();
+          privateChatIdentity = await actor.signer.getPrivateChatIdentity();
         } catch (error) {
           return commandFailed(
             'identity_secret_missing',
@@ -12223,8 +12273,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
         let chatWrite;
         try {
-          const network = await resolveWriteNetwork(rawInput.network);
-          chatWrite = await signer.writePin({
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          chatWrite = await actor.signer.writePin({
             operation: 'create',
             path: sent.path,
             encryption: sent.encryption,
@@ -12244,9 +12294,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           ? chatWrite.txids.map((entry) => normalizeText(entry)).filter(Boolean)
           : [];
         const chatA2AStoreResult = await persistA2AConversationMessageBestEffort({
-          paths: runtimeStateStore.paths,
+          paths: actor.runtimeStateStore.paths,
           local: {
-            profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+            profileSlug: path.basename(actor.runtimeStateStore.paths.profileRoot),
             globalMetaId: state.identity.globalMetaId,
             name: state.identity.name,
             chatPublicKey: state.identity.chatPublicKey,
@@ -12287,7 +12337,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const trace = buildSessionTrace({
           traceId,
           channel: 'simplemsg',
-          exportRoot: runtimeStateStore.paths.exportsRoot,
+          exportRoot: actor.runtimeStateStore.paths.exportsRoot,
           session: {
             id: `chat-${traceId}`,
             title: 'Private Chat',
@@ -12330,7 +12380,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           },
         });
 
-        await runtimeStateStore.writeState({
+        await actor.runtimeStateStore.writeState({
           ...state,
           traces: [
             trace,
@@ -12368,13 +12418,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
       },
 
-      privateChatConversations: async () => {
-        const state = await privateChatStateStore.readState();
+      privateChatConversations: async (rawInput = {}) => {
+        const actor = await resolveActorChatContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.privateChatStateStore.readState();
         return commandSuccess({ conversations: state.conversations });
       },
 
       privateChatMessages: async (msgInput) => {
-        const messages = await privateChatStateStore.getRecentMessages(
+        const actor = await resolveActorChatContext(msgInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const messages = await actor.privateChatStateStore.getRecentMessages(
           normalizeText(msgInput.conversationId),
           typeof msgInput.limit === 'number' && Number.isFinite(msgInput.limit)
             ? Math.max(1, Math.trunc(msgInput.limit))
@@ -12383,35 +12441,47 @@ export function createDefaultMetabotDaemonHandlers(input: {
         return commandSuccess({ messages });
       },
 
-      autoReplyStatus: async () => {
+      autoReplyStatus: async (rawInput = {}) => {
+        const actor = await resolveActorChatContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
         return commandSuccess({
-          enabled: autoReplyConfig.enabled,
-          acceptPolicy: autoReplyConfig.acceptPolicy,
-          defaultStrategyId: autoReplyConfig.defaultStrategyId,
+          enabled: actor.autoReplyConfig.enabled,
+          acceptPolicy: actor.autoReplyConfig.acceptPolicy,
+          defaultStrategyId: actor.autoReplyConfig.defaultStrategyId,
         });
       },
 
       setAutoReply: async (autoReplyInput) => {
-        autoReplyConfig.enabled = autoReplyInput.enabled === true;
+        const actor = await resolveActorChatContext(autoReplyInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        actor.autoReplyConfig.enabled = autoReplyInput.enabled === true;
         if (autoReplyInput.defaultStrategyId !== undefined) {
-          autoReplyConfig.defaultStrategyId = normalizeText(autoReplyInput.defaultStrategyId) || null;
+          actor.autoReplyConfig.defaultStrategyId = normalizeText(autoReplyInput.defaultStrategyId) || null;
         }
         return commandSuccess({
-          enabled: autoReplyConfig.enabled,
-          defaultStrategyId: autoReplyConfig.defaultStrategyId,
+          enabled: actor.autoReplyConfig.enabled,
+          defaultStrategyId: actor.autoReplyConfig.defaultStrategyId,
         });
       },
 
-      stopConversation: async ({ peer }) => {
+      stopConversation: async ({ from, peer }) => {
+        const actor = await resolveActorChatContext(from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
         const normalizedPeer = normalizeText(peer);
         if (!normalizedPeer) {
           return commandFailed('missing_peer', 'Peer globalMetaId is required.');
         }
-        const conversation = await privateChatStateStore.getConversationByPeer(normalizedPeer);
+        const conversation = await actor.privateChatStateStore.getConversationByPeer(normalizedPeer);
         if (!conversation) {
           return commandFailed('conversation_not_found', 'No conversation found for this peer.');
         }
-        await privateChatStateStore.upsertConversation({
+        await actor.privateChatStateStore.upsertConversation({
           ...conversation,
           state: 'closed',
           updatedAt: Date.now(),

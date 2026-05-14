@@ -64,6 +64,7 @@ export const handleChatRoutes: RouteHandler = async (context) => {
     }
 
     const result = await handler({
+      from: normalizeText(url.searchParams.get('from')) || undefined,
       peer,
       afterIndex: readOptionalNumber(url.searchParams.get('afterIndex')),
       limit: readOptionalNumber(url.searchParams.get('limit')),
@@ -82,7 +83,9 @@ export const handleChatRoutes: RouteHandler = async (context) => {
       context.sendJson(501, { ok: false, code: 'not_implemented', message: 'Private chat conversations handler is not configured.' });
       return true;
     }
-    const result = await handler();
+    const result = await handler({
+      from: normalizeText(url.searchParams.get('from')) || undefined,
+    });
     context.sendJson(200, result);
     return true;
   }
@@ -103,6 +106,7 @@ export const handleChatRoutes: RouteHandler = async (context) => {
       return true;
     }
     const result = await handler({
+      from: normalizeText(url.searchParams.get('from')) || undefined,
       conversationId,
       limit: readOptionalNumber(url.searchParams.get('limit')),
     });
@@ -120,7 +124,9 @@ export const handleChatRoutes: RouteHandler = async (context) => {
       context.sendJson(501, { ok: false, code: 'not_implemented', message: 'Auto-reply status handler is not configured.' });
       return true;
     }
-    const result = await handler();
+    const result = await handler({
+      from: normalizeText(url.searchParams.get('from')) || undefined,
+    });
     context.sendJson(200, result);
     return true;
   }
@@ -137,6 +143,7 @@ export const handleChatRoutes: RouteHandler = async (context) => {
     }
     const body = await context.readJsonBody();
     const result = await handler({
+      from: normalizeText(body.from) || undefined,
       enabled: body.enabled === true,
       defaultStrategyId: normalizeText(body.defaultStrategyId) || undefined,
     });
@@ -160,7 +167,10 @@ export const handleChatRoutes: RouteHandler = async (context) => {
       context.sendJson(400, { ok: false, code: 'missing_peer', message: 'peer is required.' });
       return true;
     }
-    const result = await handler({ peer });
+    const result = await handler({
+      from: normalizeText(body.from) || undefined,
+      peer,
+    });
     context.sendJson(200, result);
     return true;
   }

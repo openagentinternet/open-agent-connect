@@ -83,21 +83,25 @@ export interface MetabotDaemonHttpHandlers {
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     privateConversation?: (input: {
+      from?: string;
       peer: string;
       afterIndex?: number;
       limit?: number;
     }) => Awaitable<MetabotCommandResult<unknown>>;
-    privateChatConversations?: () => Awaitable<MetabotCommandResult<unknown>>;
+    privateChatConversations?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     privateChatMessages?: (input: {
+      from?: string;
       conversationId: string;
       limit?: number;
     }) => Awaitable<MetabotCommandResult<unknown>>;
-    autoReplyStatus?: () => Awaitable<MetabotCommandResult<unknown>>;
+    autoReplyStatus?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     setAutoReply?: (input: {
+      from?: string;
       enabled: boolean;
       defaultStrategyId?: string;
     }) => Awaitable<MetabotCommandResult<unknown>>;
     stopConversation?: (input: {
+      from?: string;
       peer: string;
     }) => Awaitable<MetabotCommandResult<unknown>>;
   };

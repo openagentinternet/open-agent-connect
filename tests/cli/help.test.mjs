@@ -624,7 +624,7 @@ test('runCli prints machine-readable help for `metabot chat private --help --jso
   const output = JSON.parse(stdout.join(''));
   assert.deepEqual(output.commandPath, ['chat', 'private']);
   assert.equal(output.command, 'metabot chat private');
-  assert.match(output.usage, /^metabot chat private --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]$/);
+  assert.match(output.usage, /^metabot chat private \[--from <bot-slug>\] --request-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]$/);
   assert.equal(output.summary, 'Send one encrypted private MetaWeb message to another MetaBot.');
   assert.deepEqual(output.requiredFlags, [
     {
@@ -638,6 +638,7 @@ test('runCli prints machine-readable help for `metabot chat private --help --jso
     && entry.value === '<mvc|btc|doge|opcat>'
     && /chain\.defaultWriteNetwork/.test(entry.description)
   )));
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--from'));
   assert.equal(output.requestShape.to, 'remote globalMetaId');
   assert.equal(output.requestShape.content, 'message text');
   assert.equal(output.requestShape.replyPin, 'optional prior message pin id');
@@ -650,6 +651,44 @@ test('runCli prints machine-readable help for `metabot chat private --help --jso
   assert.equal(output.successFields.includes('payload'), false);
   assert.equal(output.successFields.includes('encryptedContent'), false);
   assert.equal(output.successFields.includes('peerChatPublicKey'), false);
+});
+
+test('runCli documents actor selection for chat history and auto-reply commands', async () => {
+  const cases = [
+    {
+      args: ['chat', 'conversations', '--help'],
+      usage: /^Usage:\s+metabot chat conversations \[--from <bot-slug>\]/m,
+    },
+    {
+      args: ['chat', 'messages', '--help'],
+      usage: /^Usage:\s+metabot chat messages \[--from <bot-slug>\] --conversation-id <conversation-id> \[--limit <n>\]/m,
+    },
+    {
+      args: ['chat', 'auto-reply', 'status', '--help'],
+      usage: /^Usage:\s+metabot chat auto-reply status \[--from <bot-slug>\]/m,
+    },
+    {
+      args: ['chat', 'auto-reply', 'enable', '--help'],
+      usage: /^Usage:\s+metabot chat auto-reply enable \[--from <bot-slug>\] \[--strategy <strategy-id>\]/m,
+    },
+    {
+      args: ['chat', 'auto-reply', 'disable', '--help'],
+      usage: /^Usage:\s+metabot chat auto-reply disable \[--from <bot-slug>\]/m,
+    },
+  ];
+
+  for (const entry of cases) {
+    const stdout = [];
+    const exitCode = await runCli(entry.args, {
+      stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+      stderr: { write: () => true },
+    });
+
+    assert.equal(exitCode, 0);
+    const output = stdout.join('');
+    assert.match(output, entry.usage);
+    assert.match(output, /--from <bot-slug>/);
+  }
 });
 
 test('runCli prints nested group help for `metabot network sources --help`', async () => {
