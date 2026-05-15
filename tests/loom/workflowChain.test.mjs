@@ -128,7 +128,7 @@ test('maps failed writer envelopes to chain_write_failed', async () => {
   assert.match(result.message, /User rejected signing/);
 });
 
-test('preserves failed writer envelopes as chain write failure causes', async () => {
+test('preserves manual action writer envelopes as chain write failure causes', async () => {
   const cause = {
     ok: false,
     state: 'manual_action_required',
@@ -146,9 +146,37 @@ test('preserves failed writer envelopes as chain write failure causes', async ()
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.state, 'failed');
+  assert.equal(result.state, 'manual_action_required');
   assert.equal(result.code, 'chain_write_failed');
+  assert.equal(result.localUiUrl, 'http://127.0.0.1:3000/confirm');
   assert.match(result.message, /wallet_confirmation_required/);
+  assert.deepEqual(result.data.cause, cause);
+});
+
+test('preserves waiting writer envelopes as chain write failure causes', async () => {
+  const cause = {
+    ok: false,
+    state: 'waiting',
+    code: 'wallet_pending',
+    message: 'Waiting for wallet confirmation.',
+    pollAfterMs: 1500,
+    localUiUrl: 'http://127.0.0.1:3000/wait',
+    data: {
+      requestId: 'request-456',
+    },
+  };
+  const result = await writeLoomProtocolRecord({
+    protocol: 'status',
+    payload: validStatusPayload(),
+    writeChain: async () => cause,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'waiting');
+  assert.equal(result.code, 'chain_write_failed');
+  assert.equal(result.pollAfterMs, 1500);
+  assert.equal(result.localUiUrl, 'http://127.0.0.1:3000/wait');
+  assert.match(result.message, /wallet_pending/);
   assert.deepEqual(result.data.cause, cause);
 });
 

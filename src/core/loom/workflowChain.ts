@@ -72,6 +72,36 @@ function commandFailedWithCause(
   return commandFailed(code, message, { data: { cause } });
 }
 
+function writerFailureWithCause(
+  result: MetabotCommandResult<unknown>,
+): MetabotCommandResult<never> {
+  const message = `Loom chain write failed: ${formatWriteFailure(result)}`;
+  if (result.state === 'waiting') {
+    return {
+      ok: false,
+      state: 'waiting',
+      code: 'chain_write_failed',
+      message,
+      pollAfterMs: result.pollAfterMs,
+      ...(result.localUiUrl ? { localUiUrl: result.localUiUrl } : {}),
+      data: { cause: result },
+    };
+  }
+
+  if (result.state === 'manual_action_required') {
+    return {
+      ok: false,
+      state: 'manual_action_required',
+      code: 'chain_write_failed',
+      message,
+      ...(result.localUiUrl ? { localUiUrl: result.localUiUrl } : {}),
+      data: { cause: result },
+    };
+  }
+
+  return commandFailedWithCause('chain_write_failed', message, result);
+}
+
 export async function writeLoomProtocolRecord(
   input: LoomProtocolRecordWriteInput,
 ): Promise<MetabotCommandResult<LoomProtocolRecordWriteResult>> {
@@ -99,11 +129,7 @@ export async function writeLoomProtocolRecord(
   }
 
   if (!writeResult.ok) {
-    return commandFailedWithCause(
-      'chain_write_failed',
-      `Loom chain write failed: ${formatWriteFailure(writeResult)}`,
-      writeResult,
-    );
+    return writerFailureWithCause(writeResult);
   }
 
   if (!isRecord(writeResult.data)) {

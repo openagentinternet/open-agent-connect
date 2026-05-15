@@ -118,8 +118,8 @@ export function redactLoomProcessLog(input: unknown): string {
 
   if (/https?:\/\/[^/\s@]+@/i.test(output)) {
     output = output.replace(
-      /\b(https?:\/\/)([^:/\s@]+):([^@\s/]+)@/gi,
-      '$1$2:[REDACTED]@',
+      /\b(https?:\/\/)([^@\s/]+)@/gi,
+      '$1[REDACTED]@',
     );
   }
 
@@ -266,7 +266,7 @@ export function renderLoomProcessLog(input: LoomProcessLogInput): string {
 
   pushSection(lines, 'Checks', (input.checks ?? []).map((check) => {
     const summary = check.summary ? ` - ${redactLoomProcessLog(check.summary)}` : '';
-    return `- ${check.status}: ${redactLoomProcessLog(check.command)}${summary}`;
+    return `- ${renderValue(check.status)}: ${redactLoomProcessLog(check.command)}${summary}`;
   }));
 
   pushSection(lines, 'Git Changes', (input.git?.changes ?? []).map((change) => `- ${renderValue(change)}`));

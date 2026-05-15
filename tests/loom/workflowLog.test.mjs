@@ -116,6 +116,16 @@ test('redacts cli flag and authorization token secret shapes', () => {
   assert.doesNotMatch(redacted, /ghp_authsecret/);
 });
 
+test('redacts url userinfo token forms while preserving host and path', () => {
+  const redacted = redactLoomProcessLog([
+    'https://ghp_secret@github.com/org/repo.git',
+    'https://ghp_secret:x-oauth-basic@github.com/org/repo.git',
+  ].join('\n'));
+
+  assert.doesNotMatch(redacted, /ghp_secret/);
+  assert.match(redacted, /github.com\/org\/repo.git/);
+});
+
 test('redacts cli secret shapes from rendered check commands', () => {
   const rendered = renderLoomProcessLog({
     checks: [
@@ -133,6 +143,21 @@ test('redacts cli secret shapes from rendered check commands', () => {
   assert.doesNotMatch(rendered, /ghp_secret/);
   assert.doesNotMatch(rendered, /sk-secret/);
   assert.doesNotMatch(rendered, /ghp_authsecret/);
+});
+
+test('redacts secrets from rendered check statuses', () => {
+  const rendered = renderLoomProcessLog({
+    checks: [
+      {
+        command: 'npm run build',
+        status: 'failed token=abc',
+      },
+    ],
+  });
+
+  assert.doesNotMatch(rendered, /token=abc/);
+  assert.doesNotMatch(rendered, /abc/);
+  assert.match(rendered, /npm run build/);
 });
 
 test('redacts labelled mnemonic material without erasing ordinary prose', () => {
