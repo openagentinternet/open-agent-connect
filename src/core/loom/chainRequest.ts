@@ -17,6 +17,7 @@ export type LoomChainWriteRequestBuildResult =
     }
   | {
       request: null;
+      code: 'invalid_payload';
       validation: LoomValidationResult;
     };
 
@@ -30,6 +31,7 @@ export function buildLoomChainWriteRequest(
   if (!validation.valid) {
     return {
       request: null,
+      code: 'invalid_payload',
       validation,
     };
   }

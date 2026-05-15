@@ -191,3 +191,18 @@ test('runCli rejects chain write flags on loom export commands', async () => {
     assert.match(envelope.message, new RegExp(`${extraFlag} is not supported`));
   }
 });
+
+test('runCli leaves unimplemented loom commands unknown even with future flags', async () => {
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'draft-task',
+    '--from',
+    'alice',
+  ]);
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.state, 'failed');
+  assert.equal(envelope.code, 'unknown_command');
+  assert.match(envelope.message, /Unknown command: loom draft-task --from alice/);
+});

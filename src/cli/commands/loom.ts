@@ -79,6 +79,11 @@ async function runValidateCommand(
   args: string[],
   context: CliRuntimeContext,
 ): Promise<MetabotCommandResult<unknown>> {
+  const unsupportedFlag = rejectChainWriteFlags(args);
+  if (unsupportedFlag) {
+    return unsupportedFlag;
+  }
+
   const input = await readProtocolAndPayload(args, context);
   if (!input.ok) {
     return input.result;
@@ -101,6 +106,11 @@ async function runExportChainRequestCommand(
   args: string[],
   context: CliRuntimeContext,
 ): Promise<MetabotCommandResult<unknown>> {
+  const unsupportedFlag = rejectChainWriteFlags(args);
+  if (unsupportedFlag) {
+    return unsupportedFlag;
+  }
+
   const input = await readProtocolAndPayload(args, context);
   if (!input.ok) {
     return input.result;
@@ -134,11 +144,6 @@ export async function runLoomCommand(
   args: string[],
   context: CliRuntimeContext,
 ): Promise<MetabotCommandResult<unknown>> {
-  const unsupportedFlag = rejectChainWriteFlags(args);
-  if (unsupportedFlag) {
-    return unsupportedFlag;
-  }
-
   switch (args[0]) {
     case 'validate':
       return runValidateCommand(args, context);

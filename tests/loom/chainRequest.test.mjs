@@ -42,6 +42,7 @@ test('returns validation errors for invalid loom claim chain requests', () => {
   });
 
   assert.equal(result.request, null);
+  assert.equal(result.code, 'invalid_payload');
   assert.equal(result.validation.valid, false);
   assert.equal(result.validation.protocol, 'claim');
   assert.equal(result.validation.path, '/protocols/loom-claim');
