@@ -66,9 +66,12 @@ import {
   createNodeLoomCommandRunner,
   listLoomTasksFromCache,
   prepareGitHubForkWorkspace,
+  pushLoomBranch,
   readLoomRawChainRecords,
+  createLoomPullRequest,
   runLoomClaimAndStartWorkflow,
   runLoomDevRoundWorkflow,
+  runLoomDeliverWorkflow,
   runLoomPostTaskWorkflow,
   showLoomTaskFromCache,
   writeLoomProcessLogFile,
@@ -2958,6 +2961,49 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             signer,
           }),
           writeLogFile: writeLoomProcessLogFile,
+        });
+      },
+      deliver: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const homeDir = actor.homeDir;
+        const paths = resolveMetabotPaths(homeDir);
+        const rawCacheStore = createLoomRawCacheStore(paths);
+        const workflowStore = createLoomWorkflowStore(paths);
+        const rawState = await rawCacheStore.read();
+        const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
+        const signer = createCliSigner(context, homeDir);
+        const identity = await signer.getIdentity();
+        const runner = createNodeLoomCommandRunner();
+        const developerMetaBotSlug = path.basename(paths.profileRoot);
+
+        return runLoomDeliverWorkflow({
+          from: input.from,
+          taskPinId: input.taskPinId,
+          claimPinId: input.claimPinId,
+          chain: input.chain,
+          prTitle: input.prTitle,
+          deliverySummary: input.deliverySummary,
+          dryRun: input.dryRun,
+          developerMetaBotSlug,
+          developerGlobalMetaId: identity.globalMetaId,
+          state: taskState,
+          workflowStore,
+          runner,
+          github: {
+            pushLoomBranch,
+            createLoomPullRequest,
+          },
+          writeChain: async (request) => {
+            const result = await signer.writePin(request);
+            return commandSuccess({
+              pinId: result.pinId,
+              txids: result.txids,
+              network: result.network,
+              globalMetaId: result.globalMetaId,
+              mvcAddress: result.mvcAddress,
+            });
+          },
         });
       },
     },
