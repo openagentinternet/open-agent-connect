@@ -193,6 +193,10 @@ function createDeps(overrides = {}) {
       },
     },
     github: {
+      async assertToolsReady(toolInput) {
+        events.push({ type: 'github.assertToolsReady', input: toolInput });
+        return commandSuccess({ gitVersion: 'git version 2', ghVersion: 'gh version 2' });
+      },
       async pushLoomBranch(pushInput) {
         events.push({ type: 'github.pushLoomBranch', input: pushInput });
         return commandSuccess({ branchName: pushInput.branchName });
@@ -259,6 +263,47 @@ test('runLoomDeliverWorkflow requires the latest local status to have passing ch
     assert.deepEqual(events.filter((event) => event.type === 'github.createLoomPullRequest'), []);
     assert.deepEqual(events.filter((event) => event.type === 'writeChain'), []);
   }
+});
+
+test('runLoomDeliverWorkflow rejects a non-GitHub task before delivery side effects', async () => {
+  const { events, input } = createDeps({
+    state: taskState({
+      taskPayload: validTaskPayload({
+        projectBase: 'chain',
+        project: {},
+      }),
+    }),
+  });
+
+  const result = await runLoomDeliverWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'unsupported_project_base');
+  assert.deepEqual(events.filter((event) => event.type === 'github.assertToolsReady'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'github.pushLoomBranch'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'github.createLoomPullRequest'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'writeChain'), []);
+});
+
+test('runLoomDeliverWorkflow rejects a GitHub task with a missing repository before delivery side effects', async () => {
+  const { events, input } = createDeps({
+    state: taskState({
+      taskPayload: validTaskPayload({
+        project: {
+          baseBranch: 'main',
+        },
+      }),
+    }),
+  });
+
+  const result = await runLoomDeliverWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_project');
+  assert.match(result.message, /project\.repoUri/);
+  assert.deepEqual(events.filter((event) => event.type === 'github.assertToolsReady'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'github.pushLoomBranch'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'writeChain'), []);
 });
 
 test('runLoomDeliverWorkflow rejects an already persisted local delivery', async () => {
@@ -380,9 +425,66 @@ test('runLoomDeliverWorkflow pushes, creates PR, writes delivery, and persists s
   assert.equal(workflowWrite.state.updatedAt, '2026-05-16T00:00:00.000Z');
 });
 
+test('runLoomDeliverWorkflow uses task project base branch instead of stale local workflow base branch', async () => {
+  const { events, input } = createDeps({
+    state: taskState({
+      taskPayload: validTaskPayload({
+        project: {
+          repoUri: 'https://github.com/openagentinternet/open-agent-connect',
+          baseBranch: 'release',
+        },
+      }),
+    }),
+    workflowState: workflowState({
+      baseBranch: 'stale-local-base',
+    }),
+  });
+
+  const result = await runLoomDeliverWorkflow(input);
+
+  assert.equal(result.ok, true);
+  const prInput = events.find((event) => event.type === 'github.createLoomPullRequest').input;
+  assert.equal(prInput.baseBranch, 'release');
+  assert.equal(deliveryPayloads(events).at(-1).delivery.prBaseBranch, 'release');
+  assert.equal(result.data.baseBranch, 'release');
+});
+
+test('runLoomDeliverWorkflow preflights GitHub tools before push', async () => {
+  const { events, input } = createDeps({
+    github: {
+      async assertToolsReady(toolInput) {
+        events.push({ type: 'github.assertToolsReady', input: toolInput });
+        return commandFailed('github_auth_unavailable', 'GitHub CLI authentication is unavailable');
+      },
+      async pushLoomBranch(pushInput) {
+        events.push({ type: 'github.pushLoomBranch', input: pushInput });
+        return commandSuccess({ branchName: pushInput.branchName });
+      },
+      async createLoomPullRequest(prInput) {
+        events.push({ type: 'github.createLoomPullRequest', input: prInput });
+        return commandSuccess({ url: 'https://github.com/openagentinternet/open-agent-connect/pull/123' });
+      },
+    },
+  });
+
+  const result = await runLoomDeliverWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'github_auth_unavailable');
+  assert.equal(events.filter((event) => event.type === 'github.assertToolsReady').length, 1);
+  assert.deepEqual(events.filter((event) => event.type === 'github.pushLoomBranch'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'github.createLoomPullRequest'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'writeChain'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'workflow.write'), []);
+});
+
 test('runLoomDeliverWorkflow does not write delivery when PR creation fails', async () => {
   const { events, input } = createDeps({
     github: {
+      async assertToolsReady(toolInput) {
+        events.push({ type: 'github.assertToolsReady', input: toolInput });
+        return commandSuccess({ gitVersion: 'git version 2', ghVersion: 'gh version 2' });
+      },
       async pushLoomBranch(pushInput) {
         events.push({ type: 'github.pushLoomBranch', input: pushInput });
         return commandSuccess({ branchName: pushInput.branchName });
@@ -406,6 +508,10 @@ test('runLoomDeliverWorkflow does not write delivery when PR creation fails', as
 test('runLoomDeliverWorkflow rejects an empty PR URL before chain write', async () => {
   const { events, input } = createDeps({
     github: {
+      async assertToolsReady(toolInput) {
+        events.push({ type: 'github.assertToolsReady', input: toolInput });
+        return commandSuccess({ gitVersion: 'git version 2', ghVersion: 'gh version 2' });
+      },
       async pushLoomBranch(pushInput) {
         events.push({ type: 'github.pushLoomBranch', input: pushInput });
         return commandSuccess({ branchName: pushInput.branchName });

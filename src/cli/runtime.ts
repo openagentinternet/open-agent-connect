@@ -3121,6 +3121,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           workflowStore,
           runner,
           github: {
+            assertToolsReady: assertGitHubToolsReady,
             pushLoomBranch,
             createLoomPullRequest,
           },

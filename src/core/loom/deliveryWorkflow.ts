@@ -8,6 +8,7 @@ import { buildLoomChainWriteRequest, type LoomChainWriteRequest } from './chainR
 import type {
   CreateLoomPullRequestInput,
   CreateLoomPullRequestResult,
+  GitHubToolCheckResult,
   PushLoomBranchInput,
   PushLoomBranchResult,
 } from './githubWorkflow';
@@ -67,6 +68,7 @@ export interface LoomDeliverWorkflowInput {
   workflowStore: LoomWorkflowStore;
   runner: LoomCommandRunner;
   github: {
+    assertToolsReady(input: { runner: LoomCommandRunner }): Promise<MetabotCommandResult<GitHubToolCheckResult>>;
     pushLoomBranch(input: PushLoomBranchInput): Promise<MetabotCommandResult<PushLoomBranchResult>>;
     createLoomPullRequest(input: CreateLoomPullRequestInput): Promise<MetabotCommandResult<CreateLoomPullRequestResult>>;
   };
@@ -75,6 +77,12 @@ export interface LoomDeliverWorkflowInput {
 }
 
 const DEFAULT_CHAIN = 'mvc';
+const DEFAULT_BASE_BRANCH = 'main';
+
+interface GitHubTaskProject {
+  repoUri: string;
+  baseBranch: string;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -97,6 +105,29 @@ function taskTitle(payload: Record<string, unknown>): string {
 
 function taskCriteria(payload: Record<string, unknown>): string {
   return nonEmptyString(payload.criteria) ?? 'Review the delivered work.';
+}
+
+function resolveGitHubProject(payload: Record<string, unknown>): MetabotCommandResult<GitHubTaskProject> {
+  if (payload.projectBase !== 'github') {
+    return commandFailed('unsupported_project_base', 'Loom deliver currently supports GitHub-backed tasks only.');
+  }
+
+  const project = isRecord(payload.project) ? payload.project : {};
+  const repoUri = nonEmptyString(project.repoUri);
+  const baseBranch = nonEmptyString(project.baseBranch) ?? DEFAULT_BASE_BRANCH;
+  if (!repoUri) {
+    return commandFailed('invalid_project', 'GitHub Loom task project.repoUri is required.');
+  }
+
+  try {
+    normalizeGitHubRepoUri(repoUri);
+    return commandSuccess({ repoUri, baseBranch });
+  } catch (error) {
+    return commandFailed(
+      'invalid_project',
+      error instanceof Error ? error.message : `Invalid GitHub repository URI: ${repoUri}`,
+    );
+  }
 }
 
 function findClaimAuthor(state: LoomWorkflowTaskState, claimPinId: string): string | undefined {
@@ -358,12 +389,17 @@ export async function runLoomDeliverWorkflow(
     return commandFailed('check_failed', 'Latest local Loom workflow status does not have passing checks.');
   }
 
+  const payload = taskPayload(input.state);
+  const project = resolveGitHubProject(payload);
+  if (!project.ok) {
+    return project;
+  }
+
   const owner = forkOwner(workflow);
   if (!owner.ok) {
     return owner;
   }
 
-  const payload = taskPayload(input.state);
   const title = nonEmptyString(input.prTitle) ?? `Deliver: ${taskTitle(payload)}`;
   const deliverySummary = nonEmptyString(input.deliverySummary) ?? `Delivery for ${taskTitle(payload)}.`;
   const reviewChecklist = parseChecklist(taskCriteria(payload));
@@ -383,7 +419,7 @@ export async function runLoomDeliverWorkflow(
       deliverySummary,
       prUrl: '(pending pull request URL)',
       prBranch: workflow.branchName,
-      prBaseBranch: workflow.baseBranch,
+      prBaseBranch: project.data.baseBranch,
       prTitle: title,
       reviewChecklist,
     });
@@ -403,7 +439,7 @@ export async function runLoomDeliverWorkflow(
         branchName: workflow.branchName,
       },
       pullRequest: {
-        baseBranch: workflow.baseBranch,
+        baseBranch: project.data.baseBranch,
         head,
         title,
         body,
@@ -413,6 +449,11 @@ export async function runLoomDeliverWorkflow(
         request: preview.data,
       },
     });
+  }
+
+  const tools = await input.github.assertToolsReady({ runner: input.runner });
+  if (!tools.ok) {
+    return tools;
   }
 
   const push = await input.github.pushLoomBranch({
@@ -428,7 +469,7 @@ export async function runLoomDeliverWorkflow(
   const pr = await input.github.createLoomPullRequest({
     runner: input.runner,
     workspacePath: workflow.workspacePath,
-    baseBranch: workflow.baseBranch,
+    baseBranch: project.data.baseBranch,
     head,
     title,
     body,
@@ -446,7 +487,7 @@ export async function runLoomDeliverWorkflow(
     deliverySummary,
     prUrl: pr.data.url,
     prBranch: workflow.branchName,
-    prBaseBranch: workflow.baseBranch,
+    prBaseBranch: project.data.baseBranch,
     prTitle: title,
     reviewChecklist,
   });
@@ -489,7 +530,7 @@ export async function runLoomDeliverWorkflow(
     prUrl: pr.data.url,
     prTitle: title,
     branchName: workflow.branchName,
-    baseBranch: workflow.baseBranch,
+    baseBranch: project.data.baseBranch,
     workspacePath: workflow.workspacePath,
   });
 }
