@@ -59,11 +59,18 @@ import type { ChainAdapter } from '../core/chain/adapters/types';
 import type { Signer } from '../core/signing/signer';
 import {
   draftLoomTask,
+  assertGitHubToolsReady,
+  buildLoomWorkflowTaskState,
+  createLoomWorkflowStore,
   createLoomRawCacheStore,
+  createNodeLoomCommandRunner,
   listLoomTasksFromCache,
+  prepareGitHubForkWorkspace,
   readLoomRawChainRecords,
+  runLoomClaimAndStartWorkflow,
   runLoomPostTaskWorkflow,
   showLoomTaskFromCache,
+  writeLoomProcessLogFile,
 } from '../core/loom';
 import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain } from '../daemon/defaultHandlers';
@@ -2749,6 +2756,65 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           }),
           writeChain: async (request) => context.dependencies.chain?.write?.(request)
             ?? commandFailed('dependency_unavailable', 'Chain write dependency is unavailable.'),
+        });
+      },
+      claimAndStart: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const homeDir = actor.homeDir;
+        const paths = resolveMetabotPaths(homeDir);
+        const rawCacheStore = createLoomRawCacheStore(paths);
+        const workflowStore = createLoomWorkflowStore(paths);
+        const rawState = await rawCacheStore.read();
+        const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
+        const signer = createCliSigner(context, homeDir);
+        const identity = await signer.getIdentity();
+        const runner = createNodeLoomCommandRunner();
+        const developerMetaBotSlug = path.basename(paths.profileRoot);
+
+        return runLoomClaimAndStartWorkflow({
+          from: input.from,
+          taskPinId: input.taskPinId,
+          payoutAddress: input.payoutAddress,
+          claimPinId: input.claimPinId,
+          chain: input.chain,
+          fileChain: input.fileChain,
+          message: input.message,
+          dryRun: input.dryRun,
+          resetWorkspace: input.resetWorkspace,
+          developerMetaBotSlug,
+          developerGlobalMetaId: identity.globalMetaId,
+          state: taskState,
+          workflowStore,
+          runner,
+          github: {
+            assertToolsReady: assertGitHubToolsReady,
+            prepareForkWorkspace: prepareGitHubForkWorkspace,
+          },
+          writeChain: async (request) => {
+            const result = await signer.writePin(request);
+            return commandSuccess({
+              pinId: result.pinId,
+              txids: result.txids,
+              network: result.network,
+              globalMetaId: result.globalMetaId,
+              mvcAddress: result.mvcAddress,
+            });
+          },
+          uploadFile: async (uploadInput) => uploadLocalFileToChain({
+            filePath: uploadInput.filePath,
+            contentType: uploadInput.contentType,
+            network: uploadInput.network,
+            signer,
+          }),
+          writeLogFile: writeLoomProcessLogFile,
+          removePath: async (targetPath) => {
+            await fs.promises.rm(targetPath, { recursive: true, force: true });
+          },
+          renamePath: async (from, to) => {
+            await fs.promises.mkdir(path.dirname(to), { recursive: true });
+            await fs.promises.rename(from, to);
+          },
         });
       },
     },
