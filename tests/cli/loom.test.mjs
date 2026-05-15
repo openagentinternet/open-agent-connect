@@ -420,6 +420,66 @@ test('runCli delegates loom post-task wish input to runtime dependencies', async
   }]);
 });
 
+test('runCli default loom post-task reads a payload file and writes through chain dependency', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-post-task-'));
+  const payload = {
+    title: 'Publish a Loom task',
+    requirementContentType: 'text/markdown',
+    requirement: 'Wire post-task to the runtime workflow.',
+    criteriaContentType: 'text/markdown',
+    criteria: 'The CLI writes a valid loom-task record.',
+    projectBase: 'chain',
+    project: {},
+    bounty: {
+      amount: '1',
+      currency: 'SPACE',
+    },
+  };
+  const payloadFile = await writePayload(tempDir, payload);
+  const writes = [];
+
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'post-task',
+    '--from',
+    'alice',
+    '--payload-file',
+    payloadFile,
+    '--chain',
+    'mvc',
+  ], {
+    dependencies: {
+      chain: {
+        write: async (input) => {
+          writes.push(input);
+          return {
+            ok: true,
+            state: 'success',
+            data: {
+              pinId: 'task-pin-id',
+              network: 'mvc',
+            },
+          };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.data.pinId, 'task-pin-id');
+  assert.deepEqual(writes, [{
+    operation: 'create',
+    path: '/protocols/loom-task',
+    encryption: '0',
+    version: '1.0.0',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    from: 'alice',
+    network: 'mvc',
+  }]);
+});
+
 test('runCli rejects loom post-task without exactly one task source', async () => {
   for (const args of [
     ['loom', 'post-task', '--from', 'alice'],

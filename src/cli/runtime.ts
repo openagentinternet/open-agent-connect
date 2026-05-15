@@ -62,6 +62,7 @@ import {
   createLoomRawCacheStore,
   listLoomTasksFromCache,
   readLoomRawChainRecords,
+  runLoomPostTaskWorkflow,
   showLoomTaskFromCache,
 } from '../core/loom';
 import { createMetabotDaemon } from '../daemon';
@@ -727,6 +728,99 @@ function resolveLocalUiPath(page: string): string {
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveRuntimeInputPath(context: CliRuntimeContext, filePath: string): string {
+  return path.isAbsolute(filePath) ? filePath : path.resolve(context.cwd, filePath);
+}
+
+async function readJsonObjectFile(
+  context: CliRuntimeContext,
+  filePath: string,
+): Promise<Record<string, unknown>> {
+  const raw = await context.readTextFile(resolveRuntimeInputPath(context, filePath));
+  const parsed = JSON.parse(raw) as unknown;
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('payload file must contain a JSON object.');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+async function draftLoomTaskFromWish(
+  context: CliRuntimeContext,
+  input: { wish: string; from?: string; allowInvalid: boolean },
+): Promise<MetabotCommandResult<unknown>> {
+  const actor = await resolveActorHomeDir(context, input.from);
+  if (!('homeDir' in actor)) return actor;
+  const paths = resolveMetabotPaths(actor.homeDir);
+  const metaBotSlug = path.basename(paths.profileRoot);
+  const runtimeStore = createLlmRuntimeStore(paths);
+  const bindingStore = createLlmBindingStore(paths);
+  const runtimeResolver = createLlmRuntimeResolver({
+    runtimeStore,
+    bindingStore,
+    getPreferredRuntimeId: async () => {
+      try {
+        const raw = await fs.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
+        const data = JSON.parse(raw) as { runtimeId?: string | null };
+        return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+      } catch {
+        return null;
+      }
+    },
+  });
+  const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
+  if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
+    return commandFailed(
+      'llm_runtime_unavailable',
+      `No healthy LLM runtime is available for MetaBot ${metaBotSlug}.`,
+    );
+  }
+  const llmExecutor = new LlmExecutor({
+    sessionsRoot: paths.llmExecutorSessionsRoot,
+    transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+    skillsRoot: paths.skillsRoot,
+    backends: createRegistryBackendFactories(),
+  });
+
+  try {
+    return await draftLoomTask({
+      wish: input.wish,
+      allowInvalid: input.allowInvalid,
+      executePrompt: async ({ prompt, systemPrompt }) => {
+        const sessionId = await llmExecutor.execute({
+          runtimeId: resolved.runtime!.id,
+          runtime: resolved.runtime!,
+          prompt,
+          systemPrompt,
+          timeout: LOOM_DRAFT_LLM_TIMEOUT_MS,
+          cwd: context.cwd,
+          metaBotSlug,
+        });
+        const deadline = Date.now() + LOOM_DRAFT_LLM_TIMEOUT_MS;
+        while (Date.now() <= deadline) {
+          const session = await llmExecutor.getSession(sessionId);
+          if (session?.result) {
+            if (session.result.status === 'completed') {
+              if (resolved.bindingId) {
+                runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => { /* best effort */ });
+              }
+              return session.result.output;
+            }
+            throw new Error(session.result.error || `LLM runtime ended with status ${session.result.status}.`);
+          }
+          await sleep(LOOM_DRAFT_LLM_POLL_INTERVAL_MS);
+        }
+        throw new Error('LLM runtime timed out while drafting Loom task payload.');
+      },
+    });
+  } catch (error) {
+    await runtimeResolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
+    return commandFailed(
+      'llm_runtime_unavailable',
+      error instanceof Error ? error.message : 'LLM runtime is unavailable.',
+    );
+  }
 }
 
 async function isPortBindable(host: string, port: number): Promise<boolean> {
@@ -2634,77 +2728,24 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         });
       },
       draftTask: async (input) => {
-        const actor = await resolveActorHomeDir(context, input.from);
-        if (!('homeDir' in actor)) return actor;
-        const paths = resolveMetabotPaths(actor.homeDir);
-        const metaBotSlug = path.basename(paths.profileRoot);
-        const runtimeStore = createLlmRuntimeStore(paths);
-        const bindingStore = createLlmBindingStore(paths);
-        const runtimeResolver = createLlmRuntimeResolver({
-          runtimeStore,
-          bindingStore,
-          getPreferredRuntimeId: async () => {
-            try {
-              const raw = await fs.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
-              const data = JSON.parse(raw) as { runtimeId?: string | null };
-              return typeof data.runtimeId === 'string' ? data.runtimeId : null;
-            } catch {
-              return null;
-            }
-          },
+        return draftLoomTaskFromWish(context, input);
+      },
+      postTask: async (input) => {
+        return runLoomPostTaskWorkflow({
+          from: input.from,
+          payloadFile: input.payloadFile,
+          wish: input.wish,
+          chain: input.chain,
+          dryRun: input.dryRun,
+          readPayloadFile: (payloadFile) => readJsonObjectFile(context, payloadFile),
+          draftTask: (wish) => draftLoomTaskFromWish(context, {
+            wish,
+            from: input.from,
+            allowInvalid: false,
+          }),
+          writeChain: async (request) => context.dependencies.chain?.write?.(request)
+            ?? commandFailed('dependency_unavailable', 'Chain write dependency is unavailable.'),
         });
-        const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
-        if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
-          return commandFailed(
-            'llm_runtime_unavailable',
-            `No healthy LLM runtime is available for MetaBot ${metaBotSlug}.`,
-          );
-        }
-        const llmExecutor = new LlmExecutor({
-          sessionsRoot: paths.llmExecutorSessionsRoot,
-          transcriptsRoot: paths.llmExecutorTranscriptsRoot,
-          skillsRoot: paths.skillsRoot,
-          backends: createRegistryBackendFactories(),
-        });
-
-        try {
-          return await draftLoomTask({
-            wish: input.wish,
-            allowInvalid: input.allowInvalid,
-            executePrompt: async ({ prompt, systemPrompt }) => {
-              const sessionId = await llmExecutor.execute({
-                runtimeId: resolved.runtime!.id,
-                runtime: resolved.runtime!,
-                prompt,
-                systemPrompt,
-                timeout: LOOM_DRAFT_LLM_TIMEOUT_MS,
-                cwd: context.cwd,
-                metaBotSlug,
-              });
-              const deadline = Date.now() + LOOM_DRAFT_LLM_TIMEOUT_MS;
-              while (Date.now() <= deadline) {
-                const session = await llmExecutor.getSession(sessionId);
-                if (session?.result) {
-                  if (session.result.status === 'completed') {
-                    if (resolved.bindingId) {
-                      runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => { /* best effort */ });
-                    }
-                    return session.result.output;
-                  }
-                  throw new Error(session.result.error || `LLM runtime ended with status ${session.result.status}.`);
-                }
-                await sleep(LOOM_DRAFT_LLM_POLL_INTERVAL_MS);
-              }
-              throw new Error('LLM runtime timed out while drafting Loom task payload.');
-            },
-          });
-        } catch (error) {
-          await runtimeResolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
-          return commandFailed(
-            'llm_runtime_unavailable',
-            error instanceof Error ? error.message : 'LLM runtime is unavailable.',
-          );
-        }
       },
     },
     bot: {
