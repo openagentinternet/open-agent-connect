@@ -745,6 +745,39 @@ test('process log upload failure after claim write returns claim_written_start_f
   );
 });
 
+test('minimal workflow marker failure after claim write returns sync-before-retry envelope', async () => {
+  const events = [];
+  const workflowStore = createWorkflowStore(events);
+  const { input } = createDeps({
+    events,
+    workflowStore: {
+      ...workflowStore,
+      async write(state) {
+        events.push({ type: 'workflow.write', state });
+        throw new Error('marker write failed');
+      },
+    },
+  });
+
+  const result = await runLoomClaimAndStartWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'claim_written_marker_failed');
+  assert.equal(result.data.claimPinId, claimPinId);
+  assert.equal(result.data.stagingRepoPath, expectedLocalPaths().stagingRepoPath);
+  assert.equal(result.data.workspaceRepoPath, expectedLocalPaths().workspaceRepoPath);
+  assert.equal(result.data.syncCommand, 'metabot loom sync');
+  assert.match(result.data.retryAfterSyncCommand, new RegExp(`--claim-pin-id ${claimPinId}`));
+  assert.equal(Object.hasOwn(result.data, 'retryCommand'), false);
+  assert.match(result.data.cause.message, /marker write failed/);
+  assert.deepEqual(events.map((event) => event.type), [
+    'github.assertToolsReady',
+    'github.prepareForkWorkspace',
+    'writeChain',
+    'workflow.write',
+  ]);
+});
+
 test('--chain doge without --file-chain uploads log on mvc but writes records on doge', async () => {
   const { input, events } = createDeps({ chain: 'doge' });
 

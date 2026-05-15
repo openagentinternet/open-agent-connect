@@ -288,6 +288,31 @@ function claimWrittenStartFailed(
   );
 }
 
+function claimWrittenMarkerFailed(
+  input: LoomClaimAndStartWorkflowInput,
+  claimPinId: string,
+  cause: unknown,
+  paths: {
+    stagingRepoPath: string;
+    workspaceRepoPath: string;
+  },
+): MetabotCommandResult<never> {
+  return commandFailed(
+    'claim_written_marker_failed',
+    `Loom claim ${claimPinId} was written, but local recovery state could not be saved. Run loom sync before retrying with --claim-pin-id.`,
+    {
+      data: {
+        claimPinId,
+        stagingRepoPath: paths.stagingRepoPath,
+        workspaceRepoPath: paths.workspaceRepoPath,
+        syncCommand: 'metabot loom sync',
+        retryAfterSyncCommand: retryCommand(input, claimPinId),
+        cause: causeData(cause),
+      },
+    },
+  );
+}
+
 async function resolveRecoveryClaim(input: {
   workflowInput: LoomClaimAndStartWorkflowInput;
   state: LoomWorkflowTaskState;
@@ -655,19 +680,28 @@ export async function runLoomClaimAndStartWorkflow(
   const finalBranchName = buildLoomBranchName(input.taskPinId, finalClaimPinId as string);
   try {
     if (claimWrite) {
-      await input.workflowStore.write(createClaimWorkflowState({
-        taskPinId: input.taskPinId,
-        claimPinId: finalClaimPinId as string,
-        developerMetaBotSlug: input.developerMetaBotSlug,
-        developerGlobalMetaId: input.developerGlobalMetaId,
-        repoUri: project.data.repoUri,
-        baseBranch: project.data.baseBranch,
-        forkRepo: prepared?.forkRepo.fullName,
-        branchName: finalBranchName,
-        workspacePath: finalPaths.workspaceRepoPath,
-        claimWrite,
-        nowIso,
-      }));
+      try {
+        await input.workflowStore.write(createClaimWorkflowState({
+          taskPinId: input.taskPinId,
+          claimPinId: finalClaimPinId as string,
+          developerMetaBotSlug: input.developerMetaBotSlug,
+          developerGlobalMetaId: input.developerGlobalMetaId,
+          repoUri: project.data.repoUri,
+          baseBranch: project.data.baseBranch,
+          forkRepo: prepared?.forkRepo.fullName,
+          branchName: finalBranchName,
+          workspacePath: finalPaths.workspaceRepoPath,
+          claimWrite,
+          nowIso,
+        }));
+      } catch (error) {
+        return claimWrittenMarkerFailed(
+          input,
+          finalClaimPinId as string,
+          error,
+          failurePaths(finalClaimPinId as string),
+        );
+      }
     }
 
     if (!recoveryMode) {
