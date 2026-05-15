@@ -91,38 +91,52 @@ export function selectProcessLogFileChain(
 export function redactLoomProcessLog(input: unknown): string {
   let output = String(input ?? '');
 
-  output = output.replace(
-    /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
-    '[REDACTED PRIVATE KEY]',
-  );
-  output = output.replace(
-    /\b((?:mnemonic|seed phrase|seed words|seed_words|recovery phrase|secret phrase|seed)\s*(?::|=)\s*)(?:"[^"]*"|'[^']*'|[^\n\r]+)/gi,
-    '$1[REDACTED MNEMONIC]',
-  );
-  output = output.replace(
-    /(Authorization:\s*(?:Bearer|token)\s+)[^\s"'`]+/gi,
-    '$1[REDACTED]',
-  );
-  output = output.replace(
-    /(["']?Authorization["']?\s*:\s*["']?(?:Bearer|token)\s+)[^"',}\s]+/gi,
-    '$1[REDACTED]',
-  );
-  output = output.replace(
-    /(^|\s)(--(?:token|api-key|api_key|access-token|access_token))(?:=|\s+)(?:"[^"]*"|'[^']*'|[^\s"'`]+)/gi,
-    '$1$2 [REDACTED]',
-  );
-  output = output.replace(
-    new RegExp(`\\b(${SECRET_KEY_RE}=)(?:"[^"]*"|'[^']*'|[^&\\s"'\\x60,}]+)`, 'gi'),
-    '$1[REDACTED]',
-  );
-  output = output.replace(
-    new RegExp(`\\b(${SECRET_KEY_RE}:\\s*)(?:"[^"]*"|'[^']*'|[^&\\s"'\\x60,}]+)`, 'gi'),
-    '$1[REDACTED]',
-  );
-  output = output.replace(
-    new RegExp(`(["']?${SECRET_KEY_RE}["']?\\s*:\\s*)(["']?)([^"',}\\s]+)\\2`, 'g'),
-    '$1$2[REDACTED]$2',
-  );
+  if (/PRIVATE KEY/.test(output)) {
+    output = output.replace(
+      /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
+      '[REDACTED PRIVATE KEY]',
+    );
+  }
+
+  if (/\b(?:mnemonic|seed phrase|seed words|seed_words|recovery phrase|secret phrase|seed)\b/i.test(output)) {
+    output = output.replace(
+      /\b(["']?(?:mnemonic|seed phrase|seed words|seed_words|recovery phrase|secret phrase|seed)["']?\s*(?::|=)\s*)(?:"[^"]*"|'[^']*'|[^\n\r,}]+)/gi,
+      '$1[REDACTED MNEMONIC]',
+    );
+  }
+
+  if (/Authorization/i.test(output)) {
+    output = output.replace(
+      /(Authorization:\s*(?:Bearer|token)\s+)[^\s"'`]+/gi,
+      '$1[REDACTED]',
+    );
+    output = output.replace(
+      /(["']?Authorization["']?\s*:\s*["']?(?:Bearer|token)\s+)[^"',}\s]+/gi,
+      '$1[REDACTED]',
+    );
+  }
+
+  if (/--(?:token|api-key|api_key|access-token|access_token)/i.test(output)) {
+    output = output.replace(
+      /(^|\s)(--(?:token|api-key|api_key|access-token|access_token))(?:=|\s+)(?:"[^"]*"|'[^']*'|[^\s"'`]+)/gi,
+      '$1$2 [REDACTED]',
+    );
+  }
+
+  if (/(?:api[-_]?key|access[-_]?token|token)/i.test(output)) {
+    output = output.replace(
+      new RegExp(`\\b(${SECRET_KEY_RE}=)(?:"[^"]*"|'[^']*'|[^&\\s"'\\x60,}]+)`, 'gi'),
+      '$1[REDACTED]',
+    );
+    output = output.replace(
+      new RegExp(`\\b(${SECRET_KEY_RE}:\\s*)(?:"[^"]*"|'[^']*'|[^&\\s"'\\x60,}]+)`, 'gi'),
+      '$1[REDACTED]',
+    );
+    output = output.replace(
+      new RegExp(`(["']?${SECRET_KEY_RE}["']?\\s*:\\s*)(["'])([^"']*)\\2`, 'gi'),
+      '$1$2[REDACTED]$2',
+    );
+  }
 
   return output;
 }

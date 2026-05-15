@@ -106,6 +106,7 @@ test('maps thrown write errors to chain_write_failed', async () => {
   assert.match(result.message, /wallet unavailable/);
   assert.equal(result.data.cause.name, 'Error');
   assert.equal(result.data.cause.message, 'wallet unavailable');
+  assert.equal(Object.hasOwn(result.data.cause, 'stack'), false);
 });
 
 test('maps failed writer envelopes to chain_write_failed', async () => {

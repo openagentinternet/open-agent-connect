@@ -70,6 +70,7 @@ test('redacts json env and query token shapes while keeping non-secret text read
   const input = [
     'status=plain text is still readable',
     '{"api_key":"json-api-secret","token":"json-token-secret"}',
+    '{"token":"secret value"}',
     '{"Authorization":"Bearer json-bearer-secret"}',
     'OPENAI_API_KEY=sk-openai-secret',
     'GITHUB_TOKEN=ghp_githubsecret',
@@ -85,6 +86,7 @@ test('redacts json env and query token shapes while keeping non-secret text read
   assert.match(redacted, /state=ok/);
   assert.doesNotMatch(redacted, /json-api-secret/);
   assert.doesNotMatch(redacted, /json-token-secret/);
+  assert.doesNotMatch(redacted, /secret value/);
   assert.doesNotMatch(redacted, /json-bearer-secret/);
   assert.doesNotMatch(redacted, /sk-openai-secret/);
   assert.doesNotMatch(redacted, /ghp_githubsecret/);
@@ -137,6 +139,12 @@ test('redacts labelled mnemonic material without erasing ordinary prose', () => 
   const mnemonic = redactLoomProcessLog(
     'seed phrase: abandon ability able about above absent absorb abstract absurd abuse access accident',
   );
+  const jsonMnemonic = redactLoomProcessLog(
+    '{"mnemonic":"abandon ability able about above absent absorb abstract absurd abuse access accident"}',
+  );
+  const jsonSeed = redactLoomProcessLog(
+    '{"seed":"abandon ability able about above absent absorb abstract absurd abuse access accident"}',
+  );
   const seedEquals = redactLoomProcessLog(
     'seed=abandon ability able about above absent absorb abstract absurd abuse access accident',
   );
@@ -152,6 +160,10 @@ test('redacts labelled mnemonic material without erasing ordinary prose', () => 
 
   assert.match(mnemonic, /\[REDACTED MNEMONIC\]/);
   assert.doesNotMatch(mnemonic, /abandon ability able/);
+  assert.match(jsonMnemonic, /\[REDACTED MNEMONIC\]/);
+  assert.doesNotMatch(jsonMnemonic, /abandon ability able/);
+  assert.match(jsonSeed, /\[REDACTED MNEMONIC\]/);
+  assert.doesNotMatch(jsonSeed, /abandon ability able/);
   assert.match(seedEquals, /\[REDACTED MNEMONIC\]/);
   assert.doesNotMatch(seedEquals, /abandon ability able/);
   assert.match(seedWords, /\[REDACTED MNEMONIC\]/);
@@ -161,6 +173,24 @@ test('redacts labelled mnemonic material without erasing ordinary prose', () => 
   assert.doesNotMatch(mention, /\[REDACTED MNEMONIC\]/);
   assert.match(prose, /ordinary process summary/);
   assert.doesNotMatch(prose, /\[REDACTED MNEMONIC\]/);
+});
+
+test('redacts json-style secrets from rendered diagnostics', () => {
+  const rendered = renderLoomProcessLog({
+    payloadPreview: {
+      mnemonic: 'abandon ability able about above absent absorb abstract absurd abuse access accident',
+      token: 'secret value',
+    },
+    chainResult: {
+      seed: 'abandon ability able about above absent absorb abstract absurd abuse access accident',
+    },
+    roundNote: 'ordinary mnemonic prose remains readable',
+  });
+
+  assert.match(rendered, /ordinary mnemonic prose remains readable/);
+  assert.doesNotMatch(rendered, /abandon ability able/);
+  assert.doesNotMatch(rendered, /secret value/);
+  assert.match(rendered, /\[REDACTED MNEMONIC\]/);
 });
 
 test('renders deterministic markdown-ish process logs with truncation notes', () => {

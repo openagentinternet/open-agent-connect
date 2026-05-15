@@ -59,7 +59,6 @@ function serializeThrownCause(error: unknown): unknown {
     return {
       name: error.name,
       message: error.message,
-      ...(error.stack ? { stack: error.stack } : {}),
     };
   }
   return error;
