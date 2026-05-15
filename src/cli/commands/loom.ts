@@ -320,6 +320,9 @@ async function runDraftTaskCommand(
     return commandMissingFlag('--wish');
   }
   const from = readFlagValue(args, '--from');
+  if (args.includes('--from') && (!from || from.startsWith('--'))) {
+    return commandFailed('invalid_flag', '--from requires a bot slug value.');
+  }
   const input: { wish: string; from?: string; allowInvalid: boolean } = {
     wish,
     allowInvalid: hasFlag(args, '--allow-invalid'),

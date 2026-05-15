@@ -2695,7 +2695,6 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
                 }
                 await sleep(LOOM_DRAFT_LLM_POLL_INTERVAL_MS);
               }
-              await runtimeResolver.markRuntimeUnavailable(resolved.runtime!.id).catch(() => {});
               throw new Error('LLM runtime timed out while drafting Loom task payload.');
             },
           });

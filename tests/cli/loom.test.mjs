@@ -355,6 +355,32 @@ test('runCli forwards from and allowInvalid to loom draft-task dependencies', as
   }]);
 });
 
+test('runCli rejects loom draft-task --from without an actor value', async () => {
+  for (const args of [
+    ['loom', 'draft-task', '--wish', 'hi', '--from'],
+    ['loom', 'draft-task', '--wish', 'hi', '--from', '--allow-invalid'],
+  ]) {
+    const calls = [];
+    const { exitCode, envelope } = await runLoom(args, {
+      dependencies: {
+        loom: {
+          draftTask: async (input) => {
+            calls.push(input);
+            return { ok: true, state: 'success', data: { drafted: true } };
+          },
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.state, 'failed');
+    assert.equal(envelope.code, 'invalid_flag');
+    assert.match(envelope.message, /--from/);
+    assert.deepEqual(calls, []);
+  }
+});
+
 test('runCli requires --wish for loom draft-task', async () => {
   for (const args of [
     ['loom', 'draft-task'],
