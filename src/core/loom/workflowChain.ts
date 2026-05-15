@@ -54,10 +54,21 @@ function formatWriteFailure(result: MetabotCommandResult<unknown>): string {
   return `${code}${result.message ?? 'Chain writer returned a failed result.'}`;
 }
 
+function serializeThrownCause(error: unknown): unknown {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      ...(error.stack ? { stack: error.stack } : {}),
+    };
+  }
+  return error;
+}
+
 function commandFailedWithCause(
   code: string,
   message: string,
-  cause: MetabotCommandResult<unknown>,
+  cause: unknown,
 ): MetabotCommandResult<never> {
   return {
     ok: false,
@@ -87,7 +98,11 @@ export async function writeLoomProtocolRecord(
     writeResult = await input.writeChain(writeRequest);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return commandFailed('chain_write_failed', `Loom chain write failed: ${message}`);
+    return commandFailedWithCause(
+      'chain_write_failed',
+      `Loom chain write failed: ${message}`,
+      serializeThrownCause(error),
+    );
   }
 
   if (!writeResult.ok) {

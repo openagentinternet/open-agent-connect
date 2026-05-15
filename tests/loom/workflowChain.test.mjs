@@ -91,11 +91,12 @@ test('returns invalid_payload and does not write invalid payloads', async () => 
 });
 
 test('maps thrown write errors to chain_write_failed', async () => {
+  const writeError = new Error('wallet unavailable');
   const result = await writeLoomProtocolRecord({
     protocol: 'status',
     payload: validStatusPayload(),
     writeChain: async () => {
-      throw new Error('wallet unavailable');
+      throw writeError;
     },
   });
 
@@ -103,6 +104,8 @@ test('maps thrown write errors to chain_write_failed', async () => {
   assert.equal(result.state, 'failed');
   assert.equal(result.code, 'chain_write_failed');
   assert.match(result.message, /wallet unavailable/);
+  assert.equal(result.data.cause.name, 'Error');
+  assert.equal(result.data.cause.message, 'wallet unavailable');
 });
 
 test('maps failed writer envelopes to chain_write_failed', async () => {
