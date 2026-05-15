@@ -44,38 +44,56 @@ function addError(
   errors.push({ path, code, message });
 }
 
+function fieldPath(prefix: string, key: string): string {
+  return prefix ? `${prefix}.${key}` : key;
+}
+
 function requireObject(
   object: JsonObject,
   key: string,
   errors: LoomValidationError[],
+  prefix = '',
 ): JsonObject | null {
+  const path = fieldPath(prefix, key);
   if (!hasOwn(object, key)) {
-    addError(errors, key, 'required', `${key} is required.`);
+    addError(errors, path, 'required', `${path} is required.`);
     return null;
   }
   const value = object[key];
   if (!isObject(value)) {
-    addError(errors, key, 'invalid_type', `${key} must be an object.`);
+    addError(errors, path, 'invalid_type', `${path} must be an object.`);
     return null;
   }
   return value;
 }
 
-function requireNonEmptyString(object: JsonObject, key: string, errors: LoomValidationError[]): void {
+function requireNonEmptyString(
+  object: JsonObject,
+  key: string,
+  errors: LoomValidationError[],
+  prefix = '',
+): void {
+  const path = fieldPath(prefix, key);
   if (!hasOwn(object, key)) {
-    addError(errors, key, 'required', `${key} is required.`);
+    addError(errors, path, 'required', `${path} is required.`);
     return;
   }
   if (!isNonEmptyString(object[key])) {
-    addError(errors, key, 'invalid_string', `${key} must be a non-empty string.`);
+    addError(errors, path, 'invalid_string', `${path} must be a non-empty string.`);
   }
 }
 
-function requirePinId(object: JsonObject, key: string, errors: LoomValidationError[]): void {
-  requireNonEmptyString(object, key, errors);
+function requirePinId(
+  object: JsonObject,
+  key: string,
+  errors: LoomValidationError[],
+  prefix = '',
+): void {
+  const path = fieldPath(prefix, key);
+  requireNonEmptyString(object, key, errors, prefix);
   const value = object[key];
   if (isNonEmptyString(value) && !PIN_ID_RE.test(value)) {
-    addError(errors, key, 'invalid_pin_id', `${key} must be a PINID-like string.`);
+    addError(errors, path, 'invalid_pin_id', `${path} must be a PINID-like string.`);
   }
 }
 
@@ -83,13 +101,15 @@ function validateOptionalTimestamp(
   object: JsonObject,
   key: string,
   errors: LoomValidationError[],
+  prefix = '',
 ): void {
   if (!hasOwn(object, key) || object[key] === undefined || object[key] === null) {
     return;
   }
+  const path = fieldPath(prefix, key);
   const value = object[key];
   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
-    addError(errors, key, 'invalid_timestamp', `${key} must be a positive millisecond timestamp.`);
+    addError(errors, path, 'invalid_timestamp', `${path} must be a positive millisecond timestamp.`);
   }
 }
 
@@ -98,11 +118,13 @@ function requireEnum(
   key: string,
   values: Set<string>,
   errors: LoomValidationError[],
+  prefix = '',
 ): void {
-  requireNonEmptyString(object, key, errors);
+  const path = fieldPath(prefix, key);
+  requireNonEmptyString(object, key, errors, prefix);
   const value = object[key];
   if (isNonEmptyString(value) && !values.has(value)) {
-    addError(errors, key, 'invalid_enum', `${key} must be one of: ${Array.from(values).join(', ')}.`);
+    addError(errors, path, 'invalid_enum', `${path} must be one of: ${Array.from(values).join(', ')}.`);
   }
 }
 
@@ -110,35 +132,44 @@ function validateMetafileUriArray(
   object: JsonObject,
   key: string,
   errors: LoomValidationError[],
+  prefix = '',
 ): void {
+  const path = fieldPath(prefix, key);
   if (!hasOwn(object, key) || object[key] === undefined || object[key] === null) {
     return;
   }
   const value = object[key];
   if (!Array.isArray(value)) {
-    addError(errors, key, 'invalid_type', `${key} must be an array.`);
+    addError(errors, path, 'invalid_type', `${path} must be an array.`);
     return;
   }
   for (const [index, item] of value.entries()) {
-    const itemPath = `${key}.${index}`;
+    const itemPath = `${path}.${index}`;
     if (!isNonEmptyString(item) || !item.startsWith('metafile://')) {
       addError(errors, itemPath, 'invalid_metafile_uri', `${itemPath} must be a metafile:// URI.`);
     }
   }
 }
 
-function validateStringArray(object: JsonObject, key: string, errors: LoomValidationError[]): void {
+function validateStringArray(
+  object: JsonObject,
+  key: string,
+  errors: LoomValidationError[],
+  prefix = '',
+): void {
+  const path = fieldPath(prefix, key);
   if (!hasOwn(object, key) || object[key] === undefined || object[key] === null) {
     return;
   }
   const value = object[key];
   if (!Array.isArray(value)) {
-    addError(errors, key, 'invalid_type', `${key} must be an array.`);
+    addError(errors, path, 'invalid_type', `${path} must be an array.`);
     return;
   }
   for (const [index, item] of value.entries()) {
     if (!isNonEmptyString(item)) {
-      addError(errors, `${key}.${index}`, 'invalid_string', `${key}.${index} must be a non-empty string.`);
+      const itemPath = `${path}.${index}`;
+      addError(errors, itemPath, 'invalid_string', `${itemPath} must be a non-empty string.`);
     }
   }
 }
@@ -153,20 +184,20 @@ function validateTask(payload: JsonObject, errors: LoomValidationError[]): void 
 
   const project = requireObject(payload, 'project', errors);
   if (project && payload.projectBase === 'github') {
-    requireNonEmptyString(project, 'repoUri', errors);
-    requireNonEmptyString(project, 'baseBranch', errors);
+    requireNonEmptyString(project, 'repoUri', errors, 'project');
+    requireNonEmptyString(project, 'baseBranch', errors, 'project');
   }
 
   const bounty = requireObject(payload, 'bounty', errors);
   if (bounty) {
-    requireNonEmptyString(bounty, 'amount', errors);
+    requireNonEmptyString(bounty, 'amount', errors, 'bounty');
     if (isNonEmptyString(bounty.amount)) {
       const amount = Number(bounty.amount);
       if (!POSITIVE_DECIMAL_RE.test(bounty.amount) || amount <= 0) {
         addError(errors, 'bounty.amount', 'invalid_decimal', 'bounty.amount must be a positive decimal string.');
       }
     }
-    requireEnum(bounty, 'currency', BOUNTY_CURRENCIES, errors);
+    requireEnum(bounty, 'currency', BOUNTY_CURRENCIES, errors, 'bounty');
   }
 
   validateOptionalTimestamp(payload, 'deadline', errors);
@@ -202,9 +233,9 @@ function validateStatus(payload: JsonObject, errors: LoomValidationError[]): voi
           addError(errors, path, 'invalid_type', `${path} must be an object.`);
           continue;
         }
-        requireNonEmptyString(commit, 'sha', errors);
-        requireNonEmptyString(commit, 'message', errors);
-        validateStringArray(commit, 'files', errors);
+        requireNonEmptyString(commit, 'sha', errors, path);
+        requireNonEmptyString(commit, 'message', errors, path);
+        validateStringArray(commit, 'files', errors, path);
       }
     }
   }
@@ -231,8 +262,8 @@ function validateDelivery(payload: JsonObject, errors: LoomValidationError[]): v
         addError(errors, path, 'invalid_type', `${path} must be an object.`);
         continue;
       }
-      requireNonEmptyString(entry, 'item', errors);
-      requireEnum(entry, 'status', new Set(['passed']), errors);
+      requireNonEmptyString(entry, 'item', errors, path);
+      requireEnum(entry, 'status', new Set(['passed']), errors, path);
     }
   }
 

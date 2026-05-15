@@ -176,3 +176,40 @@ test('accepts a valid loom delivery payload', () => {
 test('accepts a valid loom claim-reject payload', () => {
   assert.equal(validateLoomPayload('claim-reject', validClaimRejectPayload()).valid, true);
 });
+
+test('reports nested loom task validation errors with qualified paths', () => {
+  const result = validateLoomPayload(
+    'task',
+    validTaskPayload({
+      bounty: {
+        amount: '0.001',
+        currency: 'ETH',
+      },
+    }),
+  );
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.path === 'bounty.currency'));
+  assert.equal(result.errors.some((error) => error.path === 'currency'), false);
+});
+
+test('reports nested loom status commit errors with qualified paths', () => {
+  const result = validateLoomPayload(
+    'status',
+    validStatusPayload({
+      commits: [
+        {
+          sha: '',
+          message: 'feat: add player UI shell',
+          files: [''],
+        },
+      ],
+    }),
+  );
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.path === 'commits.0.sha'));
+  assert.ok(result.errors.some((error) => error.path === 'commits.0.files.0'));
+  assert.equal(result.errors.some((error) => error.path === 'sha'), false);
+  assert.equal(result.errors.some((error) => error.path === 'files.0'), false);
+});
