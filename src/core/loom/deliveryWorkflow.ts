@@ -77,11 +77,11 @@ export interface LoomDeliverWorkflowInput {
 }
 
 const DEFAULT_CHAIN = 'mvc';
-const DEFAULT_BASE_BRANCH = 'main';
 
 interface GitHubTaskProject {
   repoUri: string;
   baseBranch: string;
+  upstreamRepoFullName: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -114,14 +114,17 @@ function resolveGitHubProject(payload: Record<string, unknown>): MetabotCommandR
 
   const project = isRecord(payload.project) ? payload.project : {};
   const repoUri = nonEmptyString(project.repoUri);
-  const baseBranch = nonEmptyString(project.baseBranch) ?? DEFAULT_BASE_BRANCH;
+  const baseBranch = nonEmptyString(project.baseBranch);
   if (!repoUri) {
     return commandFailed('invalid_project', 'GitHub Loom task project.repoUri is required.');
   }
+  if (!baseBranch) {
+    return commandFailed('invalid_project', 'GitHub Loom task project.baseBranch is required.');
+  }
 
   try {
-    normalizeGitHubRepoUri(repoUri);
-    return commandSuccess({ repoUri, baseBranch });
+    const upstreamRepo = normalizeGitHubRepoUri(repoUri);
+    return commandSuccess({ repoUri, baseBranch, upstreamRepoFullName: upstreamRepo.fullName });
   } catch (error) {
     return commandFailed(
       'invalid_project',
@@ -469,6 +472,7 @@ export async function runLoomDeliverWorkflow(
   const pr = await input.github.createLoomPullRequest({
     runner: input.runner,
     workspacePath: workflow.workspacePath,
+    repo: project.data.upstreamRepoFullName,
     baseBranch: project.data.baseBranch,
     head,
     title,

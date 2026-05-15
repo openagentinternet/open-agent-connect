@@ -306,6 +306,29 @@ test('runLoomDeliverWorkflow rejects a GitHub task with a missing repository bef
   assert.deepEqual(events.filter((event) => event.type === 'writeChain'), []);
 });
 
+test('runLoomDeliverWorkflow rejects a GitHub task with a missing base branch before delivery side effects', async () => {
+  const { events, input } = createDeps({
+    state: taskState({
+      taskPayload: validTaskPayload({
+        project: {
+          repoUri: 'https://github.com/openagentinternet/open-agent-connect',
+        },
+      }),
+    }),
+  });
+
+  const result = await runLoomDeliverWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_project');
+  assert.match(result.message, /project\.baseBranch/);
+  assert.deepEqual(events.filter((event) => event.type === 'github.assertToolsReady'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'github.pushLoomBranch'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'github.createLoomPullRequest'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'writeChain'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'workflow.write'), []);
+});
+
 test('runLoomDeliverWorkflow rejects an already persisted local delivery', async () => {
   const { events, input } = createDeps({
     workflowState: workflowState({
@@ -405,6 +428,7 @@ test('runLoomDeliverWorkflow pushes, creates PR, writes delivery, and persists s
     branchName: 'loom/task-claim',
   }]);
   const prInput = events.find((event) => event.type === 'github.createLoomPullRequest').input;
+  assert.equal(prInput.repo, 'openagentinternet/open-agent-connect');
   assert.equal(prInput.baseBranch, 'main');
   assert.equal(prInput.head, 'alice:loom/task-claim');
   assert.match(prInput.body, /Task PIN/);
@@ -444,6 +468,7 @@ test('runLoomDeliverWorkflow uses task project base branch instead of stale loca
 
   assert.equal(result.ok, true);
   const prInput = events.find((event) => event.type === 'github.createLoomPullRequest').input;
+  assert.equal(prInput.repo, 'openagentinternet/open-agent-connect');
   assert.equal(prInput.baseBranch, 'release');
   assert.equal(deliveryPayloads(events).at(-1).delivery.prBaseBranch, 'release');
   assert.equal(result.data.baseBranch, 'release');

@@ -52,6 +52,7 @@ export interface PushLoomBranchResult {
 export interface CreateLoomPullRequestInput {
   runner: LoomCommandRunner;
   workspacePath: string;
+  repo: string;
   baseBranch: string;
   head: string;
   title: string;
@@ -359,6 +360,8 @@ export async function createLoomPullRequest(
     args: [
       'pr',
       'create',
+      '--repo',
+      input.repo,
       '--base',
       input.baseBranch,
       '--head',

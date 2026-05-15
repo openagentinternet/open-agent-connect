@@ -329,6 +329,7 @@ test('createLoomPullRequest parses the created pull request URL from noisy stdou
   const result = await createLoomPullRequest({
     runner,
     workspacePath: '/tmp/loom/repo',
+    repo: 'openagentinternet/open-agent-connect',
     baseBranch: 'main',
     head: 'loom-developer:loom/aaaaaaaa-bbbbbbbb',
     title: 'Loom task',
@@ -338,7 +339,7 @@ test('createLoomPullRequest parses the created pull request URL from noisy stdou
   assert.equal(result.ok, true);
   assert.equal(result.data.url, 'https://github.com/openagentinternet/open-agent-connect/pull/123');
   assert.deepEqual(commandLines(calls), [
-    'gh pr create --base main --head loom-developer:loom/aaaaaaaa-bbbbbbbb --title Loom task --body Implemented by Loom.',
+    'gh pr create --repo openagentinternet/open-agent-connect --base main --head loom-developer:loom/aaaaaaaa-bbbbbbbb --title Loom task --body Implemented by Loom.',
   ]);
 });
 
@@ -350,6 +351,7 @@ test('createLoomPullRequest maps success without pull request URL to github_pr_f
   const result = await createLoomPullRequest({
     runner,
     workspacePath: '/tmp/loom/repo',
+    repo: 'openagentinternet/open-agent-connect',
     baseBranch: 'main',
     head: 'loom-developer:loom/aaaaaaaa-bbbbbbbb',
     title: 'Loom task',
