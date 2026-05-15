@@ -75,6 +75,7 @@ export interface LoomClaimAndStartWorkflowInput {
   writeLogFile: (input: LoomProcessLogInput & { directory: string; fileName: string }) => Promise<LoomProcessLogWriteResult>;
   removePath: (targetPath: string) => Promise<void>;
   renamePath: (from: string, to: string) => Promise<void>;
+  pathExists: (targetPath: string) => Promise<boolean>;
   now?: () => number;
   localRunId?: string;
 }
@@ -200,6 +201,10 @@ function claimAuthorMatches(claim: LoomCachedRecord, developerGlobalMetaId: stri
   return claim.globalMetaId === developerGlobalMetaId;
 }
 
+function workflowAuthorMatches(workflow: LoomWorkflowState, developerGlobalMetaId: string): boolean {
+  return workflow.developerGlobalMetaId === developerGlobalMetaId;
+}
+
 function causeData(error: unknown): unknown {
   if (error instanceof Error) {
     return { name: error.name, message: error.message };
@@ -241,6 +246,32 @@ function claimWrittenStartFailed(
   );
 }
 
+async function resolveRecoveryClaim(input: {
+  workflowInput: LoomClaimAndStartWorkflowInput;
+  state: LoomWorkflowTaskState;
+  claimPinId: string;
+}): Promise<MetabotCommandResult<{ workflow?: LoomWorkflowState }>> {
+  const claim = findClaim(input.state, input.claimPinId);
+  if (claim) {
+    if (!claimAuthorMatches(claim, input.workflowInput.developerGlobalMetaId)) {
+      return commandFailed('permission_denied', `Loom claim ${input.claimPinId} belongs to another developer.`);
+    }
+    return commandSuccess({});
+  }
+
+  const localWorkflow = await input.workflowInput.workflowStore.read(
+    input.workflowInput.taskPinId,
+    input.claimPinId,
+  );
+  if (!localWorkflow) {
+    return commandFailed('claim_not_found', `Loom claim not found in cache or local workflow state: ${input.claimPinId}`);
+  }
+  if (!workflowAuthorMatches(localWorkflow, input.workflowInput.developerGlobalMetaId)) {
+    return commandFailed('permission_denied', `Loom claim ${input.claimPinId} belongs to another developer.`);
+  }
+  return commandSuccess({ workflow: localWorkflow });
+}
+
 async function writeProtocolRecord(input: {
   protocol: 'claim' | 'status';
   payload: Record<string, unknown>;
@@ -272,6 +303,41 @@ async function checkoutFinalBranch(input: {
     return commandFailed('git_checkout_failed', detail ? `Failed to create final Loom branch: ${detail}` : 'Failed to create final Loom branch.');
   }
   return commandSuccess({ branchName: input.branchName });
+}
+
+function createClaimWorkflowState(input: {
+  taskPinId: string;
+  claimPinId: string;
+  developerMetaBotSlug: string;
+  developerGlobalMetaId: string;
+  repoUri: string;
+  baseBranch: string;
+  forkRepo?: string;
+  branchName: string;
+  workspacePath: string;
+  claimWrite?: LoomProtocolRecordWriteResult;
+  nowIso: string;
+}): LoomWorkflowState {
+  return {
+    version: 1,
+    taskPinId: input.taskPinId,
+    claimPinId: input.claimPinId,
+    developerMetaBotSlug: input.developerMetaBotSlug,
+    developerGlobalMetaId: input.developerGlobalMetaId,
+    repoUri: input.repoUri,
+    baseBranch: input.baseBranch,
+    upstreamRemote: DEFAULT_UPSTREAM_REMOTE,
+    forkRemote: DEFAULT_FORK_REMOTE,
+    ...(input.forkRepo ? { forkRepo: input.forkRepo } : {}),
+    branchName: input.branchName,
+    workspacePath: input.workspacePath,
+    claim: {
+      pinId: input.claimPinId,
+      txids: input.claimWrite?.txids,
+    },
+    statuses: [],
+    updatedAt: input.nowIso,
+  };
 }
 
 function createWorkflowState(input: {
@@ -336,6 +402,7 @@ export async function runLoomClaimAndStartWorkflow(
     return resolvedState;
   }
   const state = resolvedState.data;
+  const nowIso = new Date(now).toISOString();
 
   const project = resolveGitHubProject(state);
   if (!project.ok) {
@@ -402,14 +469,17 @@ export async function runLoomClaimAndStartWorkflow(
     });
   }
 
+  let recoveryWorkflow: LoomWorkflowState | undefined;
   if (recoveryMode) {
-    const claim = findClaim(state, input.claimPinId as string);
-    if (!claim) {
-      return commandFailed('claim_not_found', `Loom claim not found in cache: ${input.claimPinId}`);
+    const recoveryClaim = await resolveRecoveryClaim({
+      workflowInput: input,
+      state,
+      claimPinId: input.claimPinId as string,
+    });
+    if (!recoveryClaim.ok) {
+      return recoveryClaim;
     }
-    if (!claimAuthorMatches(claim, input.developerGlobalMetaId)) {
-      return commandFailed('permission_denied', `Loom claim ${input.claimPinId} belongs to another developer.`);
-    }
+    recoveryWorkflow = recoveryClaim.data.workflow;
   }
 
   const scopedPaths = recoveryMode
@@ -423,17 +493,26 @@ export async function runLoomClaimAndStartWorkflow(
     ? buildLoomBranchName(input.taskPinId, input.claimPinId as string)
     : pendingBranchName;
   const prepareWorkspacePath = recoveryMode ? scopedPaths.workspaceRepoPath : pendingPaths.stagingRepoPath;
-  const prepared = await input.github.prepareForkWorkspace({
-    runner: input.runner,
-    repoUri: project.data.repoUri,
-    workspaceRepoPath: prepareWorkspacePath,
-    branchName: prepareBranchName,
-    baseBranch: project.data.baseBranch,
-    upstreamRemote: DEFAULT_UPSTREAM_REMOTE,
-    forkRemote: DEFAULT_FORK_REMOTE,
-  });
-  if (!prepared.ok) {
-    return prepared;
+  const reuseRecoveryWorkspace = recoveryMode
+    && !input.resetWorkspace
+    && await input.pathExists(scopedPaths.workspaceRepoPath);
+  let prepared: PrepareGitHubForkWorkspaceResult | undefined;
+  if (!reuseRecoveryWorkspace) {
+    const preparedResult = await input.github.prepareForkWorkspace({
+      runner: input.runner,
+      repoUri: project.data.repoUri,
+      workspaceRepoPath: prepareWorkspacePath,
+      branchName: prepareBranchName,
+      baseBranch: project.data.baseBranch,
+      upstreamRemote: DEFAULT_UPSTREAM_REMOTE,
+      forkRemote: DEFAULT_FORK_REMOTE,
+    });
+    if (!preparedResult.ok) {
+      return recoveryMode
+        ? claimWrittenStartFailed(input, input.claimPinId as string, preparedResult)
+        : preparedResult;
+    }
+    prepared = preparedResult.data;
   }
 
   let claimWrite: LoomProtocolRecordWriteResult | undefined;
@@ -456,6 +535,22 @@ export async function runLoomClaimAndStartWorkflow(
   const finalPaths = input.workflowStore.resolve(input.taskPinId, finalClaimPinId);
   const finalBranchName = buildLoomBranchName(input.taskPinId, finalClaimPinId as string);
   try {
+    if (claimWrite) {
+      await input.workflowStore.write(createClaimWorkflowState({
+        taskPinId: input.taskPinId,
+        claimPinId: finalClaimPinId as string,
+        developerMetaBotSlug: input.developerMetaBotSlug,
+        developerGlobalMetaId: input.developerGlobalMetaId,
+        repoUri: project.data.repoUri,
+        baseBranch: project.data.baseBranch,
+        forkRepo: prepared?.forkRepo.fullName,
+        branchName: finalBranchName,
+        workspacePath: finalPaths.workspaceRepoPath,
+        claimWrite,
+        nowIso,
+      }));
+    }
+
     if (!recoveryMode) {
       await input.renamePath(pendingPaths.stagingRepoPath, finalPaths.workspaceRepoPath);
     }
@@ -466,7 +561,7 @@ export async function runLoomClaimAndStartWorkflow(
       branchName: finalBranchName,
     });
     if (!checkout.ok) {
-      return claimWrite
+      return claimWrite || recoveryMode
         ? claimWrittenStartFailed(input, finalClaimPinId as string, checkout)
         : checkout;
     }
@@ -529,7 +624,7 @@ export async function runLoomClaimAndStartWorkflow(
     });
     const invalidFinalStatus = invalidPayload('status', statusPayload);
     if (invalidFinalStatus) {
-      return claimWrite
+      return claimWrite || recoveryMode
         ? claimWrittenStartFailed(input, finalClaimPinId as string, invalidFinalStatus)
         : invalidFinalStatus;
     }
@@ -542,7 +637,7 @@ export async function runLoomClaimAndStartWorkflow(
       writeChain: input.writeChain,
     });
     if (!statusWrite.ok) {
-      return claimWrite
+      return claimWrite || recoveryMode
         ? claimWrittenStartFailed(input, finalClaimPinId as string, statusWrite)
         : statusWrite;
     }
@@ -554,14 +649,14 @@ export async function runLoomClaimAndStartWorkflow(
       developerGlobalMetaId: input.developerGlobalMetaId,
       repoUri: project.data.repoUri,
       baseBranch: project.data.baseBranch,
-      forkRepo: prepared.data.forkRepo.fullName,
+      forkRepo: prepared?.forkRepo.fullName ?? recoveryWorkflow?.forkRepo,
       branchName: finalBranchName,
       workspacePath: finalPaths.workspaceRepoPath,
       claimWrite,
       statusWrite: statusWrite.data,
       processLogPath: logFile.path,
       processLogUri,
-      nowIso: new Date(now).toISOString(),
+      nowIso,
     });
     const persisted = await input.workflowStore.write(workflowState);
 
@@ -577,7 +672,7 @@ export async function runLoomClaimAndStartWorkflow(
       workflowPath: input.workflowStore.resolve(persisted.taskPinId, persisted.claimPinId).workflowPath,
     });
   } catch (error) {
-    if (claimWrite) {
+    if (claimWrite || recoveryMode) {
       return claimWrittenStartFailed(input, finalClaimPinId as string, error);
     }
     throw error;

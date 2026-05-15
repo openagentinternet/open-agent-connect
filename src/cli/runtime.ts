@@ -2815,6 +2815,17 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             await fs.promises.mkdir(path.dirname(to), { recursive: true });
             await fs.promises.rename(from, to);
           },
+          pathExists: async (targetPath) => {
+            try {
+              await fs.promises.access(targetPath);
+              return true;
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                return false;
+              }
+              throw error;
+            }
+          },
         });
       },
     },

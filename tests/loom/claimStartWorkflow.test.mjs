@@ -104,9 +104,9 @@ function taskState(options = {}) {
   };
 }
 
-function createWorkflowStore(events = []) {
+function createWorkflowStore(events = [], options = {}) {
   const root = '/tmp/metabot-loom-test';
-  const writes = [];
+  const writes = options.writes ?? [];
   return {
     writes,
     paths: { profileRoot: '/tmp/metabot-loom-test/profile' },
@@ -126,8 +126,9 @@ function createWorkflowStore(events = []) {
         taskLogsRoot: path.join(root, 'runtime', 'loom', 'logs', taskSegment),
       };
     },
-    async read() {
-      return null;
+    async read(pinId, resolvedClaimPinId) {
+      events.push({ type: 'workflow.read', taskPinId: pinId, claimPinId: resolvedClaimPinId });
+      return writes.find((state) => state.taskPinId === pinId && state.claimPinId === resolvedClaimPinId) ?? null;
     },
     async write(state) {
       events.push({ type: 'workflow.write', state });
@@ -146,7 +147,7 @@ function commandFailed(code, message = code) {
 }
 
 function createDeps(overrides = {}) {
-  const events = [];
+  const events = overrides.events ?? [];
   const workflowStore = overrides.workflowStore ?? createWorkflowStore(events);
   const runner = {
     async run(input) {
@@ -219,6 +220,10 @@ function createDeps(overrides = {}) {
       },
       async renamePath(from, to) {
         events.push({ type: 'renamePath', from, to });
+      },
+      async pathExists(targetPath) {
+        events.push({ type: 'pathExists', path: targetPath });
+        return false;
       },
       now: () => 1750000000000,
       localRunId: 'run-1',
@@ -311,6 +316,7 @@ test('normal flow prepares staging, writes claim, moves workspace, uploads log, 
     'github.assertToolsReady',
     'github.prepareForkWorkspace',
     'writeChain',
+    'workflow.write',
     'renamePath',
     'runner.run',
     'writeLogFile',
@@ -320,10 +326,12 @@ test('normal flow prepares staging, writes claim, moves workspace, uploads log, 
   ]);
   assert.match(events[1].input.workspaceRepoPath, /\/staging\/.+\/run-1\/repo$/);
   assert.equal(events[2].request.path, '/protocols/loom-claim');
-  assert.match(events[3].to, /\/workspaces\/.+\/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbi0\/repo$/);
-  assert.deepEqual(events[4].input.args, ['checkout', '-B', 'loom/aaaaaaaa-bbbbbbbb']);
-  assert.equal(events[6].input.network, 'mvc');
-  assert.equal(events[7].request.path, '/protocols/loom-status');
+  assert.equal(events[3].state.claimPinId, claimPinId);
+  assert.deepEqual(events[3].state.statuses, []);
+  assert.match(events[4].to, /\/workspaces\/.+\/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbi0\/repo$/);
+  assert.deepEqual(events[5].input.args, ['checkout', '-B', 'loom/aaaaaaaa-bbbbbbbb']);
+  assert.equal(events[7].input.network, 'mvc');
+  assert.equal(events[8].request.path, '/protocols/loom-status');
   const [claimPayload, statusPayload] = payloadsFromWrites(events);
   assert.equal(claimPayload.taskPinId, taskPinId);
   assert.equal(statusPayload.claimPinId, claimPinId);
@@ -385,6 +393,81 @@ test('recovery flow resolves existing developer claim and does not write duplica
   );
 });
 
+test('immediate recovery uses local workflow claim when raw cache has not caught up', async () => {
+  const writes = [];
+  const { input, events } = createDeps({
+    workflowStore: createWorkflowStore([], { writes }),
+    async uploadFile(input) {
+      events.push({ type: 'uploadFile', input });
+      throw new Error('first upload failed');
+    },
+  });
+
+  const first = await runLoomClaimAndStartWorkflow(input);
+
+  assert.equal(first.ok, false);
+  assert.equal(first.code, 'claim_written_start_failed');
+  assert.equal(first.data.claimPinId, claimPinId);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].claimPinId, claimPinId);
+  assert.deepEqual(writes[0].statuses, []);
+
+  const retryEvents = [];
+  const retryWorkflowStore = createWorkflowStore(retryEvents, { writes });
+  const retry = await runLoomClaimAndStartWorkflow({
+    ...createDeps({
+      events: retryEvents,
+      workflowStore: retryWorkflowStore,
+      payoutAddress: undefined,
+      claimPinId,
+      state: taskState({ claims: [] }),
+      async pathExists(targetPath) {
+        retryEvents.push({ type: 'pathExists', path: targetPath });
+        return true;
+      },
+    }).input,
+  });
+
+  assert.equal(retry.ok, true);
+  assert.equal(retry.data.claimPinId, claimPinId);
+  assert.deepEqual(
+    retryEvents.filter((event) => event.type === 'writeChain').map((event) => event.request.path),
+    ['/protocols/loom-status'],
+  );
+  assert.equal(
+    retryEvents.some((event) => event.type === 'github.prepareForkWorkspace'),
+    false,
+  );
+});
+
+test('recovery flow reuses existing final workspace without cloning again', async () => {
+  const existingClaim = cachedRecord('claim', claimPinId, {
+    taskPinId,
+    payoutAddress: '1DeveloperPayoutAddress',
+  }, { globalMetaId: developerGlobalMetaId });
+  const { input, events } = createDeps({
+    payoutAddress: undefined,
+    claimPinId,
+    state: taskState({ claims: [existingClaim] }),
+    async pathExists(targetPath) {
+      events.push({ type: 'pathExists', path: targetPath });
+      return true;
+    },
+  });
+
+  const result = await runLoomClaimAndStartWorkflow(input);
+
+  assert.equal(result.ok, true);
+  assert.equal(
+    events.some((event) => event.type === 'github.prepareForkWorkspace'),
+    false,
+  );
+  assert.deepEqual(
+    events.filter((event) => event.type === 'pathExists').map((event) => event.path),
+    ['/tmp/metabot-loom-test/runtime/loom/workspaces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbi0/repo'],
+  );
+});
+
 test('recovery flow returns permission_denied when claim belongs to another developer', async () => {
   const existingClaim = cachedRecord('claim', claimPinId, {
     taskPinId,
@@ -401,6 +484,79 @@ test('recovery flow returns permission_denied when claim belongs to another deve
   assert.equal(result.ok, false);
   assert.equal(result.code, 'permission_denied');
   assert.deepEqual(events.map((event) => event.type), ['github.assertToolsReady']);
+});
+
+test('recovery status write failure returns retryable claim envelope', async () => {
+  const existingClaim = cachedRecord('claim', claimPinId, {
+    taskPinId,
+    payoutAddress: '1DeveloperPayoutAddress',
+  }, { globalMetaId: developerGlobalMetaId });
+  const { input, events } = createDeps({
+    payoutAddress: undefined,
+    claimPinId,
+    state: taskState({ claims: [existingClaim] }),
+    async writeChain(request) {
+      events.push({ type: 'writeChain', request });
+      return commandFailed('chain_write_failed', 'status write failed');
+    },
+  });
+
+  const result = await runLoomClaimAndStartWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'claim_written_start_failed');
+  assert.equal(result.data.claimPinId, claimPinId);
+  assert.match(result.data.retryCommand, new RegExp(`--claim-pin-id ${claimPinId}`));
+});
+
+test('recovery thrown upload failure returns retryable claim envelope', async () => {
+  const existingClaim = cachedRecord('claim', claimPinId, {
+    taskPinId,
+    payoutAddress: '1DeveloperPayoutAddress',
+  }, { globalMetaId: developerGlobalMetaId });
+  const { input, events } = createDeps({
+    payoutAddress: undefined,
+    claimPinId,
+    state: taskState({ claims: [existingClaim] }),
+    async uploadFile(input) {
+      events.push({ type: 'uploadFile', input });
+      throw new Error('retry upload failed');
+    },
+  });
+
+  const result = await runLoomClaimAndStartWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'claim_written_start_failed');
+  assert.equal(result.data.claimPinId, claimPinId);
+  assert.match(result.data.retryCommand, new RegExp(`--claim-pin-id ${claimPinId}`));
+  assert.match(result.data.cause.message, /retry upload failed/);
+});
+
+test('recovery thrown workflow persistence failure returns retryable claim envelope', async () => {
+  const existingClaim = cachedRecord('claim', claimPinId, {
+    taskPinId,
+    payoutAddress: '1DeveloperPayoutAddress',
+  }, { globalMetaId: developerGlobalMetaId });
+  const { input } = createDeps({
+    payoutAddress: undefined,
+    claimPinId,
+    state: taskState({ claims: [existingClaim] }),
+    workflowStore: {
+      ...createWorkflowStore([]),
+      async write() {
+        throw new Error('workflow write failed');
+      },
+    },
+  });
+
+  const result = await runLoomClaimAndStartWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'claim_written_start_failed');
+  assert.equal(result.data.claimPinId, claimPinId);
+  assert.match(result.data.retryCommand, new RegExp(`--claim-pin-id ${claimPinId}`));
+  assert.match(result.data.cause.message, /workflow write failed/);
 });
 
 test('process log upload failure after claim write returns claim_written_start_failed with retry command', async () => {
@@ -455,5 +611,5 @@ test('recovery flow returns claim_not_found when claim pin is absent', async () 
 
   assert.equal(result.ok, false);
   assert.equal(result.code, 'claim_not_found');
-  assert.deepEqual(events.map((event) => event.type), ['github.assertToolsReady']);
+  assert.deepEqual(events.map((event) => event.type), ['github.assertToolsReady', 'workflow.read']);
 });
