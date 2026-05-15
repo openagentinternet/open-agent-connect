@@ -61,7 +61,7 @@ test('validates payloads and passes stringified chain requests to injected write
     contentType: 'application/json',
     payload: JSON.stringify(payload),
     from: 'developer-slug',
-    chain: 'btc',
+    network: 'btc',
   });
   assert.equal(result.ok, true);
   assert.equal(result.data.pinId, 'status-pin');
@@ -122,6 +122,30 @@ test('maps failed writer envelopes to chain_write_failed', async () => {
   assert.equal(result.code, 'chain_write_failed');
   assert.match(result.message, /wallet_rejected/);
   assert.match(result.message, /User rejected signing/);
+});
+
+test('preserves failed writer envelopes as chain write failure causes', async () => {
+  const cause = {
+    ok: false,
+    state: 'manual_action_required',
+    code: 'wallet_confirmation_required',
+    message: 'Approve signing in the wallet.',
+    localUiUrl: 'http://127.0.0.1:3000/confirm',
+    data: {
+      requestId: 'request-123',
+    },
+  };
+  const result = await writeLoomProtocolRecord({
+    protocol: 'status',
+    payload: validStatusPayload(),
+    writeChain: async () => cause,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'chain_write_failed');
+  assert.match(result.message, /wallet_confirmation_required/);
+  assert.deepEqual(result.data.cause, cause);
 });
 
 test('requires a pinId in successful writer envelopes', async () => {

@@ -54,6 +54,20 @@ function formatWriteFailure(result: MetabotCommandResult<unknown>): string {
   return `${code}${result.message ?? 'Chain writer returned a failed result.'}`;
 }
 
+function commandFailedWithCause(
+  code: string,
+  message: string,
+  cause: MetabotCommandResult<unknown>,
+): MetabotCommandResult<never> {
+  return {
+    ok: false,
+    state: 'failed',
+    code,
+    message,
+    data: { cause },
+  } as MetabotCommandResult<never>;
+}
+
 export async function writeLoomProtocolRecord(
   input: LoomProtocolRecordWriteInput,
 ): Promise<MetabotCommandResult<LoomProtocolRecordWriteResult>> {
@@ -65,7 +79,7 @@ export async function writeLoomProtocolRecord(
   const writeRequest: Record<string, unknown> = {
     ...built.request,
     ...(input.from ? { from: input.from } : {}),
-    ...(input.chain ? { chain: input.chain } : {}),
+    ...(input.chain ? { network: input.chain } : {}),
   };
 
   let writeResult: MetabotCommandResult<unknown>;
@@ -77,7 +91,11 @@ export async function writeLoomProtocolRecord(
   }
 
   if (!writeResult.ok) {
-    return commandFailed('chain_write_failed', `Loom chain write failed: ${formatWriteFailure(writeResult)}`);
+    return commandFailedWithCause(
+      'chain_write_failed',
+      `Loom chain write failed: ${formatWriteFailure(writeResult)}`,
+      writeResult,
+    );
   }
 
   if (!isRecord(writeResult.data)) {
