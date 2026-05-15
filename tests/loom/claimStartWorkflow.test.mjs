@@ -263,6 +263,15 @@ function assertRetryableClaimFailureData(data) {
   assert.equal(data.workspaceRepoPath, expectedLocalPaths().workspaceRepoPath);
 }
 
+function assertSyncBeforeRetryData(data) {
+  assert.equal(data.claimPinId, claimPinId);
+  assert.equal(data.stagingRepoPath, expectedLocalPaths().stagingRepoPath);
+  assert.equal(data.workspaceRepoPath, expectedLocalPaths().workspaceRepoPath);
+  assert.equal(data.syncCommand, 'metabot loom sync');
+  assert.match(data.retryAfterSyncCommand, new RegExp(`--claim-pin-id ${claimPinId}`));
+  assert.equal(Object.hasOwn(data, 'retryCommand'), false);
+}
+
 test('non-GitHub task returns unsupported_project_base', async () => {
   const { input, events } = createDeps({
     state: taskState({ taskPayload: validTaskPayload({ projectBase: 'chain', project: {} }) }),
@@ -312,18 +321,18 @@ test('dry-run returns planned payloads and final previews without side effects',
   assert.equal(result.data.claimPayload.taskPinId, taskPinId);
   assert.equal(result.data.claimPayload.payoutAddress, '1DeveloperPayoutAddress');
   assert.equal(result.data.statusPayload.status, 'started');
-  assert.equal(result.data.statusPayload.claimPinId, `${'0'.repeat(64)}i0`);
-  assert.equal(result.data.statusPayload.branchName, 'loom/aaaaaaaa-00000000');
+  assert.equal(result.data.statusPayload.claimPinId, 'pending-claim');
+  assert.equal(result.data.statusPayload.branchName, 'loom/aaaaaaaa-pending-claim');
   assert.equal(
     result.data.statusPayload.workspacePath,
-    `/tmp/metabot-loom-test/runtime/loom/workspaces/${taskPinId}/${'0'.repeat(64)}i0/repo`,
+    `/tmp/metabot-loom-test/runtime/loom/workspaces/${taskPinId}/pending-claim/repo`,
   );
-  assert.equal(result.data.preview.claimPinId, `${'0'.repeat(64)}i0`);
-  assert.equal(result.data.preview.branchName, 'loom/aaaaaaaa-00000000');
+  assert.equal(result.data.preview.claimPinId, 'pending-claim');
+  assert.equal(result.data.preview.branchName, 'loom/aaaaaaaa-pending-claim');
   assert.equal(result.data.preview.stagingRepoPath, expectedLocalPaths().stagingRepoPath);
   assert.equal(
     result.data.preview.workspaceRepoPath,
-    `/tmp/metabot-loom-test/runtime/loom/workspaces/${taskPinId}/${'0'.repeat(64)}i0/repo`,
+    `/tmp/metabot-loom-test/runtime/loom/workspaces/${taskPinId}/pending-claim/repo`,
   );
   assert.deepEqual(result.data.github, {
     repoUri: 'https://github.com/openagentinternet/open-agent-connect',
@@ -429,6 +438,32 @@ test('recovery dry-run returns permission_denied when claim belongs to another d
   assert.equal(result.ok, false);
   assert.equal(result.code, 'permission_denied');
   assert.deepEqual(events.map((event) => event.type), ['github.assertToolsReady']);
+});
+
+test('recovery local workflow read failure returns sync-before-retry envelope', async () => {
+  const events = [];
+  const workflowStore = createWorkflowStore(events);
+  const { input } = createDeps({
+    events,
+    payoutAddress: undefined,
+    claimPinId,
+    state: taskState({ claims: [] }),
+    workflowStore: {
+      ...workflowStore,
+      async read(pinId, resolvedClaimPinId) {
+        events.push({ type: 'workflow.read', taskPinId: pinId, claimPinId: resolvedClaimPinId });
+        throw new Error('local workflow read failed');
+      },
+    },
+  });
+
+  const result = await runLoomClaimAndStartWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'claim_recovery_state_unavailable');
+  assertSyncBeforeRetryData(result.data);
+  assert.match(result.data.cause.message, /local workflow read failed/);
+  assert.deepEqual(events.map((event) => event.type), ['github.assertToolsReady', 'workflow.read']);
 });
 
 test('normal flow prepares staging, writes claim, moves workspace, uploads log, and writes started status', async () => {
@@ -701,19 +736,23 @@ test('recovery thrown upload failure returns retryable claim envelope', async ()
   assert.match(result.data.cause.message, /retry upload failed/);
 });
 
-test('recovery thrown workflow persistence failure returns retryable claim envelope', async () => {
+test('recovery final workflow persistence failure after status write returns sync-before-retry envelope', async () => {
   const existingClaim = cachedRecord('claim', claimPinId, {
     taskPinId,
     payoutAddress: '1DeveloperPayoutAddress',
   }, { globalMetaId: developerGlobalMetaId });
+  const events = [];
+  const workflowStore = createWorkflowStore(events);
   const { input } = createDeps({
+    events,
     payoutAddress: undefined,
     claimPinId,
     state: taskState({ claims: [existingClaim] }),
     workflowStore: {
-      ...createWorkflowStore([]),
-      async write() {
-        throw new Error('workflow write failed');
+      ...workflowStore,
+      async write(state) {
+        events.push({ type: 'workflow.write', state });
+        throw new Error('final workflow write failed');
       },
     },
   });
@@ -721,9 +760,14 @@ test('recovery thrown workflow persistence failure returns retryable claim envel
   const result = await runLoomClaimAndStartWorkflow(input);
 
   assert.equal(result.ok, false);
-  assert.equal(result.code, 'claim_written_start_failed');
-  assertRetryableClaimFailureData(result.data);
-  assert.match(result.data.cause.message, /workflow write failed/);
+  assert.equal(result.code, 'claim_started_marker_failed');
+  assertSyncBeforeRetryData(result.data);
+  assert.equal(result.data.statusPinId, statusPinId);
+  assert.match(result.data.cause.message, /final workflow write failed/);
+  assert.deepEqual(
+    events.filter((event) => event.type === 'writeChain').map((event) => event.request.path),
+    ['/protocols/loom-status'],
+  );
 });
 
 test('process log upload failure after claim write returns claim_written_start_failed with retry command', async () => {
@@ -763,12 +807,7 @@ test('minimal workflow marker failure after claim write returns sync-before-retr
 
   assert.equal(result.ok, false);
   assert.equal(result.code, 'claim_written_marker_failed');
-  assert.equal(result.data.claimPinId, claimPinId);
-  assert.equal(result.data.stagingRepoPath, expectedLocalPaths().stagingRepoPath);
-  assert.equal(result.data.workspaceRepoPath, expectedLocalPaths().workspaceRepoPath);
-  assert.equal(result.data.syncCommand, 'metabot loom sync');
-  assert.match(result.data.retryAfterSyncCommand, new RegExp(`--claim-pin-id ${claimPinId}`));
-  assert.equal(Object.hasOwn(result.data, 'retryCommand'), false);
+  assertSyncBeforeRetryData(result.data);
   assert.match(result.data.cause.message, /marker write failed/);
   assert.deepEqual(events.map((event) => event.type), [
     'github.assertToolsReady',

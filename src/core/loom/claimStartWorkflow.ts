@@ -14,7 +14,7 @@ import {
   type PrepareGitHubForkWorkspaceResult,
 } from './githubWorkflow';
 import type { LoomCachedRecord } from './rawCache';
-import type { LoomProtocolName } from './protocols';
+import { LOOM_PROTOCOLS, type LoomProtocolName } from './protocols';
 import { validateLoomPayload } from './validation';
 import { writeLoomProtocolRecord, type LoomProtocolRecordWriteResult } from './workflowChain';
 import {
@@ -106,7 +106,7 @@ interface GitHubTaskProject {
   upstreamRepo: GitHubRepoRef;
 }
 
-const DRY_RUN_CLAIM_PIN_ID = `${'0'.repeat(64)}i0`;
+const PENDING_CLAIM_MARKER = 'pending-claim';
 const DEFAULT_CHAIN = 'mvc';
 const DEFAULT_BASE_BRANCH = 'main';
 const DEFAULT_UPSTREAM_REMOTE = 'origin';
@@ -226,6 +226,25 @@ function buildPreviewChainWriteRequest(input: {
   });
 }
 
+function buildUncheckedPreviewChainWriteRequest(input: {
+  protocol: 'claim' | 'status';
+  payload: Record<string, unknown>;
+  from?: string;
+  chain: string;
+}): LoomClaimAndStartChainWritePreviewRequest {
+  const spec = LOOM_PROTOCOLS[input.protocol];
+  return {
+    operation: 'create',
+    path: spec.path,
+    encryption: '0',
+    version: spec.version,
+    contentType: spec.contentType,
+    payload: JSON.stringify(input.payload),
+    ...(input.from ? { from: input.from } : {}),
+    network: input.chain,
+  };
+}
+
 function findClaim(state: LoomWorkflowTaskState, claimPinId: string): LoomCachedRecord | null {
   if (!state.found) {
     return null;
@@ -262,6 +281,27 @@ function retryCommand(input: LoomClaimAndStartWorkflowInput, claimPinId: string)
   if (input.chain) parts.push('--chain', input.chain);
   if (input.fileChain) parts.push('--file-chain', input.fileChain);
   return parts.join(' ');
+}
+
+function syncBeforeRetryData(
+  input: LoomClaimAndStartWorkflowInput,
+  claimPinId: string,
+  cause: unknown,
+  paths: {
+    stagingRepoPath: string;
+    workspaceRepoPath: string;
+  },
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    claimPinId,
+    ...(extra ?? {}),
+    stagingRepoPath: paths.stagingRepoPath,
+    workspaceRepoPath: paths.workspaceRepoPath,
+    syncCommand: 'metabot loom sync',
+    retryAfterSyncCommand: retryCommand(input, claimPinId),
+    cause: causeData(cause),
+  };
 }
 
 function claimWrittenStartFailed(
@@ -301,14 +341,44 @@ function claimWrittenMarkerFailed(
     'claim_written_marker_failed',
     `Loom claim ${claimPinId} was written, but local recovery state could not be saved. Run loom sync before retrying with --claim-pin-id.`,
     {
-      data: {
-        claimPinId,
-        stagingRepoPath: paths.stagingRepoPath,
-        workspaceRepoPath: paths.workspaceRepoPath,
-        syncCommand: 'metabot loom sync',
-        retryAfterSyncCommand: retryCommand(input, claimPinId),
-        cause: causeData(cause),
-      },
+      data: syncBeforeRetryData(input, claimPinId, cause, paths),
+    },
+  );
+}
+
+function claimRecoveryStateUnavailable(
+  input: LoomClaimAndStartWorkflowInput,
+  claimPinId: string,
+  cause: unknown,
+  paths: {
+    stagingRepoPath: string;
+    workspaceRepoPath: string;
+  },
+): MetabotCommandResult<never> {
+  return commandFailed(
+    'claim_recovery_state_unavailable',
+    `Loom claim ${claimPinId} was not found in raw cache and local recovery state could not be read. Run loom sync before retrying with --claim-pin-id.`,
+    {
+      data: syncBeforeRetryData(input, claimPinId, cause, paths),
+    },
+  );
+}
+
+function claimStartedMarkerFailed(
+  input: LoomClaimAndStartWorkflowInput,
+  claimPinId: string,
+  statusPinId: string,
+  cause: unknown,
+  paths: {
+    stagingRepoPath: string;
+    workspaceRepoPath: string;
+  },
+): MetabotCommandResult<never> {
+  return commandFailed(
+    'claim_started_marker_failed',
+    `Loom claim ${claimPinId} and started status ${statusPinId} were written, but local workflow state could not be saved. Run loom sync before retrying with --claim-pin-id.`,
+    {
+      data: syncBeforeRetryData(input, claimPinId, cause, paths, { statusPinId }),
     },
   );
 }
@@ -482,8 +552,10 @@ export async function runLoomClaimAndStartWorkflow(
     workspaceRepoPath: input.workflowStore.resolve(input.taskPinId, claimPinId).workspaceRepoPath,
   });
   const pendingBranchName = `loom/${input.taskPinId.slice(0, 8)}-pending-${localRunId}`;
-  const plannedClaimPinId = input.claimPinId ?? DRY_RUN_CLAIM_PIN_ID;
-  const plannedBranchName = buildLoomBranchName(input.taskPinId, plannedClaimPinId);
+  const plannedClaimPinId = input.claimPinId ?? PENDING_CLAIM_MARKER;
+  const plannedBranchName = recoveryMode
+    ? buildLoomBranchName(input.taskPinId, plannedClaimPinId)
+    : `loom/${input.taskPinId.slice(0, 8)}-${PENDING_CLAIM_MARKER}`;
   const previewPaths = input.workflowStore.resolve(input.taskPinId, plannedClaimPinId, localRunId);
 
   let claimPayload: Record<string, unknown> | undefined;
@@ -502,30 +574,33 @@ export async function runLoomClaimAndStartWorkflow(
     workspacePath: previewPaths.workspaceRepoPath,
     repoUri: project.data.repoUri,
   });
-  const invalidStatus = invalidPayload('status', plannedStatusPayload);
-  if (invalidStatus) {
-    return invalidStatus;
-  }
-
-  const statusChainWritePreview = buildPreviewChainWriteRequest({
-    protocol: 'status',
-    payload: plannedStatusPayload,
-    from: input.from,
-    chain,
-  });
-  if (!statusChainWritePreview.ok) {
-    return statusChainWritePreview;
+  if (recoveryMode) {
+    const invalidStatus = invalidPayload('status', plannedStatusPayload);
+    if (invalidStatus) {
+      return invalidStatus;
+    }
   }
 
   let claimChainWritePreview:
     | { skipped: false; request: LoomClaimAndStartChainWritePreviewRequest }
     | { skipped: true; claimPinId: string; reason: string };
+  let statusChainWritePreviewRequest: LoomClaimAndStartChainWritePreviewRequest;
   if (recoveryMode) {
     claimChainWritePreview = {
       skipped: true,
       claimPinId: input.claimPinId as string,
       reason: 'Recovery mode uses the existing claim and does not write a duplicate claim.',
     };
+    const statusPreviewRequest = buildPreviewChainWriteRequest({
+      protocol: 'status',
+      payload: plannedStatusPayload,
+      from: input.from,
+      chain,
+    });
+    if (!statusPreviewRequest.ok) {
+      return statusPreviewRequest;
+    }
+    statusChainWritePreviewRequest = statusPreviewRequest.data;
   } else {
     const claimPreviewRequest = buildPreviewChainWriteRequest({
       protocol: 'claim',
@@ -540,6 +615,12 @@ export async function runLoomClaimAndStartWorkflow(
       skipped: false,
       request: claimPreviewRequest.data,
     };
+    statusChainWritePreviewRequest = buildUncheckedPreviewChainWriteRequest({
+      protocol: 'status',
+      payload: plannedStatusPayload,
+      from: input.from,
+      chain,
+    });
   }
 
   let processLogFileChain: string;
@@ -556,11 +637,21 @@ export async function runLoomClaimAndStartWorkflow(
 
   let recoveryWorkflow: LoomWorkflowState | undefined;
   if (recoveryMode) {
-    const recoveryClaim = await resolveRecoveryClaim({
-      workflowInput: input,
-      state,
-      claimPinId: input.claimPinId as string,
-    });
+    let recoveryClaim: MetabotCommandResult<{ workflow?: LoomWorkflowState }>;
+    try {
+      recoveryClaim = await resolveRecoveryClaim({
+        workflowInput: input,
+        state,
+        claimPinId: input.claimPinId as string,
+      });
+    } catch (error) {
+      return claimRecoveryStateUnavailable(
+        input,
+        input.claimPinId as string,
+        error,
+        failurePaths(input.claimPinId as string),
+      );
+    }
     if (!recoveryClaim.ok) {
       return recoveryClaim;
     }
@@ -586,7 +677,7 @@ export async function runLoomClaimAndStartWorkflow(
         claim: claimChainWritePreview,
         status: {
           skipped: false,
-          request: statusChainWritePreview.data,
+          request: statusChainWritePreviewRequest,
         },
       },
       preview: {
@@ -811,7 +902,18 @@ export async function runLoomClaimAndStartWorkflow(
       processLogUri,
       nowIso,
     });
-    const persisted = await input.workflowStore.write(workflowState);
+    let persisted: LoomWorkflowState;
+    try {
+      persisted = await input.workflowStore.write(workflowState);
+    } catch (error) {
+      return claimStartedMarkerFailed(
+        input,
+        finalClaimPinId as string,
+        statusWrite.data.pinId,
+        error,
+        failurePaths(finalClaimPinId as string),
+      );
+    }
 
     return commandSuccess({
       dryRun: false,
