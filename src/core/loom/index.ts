@@ -7,3 +7,4 @@ export * from './taskViews';
 export * from './draftTask';
 export * from './workflowTypes';
 export * from './workflowStore';
+export * from './workflowState';
