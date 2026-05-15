@@ -152,7 +152,7 @@ For refund and order operations, keep the selected seller/provider actor:
 - Preserve price and currency as explicit payload fields.
 - Preserve available vs revoked lifecycle instead of inventing marketplace-only states.
 - If an icon or skill document must be stored on-chain first, publish that asset before calling this skill. File upload supports MVC, BTC, and OPCAT, but not DOGE.
-- If human names BTC (`btc`, `比特币`, `bitcoin`), DOGE (`doge`, `dogecoin`), or OPCAT (`opcat`), pass `--chain btc`, `--chain doge`, or `--chain opcat`; otherwise omit `--chain` so the configured default write network applies.
+- If human names BTC (`btc`, `bitcoin`), DOGE (`doge`, `dogecoin`), or OPCAT (`opcat`), pass `--chain btc`, `--chain doge`, or `--chain opcat`; otherwise omit `--chain` so the configured default write network applies.
 
 ## In Scope
 
