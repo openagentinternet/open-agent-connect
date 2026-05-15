@@ -110,6 +110,10 @@ function latestRecord(records: LoomCachedRecord[]): LoomCachedRecord | undefined
   return sortRecords(records).at(-1);
 }
 
+function sortLatestFirst(records: LoomCachedRecord[]): LoomCachedRecord[] {
+  return sortRecords(records).reverse();
+}
+
 function isAfter(left: LoomCachedRecord | undefined, right: LoomCachedRecord | undefined): boolean {
   return Boolean(left && right && compareRecords(left, right) > 0);
 }
@@ -133,7 +137,7 @@ function rejectInvalidPayload(record: LoomCachedRecord): LoomWorkflowStateInvali
 }
 
 function findTask(rawState: LoomRawCacheState, taskPinId: string, invalidBuckets: LoomWorkflowTaskInvalidBuckets): LoomCachedRecord | undefined {
-  const tasks = sortRecords(rawState.records.task.filter((record) => record.pinId === taskPinId));
+  const tasks = sortLatestFirst(rawState.records.task.filter((record) => record.pinId === taskPinId));
   for (const task of tasks) {
     const payloadInvalid = rejectInvalidPayload(task);
     if (payloadInvalid) {
@@ -145,10 +149,8 @@ function findTask(rawState: LoomRawCacheState, taskPinId: string, invalidBuckets
   return undefined;
 }
 
-function taskMismatch(record: LoomCachedRecord, taskPinId: string): LoomWorkflowStateInvalidRecord | undefined {
-  return stringField(record, 'taskPinId') === taskPinId
-    ? undefined
-    : invalid(record, 'invalid_reference', `${record.protocol} must reference task ${taskPinId}.`);
+function referencesTask(record: LoomCachedRecord, taskPinId: string): boolean {
+  return stringField(record, 'taskPinId') === taskPinId;
 }
 
 function claimMismatch(record: LoomCachedRecord, claim: LoomCachedRecord | undefined): LoomWorkflowStateInvalidRecord | undefined {
@@ -174,6 +176,10 @@ function claimHasPayoutAddress(record: LoomCachedRecord): boolean {
   return Boolean(stringField(record, 'payoutAddress'));
 }
 
+function invalidTaskReference(record: LoomCachedRecord, taskPinId: string): LoomWorkflowStateInvalidRecord {
+  return invalid(record, 'invalid_reference', `${record.protocol} must reference task ${taskPinId}.`);
+}
+
 function stateFromRecords(
   valid: LoomWorkflowTaskStateBuckets,
   latestStatus: LoomCachedRecord | undefined,
@@ -185,7 +191,11 @@ function stateFromRecords(
     return 'rejected';
   }
 
-  if (latestAcceptance && (!latestDelivery || !isAfter(latestDelivery, latestAcceptance))) {
+  if (
+    latestAcceptance
+    && (!latestDelivery || !isAfter(latestDelivery, latestAcceptance))
+    && (!latestStatus || !isAfter(latestStatus, latestAcceptance))
+  ) {
     const payload = payloadObject(latestAcceptance);
     if (payload.verdict === 'revision_needed') {
       return 'revision_needed';
@@ -198,15 +208,19 @@ function stateFromRecords(
     }
   }
 
+  if (latestStatus) {
+    const status = payloadObject(latestStatus).status;
+    if (status === 'failed') {
+      return 'failed';
+    }
+  }
+
   if (latestDelivery && (!latestAcceptance || isAfter(latestDelivery, latestAcceptance))) {
     return 'delivered';
   }
 
   if (latestStatus) {
     const status = payloadObject(latestStatus).status;
-    if (status === 'failed') {
-      return 'failed';
-    }
     if (status === 'started' || status === 'in_progress') {
       return 'in_progress';
     }
@@ -237,13 +251,12 @@ export function buildLoomWorkflowTaskState(
 
   const claimsByPinId = new Map<string, LoomCachedRecord>();
   for (const claim of sortRecords(rawState.records.claim)) {
+    if (!referencesTask(claim, taskPinId)) {
+      continue;
+    }
     const payloadInvalid = rejectInvalidPayload(claim);
     if (payloadInvalid) {
       invalidBuckets.claims.push(payloadInvalid);
-      continue;
-    }
-    const referenceInvalid = taskMismatch(claim, taskPinId);
-    if (referenceInvalid) {
       continue;
     }
     if (!claimHasPayoutAddress(claim)) {
@@ -255,16 +268,20 @@ export function buildLoomWorkflowTaskState(
   }
 
   for (const status of sortRecords(rawState.records.status)) {
+    const hasTaskReference = referencesTask(status, taskPinId);
+    const claim = claimsByPinId.get(stringField(status, 'claimPinId') ?? '');
+    if (!hasTaskReference && !claim) {
+      continue;
+    }
     const payloadInvalid = rejectInvalidPayload(status);
     if (payloadInvalid) {
       invalidBuckets.statuses.push(payloadInvalid);
       continue;
     }
-    const referenceInvalid = taskMismatch(status, taskPinId);
-    if (referenceInvalid) {
+    if (!hasTaskReference) {
+      invalidBuckets.statuses.push(invalidTaskReference(status, taskPinId));
       continue;
     }
-    const claim = claimsByPinId.get(stringField(status, 'claimPinId') ?? '');
     const missingClaim = claimMismatch(status, claim);
     if (missingClaim) {
       invalidBuckets.statuses.push(missingClaim);
@@ -280,16 +297,20 @@ export function buildLoomWorkflowTaskState(
 
   const deliveriesByPinId = new Map<string, LoomCachedRecord>();
   for (const delivery of sortRecords(rawState.records.delivery)) {
+    const hasTaskReference = referencesTask(delivery, taskPinId);
+    const claim = claimsByPinId.get(stringField(delivery, 'claimPinId') ?? '');
+    if (!hasTaskReference && !claim) {
+      continue;
+    }
     const payloadInvalid = rejectInvalidPayload(delivery);
     if (payloadInvalid) {
       invalidBuckets.deliveries.push(payloadInvalid);
       continue;
     }
-    const referenceInvalid = taskMismatch(delivery, taskPinId);
-    if (referenceInvalid) {
+    if (!hasTaskReference) {
+      invalidBuckets.deliveries.push(invalidTaskReference(delivery, taskPinId));
       continue;
     }
-    const claim = claimsByPinId.get(stringField(delivery, 'claimPinId') ?? '');
     const missingClaim = claimMismatch(delivery, claim);
     if (missingClaim) {
       invalidBuckets.deliveries.push(missingClaim);
@@ -305,17 +326,21 @@ export function buildLoomWorkflowTaskState(
   }
 
   for (const acceptance of sortRecords(rawState.records.acceptance)) {
+    const hasTaskReference = referencesTask(acceptance, taskPinId);
+    const deliveryPinId = stringField(acceptance, 'deliveryPinId');
+    const delivery = deliveryPinId ? deliveriesByPinId.get(deliveryPinId) : undefined;
+    if (!hasTaskReference && !delivery) {
+      continue;
+    }
     const payloadInvalid = rejectInvalidPayload(acceptance);
     if (payloadInvalid) {
       invalidBuckets.acceptances.push(payloadInvalid);
       continue;
     }
-    const referenceInvalid = taskMismatch(acceptance, taskPinId);
-    if (referenceInvalid) {
+    if (!hasTaskReference) {
+      invalidBuckets.acceptances.push(invalidTaskReference(acceptance, taskPinId));
       continue;
     }
-    const deliveryPinId = stringField(acceptance, 'deliveryPinId');
-    const delivery = deliveryPinId ? deliveriesByPinId.get(deliveryPinId) : undefined;
     if (!deliveryPinId || !delivery) {
       invalidBuckets.acceptances.push(invalid(acceptance, 'missing_delivery', `loom-acceptance references an unknown delivery ${deliveryPinId ?? ''}.`));
       continue;
@@ -328,16 +353,20 @@ export function buildLoomWorkflowTaskState(
   }
 
   for (const claimReject of sortRecords(rawState.records['claim-reject'])) {
+    const hasTaskReference = referencesTask(claimReject, taskPinId);
+    const claim = claimsByPinId.get(stringField(claimReject, 'claimPinId') ?? '');
+    if (!hasTaskReference && !claim) {
+      continue;
+    }
     const payloadInvalid = rejectInvalidPayload(claimReject);
     if (payloadInvalid) {
       invalidBuckets.claimRejects.push(payloadInvalid);
       continue;
     }
-    const referenceInvalid = taskMismatch(claimReject, taskPinId);
-    if (referenceInvalid) {
+    if (!hasTaskReference) {
+      invalidBuckets.claimRejects.push(invalidTaskReference(claimReject, taskPinId));
       continue;
     }
-    const claim = claimsByPinId.get(stringField(claimReject, 'claimPinId') ?? '');
     const missingClaim = claimMismatch(claimReject, claim);
     if (missingClaim) {
       invalidBuckets.claimRejects.push(missingClaim);

@@ -12,6 +12,8 @@ const {
 const taskPinId = `${'a'.repeat(64)}i0`;
 const claimPinId = `${'b'.repeat(64)}i0`;
 const deliveryPinId = `${'c'.repeat(64)}i0`;
+const unrelatedTaskPinId = `${'8'.repeat(64)}i0`;
+const unrelatedClaimPinId = `${'7'.repeat(64)}i0`;
 const requesterGlobalMetaId = 'requester-global';
 const developerGlobalMetaId = 'developer-global';
 
@@ -255,4 +257,116 @@ test('findValidClaimForDelivery returns the corresponding claim', () => {
   }), taskPinId);
 
   assert.equal(findValidClaimForDelivery(state, deliveryPinId)?.pinId, claimPinId);
+});
+
+test('marks status with target claim and wrong task reference invalid', () => {
+  const badStatus = statusRecord(developerGlobalMetaId, 'completed', {
+    payload: { taskPinId: unrelatedTaskPinId },
+  });
+
+  const state = buildLoomWorkflowTaskState(cacheStateWith({
+    extraRecords: [badStatus],
+  }), taskPinId);
+
+  assert.equal(state.state, 'claimed');
+  assert.ok(state.invalid.statuses.some((entry) => entry.reason.code === 'invalid_reference'));
+});
+
+test('marks delivery with target claim and wrong task reference invalid', () => {
+  const badDelivery = deliveryRecord(developerGlobalMetaId, {
+    payload: { taskPinId: unrelatedTaskPinId },
+  });
+
+  const state = buildLoomWorkflowTaskState(cacheStateWith({
+    extraRecords: [badDelivery],
+  }), taskPinId);
+
+  assert.equal(state.state, 'claimed');
+  assert.ok(state.invalid.deliveries.some((entry) => entry.reason.code === 'invalid_reference'));
+});
+
+test('marks acceptance with target delivery and wrong task reference invalid', () => {
+  const badAcceptance = acceptanceRecord(requesterGlobalMetaId, 'passed', {
+    payload: { taskPinId: unrelatedTaskPinId },
+  });
+
+  const state = buildLoomWorkflowTaskState(cacheStateWith({
+    includeDelivery: true,
+    extraRecords: [badAcceptance],
+  }), taskPinId);
+
+  assert.equal(state.state, 'delivered');
+  assert.ok(state.invalid.acceptances.some((entry) => entry.reason.code === 'invalid_reference'));
+});
+
+test('marks claim rejection with target claim and wrong task reference invalid', () => {
+  const badClaimReject = claimRejectRecord(requesterGlobalMetaId, {
+    payload: { taskPinId: unrelatedTaskPinId },
+  });
+
+  const state = buildLoomWorkflowTaskState(cacheStateWith({
+    extraRecords: [badClaimReject],
+  }), taskPinId);
+
+  assert.equal(state.state, 'claimed');
+  assert.ok(state.invalid.claimRejects.some((entry) => entry.reason.code === 'invalid_reference'));
+});
+
+test('ignores completely unrelated claim status and delivery records', () => {
+  const unrelatedClaim = record('claim', unrelatedClaimPinId, {
+    taskPinId: unrelatedTaskPinId,
+    payoutAddress: 'unrelated-payout-address',
+  }, { globalMetaId: 'unrelated-developer', timestamp: 1750000001100 });
+  const unrelatedStatus = record('status', `${'6'.repeat(64)}i0`, {
+    taskPinId: unrelatedTaskPinId,
+    claimPinId: unrelatedClaimPinId,
+    status: 'failed',
+    progressSummary: 'Unrelated task failed.',
+  }, { globalMetaId: 'unrelated-developer', timestamp: 1750000002100 });
+  const unrelatedDelivery = record('delivery', `${'5'.repeat(64)}i0`, {
+    taskPinId: unrelatedTaskPinId,
+    claimPinId: unrelatedClaimPinId,
+    deliveryBase: 'github',
+    deliverySummary: 'Unrelated delivery.',
+    delivery: { prUrl: 'https://github.com/example/repo/pull/99' },
+    reviewChecklist: [{ item: 'Unrelated check.', status: 'passed' }],
+  }, { globalMetaId: 'unrelated-developer', timestamp: 1750000003100 });
+
+  const state = buildLoomWorkflowTaskState(cacheStateWith({
+    extraRecords: [unrelatedClaim, unrelatedStatus, unrelatedDelivery],
+  }), taskPinId);
+
+  assert.equal(state.state, 'claimed');
+  assert.equal(state.valid.claims.length, 1);
+  assert.equal(state.invalid.claims.length, 0);
+  assert.equal(state.invalid.statuses.length, 0);
+  assert.equal(state.invalid.deliveries.length, 0);
+});
+
+test('derives failed when latest status fails after an older delivery', () => {
+  const state = buildLoomWorkflowTaskState(cacheStateWith({
+    includeDelivery: true,
+    status: 'failed',
+    statusOptions: { timestamp: 1750000004000 },
+  }), taskPinId);
+
+  assert.equal(state.state, 'failed');
+});
+
+test('uses latest duplicate task record for requester permissions', () => {
+  const oldRequesterGlobalMetaId = 'old-requester-global';
+  const state = buildLoomWorkflowTaskState(cacheStateWith({
+    taskAuthor: oldRequesterGlobalMetaId,
+    taskOptions: { timestamp: 1750000000000 },
+    includeDelivery: true,
+    acceptanceAuthor: requesterGlobalMetaId,
+    acceptanceVerdict: 'passed',
+    extraRecords: [
+      taskRecord(requesterGlobalMetaId, { timestamp: 1750000000500 }),
+    ],
+  }), taskPinId);
+
+  assert.equal(state.task.globalMetaId, requesterGlobalMetaId);
+  assert.equal(state.state, 'accepted_paid');
+  assert.equal(state.invalid.acceptances.length, 0);
 });
