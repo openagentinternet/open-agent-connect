@@ -37,6 +37,27 @@ export function createNodeLoomCommandRunner(): LoomCommandRunner {
         const stderrChunks: Buffer[] = [];
         let settled = false;
         let timedOut = false;
+        let timeoutMessage = '';
+        let timeout: NodeJS.Timeout | undefined;
+        let escalationTimeout: NodeJS.Timeout | undefined;
+
+        const clearTimers = () => {
+          if (timeout) {
+            clearTimeout(timeout);
+            timeout = undefined;
+          }
+          if (escalationTimeout) {
+            clearTimeout(escalationTimeout);
+            escalationTimeout = undefined;
+          }
+        };
+
+        const appendStderr = (stderr: string, suffix: string) => {
+          if (!suffix) {
+            return stderr;
+          }
+          return stderr && !stderr.endsWith('\n') ? `${stderr}\n${suffix}` : `${stderr}${suffix}`;
+        };
 
         const finish = (exitCode: number, stderrSuffix = '') => {
           if (settled) {
@@ -44,8 +65,11 @@ export function createNodeLoomCommandRunner(): LoomCommandRunner {
           }
 
           settled = true;
+          clearTimers();
           const stdout = Buffer.concat(stdoutChunks).toString('utf8');
-          const stderr = `${Buffer.concat(stderrChunks).toString('utf8')}${stderrSuffix}`;
+          let stderr = Buffer.concat(stderrChunks).toString('utf8');
+          stderr = appendStderr(stderr, stderrSuffix);
+          stderr = appendStderr(stderr, timedOut ? timeoutMessage : '');
           resolve({
             command: input.command,
             args: input.args,
@@ -57,12 +81,16 @@ export function createNodeLoomCommandRunner(): LoomCommandRunner {
           });
         };
 
-        const timeout = input.timeoutMs && input.timeoutMs > 0
+        const timeoutMs = input.timeoutMs && input.timeoutMs > 0 ? input.timeoutMs : undefined;
+        timeout = timeoutMs
           ? setTimeout(() => {
             timedOut = true;
-            child.kill();
-            finish(124, `Command timed out after ${input.timeoutMs}ms.`);
-          }, input.timeoutMs)
+            timeoutMessage = `Command timed out after ${timeoutMs}ms.`;
+            child.kill('SIGTERM');
+            escalationTimeout = setTimeout(() => {
+              child.kill('SIGKILL');
+            }, Math.min(timeoutMs, 1000));
+          }, timeoutMs)
           : undefined;
 
         child.stdout.on('data', (chunk: Buffer) => {
@@ -74,16 +102,10 @@ export function createNodeLoomCommandRunner(): LoomCommandRunner {
         });
 
         child.on('error', (error) => {
-          if (timeout) {
-            clearTimeout(timeout);
-          }
-          finish(-1, error.message);
+          finish(timedOut ? 124 : -1, error.message);
         });
 
         child.on('close', (code) => {
-          if (timeout) {
-            clearTimeout(timeout);
-          }
           finish(timedOut ? 124 : code ?? -1);
         });
       });

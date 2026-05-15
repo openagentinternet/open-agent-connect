@@ -207,14 +207,10 @@ function parseGitHubLogin(stdout: string): string | null {
   return null;
 }
 
-async function resolveForkOwner(
-  input: PrepareGitHubForkWorkspaceInput,
-): Promise<MetabotCommandResult<{ owner: string }>> {
-  if (hasValue(input.forkOwner)) {
-    return commandSuccess({ owner: input.forkOwner.trim() });
-  }
-
-  const user = await input.runner.run({
+async function resolveAuthenticatedGitHubLogin(
+  runner: LoomCommandRunner,
+): Promise<MetabotCommandResult<{ login: string }>> {
+  const user = await runner.run({
     command: 'gh',
     args: ['api', 'user', '--jq', '.login'],
   });
@@ -233,7 +229,7 @@ async function resolveForkOwner(
     );
   }
 
-  return commandSuccess({ owner });
+  return commandSuccess({ login: owner });
 }
 
 function extractGitHubPullRequestUrl(stdout: string): string | null {
@@ -248,12 +244,19 @@ export async function prepareGitHubForkWorkspace(
   const upstreamRemote = input.upstreamRemote ?? 'origin';
   const forkRemote = input.forkRemote ?? 'fork';
 
-  const ownerResult = await resolveForkOwner(input);
-  if (!ownerResult.ok) {
-    return ownerResult;
+  let authenticatedLogin: string | undefined;
+  let candidateForkOwner = hasValue(input.forkOwner) ? input.forkOwner.trim() : undefined;
+  if (!candidateForkOwner) {
+    const loginResult = await resolveAuthenticatedGitHubLogin(input.runner);
+    if (!loginResult.ok) {
+      return loginResult;
+    }
+
+    authenticatedLogin = loginResult.data.login;
+    candidateForkOwner = authenticatedLogin;
   }
 
-  const candidateForkRepo = normalizeGitHubRepoUri(`${ownerResult.data.owner}/${upstreamRepo.repo}`);
+  const candidateForkRepo = normalizeGitHubRepoUri(`${candidateForkOwner}/${upstreamRepo.repo}`);
   const view = await input.runner.run({
     command: 'gh',
     args: ['repo', 'view', candidateForkRepo.fullName, '--json', 'parent,nameWithOwner'],
@@ -263,9 +266,24 @@ export async function prepareGitHubForkWorkspace(
     : null;
   let forkRepo = existingFork;
   if (!forkRepo) {
+    if (!authenticatedLogin) {
+      const loginResult = await resolveAuthenticatedGitHubLogin(input.runner);
+      if (!loginResult.ok) {
+        return loginResult;
+      }
+
+      authenticatedLogin = loginResult.data.login;
+    }
+
+    const forkArgs = ['repo', 'fork', upstreamRepo.fullName, '--clone=false'];
+    if (hasValue(input.forkOwner)
+      && candidateForkOwner.toLowerCase() !== authenticatedLogin.toLowerCase()) {
+      forkArgs.push('--org', candidateForkOwner);
+    }
+
     const fork = await input.runner.run({
       command: 'gh',
-      args: ['repo', 'fork', upstreamRepo.fullName, '--clone=false'],
+      args: forkArgs,
     });
     if (!isSuccessful(fork)) {
       return commandFailed('github_fork_failed', commandFailureMessage('Failed to fork repository', fork));

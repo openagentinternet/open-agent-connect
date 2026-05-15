@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url);
 const {
   assertGitHubToolsReady,
   buildLoomBranchName,
+  createNodeLoomCommandRunner,
   createLoomPullRequest,
   normalizeGitHubRepoUri,
   prepareGitHubForkWorkspace,
@@ -100,11 +101,26 @@ test('builds stable Loom branch names from task and claim pin ids', () => {
   );
 });
 
+test('createNodeLoomCommandRunner reports timeout after process closes', async () => {
+  const runner = createNodeLoomCommandRunner();
+  const result = await runner.run({
+    command: process.execPath,
+    args: ['-e', 'process.on("SIGTERM", () => {}); setTimeout(() => {}, 1000);'],
+    timeoutMs: 250,
+  });
+
+  assert.equal(result.exitCode, 124);
+  assert.match(result.stderr, /Command timed out after 250ms\./);
+  assert.ok(result.durationMs >= 400);
+});
+
 test('prepareGitHubForkWorkspace forks when no matching fork exists and prepares branch', async () => {
   const { calls, runner } = createFakeRunner((input) => commandResult(input, {
     exitCode: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'view' ? 1 : 0,
     stderr: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'view' ? 'not found' : '',
-    stdout: '',
+    stdout: input.command === 'gh' && input.args[0] === 'api' && input.args[1] === 'user'
+      ? 'loom-developer\n'
+      : '',
   }));
 
   const result = await prepareGitHubForkWorkspace({
@@ -121,6 +137,7 @@ test('prepareGitHubForkWorkspace forks when no matching fork exists and prepares
   assert.equal(result.ok, true);
   assert.deepEqual(commandLines(calls), [
     'gh repo view loom-developer/open-agent-connect --json parent,nameWithOwner',
+    'gh api user --jq .login',
     'gh repo fork openagentinternet/open-agent-connect --clone=false',
     'git clone https://github.com/openagentinternet/open-agent-connect.git /tmp/loom/repo',
     'git remote remove loom-fork',
@@ -129,6 +146,39 @@ test('prepareGitHubForkWorkspace forks when no matching fork exists and prepares
   ]);
   assert.equal(result.data.forkRepo.fullName, 'loom-developer/open-agent-connect');
   assert.equal(result.data.workspacePath, '/tmp/loom/repo');
+});
+
+test('prepareGitHubForkWorkspace forks under explicit organization owner', async () => {
+  const { calls, runner } = createFakeRunner((input) => commandResult(input, {
+    exitCode: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'view' ? 1 : 0,
+    stderr: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'view' ? 'not found' : '',
+    stdout: input.command === 'gh' && input.args[0] === 'api' && input.args[1] === 'user'
+      ? 'loom-developer\n'
+      : '',
+  }));
+
+  const result = await prepareGitHubForkWorkspace({
+    runner,
+    repoUri: 'https://github.com/openagentinternet/open-agent-connect.git',
+    forkOwner: 'openagentinternet-labs',
+    workspaceRepoPath: '/tmp/loom/org-repo',
+    branchName: 'loom/aaaaaaaa-bbbbbbbb',
+    baseBranch: 'main',
+    upstreamRemote: 'origin',
+    forkRemote: 'loom-fork',
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(commandLines(calls), [
+    'gh repo view openagentinternet-labs/open-agent-connect --json parent,nameWithOwner',
+    'gh api user --jq .login',
+    'gh repo fork openagentinternet/open-agent-connect --clone=false --org openagentinternet-labs',
+    'git clone https://github.com/openagentinternet/open-agent-connect.git /tmp/loom/org-repo',
+    'git remote remove loom-fork',
+    'git remote add loom-fork https://github.com/openagentinternet-labs/open-agent-connect.git',
+    'git checkout -B loom/aaaaaaaa-bbbbbbbb origin/main',
+  ]);
+  assert.equal(result.data.forkRepo.fullName, 'openagentinternet-labs/open-agent-connect');
 });
 
 test('prepareGitHubForkWorkspace resolves authenticated login before forking', async () => {
@@ -201,6 +251,8 @@ test('prepareGitHubForkWorkspace maps fork failures', async () => {
     stderr: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'fork' ? 'fork failed' : '',
     stdout: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'view'
       ? JSON.stringify({ nameWithOwner: 'loom-developer/open-agent-connect', parent: null })
+      : input.command === 'gh' && input.args[0] === 'api' && input.args[1] === 'user'
+        ? 'loom-developer\n'
       : '',
   }));
 
@@ -222,6 +274,8 @@ test('prepareGitHubForkWorkspace maps clone failures', async () => {
     stderr: input.command === 'git' && input.args[0] === 'clone' ? 'clone failed' : '',
     stdout: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'view'
       ? JSON.stringify({ nameWithOwner: 'loom-developer/open-agent-connect', parent: null })
+      : input.command === 'gh' && input.args[0] === 'api' && input.args[1] === 'user'
+        ? 'loom-developer\n'
       : '',
   }));
 
