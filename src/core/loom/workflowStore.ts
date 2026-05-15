@@ -1,7 +1,12 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
-import type { LoomWorkflowState } from './workflowTypes';
+import type {
+  LoomWorkflowCommitRecord,
+  LoomWorkflowState,
+  LoomWorkflowStatusRecord,
+  LoomWorkflowStatusValue,
+} from './workflowTypes';
 
 export interface LoomWorkflowPathInput {
   taskPinId: string;
@@ -79,6 +84,14 @@ function normalizeWorkflowState(
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
 const requiredStringFields: Array<keyof Pick<
   LoomWorkflowState,
   | 'developerMetaBotSlug'
@@ -103,25 +116,165 @@ const requiredStringFields: Array<keyof Pick<
 function hasRequiredStringFields(record: Partial<LoomWorkflowState>): boolean {
   return requiredStringFields.every((field) => {
     const value = record[field];
-    return typeof value === 'string' && value.trim().length > 0;
+    return isNonEmptyString(value);
   });
 }
 
-function isWorkflowStateForClaim(
+const statusValues = new Set<LoomWorkflowStatusValue>([
+  'started',
+  'in_progress',
+  'completed',
+  'failed',
+]);
+
+function isStringIfPresent(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === 'string';
+}
+
+function isStringOrNullIfPresent(value: unknown): value is string | null | undefined {
+  return value === undefined || typeof value === 'string' || value === null;
+}
+
+function isBooleanOrNullIfPresent(value: unknown): value is boolean | null | undefined {
+  return value === undefined || typeof value === 'boolean' || value === null;
+}
+
+function normalizeCommitRecord(value: unknown): LoomWorkflowCommitRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (!isNonEmptyString(value.sha) || typeof value.message !== 'string') {
+    return null;
+  }
+
+  if (!Array.isArray(value.files) || !value.files.every((file) => typeof file === 'string')) {
+    return null;
+  }
+
+  return {
+    sha: value.sha,
+    message: value.message,
+    files: value.files,
+  };
+}
+
+function normalizeStatusRecord(value: unknown): LoomWorkflowStatusRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (!isNonEmptyString(value.roundId) || typeof value.status !== 'string') {
+    return null;
+  }
+
+  if (!statusValues.has(value.status as LoomWorkflowStatusValue)) {
+    return null;
+  }
+
+  const pinId = value.pinId;
+  const processLogPath = value.processLogPath;
+  const processLogUri = value.processLogUri;
+  const llmSessionId = value.llmSessionId;
+  const checksPassed = value.checksPassed;
+
+  if (!isStringIfPresent(pinId)
+    || !isStringIfPresent(processLogPath)
+    || !isStringIfPresent(processLogUri)
+    || !isStringOrNullIfPresent(llmSessionId)
+    || !isBooleanOrNullIfPresent(checksPassed)) {
+    return null;
+  }
+
+  if (!Array.isArray(value.commits)) {
+    return null;
+  }
+
+  const commits = value.commits.map(normalizeCommitRecord);
+  if (commits.some((commit) => commit === null)) {
+    return null;
+  }
+
+  return {
+    roundId: value.roundId,
+    status: value.status as LoomWorkflowStatusValue,
+    ...(pinId !== undefined ? { pinId } : {}),
+    ...(processLogPath !== undefined ? { processLogPath } : {}),
+    ...(processLogUri !== undefined ? { processLogUri } : {}),
+    ...(llmSessionId !== undefined ? { llmSessionId } : {}),
+    commits: commits as LoomWorkflowCommitRecord[],
+    ...(checksPassed !== undefined ? { checksPassed } : {}),
+  };
+}
+
+function normalizeStatusRecords(value: unknown): LoomWorkflowStatusRecord[] | null {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const statuses = value.map(normalizeStatusRecord);
+  return statuses.some((status) => status === null)
+    ? null
+    : statuses as LoomWorkflowStatusRecord[];
+}
+
+function normalizeWorkflowStateForRead(
   value: unknown,
   taskPinId: string,
   claimPinId: string,
-): value is LoomWorkflowState {
-  if (!value || typeof value !== 'object') {
-    return false;
+): LoomWorkflowState | null {
+  if (!isRecord(value)) {
+    return null;
   }
 
   const record = value as Partial<LoomWorkflowState>;
-  return record.version === 1
+  if (!(record.version === 1
     && record.taskPinId === taskPinId
     && record.claimPinId === claimPinId
-    && hasRequiredStringFields(record)
-    && (record.statuses === undefined || Array.isArray(record.statuses));
+    && hasRequiredStringFields(record))) {
+    return null;
+  }
+
+  const statuses = normalizeStatusRecords(record.statuses);
+  if (!statuses) {
+    return null;
+  }
+
+  return normalizeWorkflowState(
+    {
+      ...record,
+      version: 1,
+      taskPinId,
+      claimPinId,
+      statuses,
+    } as LoomWorkflowState,
+    { refreshUpdatedAt: false },
+  );
+}
+
+async function writeJsonFileAtomically(filePath: string, payload: string): Promise<void> {
+  const directory = path.dirname(filePath);
+  const basename = path.basename(filePath);
+  const tmpPath = path.join(
+    directory,
+    `${basename}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+  );
+
+  try {
+    await fs.writeFile(tmpPath, payload, 'utf8');
+    await fs.rename(tmpPath, filePath);
+  } catch (error) {
+    try {
+      await fs.unlink(tmpPath);
+    } catch {
+      // Best-effort cleanup after a failed atomic write attempt.
+    }
+    throw error;
+  }
 }
 
 export function createLoomWorkflowStore(homeDirOrPaths: string | MetabotPaths): LoomWorkflowStore {
@@ -146,9 +299,7 @@ export function createLoomWorkflowStore(homeDirOrPaths: string | MetabotPaths): 
 
       try {
         const parsed = JSON.parse(raw) as unknown;
-        return isWorkflowStateForClaim(parsed, taskPinId, claimPinId)
-          ? normalizeWorkflowState(parsed, { refreshUpdatedAt: false })
-          : null;
+        return normalizeWorkflowStateForRead(parsed, taskPinId, claimPinId);
       } catch {
         return null;
       }
@@ -158,7 +309,10 @@ export function createLoomWorkflowStore(homeDirOrPaths: string | MetabotPaths): 
       const resolved = resolveLoomWorkflowPaths(paths, normalized);
 
       await fs.mkdir(path.dirname(resolved.workflowPath), { recursive: true });
-      await fs.writeFile(resolved.workflowPath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
+      await writeJsonFileAtomically(
+        resolved.workflowPath,
+        `${JSON.stringify(normalized, null, 2)}\n`,
+      );
 
       return normalized;
     },
