@@ -14,3 +14,4 @@ export * from './workflowChain';
 export * from './workflowLog';
 export * from './postTaskWorkflow';
 export * from './claimStartWorkflow';
+export * from './devRoundWorkflow';

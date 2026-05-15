@@ -68,6 +68,7 @@ import {
   prepareGitHubForkWorkspace,
   readLoomRawChainRecords,
   runLoomClaimAndStartWorkflow,
+  runLoomDevRoundWorkflow,
   runLoomPostTaskWorkflow,
   showLoomTaskFromCache,
   writeLoomProcessLogFile,
@@ -2826,6 +2827,137 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
               throw error;
             }
           },
+        });
+      },
+      runDevRound: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const homeDir = actor.homeDir;
+        const paths = resolveMetabotPaths(homeDir);
+        const rawCacheStore = createLoomRawCacheStore(paths);
+        const workflowStore = createLoomWorkflowStore(paths);
+        const rawState = await rawCacheStore.read();
+        const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
+        const signer = createCliSigner(context, homeDir);
+        const identity = await signer.getIdentity();
+        const runner = createNodeLoomCommandRunner();
+        const developerMetaBotSlug = path.basename(paths.profileRoot);
+        const workflow = await workflowStore.read(input.taskPinId, input.claimPinId);
+        if (!workflow) {
+          return commandFailed('claim_not_found', `Local Loom workflow state was not found for claim ${input.claimPinId}.`);
+        }
+        if (workflow.developerGlobalMetaId && workflow.developerGlobalMetaId !== identity.globalMetaId) {
+          return commandFailed('permission_denied', `Loom claim ${input.claimPinId} belongs to another developer.`);
+        }
+
+        const runtimeStore = createLlmRuntimeStore(paths);
+        const bindingStore = createLlmBindingStore(paths);
+        const runtimeResolver = createLlmRuntimeResolver({
+          runtimeStore,
+          bindingStore,
+          getPreferredRuntimeId: async () => {
+            try {
+              const raw = await fs.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
+              const data = JSON.parse(raw) as { runtimeId?: string | null };
+              return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+            } catch {
+              return null;
+            }
+          },
+        });
+        const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug: developerMetaBotSlug });
+        if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
+          return commandFailed(
+            'llm_runtime_unavailable',
+            `No healthy LLM runtime is available for MetaBot ${developerMetaBotSlug}.`,
+          );
+        }
+        const runtime = resolved.runtime;
+        const llmExecutor = new LlmExecutor({
+          sessionsRoot: paths.llmExecutorSessionsRoot,
+          transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+          skillsRoot: paths.skillsRoot,
+          backends: createRegistryBackendFactories(),
+        });
+
+        return runLoomDevRoundWorkflow({
+          from: input.from,
+          taskPinId: input.taskPinId,
+          claimPinId: input.claimPinId,
+          chain: input.chain,
+          fileChain: input.fileChain,
+          checks: input.checks,
+          roundNote: input.roundNote,
+          developerMetaBotSlug,
+          developerGlobalMetaId: identity.globalMetaId,
+          state: taskState,
+          workflowStore,
+          runner,
+          executeLlmRound: async (prompt, cwd) => {
+            let sessionId: string | undefined;
+            try {
+              sessionId = await llmExecutor.execute({
+                runtimeId: runtime.id,
+                runtime,
+                prompt,
+                timeout: LOOM_DRAFT_LLM_TIMEOUT_MS,
+                cwd,
+                metaBotSlug: developerMetaBotSlug,
+              });
+              const deadline = Date.now() + LOOM_DRAFT_LLM_TIMEOUT_MS;
+              while (Date.now() <= deadline) {
+                const session = await llmExecutor.getSession(sessionId);
+                if (session?.result) {
+                  if (session.result.status === 'completed') {
+                    if (resolved.bindingId) {
+                      runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => { /* best effort */ });
+                    }
+                  } else {
+                    runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => {});
+                  }
+                  return {
+                    sessionId,
+                    status: session.result.status,
+                    output: session.result.output,
+                    error: session.result.error,
+                  };
+                }
+                await sleep(LOOM_DRAFT_LLM_POLL_INTERVAL_MS);
+              }
+              await runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => {});
+              return {
+                sessionId,
+                status: 'failed',
+                output: '',
+                error: 'LLM runtime timed out while running Loom development round.',
+              };
+            } catch (error) {
+              await runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => {});
+              return {
+                sessionId,
+                status: 'failed',
+                output: '',
+                error: error instanceof Error ? error.message : 'LLM runtime is unavailable.',
+              };
+            }
+          },
+          writeChain: async (request) => {
+            const result = await signer.writePin(request);
+            return commandSuccess({
+              pinId: result.pinId,
+              txids: result.txids,
+              network: result.network,
+              globalMetaId: result.globalMetaId,
+              mvcAddress: result.mvcAddress,
+            });
+          },
+          uploadFile: async (uploadInput) => uploadLocalFileToChain({
+            filePath: uploadInput.filePath,
+            contentType: uploadInput.contentType,
+            network: uploadInput.network,
+            signer,
+          }),
+          writeLogFile: writeLoomProcessLogFile,
         });
       },
     },
