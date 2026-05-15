@@ -9,6 +9,7 @@ type ProcessLogFileChain = LoomFileUploadNetwork;
 const SUPPORTED_PROCESS_LOG_FILE_CHAINS = new Set<string>(['mvc', 'btc', 'opcat']);
 const DEFAULT_MAX_LOG_BYTES = 100 * 1024;
 const TRUNCATION_NOTE = '\n\n> Process log truncated to fit the Loom process log size limit.\n';
+const SECRET_KEY_RE = String.raw`(?:api_key|api-key|access_token|access-token|token|API_KEY|TOKEN|[A-Z0-9_]+_API_KEY|[A-Z0-9_]+_TOKEN)`;
 
 export interface LoomProcessLogCheck {
   command: string;
@@ -107,12 +108,16 @@ export function redactLoomProcessLog(input: unknown): string {
     '$1[REDACTED]',
   );
   output = output.replace(
-    /\b(api_key=)[^&\s"'`]+/gi,
+    /(["']?Authorization["']?\s*:\s*["']?Bearer\s+)[^"',}\s]+/gi,
     '$1[REDACTED]',
   );
   output = output.replace(
-    /\b(token=)[^&\s"'`]+/gi,
+    new RegExp(`\\b(${SECRET_KEY_RE}=)[^&\\s"'\\x60,}]+`, 'g'),
     '$1[REDACTED]',
+  );
+  output = output.replace(
+    new RegExp(`(["']?${SECRET_KEY_RE}["']?\\s*:\\s*)(["']?)([^"',}\\s]+)\\2`, 'g'),
+    '$1$2[REDACTED]$2',
   );
 
   return output;
@@ -126,8 +131,26 @@ function pushSection(lines: string[], title: string, values: string[]): void {
   lines.push('', `## ${title}`, ...present);
 }
 
+function safeStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+  const json = JSON.stringify(value, (_key, nestedValue) => {
+    if (typeof nestedValue === 'bigint') {
+      return nestedValue.toString();
+    }
+    if (typeof nestedValue === 'object' && nestedValue !== null) {
+      if (seen.has(nestedValue)) {
+        return '[Circular]';
+      }
+      seen.add(nestedValue);
+    }
+    return nestedValue;
+  }, 2);
+
+  return json ?? String(value);
+}
+
 function formatJson(value: unknown): string {
-  return ['```json', JSON.stringify(value, null, 2), '```'].join('\n');
+  return ['```json', safeStringify(value), '```'].join('\n');
 }
 
 function byteSafePrefix(input: string, maxBytes: number): string {
@@ -247,7 +270,13 @@ export async function writeLoomProcessLogFile(
 
   let content = renderLoomProcessLog(input);
   if (!content.endsWith('\n')) {
-    content = `${content}\n`;
+    const withNewline = `${content}\n`;
+    if (
+      input.maxBytes === undefined
+      || (input.maxBytes > 0 && Buffer.byteLength(withNewline, 'utf8') <= input.maxBytes)
+    ) {
+      content = withNewline;
+    }
   }
 
   await writeFile(path, content, 'utf8');

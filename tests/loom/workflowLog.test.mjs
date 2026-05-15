@@ -66,6 +66,28 @@ test('redacts common process log secrets', () => {
   assert.match(redacted, /\[REDACTED/);
 });
 
+test('redacts json env and query token shapes while keeping non-secret text readable', () => {
+  const input = [
+    'status=plain text is still readable',
+    '{"api_key":"json-api-secret","token":"json-token-secret"}',
+    '{"Authorization":"Bearer json-bearer-secret"}',
+    'OPENAI_API_KEY=sk-openai-secret',
+    'GITHUB_TOKEN=ghp_githubsecret',
+    'callback=https://example.test?access_token=query-secret&state=ok',
+  ].join('\n');
+
+  const redacted = redactLoomProcessLog(input);
+
+  assert.match(redacted, /plain text is still readable/);
+  assert.match(redacted, /state=ok/);
+  assert.doesNotMatch(redacted, /json-api-secret/);
+  assert.doesNotMatch(redacted, /json-token-secret/);
+  assert.doesNotMatch(redacted, /json-bearer-secret/);
+  assert.doesNotMatch(redacted, /sk-openai-secret/);
+  assert.doesNotMatch(redacted, /ghp_githubsecret/);
+  assert.doesNotMatch(redacted, /query-secret/);
+});
+
 test('renders deterministic markdown-ish process logs with truncation notes', () => {
   const rendered = renderLoomProcessLog({
     taskPinId: 'task-pin',
@@ -148,6 +170,19 @@ test('truncates non-ascii logs within the configured byte limit', () => {
   assert.ok(Buffer.byteLength(rendered, 'utf8') <= maxBytes);
 });
 
+test('renders circular and bigint diagnostics without throwing', () => {
+  const circular = { name: 'preview' };
+  circular.self = circular;
+
+  const rendered = renderLoomProcessLog({
+    payloadPreview: circular,
+    chainResult: { n: 1n },
+  });
+
+  assert.match(rendered, /\[Circular\]/);
+  assert.match(rendered, /"1"/);
+});
+
 test('writes rendered process logs to the expected path', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'loom-process-log-'));
   try {
@@ -169,6 +204,50 @@ test('writes rendered process logs to the expected path', async () => {
     assert.equal(result.path, join(directory, 'round-1.md'));
     assert.match(result.content, /Task: task-pin/);
     assert.equal(result.content.endsWith('\n'), true);
+    assert.equal(await readFile(result.path, 'utf8'), result.content);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('keeps tiny capped written process logs within maxBytes after newline handling', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'loom-process-log-'));
+  const maxBytes = 1;
+  try {
+    const result = await writeLoomProcessLogFile({
+      directory,
+      fileName: 'tiny.md',
+      rawLog: 'x'.repeat(100),
+      maxBytes,
+    });
+
+    assert.ok(Buffer.byteLength(result.content, 'utf8') <= maxBytes);
+    assert.equal(await readFile(result.path, 'utf8'), result.content);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('does not exceed exact process log byte caps when writing newline', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'loom-process-log-'));
+  const baseInput = {
+    taskPinId: 'task-pin',
+    claimPinId: 'claim-pin',
+    statusDecision: {
+      status: 'completed',
+      summary: 'Exact cap.',
+    },
+  };
+  const maxBytes = Buffer.byteLength(renderLoomProcessLog(baseInput), 'utf8');
+  try {
+    const result = await writeLoomProcessLogFile({
+      directory,
+      fileName: 'exact.md',
+      ...baseInput,
+      maxBytes,
+    });
+
+    assert.ok(Buffer.byteLength(result.content, 'utf8') <= maxBytes);
     assert.equal(await readFile(result.path, 'utf8'), result.content);
   } finally {
     await rm(directory, { recursive: true, force: true });
