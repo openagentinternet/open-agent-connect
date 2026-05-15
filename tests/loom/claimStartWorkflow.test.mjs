@@ -248,6 +248,21 @@ function payloadsFromWrites(events) {
     .map((event) => JSON.parse(event.request.payload));
 }
 
+function expectedLocalPaths() {
+  return {
+    stagingRepoPath: '/tmp/metabot-loom-test/runtime/loom/staging/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0/run-1/repo',
+    workspaceRepoPath: '/tmp/metabot-loom-test/runtime/loom/workspaces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbi0/repo',
+  };
+}
+
+function assertRetryableClaimFailureData(data) {
+  assert.equal(data.claimPinId, claimPinId);
+  assert.match(data.retryCommand, /loom claim-and-start/);
+  assert.match(data.retryCommand, new RegExp(`--claim-pin-id ${claimPinId}`));
+  assert.equal(data.stagingRepoPath, expectedLocalPaths().stagingRepoPath);
+  assert.equal(data.workspaceRepoPath, expectedLocalPaths().workspaceRepoPath);
+}
+
 test('non-GitHub task returns unsupported_project_base', async () => {
   const { input, events } = createDeps({
     state: taskState({ taskPayload: validTaskPayload({ projectBase: 'chain', project: {} }) }),
@@ -346,9 +361,7 @@ test('--reset-workspace in normal mode deletes only the current staging workspac
 
   assert.equal(result.ok, true);
   const removed = events.filter((event) => event.type === 'removePath').map((event) => event.path);
-  assert.deepEqual(removed, [
-    '/tmp/metabot-loom-test/runtime/loom/staging/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0/run-1/repo',
-  ]);
+  assert.deepEqual(removed, [expectedLocalPaths().stagingRepoPath]);
 });
 
 test('--reset-workspace in recovery mode deletes only that claim final workspace', async () => {
@@ -367,9 +380,7 @@ test('--reset-workspace in recovery mode deletes only that claim final workspace
 
   assert.equal(result.ok, true);
   const removed = events.filter((event) => event.type === 'removePath').map((event) => event.path);
-  assert.deepEqual(removed, [
-    '/tmp/metabot-loom-test/runtime/loom/workspaces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbi0/repo',
-  ]);
+  assert.deepEqual(removed, [expectedLocalPaths().workspaceRepoPath]);
 });
 
 test('recovery flow resolves existing developer claim and does not write duplicate claim', async () => {
@@ -464,7 +475,7 @@ test('recovery flow reuses existing final workspace without cloning again', asyn
   );
   assert.deepEqual(
     events.filter((event) => event.type === 'pathExists').map((event) => event.path),
-    ['/tmp/metabot-loom-test/runtime/loom/workspaces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbi0/repo'],
+    [expectedLocalPaths().workspaceRepoPath],
   );
 });
 
@@ -505,8 +516,54 @@ test('recovery status write failure returns retryable claim envelope', async () 
 
   assert.equal(result.ok, false);
   assert.equal(result.code, 'claim_written_start_failed');
-  assert.equal(result.data.claimPinId, claimPinId);
-  assert.match(result.data.retryCommand, new RegExp(`--claim-pin-id ${claimPinId}`));
+  assertRetryableClaimFailureData(result.data);
+});
+
+test('recovery pathExists failure returns retryable claim envelope with local paths', async () => {
+  const existingClaim = cachedRecord('claim', claimPinId, {
+    taskPinId,
+    payoutAddress: '1DeveloperPayoutAddress',
+  }, { globalMetaId: developerGlobalMetaId });
+  const { input, events } = createDeps({
+    payoutAddress: undefined,
+    claimPinId,
+    state: taskState({ claims: [existingClaim] }),
+    async pathExists(targetPath) {
+      events.push({ type: 'pathExists', path: targetPath });
+      throw new Error('workspace access denied');
+    },
+  });
+
+  const result = await runLoomClaimAndStartWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'claim_written_start_failed');
+  assertRetryableClaimFailureData(result.data);
+  assert.match(result.data.cause.message, /workspace access denied/);
+});
+
+test('recovery reset removePath failure returns retryable claim envelope with local paths', async () => {
+  const existingClaim = cachedRecord('claim', claimPinId, {
+    taskPinId,
+    payoutAddress: '1DeveloperPayoutAddress',
+  }, { globalMetaId: developerGlobalMetaId });
+  const { input, events } = createDeps({
+    payoutAddress: undefined,
+    claimPinId,
+    resetWorkspace: true,
+    state: taskState({ claims: [existingClaim] }),
+    async removePath(targetPath) {
+      events.push({ type: 'removePath', path: targetPath });
+      throw new Error('workspace removal denied');
+    },
+  });
+
+  const result = await runLoomClaimAndStartWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'claim_written_start_failed');
+  assertRetryableClaimFailureData(result.data);
+  assert.match(result.data.cause.message, /workspace removal denied/);
 });
 
 test('recovery thrown upload failure returns retryable claim envelope', async () => {
@@ -528,8 +585,7 @@ test('recovery thrown upload failure returns retryable claim envelope', async ()
 
   assert.equal(result.ok, false);
   assert.equal(result.code, 'claim_written_start_failed');
-  assert.equal(result.data.claimPinId, claimPinId);
-  assert.match(result.data.retryCommand, new RegExp(`--claim-pin-id ${claimPinId}`));
+  assertRetryableClaimFailureData(result.data);
   assert.match(result.data.cause.message, /retry upload failed/);
 });
 
@@ -554,8 +610,7 @@ test('recovery thrown workflow persistence failure returns retryable claim envel
 
   assert.equal(result.ok, false);
   assert.equal(result.code, 'claim_written_start_failed');
-  assert.equal(result.data.claimPinId, claimPinId);
-  assert.match(result.data.retryCommand, new RegExp(`--claim-pin-id ${claimPinId}`));
+  assertRetryableClaimFailureData(result.data);
   assert.match(result.data.cause.message, /workflow write failed/);
 });
 
@@ -571,9 +626,7 @@ test('process log upload failure after claim write returns claim_written_start_f
 
   assert.equal(result.ok, false);
   assert.equal(result.code, 'claim_written_start_failed');
-  assert.equal(result.data.claimPinId, claimPinId);
-  assert.match(result.data.retryCommand, /loom claim-and-start/);
-  assert.match(result.data.retryCommand, new RegExp(`--claim-pin-id ${claimPinId}`));
+  assertRetryableClaimFailureData(result.data);
   assert.equal(
     events.filter((event) => event.type === 'writeChain').length,
     1,

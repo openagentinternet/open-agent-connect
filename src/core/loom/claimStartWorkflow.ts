@@ -232,6 +232,10 @@ function claimWrittenStartFailed(
   input: LoomClaimAndStartWorkflowInput,
   claimPinId: string,
   cause: unknown,
+  paths: {
+    stagingRepoPath: string;
+    workspaceRepoPath: string;
+  },
 ): MetabotCommandResult<never> {
   return commandFailed(
     'claim_written_start_failed',
@@ -240,6 +244,8 @@ function claimWrittenStartFailed(
       data: {
         claimPinId,
         retryCommand: retryCommand(input, claimPinId),
+        stagingRepoPath: paths.stagingRepoPath,
+        workspaceRepoPath: paths.workspaceRepoPath,
         cause: causeData(cause),
       },
     },
@@ -410,6 +416,10 @@ export async function runLoomClaimAndStartWorkflow(
   }
 
   const pendingPaths = input.workflowStore.resolve(input.taskPinId, undefined, localRunId);
+  const failurePaths = (claimPinId: string): { stagingRepoPath: string; workspaceRepoPath: string } => ({
+    stagingRepoPath: pendingPaths.stagingRepoPath,
+    workspaceRepoPath: input.workflowStore.resolve(input.taskPinId, claimPinId).workspaceRepoPath,
+  });
   const pendingBranchName = `loom/${input.taskPinId.slice(0, 8)}-pending-${localRunId}`;
   const previewClaimPinId = input.claimPinId ?? PENDING_CLAIM_ID;
   const previewPaths = input.workflowStore.resolve(input.taskPinId, previewClaimPinId, localRunId);
@@ -486,16 +496,38 @@ export async function runLoomClaimAndStartWorkflow(
     ? input.workflowStore.resolve(input.taskPinId, input.claimPinId)
     : pendingPaths;
   if (input.resetWorkspace) {
-    await input.removePath(recoveryMode ? scopedPaths.workspaceRepoPath : scopedPaths.stagingRepoPath);
+    try {
+      await input.removePath(recoveryMode ? scopedPaths.workspaceRepoPath : scopedPaths.stagingRepoPath);
+    } catch (error) {
+      if (recoveryMode) {
+        return claimWrittenStartFailed(
+          input,
+          input.claimPinId as string,
+          error,
+          failurePaths(input.claimPinId as string),
+        );
+      }
+      throw error;
+    }
   }
 
   const prepareBranchName = recoveryMode
     ? buildLoomBranchName(input.taskPinId, input.claimPinId as string)
     : pendingBranchName;
   const prepareWorkspacePath = recoveryMode ? scopedPaths.workspaceRepoPath : pendingPaths.stagingRepoPath;
-  const reuseRecoveryWorkspace = recoveryMode
-    && !input.resetWorkspace
-    && await input.pathExists(scopedPaths.workspaceRepoPath);
+  let reuseRecoveryWorkspace = false;
+  if (recoveryMode && !input.resetWorkspace) {
+    try {
+      reuseRecoveryWorkspace = await input.pathExists(scopedPaths.workspaceRepoPath);
+    } catch (error) {
+      return claimWrittenStartFailed(
+        input,
+        input.claimPinId as string,
+        error,
+        failurePaths(input.claimPinId as string),
+      );
+    }
+  }
   let prepared: PrepareGitHubForkWorkspaceResult | undefined;
   if (!reuseRecoveryWorkspace) {
     const preparedResult = await input.github.prepareForkWorkspace({
@@ -509,7 +541,12 @@ export async function runLoomClaimAndStartWorkflow(
     });
     if (!preparedResult.ok) {
       return recoveryMode
-        ? claimWrittenStartFailed(input, input.claimPinId as string, preparedResult)
+        ? claimWrittenStartFailed(
+          input,
+          input.claimPinId as string,
+          preparedResult,
+          failurePaths(input.claimPinId as string),
+        )
         : preparedResult;
     }
     prepared = preparedResult.data;
@@ -562,7 +599,7 @@ export async function runLoomClaimAndStartWorkflow(
     });
     if (!checkout.ok) {
       return claimWrite || recoveryMode
-        ? claimWrittenStartFailed(input, finalClaimPinId as string, checkout)
+        ? claimWrittenStartFailed(input, finalClaimPinId as string, checkout, failurePaths(finalClaimPinId as string))
         : checkout;
     }
 
@@ -625,7 +662,7 @@ export async function runLoomClaimAndStartWorkflow(
     const invalidFinalStatus = invalidPayload('status', statusPayload);
     if (invalidFinalStatus) {
       return claimWrite || recoveryMode
-        ? claimWrittenStartFailed(input, finalClaimPinId as string, invalidFinalStatus)
+        ? claimWrittenStartFailed(input, finalClaimPinId as string, invalidFinalStatus, failurePaths(finalClaimPinId as string))
         : invalidFinalStatus;
     }
 
@@ -638,7 +675,7 @@ export async function runLoomClaimAndStartWorkflow(
     });
     if (!statusWrite.ok) {
       return claimWrite || recoveryMode
-        ? claimWrittenStartFailed(input, finalClaimPinId as string, statusWrite)
+        ? claimWrittenStartFailed(input, finalClaimPinId as string, statusWrite, failurePaths(finalClaimPinId as string))
         : statusWrite;
     }
 
@@ -673,7 +710,7 @@ export async function runLoomClaimAndStartWorkflow(
     });
   } catch (error) {
     if (claimWrite || recoveryMode) {
-      return claimWrittenStartFailed(input, finalClaimPinId as string, error);
+      return claimWrittenStartFailed(input, finalClaimPinId as string, error, failurePaths(finalClaimPinId as string));
     }
     throw error;
   }
