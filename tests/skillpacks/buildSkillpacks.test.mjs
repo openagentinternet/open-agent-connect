@@ -603,6 +603,15 @@ test('buildAgentConnectSkillpacks publishes provider service lifecycle commands 
   assert.match(content, /^name:\s*metabot-post-skillservice$/m);
   assert.match(content, /services skills --from <bot-slug>/);
   assert.match(content, /services publish --from <bot-slug> --payload-file/);
+  assert.match(content, /metabot identity who --json/);
+  assert.match(content, /metabot identity list --json/);
+  assert.match(content, /metabot services skills --from <bot-slug> --json/);
+  assert.match(content, /providerSkill.*primary runtime skills/s);
+  assert.match(content, /metafile:\/\/\.\.\./);
+  assert.match(content, /metabot-upload-file/);
+  assert.match(content, /explicit confirmation/i);
+  assert.match(content, /metabot services publish --from <bot-slug> --payload-file <path> \[--chain <chain>\]/);
+  assert.match(content, /Do not run the publish command until the human confirms/i);
   assert.match(content, /services owned list --from <bot-slug>/);
   assert.match(content, /services owned modify --from <bot-slug> --payload-file/);
   assert.match(content, /services owned revoke --from <bot-slug> --service-id/);
