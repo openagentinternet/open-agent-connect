@@ -96,23 +96,23 @@ export function redactLoomProcessLog(input: unknown): string {
     '[REDACTED PRIVATE KEY]',
   );
   output = output.replace(
-    /^.*\bmnemonic\b.*$/gim,
+    /^.*\b(?:mnemonic|seed phrase|seed words|recovery phrase|secret phrase)\b.*$/gim,
     '[REDACTED MNEMONIC]',
   );
   output = output.replace(
-    /\b(?:[a-z]+ ){11,23}[a-z]+\b/gi,
-    '[REDACTED MNEMONIC]',
-  );
-  output = output.replace(
-    /(Authorization:\s*Bearer\s+)[^\s"'`]+/gi,
+    /(Authorization:\s*(?:Bearer|token)\s+)[^\s"'`]+/gi,
     '$1[REDACTED]',
   );
   output = output.replace(
-    /(["']?Authorization["']?\s*:\s*["']?Bearer\s+)[^"',}\s]+/gi,
+    /(["']?Authorization["']?\s*:\s*["']?(?:Bearer|token)\s+)[^"',}\s]+/gi,
     '$1[REDACTED]',
   );
   output = output.replace(
-    new RegExp(`\\b(${SECRET_KEY_RE}=)[^&\\s"'\\x60,}]+`, 'g'),
+    /(^|\s)(--(?:token|api-key|api_key|access-token|access_token))(?:=|\s+)(?:"[^"]*"|'[^']*'|[^\s"'`]+)/gi,
+    '$1$2 [REDACTED]',
+  );
+  output = output.replace(
+    new RegExp(`\\b(${SECRET_KEY_RE}=)(?:"[^"]*"|'[^']*'|[^&\\s"'\\x60,}]+)`, 'g'),
     '$1[REDACTED]',
   );
   output = output.replace(

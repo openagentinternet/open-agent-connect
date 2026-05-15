@@ -70,13 +70,7 @@ function commandFailedWithCause(
   message: string,
   cause: unknown,
 ): MetabotCommandResult<never> {
-  return {
-    ok: false,
-    state: 'failed',
-    code,
-    message,
-    data: { cause },
-  } as MetabotCommandResult<never>;
+  return commandFailed(code, message, { data: { cause } });
 }
 
 export async function writeLoomProtocolRecord(

@@ -88,6 +88,59 @@ test('redacts json env and query token shapes while keeping non-secret text read
   assert.doesNotMatch(redacted, /query-secret/);
 });
 
+test('redacts cli flag and authorization token secret shapes', () => {
+  const input = [
+    'command=oac publish --token ghp_secret --api-key sk-secret --dry-run',
+    'TOKEN="secret value"',
+    "API_KEY='single-quote-secret'",
+    'Authorization: token ghp_authsecret',
+    'visible text remains readable',
+  ].join('\n');
+
+  const redacted = redactLoomProcessLog(input);
+
+  assert.match(redacted, /visible text remains readable/);
+  assert.match(redacted, /--dry-run/);
+  assert.doesNotMatch(redacted, /ghp_secret/);
+  assert.doesNotMatch(redacted, /sk-secret/);
+  assert.doesNotMatch(redacted, /secret value/);
+  assert.doesNotMatch(redacted, /single-quote-secret/);
+  assert.doesNotMatch(redacted, /ghp_authsecret/);
+});
+
+test('redacts cli secret shapes from rendered check commands', () => {
+  const rendered = renderLoomProcessLog({
+    checks: [
+      {
+        command: 'oac publish --token ghp_secret --api-key sk-secret',
+        status: 'failed',
+      },
+      {
+        command: 'curl -H "Authorization: token ghp_authsecret" https://example.test',
+        status: 'failed',
+      },
+    ],
+  });
+
+  assert.doesNotMatch(rendered, /ghp_secret/);
+  assert.doesNotMatch(rendered, /sk-secret/);
+  assert.doesNotMatch(rendered, /ghp_authsecret/);
+});
+
+test('redacts labelled mnemonic material without erasing ordinary prose', () => {
+  const mnemonic = redactLoomProcessLog(
+    'seed phrase: abandon ability able about above absent absorb abstract absurd abuse access accident',
+  );
+  const prose = redactLoomProcessLog(
+    'this ordinary process summary explains progress across checks commits branches reviews and cleanup',
+  );
+
+  assert.match(mnemonic, /\[REDACTED MNEMONIC\]/);
+  assert.doesNotMatch(mnemonic, /abandon ability able/);
+  assert.match(prose, /ordinary process summary/);
+  assert.doesNotMatch(prose, /\[REDACTED MNEMONIC\]/);
+});
+
 test('renders deterministic markdown-ish process logs with truncation notes', () => {
   const rendered = renderLoomProcessLog({
     taskPinId: 'task-pin',
