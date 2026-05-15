@@ -596,6 +596,38 @@ test('runCli forwards repeated loom run-dev-round checks', async () => {
   }]);
 });
 
+test('runCli rejects loom run-dev-round --check without a value', async () => {
+  const calls = [];
+  const claimPinId = `${'b'.repeat(64)}i0`;
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'run-dev-round',
+    '--task-pin-id',
+    validTaskPinId,
+    '--claim-pin-id',
+    claimPinId,
+    '--check',
+    '--round-note',
+    'Parser round.',
+  ], {
+    dependencies: {
+      loom: {
+        runDevRound: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { round: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.state, 'failed');
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /--check/);
+  assert.deepEqual(calls, []);
+});
+
 test('runCli forwards loom deliver dry-run, pr title, and delivery summary', async () => {
   const calls = [];
   const claimPinId = `${'b'.repeat(64)}i0`;
@@ -680,6 +712,73 @@ test('runCli forwards loom accept-and-pay confirmation, score, and comment', asy
   }]);
 });
 
+test('runCli rejects loom accept-and-pay scores outside the 1 to 5 range', async () => {
+  const deliveryPinId = `${'c'.repeat(64)}i0`;
+  for (const score of ['0', '6', '2.5']) {
+    const calls = [];
+    const { exitCode, envelope } = await runLoom([
+      'loom',
+      'accept-and-pay',
+      '--task-pin-id',
+      validTaskPinId,
+      '--delivery-pin-id',
+      deliveryPinId,
+      '--score',
+      score,
+      '--comment',
+      'Looks good.',
+    ], {
+      dependencies: {
+        loom: {
+          acceptAndPay: async (input) => {
+            calls.push(input);
+            return { ok: true, state: 'success', data: { accepted: true } };
+          },
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.state, 'failed');
+    assert.equal(envelope.code, 'invalid_flag');
+    assert.match(envelope.message, /--score/);
+    assert.match(envelope.message, /1 to 5/);
+    assert.deepEqual(calls, []);
+  }
+});
+
+test('runCli keeps missing loom accept-and-pay score as missing_flag', async () => {
+  const calls = [];
+  const deliveryPinId = `${'c'.repeat(64)}i0`;
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'accept-and-pay',
+    '--task-pin-id',
+    validTaskPinId,
+    '--delivery-pin-id',
+    deliveryPinId,
+    '--comment',
+    'Looks good.',
+  ], {
+    dependencies: {
+      loom: {
+        acceptAndPay: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { accepted: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.state, 'failed');
+  assert.equal(envelope.code, 'missing_flag');
+  assert.match(envelope.message, /--score/);
+  assert.deepEqual(calls, []);
+});
+
 test('runCli forwards loom review-delivery verdict, score, comment, and attachments', async () => {
   const calls = [];
   const deliveryPinId = `${'c'.repeat(64)}i0`;
@@ -726,6 +825,80 @@ test('runCli forwards loom review-delivery verdict, score, comment, and attachme
     chain: 'mvc',
     attachments: ['metafile://one', 'metafile://two'],
   }]);
+});
+
+test('runCli rejects loom review-delivery scores outside the 1 to 5 range', async () => {
+  const calls = [];
+  const deliveryPinId = `${'c'.repeat(64)}i0`;
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'review-delivery',
+    '--task-pin-id',
+    validTaskPinId,
+    '--delivery-pin-id',
+    deliveryPinId,
+    '--verdict',
+    'revision_needed',
+    '--score',
+    '6',
+    '--comment',
+    'Please add tests.',
+  ], {
+    dependencies: {
+      loom: {
+        reviewDelivery: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { reviewed: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.state, 'failed');
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /--score/);
+  assert.match(envelope.message, /1 to 5/);
+  assert.deepEqual(calls, []);
+});
+
+test('runCli rejects loom review-delivery --attachment without a value', async () => {
+  const calls = [];
+  const deliveryPinId = `${'c'.repeat(64)}i0`;
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'review-delivery',
+    '--task-pin-id',
+    validTaskPinId,
+    '--delivery-pin-id',
+    deliveryPinId,
+    '--verdict',
+    'revision_needed',
+    '--score',
+    '2',
+    '--comment',
+    'Please add tests.',
+    '--attachment',
+    '--chain',
+    'mvc',
+  ], {
+    dependencies: {
+      loom: {
+        reviewDelivery: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { reviewed: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.state, 'failed');
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /--attachment/);
+  assert.deepEqual(calls, []);
 });
 
 test('runCli delegates loom state task pin and refresh flag to runtime dependencies', async () => {

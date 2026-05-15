@@ -41,18 +41,22 @@ function commandMissingArgument(argument: string): MetabotCommandResult<never> {
   return commandFailed('missing_argument', `Missing required argument ${argument}.`);
 }
 
-function readAllFlagValues(args: string[], flag: string): string[] {
+function readAllFlagValues(args: string[], flag: string): {
+  ok: true;
+  values: string[];
+} | { ok: false; result: MetabotCommandResult<never> } {
   const values: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] !== flag) {
       continue;
     }
     const value = args[index + 1];
-    if (typeof value === 'string' && !value.startsWith('--')) {
-      values.push(value);
+    if (typeof value !== 'string' || value.startsWith('--')) {
+      return { ok: false, result: commandFailed('invalid_flag', `${flag} requires a value.`) };
     }
+    values.push(value);
   }
-  return values;
+  return { ok: true, values };
 }
 
 function readOptionalValue(args: string[], flag: string): {
@@ -108,7 +112,7 @@ function readOptionalFileChain(args: string[]): {
   return fileChainFlag.chain ? { ok: true, fileChain: fileChainFlag.chain } : { ok: true };
 }
 
-function parsePositiveScore(args: string[]): {
+function parseLoomScore(args: string[]): {
   ok: true;
   score: number;
 } | { ok: false; result: MetabotCommandResult<never> } {
@@ -117,8 +121,8 @@ function parsePositiveScore(args: string[]): {
     return { ok: false, result: commandMissingFlag('--score') };
   }
   const score = Number(rawScore);
-  if (!Number.isInteger(score) || score <= 0) {
-    return { ok: false, result: commandFailed('invalid_flag', '--score must be a positive integer.') };
+  if (!Number.isInteger(score) || score < 1 || score > 5) {
+    return { ok: false, result: commandFailed('invalid_flag', '--score must be an integer from 1 to 5.') };
   }
   return { ok: true, score };
 }
@@ -536,6 +540,8 @@ async function runDevRoundCommand(
   if (!chainInput.ok) return chainInput.result;
   const fileChainInput = readOptionalFileChain(args);
   if (!fileChainInput.ok) return fileChainInput.result;
+  const checksInput = readAllFlagValues(args, '--check');
+  if (!checksInput.ok) return checksInput.result;
 
   const input: {
     from?: string;
@@ -548,7 +554,7 @@ async function runDevRoundCommand(
   } = {
     taskPinId: taskPinIdInput.value,
     claimPinId: claimPinIdInput.value,
-    checks: readAllFlagValues(args, '--check'),
+    checks: checksInput.values,
   };
   if (fromInput.value) input.from = fromInput.value;
   if (chainInput.chain) input.chain = chainInput.chain;
@@ -606,7 +612,7 @@ async function runAcceptAndPayCommand(
   if (!taskPinIdInput.ok) return taskPinIdInput.result;
   const deliveryPinIdInput = readRequiredValue(args, '--delivery-pin-id');
   if (!deliveryPinIdInput.ok) return deliveryPinIdInput.result;
-  const scoreInput = parsePositiveScore(args);
+  const scoreInput = parseLoomScore(args);
   if (!scoreInput.ok) return scoreInput.result;
   const commentInput = readRequiredValue(args, '--comment');
   if (!commentInput.ok) return commentInput.result;
@@ -650,7 +656,7 @@ async function runReviewDeliveryCommand(
   if (verdictInput.value !== 'rejected' && verdictInput.value !== 'revision_needed') {
     return commandFailed('invalid_flag', '--verdict must be rejected or revision_needed.');
   }
-  const scoreInput = parsePositiveScore(args);
+  const scoreInput = parseLoomScore(args);
   if (!scoreInput.ok) return scoreInput.result;
   const commentInput = readRequiredValue(args, '--comment');
   if (!commentInput.ok) return commentInput.result;
@@ -658,6 +664,8 @@ async function runReviewDeliveryCommand(
   if (!fromInput.ok) return fromInput.result;
   const chainInput = readOptionalChain(args);
   if (!chainInput.ok) return chainInput.result;
+  const attachmentsInput = readAllFlagValues(args, '--attachment');
+  if (!attachmentsInput.ok) return attachmentsInput.result;
 
   const input: {
     from?: string;
@@ -674,7 +682,7 @@ async function runReviewDeliveryCommand(
     verdict: verdictInput.value,
     score: scoreInput.score,
     comment: commentInput.value,
-    attachments: readAllFlagValues(args, '--attachment'),
+    attachments: attachmentsInput.values,
   };
   if (fromInput.value) input.from = fromInput.value;
   if (chainInput.chain) input.chain = chainInput.chain;

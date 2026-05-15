@@ -435,7 +435,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     failureSemantics: [
       'Fails with missing_flag when --task-pin-id or --claim-pin-id is omitted.',
-      'Requires the delegated workflow dependency to provide any Git, command execution, and file-upload behavior.',
+      'Requires the delegated workflow dependency to provide any Git, gh/GitHub, command execution, and file-upload behavior.',
     ],
     examples: [
       `metabot loom run-dev-round --task-pin-id ${'a'.repeat(64)}i0 --claim-pin-id ${'b'.repeat(64)}i0 --check "npm run build" --check "npm test"`,
@@ -468,22 +468,22 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['loom', 'accept-and-pay'],
     summary: 'Accept a Loom delivery and forward payment confirmation intent through the delegated workflow dependency.',
-    usage: 'metabot loom accept-and-pay --task-pin-id <pinid> --delivery-pin-id <pinid> --score <n> --comment <text> [--from <bot-slug>] [--chain <mvc|btc|doge|opcat>] [--confirm-payment]',
+    usage: 'metabot loom accept-and-pay --task-pin-id <pinid> --delivery-pin-id <pinid> --score <1-5> --comment <text> [--from <bot-slug>] [--chain <mvc|btc|doge|opcat>] [--confirm-payment]',
     requiredFlags: [
       { flag: '--task-pin-id', value: '<pinid>', description: 'Loom task PIN id whose delivery is accepted.' },
       { flag: '--delivery-pin-id', value: '<pinid>', description: 'Delivery PIN id to accept.' },
-      { flag: '--score', value: '<n>', description: 'Positive integer review score.' },
+      { flag: '--score', value: '<1-5>', description: 'Integer review score from 1 to 5.' },
       { flag: '--comment', value: '<text>', description: 'Acceptance comment.' },
     ],
     optionalFlags: [
       FROM_BOT_FLAG,
       CHAIN_WRITE_FLAG,
-      { flag: '--confirm-payment', description: 'Explicitly allow the delegated workflow dependency to perform payment. Without it, payment must not be confirmed.' },
+      { flag: '--confirm-payment', description: 'Explicitly allow the delegated workflow dependency to perform payment. Without --confirm-payment, preview acceptance without confirming payment.' },
       HELP_JSON_FLAG,
     ],
     failureSemantics: [
-      'Fails with invalid_flag when --score is not a positive integer.',
-      'Omitting --confirm-payment forwards confirmPayment: false; payment-confirming behavior requires the explicit flag.',
+      'Fails with invalid_flag when --score is not an integer from 1 to 5.',
+      'Omitting --confirm-payment forwards confirmPayment: false; no payment should be confirmed without the explicit flag.',
     ],
     examples: [
       `metabot loom accept-and-pay --task-pin-id ${'a'.repeat(64)}i0 --delivery-pin-id ${'c'.repeat(64)}i0 --score 5 --comment "Accepted" --confirm-payment`,
@@ -492,12 +492,12 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['loom', 'review-delivery'],
     summary: 'Reject or request revision for a Loom delivery through the delegated workflow dependency.',
-    usage: 'metabot loom review-delivery --task-pin-id <pinid> --delivery-pin-id <pinid> --verdict <rejected|revision_needed> --score <n> --comment <text> [--from <bot-slug>] [--chain <mvc|btc|doge|opcat>] [--attachment <uri>...]',
+    usage: 'metabot loom review-delivery --task-pin-id <pinid> --delivery-pin-id <pinid> --verdict <rejected|revision_needed> --score <1-5> --comment <text> [--from <bot-slug>] [--chain <mvc|btc|doge|opcat>] [--attachment <uri>...]',
     requiredFlags: [
       { flag: '--task-pin-id', value: '<pinid>', description: 'Loom task PIN id being reviewed.' },
       { flag: '--delivery-pin-id', value: '<pinid>', description: 'Delivery PIN id to review.' },
       { flag: '--verdict', value: '<rejected|revision_needed>', description: 'Negative review verdict to post.' },
-      { flag: '--score', value: '<n>', description: 'Positive integer review score.' },
+      { flag: '--score', value: '<1-5>', description: 'Integer review score from 1 to 5.' },
       { flag: '--comment', value: '<text>', description: 'Review comment.' },
     ],
     optionalFlags: [
@@ -508,7 +508,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     failureSemantics: [
       'Fails with invalid_flag when --verdict is not rejected or revision_needed.',
-      'Fails with invalid_flag when --score is not a positive integer.',
+      'Fails with invalid_flag when --score is not an integer from 1 to 5.',
       'This command only represents negative delivery outcomes; accepted delivery payment uses accept-and-pay.',
     ],
     examples: [

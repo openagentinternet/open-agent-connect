@@ -169,6 +169,8 @@ test('runCli prints loom draft-task help with wish and actor flags', async () =>
 });
 
 test('runCli prints loom workflow command help', async () => {
+  const outputs = new Map();
+
   for (const command of [
     'post-task',
     'claim-and-start',
@@ -185,8 +187,15 @@ test('runCli prints loom workflow command help', async () => {
     });
 
     assert.equal(exitCode, 0);
-    assert.match(stdout.join(''), new RegExp(`metabot loom ${command}`));
+    const output = stdout.join('');
+    outputs.set(command, output);
+    assert.match(output, new RegExp(`metabot loom ${command}`));
   }
+
+  assert.match(outputs.get('accept-and-pay'), /--score <1-5>/);
+  assert.match(outputs.get('accept-and-pay'), /--confirm-payment/);
+  assert.match(outputs.get('accept-and-pay'), /without.*--confirm-payment.*payment/i);
+  assert.match(outputs.get('run-dev-round'), /git|gh|github/i);
 });
 
 test('runCli prints bot group help for profile, runtime, and session commands', async () => {
