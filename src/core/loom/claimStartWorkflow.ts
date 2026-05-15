@@ -4,9 +4,11 @@ import {
   type MetabotCommandResult,
 } from '../contracts/commandResult';
 import type { LoomCommandRunner } from './commandRunner';
+import { buildLoomChainWriteRequest, type LoomChainWriteRequest } from './chainRequest';
 import {
   buildLoomBranchName,
   normalizeGitHubRepoUri,
+  type GitHubRepoRef,
   type GitHubToolCheckResult,
   type PrepareGitHubForkWorkspaceInput,
   type PrepareGitHubForkWorkspaceResult,
@@ -29,6 +31,19 @@ export interface LoomClaimAndStartWorkflowDryRunResult {
   dryRun: true;
   claimPayload: Record<string, unknown>;
   statusPayload: Record<string, unknown>;
+  github: {
+    repoUri: string;
+    baseBranch: string;
+    upstreamRemote: string;
+    forkRemote: string;
+    upstreamRepo: GitHubRepoRef;
+  };
+  chainWritePreviews: {
+    claim:
+      | { skipped: false; request: LoomClaimAndStartChainWritePreviewRequest }
+      | { skipped: true; claimPinId: string; reason: string };
+    status: { skipped: false; request: LoomClaimAndStartChainWritePreviewRequest };
+  };
   preview: {
     claimPinId: string;
     branchName: string;
@@ -37,6 +52,11 @@ export interface LoomClaimAndStartWorkflowDryRunResult {
     processLogFileChain: string;
   };
 }
+
+export type LoomClaimAndStartChainWritePreviewRequest = LoomChainWriteRequest & {
+  from?: string;
+  network?: string;
+};
 
 export interface LoomClaimAndStartWorkflowResult {
   dryRun: false;
@@ -83,6 +103,7 @@ export interface LoomClaimAndStartWorkflowInput {
 interface GitHubTaskProject {
   repoUri: string;
   baseBranch: string;
+  upstreamRepo: GitHubRepoRef;
 }
 
 const PENDING_CLAIM_ID = 'pending-claim';
@@ -143,15 +164,14 @@ function resolveGitHubProject(state: LoomWorkflowTaskState): MetabotCommandResul
   }
 
   try {
-    normalizeGitHubRepoUri(repoUri);
+    const upstreamRepo = normalizeGitHubRepoUri(repoUri);
+    return commandSuccess({ repoUri, baseBranch, upstreamRepo });
   } catch (error) {
     return commandFailed(
       'invalid_project',
       error instanceof Error ? error.message : `Invalid GitHub repository URI: ${repoUri}`,
     );
   }
-
-  return commandSuccess({ repoUri, baseBranch });
 }
 
 function createClaimPayload(input: LoomClaimAndStartWorkflowInput, now: number): Record<string, unknown> {
@@ -188,6 +208,23 @@ function createStartedStatusPayload(input: {
     commits: [],
     ...(input.processLogUri ? { processLogs: [input.processLogUri] } : {}),
   };
+}
+
+function buildPreviewChainWriteRequest(input: {
+  protocol: 'claim' | 'status';
+  payload: Record<string, unknown>;
+  from?: string;
+  chain: string;
+}): MetabotCommandResult<LoomClaimAndStartChainWritePreviewRequest> {
+  const built = buildLoomChainWriteRequest(input.protocol, input.payload);
+  if (built.request === null) {
+    return commandFailed('invalid_payload', validationMessage(input.protocol, built.validation.errors));
+  }
+  return commandSuccess({
+    ...built.request,
+    ...(input.from ? { from: input.from } : {}),
+    network: input.chain,
+  });
 }
 
 function findClaim(state: LoomWorkflowTaskState, claimPinId: string): LoomCachedRecord | null {
@@ -449,6 +486,41 @@ export async function runLoomClaimAndStartWorkflow(
     return invalidStatus;
   }
 
+  const statusChainWritePreview = buildPreviewChainWriteRequest({
+    protocol: 'status',
+    payload: plannedStatusPayload,
+    from: input.from,
+    chain,
+  });
+  if (!statusChainWritePreview.ok) {
+    return statusChainWritePreview;
+  }
+
+  let claimChainWritePreview:
+    | { skipped: false; request: LoomClaimAndStartChainWritePreviewRequest }
+    | { skipped: true; claimPinId: string; reason: string };
+  if (recoveryMode) {
+    claimChainWritePreview = {
+      skipped: true,
+      claimPinId: input.claimPinId as string,
+      reason: 'Recovery mode uses the existing claim and does not write a duplicate claim.',
+    };
+  } else {
+    const claimPreviewRequest = buildPreviewChainWriteRequest({
+      protocol: 'claim',
+      payload: claimPayload as Record<string, unknown>,
+      from: input.from,
+      chain,
+    });
+    if (!claimPreviewRequest.ok) {
+      return claimPreviewRequest;
+    }
+    claimChainWritePreview = {
+      skipped: false,
+      request: claimPreviewRequest.data,
+    };
+  }
+
   let processLogFileChain: string;
   try {
     processLogFileChain = selectProcessLogFileChain(chain, input.fileChain);
@@ -469,6 +541,20 @@ export async function runLoomClaimAndStartWorkflow(
         claimPinId: input.claimPinId,
       },
       statusPayload: plannedStatusPayload,
+      github: {
+        repoUri: project.data.repoUri,
+        baseBranch: project.data.baseBranch,
+        upstreamRemote: DEFAULT_UPSTREAM_REMOTE,
+        forkRemote: DEFAULT_FORK_REMOTE,
+        upstreamRepo: project.data.upstreamRepo,
+      },
+      chainWritePreviews: {
+        claim: claimChainWritePreview,
+        status: {
+          skipped: false,
+          request: statusChainWritePreview.data,
+        },
+      },
       preview: {
         claimPinId: previewClaimPinId,
         branchName: plannedBranchName,

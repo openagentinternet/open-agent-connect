@@ -316,6 +316,66 @@ test('dry-run returns planned payloads and pending previews without side effects
   assert.match(result.data.preview.branchName, /^loom\/aaaaaaaa-pending-/);
   assert.match(result.data.preview.stagingRepoPath, /\/staging\/.+\/run-1\/repo$/);
   assert.match(result.data.preview.workspaceRepoPath, /\/workspaces\/.+\/pending-claim\/repo$/);
+  assert.deepEqual(result.data.github, {
+    repoUri: 'https://github.com/openagentinternet/open-agent-connect',
+    baseBranch: 'main',
+    upstreamRemote: 'origin',
+    forkRemote: 'fork',
+    upstreamRepo: {
+      owner: 'openagentinternet',
+      repo: 'open-agent-connect',
+      fullName: 'openagentinternet/open-agent-connect',
+    },
+  });
+  assert.equal(result.data.chainWritePreviews.claim.skipped, false);
+  assert.deepEqual(result.data.chainWritePreviews.claim.request, {
+    operation: 'create',
+    path: '/protocols/loom-claim',
+    encryption: '0',
+    version: '1.0.0',
+    contentType: 'application/json',
+    payload: JSON.stringify(result.data.claimPayload),
+    from: 'alice',
+    network: 'mvc',
+  });
+  assert.equal(result.data.chainWritePreviews.status.skipped, false);
+  assert.deepEqual(result.data.chainWritePreviews.status.request, {
+    operation: 'create',
+    path: '/protocols/loom-status',
+    encryption: '0',
+    version: '1.0.0',
+    contentType: 'application/json',
+    payload: JSON.stringify(result.data.statusPayload),
+    from: 'alice',
+    network: 'mvc',
+  });
+  assert.deepEqual(events.map((event) => event.type), ['github.assertToolsReady']);
+});
+
+test('recovery dry-run skips claim write preview but includes started status chain preview', async () => {
+  const { input, events } = createDeps({
+    dryRun: true,
+    payoutAddress: undefined,
+    claimPinId,
+    chain: 'doge',
+  });
+
+  const result = await runLoomClaimAndStartWorkflow(input);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.dryRun, true);
+  assert.equal(result.data.preview.claimPinId, claimPinId);
+  assert.equal(result.data.chainWritePreviews.claim.skipped, true);
+  assert.equal(result.data.chainWritePreviews.claim.claimPinId, claimPinId);
+  assert.equal(result.data.chainWritePreviews.status.skipped, false);
+  assert.equal(result.data.chainWritePreviews.status.request.path, '/protocols/loom-status');
+  assert.equal(result.data.chainWritePreviews.status.request.network, 'doge');
+  assert.equal(JSON.parse(result.data.chainWritePreviews.status.request.payload).claimPinId, claimPinId);
+  assert.deepEqual(result.data.github.upstreamRepo, {
+    owner: 'openagentinternet',
+    repo: 'open-agent-connect',
+    fullName: 'openagentinternet/open-agent-connect',
+  });
   assert.deepEqual(events.map((event) => event.type), ['github.assertToolsReady']);
 });
 
