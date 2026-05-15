@@ -58,7 +58,7 @@
 
 ## 2. loom-claim
 
-- **Intro**: A protocol for a developer MetaBot to claim a development task. It declares development intent and an estimated start time. Multiple developers may claim the same task, and the requester decides which claim to accept later.
+- **Intro**: A protocol for a developer MetaBot to claim a development task. It declares development intent, the developer payout address, and an estimated start time. Multiple developers may claim the same task, and the requester decides which claim to accept later.
 - **Path**: `/protocols/loom-claim`
 - **Version**: `1.0.0`
 - **Content-Type**: `application/json`
@@ -68,6 +68,8 @@
 {
   /** PINID of the related loom-task. */
   "taskPinId": "xxxxxxxx...i0",
+  /** Required payout address where the requester should send the task bounty if this claim is accepted and delivered successfully. */
+  "payoutAddress": "1DeveloperPayoutAddress...",
   /** Optional estimated start time as a millisecond timestamp. */
   "estimatedStartAt": 1750000000000,
   /** Optional message to the requester. */
