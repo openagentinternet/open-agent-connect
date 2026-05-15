@@ -14,6 +14,10 @@ const SECRET_KEY_RE = String.raw`(?:[A-Z0-9_]+_API_KEY|[A-Z0-9_]+_TOKEN|api_key|
 export interface LoomProcessLogCheck {
   command: string;
   status: 'passed' | 'failed' | 'skipped' | string;
+  exitCode?: number;
+  durationMs?: number;
+  stdoutSummary?: string;
+  stderrSummary?: string;
   summary?: string;
 }
 
@@ -265,8 +269,18 @@ export function renderLoomProcessLog(input: LoomProcessLogInput): string {
   ]);
 
   pushSection(lines, 'Checks', (input.checks ?? []).map((check) => {
-    const summary = check.summary ? ` - ${redactLoomProcessLog(check.summary)}` : '';
-    return `- ${renderValue(check.status)}: ${redactLoomProcessLog(check.command)}${summary}`;
+    const details = [
+      check.exitCode === undefined ? '' : `exit=${check.exitCode}`,
+      check.durationMs === undefined ? '' : `durationMs=${check.durationMs}`,
+    ].filter(Boolean).join(', ');
+    const detailText = details ? ` (${details})` : '';
+    const streams = [
+      check.stdoutSummary ? `stdout: ${redactLoomProcessLog(check.stdoutSummary)}` : '',
+      check.stderrSummary ? `stderr: ${redactLoomProcessLog(check.stderrSummary)}` : '',
+    ].filter(Boolean).join('; ');
+    const streamText = streams ? ` - ${streams}` : '';
+    const summary = check.summary && !streams ? ` - ${redactLoomProcessLog(check.summary)}` : '';
+    return `- ${renderValue(check.status)}: ${redactLoomProcessLog(check.command)}${detailText}${streamText}${summary}`;
   }));
 
   pushSection(lines, 'Git Changes', (input.git?.changes ?? []).map((change) => `- ${renderValue(change)}`));

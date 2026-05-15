@@ -6,6 +6,7 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const {
   buildLoomDevRoundPrompt,
+  renderLoomProcessLog,
   runLoomDevRoundWorkflow,
 } = require('../../dist/core/loom/index.js');
 
@@ -312,14 +313,27 @@ test('runLoomDevRoundWorkflow completes when LLM succeeds, checks pass, and git 
   assert.equal(result.ok, true);
   assert.equal(result.data.status, 'completed');
   assert.deepEqual(commands(events), [
+    'npm run build',
     'git status --porcelain',
     'git diff --name-only',
-    'npm run build',
     'git add -A',
     'git commit -m feat: add loom dev round workflow',
     'git rev-parse HEAD',
     'git show --name-only --format=%s HEAD',
   ]);
+  const logInput = events.find((event) => event.type === 'writeLogFile').input;
+  assert.deepEqual(logInput.checks[0], {
+    command: 'npm run build',
+    status: 'passed',
+    exitCode: 0,
+    durationMs: 1,
+    stdoutSummary: 'ok',
+    stderrSummary: '',
+    summary: 'ok',
+  });
+  assert.match(renderLoomProcessLog({ checks: logInput.checks }), /exit=0/);
+  assert.match(renderLoomProcessLog({ checks: logInput.checks }), /durationMs=1/);
+  assert.match(renderLoomProcessLog({ checks: logInput.checks }), /stdout: ok/);
   assert.equal(events.find((event) => event.type === 'uploadFile').input.network, 'mvc');
   const payload = statusPayloads(events).at(-1);
   assert.equal(payload.status, 'completed');
@@ -343,7 +357,39 @@ test('runLoomDevRoundWorkflow stays in progress when a check fails but still com
 
   assert.equal(result.ok, true);
   assert.equal(result.data.status, 'in_progress');
-  assert.ok(commands(events).includes('git commit -m feat: add loom dev round workflow'));
+  assert.deepEqual(commands(events), [
+    'npm run build',
+    'npm test',
+    'git status --porcelain',
+    'git diff --name-only',
+    'git add -A',
+    'git commit -m feat: add loom dev round workflow',
+    'git rev-parse HEAD',
+    'git show --name-only --format=%s HEAD',
+  ]);
+  const logInput = events.find((event) => event.type === 'writeLogFile').input;
+  assert.deepEqual(logInput.checks, [{
+    command: 'npm run build',
+    status: 'passed',
+    exitCode: 0,
+    durationMs: 1,
+    stdoutSummary: 'ok',
+    stderrSummary: '',
+    summary: 'ok',
+  }, {
+    command: 'npm test',
+    status: 'failed',
+    exitCode: 1,
+    durationMs: 1,
+    stdoutSummary: '',
+    stderrSummary: 'check failed',
+    summary: 'check failed',
+  }]);
+  const renderedChecks = renderLoomProcessLog({ checks: logInput.checks });
+  assert.match(renderedChecks, /failed: npm test/);
+  assert.match(renderedChecks, /exit=1/);
+  assert.match(renderedChecks, /durationMs=1/);
+  assert.match(renderedChecks, /stderr: check failed/);
   const payload = statusPayloads(events).at(-1);
   assert.equal(payload.status, 'in_progress');
   assert.equal(payload.commits[0].sha, 'abc123456789');

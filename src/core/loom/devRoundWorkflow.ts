@@ -169,6 +169,10 @@ function commandDetail(result: LoomCommandRunResult): string {
   return result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`;
 }
 
+function commandOutputSummary(output: string): string {
+  return output.trim();
+}
+
 function parseStatusPorcelainFiles(output: string): string[] {
   return output
     .split(/\r?\n/)
@@ -243,6 +247,10 @@ function processLogChecks(checks: string[], runs: CheckRun[]): LoomProcessLogChe
   return runs.map((run) => ({
     command: run.command,
     status: run.result.exitCode === 0 ? 'passed' : 'failed',
+    exitCode: run.result.exitCode,
+    durationMs: run.result.durationMs,
+    stdoutSummary: commandOutputSummary(run.result.stdout),
+    stderrSummary: commandOutputSummary(run.result.stderr),
     summary: commandDetail(run.result),
   }));
 }
@@ -553,12 +561,12 @@ export async function runLoomDevRoundWorkflow(
   let commits: LoomWorkflowCommitRecord[] = [];
 
   if (llm.status === 'completed') {
+    checkRuns = await runChecks(input.runner, workflow.workspacePath, input.checks);
     const snapshot = await readGitSnapshot(input.runner, workflow.workspacePath);
     if (!snapshot.ok) {
       return snapshot;
     }
     git = snapshot.data;
-    checkRuns = await runChecks(input.runner, workflow.workspacePath, input.checks);
 
     if (git.changedFiles.length > 0) {
       const commit = await createCommit({
