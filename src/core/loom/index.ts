@@ -10,3 +10,5 @@ export * from './workflowStore';
 export * from './workflowState';
 export * from './commandRunner';
 export * from './githubWorkflow';
+export * from './workflowChain';
+export * from './workflowLog';
