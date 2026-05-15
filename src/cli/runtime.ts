@@ -2731,6 +2731,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         return draftLoomTaskFromWish(context, input);
       },
       postTask: async (input) => {
+        if (input.from) {
+          const actor = await resolveActorHomeDir(context, input.from);
+          if (!('homeDir' in actor)) return actor;
+        }
         return runLoomPostTaskWorkflow({
           from: input.from,
           payloadFile: input.payloadFile,

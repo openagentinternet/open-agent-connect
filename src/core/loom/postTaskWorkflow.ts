@@ -6,8 +6,13 @@ import { writeLoomProtocolRecord, type LoomProtocolRecordWriteResult } from './w
 export interface LoomPostTaskWorkflowDryRunResult {
   dryRun: true;
   payload: Record<string, unknown>;
-  request: LoomChainWriteRequest;
+  request: LoomPostTaskWorkflowPreviewRequest;
 }
+
+export type LoomPostTaskWorkflowPreviewRequest = LoomChainWriteRequest & {
+  from?: string;
+  network?: string;
+};
 
 export type LoomTaskDraftDependencyResult =
   | Record<string, unknown>
@@ -40,6 +45,17 @@ function sourceCount(input: Pick<LoomPostTaskWorkflowInput, 'payload' | 'payload
   return [input.payload !== undefined, Boolean(input.payloadFile), Boolean(input.wish)]
     .filter(Boolean)
     .length;
+}
+
+function buildPreviewRequest(
+  request: LoomChainWriteRequest,
+  input: Pick<LoomPostTaskWorkflowInput, 'from' | 'chain'>,
+): LoomPostTaskWorkflowPreviewRequest {
+  return {
+    ...request,
+    ...(input.from ? { from: input.from } : {}),
+    ...(input.chain ? { network: input.chain } : {}),
+  };
 }
 
 function extractDraftPayload(result: LoomTaskDraftDependencyResult): MetabotCommandResult<Record<string, unknown>> {
@@ -123,7 +139,7 @@ export async function runLoomPostTaskWorkflow(
     return commandSuccess({
       dryRun: true,
       payload,
-      request: built.request,
+      request: buildPreviewRequest(built.request, input),
     });
   }
 

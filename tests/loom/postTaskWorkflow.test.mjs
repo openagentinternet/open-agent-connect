@@ -78,6 +78,8 @@ test('dryRun returns payload and request without writing', async () => {
   let wrote = false;
   const result = await runLoomPostTaskWorkflow({
     payload,
+    from: 'alice',
+    chain: 'mvc',
     dryRun: true,
     writeChain: async () => {
       wrote = true;
@@ -95,6 +97,8 @@ test('dryRun returns payload and request without writing', async () => {
     version: '1.0.0',
     contentType: 'application/json',
     payload: JSON.stringify(payload),
+    from: 'alice',
+    network: 'mvc',
   });
   assert.equal(result.data.dryRun, true);
 });
