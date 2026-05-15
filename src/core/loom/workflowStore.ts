@@ -5,15 +5,20 @@ import type { LoomWorkflowState } from './workflowTypes';
 
 export interface LoomWorkflowPathInput {
   taskPinId: string;
-  claimPinId: string;
+  claimPinId?: string;
   localRunId?: string;
 }
 
 export interface LoomWorkflowPaths {
-  loomRoot: string;
+  loomRuntimeRoot: string;
+  workflowsRoot: string;
+  stagingRoot: string;
+  workspacesRoot: string;
+  logsRoot: string;
   workflowPath: string;
-  workspaceRepoPath: string;
   stagingRepoPath: string;
+  workspaceRepoPath: string;
+  taskLogsRoot: string;
 }
 
 export interface LoomWorkflowStore {
@@ -39,16 +44,26 @@ export function resolveLoomWorkflowPaths(
   input: LoomWorkflowPathInput,
 ): LoomWorkflowPaths {
   const paths = resolvePaths(homeDirOrPaths);
-  const loomRoot = path.join(paths.runtimeRoot, 'loom');
+  const loomRuntimeRoot = path.join(paths.runtimeRoot, 'loom');
+  const workflowsRoot = path.join(loomRuntimeRoot, 'workflows');
+  const stagingRoot = path.join(loomRuntimeRoot, 'staging');
+  const workspacesRoot = path.join(loomRuntimeRoot, 'workspaces');
+  const logsRoot = path.join(loomRuntimeRoot, 'logs');
   const taskSegment = sanitizePathSegment(input.taskPinId);
-  const claimSegment = sanitizePathSegment(input.claimPinId);
-  const runSegment = sanitizePathSegment(input.localRunId ?? input.claimPinId);
+  const claimSegment = sanitizePathSegment(input.claimPinId ?? 'pending-claim');
+  const runSegment = sanitizePathSegment(input.localRunId ?? 'run');
+  const taskLogsRoot = path.join(logsRoot, taskSegment);
 
   return {
-    loomRoot,
-    workflowPath: path.join(loomRoot, 'workflows', taskSegment, `${claimSegment}.json`),
-    workspaceRepoPath: path.join(loomRoot, 'workspaces', taskSegment, claimSegment, 'repo'),
-    stagingRepoPath: path.join(loomRoot, 'staging', taskSegment, runSegment, 'repo'),
+    loomRuntimeRoot,
+    workflowsRoot,
+    stagingRoot,
+    workspacesRoot,
+    logsRoot,
+    workflowPath: path.join(workflowsRoot, taskSegment, `${claimSegment}.json`),
+    stagingRepoPath: path.join(stagingRoot, taskSegment, runSegment, 'repo'),
+    workspaceRepoPath: path.join(workspacesRoot, taskSegment, claimSegment, 'repo'),
+    taskLogsRoot,
   };
 }
 
@@ -73,8 +88,7 @@ function isWorkflowStateForClaim(
   const record = value as Partial<LoomWorkflowState>;
   return record.version === 1
     && record.taskPinId === taskPinId
-    && record.claimPinId === claimPinId
-    && Array.isArray(record.statuses);
+    && record.claimPinId === claimPinId;
 }
 
 export function createLoomWorkflowStore(homeDirOrPaths: string | MetabotPaths): LoomWorkflowStore {
@@ -99,7 +113,9 @@ export function createLoomWorkflowStore(homeDirOrPaths: string | MetabotPaths): 
 
       try {
         const parsed = JSON.parse(raw) as unknown;
-        return isWorkflowStateForClaim(parsed, taskPinId, claimPinId) ? parsed : null;
+        return isWorkflowStateForClaim(parsed, taskPinId, claimPinId)
+          ? normalizeWorkflowState(parsed)
+          : null;
       } catch {
         return null;
       }
@@ -108,11 +124,7 @@ export function createLoomWorkflowStore(homeDirOrPaths: string | MetabotPaths): 
       const normalized = normalizeWorkflowState(state);
       const resolved = resolveLoomWorkflowPaths(paths, normalized);
 
-      await Promise.all([
-        fs.mkdir(path.dirname(resolved.workflowPath), { recursive: true }),
-        fs.mkdir(resolved.workspaceRepoPath, { recursive: true }),
-        fs.mkdir(resolved.stagingRepoPath, { recursive: true }),
-      ]);
+      await fs.mkdir(path.dirname(resolved.workflowPath), { recursive: true });
       await fs.writeFile(resolved.workflowPath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
 
       return normalized;
