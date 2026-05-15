@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -12,6 +12,15 @@ const {
   renderLoomProcessLog,
   writeLoomProcessLogFile,
 } = require('../../dist/core/loom/index.js');
+
+async function fileExists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 test('selects the process log file chain from the record chain by default', () => {
   assert.equal(selectProcessLogFileChain('mvc'), 'mvc');
@@ -109,6 +118,36 @@ test('renders deterministic markdown-ish process logs with truncation notes', ()
   assert.ok(Buffer.byteLength(rendered, 'utf8') <= 4_200);
 });
 
+test('redacts secrets from rendered check commands', () => {
+  const rendered = renderLoomProcessLog({
+    taskPinId: 'task-pin',
+    claimPinId: 'claim-pin',
+    checks: [
+      {
+        command: 'curl -H "Authorization: Bearer abc" https://example.test',
+        status: 'failed',
+        summary: 'request failed',
+      },
+    ],
+  });
+
+  assert.doesNotMatch(rendered, /abc/);
+  assert.doesNotMatch(rendered, /Bearer abc/);
+  assert.match(rendered, /Authorization: Bearer \[REDACTED\]/);
+});
+
+test('truncates non-ascii logs within the configured byte limit', () => {
+  const maxBytes = 98;
+  const rendered = renderLoomProcessLog({
+    taskPinId: 'task-pin',
+    claimPinId: 'claim-pin',
+    rawLog: '开发日志'.repeat(100),
+    maxBytes,
+  });
+
+  assert.ok(Buffer.byteLength(rendered, 'utf8') <= maxBytes);
+});
+
 test('writes rendered process logs to the expected path', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'loom-process-log-'));
   try {
@@ -133,5 +172,29 @@ test('writes rendered process logs to the expected path', async () => {
     assert.equal(await readFile(result.path, 'utf8'), result.content);
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects unsafe process log filenames without writing outside the directory', async () => {
+  const parentDirectory = await mkdtemp(join(tmpdir(), 'loom-process-log-parent-'));
+  const directory = join(parentDirectory, 'logs');
+  const outsidePath = join(parentDirectory, 'escape.md');
+  try {
+    await assert.rejects(
+      () => writeLoomProcessLogFile({
+        directory,
+        fileName: '../escape.md',
+        taskPinId: 'task-pin',
+        claimPinId: 'claim-pin',
+        statusDecision: {
+          status: 'failed',
+          summary: 'Unsafe path rejected.',
+        },
+      }),
+      /Unsafe Loom process log file name/,
+    );
+    assert.equal(await fileExists(outsidePath), false);
+  } finally {
+    await rm(parentDirectory, { recursive: true, force: true });
   }
 });

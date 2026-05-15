@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import type { ChainWriteNetwork } from '../chain/writePin';
 import type { LoomFileUploadNetwork, LoomWorkflowStatusValue } from './workflowTypes';
 
@@ -130,15 +130,47 @@ function formatJson(value: unknown): string {
   return ['```json', JSON.stringify(value, null, 2), '```'].join('\n');
 }
 
+function byteSafePrefix(input: string, maxBytes: number): string {
+  let output = '';
+  for (const character of input) {
+    const next = `${output}${character}`;
+    if (Buffer.byteLength(next, 'utf8') > maxBytes) {
+      break;
+    }
+    output = next;
+  }
+  return output;
+}
+
 function truncateToMaxBytes(content: string, maxBytes: number): string {
+  if (maxBytes <= 0) {
+    return '';
+  }
+
   const contentBytes = Buffer.byteLength(content, 'utf8');
   if (contentBytes <= maxBytes) {
     return content;
   }
 
   const noteBytes = Buffer.byteLength(TRUNCATION_NOTE, 'utf8');
-  const keepBytes = Math.max(0, maxBytes - noteBytes);
-  return `${Buffer.from(content, 'utf8').subarray(0, keepBytes).toString('utf8')}${TRUNCATION_NOTE}`;
+  if (noteBytes > maxBytes) {
+    return byteSafePrefix('[truncated]', maxBytes);
+  }
+
+  const keepBytes = maxBytes - noteBytes;
+  return `${byteSafePrefix(content, keepBytes)}${TRUNCATION_NOTE}`;
+}
+
+function assertSafeProcessLogFileName(fileName: string): void {
+  if (
+    fileName.length === 0
+    || isAbsolute(fileName)
+    || fileName.includes('/')
+    || fileName.includes('\\')
+    || fileName === '..'
+  ) {
+    throw new Error(`Unsafe Loom process log file name: ${fileName}`);
+  }
 }
 
 export function renderLoomProcessLog(input: LoomProcessLogInput): string {
@@ -172,7 +204,7 @@ export function renderLoomProcessLog(input: LoomProcessLogInput): string {
 
   pushSection(lines, 'Checks', (input.checks ?? []).map((check) => {
     const summary = check.summary ? ` - ${redactLoomProcessLog(check.summary)}` : '';
-    return `- ${check.status}: ${check.command}${summary}`;
+    return `- ${check.status}: ${redactLoomProcessLog(check.command)}${summary}`;
   }));
 
   pushSection(lines, 'Git Changes', (input.git?.changes ?? []).map((change) => `- ${change}`));
@@ -209,6 +241,7 @@ export function renderLoomProcessLog(input: LoomProcessLogInput): string {
 export async function writeLoomProcessLogFile(
   input: LoomProcessLogInput & { directory: string; fileName: string },
 ): Promise<LoomProcessLogWriteResult> {
+  assertSafeProcessLogFileName(input.fileName);
   const path = join(input.directory, input.fileName);
   await mkdir(input.directory, { recursive: true });
 
