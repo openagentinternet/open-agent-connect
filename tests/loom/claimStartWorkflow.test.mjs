@@ -302,7 +302,7 @@ test('missing git or gh returns tool_missing before chain writes', async () => {
   assert.deepEqual(events.map((event) => event.type), ['github.assertToolsReady']);
 });
 
-test('dry-run returns planned payloads and pending previews without side effects', async () => {
+test('dry-run returns planned payloads and final previews without side effects', async () => {
   const { input, events } = createDeps({ dryRun: true });
 
   const result = await runLoomClaimAndStartWorkflow(input);
@@ -312,10 +312,19 @@ test('dry-run returns planned payloads and pending previews without side effects
   assert.equal(result.data.claimPayload.taskPinId, taskPinId);
   assert.equal(result.data.claimPayload.payoutAddress, '1DeveloperPayoutAddress');
   assert.equal(result.data.statusPayload.status, 'started');
-  assert.equal(result.data.preview.claimPinId, 'pending-claim');
-  assert.match(result.data.preview.branchName, /^loom\/aaaaaaaa-pending-/);
-  assert.match(result.data.preview.stagingRepoPath, /\/staging\/.+\/run-1\/repo$/);
-  assert.match(result.data.preview.workspaceRepoPath, /\/workspaces\/.+\/pending-claim\/repo$/);
+  assert.equal(result.data.statusPayload.claimPinId, `${'0'.repeat(64)}i0`);
+  assert.equal(result.data.statusPayload.branchName, 'loom/aaaaaaaa-00000000');
+  assert.equal(
+    result.data.statusPayload.workspacePath,
+    `/tmp/metabot-loom-test/runtime/loom/workspaces/${taskPinId}/${'0'.repeat(64)}i0/repo`,
+  );
+  assert.equal(result.data.preview.claimPinId, `${'0'.repeat(64)}i0`);
+  assert.equal(result.data.preview.branchName, 'loom/aaaaaaaa-00000000');
+  assert.equal(result.data.preview.stagingRepoPath, expectedLocalPaths().stagingRepoPath);
+  assert.equal(
+    result.data.preview.workspaceRepoPath,
+    `/tmp/metabot-loom-test/runtime/loom/workspaces/${taskPinId}/${'0'.repeat(64)}i0/repo`,
+  );
   assert.deepEqual(result.data.github, {
     repoUri: 'https://github.com/openagentinternet/open-agent-connect',
     baseBranch: 'main',
@@ -353,11 +362,16 @@ test('dry-run returns planned payloads and pending previews without side effects
 });
 
 test('recovery dry-run skips claim write preview but includes started status chain preview', async () => {
+  const existingClaim = cachedRecord('claim', claimPinId, {
+    taskPinId,
+    payoutAddress: '1DeveloperPayoutAddress',
+  }, { globalMetaId: developerGlobalMetaId });
   const { input, events } = createDeps({
     dryRun: true,
     payoutAddress: undefined,
     claimPinId,
     chain: 'doge',
+    state: taskState({ claims: [existingClaim] }),
   });
 
   const result = await runLoomClaimAndStartWorkflow(input);
@@ -376,6 +390,44 @@ test('recovery dry-run skips claim write preview but includes started status cha
     repo: 'open-agent-connect',
     fullName: 'openagentinternet/open-agent-connect',
   });
+  assert.deepEqual(events.map((event) => event.type), ['github.assertToolsReady']);
+});
+
+test('recovery dry-run returns claim_not_found when the claim is absent', async () => {
+  const existingClaim = cachedRecord('claim', otherClaimPinId, {
+    taskPinId,
+    payoutAddress: '1DeveloperPayoutAddress',
+  }, { globalMetaId: developerGlobalMetaId });
+  const { input, events } = createDeps({
+    dryRun: true,
+    payoutAddress: undefined,
+    claimPinId,
+    state: taskState({ claims: [existingClaim] }),
+  });
+
+  const result = await runLoomClaimAndStartWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'claim_not_found');
+  assert.deepEqual(events.map((event) => event.type), ['github.assertToolsReady', 'workflow.read']);
+});
+
+test('recovery dry-run returns permission_denied when claim belongs to another developer', async () => {
+  const existingClaim = cachedRecord('claim', claimPinId, {
+    taskPinId,
+    payoutAddress: '1DeveloperPayoutAddress',
+  }, { globalMetaId: otherDeveloperGlobalMetaId });
+  const { input, events } = createDeps({
+    dryRun: true,
+    payoutAddress: undefined,
+    claimPinId,
+    state: taskState({ claims: [existingClaim] }),
+  });
+
+  const result = await runLoomClaimAndStartWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'permission_denied');
   assert.deepEqual(events.map((event) => event.type), ['github.assertToolsReady']);
 });
 

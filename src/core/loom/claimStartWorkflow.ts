@@ -106,7 +106,6 @@ interface GitHubTaskProject {
   upstreamRepo: GitHubRepoRef;
 }
 
-const PENDING_CLAIM_ID = 'pending-claim';
 const DRY_RUN_CLAIM_PIN_ID = `${'0'.repeat(64)}i0`;
 const DEFAULT_CHAIN = 'mvc';
 const DEFAULT_BASE_BRANCH = 'main';
@@ -458,12 +457,9 @@ export async function runLoomClaimAndStartWorkflow(
     workspaceRepoPath: input.workflowStore.resolve(input.taskPinId, claimPinId).workspaceRepoPath,
   });
   const pendingBranchName = `loom/${input.taskPinId.slice(0, 8)}-pending-${localRunId}`;
-  const previewClaimPinId = input.claimPinId ?? PENDING_CLAIM_ID;
-  const previewPaths = input.workflowStore.resolve(input.taskPinId, previewClaimPinId, localRunId);
   const plannedClaimPinId = input.claimPinId ?? DRY_RUN_CLAIM_PIN_ID;
-  const plannedBranchName = input.claimPinId
-    ? buildLoomBranchName(input.taskPinId, input.claimPinId)
-    : pendingBranchName;
+  const plannedBranchName = buildLoomBranchName(input.taskPinId, plannedClaimPinId);
+  const previewPaths = input.workflowStore.resolve(input.taskPinId, plannedClaimPinId, localRunId);
 
   let claimPayload: Record<string, unknown> | undefined;
   if (!recoveryMode) {
@@ -533,6 +529,19 @@ export async function runLoomClaimAndStartWorkflow(
     return tools;
   }
 
+  let recoveryWorkflow: LoomWorkflowState | undefined;
+  if (recoveryMode) {
+    const recoveryClaim = await resolveRecoveryClaim({
+      workflowInput: input,
+      state,
+      claimPinId: input.claimPinId as string,
+    });
+    if (!recoveryClaim.ok) {
+      return recoveryClaim;
+    }
+    recoveryWorkflow = recoveryClaim.data.workflow;
+  }
+
   if (input.dryRun) {
     return commandSuccess({
       dryRun: true,
@@ -556,26 +565,13 @@ export async function runLoomClaimAndStartWorkflow(
         },
       },
       preview: {
-        claimPinId: previewClaimPinId,
+        claimPinId: plannedClaimPinId,
         branchName: plannedBranchName,
         stagingRepoPath: pendingPaths.stagingRepoPath,
         workspaceRepoPath: previewPaths.workspaceRepoPath,
         processLogFileChain,
       },
     });
-  }
-
-  let recoveryWorkflow: LoomWorkflowState | undefined;
-  if (recoveryMode) {
-    const recoveryClaim = await resolveRecoveryClaim({
-      workflowInput: input,
-      state,
-      claimPinId: input.claimPinId as string,
-    });
-    if (!recoveryClaim.ok) {
-      return recoveryClaim;
-    }
-    recoveryWorkflow = recoveryClaim.data.workflow;
   }
 
   const scopedPaths = recoveryMode
