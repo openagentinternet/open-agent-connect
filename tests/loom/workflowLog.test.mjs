@@ -73,6 +73,9 @@ test('redacts json env and query token shapes while keeping non-secret text read
     '{"Authorization":"Bearer json-bearer-secret"}',
     'OPENAI_API_KEY=sk-openai-secret',
     'GITHUB_TOKEN=ghp_githubsecret',
+    'openai_api_key=sk-lower-openai-secret',
+    'github_token=ghp_lowergithubsecret',
+    'Api-Key: sk-header-secret',
     'callback=https://example.test?access_token=query-secret&state=ok',
   ].join('\n');
 
@@ -85,6 +88,9 @@ test('redacts json env and query token shapes while keeping non-secret text read
   assert.doesNotMatch(redacted, /json-bearer-secret/);
   assert.doesNotMatch(redacted, /sk-openai-secret/);
   assert.doesNotMatch(redacted, /ghp_githubsecret/);
+  assert.doesNotMatch(redacted, /sk-lower-openai-secret/);
+  assert.doesNotMatch(redacted, /ghp_lowergithubsecret/);
+  assert.doesNotMatch(redacted, /sk-header-secret/);
   assert.doesNotMatch(redacted, /query-secret/);
 });
 
@@ -131,12 +137,28 @@ test('redacts labelled mnemonic material without erasing ordinary prose', () => 
   const mnemonic = redactLoomProcessLog(
     'seed phrase: abandon ability able about above absent absorb abstract absurd abuse access accident',
   );
+  const seedEquals = redactLoomProcessLog(
+    'seed=abandon ability able about above absent absorb abstract absurd abuse access accident',
+  );
+  const seedWords = redactLoomProcessLog(
+    'seed_words="abandon ability able about above absent absorb abstract absurd abuse access accident"',
+  );
+  const mention = redactLoomProcessLog(
+    'Implemented mnemonic redaction tests and confirmed mnemonic not found in output.',
+  );
   const prose = redactLoomProcessLog(
     'this ordinary process summary explains progress across checks commits branches reviews and cleanup',
   );
 
   assert.match(mnemonic, /\[REDACTED MNEMONIC\]/);
   assert.doesNotMatch(mnemonic, /abandon ability able/);
+  assert.match(seedEquals, /\[REDACTED MNEMONIC\]/);
+  assert.doesNotMatch(seedEquals, /abandon ability able/);
+  assert.match(seedWords, /\[REDACTED MNEMONIC\]/);
+  assert.doesNotMatch(seedWords, /abandon ability able/);
+  assert.match(mention, /Implemented mnemonic redaction tests/);
+  assert.match(mention, /mnemonic not found in output/);
+  assert.doesNotMatch(mention, /\[REDACTED MNEMONIC\]/);
   assert.match(prose, /ordinary process summary/);
   assert.doesNotMatch(prose, /\[REDACTED MNEMONIC\]/);
 });

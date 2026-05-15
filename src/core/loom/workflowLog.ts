@@ -9,7 +9,7 @@ type ProcessLogFileChain = LoomFileUploadNetwork;
 const SUPPORTED_PROCESS_LOG_FILE_CHAINS = new Set<string>(['mvc', 'btc', 'opcat']);
 const DEFAULT_MAX_LOG_BYTES = 100 * 1024;
 const TRUNCATION_NOTE = '\n\n> Process log truncated to fit the Loom process log size limit.\n';
-const SECRET_KEY_RE = String.raw`(?:api_key|api-key|access_token|access-token|token|API_KEY|TOKEN|[A-Z0-9_]+_API_KEY|[A-Z0-9_]+_TOKEN)`;
+const SECRET_KEY_RE = String.raw`(?:[A-Z0-9_]+_API_KEY|[A-Z0-9_]+_TOKEN|api_key|api-key|access_token|access-token|token|API_KEY|TOKEN)`;
 
 export interface LoomProcessLogCheck {
   command: string;
@@ -96,8 +96,8 @@ export function redactLoomProcessLog(input: unknown): string {
     '[REDACTED PRIVATE KEY]',
   );
   output = output.replace(
-    /^.*\b(?:mnemonic|seed phrase|seed words|recovery phrase|secret phrase)\b.*$/gim,
-    '[REDACTED MNEMONIC]',
+    /\b((?:mnemonic|seed phrase|seed words|seed_words|recovery phrase|secret phrase|seed)\s*(?::|=)\s*)(?:"[^"]*"|'[^']*'|[^\n\r]+)/gi,
+    '$1[REDACTED MNEMONIC]',
   );
   output = output.replace(
     /(Authorization:\s*(?:Bearer|token)\s+)[^\s"'`]+/gi,
@@ -112,7 +112,11 @@ export function redactLoomProcessLog(input: unknown): string {
     '$1$2 [REDACTED]',
   );
   output = output.replace(
-    new RegExp(`\\b(${SECRET_KEY_RE}=)(?:"[^"]*"|'[^']*'|[^&\\s"'\\x60,}]+)`, 'g'),
+    new RegExp(`\\b(${SECRET_KEY_RE}=)(?:"[^"]*"|'[^']*'|[^&\\s"'\\x60,}]+)`, 'gi'),
+    '$1[REDACTED]',
+  );
+  output = output.replace(
+    new RegExp(`\\b(${SECRET_KEY_RE}:\\s*)(?:"[^"]*"|'[^']*'|[^&\\s"'\\x60,}]+)`, 'gi'),
     '$1[REDACTED]',
   );
   output = output.replace(
