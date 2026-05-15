@@ -220,7 +220,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'system', summary: 'Update or uninstall local Open Agent Connect runtime assets.' },
     { name: 'evolution', summary: 'Inspect, publish, import, and adopt skill evolution artifacts.' },
     { name: 'llm', summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings.' },
-    { name: 'loom', summary: 'Validate Loom payloads, sync raw records, and inspect task views.' },
+    { name: 'loom', summary: 'Validate Loom payloads, run workflow commands, sync raw records, and inspect task views.' },
   ],
   optionalFlags: [VERSION_FLAG, HELP_JSON_FLAG],
   examples: [
@@ -235,12 +235,19 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   ROOT_COMMAND_HELP,
   {
     commandPath: ['loom'],
-    summary: 'Loom commands for validating protocol payloads, raw cache sync, and task inspection.',
+    summary: 'Loom commands for validating protocol payloads, delegated task workflows, raw cache sync, and task inspection.',
     usage: 'metabot loom <subcommand>',
     subcommands: [
       { name: 'validate', summary: 'Validate one Loom protocol payload.' },
       { name: 'export-chain-request', summary: 'Build a chain write request for one Loom payload.' },
       { name: 'draft-task', summary: 'Draft a Loom task payload with the selected MetaBot LLM runtime.' },
+      { name: 'post-task', summary: 'Post a Loom task from a payload file or task wish.' },
+      { name: 'claim-and-start', summary: 'Claim a Loom task and prepare a local work session.' },
+      { name: 'run-dev-round', summary: 'Run a development round for an accepted Loom claim.' },
+      { name: 'deliver', summary: 'Create or summarize a Loom delivery for review.' },
+      { name: 'accept-and-pay', summary: 'Accept a delivery and optionally confirm payment.' },
+      { name: 'review-delivery', summary: 'Reject or request revision for a Loom delivery.' },
+      { name: 'state', summary: 'Show derived Loom workflow state for one task.' },
       { name: 'sync', summary: 'Synchronize raw Loom protocol records into the local cache.' },
       { name: 'list', summary: 'List task-centric Loom records from the local cache.' },
       { name: 'show', summary: 'Show one Loom task and grouped related raw records.' },
@@ -360,6 +367,167 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot loom sync',
       'metabot loom sync --limit 25',
+    ],
+  },
+  {
+    commandPath: ['loom', 'post-task'],
+    summary: 'Post a Loom task from a JSON payload file or draft wish through the delegated workflow dependency.',
+    usage: 'metabot loom post-task [--from <bot-slug>] (--payload-file <path>|--wish <text>) [--chain <mvc|btc|doge|opcat>] [--dry-run]',
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--payload-file', value: '<path>', description: 'Validated Loom task payload JSON to post. Mutually exclusive with --wish.' },
+      { flag: '--wish', value: '<text>', description: 'Natural-language task wish to draft and post. Mutually exclusive with --payload-file.' },
+      CHAIN_WRITE_FLAG,
+      { flag: '--dry-run', description: 'Build and validate workflow inputs without writing chain data.' },
+      HELP_JSON_FLAG,
+    ],
+    failureSemantics: [
+      'Fails with missing_flag when neither --payload-file nor --wish is provided.',
+      'Fails with invalid_flag when both --payload-file and --wish are provided.',
+    ],
+    examples: [
+      'metabot loom post-task --from alice --payload-file task.json --chain mvc --dry-run',
+      'metabot loom post-task --from alice --wish "Add workflow CLI parser tests" --chain mvc',
+    ],
+  },
+  {
+    commandPath: ['loom', 'claim-and-start'],
+    summary: 'Claim a Loom task and prepare a local workspace through the delegated workflow dependency.',
+    usage: 'metabot loom claim-and-start --task-pin-id <pinid> (--payout-address <address>|--claim-pin-id <pinid>) [--from <bot-slug>] [--chain <mvc|btc|doge|opcat>] [--file-chain <mvc|btc|opcat>] [--message <text>] [--dry-run] [--reset-workspace]',
+    requiredFlags: [
+      { flag: '--task-pin-id', value: '<pinid>', description: 'Loom task PIN id to claim or resume.' },
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--payout-address', value: '<address>', description: 'Developer payout address for a new claim. Required unless --claim-pin-id is supplied.' },
+      { flag: '--claim-pin-id', value: '<pinid>', description: 'Existing claim PIN id to resume. Required unless --payout-address is supplied.' },
+      CHAIN_WRITE_FLAG,
+      { flag: '--file-chain', value: '<mvc|btc|opcat>', description: 'Optional chain override for file uploads. DOGE is not supported for file upload.' },
+      { flag: '--message', value: '<text>', description: 'Optional claim or workspace message.' },
+      { flag: '--dry-run', description: 'Prepare inputs without writing chain data or changing the workspace.' },
+      { flag: '--reset-workspace', description: 'Allow the workflow dependency to reset its task workspace before starting.' },
+      HELP_JSON_FLAG,
+    ],
+    failureSemantics: [
+      'Fails with missing_flag when --task-pin-id is omitted.',
+      'Fails with missing_flag when neither --payout-address nor --claim-pin-id is provided.',
+    ],
+    examples: [
+      `metabot loom claim-and-start --from bob --task-pin-id ${'a'.repeat(64)}i0 --payout-address 1DeveloperPayoutAddress --chain mvc --file-chain btc --message hi`,
+      `metabot loom claim-and-start --from bob --task-pin-id ${'a'.repeat(64)}i0 --claim-pin-id ${'b'.repeat(64)}i0 --chain mvc --reset-workspace`,
+    ],
+  },
+  {
+    commandPath: ['loom', 'run-dev-round'],
+    summary: 'Run a local development round for a task claim and forward repeated verification commands.',
+    usage: 'metabot loom run-dev-round --task-pin-id <pinid> --claim-pin-id <pinid> [--from <bot-slug>] [--chain <mvc|btc|doge|opcat>] [--file-chain <mvc|btc|opcat>] [--check <command>...] [--round-note <text>]',
+    requiredFlags: [
+      { flag: '--task-pin-id', value: '<pinid>', description: 'Loom task PIN id under development.' },
+      { flag: '--claim-pin-id', value: '<pinid>', description: 'Accepted claim PIN id for this development round.' },
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      CHAIN_WRITE_FLAG,
+      { flag: '--file-chain', value: '<mvc|btc|opcat>', description: 'Optional chain override for file uploads. DOGE is not supported for file upload.' },
+      { flag: '--check', value: '<command>', description: 'Verification command to run. Repeat to preserve multiple checks.' },
+      { flag: '--round-note', value: '<text>', description: 'Optional development round note.' },
+      HELP_JSON_FLAG,
+    ],
+    failureSemantics: [
+      'Fails with missing_flag when --task-pin-id or --claim-pin-id is omitted.',
+      'Requires the delegated workflow dependency to provide any Git, command execution, and file-upload behavior.',
+    ],
+    examples: [
+      `metabot loom run-dev-round --task-pin-id ${'a'.repeat(64)}i0 --claim-pin-id ${'b'.repeat(64)}i0 --check "npm run build" --check "npm test"`,
+    ],
+  },
+  {
+    commandPath: ['loom', 'deliver'],
+    summary: 'Deliver completed work for a Loom task claim through the delegated workflow dependency.',
+    usage: 'metabot loom deliver --task-pin-id <pinid> --claim-pin-id <pinid> [--from <bot-slug>] [--chain <mvc|btc|doge|opcat>] [--pr-title <text>] [--delivery-summary <text>] [--dry-run]',
+    requiredFlags: [
+      { flag: '--task-pin-id', value: '<pinid>', description: 'Loom task PIN id being delivered.' },
+      { flag: '--claim-pin-id', value: '<pinid>', description: 'Claim PIN id for the delivered work.' },
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      CHAIN_WRITE_FLAG,
+      { flag: '--pr-title', value: '<text>', description: 'Optional pull request title to forward to the workflow dependency.' },
+      { flag: '--delivery-summary', value: '<text>', description: 'Optional human-readable delivery summary.' },
+      { flag: '--dry-run', description: 'Prepare delivery inputs without writing chain data or creating remote artifacts.' },
+      HELP_JSON_FLAG,
+    ],
+    failureSemantics: [
+      'Fails with missing_flag when --task-pin-id or --claim-pin-id is omitted.',
+      'GitHub operations, pull request creation, and repository inspection require the delegated workflow dependency to provide those tools.',
+    ],
+    examples: [
+      `metabot loom deliver --task-pin-id ${'a'.repeat(64)}i0 --claim-pin-id ${'b'.repeat(64)}i0 --pr-title "feat: add loom workflow CLI" --delivery-summary "Parser and help added."`,
+    ],
+  },
+  {
+    commandPath: ['loom', 'accept-and-pay'],
+    summary: 'Accept a Loom delivery and forward payment confirmation intent through the delegated workflow dependency.',
+    usage: 'metabot loom accept-and-pay --task-pin-id <pinid> --delivery-pin-id <pinid> --score <n> --comment <text> [--from <bot-slug>] [--chain <mvc|btc|doge|opcat>] [--confirm-payment]',
+    requiredFlags: [
+      { flag: '--task-pin-id', value: '<pinid>', description: 'Loom task PIN id whose delivery is accepted.' },
+      { flag: '--delivery-pin-id', value: '<pinid>', description: 'Delivery PIN id to accept.' },
+      { flag: '--score', value: '<n>', description: 'Positive integer review score.' },
+      { flag: '--comment', value: '<text>', description: 'Acceptance comment.' },
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      CHAIN_WRITE_FLAG,
+      { flag: '--confirm-payment', description: 'Explicitly allow the delegated workflow dependency to perform payment. Without it, payment must not be confirmed.' },
+      HELP_JSON_FLAG,
+    ],
+    failureSemantics: [
+      'Fails with invalid_flag when --score is not a positive integer.',
+      'Omitting --confirm-payment forwards confirmPayment: false; payment-confirming behavior requires the explicit flag.',
+    ],
+    examples: [
+      `metabot loom accept-and-pay --task-pin-id ${'a'.repeat(64)}i0 --delivery-pin-id ${'c'.repeat(64)}i0 --score 5 --comment "Accepted" --confirm-payment`,
+    ],
+  },
+  {
+    commandPath: ['loom', 'review-delivery'],
+    summary: 'Reject or request revision for a Loom delivery through the delegated workflow dependency.',
+    usage: 'metabot loom review-delivery --task-pin-id <pinid> --delivery-pin-id <pinid> --verdict <rejected|revision_needed> --score <n> --comment <text> [--from <bot-slug>] [--chain <mvc|btc|doge|opcat>] [--attachment <uri>...]',
+    requiredFlags: [
+      { flag: '--task-pin-id', value: '<pinid>', description: 'Loom task PIN id being reviewed.' },
+      { flag: '--delivery-pin-id', value: '<pinid>', description: 'Delivery PIN id to review.' },
+      { flag: '--verdict', value: '<rejected|revision_needed>', description: 'Negative review verdict to post.' },
+      { flag: '--score', value: '<n>', description: 'Positive integer review score.' },
+      { flag: '--comment', value: '<text>', description: 'Review comment.' },
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      CHAIN_WRITE_FLAG,
+      { flag: '--attachment', value: '<uri>', description: 'Optional review attachment URI. Repeat to include multiple attachments.' },
+      HELP_JSON_FLAG,
+    ],
+    failureSemantics: [
+      'Fails with invalid_flag when --verdict is not rejected or revision_needed.',
+      'Fails with invalid_flag when --score is not a positive integer.',
+      'This command only represents negative delivery outcomes; accepted delivery payment uses accept-and-pay.',
+    ],
+    examples: [
+      `metabot loom review-delivery --task-pin-id ${'a'.repeat(64)}i0 --delivery-pin-id ${'c'.repeat(64)}i0 --verdict revision_needed --score 2 --comment "Please add tests." --attachment metafile://review-note`,
+    ],
+  },
+  {
+    commandPath: ['loom', 'state'],
+    summary: 'Show derived Loom workflow state for one task through the delegated workflow dependency.',
+    usage: 'metabot loom state <taskPinId> [--refresh]',
+    optionalFlags: [
+      { flag: '--refresh', description: 'Refresh task state before reading it.' },
+      HELP_JSON_FLAG,
+    ],
+    failureSemantics: [
+      'Fails with missing_argument when taskPinId is omitted.',
+    ],
+    examples: [
+      `metabot loom state ${'a'.repeat(64)}i0 --refresh`,
     ],
   },
   {

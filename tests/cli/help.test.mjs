@@ -168,6 +168,27 @@ test('runCli prints loom draft-task help with wish and actor flags', async () =>
   assert.ok(jsonOutput.optionalFlags.some((flag) => flag.flag === '--allow-invalid'));
 });
 
+test('runCli prints loom workflow command help', async () => {
+  for (const command of [
+    'post-task',
+    'claim-and-start',
+    'run-dev-round',
+    'deliver',
+    'accept-and-pay',
+    'review-delivery',
+    'state',
+  ]) {
+    const stdout = [];
+    const exitCode = await runCli(['loom', command, '--help'], {
+      stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+      stderr: { write: () => true },
+    });
+
+    assert.equal(exitCode, 0);
+    assert.match(stdout.join(''), new RegExp(`metabot loom ${command}`));
+  }
+});
+
 test('runCli prints bot group help for profile, runtime, and session commands', async () => {
   const stdout = [];
 

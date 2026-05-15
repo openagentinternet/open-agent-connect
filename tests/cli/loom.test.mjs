@@ -355,6 +355,396 @@ test('runCli forwards from and allowInvalid to loom draft-task dependencies', as
   }]);
 });
 
+test('runCli delegates loom post-task payload-file input to runtime dependencies', async () => {
+  const calls = [];
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'post-task',
+    '--from',
+    'alice',
+    '--payload-file',
+    'task.json',
+    '--chain',
+    'mvc',
+    '--dry-run',
+  ], {
+    dependencies: {
+      loom: {
+        postTask: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { posted: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    from: 'alice',
+    payloadFile: 'task.json',
+    chain: 'mvc',
+    dryRun: true,
+  }]);
+  assert.equal(envelope.ok, true);
+  assert.deepEqual(envelope.data, { posted: true });
+});
+
+test('runCli delegates loom post-task wish input to runtime dependencies', async () => {
+  const calls = [];
+  const { exitCode } = await runLoom([
+    'loom',
+    'post-task',
+    '--from',
+    'alice',
+    '--wish',
+    'Build a CLI workflow surface.',
+    '--chain',
+    'mvc',
+  ], {
+    dependencies: {
+      loom: {
+        postTask: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { posted: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    from: 'alice',
+    wish: 'Build a CLI workflow surface.',
+    chain: 'mvc',
+    dryRun: false,
+  }]);
+});
+
+test('runCli rejects loom post-task without exactly one task source', async () => {
+  for (const args of [
+    ['loom', 'post-task', '--from', 'alice'],
+    ['loom', 'post-task', '--payload-file', 'task.json', '--wish', 'Build it.'],
+  ]) {
+    const calls = [];
+    const { exitCode, envelope } = await runLoom(args, {
+      dependencies: {
+        loom: {
+          postTask: async (input) => {
+            calls.push(input);
+            return { ok: true, state: 'success', data: { posted: true } };
+          },
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.state, 'failed');
+    assert.match(envelope.code, /missing_flag|invalid_flag/);
+    assert.deepEqual(calls, []);
+  }
+});
+
+test('runCli delegates loom claim-and-start payout input to runtime dependencies', async () => {
+  const calls = [];
+  const { exitCode } = await runLoom([
+    'loom',
+    'claim-and-start',
+    '--from',
+    'bob',
+    '--task-pin-id',
+    validTaskPinId,
+    '--payout-address',
+    '1DeveloperPayoutAddress',
+    '--chain',
+    'mvc',
+    '--file-chain',
+    'btc',
+    '--message',
+    'hi',
+  ], {
+    dependencies: {
+      loom: {
+        claimAndStart: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { claimed: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    from: 'bob',
+    taskPinId: validTaskPinId,
+    payoutAddress: '1DeveloperPayoutAddress',
+    chain: 'mvc',
+    fileChain: 'btc',
+    message: 'hi',
+    dryRun: false,
+    resetWorkspace: false,
+  }]);
+});
+
+test('runCli delegates loom claim-and-start claim-pin input to runtime dependencies', async () => {
+  const calls = [];
+  const claimPinId = `${'b'.repeat(64)}i0`;
+  const { exitCode } = await runLoom([
+    'loom',
+    'claim-and-start',
+    '--from',
+    'bob',
+    '--task-pin-id',
+    validTaskPinId,
+    '--claim-pin-id',
+    claimPinId,
+    '--chain',
+    'mvc',
+    '--reset-workspace',
+  ], {
+    dependencies: {
+      loom: {
+        claimAndStart: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { claimed: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    from: 'bob',
+    taskPinId: validTaskPinId,
+    claimPinId,
+    chain: 'mvc',
+    dryRun: false,
+    resetWorkspace: true,
+  }]);
+});
+
+test('runCli rejects loom claim-and-start without a payout or claim pin id', async () => {
+  const calls = [];
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'claim-and-start',
+    '--from',
+    'bob',
+    '--task-pin-id',
+    validTaskPinId,
+  ], {
+    dependencies: {
+      loom: {
+        claimAndStart: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { claimed: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.state, 'failed');
+  assert.equal(envelope.code, 'missing_flag');
+  assert.match(envelope.message, /--payout-address|--claim-pin-id/);
+  assert.deepEqual(calls, []);
+});
+
+test('runCli forwards repeated loom run-dev-round checks', async () => {
+  const calls = [];
+  const claimPinId = `${'b'.repeat(64)}i0`;
+  const { exitCode } = await runLoom([
+    'loom',
+    'run-dev-round',
+    '--from',
+    'alice',
+    '--task-pin-id',
+    validTaskPinId,
+    '--claim-pin-id',
+    claimPinId,
+    '--chain',
+    'mvc',
+    '--file-chain',
+    'btc',
+    '--check',
+    'npm run build',
+    '--check',
+    'node --test tests/cli/loom.test.mjs',
+    '--round-note',
+    'Parser round.',
+  ], {
+    dependencies: {
+      loom: {
+        runDevRound: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { round: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    from: 'alice',
+    taskPinId: validTaskPinId,
+    claimPinId,
+    chain: 'mvc',
+    fileChain: 'btc',
+    checks: ['npm run build', 'node --test tests/cli/loom.test.mjs'],
+    roundNote: 'Parser round.',
+  }]);
+});
+
+test('runCli forwards loom deliver dry-run, pr title, and delivery summary', async () => {
+  const calls = [];
+  const claimPinId = `${'b'.repeat(64)}i0`;
+  const { exitCode } = await runLoom([
+    'loom',
+    'deliver',
+    '--from',
+    'alice',
+    '--task-pin-id',
+    validTaskPinId,
+    '--claim-pin-id',
+    claimPinId,
+    '--chain',
+    'mvc',
+    '--dry-run',
+    '--pr-title',
+    'feat: add parser',
+    '--delivery-summary',
+    'CLI surface added.',
+  ], {
+    dependencies: {
+      loom: {
+        deliver: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { delivered: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    from: 'alice',
+    taskPinId: validTaskPinId,
+    claimPinId,
+    chain: 'mvc',
+    prTitle: 'feat: add parser',
+    deliverySummary: 'CLI surface added.',
+    dryRun: true,
+  }]);
+});
+
+test('runCli forwards loom accept-and-pay confirmation, score, and comment', async () => {
+  const calls = [];
+  const deliveryPinId = `${'c'.repeat(64)}i0`;
+  const { exitCode } = await runLoom([
+    'loom',
+    'accept-and-pay',
+    '--from',
+    'alice',
+    '--task-pin-id',
+    validTaskPinId,
+    '--delivery-pin-id',
+    deliveryPinId,
+    '--score',
+    '5',
+    '--comment',
+    'Looks good.',
+    '--chain',
+    'mvc',
+    '--confirm-payment',
+  ], {
+    dependencies: {
+      loom: {
+        acceptAndPay: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { accepted: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    from: 'alice',
+    taskPinId: validTaskPinId,
+    deliveryPinId,
+    score: 5,
+    comment: 'Looks good.',
+    chain: 'mvc',
+    confirmPayment: true,
+  }]);
+});
+
+test('runCli forwards loom review-delivery verdict, score, comment, and attachments', async () => {
+  const calls = [];
+  const deliveryPinId = `${'c'.repeat(64)}i0`;
+  const { exitCode } = await runLoom([
+    'loom',
+    'review-delivery',
+    '--from',
+    'alice',
+    '--task-pin-id',
+    validTaskPinId,
+    '--delivery-pin-id',
+    deliveryPinId,
+    '--verdict',
+    'revision_needed',
+    '--score',
+    '2',
+    '--comment',
+    'Please add tests.',
+    '--chain',
+    'mvc',
+    '--attachment',
+    'metafile://one',
+    '--attachment',
+    'metafile://two',
+  ], {
+    dependencies: {
+      loom: {
+        reviewDelivery: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { reviewed: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    from: 'alice',
+    taskPinId: validTaskPinId,
+    deliveryPinId,
+    verdict: 'revision_needed',
+    score: 2,
+    comment: 'Please add tests.',
+    chain: 'mvc',
+    attachments: ['metafile://one', 'metafile://two'],
+  }]);
+});
+
+test('runCli delegates loom state task pin and refresh flag to runtime dependencies', async () => {
+  const calls = [];
+  const { exitCode } = await runLoom(['loom', 'state', validTaskPinId, '--refresh'], {
+    dependencies: {
+      loom: {
+        state: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { found: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ taskPinId: validTaskPinId, refresh: true }]);
+});
+
 test('runCli rejects loom draft-task --from without an actor value', async () => {
   for (const args of [
     ['loom', 'draft-task', '--wish', 'hi', '--from'],
