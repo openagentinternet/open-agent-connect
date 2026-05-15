@@ -92,7 +92,7 @@ function taskState(options = {}) {
     valid: {
       claims: options.claims ?? [claim],
       statuses: [],
-      deliveries: [],
+      deliveries: options.deliveries ?? [],
       acceptances: [],
       claimRejects: [],
     },
@@ -261,6 +261,58 @@ test('runLoomDeliverWorkflow requires the latest local status to have passing ch
   }
 });
 
+test('runLoomDeliverWorkflow rejects an already persisted local delivery', async () => {
+  const { events, input } = createDeps({
+    workflowState: workflowState({
+      delivery: {
+        pinId: deliveryPinId,
+        prUrl: 'https://github.com/openagentinternet/open-agent-connect/pull/122',
+        prTitle: 'feat: previous delivery',
+      },
+    }),
+  });
+
+  const result = await runLoomDeliverWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'already_delivered');
+  assert.equal(result.data.deliveryPinId, deliveryPinId);
+  assert.equal(result.data.source, 'local_workflow');
+  assert.deepEqual(events.filter((event) => event.type === 'github.pushLoomBranch'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'github.createLoomPullRequest'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'writeChain'), []);
+});
+
+test('runLoomDeliverWorkflow rejects an existing valid chain delivery for the claim', async () => {
+  const chainDelivery = cachedRecord('delivery', deliveryPinId, {
+    taskPinId,
+    claimPinId,
+    deliveryBase: 'github',
+    deliverySummary: 'Already delivered.',
+    delivery: {
+      prUrl: 'https://github.com/openagentinternet/open-agent-connect/pull/122',
+      prBranch: 'loom/task-claim',
+      prBaseBranch: 'main',
+      prTitle: 'feat: previous delivery',
+    },
+    reviewChecklist: [{ item: 'Previous checklist item', status: 'passed' }],
+  }, { globalMetaId: developerGlobalMetaId });
+  const { events, input } = createDeps({
+    state: taskState({ deliveries: [chainDelivery] }),
+  });
+
+  const result = await runLoomDeliverWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'already_delivered');
+  assert.equal(result.data.deliveryPinId, deliveryPinId);
+  assert.equal(result.data.source, 'chain_projection');
+  assert.equal(result.data.prUrl, 'https://github.com/openagentinternet/open-agent-connect/pull/122');
+  assert.deepEqual(events.filter((event) => event.type === 'github.pushLoomBranch'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'github.createLoomPullRequest'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'writeChain'), []);
+});
+
 test('runLoomDeliverWorkflow dry-run returns delivery plan and writes nothing', async () => {
   const { events, input } = createDeps({ dryRun: true });
 
@@ -347,6 +399,30 @@ test('runLoomDeliverWorkflow does not write delivery when PR creation fails', as
   assert.equal(result.ok, false);
   assert.equal(result.code, 'github_pr_failed');
   assert.equal(events.filter((event) => event.type === 'github.pushLoomBranch').length, 1);
+  assert.deepEqual(events.filter((event) => event.type === 'writeChain'), []);
+  assert.deepEqual(events.filter((event) => event.type === 'workflow.write'), []);
+});
+
+test('runLoomDeliverWorkflow rejects an empty PR URL before chain write', async () => {
+  const { events, input } = createDeps({
+    github: {
+      async pushLoomBranch(pushInput) {
+        events.push({ type: 'github.pushLoomBranch', input: pushInput });
+        return commandSuccess({ branchName: pushInput.branchName });
+      },
+      async createLoomPullRequest(prInput) {
+        events.push({ type: 'github.createLoomPullRequest', input: prInput });
+        return commandSuccess({ url: '' });
+      },
+    },
+  });
+
+  const result = await runLoomDeliverWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_pull_request');
+  assert.equal(events.filter((event) => event.type === 'github.pushLoomBranch').length, 1);
+  assert.equal(events.filter((event) => event.type === 'github.createLoomPullRequest').length, 1);
   assert.deepEqual(events.filter((event) => event.type === 'writeChain'), []);
   assert.deepEqual(events.filter((event) => event.type === 'workflow.write'), []);
 });

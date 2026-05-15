@@ -249,7 +249,13 @@ function validateDelivery(payload: JsonObject, errors: LoomValidationError[]): v
   requirePinId(payload, 'claimPinId', errors);
   requireEnum(payload, 'deliveryBase', DELIVERY_BASES, errors);
   requireNonEmptyString(payload, 'deliverySummary', errors);
-  requireObject(payload, 'delivery', errors);
+  const delivery = requireObject(payload, 'delivery', errors);
+  if (delivery) {
+    requireNonEmptyString(delivery, 'prUrl', errors, 'delivery');
+    requireNonEmptyString(delivery, 'prBranch', errors, 'delivery');
+    requireNonEmptyString(delivery, 'prBaseBranch', errors, 'delivery');
+    requireNonEmptyString(delivery, 'prTitle', errors, 'delivery');
+  }
 
   if (!hasOwn(payload, 'reviewChecklist')) {
     addError(errors, 'reviewChecklist', 'required', 'reviewChecklist is required.');

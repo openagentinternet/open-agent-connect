@@ -114,6 +114,69 @@ function latestChecksPassed(workflow: LoomWorkflowState): boolean {
   return workflow.statuses.at(-1)?.checksPassed === true;
 }
 
+function deliveryPayloadPrUrl(record: { payload?: unknown }): string | undefined {
+  if (!isRecord(record.payload)) {
+    return undefined;
+  }
+  const delivery = record.payload.delivery;
+  if (!isRecord(delivery)) {
+    return undefined;
+  }
+  return nonEmptyString(delivery.prUrl);
+}
+
+function deliveryPayloadPrTitle(record: { payload?: unknown }): string | undefined {
+  if (!isRecord(record.payload)) {
+    return undefined;
+  }
+  const delivery = record.payload.delivery;
+  if (!isRecord(delivery)) {
+    return undefined;
+  }
+  return nonEmptyString(delivery.prTitle);
+}
+
+function existingChainDelivery(state: LoomWorkflowTaskState, claimPinId: string): { pinId: string; prUrl?: string; prTitle?: string } | null {
+  if (!state.found) {
+    return null;
+  }
+
+  const delivery = state.valid.deliveries.find((record) => {
+    if (!isRecord(record.payload)) {
+      return false;
+    }
+    return record.payload.claimPinId === claimPinId;
+  });
+  if (!delivery) {
+    return null;
+  }
+  return {
+    pinId: delivery.pinId,
+    prUrl: deliveryPayloadPrUrl(delivery),
+    prTitle: deliveryPayloadPrTitle(delivery),
+  };
+}
+
+function alreadyDelivered(input: {
+  source: 'local_workflow' | 'chain_projection';
+  deliveryPinId: string;
+  prUrl?: string;
+  prTitle?: string;
+}): MetabotCommandResult<never> {
+  return commandFailed(
+    'already_delivered',
+    `Loom claim already has a delivery: ${input.deliveryPinId}.`,
+    {
+      data: {
+        source: input.source,
+        deliveryPinId: input.deliveryPinId,
+        ...(input.prUrl ? { prUrl: input.prUrl } : {}),
+        ...(input.prTitle ? { prTitle: input.prTitle } : {}),
+      },
+    },
+  );
+}
+
 function parseChecklist(criteria: string): Array<{ item: string; status: 'passed' }> {
   const items = criteria
     .split(/\r?\n/)
@@ -273,6 +336,24 @@ export async function runLoomDeliverWorkflow(
   if (workflow.developerGlobalMetaId && workflow.developerGlobalMetaId !== input.developerGlobalMetaId) {
     return commandFailed('permission_denied', `Loom claim ${input.claimPinId} belongs to another developer.`);
   }
+  if (workflow.delivery?.pinId) {
+    return alreadyDelivered({
+      source: 'local_workflow',
+      deliveryPinId: workflow.delivery.pinId,
+      prUrl: workflow.delivery.prUrl,
+      prTitle: workflow.delivery.prTitle,
+    });
+  }
+
+  const projectedDelivery = existingChainDelivery(input.state, input.claimPinId);
+  if (projectedDelivery) {
+    return alreadyDelivered({
+      source: 'chain_projection',
+      deliveryPinId: projectedDelivery.pinId,
+      prUrl: projectedDelivery.prUrl,
+      prTitle: projectedDelivery.prTitle,
+    });
+  }
   if (!latestChecksPassed(workflow)) {
     return commandFailed('check_failed', 'Latest local Loom workflow status does not have passing checks.');
   }
@@ -354,6 +435,9 @@ export async function runLoomDeliverWorkflow(
   });
   if (!pr.ok) {
     return pr;
+  }
+  if (!nonEmptyString(pr.data.url)) {
+    return commandFailed('invalid_pull_request', 'GitHub pull request creation returned an empty pull request URL.');
   }
 
   const deliveryPayload = createDeliveryPayload({

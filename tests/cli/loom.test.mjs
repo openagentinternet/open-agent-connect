@@ -27,7 +27,7 @@ async function writePayload(tempDir, payload) {
   return payloadFile;
 }
 
-async function createIndexedHome() {
+async function createIndexedHome(options = {}) {
   const home = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-home-'));
   const profileHome = path.join(home, '.metabot', 'profiles', 'eric');
   const managerRoot = path.join(home, '.metabot', 'manager');
@@ -42,7 +42,7 @@ async function createIndexedHome() {
         slug: 'eric',
         aliases: ['eric'],
         homeDir: profileHome,
-        globalMetaId: '',
+        globalMetaId: options.globalMetaId ?? '',
         mvcAddress: '',
         createdAt: now,
         updatedAt: now,
@@ -56,6 +56,25 @@ async function createIndexedHome() {
     'utf8',
   );
   return home;
+}
+
+function cachedLoomRecord(protocol, pinId, payload, overrides = {}) {
+  return {
+    pinId,
+    protocol,
+    path: `/protocols/loom-${protocol}`,
+    operation: 'create',
+    contentType: 'application/json',
+    timestamp: overrides.timestamp ?? 1,
+    creatorAddress: '',
+    creatorMetaId: '',
+    globalMetaId: overrides.globalMetaId ?? '',
+    payload,
+    payloadValid: true,
+    validationErrors: [],
+    raw: {},
+    ...overrides,
+  };
 }
 
 async function withChainApiServer(handler) {
@@ -924,6 +943,105 @@ test('runCli forwards loom deliver dry-run, pr title, and delivery summary', asy
     deliverySummary: 'CLI surface added.',
     dryRun: true,
   }]);
+});
+
+test('runCli default loom deliver dry-run uses indexed profile identity without signer secrets', async () => {
+  const developerGlobalMetaId = 'metaid-eric';
+  const home = await createIndexedHome({ globalMetaId: developerGlobalMetaId });
+  const profileHome = path.join(home, '.metabot', 'profiles', 'eric');
+  const claimPinId = `${'b'.repeat(64)}i0`;
+  const statusPinId = `${'d'.repeat(64)}i0`;
+  const taskPayload = {
+    title: 'Preview delivery',
+    requirementContentType: 'text/markdown',
+    requirement: 'Preview a delivery without mutating identity secrets.',
+    criteriaContentType: 'text/markdown',
+    criteria: '- Review the PR',
+    projectBase: 'github',
+    project: {
+      repoUri: 'https://github.com/openagentinternet/open-agent-connect',
+      baseBranch: 'main',
+    },
+    bounty: {
+      amount: '1',
+      currency: 'SPACE',
+    },
+  };
+  const rawCachePath = path.join(home, '.metabot', 'loom', 'records.json');
+  const workflowPath = path.join(profileHome, '.runtime', 'loom', 'workflows', validTaskPinId, `${claimPinId}.json`);
+  await mkdir(path.dirname(rawCachePath), { recursive: true });
+  await mkdir(path.dirname(workflowPath), { recursive: true });
+  await writeFile(rawCachePath, JSON.stringify({
+    version: 1,
+    updatedAt: Date.now(),
+    records: {
+      task: [cachedLoomRecord('task', validTaskPinId, taskPayload)],
+      claim: [cachedLoomRecord('claim', claimPinId, {
+        taskPinId: validTaskPinId,
+        payoutAddress: '1DeveloperPayoutAddress',
+      }, { globalMetaId: developerGlobalMetaId })],
+      status: [],
+      delivery: [],
+      acceptance: [],
+      'claim-reject': [],
+    },
+  }), 'utf8');
+  await writeFile(workflowPath, JSON.stringify({
+    version: 1,
+    taskPinId: validTaskPinId,
+    claimPinId,
+    developerMetaBotSlug: 'eric',
+    developerGlobalMetaId,
+    repoUri: 'https://github.com/openagentinternet/open-agent-connect',
+    baseBranch: 'main',
+    upstreamRemote: 'origin',
+    forkRemote: 'fork',
+    forkRepo: 'eric/open-agent-connect',
+    branchName: 'loom/task-claim',
+    workspacePath: path.join(profileHome, 'repo'),
+    claim: { pinId: claimPinId },
+    statuses: [{
+      roundId: 'round-1',
+      status: 'completed',
+      pinId: statusPinId,
+      commits: [],
+      checksPassed: true,
+    }],
+    updatedAt: '2026-05-16T00:00:00.000Z',
+  }), 'utf8');
+
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'deliver',
+    '--from',
+    'eric',
+    '--task-pin-id',
+    validTaskPinId,
+    '--claim-pin-id',
+    claimPinId,
+    '--dry-run',
+  ], {
+    env: {
+      ...process.env,
+      HOME: home,
+    },
+    dependencies: {
+      chain: {
+        write: async () => {
+          throw new Error('dry-run must not write chain data');
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.data.dryRun, true);
+  assert.equal(envelope.data.pullRequest.head, 'eric:loom/task-claim');
+  await assert.rejects(
+    readFile(path.join(profileHome, '.runtime', 'identity-secrets.json'), 'utf8'),
+    { code: 'ENOENT' },
+  );
 });
 
 test('runCli forwards loom accept-and-pay confirmation, score, and comment', async () => {

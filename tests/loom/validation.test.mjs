@@ -173,6 +173,23 @@ test('accepts a valid loom delivery payload', () => {
   assert.equal(validateLoomPayload('delivery', validDeliveryPayload()).valid, true);
 });
 
+test('requires nested loom delivery GitHub fields', () => {
+  const result = validateLoomPayload('delivery', validDeliveryPayload({
+    delivery: {
+      prUrl: '',
+      prBranch: '',
+      prBaseBranch: '',
+      prTitle: '',
+    },
+  }));
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.path === 'delivery.prUrl'));
+  assert.ok(result.errors.some((error) => error.path === 'delivery.prBranch'));
+  assert.ok(result.errors.some((error) => error.path === 'delivery.prBaseBranch'));
+  assert.ok(result.errors.some((error) => error.path === 'delivery.prTitle'));
+});
+
 test('accepts a valid loom claim-reject payload', () => {
   assert.equal(validateLoomPayload('claim-reject', validClaimRejectPayload()).valid, true);
 });

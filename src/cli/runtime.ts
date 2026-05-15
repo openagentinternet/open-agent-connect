@@ -35,6 +35,7 @@ import type { SkillActiveVariantRef } from '../core/evolution/types';
 import { resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
 import {
   normalizeSystemHomeDir as normalizeSelectedSystemHomeDir,
+  resolveMetabotManagerLayout,
   resolveMetabotHomeSelectionSync,
 } from '../core/state/homeSelection';
 import {
@@ -677,6 +678,128 @@ async function resolveActorHomeDir(
     return commandFailed('identity_profile_ambiguous', resolved.message);
   }
   return { homeDir: resolved.match.homeDir };
+}
+
+function normalizeReadOnlyIdentityProfile(value: unknown): IdentityProfileRecord | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Partial<IdentityProfileRecord>;
+  const name = normalizeEnvText(record.name);
+  const slug = normalizeEnvText(record.slug);
+  const homeDir = normalizeEnvText(record.homeDir);
+  const globalMetaId = normalizeEnvText(record.globalMetaId);
+  if (!name || !slug || !homeDir) {
+    return null;
+  }
+  return {
+    name,
+    slug,
+    aliases: Array.isArray(record.aliases)
+      ? record.aliases.map((alias) => normalizeEnvText(alias)).filter(Boolean)
+      : [],
+    homeDir: path.resolve(homeDir),
+    globalMetaId,
+    mvcAddress: normalizeEnvText(record.mvcAddress),
+    createdAt: typeof record.createdAt === 'number' && Number.isFinite(record.createdAt)
+      ? record.createdAt
+      : 0,
+    updatedAt: typeof record.updatedAt === 'number' && Number.isFinite(record.updatedAt)
+      ? record.updatedAt
+      : 0,
+  };
+}
+
+async function readIdentityProfilesReadonly(systemHomeDir: string): Promise<IdentityProfileRecord[]> {
+  const layout = resolveMetabotManagerLayout(systemHomeDir);
+  let raw: string;
+  try {
+    raw = await fs.promises.readFile(layout.identityProfilesPath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return [];
+  }
+
+  const record = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as { profiles?: unknown }
+    : {};
+  const profiles = Array.isArray(record.profiles) ? record.profiles : [];
+  return profiles
+    .map(normalizeReadOnlyIdentityProfile)
+    .filter((profile): profile is IdentityProfileRecord => Boolean(profile));
+}
+
+async function readActiveHomeReadonly(systemHomeDir: string): Promise<string | null> {
+  const layout = resolveMetabotManagerLayout(systemHomeDir);
+  let raw: string;
+  try {
+    raw = await fs.promises.readFile(layout.activeHomePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { homeDir?: unknown };
+    const homeDir = typeof parsed.homeDir === 'string' ? normalizeEnvText(parsed.homeDir) : '';
+    return homeDir ? path.resolve(homeDir) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveActorProfileReadonly(
+  context: CliRuntimeContext,
+  from?: string,
+): Promise<{ homeDir: string; profile: IdentityProfileRecord } | MetabotCommandResult<never>> {
+  const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+  const profiles = await readIdentityProfilesReadonly(systemHomeDir);
+  const requestedFrom = normalizeEnvText(from);
+  let profile: IdentityProfileRecord | undefined;
+
+  if (requestedFrom) {
+    const resolved = resolveProfileNameMatch(requestedFrom, profiles);
+    if (resolved.status === 'not_found') {
+      return commandFailed('profile_not_found', resolved.message);
+    }
+    if (resolved.status === 'ambiguous') {
+      return commandFailed('identity_profile_ambiguous', resolved.message);
+    }
+    profile = resolved.match;
+  } else {
+    const explicitHome = normalizeEnvText(context.env.METABOT_HOME);
+    const selectedHome = explicitHome ? path.resolve(explicitHome) : await readActiveHomeReadonly(systemHomeDir);
+    if (!selectedHome) {
+      return commandFailed('profile_not_found', 'No active MetaBot profile found for dry-run delivery.');
+    }
+    profile = profiles.find((entry) => path.resolve(entry.homeDir) === selectedHome);
+    if (!profile) {
+      return commandFailed('profile_not_found', `MetaBot profile not found in the manager index for home: ${selectedHome}`);
+    }
+  }
+
+  if (!profile.globalMetaId) {
+    return commandFailed(
+      'identity_unavailable',
+      `MetaBot profile ${profile.slug} does not have a globalMetaId in the manager index. Initialize or sync the profile identity before dry-run delivery.`,
+    );
+  }
+
+  return {
+    homeDir: profile.homeDir,
+    profile,
+  };
 }
 
 async function resolveActorProfileSlug(
@@ -2964,18 +3087,25 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         });
       },
       deliver: async (input) => {
-        const actor = await resolveActorHomeDir(context, input.from);
-        if (!('homeDir' in actor)) return actor;
+        const actor = input.dryRun
+          ? await resolveActorProfileReadonly(context, input.from)
+          : await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) {
+          return actor;
+        }
         const homeDir = actor.homeDir;
         const paths = resolveMetabotPaths(homeDir);
         const rawCacheStore = createLoomRawCacheStore(paths);
         const workflowStore = createLoomWorkflowStore(paths);
         const rawState = await rawCacheStore.read();
         const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
-        const signer = createCliSigner(context, homeDir);
-        const identity = await signer.getIdentity();
         const runner = createNodeLoomCommandRunner();
         const developerMetaBotSlug = path.basename(paths.profileRoot);
+        const signer = input.dryRun ? null : createCliSigner(context, homeDir);
+        const dryRunProfile = (actor as { profile?: IdentityProfileRecord }).profile;
+        const developerGlobalMetaId = dryRunProfile
+          ? dryRunProfile.globalMetaId
+          : (await (signer as Signer).getIdentity()).globalMetaId;
 
         return runLoomDeliverWorkflow({
           from: input.from,
@@ -2986,7 +3116,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           deliverySummary: input.deliverySummary,
           dryRun: input.dryRun,
           developerMetaBotSlug,
-          developerGlobalMetaId: identity.globalMetaId,
+          developerGlobalMetaId,
           state: taskState,
           workflowStore,
           runner,
@@ -2995,6 +3125,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             createLoomPullRequest,
           },
           writeChain: async (request) => {
+            if (!signer) {
+              return commandFailed('chain_write_unavailable', 'Dry-run delivery must not write chain data.');
+            }
             const result = await signer.writePin(request);
             return commandSuccess({
               pinId: result.pinId,
