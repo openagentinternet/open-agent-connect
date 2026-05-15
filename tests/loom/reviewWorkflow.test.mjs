@@ -15,6 +15,7 @@ const {
 const taskPinId = `${'a'.repeat(64)}i0`;
 const claimPinId = `${'b'.repeat(64)}i0`;
 const deliveryPinId = `${'c'.repeat(64)}i0`;
+const secondDeliveryPinId = `${'e'.repeat(64)}i0`;
 const acceptancePinId = `${'d'.repeat(64)}i0`;
 const requesterGlobalMetaId = 'metaid-requester';
 const otherRequesterGlobalMetaId = 'metaid-other-requester';
@@ -123,6 +124,19 @@ function taskState(options = {}) {
     },
     reviewChecklist: [{ item: 'Review workflow passes.', status: 'passed' }],
   }, { globalMetaId: developerGlobalMetaId });
+  const secondDelivery = cachedRecord('delivery', secondDeliveryPinId, {
+    taskPinId,
+    claimPinId,
+    deliveryBase: 'github',
+    deliverySummary: 'Second delivery ready for review.',
+    delivery: {
+      prUrl: 'https://github.com/openagentinternet/open-agent-connect/pull/124',
+      prBranch: 'codex/metabot-loom-cli-second',
+      prBaseBranch: 'main',
+      prTitle: 'feat: add second review workflow',
+    },
+    reviewChecklist: [{ item: 'Second review workflow passes.', status: 'passed' }],
+  }, { globalMetaId: developerGlobalMetaId, timestamp: 2 });
   const acceptance = cachedRecord('acceptance', acceptancePinId, {
     taskPinId,
     deliveryPinId,
@@ -141,7 +155,9 @@ function taskState(options = {}) {
     valid: {
       claims: options.includeClaim === false ? [] : [claim],
       statuses: [],
-      deliveries: options.includeDelivery === false ? [] : [delivery],
+      deliveries: options.includeDelivery === false
+        ? []
+        : [delivery, ...(options.includeSecondDelivery ? [secondDelivery] : [])],
       acceptances: options.accepted ? [acceptance] : [],
       claimRejects: [],
     },
@@ -325,6 +341,28 @@ test('accept-and-pay with confirmPayment transfers and writes passed acceptance 
   assert.equal(events[3].state.acceptance.paymentTxId, 'payment-txid');
 });
 
+test('accept-and-pay invalid score fails before wallet transfer', async () => {
+  const { events, input } = await createDeps({ score: 6 });
+
+  const result = await runLoomAcceptAndPayWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_payload');
+  assert.match(result.message, /score/i);
+  assert.deepEqual(events, []);
+});
+
+test('accept-and-pay empty comment fails before wallet transfer', async () => {
+  const { events, input } = await createDeps({ comment: '   ' });
+
+  const result = await runLoomAcceptAndPayWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_payload');
+  assert.match(result.message, /comment/i);
+  assert.deepEqual(events, []);
+});
+
 test('payment failure does not write acceptance', async () => {
   const { events, input } = await createDeps({
     walletTransfer: () => commandFailed('transfer_broadcast_failed', 'transfer failed'),
@@ -382,6 +420,98 @@ test('already accepted paid returns already_accepted_paid and does not pay again
   assert.equal(result.ok, false);
   assert.equal(result.code, 'already_accepted_paid');
   assert.deepEqual(events, []);
+});
+
+test('already accepted paid task returns already_accepted_paid for a different delivery and does not pay again', async () => {
+  const { events, input } = await createDeps({
+    deliveryPinId: secondDeliveryPinId,
+    state: taskState({
+      accepted: true,
+      includeSecondDelivery: true,
+    }),
+  });
+
+  const result = await runLoomAcceptAndPayWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'already_accepted_paid');
+  assert.deepEqual(events, []);
+});
+
+test('existing paid passed acceptance blocks the task even when state names a newer delivery', async () => {
+  const state = taskState({ includeSecondDelivery: true });
+  state.valid.acceptances = [
+    cachedRecord('acceptance', acceptancePinId, {
+      taskPinId,
+      deliveryPinId,
+      verdict: 'passed',
+      score: 5,
+      comment: 'Accepted and paid already.',
+      releasePayment: true,
+      paymentTxId: 'existing-payment-txid',
+    }, { globalMetaId: requesterGlobalMetaId }),
+  ];
+
+  const { events, input } = await createDeps({
+    deliveryPinId: secondDeliveryPinId,
+    state,
+  });
+
+  const result = await runLoomAcceptAndPayWorkflow(input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'already_accepted_paid');
+  assert.deepEqual(events, []);
+});
+
+test('accept-and-pay returns acceptance evidence when local persistence read fails after chain write', async () => {
+  const events = [];
+  const { input } = await createDeps({
+    events,
+    workflowStore: {
+      ...createWorkflowStore(events),
+      async read(pinId, resolvedClaimPinId) {
+        events.push({ type: 'workflow.read', taskPinId: pinId, claimPinId: resolvedClaimPinId });
+        throw new Error('workflow read unavailable');
+      },
+    },
+  });
+
+  const result = await runLoomAcceptAndPayWorkflow(input);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'success');
+  assert.equal(result.data.acceptancePinId, acceptancePinId);
+  assert.equal(result.data.paymentTxId, 'payment-txid');
+  assert.equal(result.data.localPersistenceWarning.code, 'local_persistence_failed');
+  assert.match(result.data.localPersistenceWarning.error.message, /workflow read unavailable/);
+  assert.deepEqual(events.map((event) => event.type), ['wallet.transfer', 'writeChain', 'workflow.read']);
+});
+
+test('review-delivery returns acceptance evidence when local persistence write fails after chain write', async () => {
+  const events = [];
+  const { input } = await createDeps({
+    events,
+    verdict: 'revision_needed',
+    score: 3,
+    comment: 'Please revise the delivery.',
+    workflowStore: {
+      ...createWorkflowStore(events),
+      async write(nextState) {
+        events.push({ type: 'workflow.write', state: nextState });
+        throw new Error('workflow write unavailable');
+      },
+    },
+  });
+
+  const result = await runLoomReviewDeliveryWorkflow(input);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'success');
+  assert.equal(result.data.acceptancePinId, acceptancePinId);
+  assert.equal(result.data.localPersistenceWarning.code, 'local_persistence_failed');
+  assert.match(result.data.localPersistenceWarning.error.message, /workflow write unavailable/);
+  assert.deepEqual(events.map((event) => event.type), ['writeChain', 'workflow.read', 'workflow.write']);
 });
 
 test('review-delivery writes rejected and revision_needed with releasePayment false and no paymentTxId', async () => {

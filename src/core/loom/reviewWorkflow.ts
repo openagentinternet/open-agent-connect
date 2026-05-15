@@ -57,6 +57,7 @@ export interface LoomReviewWorkflowResult {
   acceptancePinId: string;
   paymentTxId?: string;
   acceptancePayload: Record<string, unknown>;
+  localPersistenceWarning?: LoomLocalPersistenceWarning;
 }
 
 interface ResolvedReviewContext {
@@ -65,6 +66,12 @@ interface ResolvedReviewContext {
   deliveryPinId: string;
   payoutAddress?: string;
   taskPayload: Record<string, unknown>;
+}
+
+interface LoomLocalPersistenceWarning {
+  code: 'local_persistence_failed';
+  message: string;
+  error: { name?: string; message: string };
 }
 
 export function buildLoomPaymentAmountRaw(bounty: unknown): string | undefined {
@@ -99,15 +106,11 @@ function hasAcceptedPaidDelivery(input: LoomReviewWorkflowBaseInput): boolean {
     return false;
   }
   if (input.state.state === 'accepted_paid') {
-    const latestDeliveryPinId = input.state.latestAcceptance
-      ? nonEmptyString(payloadObject(input.state.latestAcceptance).deliveryPinId)
-      : undefined;
-    return !latestDeliveryPinId || latestDeliveryPinId === input.deliveryPinId;
+    return true;
   }
   return input.state.valid.acceptances.some((acceptance) => {
     const payload = payloadObject(acceptance);
-    return payload.deliveryPinId === input.deliveryPinId
-      && payload.verdict === 'passed'
+    return payload.verdict === 'passed'
       && payload.releasePayment === true
       && Boolean(nonEmptyString(payload.paymentTxId));
   });
@@ -181,6 +184,12 @@ function paymentFailed(result: MetabotCommandResult<unknown>, message?: string):
   );
 }
 
+function serializeError(error: unknown): { name?: string; message: string } {
+  return error instanceof Error
+    ? { name: error.name, message: error.message }
+    : { message: String(error) };
+}
+
 async function persistAcceptanceIfWorkflowExists(input: {
   workflowStore: LoomWorkflowStore;
   taskPinId: string;
@@ -188,19 +197,28 @@ async function persistAcceptanceIfWorkflowExists(input: {
   acceptancePinId: string;
   paymentTxId?: string;
   nowIso: string;
-}): Promise<void> {
-  const workflow = await input.workflowStore.read(input.taskPinId, input.claimPinId);
-  if (!workflow || workflow.taskPinId !== input.taskPinId || workflow.claimPinId !== input.claimPinId) {
-    return;
+}): Promise<LoomLocalPersistenceWarning | undefined> {
+  try {
+    const workflow = await input.workflowStore.read(input.taskPinId, input.claimPinId);
+    if (!workflow || workflow.taskPinId !== input.taskPinId || workflow.claimPinId !== input.claimPinId) {
+      return undefined;
+    }
+    await input.workflowStore.write({
+      ...workflow,
+      acceptance: {
+        pinId: input.acceptancePinId,
+        ...(input.paymentTxId ? { paymentTxId: input.paymentTxId } : {}),
+      },
+      updatedAt: input.nowIso,
+    });
+    return undefined;
+  } catch (error) {
+    return {
+      code: 'local_persistence_failed',
+      message: 'Loom acceptance was written on-chain, but updating the local workflow state failed.',
+      error: serializeError(error),
+    };
   }
-  await input.workflowStore.write({
-    ...workflow,
-    acceptance: {
-      pinId: input.acceptancePinId,
-      ...(input.paymentTxId ? { paymentTxId: input.paymentTxId } : {}),
-    },
-    updatedAt: input.nowIso,
-  });
 }
 
 async function saveRetryArtifacts(input: {
@@ -270,7 +288,7 @@ async function writeAcceptance(input: {
   }
 
   const nowIso = new Date(input.base.now?.() ?? Date.now()).toISOString();
-  await persistAcceptanceIfWorkflowExists({
+  const localPersistenceWarning = await persistAcceptanceIfWorkflowExists({
     workflowStore: input.base.workflowStore,
     taskPinId: input.base.taskPinId,
     claimPinId: input.context.claimPinId,
@@ -286,6 +304,7 @@ async function writeAcceptance(input: {
     acceptancePinId: writeResult.data.pinId,
     ...(input.paymentTxId ? { paymentTxId: input.paymentTxId } : {}),
     acceptancePayload: input.payload,
+    ...(localPersistenceWarning ? { localPersistenceWarning } : {}),
   });
 }
 
@@ -304,6 +323,24 @@ export async function runLoomAcceptAndPayWorkflow(
   const amountRaw = buildLoomPaymentAmountRaw(context.taskPayload.bounty);
   if (!amountRaw) {
     return commandFailed('invalid_bounty', `Loom task ${input.taskPinId} has an invalid or unsupported bounty.`);
+  }
+
+  const prePaymentAcceptancePayload = {
+    taskPinId: input.taskPinId,
+    deliveryPinId: context.deliveryPinId,
+    verdict: 'passed',
+    score: input.score,
+    comment: input.comment,
+    releasePayment: true,
+    paymentTxId: 'pending-payment-validation-placeholder',
+  };
+  const prePaymentChainRequest = buildFullChainRequest({
+    payload: prePaymentAcceptancePayload,
+    from: input.from,
+    chain: input.chain ?? DEFAULT_CHAIN,
+  });
+  if (!prePaymentChainRequest.ok) {
+    return prePaymentChainRequest;
   }
 
   const transferResult = await input.walletTransfer({
@@ -384,7 +421,7 @@ export async function runLoomAcceptAndPayWorkflow(
   }
 
   const nowIso = new Date(input.now?.() ?? Date.now()).toISOString();
-  await persistAcceptanceIfWorkflowExists({
+  const localPersistenceWarning = await persistAcceptanceIfWorkflowExists({
     workflowStore: input.workflowStore,
     taskPinId: input.taskPinId,
     claimPinId: context.claimPinId,
@@ -400,6 +437,7 @@ export async function runLoomAcceptAndPayWorkflow(
     acceptancePinId: writeResult.data.pinId,
     paymentTxId,
     acceptancePayload,
+    ...(localPersistenceWarning ? { localPersistenceWarning } : {}),
   });
 }
 
