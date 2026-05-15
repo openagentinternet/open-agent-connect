@@ -5,3 +5,5 @@ export * from './rawChainReader';
 export * from './rawCache';
 export * from './taskViews';
 export * from './draftTask';
+export * from './workflowTypes';
+export * from './workflowStore';
