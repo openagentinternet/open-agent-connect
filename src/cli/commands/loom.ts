@@ -6,9 +6,10 @@ import {
   isLoomProtocolName,
   LOOM_PROTOCOLS,
   validateLoomPayload,
+  type LoomProtocolName,
   type LoomValidationResult,
 } from '../../core/loom';
-import { commandMissingFlag, commandUnknownSubcommand, readFlagValue, readJsonFile } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, readFlagValue } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function commandUnsupportedFlag(flag: string): MetabotCommandResult<never> {
@@ -48,11 +49,69 @@ function resolveOutPath(context: CliRuntimeContext, outPath: string): string {
   return path.isAbsolute(outPath) ? outPath : path.resolve(context.cwd, outPath);
 }
 
+function resolveInputPath(context: CliRuntimeContext, filePath: string): string {
+  return path.isAbsolute(filePath) ? filePath : path.resolve(context.cwd, filePath);
+}
+
+function invalidJsonValidation(
+  protocol: LoomProtocolName,
+  message: string,
+): LoomValidationResult {
+  return {
+    valid: false,
+    protocol,
+    path: LOOM_PROTOCOLS[protocol].path,
+    errors: [
+      {
+        path: '',
+        code: 'invalid_json',
+        message,
+      },
+    ],
+  };
+}
+
+async function readLoomPayloadFile(
+  context: CliRuntimeContext,
+  protocol: LoomProtocolName,
+  payloadFile: string,
+): Promise<
+  | { ok: true; payload: Record<string, unknown> }
+  | { ok: false; validation: LoomValidationResult }
+> {
+  const raw = await context.readTextFile(resolveInputPath(context, payloadFile));
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch (error) {
+    return {
+      ok: false,
+      validation: invalidJsonValidation(
+        protocol,
+        error instanceof Error ? error.message : 'payload file must contain valid JSON.',
+      ),
+    };
+  }
+
+  const validation = validateLoomPayload(protocol, parsed);
+  if (!validation.valid) {
+    return {
+      ok: false,
+      validation,
+    };
+  }
+
+  return {
+    ok: true,
+    payload: parsed as Record<string, unknown>,
+  };
+}
+
 async function readProtocolAndPayload(
   args: string[],
   context: CliRuntimeContext,
 ): Promise<
-  | { ok: true; protocol: keyof typeof LOOM_PROTOCOLS; payload: Record<string, unknown> }
+  | { ok: true; protocol: LoomProtocolName; payload: Record<string, unknown> }
   | { ok: false; result: MetabotCommandResult<never> }
 > {
   const protocol = readFlagValue(args, '--protocol');
@@ -68,10 +127,15 @@ async function readProtocolAndPayload(
     return { ok: false, result: commandMissingFlag('--payload-file') };
   }
 
+  const payload = await readLoomPayloadFile(context, protocol, payloadFile);
+  if (!payload.ok) {
+    return { ok: false, result: commandInvalidPayload(protocol, payload.validation) };
+  }
+
   return {
     ok: true,
     protocol,
-    payload: await readJsonFile(context, payloadFile),
+    payload: payload.payload,
   };
 }
 

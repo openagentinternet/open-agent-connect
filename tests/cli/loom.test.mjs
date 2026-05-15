@@ -84,6 +84,54 @@ test('runCli fails loom validation for an invalid claim payload', async () => {
   assert.ok(envelope.data.validation.errors.some((error) => error.path === 'payoutAddress'));
 });
 
+test('runCli reports malformed loom payload JSON as invalid_payload', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-malformed-'));
+  const payloadFile = path.join(tempDir, 'malformed.json');
+  await writeFile(payloadFile, '{', 'utf8');
+
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'validate',
+    '--protocol',
+    'claim',
+    '--payload-file',
+    payloadFile,
+  ]);
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.state, 'failed');
+  assert.equal(envelope.code, 'invalid_payload');
+  assert.equal(envelope.data.validation.protocol, 'claim');
+  assert.equal(envelope.data.validation.path, '/protocols/loom-claim');
+  assert.equal(envelope.data.validation.valid, false);
+  assert.ok(envelope.data.validation.errors.some((error) => error.code === 'invalid_json'));
+});
+
+test('runCli reports non-object loom payload JSON as invalid_payload', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-array-'));
+  const payloadFile = path.join(tempDir, 'array.json');
+  await writeFile(payloadFile, '[]', 'utf8');
+
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'validate',
+    '--protocol',
+    'claim',
+    '--payload-file',
+    payloadFile,
+  ]);
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.state, 'failed');
+  assert.equal(envelope.code, 'invalid_payload');
+  assert.equal(envelope.data.validation.protocol, 'claim');
+  assert.equal(envelope.data.validation.path, '/protocols/loom-claim');
+  assert.equal(envelope.data.validation.valid, false);
+  assert.ok(envelope.data.validation.errors.some((error) => error.code === 'invalid_type'));
+});
+
 test('runCli exports a loom claim chain request in the command envelope', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-export-'));
   const payload = validClaimPayload();
@@ -110,6 +158,30 @@ test('runCli exports a loom claim chain request in the command envelope', async 
     contentType: 'application/json',
     payload: JSON.stringify(payload),
   });
+});
+
+test('runCli reports non-object loom export payload JSON as invalid_payload', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-export-array-'));
+  const payloadFile = path.join(tempDir, 'array.json');
+  await writeFile(payloadFile, '[]', 'utf8');
+
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'export-chain-request',
+    '--protocol',
+    'claim',
+    '--payload-file',
+    payloadFile,
+  ]);
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.state, 'failed');
+  assert.equal(envelope.code, 'invalid_payload');
+  assert.equal(envelope.data.validation.protocol, 'claim');
+  assert.equal(envelope.data.validation.path, '/protocols/loom-claim');
+  assert.equal(envelope.data.validation.valid, false);
+  assert.ok(envelope.data.validation.errors.some((error) => error.code === 'invalid_type'));
 });
 
 test('runCli writes a loom claim chain request to --out', async () => {
