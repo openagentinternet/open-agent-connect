@@ -422,3 +422,36 @@ test('runLoomDevRoundWorkflow writes failed status when the LLM round fails', as
   assert.equal(workflowWrite.state.statuses.at(-1).status, 'failed');
   assert.equal(workflowWrite.state.statuses.at(-1).llmSessionId, 'llm-session-2');
 });
+
+test('runLoomDevRoundWorkflow returns recovery envelope when local status marker write fails', async () => {
+  const events = [];
+  const workflowStore = {
+    ...createWorkflowStore(events),
+    async write(nextState) {
+      events.push({ type: 'workflow.write', state: nextState });
+      throw new Error('disk full');
+    },
+  };
+  const { input } = createDeps({ events, workflowStore });
+  let result;
+
+  await assert.doesNotReject(async () => {
+    result = await runLoomDevRoundWorkflow(input);
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'dev_round_status_marker_failed');
+  assert.equal(events.filter((event) => event.type === 'writeChain').length, 1);
+  assert.equal(events.filter((event) => event.type === 'workflow.write').length, 1);
+  assert.equal(result.data.taskPinId, taskPinId);
+  assert.equal(result.data.claimPinId, claimPinId);
+  assert.equal(result.data.statusPinId, statusPinId);
+  assert.equal(result.data.processLogUri, 'metafile://process-log.md');
+  assert.match(result.data.processLogPath, /dev-round/);
+  assert.match(result.data.workflowPath, new RegExp(`${taskPinId}\\/${claimPinId}\\.json$`));
+  assert.equal(result.data.workspacePath, workspacePath);
+  assert.equal(result.data.syncCommand, 'metabot loom sync');
+  assert.match(result.data.retryAfterSyncCommand, /inspect local workflow state/i);
+  assert.equal(result.data.cause.message, 'disk full');
+  assert.equal(Object.hasOwn(result.data, 'retryCommand'), false);
+});

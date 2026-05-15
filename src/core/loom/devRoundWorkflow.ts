@@ -386,6 +386,38 @@ function serializeError(error: unknown): Record<string, unknown> {
   return { value: String(error) };
 }
 
+function devRoundStatusMarkerFailed(input: {
+  workflowInput: LoomDevRoundWorkflowInput;
+  workflow: LoomWorkflowState;
+  statusWrite: LoomProtocolRecordWriteResult;
+  processLogPath: string;
+  processLogUri: string;
+  cause: unknown;
+}): MetabotCommandResult<never> {
+  const paths = input.workflowInput.workflowStore.resolve(
+    input.workflowInput.taskPinId,
+    input.workflowInput.claimPinId,
+  );
+  return commandFailed(
+    'dev_round_status_marker_failed',
+    `Loom status ${input.statusWrite.pinId} was written, but local dev-round marker state could not be saved. Sync and inspect local workflow state before retrying.`,
+    {
+      data: {
+        taskPinId: input.workflowInput.taskPinId,
+        claimPinId: input.workflowInput.claimPinId,
+        statusPinId: input.statusWrite.pinId,
+        processLogUri: input.processLogUri,
+        processLogPath: input.processLogPath,
+        workflowPath: paths.workflowPath,
+        workspacePath: input.workflow.workspacePath,
+        syncCommand: 'metabot loom sync',
+        retryAfterSyncCommand: 'After sync, inspect local workflow state before deciding whether another development round is needed.',
+        cause: serializeError(input.cause),
+      },
+    },
+  );
+}
+
 async function writeAndUploadLog(input: {
   workflowInput: LoomDevRoundWorkflowInput;
   workflow: LoomWorkflowState;
@@ -603,11 +635,23 @@ export async function runLoomDevRoundWorkflow(
     commits,
     checksPassed: decision.checksPassed,
   };
-  const updatedWorkflow = await input.workflowStore.write({
-    ...workflow,
-    statuses: [...workflow.statuses, statusRecord],
-    updatedAt: new Date(now).toISOString(),
-  });
+  let updatedWorkflow: LoomWorkflowState;
+  try {
+    updatedWorkflow = await input.workflowStore.write({
+      ...workflow,
+      statuses: [...workflow.statuses, statusRecord],
+      updatedAt: new Date(now).toISOString(),
+    });
+  } catch (error) {
+    return devRoundStatusMarkerFailed({
+      workflowInput: input,
+      workflow,
+      statusWrite: statusWrite.data,
+      processLogPath: logUpload.data.path,
+      processLogUri: logUpload.data.uri,
+      cause: error,
+    });
+  }
   const writtenStatus = updatedWorkflow.statuses.at(-1) ?? statusRecord;
 
   return commandSuccess({
