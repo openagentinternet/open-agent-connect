@@ -31,6 +31,7 @@ export interface LoomDeliverDryRunResult {
     branchName: string;
   };
   pullRequest: {
+    repo: string;
     baseBranch: string;
     head: string;
     title: string;
@@ -442,6 +443,7 @@ export async function runLoomDeliverWorkflow(
         branchName: workflow.branchName,
       },
       pullRequest: {
+        repo: project.data.upstreamRepoFullName,
         baseBranch: project.data.baseBranch,
         head,
         title,

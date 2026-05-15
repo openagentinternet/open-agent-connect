@@ -393,6 +393,7 @@ test('runLoomDeliverWorkflow dry-run returns delivery plan and writes nothing', 
     forkRemote: 'fork',
     branchName: 'loom/task-claim',
   });
+  assert.equal(result.data.pullRequest.repo, 'openagentinternet/open-agent-connect');
   assert.equal(result.data.pullRequest.baseBranch, 'main');
   assert.equal(result.data.pullRequest.head, 'alice:loom/task-claim');
   assert.equal(result.data.pullRequest.title, 'feat: add loom delivery workflow');
