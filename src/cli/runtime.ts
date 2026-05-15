@@ -73,7 +73,9 @@ import {
   runLoomClaimAndStartWorkflow,
   runLoomDevRoundWorkflow,
   runLoomDeliverWorkflow,
+  runLoomAcceptAndPayWorkflow,
   runLoomPostTaskWorkflow,
+  runLoomReviewDeliveryWorkflow,
   showLoomTaskFromCache,
   writeLoomProcessLogFile,
 } from '../core/loom';
@@ -1743,6 +1745,115 @@ function createTestMasterReplyWaiter(env: NodeJS.ProcessEnv): MetaWebMasterReply
   };
 }
 
+async function runWalletTransferRuntime(
+  context: CliRuntimeContext,
+  input: { from?: string; toAddress: string; amountRaw: string; confirm: boolean },
+): Promise<MetabotCommandResult<unknown>> {
+  const actor = await resolveActorHomeDir(context, input.from);
+  if (!('homeDir' in actor)) {
+    return actor;
+  }
+  const homeDir = actor.homeDir;
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+  const state = await runtimeStateStore.readState();
+  if (!state.identity) {
+    return commandFailed('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
+  }
+
+  const adapters = createDefaultChainAdapterRegistry();
+
+  let parsed: ParsedTransferAmount;
+  try {
+    parsed = parseTransferAmount(input.amountRaw, adapters);
+  } catch (error) {
+    return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
+  }
+
+  const adapter = parsed.adapter;
+  const minSatoshis = adapter.minTransferSatoshis;
+  if (parsed.satoshis < minSatoshis) {
+    return commandFailed('invalid_argument', `Amount is below the minimum of ${minSatoshis} satoshis for ${parsed.currency}.`);
+  }
+
+  const fromAddress = state.identity.addresses[parsed.chain] ?? state.identity.mvcAddress;
+  if (!fromAddress) {
+    return commandFailed('identity_address_missing', `Current identity has no address for chain "${parsed.chain}".`);
+  }
+
+  const feeRate = await adapter.fetchFeeRate();
+  const feePerByte = adapter.feeRateUnit === 'sat/KB' ? feeRate / 1000 : feeRate;
+  const estimatedFeeSatoshis = Math.ceil(392 * feePerByte);
+  const totalRequired = parsed.satoshis + estimatedFeeSatoshis;
+
+  const balance = await adapter.fetchBalance(fromAddress);
+
+  if (balance.totalSatoshis < totalRequired) {
+    const balanceDisplay = `${balance.totalSatoshis} sats (${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
+    const unconfirmedNote = balance.unconfirmedSatoshis > 0
+      ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
+      : '';
+    return commandFailed(
+      'insufficient_balance',
+      `Total balance ${balanceDisplay}${unconfirmedNote} is below the required ${totalRequired} sats (${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency} + estimated fee ${estimatedFeeSatoshis} sats).`,
+    );
+  }
+
+  if (!input.confirm) {
+    const currentBalanceDisplay = `${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
+    const unconfirmedNote = balance.unconfirmedSatoshis > 0
+      ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
+      : '';
+    return commandAwaitingConfirmation({
+      fromAddress,
+      currentBalance: currentBalanceDisplay + unconfirmedNote,
+      currentBalanceSatoshis: balance.totalSatoshis,
+      toAddress: input.toAddress,
+      amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
+      amountSatoshis: parsed.satoshis,
+      estimatedFee: `${(estimatedFeeSatoshis / 1e8).toFixed(8)} ${parsed.currency}`,
+      estimatedFeeSatoshis,
+      feeRateSatPerVb: feeRate,
+      currency: parsed.currency,
+      chain: parsed.chain,
+    });
+  }
+
+  const secretStore = createFileSecretStore(homeDir);
+  const secrets = await secretStore.readIdentitySecrets();
+  if (!secrets?.mnemonic) {
+    return commandFailed('identity_secrets_missing', 'Identity mnemonic not found in the secret store.');
+  }
+
+  try {
+    const result = await executeTransfer(adapter, {
+      mnemonic: secrets.mnemonic,
+      path: secrets.path ?? state.identity.path ?? "m/44'/10001'/0'/0/0",
+      toAddress: input.toAddress,
+      amountSatoshis: parsed.satoshis,
+      feeRate,
+    });
+
+    const explorerUrl = `${adapter.explorerBaseUrl}/tx/${result.txid}`;
+
+    return commandSuccess({
+      txid: result.txid,
+      explorerUrl,
+      amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
+      toAddress: input.toAddress,
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    const lower = msg.toLowerCase();
+    if (lower.includes('insufficient') || lower.includes('not enough') || lower.includes('余额不足')) {
+      return commandFailed('insufficient_balance', `Balance is insufficient: ${msg}`);
+    }
+    return commandFailed(
+      'transfer_broadcast_failed',
+      `Transfer failed: ${msg}. Verify the recipient address is correct and that you have enough total balance to cover the amount plus fees. If UTXO inputs appear stale, wait a few seconds and retry.`,
+    );
+  }
+}
+
 export function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies {
   return {
     config: {
@@ -2226,110 +2337,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
       },
       transfer: async (input) => {
-        const actor = await resolveActorHomeDir(context, input.from);
-        if (!('homeDir' in actor)) {
-          return actor;
-        }
-        const homeDir = actor.homeDir;
-        const runtimeStateStore = createRuntimeStateStore(homeDir);
-        const state = await runtimeStateStore.readState();
-        if (!state.identity) {
-          return commandFailed('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
-        }
-
-        const adapters = createDefaultChainAdapterRegistry();
-
-        let parsed: ParsedTransferAmount;
-        try {
-          parsed = parseTransferAmount(input.amountRaw, adapters);
-        } catch (error) {
-          return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
-        }
-
-        const adapter = parsed.adapter;
-        const minSatoshis = adapter.minTransferSatoshis;
-        if (parsed.satoshis < minSatoshis) {
-          return commandFailed('invalid_argument', `Amount is below the minimum of ${minSatoshis} satoshis for ${parsed.currency}.`);
-        }
-
-        const fromAddress = state.identity.addresses[parsed.chain] ?? state.identity.mvcAddress;
-        if (!fromAddress) {
-          return commandFailed('identity_address_missing', `Current identity has no address for chain "${parsed.chain}".`);
-        }
-
-        const feeRate = await adapter.fetchFeeRate();
-        // Rough fee estimate: ~392 bytes * feeRate for sat/byte chains, adjusted for sat/KB chains
-        const feePerByte = adapter.feeRateUnit === 'sat/KB' ? feeRate / 1000 : feeRate;
-        const estimatedFeeSatoshis = Math.ceil(392 * feePerByte);
-        const totalRequired = parsed.satoshis + estimatedFeeSatoshis;
-
-        const balance = await adapter.fetchBalance(fromAddress);
-
-        if (balance.totalSatoshis < totalRequired) {
-          const balanceDisplay = `${balance.totalSatoshis} sats (${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
-          const unconfirmedNote = balance.unconfirmedSatoshis > 0
-            ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
-            : '';
-          return commandFailed(
-            'insufficient_balance',
-            `Total balance ${balanceDisplay}${unconfirmedNote} is below the required ${totalRequired} sats (${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency} + estimated fee ${estimatedFeeSatoshis} sats).`
-          );
-        }
-
-        if (!input.confirm) {
-          const currentBalanceDisplay = `${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
-          const unconfirmedNote = balance.unconfirmedSatoshis > 0
-            ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
-            : '';
-          return commandAwaitingConfirmation({
-            fromAddress,
-            currentBalance: currentBalanceDisplay + unconfirmedNote,
-            currentBalanceSatoshis: balance.totalSatoshis,
-            toAddress: input.toAddress,
-            amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
-            amountSatoshis: parsed.satoshis,
-            estimatedFee: `${(estimatedFeeSatoshis / 1e8).toFixed(8)} ${parsed.currency}`,
-            estimatedFeeSatoshis,
-            feeRateSatPerVb: feeRate,
-            currency: parsed.currency,
-            chain: parsed.chain,
-          });
-        }
-
-        const secretStore = createFileSecretStore(homeDir);
-        const secrets = await secretStore.readIdentitySecrets();
-        if (!secrets?.mnemonic) {
-          return commandFailed('identity_secrets_missing', 'Identity mnemonic not found in the secret store.');
-        }
-
-        try {
-          const result = await executeTransfer(adapter, {
-            mnemonic: secrets.mnemonic,
-            path: secrets.path ?? state.identity.path ?? "m/44'/10001'/0'/0/0",
-            toAddress: input.toAddress,
-            amountSatoshis: parsed.satoshis,
-            feeRate,
-          });
-
-          const explorerUrl = `${adapter.explorerBaseUrl}/tx/${result.txid}`;
-
-          return commandSuccess({
-            txid: result.txid,
-            explorerUrl,
-            amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
-            toAddress: input.toAddress,
-          });
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          const lower = msg.toLowerCase();
-          if (lower.includes('insufficient') || lower.includes('not enough') || lower.includes('余额不足')) {
-            return commandFailed('insufficient_balance', `Balance is insufficient: ${msg}`);
-          }
-          return commandFailed(
-            'transfer_broadcast_failed',
-            `Transfer failed: ${msg}. Verify the recipient address is correct and that you have enough total balance to cover the amount plus fees. If UTXO inputs appear stale, wait a few seconds and retry.`
-          );
-        }
+        return runWalletTransferRuntime(context, input);
       },
     },
     trace: {
@@ -3129,6 +3137,82 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             if (!signer) {
               return commandFailed('chain_write_unavailable', 'Dry-run delivery must not write chain data.');
             }
+            const result = await signer.writePin(request);
+            return commandSuccess({
+              pinId: result.pinId,
+              txids: result.txids,
+              network: result.network,
+              globalMetaId: result.globalMetaId,
+              mvcAddress: result.mvcAddress,
+            });
+          },
+        });
+      },
+      acceptAndPay: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) {
+          return actor;
+        }
+        const homeDir = actor.homeDir;
+        const paths = resolveMetabotPaths(homeDir);
+        const rawCacheStore = createLoomRawCacheStore(paths);
+        const workflowStore = createLoomWorkflowStore(paths);
+        const rawState = await rawCacheStore.read();
+        const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
+        const signer = createCliSigner(context, homeDir);
+        const identity = await signer.getIdentity();
+
+        return runLoomAcceptAndPayWorkflow({
+          from: input.from,
+          taskPinId: input.taskPinId,
+          deliveryPinId: input.deliveryPinId,
+          score: input.score,
+          comment: input.comment,
+          chain: input.chain,
+          confirmPayment: input.confirmPayment,
+          requesterGlobalMetaId: identity.globalMetaId,
+          state: taskState,
+          workflowStore,
+          walletTransfer: async (transferInput) => runWalletTransferRuntime(context, transferInput),
+          writeChain: async (request) => {
+            const result = await signer.writePin(request);
+            return commandSuccess({
+              pinId: result.pinId,
+              txids: result.txids,
+              network: result.network,
+              globalMetaId: result.globalMetaId,
+              mvcAddress: result.mvcAddress,
+            });
+          },
+        });
+      },
+      reviewDelivery: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) {
+          return actor;
+        }
+        const homeDir = actor.homeDir;
+        const paths = resolveMetabotPaths(homeDir);
+        const rawCacheStore = createLoomRawCacheStore(paths);
+        const workflowStore = createLoomWorkflowStore(paths);
+        const rawState = await rawCacheStore.read();
+        const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
+        const signer = createCliSigner(context, homeDir);
+        const identity = await signer.getIdentity();
+
+        return runLoomReviewDeliveryWorkflow({
+          from: input.from,
+          taskPinId: input.taskPinId,
+          deliveryPinId: input.deliveryPinId,
+          verdict: input.verdict,
+          score: input.score,
+          comment: input.comment,
+          chain: input.chain,
+          attachments: input.attachments,
+          requesterGlobalMetaId: identity.globalMetaId,
+          state: taskState,
+          workflowStore,
+          writeChain: async (request) => {
             const result = await signer.writePin(request);
             return commandSuccess({
               pinId: result.pinId,
