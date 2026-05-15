@@ -139,7 +139,7 @@ Successful write output should include:
 Usage:
 
 ```bash
-metabot loom claim-and-start --from <developer-bot> --task-pin-id <pinId> --payout-address <address> --chain <mvc|btc|doge|opcat> [--file-chain <mvc|btc|opcat>] [--message <text>] [--dry-run] [--reset-workspace]
+metabot loom claim-and-start --from <developer-bot> --task-pin-id <pinId> (--payout-address <address> | --claim-pin-id <pinId>) --chain <mvc|btc|doge|opcat> [--file-chain <mvc|btc|opcat>] [--message <text>] [--dry-run] [--reset-workspace]
 ```
 
 Behavior:
@@ -153,11 +153,14 @@ Behavior:
 - Ensure a fork exists for the repository:
   - reuse an existing fork when available;
   - otherwise create a fork through `gh repo fork <owner/repo> --clone=false`.
-- Create or reuse the workflow workspace.
-- Clone or refresh the upstream repository into the workflow workspace.
-- Add or update a fork remote.
+- Prepare a pre-claim staging workspace under profile runtime storage.
+- Clone or refresh the upstream repository into the staging workspace.
+- Add or update a fork remote in the staging workspace.
+- In normal mode, build and write a `loom-claim` payload with `taskPinId`, `payoutAddress`, and optional `message`.
+- In recovery mode, when `--claim-pin-id` is provided, resolve that existing claim, verify it belongs to the developer actor, and do not write a second claim.
+- After `claimPinId` is known, create or reuse the final claim-scoped workflow workspace.
+- Move or reuse the staged repository under the final claim-scoped workspace.
 - Create or check out a branch named like `loom/<shortTaskPinId>-<shortClaimPinId>`.
-- Build and write a `loom-claim` payload with `taskPinId`, `payoutAddress`, and optional `message`.
 - Generate and upload an initialization process log.
 - Build and write a `loom-status` payload with:
   - `status: "started"`;
@@ -173,11 +176,22 @@ Behavior:
 - Validate all inputs that can be checked without side effects.
 - Return the planned claim payload, status payload, branch name, workspace path, GitHub repository metadata, and chain-write previews.
 - Do not create fork, clone, write chain records, upload logs, or create files outside temporary preview data.
+- Because no real `claimPinId` exists in dry-run mode, branch and path previews must clearly mark the claim id segment as pending.
 
 `--reset-workspace` behavior:
 
 - Remove only the workflow workspace for the selected task/claim before cloning again.
 - It must not remove global cache, profile state, or unrelated workflow directories.
+- In normal mode before `claimPinId` exists, reset only the pre-claim staging workspace for the task and current run.
+- In recovery mode with `--claim-pin-id`, reset only the final claim-scoped workspace for that task and claim.
+
+Ordering and recovery:
+
+- Fork resolution and staging clone must happen before writing `loom-claim`. This prevents a claim from being written when the machine cannot even prepare the repository.
+- The final workspace path and final branch name must not require `claimPinId` before the claim write succeeds.
+- If the claim write succeeds but later startup work fails, such as final workspace move, process log upload, or started status write, return `claim_written_start_failed`.
+- `claim_written_start_failed` must include `claimPinId`, any local staging/final paths, and a retry command using `--claim-pin-id`.
+- Retrying with `--claim-pin-id` must never write a duplicate claim.
 
 ### `metabot loom run-dev-round`
 
@@ -309,6 +323,10 @@ Important payment failure rule:
 
 - If payment fails, do not write `loom-acceptance`.
 - If payment succeeds but acceptance chain write fails, return `acceptance_write_failed_after_payment` with payment txid, acceptance payload, chain request, and retry guidance.
+- The retry path after `acceptance_write_failed_after_payment` must not call `accept-and-pay` again, because that could pay twice.
+- The command should persist a retry payload file and chain request file in the requester workflow state directory when possible.
+- The returned retry guidance should instruct the caller to publish only the saved acceptance request, for example with `metabot chain write --from <requester-bot> --request-file <saved-request> --chain <chain>`.
+- The saved acceptance payload must include the already completed `paymentTxId`.
 
 ### `metabot loom review-delivery`
 
@@ -360,6 +378,10 @@ Profile-scoped workflow storage is new:
   workflows/
     <taskPinId>/
       <claimPinId>.json
+  staging/
+    <taskPinId>/
+      <localRunId>/
+        repo/
   workspaces/
     <taskPinId>/
       <claimPinId>/
@@ -418,6 +440,8 @@ Rules:
 
 - Workflow state is developer-profile scoped.
 - Raw cache is global.
+- `staging/` is used only before `claimPinId` exists.
+- `staging/` entries should be moved into the claim-scoped workspace after claim write succeeds, or cleaned up after recoverable startup failure is resolved.
 - Optimistic local records may be appended to the raw cache after successful workflow chain writes so the next command is not blocked by remote indexer latency.
 - Optimistic records must be marked as local/optimistic in raw metadata if the cache schema is extended.
 - If optimistic append is too invasive for the first implementation task, workflow commands may read their own workflow state first and raw cache second.
@@ -567,6 +591,7 @@ Suggested error codes:
 | `git_commit_failed` | Commit creation fails. |
 | `github_push_failed` | Push to fork fails. |
 | `github_pr_failed` | PR creation fails. |
+| `claim_written_start_failed` | Claim write succeeds but final workspace/log/status startup fails. |
 | `llm_runtime_unavailable` | No healthy LLM runtime can be resolved. |
 | `llm_round_failed` | LLM runtime fails during a development round. |
 | `check_failed` | Checks fail when a command requires passing checks. |
@@ -592,6 +617,8 @@ These cases must be explicit in behavior and tests where practical:
 - A non-requester cannot write acceptance or claim rejection records.
 - A non-claim-author cannot run `run-dev-round` or `deliver` for that claim.
 - Fork creation failure must not write a claim or started status.
+- Staging clone failure must not write a claim or started status.
+- If claim write succeeds and started status fails, retry must use the existing claim id rather than creating a duplicate claim.
 - Clone/checkout failure must not write a delivery.
 - PR creation failure must not write a delivery.
 - LLM runtime unavailability must not create a commit and must not pretend work happened.
@@ -602,6 +629,7 @@ These cases must be explicit in behavior and tests where practical:
 - Payment preview without `--confirm-payment` must not transfer funds.
 - Payment failure must not write a passed acceptance.
 - Payment success followed by acceptance write failure must return payment txid and retry payload.
+- Retrying an acceptance after payment success must publish the saved acceptance payload without performing another wallet transfer.
 - Already `accepted_paid` tasks must not be paid again.
 - `review-delivery` must never set `releasePayment: true` or include `paymentTxId`.
 - `state --refresh` must surface invalid records with reasons rather than silently folding them into valid state.
