@@ -116,6 +116,13 @@ export function redactLoomProcessLog(input: unknown): string {
     );
   }
 
+  if (/https?:\/\/[^/\s@]+@/i.test(output)) {
+    output = output.replace(
+      /\b(https?:\/\/)([^:/\s@]+):([^@\s/]+)@/gi,
+      '$1$2:[REDACTED]@',
+    );
+  }
+
   if (/--(?:token|api-key|api_key|access-token|access_token)/i.test(output)) {
     output = output.replace(
       /(^|\s)(--(?:token|api-key|api_key|access-token|access_token))(?:=|\s+)(?:"[^"]*"|'[^']*'|[^\s"'`]+)/gi,
@@ -125,11 +132,11 @@ export function redactLoomProcessLog(input: unknown): string {
 
   if (/(?:api[-_]?key|access[-_]?token|token)/i.test(output)) {
     output = output.replace(
-      new RegExp(`\\b(${SECRET_KEY_RE}=)(?:"[^"]*"|'[^']*'|[^&\\s"'\\x60,}]+)`, 'gi'),
+      new RegExp(`\\b(${SECRET_KEY_RE}=)(?:"[^"]*"|'[^']*'|[^&/@\\s"'\\x60,}]+)`, 'gi'),
       '$1[REDACTED]',
     );
     output = output.replace(
-      new RegExp(`\\b(${SECRET_KEY_RE}:\\s*)(?:"[^"]*"|'[^']*'|[^&\\s"'\\x60,}]+)`, 'gi'),
+      new RegExp(`\\b(${SECRET_KEY_RE}:\\s*)(?:"[^"]*"|'[^']*'|[^&/@\\s"'\\x60,}]+)`, 'gi'),
       '$1[REDACTED]',
     );
     output = output.replace(
@@ -169,6 +176,20 @@ function safeStringify(value: unknown): string {
 
 function formatJson(value: unknown): string {
   return ['```json', safeStringify(value), '```'].join('\n');
+}
+
+function renderValue(value: unknown): string {
+  return redactLoomProcessLog(String(value));
+}
+
+function renderDiagnostic(value: unknown): string {
+  if (value instanceof Error) {
+    return redactLoomProcessLog(value.message);
+  }
+  if (typeof value === 'object' && value !== null) {
+    return redactLoomProcessLog(formatJson(value));
+  }
+  return renderValue(value);
 }
 
 function byteSafePrefix(input: string, maxBytes: number): string {
@@ -219,19 +240,19 @@ export function renderLoomProcessLog(input: LoomProcessLogInput): string {
   const lines: string[] = ['# Loom Process Log'];
 
   pushSection(lines, 'Task And Claim', [
-    input.taskPinId ? `- Task: ${input.taskPinId}` : '',
-    input.claimPinId ? `- Claim: ${input.claimPinId}` : '',
+    input.taskPinId ? `- Task: ${renderValue(input.taskPinId)}` : '',
+    input.claimPinId ? `- Claim: ${renderValue(input.claimPinId)}` : '',
   ]);
 
   pushSection(lines, 'Actor', [
-    input.actor?.slug ? `- Slug: ${input.actor.slug}` : '',
-    input.actor?.globalMetaId ? `- Global MetaID: ${input.actor.globalMetaId}` : '',
+    input.actor?.slug ? `- Slug: ${renderValue(input.actor.slug)}` : '',
+    input.actor?.globalMetaId ? `- Global MetaID: ${renderValue(input.actor.globalMetaId)}` : '',
   ]);
 
   pushSection(lines, 'Repo And Branch', [
-    input.repo?.uri ? `- Repo: ${input.repo.uri}` : '',
-    input.repo?.branch ? `- Branch: ${input.repo.branch}` : '',
-    input.repo?.workspacePath ? `- Workspace: ${input.repo.workspacePath}` : '',
+    input.repo?.uri ? `- Repo: ${renderValue(input.repo.uri)}` : '',
+    input.repo?.branch ? `- Branch: ${renderValue(input.repo.branch)}` : '',
+    input.repo?.workspacePath ? `- Workspace: ${renderValue(input.repo.workspacePath)}` : '',
   ]);
 
   pushSection(lines, 'Round Note', [
@@ -239,8 +260,8 @@ export function renderLoomProcessLog(input: LoomProcessLogInput): string {
   ]);
 
   pushSection(lines, 'LLM', [
-    input.llm?.model ? `- Model: ${input.llm.model}` : '',
-    input.llm?.sessionId ? `- Session: ${input.llm.sessionId}` : '',
+    input.llm?.model ? `- Model: ${renderValue(input.llm.model)}` : '',
+    input.llm?.sessionId ? `- Session: ${renderValue(input.llm.sessionId)}` : '',
   ]);
 
   pushSection(lines, 'Checks', (input.checks ?? []).map((check) => {
@@ -248,13 +269,13 @@ export function renderLoomProcessLog(input: LoomProcessLogInput): string {
     return `- ${check.status}: ${redactLoomProcessLog(check.command)}${summary}`;
   }));
 
-  pushSection(lines, 'Git Changes', (input.git?.changes ?? []).map((change) => `- ${change}`));
+  pushSection(lines, 'Git Changes', (input.git?.changes ?? []).map((change) => `- ${renderValue(change)}`));
   pushSection(lines, 'Commits', (input.git?.commits ?? []).map(
-    (commit) => `- ${commit.sha} ${redactLoomProcessLog(commit.message)}`,
+    (commit) => `- ${renderValue(commit.sha)} ${redactLoomProcessLog(commit.message)}`,
   ));
 
   pushSection(lines, 'Status Decision', [
-    input.statusDecision?.status ? `- Status: ${input.statusDecision.status}` : '',
+    input.statusDecision?.status ? `- Status: ${renderValue(input.statusDecision.status)}` : '',
     input.statusDecision?.summary
       ? `- Summary: ${redactLoomProcessLog(input.statusDecision.summary)}`
       : '',
@@ -268,9 +289,7 @@ export function renderLoomProcessLog(input: LoomProcessLogInput): string {
     input.chainResult === undefined ? '' : redactLoomProcessLog(formatJson(input.chainResult)),
   ]);
 
-  pushSection(lines, 'Errors', (input.errors ?? []).map(
-    (error) => `- ${redactLoomProcessLog(error instanceof Error ? error.message : String(error))}`,
-  ));
+  pushSection(lines, 'Errors', (input.errors ?? []).map((error) => `- ${renderDiagnostic(error)}`));
 
   pushSection(lines, 'Raw Log', [
     input.rawLog === undefined ? '' : redactLoomProcessLog(input.rawLog),

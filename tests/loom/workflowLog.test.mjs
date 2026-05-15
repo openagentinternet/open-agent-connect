@@ -193,6 +193,43 @@ test('redacts json-style secrets from rendered diagnostics', () => {
   assert.match(rendered, /\[REDACTED MNEMONIC\]/);
 });
 
+test('redacts secrets from rendered repo and git fields', () => {
+  const rendered = renderLoomProcessLog({
+    repo: {
+      uri: 'https://x-access-token:ghp_secret@github.com/org/repo.git',
+      branch: 'feature/token=abc',
+      workspacePath: '/tmp/token=abc/repo',
+    },
+    git: {
+      changes: ['/tmp/token=abc/repo/src/file.ts'],
+      commits: [{ sha: 'abc1234', message: 'feat: safe commit' }],
+    },
+  });
+
+  assert.doesNotMatch(rendered, /ghp_secret/);
+  assert.doesNotMatch(rendered, /token=abc/);
+  assert.match(rendered, /github.com\/org\/repo.git/);
+  assert.match(rendered, /src\/file.ts/);
+});
+
+test('renders object errors as useful redacted diagnostics', () => {
+  const rendered = renderLoomProcessLog({
+    errors: [
+      {
+        ok: false,
+        code: 'token=abc',
+        data: { token: 'secret value' },
+      },
+    ],
+  });
+
+  assert.match(rendered, /"ok": false/);
+  assert.match(rendered, /"code"/);
+  assert.doesNotMatch(rendered, /\[object Object\]/);
+  assert.doesNotMatch(rendered, /token=abc/);
+  assert.doesNotMatch(rendered, /secret value/);
+});
+
 test('renders deterministic markdown-ish process logs with truncation notes', () => {
   const rendered = renderLoomProcessLog({
     taskPinId: 'task-pin',
