@@ -240,6 +240,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     subcommands: [
       { name: 'validate', summary: 'Validate one Loom protocol payload.' },
       { name: 'export-chain-request', summary: 'Build a chain write request for one Loom payload.' },
+      { name: 'draft-task', summary: 'Draft a Loom task payload with the selected MetaBot LLM runtime.' },
       { name: 'sync', summary: 'Synchronize raw Loom protocol records into the local cache.' },
       { name: 'list', summary: 'List task-centric Loom records from the local cache.' },
       { name: 'show', summary: 'Show one Loom task and grouped related raw records.' },
@@ -303,6 +304,38 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot loom export-chain-request --protocol claim --payload-file claim.json',
       'metabot loom export-chain-request --protocol claim --payload-file claim.json --out claim-request.json',
       'metabot loom export-chain-request --protocol claim --payload-file claim.json --help --json',
+    ],
+  },
+  {
+    commandPath: ['loom', 'draft-task'],
+    summary: 'Draft a Loom task payload with the selected MetaBot LLM runtime without writing chain data.',
+    usage: 'metabot loom draft-task --wish <text> [--from <bot-slug>] [--allow-invalid]',
+    requiredFlags: [
+      { flag: '--wish', value: '<text>', description: 'Natural-language task wish to turn into a /protocols/loom-task payload.' },
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--allow-invalid', description: 'Return parsed schema-invalid task JSON for editing instead of failing with invalid_payload.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'protocol',
+      'path',
+      'valid',
+      'payload',
+      'validation',
+    ],
+    failureSemantics: [
+      'Fails with missing_flag when --wish is omitted.',
+      'Fails with llm_runtime_unavailable when the selected MetaBot has no usable LLM runtime.',
+      'Fails with invalid_llm_output when the LLM output cannot be parsed as JSON, even with --allow-invalid.',
+      'Fails with invalid_payload when parsed task JSON fails validation unless --allow-invalid is set.',
+      'Does not write chain data, export chain requests, upload attachments, inspect git, create PRs, or perform payments.',
+    ],
+    examples: [
+      'metabot loom draft-task --wish "Add CLI help for loom draft-task"',
+      'metabot loom draft-task --from alice --allow-invalid --wish "Sketch a rough task for a future UI"',
+      'metabot loom draft-task --help --json',
     ],
   },
   {

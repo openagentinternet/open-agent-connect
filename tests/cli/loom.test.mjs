@@ -307,19 +307,67 @@ test('runCli rejects chain write flags on loom export commands', async () => {
   }
 });
 
-test('runCli leaves unimplemented loom commands unknown even with future flags', async () => {
-  const { exitCode, envelope } = await runLoom([
+test('runCli delegates loom draft-task wish to runtime dependencies', async () => {
+  const calls = [];
+  const { exitCode, envelope } = await runLoom(['loom', 'draft-task', '--wish', 'Add a task draft command.'], {
+    dependencies: {
+      loom: {
+        draftTask: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { drafted: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ wish: 'Add a task draft command.', allowInvalid: false }]);
+  assert.equal(envelope.ok, true);
+  assert.deepEqual(envelope.data, { drafted: true });
+});
+
+test('runCli forwards from and allowInvalid to loom draft-task dependencies', async () => {
+  const calls = [];
+  const { exitCode } = await runLoom([
     'loom',
     'draft-task',
+    '--wish',
+    'Draft an intentionally incomplete task.',
     '--from',
     'alice',
-  ]);
+    '--allow-invalid',
+  ], {
+    dependencies: {
+      loom: {
+        draftTask: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { drafted: true } };
+        },
+      },
+    },
+  });
 
-  assert.equal(exitCode, 1);
-  assert.equal(envelope.ok, false);
-  assert.equal(envelope.state, 'failed');
-  assert.equal(envelope.code, 'unknown_command');
-  assert.match(envelope.message, /Unknown command: loom draft-task --from alice/);
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    wish: 'Draft an intentionally incomplete task.',
+    from: 'alice',
+    allowInvalid: true,
+  }]);
+});
+
+test('runCli requires --wish for loom draft-task', async () => {
+  for (const args of [
+    ['loom', 'draft-task'],
+    ['loom', 'draft-task', '--wish', '--from', 'alice'],
+  ]) {
+    const { exitCode, envelope } = await runLoom(args);
+
+    assert.equal(exitCode, 1);
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.state, 'failed');
+    assert.equal(envelope.code, 'missing_flag');
+    assert.match(envelope.message, /--wish/);
+  }
 });
 
 test('runCli delegates loom sync to runtime dependencies', async () => {

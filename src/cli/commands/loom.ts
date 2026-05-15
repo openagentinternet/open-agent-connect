@@ -311,6 +311,26 @@ async function runShowCommand(
   }) ?? commandFailed('dependency_unavailable', 'Loom show dependency is unavailable.');
 }
 
+async function runDraftTaskCommand(
+  args: string[],
+  context: CliRuntimeContext,
+): Promise<MetabotCommandResult<unknown>> {
+  const wish = readFlagValue(args, '--wish');
+  if (!wish || wish.startsWith('--')) {
+    return commandMissingFlag('--wish');
+  }
+  const from = readFlagValue(args, '--from');
+  const input: { wish: string; from?: string; allowInvalid: boolean } = {
+    wish,
+    allowInvalid: hasFlag(args, '--allow-invalid'),
+  };
+  if (from) {
+    input.from = from;
+  }
+  return context.dependencies.loom?.draftTask?.(input)
+    ?? commandFailed('dependency_unavailable', 'Loom draft-task dependency is unavailable.');
+}
+
 export async function runLoomCommand(
   args: string[],
   context: CliRuntimeContext,
@@ -326,6 +346,8 @@ export async function runLoomCommand(
       return runListCommand(args, context);
     case 'show':
       return runShowCommand(args, context);
+    case 'draft-task':
+      return runDraftTaskCommand(args, context);
     default:
       return commandUnknownSubcommand(`loom ${args.join(' ')}`.trim());
   }

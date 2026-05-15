@@ -58,6 +58,7 @@ import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import type { ChainAdapter } from '../core/chain/adapters/types';
 import type { Signer } from '../core/signing/signer';
 import {
+  draftLoomTask,
   createLoomRawCacheStore,
   listLoomTasksFromCache,
   readLoomRawChainRecords,
@@ -117,6 +118,8 @@ const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
+const LOOM_DRAFT_LLM_TIMEOUT_MS = 120_000;
+const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 let cachedDaemonRuntimeFingerprint: string | null = null;
 
 type A2ASimplemsgInboundDispatcherMessage = Pick<
@@ -2629,6 +2632,80 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             refreshed,
           },
         });
+      },
+      draftTask: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const metaBotSlug = path.basename(paths.profileRoot);
+        const runtimeStore = createLlmRuntimeStore(paths);
+        const bindingStore = createLlmBindingStore(paths);
+        const runtimeResolver = createLlmRuntimeResolver({
+          runtimeStore,
+          bindingStore,
+          getPreferredRuntimeId: async () => {
+            try {
+              const raw = await fs.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
+              const data = JSON.parse(raw) as { runtimeId?: string | null };
+              return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+            } catch {
+              return null;
+            }
+          },
+        });
+        const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
+        if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
+          return commandFailed(
+            'llm_runtime_unavailable',
+            `No healthy LLM runtime is available for MetaBot ${metaBotSlug}.`,
+          );
+        }
+        const llmExecutor = new LlmExecutor({
+          sessionsRoot: paths.llmExecutorSessionsRoot,
+          transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+          skillsRoot: paths.skillsRoot,
+          backends: createRegistryBackendFactories(),
+        });
+
+        try {
+          return await draftLoomTask({
+            wish: input.wish,
+            allowInvalid: input.allowInvalid,
+            executePrompt: async ({ prompt, systemPrompt }) => {
+              const sessionId = await llmExecutor.execute({
+                runtimeId: resolved.runtime!.id,
+                runtime: resolved.runtime!,
+                prompt,
+                systemPrompt,
+                timeout: LOOM_DRAFT_LLM_TIMEOUT_MS,
+                cwd: context.cwd,
+                metaBotSlug,
+              });
+              const deadline = Date.now() + LOOM_DRAFT_LLM_TIMEOUT_MS;
+              while (Date.now() <= deadline) {
+                const session = await llmExecutor.getSession(sessionId);
+                if (session?.result) {
+                  if (session.result.status === 'completed') {
+                    if (resolved.bindingId) {
+                      runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => { /* best effort */ });
+                    }
+                    return session.result.output;
+                  }
+                  throw new Error(session.result.error || `LLM runtime ended with status ${session.result.status}.`);
+                }
+                await sleep(LOOM_DRAFT_LLM_POLL_INTERVAL_MS);
+              }
+              await runtimeResolver.markRuntimeUnavailable(resolved.runtime!.id).catch(() => {});
+              throw new Error('LLM runtime timed out while drafting Loom task payload.');
+            },
+          });
+        } catch (error) {
+          await runtimeResolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
+          return commandFailed(
+            'llm_runtime_unavailable',
+            error instanceof Error ? error.message : 'LLM runtime is unavailable.',
+          );
+        }
       },
     },
     bot: {

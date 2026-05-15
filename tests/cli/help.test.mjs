@@ -64,6 +64,7 @@ test('runCli prints loom group help for validation and export commands', async (
   assert.match(output, /^Usage:\s+metabot loom <subcommand>/m);
   assert.match(output, /validate\s+Validate one Loom protocol payload\./);
   assert.match(output, /export-chain-request\s+Build a chain write request for one Loom payload\./);
+  assert.match(output, /draft-task\s+Draft a Loom task payload with the selected MetaBot LLM runtime\./);
   assert.match(output, /sync\s+Synchronize raw Loom protocol records into the local cache\./);
   assert.match(output, /list\s+List task-centric Loom records from the local cache\./);
   assert.match(output, /show\s+Show one Loom task and grouped related raw records\./);
@@ -136,6 +137,35 @@ test('runCli prints loom sync, list, and show help', async () => {
   });
   assert.equal(showExitCode, 0);
   assert.match(showStdout.join(''), /^Usage:\s+metabot loom show <taskPinId> \[--refresh\]/m);
+});
+
+test('runCli prints loom draft-task help with wish and actor flags', async () => {
+  const textStdout = [];
+  const textExitCode = await runCli(['loom', 'draft-task', '--help'], {
+    stdout: { write: (chunk) => { textStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(textExitCode, 0);
+  const textOutput = textStdout.join('');
+  assert.match(textOutput, /^Usage:\s+metabot loom draft-task --wish <text> \[--from <bot-slug>\] \[--allow-invalid\]/m);
+  assert.match(textOutput, /--wish <text>/);
+  assert.match(textOutput, /--from <bot-slug>/);
+  assert.match(textOutput, /--allow-invalid/);
+  assert.match(textOutput, /invalid_llm_output/);
+
+  const jsonStdout = [];
+  const jsonExitCode = await runCli(['loom', 'draft-task', '--help', '--json'], {
+    stdout: { write: (chunk) => { jsonStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(jsonExitCode, 0);
+  const jsonOutput = JSON.parse(jsonStdout.join(''));
+  assert.deepEqual(jsonOutput.commandPath, ['loom', 'draft-task']);
+  assert.equal(jsonOutput.command, 'metabot loom draft-task');
+  assert.ok(jsonOutput.requiredFlags.some((flag) => flag.flag === '--wish'));
+  assert.ok(jsonOutput.optionalFlags.some((flag) => flag.flag === '--allow-invalid'));
 });
 
 test('runCli prints bot group help for profile, runtime, and session commands', async () => {

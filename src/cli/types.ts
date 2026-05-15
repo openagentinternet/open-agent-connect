@@ -163,6 +163,7 @@ export interface CliDependencies {
     sync?: (input: { limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
     list?: (input: { refresh: boolean; limit?: number; tag?: string; currency?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     show?: (input: { taskPinId: string; refresh: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    draftTask?: (input: { wish: string; from?: string; allowInvalid: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   bot?: {
     listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;
