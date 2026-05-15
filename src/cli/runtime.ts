@@ -57,6 +57,12 @@ import { createDefaultChainAdapterRegistry } from '../core/chain/adapters/regist
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import type { ChainAdapter } from '../core/chain/adapters/types';
 import type { Signer } from '../core/signing/signer';
+import {
+  createLoomRawCacheStore,
+  listLoomTasksFromCache,
+  readLoomRawChainRecords,
+  showLoomTaskFromCache,
+} from '../core/loom';
 import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain } from '../daemon/defaultHandlers';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
@@ -2544,6 +2550,91 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         });
       },
     },
+    loom: {
+      sync: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const paths = resolveMetabotPaths(homeDir);
+        const cacheStore = createLoomRawCacheStore(paths);
+        const pageSize = input.limit ? Math.max(1, Math.floor(input.limit)) : undefined;
+        const maxPages = input.limit ? 1 : undefined;
+        const syncResult = await readLoomRawChainRecords({
+          chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+          pageSize,
+          maxPages,
+        });
+        const state = await cacheStore.update(syncResult.records);
+        const cachedRecords = Object.values(state.records).reduce(
+          (total, records) => total + records.length,
+          0,
+        );
+        return commandSuccess({
+          fetchedRecords: syncResult.records.length,
+          fetchedByProtocol: syncResult.byProtocol,
+          cachedRecords,
+          cachePath: cacheStore.cachePath,
+          updatedAt: state.updatedAt,
+        });
+      },
+      list: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const paths = resolveMetabotPaths(homeDir);
+        const cacheStore = createLoomRawCacheStore(paths);
+        let refreshed = false;
+        if (input.refresh) {
+          const pageSize = input.limit ? Math.max(1, Math.floor(input.limit)) : undefined;
+          const maxPages = input.limit ? 1 : undefined;
+          const syncResult = await readLoomRawChainRecords({
+            chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+            pageSize,
+            maxPages,
+          });
+          await cacheStore.update(syncResult.records);
+          refreshed = true;
+        }
+        const state = await cacheStore.read();
+        return commandSuccess({
+          ...listLoomTasksFromCache(state, {
+            limit: input.limit,
+            tag: input.tag,
+            currency: input.currency,
+          }),
+          cache: {
+            path: cacheStore.cachePath,
+            updatedAt: state.updatedAt,
+            refreshed,
+          },
+        });
+      },
+      show: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const paths = resolveMetabotPaths(homeDir);
+        const cacheStore = createLoomRawCacheStore(paths);
+        let refreshed = false;
+        if (input.refresh) {
+          const syncResult = await readLoomRawChainRecords({
+            chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+          });
+          await cacheStore.update(syncResult.records);
+          refreshed = true;
+        }
+        const state = await cacheStore.read();
+        const projection = showLoomTaskFromCache(state, input.taskPinId);
+        if (!projection.found) {
+          return {
+            ...commandFailed('task_not_found', `Loom task not found in cache: ${input.taskPinId}`),
+            data: projection,
+          };
+        }
+        return commandSuccess({
+          ...projection,
+          cache: {
+            path: cacheStore.cachePath,
+            updatedAt: state.updatedAt,
+            refreshed,
+          },
+        });
+      },
+    },
     bot: {
       listProfiles: async () => requestJson(context, 'GET', '/api/bot/profiles'),
       getProfile: async (input) =>
@@ -2618,6 +2709,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     host: { ...defaults.host, ...provided.host },
     system: { ...defaults.system, ...provided.system },
     llm: { ...defaults.llm, ...provided.llm },
+    loom: { ...defaults.loom, ...provided.loom },
     bot: { ...defaults.bot, ...provided.bot },
     evolution: { ...defaults.evolution, ...provided.evolution },
   };

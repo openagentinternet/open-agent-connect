@@ -220,7 +220,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'system', summary: 'Update or uninstall local Open Agent Connect runtime assets.' },
     { name: 'evolution', summary: 'Inspect, publish, import, and adopt skill evolution artifacts.' },
     { name: 'llm', summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings.' },
-    { name: 'loom', summary: 'Validate Loom payloads and export chain write requests.' },
+    { name: 'loom', summary: 'Validate Loom payloads, sync raw records, and inspect task views.' },
   ],
   optionalFlags: [VERSION_FLAG, HELP_JSON_FLAG],
   examples: [
@@ -235,11 +235,14 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   ROOT_COMMAND_HELP,
   {
     commandPath: ['loom'],
-    summary: 'Loom commands for validating protocol payloads and preparing chain write requests.',
+    summary: 'Loom commands for validating protocol payloads, raw cache sync, and task inspection.',
     usage: 'metabot loom <subcommand>',
     subcommands: [
       { name: 'validate', summary: 'Validate one Loom protocol payload.' },
       { name: 'export-chain-request', summary: 'Build a chain write request for one Loom payload.' },
+      { name: 'sync', summary: 'Synchronize raw Loom protocol records into the local cache.' },
+      { name: 'list', summary: 'List task-centric Loom records from the local cache.' },
+      { name: 'show', summary: 'Show one Loom task and grouped related raw records.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
@@ -300,6 +303,84 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot loom export-chain-request --protocol claim --payload-file claim.json',
       'metabot loom export-chain-request --protocol claim --payload-file claim.json --out claim-request.json',
       'metabot loom export-chain-request --protocol claim --payload-file claim.json --help --json',
+    ],
+  },
+  {
+    commandPath: ['loom', 'sync'],
+    summary: 'Synchronize raw Loom protocol records into the global local cache.',
+    usage: 'metabot loom sync [--limit <n>]',
+    optionalFlags: [
+      { flag: '--limit', value: '<n>', description: 'Maximum rows to request per Loom protocol path for this sync.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'fetchedRecords',
+      'fetchedByProtocol',
+      'cachedRecords',
+      'cachePath',
+      'updatedAt',
+    ],
+    failureSemantics: [
+      'Fails with invalid_flag when --limit is not a positive integer.',
+      'Reads only Loom protocol paths and does not write chain data.',
+    ],
+    examples: [
+      'metabot loom sync',
+      'metabot loom sync --limit 25',
+    ],
+  },
+  {
+    commandPath: ['loom', 'list'],
+    summary: 'List task-centric Loom records from the global local cache.',
+    usage: 'metabot loom list [--refresh] [--limit <n>] [--tag <tag>] [--currency <SPACE|BTC|DOGE|OPCAT>]',
+    optionalFlags: [
+      { flag: '--refresh', description: 'Run loom sync before reading the local cache.' },
+      { flag: '--limit', value: '<n>', description: 'Maximum task count to return.' },
+      { flag: '--tag', value: '<tag>', description: 'Return tasks whose payload tags include this tag.' },
+      { flag: '--currency', value: '<SPACE|BTC|DOGE|OPCAT>', description: 'Return tasks whose bounty currency matches this value.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'tasks',
+      'tasks[].pinId',
+      'tasks[].relatedCounts',
+      'cache',
+    ],
+    failureSemantics: [
+      'Fails with invalid_flag when --limit or --currency is invalid.',
+      'Does not emit derived task status or business state.',
+    ],
+    examples: [
+      'metabot loom list',
+      'metabot loom list --refresh --tag cli --currency SPACE',
+    ],
+  },
+  {
+    commandPath: ['loom', 'show'],
+    summary: 'Show one Loom task and grouped related raw records from the local cache.',
+    usage: 'metabot loom show <taskPinId> [--refresh]',
+    optionalFlags: [
+      { flag: '--refresh', description: 'Run loom sync before reading the local cache.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'found',
+      'task',
+      'related.claims',
+      'related.statuses',
+      'related.deliveries',
+      'related.acceptances',
+      'related.claimRejects',
+      'cache',
+    ],
+    failureSemantics: [
+      'Fails with missing_argument when taskPinId is omitted.',
+      'Fails with task_not_found when the task is absent from the local cache.',
+      'Does not emit derived task status, permission validation, or payment transaction validation.',
+    ],
+    examples: [
+      `metabot loom show ${'a'.repeat(64)}i0`,
+      `metabot loom show ${'a'.repeat(64)}i0 --refresh`,
     ],
   },
   {

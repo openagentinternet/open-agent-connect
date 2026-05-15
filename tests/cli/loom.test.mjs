@@ -30,6 +30,7 @@ async function runLoom(args, options = {}) {
   const stdout = [];
   const exitCode = await runCli(args, {
     cwd: options.cwd,
+    dependencies: options.dependencies,
     stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
     stderr: { write: () => true },
   });
@@ -277,4 +278,99 @@ test('runCli leaves unimplemented loom commands unknown even with future flags',
   assert.equal(envelope.state, 'failed');
   assert.equal(envelope.code, 'unknown_command');
   assert.match(envelope.message, /Unknown command: loom draft-task --from alice/);
+});
+
+test('runCli delegates loom sync to runtime dependencies', async () => {
+  const calls = [];
+  const { exitCode, envelope } = await runLoom(['loom', 'sync'], {
+    dependencies: {
+      loom: {
+        sync: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { synced: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{}]);
+  assert.equal(envelope.ok, true);
+  assert.deepEqual(envelope.data, { synced: true });
+});
+
+test('runCli delegates loom list to runtime dependencies', async () => {
+  const calls = [];
+  const { exitCode, envelope } = await runLoom(['loom', 'list'], {
+    dependencies: {
+      loom: {
+        list: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { tasks: [] } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ refresh: false }]);
+  assert.equal(envelope.ok, true);
+  assert.deepEqual(envelope.data, { tasks: [] });
+});
+
+test('runCli passes refresh flag to loom list dependencies', async () => {
+  const calls = [];
+  const { exitCode } = await runLoom(['loom', 'list', '--refresh'], {
+    dependencies: {
+      loom: {
+        list: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { tasks: [] } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ refresh: true }]);
+});
+
+test('runCli passes task pin and refresh flag to loom show dependencies', async () => {
+  const calls = [];
+  const { exitCode } = await runLoom(['loom', 'show', validTaskPinId, '--refresh'], {
+    dependencies: {
+      loom: {
+        show: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { found: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ taskPinId: validTaskPinId, refresh: true }]);
+});
+
+test('runCli rejects invalid loom sync limit values', async () => {
+  for (const args of [
+    ['loom', 'sync', '--limit', '0'],
+    ['loom', 'sync', '--limit'],
+  ]) {
+    const { exitCode, envelope } = await runLoom(args);
+
+    assert.equal(exitCode, 1);
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.code, 'invalid_flag');
+    assert.match(envelope.message, /--limit/);
+  }
+});
+
+test('runCli rejects loom show without a task pin id', async () => {
+  const { exitCode, envelope } = await runLoom(['loom', 'show', '--refresh']);
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.code, 'missing_argument');
+  assert.match(envelope.message, /taskPinId/);
 });

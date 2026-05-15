@@ -9,7 +9,7 @@ import {
   type LoomProtocolName,
   type LoomValidationResult,
 } from '../../core/loom';
-import { commandMissingFlag, commandUnknownSubcommand, readFlagValue } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFlagValue } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function commandUnsupportedFlag(flag: string): MetabotCommandResult<never> {
@@ -28,6 +28,10 @@ function rejectChainWriteFlags(args: string[]): MetabotCommandResult<never> | nu
 
 function commandInvalidProtocol(protocol: string): MetabotCommandResult<never> {
   return commandFailed('invalid_protocol', `Unsupported Loom protocol: ${protocol}`);
+}
+
+function commandMissingArgument(argument: string): MetabotCommandResult<never> {
+  return commandFailed('missing_argument', `Missing required argument ${argument}.`);
 }
 
 function commandInvalidPayload(
@@ -51,6 +55,49 @@ function resolveOutPath(context: CliRuntimeContext, outPath: string): string {
 
 function resolveInputPath(context: CliRuntimeContext, filePath: string): string {
   return path.isAbsolute(filePath) ? filePath : path.resolve(context.cwd, filePath);
+}
+
+function parseOptionalLimit(args: string[]): { ok: true; limit?: number } | { ok: false; result: MetabotCommandResult<never> } {
+  const hasLimitFlag = args.includes('--limit');
+  const rawLimit = readFlagValue(args, '--limit');
+  if (!hasLimitFlag) {
+    return { ok: true };
+  }
+  if (rawLimit === null) {
+    return {
+      ok: false,
+      result: commandFailed('invalid_flag', '--limit must be a positive integer.'),
+    };
+  }
+  const limit = Number(rawLimit);
+  if (!Number.isInteger(limit) || limit <= 0) {
+    return {
+      ok: false,
+      result: commandFailed('invalid_flag', '--limit must be a positive integer.'),
+    };
+  }
+  return { ok: true, limit };
+}
+
+function parseOptionalCurrency(args: string[]): { ok: true; currency?: string } | { ok: false; result: MetabotCommandResult<never> } {
+  const hasCurrencyFlag = args.includes('--currency');
+  const currency = readFlagValue(args, '--currency');
+  if (!hasCurrencyFlag) {
+    return { ok: true };
+  }
+  if (currency === null) {
+    return {
+      ok: false,
+      result: commandFailed('invalid_flag', '--currency must be one of SPACE, BTC, DOGE, or OPCAT.'),
+    };
+  }
+  if (!['SPACE', 'BTC', 'DOGE', 'OPCAT'].includes(currency)) {
+    return {
+      ok: false,
+      result: commandFailed('invalid_flag', '--currency must be one of SPACE, BTC, DOGE, or OPCAT.'),
+    };
+  }
+  return { ok: true, currency };
 }
 
 function invalidJsonValidation(
@@ -204,6 +251,66 @@ async function runExportChainRequestCommand(
   });
 }
 
+async function runSyncCommand(
+  args: string[],
+  context: CliRuntimeContext,
+): Promise<MetabotCommandResult<unknown>> {
+  const limit = parseOptionalLimit(args);
+  if (!limit.ok) {
+    return limit.result;
+  }
+  const input: { limit?: number } = {};
+  if (limit.limit !== undefined) {
+    input.limit = limit.limit;
+  }
+  return context.dependencies.loom?.sync?.(input)
+    ?? commandFailed('dependency_unavailable', 'Loom sync dependency is unavailable.');
+}
+
+async function runListCommand(
+  args: string[],
+  context: CliRuntimeContext,
+): Promise<MetabotCommandResult<unknown>> {
+  const limit = parseOptionalLimit(args);
+  if (!limit.ok) {
+    return limit.result;
+  }
+  const currency = parseOptionalCurrency(args);
+  if (!currency.ok) {
+    return currency.result;
+  }
+
+  const input: { refresh: boolean; limit?: number; tag?: string; currency?: string } = {
+    refresh: hasFlag(args, '--refresh'),
+  };
+  const tag = readFlagValue(args, '--tag');
+  if (limit.limit !== undefined) {
+    input.limit = limit.limit;
+  }
+  if (tag !== null) {
+    input.tag = tag;
+  }
+  if (currency.currency !== undefined) {
+    input.currency = currency.currency;
+  }
+  return context.dependencies.loom?.list?.(input)
+    ?? commandFailed('dependency_unavailable', 'Loom list dependency is unavailable.');
+}
+
+async function runShowCommand(
+  args: string[],
+  context: CliRuntimeContext,
+): Promise<MetabotCommandResult<unknown>> {
+  const taskPinId = args.slice(1).find((arg) => !arg.startsWith('-'));
+  if (!taskPinId) {
+    return commandMissingArgument('taskPinId');
+  }
+  return context.dependencies.loom?.show?.({
+    taskPinId,
+    refresh: hasFlag(args, '--refresh'),
+  }) ?? commandFailed('dependency_unavailable', 'Loom show dependency is unavailable.');
+}
+
 export async function runLoomCommand(
   args: string[],
   context: CliRuntimeContext,
@@ -213,6 +320,12 @@ export async function runLoomCommand(
       return runValidateCommand(args, context);
     case 'export-chain-request':
       return runExportChainRequestCommand(args, context);
+    case 'sync':
+      return runSyncCommand(args, context);
+    case 'list':
+      return runListCommand(args, context);
+    case 'show':
+      return runShowCommand(args, context);
     default:
       return commandUnknownSubcommand(`loom ${args.join(' ')}`.trim());
   }

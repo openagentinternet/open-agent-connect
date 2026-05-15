@@ -64,6 +64,9 @@ test('runCli prints loom group help for validation and export commands', async (
   assert.match(output, /^Usage:\s+metabot loom <subcommand>/m);
   assert.match(output, /validate\s+Validate one Loom protocol payload\./);
   assert.match(output, /export-chain-request\s+Build a chain write request for one Loom payload\./);
+  assert.match(output, /sync\s+Synchronize raw Loom protocol records into the local cache\./);
+  assert.match(output, /list\s+List task-centric Loom records from the local cache\./);
+  assert.match(output, /show\s+Show one Loom task and grouped related raw records\./);
 });
 
 test('runCli prints loom validate help with protocol and payload-file flags', async () => {
@@ -107,6 +110,32 @@ test('runCli prints loom export-chain-request help and JSON help', async () => {
   assert.deepEqual(jsonOutput.commandPath, ['loom', 'export-chain-request']);
   assert.equal(jsonOutput.command, 'metabot loom export-chain-request');
   assert.ok(jsonOutput.optionalFlags.some((flag) => flag.flag === '--out'));
+});
+
+test('runCli prints loom sync, list, and show help', async () => {
+  const syncStdout = [];
+  const syncExitCode = await runCli(['loom', 'sync', '--help'], {
+    stdout: { write: (chunk) => { syncStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(syncExitCode, 0);
+  assert.match(syncStdout.join(''), /^Usage:\s+metabot loom sync \[--limit <n>\]/m);
+
+  const listStdout = [];
+  const listExitCode = await runCli(['loom', 'list', '--help'], {
+    stdout: { write: (chunk) => { listStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(listExitCode, 0);
+  assert.match(listStdout.join(''), /^Usage:\s+metabot loom list \[--refresh\] \[--limit <n>\] \[--tag <tag>\] \[--currency <SPACE\|BTC\|DOGE\|OPCAT>\]/m);
+
+  const showStdout = [];
+  const showExitCode = await runCli(['loom', 'show', '--help'], {
+    stdout: { write: (chunk) => { showStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(showExitCode, 0);
+  assert.match(showStdout.join(''), /^Usage:\s+metabot loom show <taskPinId> \[--refresh\]/m);
 });
 
 test('runCli prints bot group help for profile, runtime, and session commands', async () => {
