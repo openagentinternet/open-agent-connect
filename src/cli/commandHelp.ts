@@ -411,6 +411,8 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     failureSemantics: [
       'Fails with missing_flag when --task-pin-id is omitted.',
       'Fails with missing_flag when neither --payout-address nor --claim-pin-id is provided.',
+      'Fails with invalid_flag when both --payout-address and --claim-pin-id are provided.',
+      'Requires the delegated workflow dependency to provide local git, gh, authenticated `gh auth status`, and GitHub repository access.',
     ],
     examples: [
       `metabot loom claim-and-start --from bob --task-pin-id ${'a'.repeat(64)}i0 --payout-address 1DeveloperPayoutAddress --chain mvc --file-chain btc --message hi`,

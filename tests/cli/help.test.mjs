@@ -195,6 +195,9 @@ test('runCli prints loom workflow command help', async () => {
   assert.match(outputs.get('accept-and-pay'), /--score <1-5>/);
   assert.match(outputs.get('accept-and-pay'), /--confirm-payment/);
   assert.match(outputs.get('accept-and-pay'), /without.*--confirm-payment.*payment/i);
+  assert.match(outputs.get('claim-and-start'), /git/i);
+  assert.match(outputs.get('claim-and-start'), /gh/i);
+  assert.match(outputs.get('claim-and-start'), /github/i);
   assert.match(outputs.get('run-dev-round'), /git|gh|github/i);
 });
 

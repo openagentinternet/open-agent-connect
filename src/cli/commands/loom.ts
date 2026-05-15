@@ -14,7 +14,6 @@ import {
   commandUnknownSubcommand,
   hasFlag,
   readChainWriteFlag,
-  readFileUploadChainFlag,
   readFlagValue,
 } from './helpers';
 import type { CliRuntimeContext } from '../types';
@@ -103,13 +102,23 @@ function readOptionalFileChain(args: string[]): {
     return { ok: true };
   }
   const fileChain = readFlagValue(args, '--file-chain');
-  const fileChainFlag = fileChain && !fileChain.startsWith('--')
-    ? readFileUploadChainFlag(['--chain', fileChain])
-    : readFileUploadChainFlag(['--chain']);
-  if (fileChainFlag.error) {
-    return { ok: false, result: fileChainFlag.error };
+  if (!fileChain || fileChain.startsWith('--')) {
+    return {
+      ok: false,
+      result: commandFailed('invalid_flag', '--file-chain requires a value. Supported values: mvc, btc, opcat.'),
+    };
   }
-  return fileChainFlag.chain ? { ok: true, fileChain: fileChainFlag.chain } : { ok: true };
+  const normalized = fileChain.trim().toLowerCase();
+  if (normalized !== 'mvc' && normalized !== 'btc' && normalized !== 'opcat') {
+    return {
+      ok: false,
+      result: commandFailed(
+        'invalid_flag',
+        `Unsupported --file-chain value: ${fileChain}. Supported values: mvc, btc, opcat. DOGE is not supported for file upload.`,
+      ),
+    };
+  }
+  return { ok: true, fileChain: normalized };
 }
 
 function parseLoomScore(args: string[]): {
@@ -120,10 +129,10 @@ function parseLoomScore(args: string[]): {
   if (!rawScore || rawScore.startsWith('--')) {
     return { ok: false, result: commandMissingFlag('--score') };
   }
-  const score = Number(rawScore);
-  if (!Number.isInteger(score) || score < 1 || score > 5) {
+  if (!['1', '2', '3', '4', '5'].includes(rawScore)) {
     return { ok: false, result: commandFailed('invalid_flag', '--score must be an integer from 1 to 5.') };
   }
+  const score = Number(rawScore);
   return { ok: true, score };
 }
 
@@ -488,6 +497,9 @@ async function runClaimAndStartCommand(
   if (!claimPinIdInput.ok) return claimPinIdInput.result;
   if (!payoutAddressInput.value && !claimPinIdInput.value) {
     return commandMissingFlag('--payout-address or --claim-pin-id');
+  }
+  if (payoutAddressInput.value && claimPinIdInput.value) {
+    return commandFailed('invalid_flag', 'Use exactly one of --payout-address or --claim-pin-id.');
   }
   const fromInput = readOptionalValue(args, '--from');
   if (!fromInput.ok) return fromInput.result;
