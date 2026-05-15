@@ -1,7 +1,6 @@
 import {
   LOOM_PROTOCOL_NAMES,
   LOOM_PROTOCOLS,
-  resolveLoomProtocol,
   type LoomProtocolName,
 } from './protocols';
 import type { LoomCachedRecord } from './rawCache';
@@ -113,6 +112,28 @@ function normalizePath(row: Record<string, unknown>, protocol: LoomProtocolName)
   return path || LOOM_PROTOCOLS[protocol].path;
 }
 
+function resolveRecordProtocol(
+  path: string,
+  requestedProtocol: LoomProtocolName,
+): {
+  protocol: LoomProtocolName;
+  pathErrors: LoomValidationError[];
+} {
+  if (path === LOOM_PROTOCOLS[requestedProtocol].path) {
+    return { protocol: requestedProtocol, pathErrors: [] };
+  }
+  return {
+    protocol: requestedProtocol,
+    pathErrors: [
+      {
+        path: 'path',
+        code: 'invalid_path',
+        message: `Unexpected Loom row path "${path}" while reading ${LOOM_PROTOCOLS[requestedProtocol].path}.`,
+      },
+    ],
+  };
+}
+
 function normalizeOperation(row: Record<string, unknown>): string {
   const operation = toString(row.operation ?? row.Operation).toLowerCase();
   return operation || 'create';
@@ -126,18 +147,19 @@ function normalizeRecord(row: Record<string, unknown>, protocol: LoomProtocolNam
   const pinId = normalizePinId(row);
   if (!pinId) return null;
   const path = normalizePath(row, protocol);
-  const resolvedProtocol = resolveLoomProtocol(path).name;
+  const resolved = resolveRecordProtocol(path, protocol);
   const parsed = parsePayload(row);
-  const validation = parsed.parseErrors.length
-    ? {
-      valid: false,
-      errors: parsed.parseErrors,
-    }
-    : validateLoomPayload(resolvedProtocol, parsed.payload);
+  const payloadValidation = parsed.parseErrors.length
+    ? parsed.parseErrors
+    : validateLoomPayload(resolved.protocol, parsed.payload).errors;
+  const validationErrors = [
+    ...resolved.pathErrors,
+    ...payloadValidation,
+  ];
 
   return {
     pinId,
-    protocol: resolvedProtocol,
+    protocol: resolved.protocol,
     path,
     operation: normalizeOperation(row),
     contentType: toString(row.contentType ?? row.content_type) || 'application/json',
@@ -146,8 +168,8 @@ function normalizeRecord(row: Record<string, unknown>, protocol: LoomProtocolNam
     creatorMetaId: toString(row.metaid ?? row.metaId ?? row.createMetaId),
     globalMetaId: toString(row.globalMetaId ?? row.global_meta_id),
     payload: parsed.payload,
-    payloadValid: validation.valid,
-    validationErrors: validation.errors,
+    payloadValid: validationErrors.length === 0,
+    validationErrors,
     raw: row,
   };
 }

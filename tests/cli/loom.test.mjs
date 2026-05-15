@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -26,10 +27,51 @@ async function writePayload(tempDir, payload) {
   return payloadFile;
 }
 
+async function createIndexedHome() {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-home-'));
+  const profileHome = path.join(home, '.metabot', 'profiles', 'eric');
+  const managerRoot = path.join(home, '.metabot', 'manager');
+  await mkdir(profileHome, { recursive: true });
+  await mkdir(managerRoot, { recursive: true });
+  await writeFile(
+    path.join(managerRoot, 'identity-profiles.json'),
+    JSON.stringify({ profiles: [{ slug: 'eric', homeDir: profileHome }] }),
+    'utf8',
+  );
+  await writeFile(
+    path.join(managerRoot, 'active-home.json'),
+    JSON.stringify({ homeDir: profileHome }),
+    'utf8',
+  );
+  return home;
+}
+
+async function withChainApiServer(handler) {
+  const requests = [];
+  const server = http.createServer((request, response) => {
+    requests.push(request.url);
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ data: { list: [], nextCursor: null } }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  try {
+    return await handler({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      requests,
+    });
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+}
+
 async function runLoom(args, options = {}) {
   const stdout = [];
   const exitCode = await runCli(args, {
     cwd: options.cwd,
+    env: options.env,
     dependencies: options.dependencies,
     stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
     stderr: { write: () => true },
@@ -373,4 +415,25 @@ test('runCli rejects loom show without a task pin id', async () => {
   assert.equal(envelope.ok, false);
   assert.equal(envelope.code, 'missing_argument');
   assert.match(envelope.message, /taskPinId/);
+});
+
+test('runCli does not use loom list display limit as refresh sync page size', async () => {
+  const home = await createIndexedHome();
+  await withChainApiServer(async ({ baseUrl, requests }) => {
+    const { exitCode, envelope } = await runLoom(['loom', 'list', '--refresh', '--limit', '5'], {
+      env: {
+        ...process.env,
+        HOME: home,
+        METABOT_CHAIN_API_BASE_URL: baseUrl,
+      },
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(envelope.ok, true);
+    assert.equal(requests.length, 6);
+    for (const request of requests) {
+      const parsed = new URL(request, baseUrl);
+      assert.equal(parsed.searchParams.get('size'), '200');
+    }
+  });
 });

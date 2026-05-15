@@ -2581,12 +2581,8 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const cacheStore = createLoomRawCacheStore(paths);
         let refreshed = false;
         if (input.refresh) {
-          const pageSize = input.limit ? Math.max(1, Math.floor(input.limit)) : undefined;
-          const maxPages = input.limit ? 1 : undefined;
           const syncResult = await readLoomRawChainRecords({
             chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
-            pageSize,
-            maxPages,
           });
           await cacheStore.update(syncResult.records);
           refreshed = true;
