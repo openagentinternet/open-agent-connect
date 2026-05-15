@@ -107,14 +107,14 @@ function normalizeRepoParts(owner: string, repo: string): GitHubRepoRef {
 
 export function normalizeGitHubRepoUri(value: string): GitHubRepoRef {
   const trimmed = value.trim();
-  const shorthandMatch = /^([^/\s]+)\/([^/\s]+?)(?:\.git)?$/.exec(trimmed);
-  if (shorthandMatch) {
-    return normalizeRepoParts(shorthandMatch[1], shorthandMatch[2]);
-  }
-
   const sshMatch = /^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/.exec(trimmed);
   if (sshMatch) {
     return normalizeRepoParts(sshMatch[1], sshMatch[2]);
+  }
+
+  const shorthandMatch = /^([^/@:\s]+)\/([^/@:\s]+?)(?:\.git)?$/.exec(trimmed);
+  if (shorthandMatch) {
+    return normalizeRepoParts(shorthandMatch[1], shorthandMatch[2]);
   }
 
   let url: URL;

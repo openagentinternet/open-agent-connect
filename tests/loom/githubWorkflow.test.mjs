@@ -63,6 +63,17 @@ test('normalizes owner/repo shorthand', () => {
   });
 });
 
+test('normalizes SSH GitHub repository URLs', () => {
+  assert.deepEqual(
+    normalizeGitHubRepoUri('git@github.com:openagentinternet/open-agent-connect.git'),
+    {
+      owner: 'openagentinternet',
+      repo: 'open-agent-connect',
+      fullName: 'openagentinternet/open-agent-connect',
+    },
+  );
+});
+
 test('rejects invalid GitHub repository URLs', () => {
   assert.throws(
     () => normalizeGitHubRepoUri('https://example.com/openagentinternet/open-agent-connect'),
