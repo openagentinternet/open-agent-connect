@@ -23,6 +23,7 @@ import { runEvolutionCommand } from './commands/evolution';
 import { runWalletCommand } from './commands/wallet';
 import { runSystemCommand } from './commands/system';
 import { runLlmCommand } from './commands/llm';
+import { runLoomCommand } from './commands/loom';
 import { commandUnknownSubcommand } from './commands/helpers';
 import { helpRequested, writeResolvedHelp } from './commandHelp';
 import { createCliRuntimeContext, type CliContext } from './types';
@@ -133,6 +134,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'llm':
           result = await runLlmCommand(rest, context);
+          break;
+        case 'loom':
+          result = await runLoomCommand(rest, context);
           break;
         case undefined:
           result = commandFailed('missing_command', 'No command provided.');

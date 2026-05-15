@@ -220,6 +220,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'system', summary: 'Update or uninstall local Open Agent Connect runtime assets.' },
     { name: 'evolution', summary: 'Inspect, publish, import, and adopt skill evolution artifacts.' },
     { name: 'llm', summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings.' },
+    { name: 'loom', summary: 'Validate Loom payloads and export chain write requests.' },
   ],
   optionalFlags: [VERSION_FLAG, HELP_JSON_FLAG],
   examples: [
@@ -232,6 +233,75 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
 
 const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   ROOT_COMMAND_HELP,
+  {
+    commandPath: ['loom'],
+    summary: 'Loom commands for validating protocol payloads and preparing chain write requests.',
+    usage: 'metabot loom <subcommand>',
+    subcommands: [
+      { name: 'validate', summary: 'Validate one Loom protocol payload.' },
+      { name: 'export-chain-request', summary: 'Build a chain write request for one Loom payload.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['loom', 'validate'],
+    summary: 'Validate one Loom protocol payload without writing chain data.',
+    usage: 'metabot loom validate --protocol <protocol> --payload-file <path>',
+    requiredFlags: [
+      { flag: '--protocol', value: '<protocol>', description: 'Loom protocol name, such as claim.' },
+      { flag: '--payload-file', value: '<path>', description: 'JSON payload file to validate.' },
+    ],
+    successFields: [
+      'protocol',
+      'path',
+      'valid',
+      'payload',
+    ],
+    failureSemantics: [
+      'Fails with invalid_protocol when --protocol is not a supported Loom protocol.',
+      'Fails with invalid_payload and validation errors when the payload does not satisfy the protocol.',
+    ],
+    examples: [
+      'metabot loom validate --protocol claim --payload-file claim.json',
+      'metabot loom validate --protocol claim --payload-file claim.json --help --json',
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['loom', 'export-chain-request'],
+    summary: 'Build a chain write request for one validated Loom payload without writing chain data.',
+    usage: 'metabot loom export-chain-request --protocol <protocol> --payload-file <path> [--out <path>]',
+    requiredFlags: [
+      { flag: '--protocol', value: '<protocol>', description: 'Loom protocol name, such as claim.' },
+      { flag: '--payload-file', value: '<path>', description: 'JSON payload file to validate and export.' },
+    ],
+    optionalFlags: [
+      { flag: '--out', value: '<path>', description: 'Write the chain request JSON to this path. Relative paths resolve against the current working directory.' },
+      HELP_JSON_FLAG,
+    ],
+    requestShape: {
+      taskPinId: '64-hex PINID string with i suffix',
+      payoutAddress: 'claim payout address',
+      message: 'optional claim message',
+    },
+    successFields: [
+      'protocol',
+      'path',
+      'request.operation',
+      'request.payload',
+      'outPath',
+    ],
+    failureSemantics: [
+      'Fails with invalid_protocol when --protocol is not a supported Loom protocol.',
+      'Fails with invalid_payload and validation errors when the payload does not satisfy the protocol.',
+      'Does not accept --chain or --from; pass the exported request to metabot chain write for actual chain writes.',
+    ],
+    examples: [
+      'metabot loom export-chain-request --protocol claim --payload-file claim.json',
+      'metabot loom export-chain-request --protocol claim --payload-file claim.json --out claim-request.json',
+      'metabot loom export-chain-request --protocol claim --payload-file claim.json --help --json',
+    ],
+  },
   {
     commandPath: ['bot'],
     summary: 'Manage local MetaBot profiles, config, wallets, runtimes, and sessions.',

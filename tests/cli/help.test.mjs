@@ -27,6 +27,7 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^\s+host\s+/m);
   assert.match(output, /^\s+trace\s+/m);
   assert.match(output, /^\s+system\s+/m);
+  assert.match(output, /^\s+loom\s+/m);
   assert.equal(output.includes('"ok"'), false);
 });
 
@@ -47,6 +48,65 @@ test('runCli prints machine-readable top-level help for `metabot --help --json`'
   assert.ok(output.subcommands.some((entry) => entry.name === 'bot'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'host'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'provider'));
+  assert.ok(output.subcommands.some((entry) => entry.name === 'loom'));
+});
+
+test('runCli prints loom group help for validation and export commands', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['loom', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot loom <subcommand>/m);
+  assert.match(output, /validate\s+Validate one Loom protocol payload\./);
+  assert.match(output, /export-chain-request\s+Build a chain write request for one Loom payload\./);
+});
+
+test('runCli prints loom validate help with protocol and payload-file flags', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['loom', 'validate', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot loom validate --protocol <protocol> --payload-file <path>/m);
+  assert.match(output, /--protocol <protocol>/);
+  assert.match(output, /--payload-file <path>/);
+  assert.match(output, /invalid_payload/);
+});
+
+test('runCli prints loom export-chain-request help and JSON help', async () => {
+  const textStdout = [];
+
+  const textExitCode = await runCli(['loom', 'export-chain-request', '--help'], {
+    stdout: { write: (chunk) => { textStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(textExitCode, 0);
+  const textOutput = textStdout.join('');
+  assert.match(textOutput, /^Usage:\s+metabot loom export-chain-request --protocol <protocol> --payload-file <path> \[--out <path>\]/m);
+  assert.match(textOutput, /--out <path>/);
+  assert.match(textOutput, /payload/);
+
+  const jsonStdout = [];
+  const jsonExitCode = await runCli(['loom', 'export-chain-request', '--help', '--json'], {
+    stdout: { write: (chunk) => { jsonStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(jsonExitCode, 0);
+  const jsonOutput = JSON.parse(jsonStdout.join(''));
+  assert.deepEqual(jsonOutput.commandPath, ['loom', 'export-chain-request']);
+  assert.equal(jsonOutput.command, 'metabot loom export-chain-request');
+  assert.ok(jsonOutput.optionalFlags.some((flag) => flag.flag === '--out'));
 });
 
 test('runCli prints bot group help for profile, runtime, and session commands', async () => {
