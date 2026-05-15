@@ -82,16 +82,26 @@ function cloneUrlForRepo(repo: GitHubRepoRef): string {
   return `https://github.com/${repo.fullName}.git`;
 }
 
+function hasValue(value: string | undefined): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
 function normalizeRepoParts(owner: string, repo: string): GitHubRepoRef {
-  const normalizedRepo = repo.endsWith('.git') ? repo.slice(0, -4) : repo;
-  if (!owner || !normalizedRepo || owner.includes('/') || normalizedRepo.includes('/')) {
+  const normalizedOwner = owner.trim();
+  const normalizedRepo = repo.trim().endsWith('.git') ? repo.trim().slice(0, -4) : repo.trim();
+  if (!normalizedOwner
+    || !normalizedRepo
+    || normalizedOwner.includes('/')
+    || normalizedRepo.includes('/')
+    || /\s/.test(normalizedOwner)
+    || /\s/.test(normalizedRepo)) {
     throw new Error(`Invalid GitHub repository URI: ${owner}/${repo}`);
   }
 
   return {
-    owner,
+    owner: normalizedOwner,
     repo: normalizedRepo,
-    fullName: `${owner}/${normalizedRepo}`,
+    fullName: `${normalizedOwner}/${normalizedRepo}`,
   };
 }
 
@@ -179,6 +189,57 @@ function findExistingFork(view: GitHubRepoViewJson | null, upstream: GitHubRepoR
   return normalizeGitHubRepoUri(nameWithOwner);
 }
 
+function parseGitHubLogin(stdout: string): string | null {
+  const trimmed = stdout.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as { login?: unknown };
+    if (typeof parsed.login === 'string' && parsed.login.trim()) {
+      return parsed.login.trim();
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return null;
+}
+
+async function resolveForkOwner(
+  input: PrepareGitHubForkWorkspaceInput,
+): Promise<MetabotCommandResult<{ owner: string }>> {
+  if (hasValue(input.forkOwner)) {
+    return commandSuccess({ owner: input.forkOwner.trim() });
+  }
+
+  const user = await input.runner.run({
+    command: 'gh',
+    args: ['api', 'user', '--jq', '.login'],
+  });
+  if (!isSuccessful(user)) {
+    return commandFailed(
+      'github_auth_unavailable',
+      commandFailureMessage('Failed to resolve authenticated GitHub login', user),
+    );
+  }
+
+  const owner = parseGitHubLogin(user.stdout);
+  if (!owner) {
+    return commandFailed(
+      'github_auth_unavailable',
+      'Failed to resolve authenticated GitHub login: gh api user returned no login.',
+    );
+  }
+
+  return commandSuccess({ owner });
+}
+
+function extractGitHubPullRequestUrl(stdout: string): string | null {
+  return stdout.match(/https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/)?.[0] ?? null;
+}
+
 export async function prepareGitHubForkWorkspace(
   input: PrepareGitHubForkWorkspaceInput,
 ): Promise<MetabotCommandResult<PrepareGitHubForkWorkspaceResult>> {
@@ -187,18 +248,19 @@ export async function prepareGitHubForkWorkspace(
   const upstreamRemote = input.upstreamRemote ?? 'origin';
   const forkRemote = input.forkRemote ?? 'fork';
 
-  const view = await input.runner.run({
-    command: 'gh',
-    args: ['repo', 'view', upstreamRepo.fullName, '--json', 'parent,nameWithOwner'],
-  });
-  if (!isSuccessful(view)) {
-    return commandFailed(
-      'github_repo_view_failed',
-      commandFailureMessage('Failed to inspect GitHub repository', view),
-    );
+  const ownerResult = await resolveForkOwner(input);
+  if (!ownerResult.ok) {
+    return ownerResult;
   }
 
-  const existingFork = findExistingFork(parseGitHubRepoView(view.stdout), upstreamRepo);
+  const candidateForkRepo = normalizeGitHubRepoUri(`${ownerResult.data.owner}/${upstreamRepo.repo}`);
+  const view = await input.runner.run({
+    command: 'gh',
+    args: ['repo', 'view', candidateForkRepo.fullName, '--json', 'parent,nameWithOwner'],
+  });
+  const existingFork = isSuccessful(view)
+    ? findExistingFork(parseGitHubRepoView(view.stdout), upstreamRepo)
+    : null;
   let forkRepo = existingFork;
   if (!forkRepo) {
     const fork = await input.runner.run({
@@ -209,13 +271,7 @@ export async function prepareGitHubForkWorkspace(
       return commandFailed('github_fork_failed', commandFailureMessage('Failed to fork repository', fork));
     }
 
-    if (!input.forkOwner) {
-      return commandFailed(
-        'github_fork_owner_missing',
-        'forkOwner is required when no existing fork is detected.',
-      );
-    }
-    forkRepo = normalizeGitHubRepoUri(`${input.forkOwner}/${upstreamRepo.repo}`);
+    forkRepo = candidateForkRepo;
   }
 
   const clone = await input.runner.run({
@@ -300,5 +356,13 @@ export async function createLoomPullRequest(
     return commandFailed('github_pr_failed', commandFailureMessage('Failed to create pull request', pr));
   }
 
-  return commandSuccess({ url: pr.stdout.trim() });
+  const url = extractGitHubPullRequestUrl(pr.stdout);
+  if (!url) {
+    return commandFailed(
+      'github_pr_failed',
+      'Failed to create pull request: gh pr create did not return a pull request URL.',
+    );
+  }
+
+  return commandSuccess({ url });
 }

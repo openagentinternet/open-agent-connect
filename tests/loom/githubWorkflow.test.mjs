@@ -102,9 +102,9 @@ test('builds stable Loom branch names from task and claim pin ids', () => {
 
 test('prepareGitHubForkWorkspace forks when no matching fork exists and prepares branch', async () => {
   const { calls, runner } = createFakeRunner((input) => commandResult(input, {
-    stdout: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'view'
-      ? JSON.stringify({ nameWithOwner: 'openagentinternet/open-agent-connect', parent: null })
-      : '',
+    exitCode: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'view' ? 1 : 0,
+    stderr: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'view' ? 'not found' : '',
+    stdout: '',
   }));
 
   const result = await prepareGitHubForkWorkspace({
@@ -120,7 +120,40 @@ test('prepareGitHubForkWorkspace forks when no matching fork exists and prepares
 
   assert.equal(result.ok, true);
   assert.deepEqual(commandLines(calls), [
-    'gh repo view openagentinternet/open-agent-connect --json parent,nameWithOwner',
+    'gh repo view loom-developer/open-agent-connect --json parent,nameWithOwner',
+    'gh repo fork openagentinternet/open-agent-connect --clone=false',
+    'git clone https://github.com/openagentinternet/open-agent-connect.git /tmp/loom/repo',
+    'git remote remove loom-fork',
+    'git remote add loom-fork https://github.com/loom-developer/open-agent-connect.git',
+    'git checkout -B loom/aaaaaaaa-bbbbbbbb origin/main',
+  ]);
+  assert.equal(result.data.forkRepo.fullName, 'loom-developer/open-agent-connect');
+  assert.equal(result.data.workspacePath, '/tmp/loom/repo');
+});
+
+test('prepareGitHubForkWorkspace resolves authenticated login before forking', async () => {
+  const { calls, runner } = createFakeRunner((input) => commandResult(input, {
+    exitCode: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'view' ? 1 : 0,
+    stderr: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'view' ? 'not found' : '',
+    stdout: input.command === 'gh' && input.args[0] === 'api' && input.args[1] === 'user'
+      ? 'loom-developer\n'
+      : '',
+  }));
+
+  const result = await prepareGitHubForkWorkspace({
+    runner,
+    repoUri: 'https://github.com/openagentinternet/open-agent-connect.git',
+    workspaceRepoPath: '/tmp/loom/repo',
+    branchName: 'loom/aaaaaaaa-bbbbbbbb',
+    baseBranch: 'main',
+    upstreamRemote: 'origin',
+    forkRemote: 'loom-fork',
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(commandLines(calls), [
+    'gh api user --jq .login',
+    'gh repo view loom-developer/open-agent-connect --json parent,nameWithOwner',
     'gh repo fork openagentinternet/open-agent-connect --clone=false',
     'git clone https://github.com/openagentinternet/open-agent-connect.git /tmp/loom/repo',
     'git remote remove loom-fork',
@@ -138,6 +171,8 @@ test('prepareGitHubForkWorkspace reuses an existing matching fork', async () => 
         nameWithOwner: 'loom-developer/open-agent-connect',
         parent: { nameWithOwner: 'openagentinternet/open-agent-connect' },
       })
+      : input.command === 'gh' && input.args[0] === 'api' && input.args[1] === 'user'
+        ? 'loom-developer\n'
       : '',
   }));
 
@@ -150,7 +185,8 @@ test('prepareGitHubForkWorkspace reuses an existing matching fork', async () => 
 
   assert.equal(result.ok, true);
   assert.deepEqual(commandLines(calls), [
-    'gh repo view openagentinternet/open-agent-connect --json parent,nameWithOwner',
+    'gh api user --jq .login',
+    'gh repo view loom-developer/open-agent-connect --json parent,nameWithOwner',
     'git clone https://github.com/openagentinternet/open-agent-connect.git /tmp/loom/reused',
     'git remote remove fork',
     'git remote add fork https://github.com/loom-developer/open-agent-connect.git',
@@ -164,7 +200,7 @@ test('prepareGitHubForkWorkspace maps fork failures', async () => {
     exitCode: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'fork' ? 1 : 0,
     stderr: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'fork' ? 'fork failed' : '',
     stdout: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'view'
-      ? JSON.stringify({ nameWithOwner: 'openagentinternet/open-agent-connect', parent: null })
+      ? JSON.stringify({ nameWithOwner: 'loom-developer/open-agent-connect', parent: null })
       : '',
   }));
 
@@ -185,7 +221,7 @@ test('prepareGitHubForkWorkspace maps clone failures', async () => {
     exitCode: input.command === 'git' && input.args[0] === 'clone' ? 1 : 0,
     stderr: input.command === 'git' && input.args[0] === 'clone' ? 'clone failed' : '',
     stdout: input.command === 'gh' && input.args[0] === 'repo' && input.args[1] === 'view'
-      ? JSON.stringify({ nameWithOwner: 'openagentinternet/open-agent-connect', parent: null })
+      ? JSON.stringify({ nameWithOwner: 'loom-developer/open-agent-connect', parent: null })
       : '',
   }));
 
@@ -220,9 +256,9 @@ test('pushLoomBranch maps push failures', async () => {
   assert.equal(calls[0].cwd, '/tmp/loom/repo');
 });
 
-test('createLoomPullRequest parses the created pull request URL', async () => {
+test('createLoomPullRequest parses the created pull request URL from noisy stdout', async () => {
   const { calls, runner } = createFakeRunner((input) => commandResult(input, {
-    stdout: 'https://github.com/openagentinternet/open-agent-connect/pull/123\n',
+    stdout: 'Creating pull request...\nhttps://github.com/openagentinternet/open-agent-connect/pull/123\nDone.\n',
   }));
 
   const result = await createLoomPullRequest({
@@ -239,4 +275,22 @@ test('createLoomPullRequest parses the created pull request URL', async () => {
   assert.deepEqual(commandLines(calls), [
     'gh pr create --base main --head loom-developer:loom/aaaaaaaa-bbbbbbbb --title Loom task --body Implemented by Loom.',
   ]);
+});
+
+test('createLoomPullRequest maps success without pull request URL to github_pr_failed', async () => {
+  const { runner } = createFakeRunner((input) => commandResult(input, {
+    stdout: 'Pull request created.\n',
+  }));
+
+  const result = await createLoomPullRequest({
+    runner,
+    workspacePath: '/tmp/loom/repo',
+    baseBranch: 'main',
+    head: 'loom-developer:loom/aaaaaaaa-bbbbbbbb',
+    title: 'Loom task',
+    body: 'Implemented by Loom.',
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'github_pr_failed');
 });
