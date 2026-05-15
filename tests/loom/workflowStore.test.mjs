@@ -36,6 +36,17 @@ test('resolves pending claim preview paths with run fallback', async () => {
   assert.match(paths.stagingRepoPath, /\.runtime\/loom\/staging\/a+.*\/run\/repo$/);
 });
 
+test('workflow store resolve supports pending claim preview paths', async () => {
+  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-resolve-preview-')), '.metabot', 'profiles', 'eric');
+  const store = createLoomWorkflowStore(profileHome);
+  const paths = store.resolve(taskPinId);
+  assert.match(paths.workflowPath, /\.runtime\/loom\/workflows\/a+.*\/pending-claim\.json$/);
+  assert.match(paths.workspaceRepoPath, /\.runtime\/loom\/workspaces\/a+.*\/pending-claim\/repo$/);
+
+  const declaration = await readFile(path.join('dist', 'core', 'loom', 'workflowStore.d.ts'), 'utf8');
+  assert.match(declaration, /resolve\(taskPinId: string, claimPinId\?: string, localRunId\?: string\): LoomWorkflowPaths;/);
+});
+
 test('workflow store writes and reads normalized state', async () => {
   const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-state-')), '.metabot', 'profiles', 'eric');
   const store = createLoomWorkflowStore(profileHome);
@@ -83,6 +94,41 @@ test('workflow store normalizes missing statuses on read', async () => {
   })}\n`, 'utf8');
   const read = await store.read(taskPinId, claimPinId);
   assert.deepEqual(read.statuses, []);
+});
+
+test('workflow store returns null for malformed state', async () => {
+  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-malformed-')), '.metabot', 'profiles', 'eric');
+  const store = createLoomWorkflowStore(profileHome);
+  const workflowPath = store.resolve(taskPinId, claimPinId).workflowPath;
+  await mkdir(path.dirname(workflowPath), { recursive: true });
+  await writeFile(workflowPath, `${JSON.stringify({
+    version: 1,
+    taskPinId,
+    claimPinId,
+  })}\n`, 'utf8');
+  assert.equal(await store.read(taskPinId, claimPinId), null);
+});
+
+test('workflow store returns null when statuses is not an array', async () => {
+  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-bad-statuses-')), '.metabot', 'profiles', 'eric');
+  const store = createLoomWorkflowStore(profileHome);
+  const workflowPath = store.resolve(taskPinId, claimPinId).workflowPath;
+  await mkdir(path.dirname(workflowPath), { recursive: true });
+  await writeFile(workflowPath, `${JSON.stringify({
+    version: 1,
+    taskPinId,
+    claimPinId,
+    developerMetaBotSlug: 'eric',
+    repoUri: 'https://github.com/example/repo',
+    baseBranch: 'main',
+    upstreamRemote: 'origin',
+    forkRemote: 'loom-fork',
+    branchName: 'loom/aaaaaaaa-bbbbbbbb',
+    workspacePath: '/tmp/repo',
+    statuses: 'started',
+    updatedAt: '2026-05-16T00:00:00.000Z',
+  })}\n`, 'utf8');
+  assert.equal(await store.read(taskPinId, claimPinId), null);
 });
 
 test('workflow store write does not create repo directories', async () => {

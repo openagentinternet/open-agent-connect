@@ -23,7 +23,7 @@ export interface LoomWorkflowPaths {
 
 export interface LoomWorkflowStore {
   paths: MetabotPaths;
-  resolve(taskPinId: string, claimPinId: string, localRunId?: string): LoomWorkflowPaths;
+  resolve(taskPinId: string, claimPinId?: string, localRunId?: string): LoomWorkflowPaths;
   read(taskPinId: string, claimPinId: string): Promise<LoomWorkflowState | null>;
   write(state: LoomWorkflowState): Promise<LoomWorkflowState>;
 }
@@ -67,13 +67,44 @@ export function resolveLoomWorkflowPaths(
   };
 }
 
-function normalizeWorkflowState(state: LoomWorkflowState): LoomWorkflowState {
+function normalizeWorkflowState(
+  state: LoomWorkflowState,
+  options: { refreshUpdatedAt: boolean },
+): LoomWorkflowState {
   return {
     ...state,
     version: 1,
     statuses: Array.isArray(state.statuses) ? state.statuses : [],
-    updatedAt: new Date().toISOString(),
+    updatedAt: options.refreshUpdatedAt ? new Date().toISOString() : state.updatedAt,
   };
+}
+
+const requiredStringFields: Array<keyof Pick<
+  LoomWorkflowState,
+  | 'developerMetaBotSlug'
+  | 'repoUri'
+  | 'baseBranch'
+  | 'upstreamRemote'
+  | 'forkRemote'
+  | 'branchName'
+  | 'workspacePath'
+  | 'updatedAt'
+>> = [
+  'developerMetaBotSlug',
+  'repoUri',
+  'baseBranch',
+  'upstreamRemote',
+  'forkRemote',
+  'branchName',
+  'workspacePath',
+  'updatedAt',
+];
+
+function hasRequiredStringFields(record: Partial<LoomWorkflowState>): boolean {
+  return requiredStringFields.every((field) => {
+    const value = record[field];
+    return typeof value === 'string' && value.trim().length > 0;
+  });
 }
 
 function isWorkflowStateForClaim(
@@ -88,7 +119,9 @@ function isWorkflowStateForClaim(
   const record = value as Partial<LoomWorkflowState>;
   return record.version === 1
     && record.taskPinId === taskPinId
-    && record.claimPinId === claimPinId;
+    && record.claimPinId === claimPinId
+    && hasRequiredStringFields(record)
+    && (record.statuses === undefined || Array.isArray(record.statuses));
 }
 
 export function createLoomWorkflowStore(homeDirOrPaths: string | MetabotPaths): LoomWorkflowStore {
@@ -96,7 +129,7 @@ export function createLoomWorkflowStore(homeDirOrPaths: string | MetabotPaths): 
 
   return {
     paths,
-    resolve(taskPinId: string, claimPinId: string, localRunId?: string): LoomWorkflowPaths {
+    resolve(taskPinId: string, claimPinId?: string, localRunId?: string): LoomWorkflowPaths {
       return resolveLoomWorkflowPaths(paths, { taskPinId, claimPinId, localRunId });
     },
     async read(taskPinId: string, claimPinId: string): Promise<LoomWorkflowState | null> {
@@ -114,14 +147,14 @@ export function createLoomWorkflowStore(homeDirOrPaths: string | MetabotPaths): 
       try {
         const parsed = JSON.parse(raw) as unknown;
         return isWorkflowStateForClaim(parsed, taskPinId, claimPinId)
-          ? normalizeWorkflowState(parsed)
+          ? normalizeWorkflowState(parsed, { refreshUpdatedAt: false })
           : null;
       } catch {
         return null;
       }
     },
     async write(state: LoomWorkflowState): Promise<LoomWorkflowState> {
-      const normalized = normalizeWorkflowState(state);
+      const normalized = normalizeWorkflowState(state, { refreshUpdatedAt: true });
       const resolved = resolveLoomWorkflowPaths(paths, normalized);
 
       await fs.mkdir(path.dirname(resolved.workflowPath), { recursive: true });
