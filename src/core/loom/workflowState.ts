@@ -180,17 +180,32 @@ function invalidTaskReference(record: LoomCachedRecord, taskPinId: string): Loom
   return invalid(record, 'invalid_reference', `${record.protocol} must reference task ${taskPinId}.`);
 }
 
+function buildActiveStateBuckets(valid: LoomWorkflowTaskStateBuckets): LoomWorkflowTaskStateBuckets {
+  const rejectedClaimIds = new Set(
+    valid.claimRejects
+      .map((claimReject) => stringField(claimReject, 'claimPinId'))
+      .filter((claimPinId): claimPinId is string => Boolean(claimPinId)),
+  );
+  const activeClaims = valid.claims.filter((claim) => !rejectedClaimIds.has(claim.pinId));
+  const activeClaimIds = new Set(activeClaims.map((claim) => claim.pinId));
+  const activeDeliveries = valid.deliveries.filter((delivery) => activeClaimIds.has(stringField(delivery, 'claimPinId') ?? ''));
+  const activeDeliveryIds = new Set(activeDeliveries.map((delivery) => delivery.pinId));
+
+  return {
+    claims: activeClaims,
+    statuses: valid.statuses.filter((status) => activeClaimIds.has(stringField(status, 'claimPinId') ?? '')),
+    deliveries: activeDeliveries,
+    acceptances: valid.acceptances.filter((acceptance) => activeDeliveryIds.has(stringField(acceptance, 'deliveryPinId') ?? '')),
+    claimRejects: valid.claimRejects,
+  };
+}
+
 function stateFromRecords(
-  valid: LoomWorkflowTaskStateBuckets,
+  active: LoomWorkflowTaskStateBuckets,
   latestStatus: LoomCachedRecord | undefined,
   latestDelivery: LoomCachedRecord | undefined,
   latestAcceptance: LoomCachedRecord | undefined,
 ): LoomDerivedTaskState {
-  const latestClaimReject = latestRecord(valid.claimRejects);
-  if (latestClaimReject) {
-    return 'rejected';
-  }
-
   if (
     latestAcceptance
     && (!latestDelivery || !isAfter(latestDelivery, latestAcceptance))
@@ -226,7 +241,10 @@ function stateFromRecords(
     }
   }
 
-  return valid.claims.length > 0 ? 'claimed' : 'open';
+  if (active.claims.length > 0) {
+    return 'claimed';
+  }
+  return active.claimRejects.length > 0 ? 'rejected' : 'open';
 }
 
 export function buildLoomWorkflowTaskState(
@@ -379,14 +397,15 @@ export function buildLoomWorkflowTaskState(
     valid.claimRejects.push(claimReject);
   }
 
-  const latestStatus = latestRecord(valid.statuses);
-  const latestDelivery = latestRecord(valid.deliveries);
-  const latestAcceptance = latestRecord(valid.acceptances);
+  const active = buildActiveStateBuckets(valid);
+  const latestStatus = latestRecord(active.statuses);
+  const latestDelivery = latestRecord(active.deliveries);
+  const latestAcceptance = latestRecord(active.acceptances);
 
   return {
     found: true,
     taskPinId,
-    state: stateFromRecords(valid, latestStatus, latestDelivery, latestAcceptance),
+    state: stateFromRecords(active, latestStatus, latestDelivery, latestAcceptance),
     task,
     valid,
     invalid: invalidBuckets,

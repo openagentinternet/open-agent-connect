@@ -12,10 +12,13 @@ const {
 const taskPinId = `${'a'.repeat(64)}i0`;
 const claimPinId = `${'b'.repeat(64)}i0`;
 const deliveryPinId = `${'c'.repeat(64)}i0`;
+const secondClaimPinId = `${'2'.repeat(64)}i0`;
+const secondDeliveryPinId = `${'3'.repeat(64)}i0`;
 const unrelatedTaskPinId = `${'8'.repeat(64)}i0`;
 const unrelatedClaimPinId = `${'7'.repeat(64)}i0`;
 const requesterGlobalMetaId = 'requester-global';
 const developerGlobalMetaId = 'developer-global';
+const secondDeveloperGlobalMetaId = 'second-developer-global';
 
 function record(protocol, pinId, payload, options = {}) {
   return {
@@ -49,7 +52,7 @@ function taskRecord(globalMetaId = requesterGlobalMetaId, options = {}) {
 }
 
 function claimRecord(globalMetaId = developerGlobalMetaId, options = {}) {
-  return record('claim', claimPinId, {
+  return record('claim', options.pinId ?? claimPinId, {
     taskPinId,
     payoutAddress: 'developer-payout-address',
     message: 'I can build this.',
@@ -369,4 +372,61 @@ test('uses latest duplicate task record for requester permissions', () => {
   assert.equal(state.task.globalMetaId, requesterGlobalMetaId);
   assert.equal(state.state, 'accepted_paid');
   assert.equal(state.invalid.acceptances.length, 0);
+});
+
+test('derives rejected when single claim is rejected', () => {
+  const state = buildLoomWorkflowTaskState(cacheStateWith({
+    includeClaimReject: true,
+  }), taskPinId);
+
+  assert.equal(state.state, 'rejected');
+});
+
+test('derives claimed when older rejected claim has later active claim', () => {
+  const secondClaim = claimRecord(secondDeveloperGlobalMetaId, {
+    pinId: secondClaimPinId,
+    timestamp: 1750000006000,
+  });
+
+  const state = buildLoomWorkflowTaskState(cacheStateWith({
+    includeClaimReject: true,
+    extraRecords: [secondClaim],
+  }), taskPinId);
+
+  assert.equal(state.state, 'claimed');
+});
+
+test('derives delivered from later active claim after older claim rejection', () => {
+  const secondClaim = claimRecord(secondDeveloperGlobalMetaId, {
+    pinId: secondClaimPinId,
+    timestamp: 1750000006000,
+  });
+  const secondDelivery = deliveryRecord(secondDeveloperGlobalMetaId, {
+    pinId: secondDeliveryPinId,
+    timestamp: 1750000007000,
+    payload: { claimPinId: secondClaimPinId },
+  });
+
+  const state = buildLoomWorkflowTaskState(cacheStateWith({
+    includeClaimReject: true,
+    extraRecords: [secondClaim, secondDelivery],
+  }), taskPinId);
+
+  assert.equal(state.state, 'delivered');
+});
+
+test('ignores rejected claim activity when deriving active state', () => {
+  const rejectedStatus = statusRecord(developerGlobalMetaId, 'in_progress', {
+    timestamp: 1750000006000,
+  });
+  const rejectedDelivery = deliveryRecord(developerGlobalMetaId, {
+    timestamp: 1750000007000,
+  });
+
+  const state = buildLoomWorkflowTaskState(cacheStateWith({
+    includeClaimReject: true,
+    extraRecords: [rejectedStatus, rejectedDelivery],
+  }), taskPinId);
+
+  assert.equal(state.state, 'rejected');
 });
