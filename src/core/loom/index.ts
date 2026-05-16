@@ -20,3 +20,4 @@ export * from './reviewWorkflow';
 export * from './dashboardTypes';
 export * from './dashboardIdentity';
 export * from './dashboardAggregation';
+export * from './dashboardStore';
