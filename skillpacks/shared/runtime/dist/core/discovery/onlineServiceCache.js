@@ -12,6 +12,18 @@ const node_path_1 = __importDefault(require("node:path"));
 const paths_1 = require("../state/paths");
 exports.ONLINE_SERVICE_CACHE_LIMIT = 1000;
 exports.DEFAULT_ONLINE_SERVICE_CACHE_SYNC_INTERVAL_MS = 10 * 60 * 1000;
+const RELEVANCE_PRIMARY_SCORE_THRESHOLD = 8;
+const RELEVANCE_SCORE_NORMALIZER = 120;
+const RATING_PRIOR_AVG = 4;
+const RATING_PRIOR_COUNT = 5;
+const CONFIDENCE_FULL_RATING_COUNT = 50;
+const SEARCH_SCORE_WEIGHTS = {
+    relevance: 0.2,
+    quality: 0.3,
+    confidence: 0.2,
+    price: 0.2,
+    freshness: 0.1,
+};
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : value == null ? '' : String(value).trim();
 }
@@ -28,6 +40,12 @@ function normalizeNumber(value) {
 function normalizeInteger(value) {
     const parsed = normalizeNumber(value);
     return parsed === null ? null : Math.trunc(parsed);
+}
+function clamp01(value) {
+    if (!Number.isFinite(value)) {
+        return 0;
+    }
+    return Math.max(0, Math.min(1, value));
 }
 function normalizeLimit(value) {
     const parsed = normalizeInteger(value);
@@ -300,23 +318,98 @@ function scoreTextField(input) {
 function parsePrice(value) {
     const text = normalizeText(value);
     if (!text) {
-        return 0;
+        return null;
     }
     const parsed = Number(text);
-    return Number.isFinite(parsed) ? parsed : null;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 function scoreServiceForQuery(service, query) {
     if (!query) {
-        return 0;
+        return {
+            queryScore: 0,
+            primaryScore: 0,
+            relevanceScore: 0,
+            relevant: true,
+        };
     }
     const tokens = tokenizeQuery(query);
-    let score = 0;
-    score += scoreTextField({ query, tokens, field: service.displayName, exactWeight: 80, tokenWeight: 16 });
-    score += scoreTextField({ query, tokens, field: service.serviceName, exactWeight: 50, tokenWeight: 10 });
-    score += scoreTextField({ query, tokens, field: service.description, exactWeight: 40, tokenWeight: 8 });
-    score += scoreTextField({ query, tokens, field: service.providerSkill, exactWeight: 30, tokenWeight: 6 });
-    score += scoreTextField({ query, tokens, field: service.providerName, exactWeight: 20, tokenWeight: 4 });
-    return score;
+    const displayNameScore = scoreTextField({ query, tokens, field: service.displayName, exactWeight: 80, tokenWeight: 16 });
+    const serviceNameScore = scoreTextField({ query, tokens, field: service.serviceName, exactWeight: 50, tokenWeight: 10 });
+    const descriptionScore = scoreTextField({ query, tokens, field: service.description, exactWeight: 40, tokenWeight: 8 });
+    const providerSkillScore = scoreTextField({ query, tokens, field: service.providerSkill, exactWeight: 30, tokenWeight: 6 });
+    const providerNameScore = scoreTextField({ query, tokens, field: service.providerName, exactWeight: 20, tokenWeight: 4 });
+    const primaryScore = displayNameScore + serviceNameScore + descriptionScore + providerSkillScore;
+    const queryScore = primaryScore + providerNameScore;
+    return {
+        queryScore,
+        primaryScore,
+        relevanceScore: clamp01(queryScore / RELEVANCE_SCORE_NORMALIZER),
+        relevant: primaryScore >= RELEVANCE_PRIMARY_SCORE_THRESHOLD,
+    };
+}
+function calculateRatingQualityScore(service) {
+    const ratingCount = Math.max(0, service.ratingCount);
+    const ratingAvg = service.ratingAvg ?? RATING_PRIOR_AVG;
+    const bayesianRating = (ratingAvg * ratingCount
+        + RATING_PRIOR_AVG * RATING_PRIOR_COUNT) / (ratingCount + RATING_PRIOR_COUNT);
+    return clamp01(bayesianRating / 5);
+}
+function calculateRatingConfidenceScore(service) {
+    const ratingCount = Math.max(0, service.ratingCount);
+    return clamp01(Math.log1p(ratingCount) / Math.log1p(CONFIDENCE_FULL_RATING_COUNT));
+}
+function resolvePriceCurrencyKey(service) {
+    return normalizeComparable(service.currency) || '__unknown_currency__';
+}
+function buildMaxPriceByCurrency(services) {
+    const maxPriceByCurrency = new Map();
+    for (const service of services) {
+        const price = parsePrice(service.price);
+        if (price === null) {
+            continue;
+        }
+        const key = resolvePriceCurrencyKey(service);
+        maxPriceByCurrency.set(key, Math.max(maxPriceByCurrency.get(key) ?? 0, price));
+    }
+    return maxPriceByCurrency;
+}
+function calculatePriceScore(service, maxPriceByCurrency) {
+    const price = parsePrice(service.price);
+    if (price === null) {
+        return 0;
+    }
+    if (price === 0) {
+        return 1;
+    }
+    const maxPrice = maxPriceByCurrency.get(resolvePriceCurrencyKey(service)) ?? price;
+    if (maxPrice <= 0) {
+        return 1;
+    }
+    return clamp01(1 - Math.log1p(price) / Math.log1p(maxPrice));
+}
+function buildFreshnessRange(services) {
+    let minUpdatedAt = Number.POSITIVE_INFINITY;
+    let maxUpdatedAt = 0;
+    for (const service of services) {
+        minUpdatedAt = Math.min(minUpdatedAt, service.updatedAt);
+        maxUpdatedAt = Math.max(maxUpdatedAt, service.updatedAt);
+    }
+    if (!Number.isFinite(minUpdatedAt)) {
+        return {
+            minUpdatedAt: 0,
+            maxUpdatedAt: 0,
+        };
+    }
+    return {
+        minUpdatedAt,
+        maxUpdatedAt,
+    };
+}
+function calculateFreshnessScore(service, range) {
+    if (range.maxUpdatedAt <= range.minUpdatedAt) {
+        return 1;
+    }
+    return clamp01((service.updatedAt - range.minUpdatedAt) / (range.maxUpdatedAt - range.minUpdatedAt));
 }
 function searchOnlineServiceCacheServices(services, options = {}) {
     const query = normalizeComparable(options.query);
@@ -324,8 +417,7 @@ function searchOnlineServiceCacheServices(services, options = {}) {
     const currency = normalizeComparable(options.currency);
     const maxPrice = options.maxPrice == null ? null : parsePrice(options.maxPrice);
     const minRating = options.minRating == null ? null : normalizeNumber(options.minRating);
-    const ranked = services
-        .filter((service) => {
+    const candidates = services.filter((service) => {
         if (options.onlineOnly === true && !service.online) {
             return false;
         }
@@ -345,19 +437,27 @@ function searchOnlineServiceCacheServices(services, options = {}) {
             return false;
         }
         return true;
-    })
+    });
+    const maxPriceByCurrency = buildMaxPriceByCurrency(candidates);
+    const freshnessRange = buildFreshnessRange(candidates);
+    const ranked = candidates
         .map((service) => {
-        const queryScore = scoreServiceForQuery(service, query);
+        const relevance = scoreServiceForQuery(service, query);
+        const qualityScore = calculateRatingQualityScore(service);
+        const confidenceScore = calculateRatingConfidenceScore(service);
+        const priceScore = calculatePriceScore(service, maxPriceByCurrency);
+        const freshnessScore = calculateFreshnessScore(service, freshnessRange);
         return {
             service,
-            queryScore,
-            score: queryScore
-                + (service.online ? 20 : 0)
-                + (service.ratingAvg ?? 0)
-                + Math.log1p(service.ratingCount),
+            relevance,
+            score: relevance.relevanceScore * SEARCH_SCORE_WEIGHTS.relevance
+                + qualityScore * SEARCH_SCORE_WEIGHTS.quality
+                + confidenceScore * SEARCH_SCORE_WEIGHTS.confidence
+                + priceScore * SEARCH_SCORE_WEIGHTS.price
+                + freshnessScore * SEARCH_SCORE_WEIGHTS.freshness,
         };
     })
-        .filter((entry) => !query || entry.queryScore > 0)
+        .filter((entry) => !query || entry.relevance.relevant)
         .sort((left, right) => {
         if (right.score !== left.score) {
             return right.score - left.score;

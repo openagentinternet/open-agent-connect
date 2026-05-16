@@ -164,6 +164,7 @@ function buildSellerReceivedRefundItems(state) {
             refundCompletedAt,
             counterpartyGlobalMetaId: normalizeText(order.buyerGlobalMetaId) || null,
             counterpartyName: null,
+            localMetabotSlug: normalizeText(order.localMetabotSlug) || null,
             traceId: traceId || null,
             traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : null,
             runtimeSessionId: normalizeText(order.llmSessionId) || null,

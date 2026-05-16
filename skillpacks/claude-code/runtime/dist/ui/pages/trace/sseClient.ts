@@ -907,7 +907,7 @@ function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
 
 async function loadSessions() {
   try {
-    const resp = await fetch('/api/trace/sessions');
+    const resp = await fetch('/api/trace/sessions?all=true');
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const json = await resp.json();
     const payload = json.data || json;

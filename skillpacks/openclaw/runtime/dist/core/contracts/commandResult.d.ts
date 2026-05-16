@@ -30,6 +30,7 @@ type CommandManualActionRequired = CommandBase & {
 type CommandFailed = CommandBase & {
     ok: false;
     state: 'failed';
+    data?: Record<string, unknown>;
 };
 export type MetabotCommandResult<T> = CommandSuccess<T> | CommandAwaitingConfirmation<T> | CommandWaiting | CommandManualActionRequired | CommandFailed;
 export declare const commandSuccess: <T>(data: T) => MetabotCommandResult<T>;
@@ -42,5 +43,7 @@ export declare const commandManualActionRequired: (code: string, message: string
     localUiUrl?: string;
     data?: Record<string, unknown>;
 }) => MetabotCommandResult<never>;
-export declare const commandFailed: (code: string, message: string) => MetabotCommandResult<never>;
+export declare const commandFailed: (code: string, message: string, options?: {
+    data?: Record<string, unknown>;
+}) => MetabotCommandResult<never>;
 export {};

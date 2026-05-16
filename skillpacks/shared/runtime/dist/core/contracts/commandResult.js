@@ -36,10 +36,11 @@ const commandManualActionRequired = (code, message, options) => {
     };
 };
 exports.commandManualActionRequired = commandManualActionRequired;
-const commandFailed = (code, message) => ({
+const commandFailed = (code, message, options) => ({
     ok: false,
     state: 'failed',
     code,
-    message
+    message,
+    ...(options?.data ? { data: options.data } : {}),
 });
 exports.commandFailed = commandFailed;

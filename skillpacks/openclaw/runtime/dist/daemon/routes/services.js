@@ -27,19 +27,19 @@ const handleServicesRoutes = async (context) => {
         context.sendJson(200, result);
         return true;
     }
-    if (url.pathname === '/api/services/publish/skills') {
+    if (url.pathname === '/api/services/skills') {
         if (req.method !== 'GET') {
             context.sendMethodNotAllowed(['GET']);
             return true;
         }
-        const slug = url.searchParams.get('slug')?.trim() || url.searchParams.get('from')?.trim();
+        const from = url.searchParams.get('from')?.trim();
         const result = handlers.services?.listPublishSkills
-            ? await handlers.services.listPublishSkills(slug ? { slug } : {})
+            ? await handlers.services.listPublishSkills(from ? { from } : {})
             : (0, commandResult_1.commandFailed)('not_implemented', 'Services publish skills handler is not configured.');
         context.sendJson(200, result);
         return true;
     }
-    if (url.pathname === '/api/services/my') {
+    if (url.pathname === '/api/services/owned') {
         if (req.method !== 'GET') {
             context.sendMethodNotAllowed(['GET']);
             return true;
@@ -56,7 +56,7 @@ const handleServicesRoutes = async (context) => {
         context.sendJson(200, result);
         return true;
     }
-    if (url.pathname === '/api/services/my/orders') {
+    if (url.pathname === '/api/services/owned/orders') {
         if (req.method !== 'GET') {
             context.sendMethodNotAllowed(['GET']);
             return true;
@@ -75,7 +75,7 @@ const handleServicesRoutes = async (context) => {
         context.sendJson(200, result);
         return true;
     }
-    if (url.pathname === '/api/services/my/modify') {
+    if (url.pathname === '/api/services/owned/modify') {
         if (req.method !== 'POST') {
             context.sendMethodNotAllowed(['POST']);
             return true;
@@ -87,7 +87,7 @@ const handleServicesRoutes = async (context) => {
         context.sendJson(200, result);
         return true;
     }
-    if (url.pathname === '/api/services/my/revoke') {
+    if (url.pathname === '/api/services/owned/revoke') {
         if (req.method !== 'POST') {
             context.sendMethodNotAllowed(['POST']);
             return true;
@@ -96,6 +96,52 @@ const handleServicesRoutes = async (context) => {
         const result = handlers.services?.revokeMyService
             ? await handlers.services.revokeMyService(input)
             : (0, commandResult_1.commandFailed)('not_implemented', 'My service revoke handler is not configured.');
+        context.sendJson(200, result);
+        return true;
+    }
+    if (url.pathname === '/api/services/refunds') {
+        if (req.method !== 'GET') {
+            context.sendMethodNotAllowed(['GET']);
+            return true;
+        }
+        const result = handlers.services?.listRefunds
+            ? await handlers.services.listRefunds({
+                ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from').trim() } : {}),
+                ...(url.searchParams.has('all') ? { all: readBoolean(url.searchParams.get('all')) } : {}),
+                kind: url.searchParams.get('kind')?.trim() || 'all',
+            })
+            : (0, commandResult_1.commandFailed)('not_implemented', 'Services refunds handler is not configured.');
+        context.sendJson(200, result);
+        return true;
+    }
+    if (url.pathname === '/api/services/refunds/settle') {
+        if (req.method !== 'POST') {
+            context.sendMethodNotAllowed(['POST']);
+            return true;
+        }
+        const input = await context.readJsonBody();
+        const result = handlers.services?.settleRefund
+            ? await handlers.services.settleRefund({
+                ...(typeof input.from === 'string' ? { from: input.from } : {}),
+                ...(typeof input.orderId === 'string' ? { orderId: input.orderId } : {}),
+                ...(typeof input.paymentTxid === 'string' ? { paymentTxid: input.paymentTxid } : {}),
+            })
+            : (0, commandResult_1.commandFailed)('not_implemented', 'Services refund settlement handler is not configured.');
+        context.sendJson(200, result);
+        return true;
+    }
+    if (url.pathname === '/api/services/orders/inspect') {
+        if (req.method !== 'GET') {
+            context.sendMethodNotAllowed(['GET']);
+            return true;
+        }
+        const result = handlers.services?.inspectOrder
+            ? await handlers.services.inspectOrder({
+                ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from').trim() } : {}),
+                orderId: url.searchParams.get('orderId') ?? '',
+                paymentTxid: url.searchParams.get('paymentTxid') ?? '',
+            })
+            : (0, commandResult_1.commandFailed)('not_implemented', 'Services order inspection handler is not configured.');
         context.sendJson(200, result);
         return true;
     }

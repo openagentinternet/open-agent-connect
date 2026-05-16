@@ -10,6 +10,9 @@ const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 
 const validTaskPinId = `${'a'.repeat(64)}i0`;
+const fixtureMnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+const fixturePath = "m/44'/10001'/0'/0/0";
+const fixtureGlobalMetaId = 'idq1970463ym8fqmgawe4lylktne97ahhw4kqehkch';
 
 function validClaimPayload(overrides = {}) {
   return {
@@ -98,6 +101,68 @@ async function withChainApiServer(handler) {
   }
 }
 
+function chainApiRow(record) {
+  return {
+    id: record.pinId,
+    path: record.path,
+    operation: record.operation,
+    contentType: record.contentType,
+    timestamp: record.timestamp,
+    createAddress: record.creatorAddress,
+    metaid: record.creatorMetaId,
+    globalMetaId: record.globalMetaId,
+    contentSummary: JSON.stringify(record.payload),
+  };
+}
+
+async function withChainApiRows(records, handler) {
+  const requests = [];
+  const server = http.createServer((request, response) => {
+    requests.push(request.url);
+    const url = new URL(request.url, 'http://127.0.0.1');
+    const requestedPath = url.searchParams.get('path');
+    const list = records
+      .filter((record) => record.path === requestedPath)
+      .map(chainApiRow);
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ data: { list, nextCursor: null } }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  try {
+    return await handler({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      requests,
+    });
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+}
+
+async function withFailingChainApiServer(handler) {
+  const requests = [];
+  const server = http.createServer((request, response) => {
+    requests.push(request.url);
+    response.statusCode = 503;
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ error: 'chain unavailable' }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  try {
+    return await handler({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      requests,
+    });
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+}
+
 async function writeRawLoomCache(home, records, updatedAt = Date.now()) {
   const rawCachePath = path.join(home, '.metabot', 'loom', 'records.json');
   await mkdir(path.dirname(rawCachePath), { recursive: true });
@@ -115,6 +180,16 @@ async function writeRawLoomCache(home, records, updatedAt = Date.now()) {
     },
   }), 'utf8');
   return rawCachePath;
+}
+
+async function writeIdentitySecrets(profileHome) {
+  const secretsPath = path.join(profileHome, '.runtime', 'identity-secrets.json');
+  await mkdir(path.dirname(secretsPath), { recursive: true });
+  await writeFile(secretsPath, JSON.stringify({
+    mnemonic: fixtureMnemonic,
+    path: fixturePath,
+  }), 'utf8');
+  return secretsPath;
 }
 
 async function runLoom(args, options = {}) {
@@ -1063,6 +1138,88 @@ test('runCli default loom deliver dry-run uses indexed profile identity without 
   );
 });
 
+test('runCli default loom deliver refreshes raw cache before resolving related chain records', async () => {
+  const developerGlobalMetaId = 'metaid-eric';
+  const home = await createIndexedHome({ globalMetaId: developerGlobalMetaId });
+  const profileHome = path.join(home, '.metabot', 'profiles', 'eric');
+  const claimPinId = `${'b'.repeat(64)}i0`;
+  const statusPinId = `${'d'.repeat(64)}i0`;
+  const taskPayload = {
+    title: 'Deliver after fresh chain writes',
+    requirementContentType: 'text/markdown',
+    requirement: 'Deliver without requiring a manual loom sync between commands.',
+    criteriaContentType: 'text/markdown',
+    criteria: '- Review the PR',
+    projectBase: 'github',
+    project: {
+      repoUri: 'https://github.com/openagentinternet/open-agent-connect',
+      baseBranch: 'main',
+    },
+    bounty: {
+      amount: '1',
+      currency: 'SPACE',
+    },
+  };
+  await writeRawLoomCache(home, {});
+  const workflowPath = path.join(profileHome, '.runtime', 'loom', 'workflows', validTaskPinId, `${claimPinId}.json`);
+  await mkdir(path.dirname(workflowPath), { recursive: true });
+  await writeFile(workflowPath, JSON.stringify({
+    version: 1,
+    taskPinId: validTaskPinId,
+    claimPinId,
+    developerMetaBotSlug: 'eric',
+    developerGlobalMetaId,
+    repoUri: 'https://github.com/openagentinternet/open-agent-connect',
+    baseBranch: 'main',
+    upstreamRemote: 'origin',
+    forkRemote: 'fork',
+    forkRepo: 'eric/open-agent-connect',
+    branchName: 'loom/task-claim',
+    workspacePath: path.join(profileHome, 'repo'),
+    claim: { pinId: claimPinId },
+    statuses: [{
+      roundId: 'round-1',
+      status: 'completed',
+      pinId: statusPinId,
+      commits: [],
+      checksPassed: true,
+    }],
+    updatedAt: '2026-05-16T00:00:00.000Z',
+  }), 'utf8');
+
+  await withChainApiRows([
+    cachedLoomRecord('task', validTaskPinId, taskPayload, { globalMetaId: 'requester-metaid', timestamp: 1 }),
+    cachedLoomRecord('claim', claimPinId, {
+      taskPinId: validTaskPinId,
+      payoutAddress: '1DeveloperPayoutAddress',
+    }, { globalMetaId: developerGlobalMetaId, timestamp: 2 }),
+  ], async ({ baseUrl, requests }) => {
+    const { exitCode, envelope } = await runLoom([
+      'loom',
+      'deliver',
+      '--from',
+      'eric',
+      '--task-pin-id',
+      validTaskPinId,
+      '--claim-pin-id',
+      claimPinId,
+      '--dry-run',
+    ], {
+      env: {
+        ...process.env,
+        HOME: home,
+        METABOT_CHAIN_API_BASE_URL: baseUrl,
+      },
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(envelope.ok, true);
+    assert.equal(envelope.data.dryRun, true);
+    assert.equal(envelope.data.pullRequest.head, 'eric:loom/task-claim');
+    assert.equal(requests.length, 6);
+  });
+});
+
 test('runCli forwards loom accept-and-pay confirmation, score, and comment', async () => {
   const calls = [];
   const deliveryPinId = `${'c'.repeat(64)}i0`;
@@ -1103,6 +1260,81 @@ test('runCli forwards loom accept-and-pay confirmation, score, and comment', asy
     chain: 'mvc',
     confirmPayment: true,
   }]);
+});
+
+test('runCli default loom accept-and-pay confirm fails closed when raw cache refresh fails', async () => {
+  const home = await createIndexedHome({ globalMetaId: fixtureGlobalMetaId });
+  const profileHome = path.join(home, '.metabot', 'profiles', 'eric');
+  await writeIdentitySecrets(profileHome);
+  const claimPinId = `${'b'.repeat(64)}i0`;
+  const deliveryPinId = `${'c'.repeat(64)}i0`;
+  await writeRawLoomCache(home, {
+    task: [cachedLoomRecord('task', validTaskPinId, {
+      title: 'Pay only after a fresh chain read',
+      requirementContentType: 'text/markdown',
+      requirement: 'Confirmed payment must not continue from stale cache after refresh failure.',
+      criteriaContentType: 'text/markdown',
+      criteria: '- Payment is guarded by a fresh chain read',
+      projectBase: 'github',
+      project: {
+        repoUri: 'https://github.com/openagentinternet/open-agent-connect',
+        baseBranch: 'main',
+      },
+      bounty: {
+        amount: '1',
+        currency: 'SPACE',
+      },
+    }, { globalMetaId: fixtureGlobalMetaId, timestamp: 1 })],
+    claim: [cachedLoomRecord('claim', claimPinId, {
+      taskPinId: validTaskPinId,
+      payoutAddress: '1DeveloperPayoutAddress',
+    }, { globalMetaId: 'developer-metaid', timestamp: 2 })],
+    delivery: [cachedLoomRecord('delivery', deliveryPinId, {
+      taskPinId: validTaskPinId,
+      claimPinId,
+      deliveryBase: 'github',
+      deliverySummary: 'Ready for review.',
+      delivery: {
+        prUrl: 'https://github.com/openagentinternet/open-agent-connect/pull/123',
+        prBranch: 'loom/task-claim',
+        prBaseBranch: 'main',
+        prTitle: 'feat: guarded payment',
+      },
+      reviewChecklist: [{ item: 'Payment guard checked.', status: 'passed' }],
+    }, { globalMetaId: 'developer-metaid', timestamp: 3 })],
+  });
+
+  await withFailingChainApiServer(async ({ baseUrl, requests }) => {
+    const { exitCode, envelope } = await runLoom([
+      'loom',
+      'accept-and-pay',
+      '--from',
+      'eric',
+      '--task-pin-id',
+      validTaskPinId,
+      '--delivery-pin-id',
+      deliveryPinId,
+      '--score',
+      '5',
+      '--comment',
+      'Looks good.',
+      '--confirm-payment',
+    ], {
+      env: {
+        ...process.env,
+        HOME: home,
+        METABOT_CHAIN_API_BASE_URL: baseUrl,
+        METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.code, 'loom_refresh_failed');
+    assert.equal(envelope.data.syncCommand, 'metabot loom sync');
+    assert.match(envelope.data.cause, /loom_chain_reader_http_503/);
+    assert.equal(requests.length, 1);
+  });
 });
 
 test('runCli rejects loom accept-and-pay scores outside the literal 1 to 5 range', async () => {

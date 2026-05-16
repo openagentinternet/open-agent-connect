@@ -326,7 +326,7 @@ function buildMyServicesPageDefinition() {
       render();
       return;
     }
-    const fetchOrdersPage = () => fetchJson('/api/services/my/orders?serviceId=' + encodeURIComponent(serviceId) + '&page=' + encodeURIComponent(String(state.ordersPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.ordersPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
+    const fetchOrdersPage = () => fetchJson('/api/services/owned/orders?serviceId=' + encodeURIComponent(serviceId) + '&all=true&page=' + encodeURIComponent(String(state.ordersPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.ordersPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
     state.ordersPage = await fetchOrdersPage();
     const totalPages = Number(state.ordersPage && state.ordersPage.totalPages) || 0;
     if (state.ordersPageNumber > 1 && totalPages > 0 && state.ordersPageNumber > totalPages) {
@@ -338,7 +338,7 @@ function buildMyServicesPageDefinition() {
 
   const loadServices = async (refresh) => {
     state.error = null;
-    const fetchServicesPage = () => fetchJson('/api/services/my?page=' + encodeURIComponent(String(state.servicesPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.servicesPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
+    const fetchServicesPage = () => fetchJson('/api/services/owned?all=true&page=' + encodeURIComponent(String(state.servicesPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.servicesPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
     state.servicesPage = await fetchServicesPage();
     const totalPages = Number(state.servicesPage && state.servicesPage.totalPages) || 0;
     if (state.servicesPageNumber > 1 && totalPages > 0 && state.servicesPageNumber > totalPages) {
@@ -405,7 +405,7 @@ function buildMyServicesPageDefinition() {
     const slug = normalizeTextClient(raw && raw.creatorMetabotSlug);
     if (slug) {
       try {
-        const data = await fetchJson('/api/services/publish/skills?slug=' + encodeURIComponent(slug));
+        const data = await fetchJson('/api/services/skills?from=' + encodeURIComponent(slug));
         const skills = Array.isArray(data.skills) ? data.skills.map((skill) => ({
           value: normalizeTextClient(skill && skill.skillName),
           label: normalizeTextClient(skill && (skill.title || skill.skillName)),
@@ -451,8 +451,11 @@ function buildMyServicesPageDefinition() {
     event.preventDefault();
     const form = event.currentTarget;
     const formData = new FormData(form);
+    const raw = getSelectedRawService();
+    const from = normalizeTextClient(raw && raw.creatorMetabotSlug);
     const payload = {
       serviceId: state.editServiceId,
+      ...(from ? { from } : {}),
       displayName: normalizeTextClient(formData.get('displayName')),
       serviceName: normalizeTextClient(formData.get('serviceName')),
       description: normalizeTextClient(formData.get('description')),
@@ -465,7 +468,7 @@ function buildMyServicesPageDefinition() {
       removeServiceIcon: state.editCoverRemoved,
     };
     try {
-      state.mutationResult = await fetchJson('/api/services/my/modify', {
+      state.mutationResult = await fetchJson('/api/services/owned/modify', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
@@ -480,10 +483,12 @@ function buildMyServicesPageDefinition() {
   const confirmRevoke = async () => {
     if (!state.revokeServiceId) return;
     try {
-      state.mutationResult = await fetchJson('/api/services/my/revoke', {
+      const raw = getSelectedRawService();
+      const from = normalizeTextClient(raw && raw.creatorMetabotSlug);
+      state.mutationResult = await fetchJson('/api/services/owned/revoke', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ serviceId: state.revokeServiceId }),
+        body: JSON.stringify({ serviceId: state.revokeServiceId, ...(from ? { from } : {}) }),
       });
       closeRevoke();
       state.selectedServiceId = '';

@@ -9160,6 +9160,65 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('service_revoke_failed', error instanceof Error ? error.message : String(error));
                 }
             },
+            listRefunds: async (request = {}) => {
+                const requestedFrom = normalizeText(request.from);
+                const kind = normalizeText(request.kind);
+                const scoped = await resolveScopedProviderForActor(request.from);
+                if (scoped.failure) {
+                    return scoped.failure;
+                }
+                if (scoped.provider?.getRefunds) {
+                    return scoped.provider.getRefunds({
+                        from: requestedFrom,
+                        ...(kind ? { kind } : {}),
+                    });
+                }
+                if (!requestedFrom && request.all === true) {
+                    const states = await loadProviderRefundProfileStates();
+                    return (0, commandResult_1.commandSuccess)(mergeProviderRefundsPayloads(states.map((state) => buildProviderRefundsPayload({ state })), kind));
+                }
+                const state = await runtimeStateStore.readState();
+                const payload = buildProviderRefundsPayload({ state });
+                if (kind === 'initiated') {
+                    const initiatedByMe = payload.initiatedByMe;
+                    return (0, commandResult_1.commandSuccess)({
+                        initiatedByMe,
+                        receivedByMe: [],
+                        totalCount: initiatedByMe.length,
+                        pendingCount: initiatedByMe.filter((entry) => entry.status === 'refund_pending').length,
+                    });
+                }
+                if (kind === 'received') {
+                    const receivedByMe = payload.receivedByMe;
+                    return (0, commandResult_1.commandSuccess)({
+                        initiatedByMe: [],
+                        receivedByMe,
+                        totalCount: receivedByMe.length,
+                        pendingCount: receivedByMe.filter((entry) => entry.status !== 'refunded').length,
+                    });
+                }
+                return (0, commandResult_1.commandSuccess)(payload);
+            },
+            inspectOrder: async ({ from, orderId, paymentTxid }) => {
+                const scoped = await resolveScopedProviderForActor(from);
+                if (scoped.failure) {
+                    return scoped.failure;
+                }
+                if (scoped.provider?.inspectOrder) {
+                    return scoped.provider.inspectOrder({ from, orderId, paymentTxid });
+                }
+                return inspectProviderSellerOrder({ orderId, paymentTxid });
+            },
+            settleRefund: async ({ from, orderId, paymentTxid }) => {
+                const scoped = await resolveScopedProviderForActor(from);
+                if (scoped.failure) {
+                    return scoped.failure;
+                }
+                if (scoped.provider?.settleRefund) {
+                    return scoped.provider.settleRefund({ from, orderId, paymentTxid });
+                }
+                return settleProviderSellerRefund({ orderId, paymentTxid });
+            },
             listPublishSkills: async (request = {}) => {
                 const requestedSlug = normalizeText(request.from) || normalizeText(request.slug);
                 const selectedProfile = requestedSlug

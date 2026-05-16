@@ -195,8 +195,9 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
       const traceLink = item.traceHref
         ? '<a href="' + escHtml(item.traceHref) + '">Open trace</a>'
         : '';
+      const localMetabotSlug = String(item.localMetabotSlug || '').trim();
       const settleButton = role === 'seller' && item.manualActionRequired
-        ? '<button type="button" class="refund-action" data-settle-refund="' + escHtml(item.orderId) + '">Settle refund</button>'
+        ? '<button type="button" class="refund-action" data-settle-refund="' + escHtml(item.orderId) + '" data-refund-from="' + escHtml(localMetabotSlug) + '">Settle refund</button>'
         : '';
       return ''
         + '<article class="refund-item">'
@@ -230,10 +231,11 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
         button.disabled = true;
         button.textContent = 'Settling...';
         try {
-          const response = await fetch('/api/provider/refund/settle', {
+          const from = button.getAttribute('data-refund-from') || '';
+          const response = await fetch('/api/services/refunds/settle', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ orderId }),
+            body: JSON.stringify({ orderId, ...(from ? { from } : {}) }),
           });
           const payload = await response.json();
           if (!payload || payload.ok !== true) {
@@ -250,7 +252,7 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
   };
 
   const loadRefunds = async () => {
-    const response = await fetch('/api/provider/refunds', { cache: 'no-store' });
+    const response = await fetch('/api/services/refunds?all=true', { cache: 'no-store' });
     const payload = await response.json();
     if (!payload || payload.ok !== true) {
       throw new Error((payload && payload.message) || 'Refunds load failed.');

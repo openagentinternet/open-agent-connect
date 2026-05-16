@@ -78,6 +78,8 @@ import {
   runLoomReviewDeliveryWorkflow,
   showLoomTaskFromCache,
   writeLoomProcessLogFile,
+  type LoomRawCacheState,
+  type LoomRawCacheStore,
 } from '../core/loom';
 import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain } from '../daemon/defaultHandlers';
@@ -275,6 +277,52 @@ async function listLocalLoomWorkflowsForTask(
     }
   }
   return workflows.sort((left, right) => left.claimPinId.localeCompare(right.claimPinId));
+}
+
+async function refreshLoomRawState(
+  context: CliRuntimeContext,
+  cacheStore: LoomRawCacheStore,
+): Promise<LoomRawCacheState> {
+  const syncResult = await readLoomRawChainRecords({
+    chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+  });
+  return cacheStore.update(syncResult.records);
+}
+
+function loomRefreshFailure(error: unknown): MetabotCommandResult<never> {
+  const cause = error instanceof Error ? error.message : String(error);
+  return commandFailed(
+    'loom_refresh_failed',
+    'Loom chain data could not be refreshed before a confirmed payment. Run metabot loom sync and retry after the chain index is reachable.',
+    {
+      data: {
+        syncCommand: 'metabot loom sync',
+        cause,
+      },
+    },
+  );
+}
+
+async function readFreshLoomRawState(
+  context: CliRuntimeContext,
+  cacheStore: LoomRawCacheStore,
+): Promise<LoomRawCacheState> {
+  try {
+    return await refreshLoomRawState(context, cacheStore);
+  } catch {
+    return cacheStore.read();
+  }
+}
+
+async function requireFreshLoomRawState(
+  context: CliRuntimeContext,
+  cacheStore: LoomRawCacheStore,
+): Promise<MetabotCommandResult<LoomRawCacheState>> {
+  try {
+    return commandSuccess(await refreshLoomRawState(context, cacheStore));
+  } catch (error) {
+    return loomRefreshFailure(error);
+  }
 }
 
 interface ParsedTransferAmount {
@@ -2963,7 +3011,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const paths = resolveMetabotPaths(homeDir);
         const rawCacheStore = createLoomRawCacheStore(paths);
         const workflowStore = createLoomWorkflowStore(paths);
-        const rawState = await rawCacheStore.read();
+        const rawState = await readFreshLoomRawState(context, rawCacheStore);
         const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
         const signer = createCliSigner(context, homeDir);
         const identity = await signer.getIdentity();
@@ -3033,7 +3081,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const paths = resolveMetabotPaths(homeDir);
         const rawCacheStore = createLoomRawCacheStore(paths);
         const workflowStore = createLoomWorkflowStore(paths);
-        const rawState = await rawCacheStore.read();
+        const rawState = await readFreshLoomRawState(context, rawCacheStore);
         const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
         const signer = createCliSigner(context, homeDir);
         const identity = await signer.getIdentity();
@@ -3168,7 +3216,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const paths = resolveMetabotPaths(homeDir);
         const rawCacheStore = createLoomRawCacheStore(paths);
         const workflowStore = createLoomWorkflowStore(paths);
-        const rawState = await rawCacheStore.read();
+        const rawState = await readFreshLoomRawState(context, rawCacheStore);
         const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
         const runner = createNodeLoomCommandRunner();
         const developerMetaBotSlug = path.basename(paths.profileRoot);
@@ -3220,7 +3268,13 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const paths = resolveMetabotPaths(homeDir);
         const rawCacheStore = createLoomRawCacheStore(paths);
         const workflowStore = createLoomWorkflowStore(paths);
-        const rawState = await rawCacheStore.read();
+        const rawStateResult = input.confirmPayment
+          ? await requireFreshLoomRawState(context, rawCacheStore)
+          : commandSuccess(await readFreshLoomRawState(context, rawCacheStore));
+        if (!rawStateResult.ok) {
+          return rawStateResult;
+        }
+        const rawState = rawStateResult.data;
         const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
         const signer = createCliSigner(context, homeDir);
         const identity = await signer.getIdentity();
@@ -3258,7 +3312,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const paths = resolveMetabotPaths(homeDir);
         const rawCacheStore = createLoomRawCacheStore(paths);
         const workflowStore = createLoomWorkflowStore(paths);
-        const rawState = await rawCacheStore.read();
+        const rawState = await readFreshLoomRawState(context, rawCacheStore);
         const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
         const signer = createCliSigner(context, homeDir);
         const identity = await signer.getIdentity();

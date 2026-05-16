@@ -70,7 +70,7 @@ requirements intentionally tiny so the smoke can finish quickly.
     "baseBranch": "<base-branch>"
   },
   "bounty": {
-    "amount": "0.000001",
+    "amount": "0.000006",
     "currency": "SPACE"
   },
   "tags": ["smoke", "loom-cli"]

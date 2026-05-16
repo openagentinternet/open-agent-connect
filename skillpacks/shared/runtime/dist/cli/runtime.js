@@ -47,6 +47,7 @@ const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const writePin_1 = require("../core/chain/writePin");
 const registry_1 = require("../core/chain/adapters/registry");
+const loom_1 = require("../core/loom");
 const daemon_1 = require("../daemon");
 const defaultHandlers_1 = require("../daemon/defaultHandlers");
 const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
@@ -85,6 +86,8 @@ const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
+const LOOM_DRAFT_LLM_TIMEOUT_MS = 120_000;
+const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 let cachedDaemonRuntimeFingerprint = null;
 function normalizeDispatcherPrivateChatMessage(message) {
     return {
@@ -140,6 +143,63 @@ async function fetchMetaletData(url) {
         throw new Error(payload?.message || 'Metalet request failed.');
     }
     return (payload?.data ?? null);
+}
+async function listLocalLoomWorkflowsForTask(paths, taskPinId) {
+    const workflowStore = (0, loom_1.createLoomWorkflowStore)(paths);
+    const taskWorkflowDir = node_path_1.default.dirname(workflowStore.resolve(taskPinId, 'claim').workflowPath);
+    let entries;
+    try {
+        entries = await node_fs_1.default.promises.readdir(taskWorkflowDir, { withFileTypes: true });
+    }
+    catch (error) {
+        if (error.code === 'ENOENT') {
+            return [];
+        }
+        throw error;
+    }
+    const workflows = [];
+    for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith('.json')) {
+            continue;
+        }
+        const claimPinId = node_path_1.default.basename(entry.name, '.json');
+        const workflow = await workflowStore.read(taskPinId, claimPinId);
+        if (workflow) {
+            workflows.push(workflow);
+        }
+    }
+    return workflows.sort((left, right) => left.claimPinId.localeCompare(right.claimPinId));
+}
+async function refreshLoomRawState(context, cacheStore) {
+    const syncResult = await (0, loom_1.readLoomRawChainRecords)({
+        chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+    });
+    return cacheStore.update(syncResult.records);
+}
+function loomRefreshFailure(error) {
+    const cause = error instanceof Error ? error.message : String(error);
+    return (0, commandResult_1.commandFailed)('loom_refresh_failed', 'Loom chain data could not be refreshed before a confirmed payment. Run metabot loom sync and retry after the chain index is reachable.', {
+        data: {
+            syncCommand: 'metabot loom sync',
+            cause,
+        },
+    });
+}
+async function readFreshLoomRawState(context, cacheStore) {
+    try {
+        return await refreshLoomRawState(context, cacheStore);
+    }
+    catch {
+        return cacheStore.read();
+    }
+}
+async function requireFreshLoomRawState(context, cacheStore) {
+    try {
+        return (0, commandResult_1.commandSuccess)(await refreshLoomRawState(context, cacheStore));
+    }
+    catch (error) {
+        return loomRefreshFailure(error);
+    }
 }
 /**
  * Parse a transfer amount string like "0.01DOGE", "0.00001BTC", "1SPACE", "10OPCAT".
@@ -501,6 +561,117 @@ async function resolveActorHomeDir(context, from) {
     }
     return { homeDir: resolved.match.homeDir };
 }
+function normalizeReadOnlyIdentityProfile(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+    const record = value;
+    const name = normalizeEnvText(record.name);
+    const slug = normalizeEnvText(record.slug);
+    const homeDir = normalizeEnvText(record.homeDir);
+    const globalMetaId = normalizeEnvText(record.globalMetaId);
+    if (!name || !slug || !homeDir) {
+        return null;
+    }
+    return {
+        name,
+        slug,
+        aliases: Array.isArray(record.aliases)
+            ? record.aliases.map((alias) => normalizeEnvText(alias)).filter(Boolean)
+            : [],
+        homeDir: node_path_1.default.resolve(homeDir),
+        globalMetaId,
+        mvcAddress: normalizeEnvText(record.mvcAddress),
+        createdAt: typeof record.createdAt === 'number' && Number.isFinite(record.createdAt)
+            ? record.createdAt
+            : 0,
+        updatedAt: typeof record.updatedAt === 'number' && Number.isFinite(record.updatedAt)
+            ? record.updatedAt
+            : 0,
+    };
+}
+async function readIdentityProfilesReadonly(systemHomeDir) {
+    const layout = (0, homeSelection_1.resolveMetabotManagerLayout)(systemHomeDir);
+    let raw;
+    try {
+        raw = await node_fs_1.default.promises.readFile(layout.identityProfilesPath, 'utf8');
+    }
+    catch (error) {
+        if (error.code === 'ENOENT') {
+            return [];
+        }
+        throw error;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch {
+        return [];
+    }
+    const record = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : {};
+    const profiles = Array.isArray(record.profiles) ? record.profiles : [];
+    return profiles
+        .map(normalizeReadOnlyIdentityProfile)
+        .filter((profile) => Boolean(profile));
+}
+async function readActiveHomeReadonly(systemHomeDir) {
+    const layout = (0, homeSelection_1.resolveMetabotManagerLayout)(systemHomeDir);
+    let raw;
+    try {
+        raw = await node_fs_1.default.promises.readFile(layout.activeHomePath, 'utf8');
+    }
+    catch (error) {
+        if (error.code === 'ENOENT') {
+            return null;
+        }
+        throw error;
+    }
+    try {
+        const parsed = JSON.parse(raw);
+        const homeDir = typeof parsed.homeDir === 'string' ? normalizeEnvText(parsed.homeDir) : '';
+        return homeDir ? node_path_1.default.resolve(homeDir) : null;
+    }
+    catch {
+        return null;
+    }
+}
+async function resolveActorProfileReadonly(context, from) {
+    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+    const profiles = await readIdentityProfilesReadonly(systemHomeDir);
+    const requestedFrom = normalizeEnvText(from);
+    let profile;
+    if (requestedFrom) {
+        const resolved = (0, profileNameResolution_1.resolveProfileNameMatch)(requestedFrom, profiles);
+        if (resolved.status === 'not_found') {
+            return (0, commandResult_1.commandFailed)('profile_not_found', resolved.message);
+        }
+        if (resolved.status === 'ambiguous') {
+            return (0, commandResult_1.commandFailed)('identity_profile_ambiguous', resolved.message);
+        }
+        profile = resolved.match;
+    }
+    else {
+        const explicitHome = normalizeEnvText(context.env.METABOT_HOME);
+        const selectedHome = explicitHome ? node_path_1.default.resolve(explicitHome) : await readActiveHomeReadonly(systemHomeDir);
+        if (!selectedHome) {
+            return (0, commandResult_1.commandFailed)('profile_not_found', 'No active MetaBot profile found for dry-run delivery.');
+        }
+        profile = profiles.find((entry) => node_path_1.default.resolve(entry.homeDir) === selectedHome);
+        if (!profile) {
+            return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found in the manager index for home: ${selectedHome}`);
+        }
+    }
+    if (!profile.globalMetaId) {
+        return (0, commandResult_1.commandFailed)('identity_unavailable', `MetaBot profile ${profile.slug} does not have a globalMetaId in the manager index. Initialize or sync the profile identity before dry-run delivery.`);
+    }
+    return {
+        homeDir: profile.homeDir,
+        profile,
+    };
+}
 async function resolveActorProfileSlug(context, input = {}) {
     const requestedSelector = normalizeEnvText(input.from) || normalizeEnvText(input.slug);
     const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
@@ -546,6 +717,86 @@ function resolveLocalUiPath(page) {
 }
 async function sleep(ms) {
     await new Promise((resolve) => setTimeout(resolve, ms));
+}
+function resolveRuntimeInputPath(context, filePath) {
+    return node_path_1.default.isAbsolute(filePath) ? filePath : node_path_1.default.resolve(context.cwd, filePath);
+}
+async function readJsonObjectFile(context, filePath) {
+    const raw = await context.readTextFile(resolveRuntimeInputPath(context, filePath));
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new Error('payload file must contain a JSON object.');
+    }
+    return parsed;
+}
+async function draftLoomTaskFromWish(context, input) {
+    const actor = await resolveActorHomeDir(context, input.from);
+    if (!('homeDir' in actor))
+        return actor;
+    const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+    const metaBotSlug = node_path_1.default.basename(paths.profileRoot);
+    const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(paths);
+    const bindingStore = (0, llmBindingStore_1.createLlmBindingStore)(paths);
+    const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
+        runtimeStore,
+        bindingStore,
+        getPreferredRuntimeId: async () => {
+            try {
+                const raw = await node_fs_1.default.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
+                const data = JSON.parse(raw);
+                return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+            }
+            catch {
+                return null;
+            }
+        },
+    });
+    const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
+    if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
+        return (0, commandResult_1.commandFailed)('llm_runtime_unavailable', `No healthy LLM runtime is available for MetaBot ${metaBotSlug}.`);
+    }
+    const llmExecutor = new executor_1.LlmExecutor({
+        sessionsRoot: paths.llmExecutorSessionsRoot,
+        transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+        skillsRoot: paths.skillsRoot,
+        backends: (0, executor_1.createRegistryBackendFactories)(),
+    });
+    try {
+        return await (0, loom_1.draftLoomTask)({
+            wish: input.wish,
+            allowInvalid: input.allowInvalid,
+            executePrompt: async ({ prompt, systemPrompt }) => {
+                const sessionId = await llmExecutor.execute({
+                    runtimeId: resolved.runtime.id,
+                    runtime: resolved.runtime,
+                    prompt,
+                    systemPrompt,
+                    timeout: LOOM_DRAFT_LLM_TIMEOUT_MS,
+                    cwd: context.cwd,
+                    metaBotSlug,
+                });
+                const deadline = Date.now() + LOOM_DRAFT_LLM_TIMEOUT_MS;
+                while (Date.now() <= deadline) {
+                    const session = await llmExecutor.getSession(sessionId);
+                    if (session?.result) {
+                        if (session.result.status === 'completed') {
+                            if (resolved.bindingId) {
+                                runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => { });
+                            }
+                            return session.result.output;
+                        }
+                        throw new Error(session.result.error || `LLM runtime ended with status ${session.result.status}.`);
+                    }
+                    await sleep(LOOM_DRAFT_LLM_POLL_INTERVAL_MS);
+                }
+                throw new Error('LLM runtime timed out while drafting Loom task payload.');
+            },
+        });
+    }
+    catch (error) {
+        await runtimeResolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => { });
+        return (0, commandResult_1.commandFailed)('llm_runtime_unavailable', error instanceof Error ? error.message : 'LLM runtime is unavailable.');
+    }
 }
 async function isPortBindable(host, port) {
     return new Promise((resolve) => {
@@ -1161,6 +1412,95 @@ function createTestMasterReplyWaiter(env) {
         },
     };
 }
+async function runWalletTransferRuntime(context, input) {
+    const actor = await resolveActorHomeDir(context, input.from);
+    if (!('homeDir' in actor)) {
+        return actor;
+    }
+    const homeDir = actor.homeDir;
+    const runtimeStateStore = (0, runtimeStateStore_1.createRuntimeStateStore)(homeDir);
+    const state = await runtimeStateStore.readState();
+    if (!state.identity) {
+        return (0, commandResult_1.commandFailed)('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
+    }
+    const adapters = (0, registry_1.createDefaultChainAdapterRegistry)();
+    let parsed;
+    try {
+        parsed = parseTransferAmount(input.amountRaw, adapters);
+    }
+    catch (error) {
+        return (0, commandResult_1.commandFailed)('invalid_argument', error instanceof Error ? error.message : String(error));
+    }
+    const adapter = parsed.adapter;
+    const minSatoshis = adapter.minTransferSatoshis;
+    if (parsed.satoshis < minSatoshis) {
+        return (0, commandResult_1.commandFailed)('invalid_argument', `Amount is below the minimum of ${minSatoshis} satoshis for ${parsed.currency}.`);
+    }
+    const fromAddress = state.identity.addresses[parsed.chain] ?? state.identity.mvcAddress;
+    if (!fromAddress) {
+        return (0, commandResult_1.commandFailed)('identity_address_missing', `Current identity has no address for chain "${parsed.chain}".`);
+    }
+    const feeRate = await adapter.fetchFeeRate();
+    const feePerByte = adapter.feeRateUnit === 'sat/KB' ? feeRate / 1000 : feeRate;
+    const estimatedFeeSatoshis = Math.ceil(392 * feePerByte);
+    const totalRequired = parsed.satoshis + estimatedFeeSatoshis;
+    const balance = await adapter.fetchBalance(fromAddress);
+    if (balance.totalSatoshis < totalRequired) {
+        const balanceDisplay = `${balance.totalSatoshis} sats (${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
+        const unconfirmedNote = balance.unconfirmedSatoshis > 0
+            ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
+            : '';
+        return (0, commandResult_1.commandFailed)('insufficient_balance', `Total balance ${balanceDisplay}${unconfirmedNote} is below the required ${totalRequired} sats (${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency} + estimated fee ${estimatedFeeSatoshis} sats).`);
+    }
+    if (!input.confirm) {
+        const currentBalanceDisplay = `${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
+        const unconfirmedNote = balance.unconfirmedSatoshis > 0
+            ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
+            : '';
+        return (0, commandResult_1.commandAwaitingConfirmation)({
+            fromAddress,
+            currentBalance: currentBalanceDisplay + unconfirmedNote,
+            currentBalanceSatoshis: balance.totalSatoshis,
+            toAddress: input.toAddress,
+            amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
+            amountSatoshis: parsed.satoshis,
+            estimatedFee: `${(estimatedFeeSatoshis / 1e8).toFixed(8)} ${parsed.currency}`,
+            estimatedFeeSatoshis,
+            feeRateSatPerVb: feeRate,
+            currency: parsed.currency,
+            chain: parsed.chain,
+        });
+    }
+    const secretStore = (0, fileSecretStore_1.createFileSecretStore)(homeDir);
+    const secrets = await secretStore.readIdentitySecrets();
+    if (!secrets?.mnemonic) {
+        return (0, commandResult_1.commandFailed)('identity_secrets_missing', 'Identity mnemonic not found in the secret store.');
+    }
+    try {
+        const result = await (0, localMnemonicSigner_1.executeTransfer)(adapter, {
+            mnemonic: secrets.mnemonic,
+            path: secrets.path ?? state.identity.path ?? "m/44'/10001'/0'/0/0",
+            toAddress: input.toAddress,
+            amountSatoshis: parsed.satoshis,
+            feeRate,
+        });
+        const explorerUrl = `${adapter.explorerBaseUrl}/tx/${result.txid}`;
+        return (0, commandResult_1.commandSuccess)({
+            txid: result.txid,
+            explorerUrl,
+            amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
+            toAddress: input.toAddress,
+        });
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        const lower = msg.toLowerCase();
+        if (lower.includes('insufficient') || lower.includes('not enough') || lower.includes('余额不足')) {
+            return (0, commandResult_1.commandFailed)('insufficient_balance', `Balance is insufficient: ${msg}`);
+        }
+        return (0, commandResult_1.commandFailed)('transfer_broadcast_failed', `Transfer failed: ${msg}. Verify the recipient address is correct and that you have enough total balance to cover the amount plus fees. If UTXO inputs appear stale, wait a few seconds and retry.`);
+    }
+}
 function createDefaultCliDependencies(context) {
     return {
         config: {
@@ -1467,7 +1807,7 @@ function createDefaultCliDependencies(context) {
                 if (input.from) {
                     query.set('from', input.from);
                 }
-                return requestJson(context, 'GET', `/api/services/my?${query.toString()}`);
+                return requestJson(context, 'GET', `/api/services/owned?${query.toString()}`);
             },
             listOwnedOrders: async (input) => {
                 const query = new URLSearchParams({
@@ -1480,10 +1820,10 @@ function createDefaultCliDependencies(context) {
                 if (input.from) {
                     query.set('from', input.from);
                 }
-                return requestJson(context, 'GET', `/api/services/my/orders?${query.toString()}`);
+                return requestJson(context, 'GET', `/api/services/owned/orders?${query.toString()}`);
             },
-            modifyOwned: async (input) => requestJson(context, 'POST', '/api/services/my/modify', input),
-            revokeOwned: async (input) => requestJson(context, 'POST', '/api/services/my/revoke', input),
+            modifyOwned: async (input) => requestJson(context, 'POST', '/api/services/owned/modify', input),
+            revokeOwned: async (input) => requestJson(context, 'POST', '/api/services/owned/revoke', input),
             listRefunds: async (input) => {
                 const query = new URLSearchParams();
                 if (input.from) {
@@ -1491,12 +1831,9 @@ function createDefaultCliDependencies(context) {
                 }
                 query.set('all', input.all ? 'true' : 'false');
                 query.set('kind', input.kind);
-                const path = input.kind === 'initiated'
-                    ? '/api/provider/refunds/initiated'
-                    : '/api/provider/refunds';
-                return requestJson(context, 'GET', `${path}?${query.toString()}`);
+                return requestJson(context, 'GET', `/api/services/refunds?${query.toString()}`);
             },
-            settleRefund: async (input) => requestJson(context, 'POST', '/api/provider/refund/settle', input),
+            settleRefund: async (input) => requestJson(context, 'POST', '/api/services/refunds/settle', input),
             inspectOrder: async (input) => {
                 const query = new URLSearchParams();
                 if (input.orderId) {
@@ -1509,7 +1846,7 @@ function createDefaultCliDependencies(context) {
                     query.set('from', input.from);
                 }
                 const suffix = query.size ? `?${query.toString()}` : '';
-                return requestJson(context, 'GET', `/api/provider/order${suffix}`);
+                return requestJson(context, 'GET', `/api/services/orders/inspect${suffix}`);
             },
         },
         provider: {
@@ -1521,10 +1858,13 @@ function createDefaultCliDependencies(context) {
                 if (input.paymentTxid) {
                     query.set('paymentTxid', input.paymentTxid);
                 }
+                if (input.from) {
+                    query.set('from', input.from);
+                }
                 const suffix = query.size ? `?${query.toString()}` : '';
-                return requestJson(context, 'GET', `/api/provider/order${suffix}`);
+                return requestJson(context, 'GET', `/api/services/orders/inspect${suffix}`);
             },
-            settleRefund: async (input) => requestJson(context, 'POST', '/api/provider/refund/settle', input),
+            settleRefund: async (input) => requestJson(context, 'POST', '/api/services/refunds/settle', input),
         },
         chat: {
             private: async (input) => requestJson(context, 'POST', '/api/chat/private', input),
@@ -1600,94 +1940,7 @@ function createDefaultCliDependencies(context) {
                 }
             },
             transfer: async (input) => {
-                const actor = await resolveActorHomeDir(context, input.from);
-                if (!('homeDir' in actor)) {
-                    return actor;
-                }
-                const homeDir = actor.homeDir;
-                const runtimeStateStore = (0, runtimeStateStore_1.createRuntimeStateStore)(homeDir);
-                const state = await runtimeStateStore.readState();
-                if (!state.identity) {
-                    return (0, commandResult_1.commandFailed)('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
-                }
-                const adapters = (0, registry_1.createDefaultChainAdapterRegistry)();
-                let parsed;
-                try {
-                    parsed = parseTransferAmount(input.amountRaw, adapters);
-                }
-                catch (error) {
-                    return (0, commandResult_1.commandFailed)('invalid_argument', error instanceof Error ? error.message : String(error));
-                }
-                const adapter = parsed.adapter;
-                const minSatoshis = adapter.minTransferSatoshis;
-                if (parsed.satoshis < minSatoshis) {
-                    return (0, commandResult_1.commandFailed)('invalid_argument', `Amount is below the minimum of ${minSatoshis} satoshis for ${parsed.currency}.`);
-                }
-                const fromAddress = state.identity.addresses[parsed.chain] ?? state.identity.mvcAddress;
-                if (!fromAddress) {
-                    return (0, commandResult_1.commandFailed)('identity_address_missing', `Current identity has no address for chain "${parsed.chain}".`);
-                }
-                const feeRate = await adapter.fetchFeeRate();
-                // Rough fee estimate: ~392 bytes * feeRate for sat/byte chains, adjusted for sat/KB chains
-                const feePerByte = adapter.feeRateUnit === 'sat/KB' ? feeRate / 1000 : feeRate;
-                const estimatedFeeSatoshis = Math.ceil(392 * feePerByte);
-                const totalRequired = parsed.satoshis + estimatedFeeSatoshis;
-                const balance = await adapter.fetchBalance(fromAddress);
-                if (balance.totalSatoshis < totalRequired) {
-                    const balanceDisplay = `${balance.totalSatoshis} sats (${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
-                    const unconfirmedNote = balance.unconfirmedSatoshis > 0
-                        ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
-                        : '';
-                    return (0, commandResult_1.commandFailed)('insufficient_balance', `Total balance ${balanceDisplay}${unconfirmedNote} is below the required ${totalRequired} sats (${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency} + estimated fee ${estimatedFeeSatoshis} sats).`);
-                }
-                if (!input.confirm) {
-                    const currentBalanceDisplay = `${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
-                    const unconfirmedNote = balance.unconfirmedSatoshis > 0
-                        ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
-                        : '';
-                    return (0, commandResult_1.commandAwaitingConfirmation)({
-                        fromAddress,
-                        currentBalance: currentBalanceDisplay + unconfirmedNote,
-                        currentBalanceSatoshis: balance.totalSatoshis,
-                        toAddress: input.toAddress,
-                        amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
-                        amountSatoshis: parsed.satoshis,
-                        estimatedFee: `${(estimatedFeeSatoshis / 1e8).toFixed(8)} ${parsed.currency}`,
-                        estimatedFeeSatoshis,
-                        feeRateSatPerVb: feeRate,
-                        currency: parsed.currency,
-                        chain: parsed.chain,
-                    });
-                }
-                const secretStore = (0, fileSecretStore_1.createFileSecretStore)(homeDir);
-                const secrets = await secretStore.readIdentitySecrets();
-                if (!secrets?.mnemonic) {
-                    return (0, commandResult_1.commandFailed)('identity_secrets_missing', 'Identity mnemonic not found in the secret store.');
-                }
-                try {
-                    const result = await (0, localMnemonicSigner_1.executeTransfer)(adapter, {
-                        mnemonic: secrets.mnemonic,
-                        path: secrets.path ?? state.identity.path ?? "m/44'/10001'/0'/0/0",
-                        toAddress: input.toAddress,
-                        amountSatoshis: parsed.satoshis,
-                        feeRate,
-                    });
-                    const explorerUrl = `${adapter.explorerBaseUrl}/tx/${result.txid}`;
-                    return (0, commandResult_1.commandSuccess)({
-                        txid: result.txid,
-                        explorerUrl,
-                        amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
-                        toAddress: input.toAddress,
-                    });
-                }
-                catch (error) {
-                    const msg = error instanceof Error ? error.message : String(error);
-                    const lower = msg.toLowerCase();
-                    if (lower.includes('insufficient') || lower.includes('not enough') || lower.includes('余额不足')) {
-                        return (0, commandResult_1.commandFailed)('insufficient_balance', `Balance is insufficient: ${msg}`);
-                    }
-                    return (0, commandResult_1.commandFailed)('transfer_broadcast_failed', `Transfer failed: ${msg}. Verify the recipient address is correct and that you have enough total balance to cover the amount plus fees. If UTXO inputs appear stale, wait a few seconds and retry.`);
-                }
+                return runWalletTransferRuntime(context, input);
             },
         },
         trace: {
@@ -2124,6 +2377,476 @@ function createDefaultCliDependencies(context) {
                 });
             },
         },
+        loom: {
+            sync: async (input) => {
+                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
+                const cacheStore = (0, loom_1.createLoomRawCacheStore)(paths);
+                const pageSize = input.limit ? Math.max(1, Math.floor(input.limit)) : undefined;
+                const maxPages = input.limit ? 1 : undefined;
+                const syncResult = await (0, loom_1.readLoomRawChainRecords)({
+                    chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+                    pageSize,
+                    maxPages,
+                });
+                const state = await cacheStore.update(syncResult.records);
+                const cachedRecords = Object.values(state.records).reduce((total, records) => total + records.length, 0);
+                return (0, commandResult_1.commandSuccess)({
+                    fetchedRecords: syncResult.records.length,
+                    fetchedByProtocol: syncResult.byProtocol,
+                    cachedRecords,
+                    cachePath: cacheStore.cachePath,
+                    updatedAt: state.updatedAt,
+                });
+            },
+            list: async (input) => {
+                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
+                const cacheStore = (0, loom_1.createLoomRawCacheStore)(paths);
+                let refreshed = false;
+                if (input.refresh) {
+                    const syncResult = await (0, loom_1.readLoomRawChainRecords)({
+                        chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+                    });
+                    await cacheStore.update(syncResult.records);
+                    refreshed = true;
+                }
+                const state = await cacheStore.read();
+                return (0, commandResult_1.commandSuccess)({
+                    ...(0, loom_1.listLoomTasksFromCache)(state, {
+                        limit: input.limit,
+                        tag: input.tag,
+                        currency: input.currency,
+                    }),
+                    cache: {
+                        path: cacheStore.cachePath,
+                        updatedAt: state.updatedAt,
+                        refreshed,
+                    },
+                });
+            },
+            show: async (input) => {
+                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
+                const cacheStore = (0, loom_1.createLoomRawCacheStore)(paths);
+                let refreshed = false;
+                if (input.refresh) {
+                    const syncResult = await (0, loom_1.readLoomRawChainRecords)({
+                        chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+                    });
+                    await cacheStore.update(syncResult.records);
+                    refreshed = true;
+                }
+                const state = await cacheStore.read();
+                const projection = (0, loom_1.showLoomTaskFromCache)(state, input.taskPinId);
+                if (!projection.found) {
+                    return {
+                        ...(0, commandResult_1.commandFailed)('task_not_found', `Loom task not found in cache: ${input.taskPinId}`),
+                        data: projection,
+                    };
+                }
+                return (0, commandResult_1.commandSuccess)({
+                    ...projection,
+                    cache: {
+                        path: cacheStore.cachePath,
+                        updatedAt: state.updatedAt,
+                        refreshed,
+                    },
+                });
+            },
+            state: async (input) => {
+                const homeDir = normalizeHomeDir(context.env, context.cwd);
+                const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
+                const cacheStore = (0, loom_1.createLoomRawCacheStore)(paths);
+                let refreshed = false;
+                if (input.refresh) {
+                    const syncResult = await (0, loom_1.readLoomRawChainRecords)({
+                        chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+                    });
+                    await cacheStore.update(syncResult.records);
+                    refreshed = true;
+                }
+                const rawState = await cacheStore.read();
+                const projection = (0, loom_1.buildLoomWorkflowTaskState)(rawState, input.taskPinId);
+                const localWorkflows = await listLocalLoomWorkflowsForTask(paths, input.taskPinId);
+                const cache = {
+                    path: cacheStore.cachePath,
+                    updatedAt: rawState.updatedAt,
+                    refreshed,
+                };
+                const data = {
+                    ...projection,
+                    cache,
+                    localWorkflows,
+                };
+                if (!projection.found) {
+                    return {
+                        ...(0, commandResult_1.commandFailed)('task_not_found', projection.message),
+                        data,
+                    };
+                }
+                return (0, commandResult_1.commandSuccess)(data);
+            },
+            draftTask: async (input) => {
+                return draftLoomTaskFromWish(context, input);
+            },
+            postTask: async (input) => {
+                if (input.from) {
+                    const actor = await resolveActorHomeDir(context, input.from);
+                    if (!('homeDir' in actor))
+                        return actor;
+                }
+                return (0, loom_1.runLoomPostTaskWorkflow)({
+                    from: input.from,
+                    payloadFile: input.payloadFile,
+                    wish: input.wish,
+                    chain: input.chain,
+                    dryRun: input.dryRun,
+                    readPayloadFile: (payloadFile) => readJsonObjectFile(context, payloadFile),
+                    draftTask: (wish) => draftLoomTaskFromWish(context, {
+                        wish,
+                        from: input.from,
+                        allowInvalid: false,
+                    }),
+                    writeChain: async (request) => context.dependencies.chain?.write?.(request)
+                        ?? (0, commandResult_1.commandFailed)('dependency_unavailable', 'Chain write dependency is unavailable.'),
+                });
+            },
+            claimAndStart: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const homeDir = actor.homeDir;
+                const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
+                const rawCacheStore = (0, loom_1.createLoomRawCacheStore)(paths);
+                const workflowStore = (0, loom_1.createLoomWorkflowStore)(paths);
+                const rawState = await readFreshLoomRawState(context, rawCacheStore);
+                const taskState = (0, loom_1.buildLoomWorkflowTaskState)(rawState, input.taskPinId);
+                const signer = createCliSigner(context, homeDir);
+                const identity = await signer.getIdentity();
+                const runner = (0, loom_1.createNodeLoomCommandRunner)();
+                const developerMetaBotSlug = node_path_1.default.basename(paths.profileRoot);
+                return (0, loom_1.runLoomClaimAndStartWorkflow)({
+                    from: input.from,
+                    taskPinId: input.taskPinId,
+                    payoutAddress: input.payoutAddress,
+                    claimPinId: input.claimPinId,
+                    chain: input.chain,
+                    fileChain: input.fileChain,
+                    message: input.message,
+                    dryRun: input.dryRun,
+                    resetWorkspace: input.resetWorkspace,
+                    developerMetaBotSlug,
+                    developerGlobalMetaId: identity.globalMetaId,
+                    state: taskState,
+                    workflowStore,
+                    runner,
+                    github: {
+                        assertToolsReady: loom_1.assertGitHubToolsReady,
+                        prepareForkWorkspace: loom_1.prepareGitHubForkWorkspace,
+                    },
+                    writeChain: async (request) => {
+                        const result = await signer.writePin(request);
+                        return (0, commandResult_1.commandSuccess)({
+                            pinId: result.pinId,
+                            txids: result.txids,
+                            network: result.network,
+                            globalMetaId: result.globalMetaId,
+                            mvcAddress: result.mvcAddress,
+                        });
+                    },
+                    uploadFile: async (uploadInput) => (0, uploadFile_1.uploadLocalFileToChain)({
+                        filePath: uploadInput.filePath,
+                        contentType: uploadInput.contentType,
+                        network: uploadInput.network,
+                        signer,
+                    }),
+                    writeLogFile: loom_1.writeLoomProcessLogFile,
+                    removePath: async (targetPath) => {
+                        await node_fs_1.default.promises.rm(targetPath, { recursive: true, force: true });
+                    },
+                    renamePath: async (from, to) => {
+                        await node_fs_1.default.promises.mkdir(node_path_1.default.dirname(to), { recursive: true });
+                        await node_fs_1.default.promises.rename(from, to);
+                    },
+                    pathExists: async (targetPath) => {
+                        try {
+                            await node_fs_1.default.promises.access(targetPath);
+                            return true;
+                        }
+                        catch (error) {
+                            if (error.code === 'ENOENT') {
+                                return false;
+                            }
+                            throw error;
+                        }
+                    },
+                });
+            },
+            runDevRound: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const homeDir = actor.homeDir;
+                const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
+                const rawCacheStore = (0, loom_1.createLoomRawCacheStore)(paths);
+                const workflowStore = (0, loom_1.createLoomWorkflowStore)(paths);
+                const rawState = await readFreshLoomRawState(context, rawCacheStore);
+                const taskState = (0, loom_1.buildLoomWorkflowTaskState)(rawState, input.taskPinId);
+                const signer = createCliSigner(context, homeDir);
+                const identity = await signer.getIdentity();
+                const runner = (0, loom_1.createNodeLoomCommandRunner)();
+                const developerMetaBotSlug = node_path_1.default.basename(paths.profileRoot);
+                const workflow = await workflowStore.read(input.taskPinId, input.claimPinId);
+                if (!workflow) {
+                    return (0, commandResult_1.commandFailed)('claim_not_found', `Local Loom workflow state was not found for claim ${input.claimPinId}.`);
+                }
+                if (workflow.developerGlobalMetaId && workflow.developerGlobalMetaId !== identity.globalMetaId) {
+                    return (0, commandResult_1.commandFailed)('permission_denied', `Loom claim ${input.claimPinId} belongs to another developer.`);
+                }
+                const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(paths);
+                const bindingStore = (0, llmBindingStore_1.createLlmBindingStore)(paths);
+                const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
+                    runtimeStore,
+                    bindingStore,
+                    getPreferredRuntimeId: async () => {
+                        try {
+                            const raw = await node_fs_1.default.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
+                            const data = JSON.parse(raw);
+                            return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+                        }
+                        catch {
+                            return null;
+                        }
+                    },
+                });
+                const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug: developerMetaBotSlug });
+                if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
+                    return (0, commandResult_1.commandFailed)('llm_runtime_unavailable', `No healthy LLM runtime is available for MetaBot ${developerMetaBotSlug}.`);
+                }
+                const runtime = resolved.runtime;
+                const llmExecutor = new executor_1.LlmExecutor({
+                    sessionsRoot: paths.llmExecutorSessionsRoot,
+                    transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+                    skillsRoot: paths.skillsRoot,
+                    backends: (0, executor_1.createRegistryBackendFactories)(),
+                });
+                return (0, loom_1.runLoomDevRoundWorkflow)({
+                    from: input.from,
+                    taskPinId: input.taskPinId,
+                    claimPinId: input.claimPinId,
+                    chain: input.chain,
+                    fileChain: input.fileChain,
+                    checks: input.checks,
+                    roundNote: input.roundNote,
+                    developerMetaBotSlug,
+                    developerGlobalMetaId: identity.globalMetaId,
+                    state: taskState,
+                    workflowStore,
+                    runner,
+                    executeLlmRound: async (prompt, cwd) => {
+                        let sessionId;
+                        try {
+                            sessionId = await llmExecutor.execute({
+                                runtimeId: runtime.id,
+                                runtime,
+                                prompt,
+                                timeout: LOOM_DRAFT_LLM_TIMEOUT_MS,
+                                cwd,
+                                metaBotSlug: developerMetaBotSlug,
+                            });
+                            const deadline = Date.now() + LOOM_DRAFT_LLM_TIMEOUT_MS;
+                            while (Date.now() <= deadline) {
+                                const session = await llmExecutor.getSession(sessionId);
+                                if (session?.result) {
+                                    if (session.result.status === 'completed') {
+                                        if (resolved.bindingId) {
+                                            runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => { });
+                                        }
+                                    }
+                                    else {
+                                        runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => { });
+                                    }
+                                    return {
+                                        sessionId,
+                                        status: session.result.status,
+                                        output: session.result.output,
+                                        error: session.result.error,
+                                    };
+                                }
+                                await sleep(LOOM_DRAFT_LLM_POLL_INTERVAL_MS);
+                            }
+                            await runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => { });
+                            return {
+                                sessionId,
+                                status: 'failed',
+                                output: '',
+                                error: 'LLM runtime timed out while running Loom development round.',
+                            };
+                        }
+                        catch (error) {
+                            await runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => { });
+                            return {
+                                sessionId,
+                                status: 'failed',
+                                output: '',
+                                error: error instanceof Error ? error.message : 'LLM runtime is unavailable.',
+                            };
+                        }
+                    },
+                    writeChain: async (request) => {
+                        const result = await signer.writePin(request);
+                        return (0, commandResult_1.commandSuccess)({
+                            pinId: result.pinId,
+                            txids: result.txids,
+                            network: result.network,
+                            globalMetaId: result.globalMetaId,
+                            mvcAddress: result.mvcAddress,
+                        });
+                    },
+                    uploadFile: async (uploadInput) => (0, uploadFile_1.uploadLocalFileToChain)({
+                        filePath: uploadInput.filePath,
+                        contentType: uploadInput.contentType,
+                        network: uploadInput.network,
+                        signer,
+                    }),
+                    writeLogFile: loom_1.writeLoomProcessLogFile,
+                });
+            },
+            deliver: async (input) => {
+                const actor = input.dryRun
+                    ? await resolveActorProfileReadonly(context, input.from)
+                    : await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor)) {
+                    return actor;
+                }
+                const homeDir = actor.homeDir;
+                const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
+                const rawCacheStore = (0, loom_1.createLoomRawCacheStore)(paths);
+                const workflowStore = (0, loom_1.createLoomWorkflowStore)(paths);
+                const rawState = await readFreshLoomRawState(context, rawCacheStore);
+                const taskState = (0, loom_1.buildLoomWorkflowTaskState)(rawState, input.taskPinId);
+                const runner = (0, loom_1.createNodeLoomCommandRunner)();
+                const developerMetaBotSlug = node_path_1.default.basename(paths.profileRoot);
+                const signer = input.dryRun ? null : createCliSigner(context, homeDir);
+                const dryRunProfile = actor.profile;
+                const developerGlobalMetaId = dryRunProfile
+                    ? dryRunProfile.globalMetaId
+                    : (await signer.getIdentity()).globalMetaId;
+                return (0, loom_1.runLoomDeliverWorkflow)({
+                    from: input.from,
+                    taskPinId: input.taskPinId,
+                    claimPinId: input.claimPinId,
+                    chain: input.chain,
+                    prTitle: input.prTitle,
+                    deliverySummary: input.deliverySummary,
+                    dryRun: input.dryRun,
+                    developerMetaBotSlug,
+                    developerGlobalMetaId,
+                    state: taskState,
+                    workflowStore,
+                    runner,
+                    github: {
+                        assertToolsReady: loom_1.assertGitHubToolsReady,
+                        pushLoomBranch: loom_1.pushLoomBranch,
+                        createLoomPullRequest: loom_1.createLoomPullRequest,
+                    },
+                    writeChain: async (request) => {
+                        if (!signer) {
+                            return (0, commandResult_1.commandFailed)('chain_write_unavailable', 'Dry-run delivery must not write chain data.');
+                        }
+                        const result = await signer.writePin(request);
+                        return (0, commandResult_1.commandSuccess)({
+                            pinId: result.pinId,
+                            txids: result.txids,
+                            network: result.network,
+                            globalMetaId: result.globalMetaId,
+                            mvcAddress: result.mvcAddress,
+                        });
+                    },
+                });
+            },
+            acceptAndPay: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor)) {
+                    return actor;
+                }
+                const homeDir = actor.homeDir;
+                const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
+                const rawCacheStore = (0, loom_1.createLoomRawCacheStore)(paths);
+                const workflowStore = (0, loom_1.createLoomWorkflowStore)(paths);
+                const rawStateResult = input.confirmPayment
+                    ? await requireFreshLoomRawState(context, rawCacheStore)
+                    : (0, commandResult_1.commandSuccess)(await readFreshLoomRawState(context, rawCacheStore));
+                if (!rawStateResult.ok) {
+                    return rawStateResult;
+                }
+                const rawState = rawStateResult.data;
+                const taskState = (0, loom_1.buildLoomWorkflowTaskState)(rawState, input.taskPinId);
+                const signer = createCliSigner(context, homeDir);
+                const identity = await signer.getIdentity();
+                return (0, loom_1.runLoomAcceptAndPayWorkflow)({
+                    from: input.from,
+                    taskPinId: input.taskPinId,
+                    deliveryPinId: input.deliveryPinId,
+                    score: input.score,
+                    comment: input.comment,
+                    chain: input.chain,
+                    confirmPayment: input.confirmPayment,
+                    requesterGlobalMetaId: identity.globalMetaId,
+                    state: taskState,
+                    workflowStore,
+                    walletTransfer: async (transferInput) => runWalletTransferRuntime(context, transferInput),
+                    writeChain: async (request) => {
+                        const result = await signer.writePin(request);
+                        return (0, commandResult_1.commandSuccess)({
+                            pinId: result.pinId,
+                            txids: result.txids,
+                            network: result.network,
+                            globalMetaId: result.globalMetaId,
+                            mvcAddress: result.mvcAddress,
+                        });
+                    },
+                });
+            },
+            reviewDelivery: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor)) {
+                    return actor;
+                }
+                const homeDir = actor.homeDir;
+                const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
+                const rawCacheStore = (0, loom_1.createLoomRawCacheStore)(paths);
+                const workflowStore = (0, loom_1.createLoomWorkflowStore)(paths);
+                const rawState = await readFreshLoomRawState(context, rawCacheStore);
+                const taskState = (0, loom_1.buildLoomWorkflowTaskState)(rawState, input.taskPinId);
+                const signer = createCliSigner(context, homeDir);
+                const identity = await signer.getIdentity();
+                return (0, loom_1.runLoomReviewDeliveryWorkflow)({
+                    from: input.from,
+                    taskPinId: input.taskPinId,
+                    deliveryPinId: input.deliveryPinId,
+                    verdict: input.verdict,
+                    score: input.score,
+                    comment: input.comment,
+                    chain: input.chain,
+                    attachments: input.attachments,
+                    requesterGlobalMetaId: identity.globalMetaId,
+                    state: taskState,
+                    workflowStore,
+                    writeChain: async (request) => {
+                        const result = await signer.writePin(request);
+                        return (0, commandResult_1.commandSuccess)({
+                            pinId: result.pinId,
+                            txids: result.txids,
+                            network: result.network,
+                            globalMetaId: result.globalMetaId,
+                            mvcAddress: result.mvcAddress,
+                        });
+                    },
+                });
+            },
+        },
         bot: {
             listProfiles: async () => requestJson(context, 'GET', '/api/bot/profiles'),
             getProfile: async (input) => requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}`),
@@ -2192,6 +2915,7 @@ function mergeCliDependencies(context) {
         host: { ...defaults.host, ...provided.host },
         system: { ...defaults.system, ...provided.system },
         llm: { ...defaults.llm, ...provided.llm },
+        loom: { ...defaults.loom, ...provided.loom },
         bot: { ...defaults.bot, ...provided.bot },
         evolution: { ...defaults.evolution, ...provided.evolution },
     };
