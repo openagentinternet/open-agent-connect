@@ -247,6 +247,36 @@ async function fetchMetaletData<T>(url: string): Promise<T> {
   return (payload?.data ?? null) as T;
 }
 
+async function listLocalLoomWorkflowsForTask(
+  paths: MetabotPaths,
+  taskPinId: string,
+) {
+  const workflowStore = createLoomWorkflowStore(paths);
+  const taskWorkflowDir = path.dirname(workflowStore.resolve(taskPinId, 'claim').workflowPath);
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(taskWorkflowDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+
+  const workflows = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) {
+      continue;
+    }
+    const claimPinId = path.basename(entry.name, '.json');
+    const workflow = await workflowStore.read(taskPinId, claimPinId);
+    if (workflow) {
+      workflows.push(workflow);
+    }
+  }
+  return workflows.sort((left, right) => left.claimPinId.localeCompare(right.claimPinId));
+}
+
 interface ParsedTransferAmount {
   chain: string;
   currency: string;
@@ -2868,6 +2898,39 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             refreshed,
           },
         });
+      },
+      state: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const paths = resolveMetabotPaths(homeDir);
+        const cacheStore = createLoomRawCacheStore(paths);
+        let refreshed = false;
+        if (input.refresh) {
+          const syncResult = await readLoomRawChainRecords({
+            chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+          });
+          await cacheStore.update(syncResult.records);
+          refreshed = true;
+        }
+        const rawState = await cacheStore.read();
+        const projection = buildLoomWorkflowTaskState(rawState, input.taskPinId);
+        const localWorkflows = await listLocalLoomWorkflowsForTask(paths, input.taskPinId);
+        const cache = {
+          path: cacheStore.cachePath,
+          updatedAt: rawState.updatedAt,
+          refreshed,
+        };
+        const data = {
+          ...projection,
+          cache,
+          localWorkflows,
+        };
+        if (!projection.found) {
+          return {
+            ...commandFailed('task_not_found', projection.message),
+            data,
+          };
+        }
+        return commandSuccess(data);
       },
       draftTask: async (input) => {
         return draftLoomTaskFromWish(context, input);

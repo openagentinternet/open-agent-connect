@@ -98,6 +98,25 @@ async function withChainApiServer(handler) {
   }
 }
 
+async function writeRawLoomCache(home, records, updatedAt = Date.now()) {
+  const rawCachePath = path.join(home, '.metabot', 'loom', 'records.json');
+  await mkdir(path.dirname(rawCachePath), { recursive: true });
+  await writeFile(rawCachePath, JSON.stringify({
+    version: 1,
+    updatedAt,
+    records: {
+      task: [],
+      claim: [],
+      status: [],
+      delivery: [],
+      acceptance: [],
+      'claim-reject': [],
+      ...records,
+    },
+  }), 'utf8');
+  return rawCachePath;
+}
+
 async function runLoom(args, options = {}) {
   const stdout = [];
   const exitCode = await runCli(args, {
@@ -1292,6 +1311,184 @@ test('runCli delegates loom state task pin and refresh flag to runtime dependenc
 
   assert.equal(exitCode, 0);
   assert.deepEqual(calls, [{ taskPinId: validTaskPinId, refresh: true }]);
+});
+
+test('runCli default loom state refresh returns derived state and cache metadata', async () => {
+  const home = await createIndexedHome();
+  const claimPinId = `${'b'.repeat(64)}i0`;
+  const statusPinId = `${'d'.repeat(64)}i0`;
+  await writeRawLoomCache(home, {
+    task: [cachedLoomRecord('task', validTaskPinId, {
+      title: 'Wire state runtime',
+      requirementContentType: 'text/markdown',
+      requirement: 'Return a derived task state.',
+      criteriaContentType: 'text/markdown',
+      criteria: 'The state command includes projection metadata.',
+      projectBase: 'chain',
+      project: {},
+      bounty: { amount: '1', currency: 'SPACE' },
+    }, { globalMetaId: 'requester-metaid' })],
+    claim: [cachedLoomRecord('claim', claimPinId, {
+      taskPinId: validTaskPinId,
+      payoutAddress: '1DeveloperPayoutAddress',
+    }, { globalMetaId: 'developer-metaid', timestamp: 2 })],
+    status: [cachedLoomRecord('status', statusPinId, {
+      taskPinId: validTaskPinId,
+      claimPinId,
+      status: 'in_progress',
+    }, { globalMetaId: 'developer-metaid', timestamp: 3 })],
+  }, 123);
+
+  await withChainApiServer(async ({ baseUrl, requests }) => {
+    const { exitCode, envelope } = await runLoom(['loom', 'state', validTaskPinId, '--refresh'], {
+      env: {
+        ...process.env,
+        HOME: home,
+        METABOT_CHAIN_API_BASE_URL: baseUrl,
+      },
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(envelope.ok, true);
+    assert.equal(envelope.data.found, true);
+    assert.equal(envelope.data.state, 'in_progress');
+    assert.equal(envelope.data.valid.claims[0].pinId, claimPinId);
+    assert.equal(envelope.data.latestStatus.pinId, statusPinId);
+    assert.equal(envelope.data.cache.refreshed, true);
+    assert.match(envelope.data.cache.path, /records\.json$/);
+    assert.equal(typeof envelope.data.cache.updatedAt, 'number');
+    assert.equal(requests.length, 6);
+  });
+});
+
+test('runCli default loom state exposes invalid related records', async () => {
+  const home = await createIndexedHome();
+  const claimPinId = `${'b'.repeat(64)}i0`;
+  const statusPinId = `${'d'.repeat(64)}i0`;
+  await writeRawLoomCache(home, {
+    task: [cachedLoomRecord('task', validTaskPinId, {
+      title: 'Inspect invalid records',
+      requirementContentType: 'text/markdown',
+      requirement: 'Show invalid related records.',
+      criteriaContentType: 'text/markdown',
+      criteria: 'Invalid statuses remain visible.',
+      projectBase: 'chain',
+      project: {},
+      bounty: { amount: '1', currency: 'SPACE' },
+    }, { globalMetaId: 'requester-metaid' })],
+    claim: [cachedLoomRecord('claim', claimPinId, {
+      taskPinId: validTaskPinId,
+      payoutAddress: '1DeveloperPayoutAddress',
+    }, { globalMetaId: 'developer-metaid', timestamp: 2 })],
+    status: [cachedLoomRecord('status', statusPinId, {
+      taskPinId: validTaskPinId,
+      claimPinId,
+      status: 'in_progress',
+    }, { globalMetaId: 'other-developer-metaid', timestamp: 3 })],
+  });
+
+  const { exitCode, envelope } = await runLoom(['loom', 'state', validTaskPinId], {
+    env: {
+      ...process.env,
+      HOME: home,
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.data.invalid.statuses[0].record.pinId, statusPinId);
+  assert.equal(envelope.data.invalid.statuses[0].reason.code, 'permission_denied');
+});
+
+test('runCli default loom state includes valid local workflow states', async () => {
+  const home = await createIndexedHome({ globalMetaId: 'developer-metaid' });
+  const profileHome = path.join(home, '.metabot', 'profiles', 'eric');
+  const claimPinId = `${'b'.repeat(64)}i0`;
+  await writeRawLoomCache(home, {
+    task: [cachedLoomRecord('task', validTaskPinId, {
+      title: 'Include local workflow',
+      requirementContentType: 'text/markdown',
+      requirement: 'Return local workflow state files.',
+      criteriaContentType: 'text/markdown',
+      criteria: 'The workflow state is normalized before returning.',
+      projectBase: 'chain',
+      project: {},
+      bounty: { amount: '1', currency: 'SPACE' },
+    })],
+  });
+  const workflowPath = path.join(profileHome, '.runtime', 'loom', 'workflows', validTaskPinId, `${claimPinId}.json`);
+  await mkdir(path.dirname(workflowPath), { recursive: true });
+  await writeFile(workflowPath, JSON.stringify({
+    version: 1,
+    taskPinId: validTaskPinId,
+    claimPinId,
+    developerMetaBotSlug: 'eric',
+    developerGlobalMetaId: 'developer-metaid',
+    repoUri: 'https://github.com/openagentinternet/open-agent-connect',
+    baseBranch: 'main',
+    upstreamRemote: 'origin',
+    forkRemote: 'fork',
+    forkRepo: 'eric/open-agent-connect',
+    branchName: 'loom/task-claim',
+    workspacePath: path.join(profileHome, 'workspace'),
+    claim: { pinId: claimPinId },
+    statuses: [],
+    updatedAt: '2026-05-16T00:00:00.000Z',
+  }), 'utf8');
+  await writeFile(path.join(path.dirname(workflowPath), 'malformed.json'), '{', 'utf8');
+
+  const { exitCode, envelope } = await runLoom(['loom', 'state', validTaskPinId], {
+    env: {
+      ...process.env,
+      HOME: home,
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.data.localWorkflows.length, 1);
+  assert.equal(envelope.data.localWorkflows[0].claimPinId, claimPinId);
+  assert.equal(envelope.data.localWorkflows[0].branchName, 'loom/task-claim');
+  assert.equal(envelope.data.localWorkflows[0].workspacePath, path.join(profileHome, 'workspace'));
+});
+
+test('runCli default loom state missing task returns task_not_found with cache metadata and local workflows', async () => {
+  const home = await createIndexedHome();
+  const profileHome = path.join(home, '.metabot', 'profiles', 'eric');
+  const claimPinId = `${'b'.repeat(64)}i0`;
+  await writeRawLoomCache(home, {});
+  const workflowPath = path.join(profileHome, '.runtime', 'loom', 'workflows', validTaskPinId, `${claimPinId}.json`);
+  await mkdir(path.dirname(workflowPath), { recursive: true });
+  await writeFile(workflowPath, JSON.stringify({
+    version: 1,
+    taskPinId: validTaskPinId,
+    claimPinId,
+    developerMetaBotSlug: 'eric',
+    repoUri: 'https://github.com/openagentinternet/open-agent-connect',
+    baseBranch: 'main',
+    upstreamRemote: 'origin',
+    forkRemote: 'fork',
+    branchName: 'loom/task-claim',
+    workspacePath: path.join(profileHome, 'workspace'),
+    statuses: [],
+    updatedAt: '2026-05-16T00:00:00.000Z',
+  }), 'utf8');
+
+  const { exitCode, envelope } = await runLoom(['loom', 'state', validTaskPinId], {
+    env: {
+      ...process.env,
+      HOME: home,
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.code, 'task_not_found');
+  assert.equal(envelope.data.found, false);
+  assert.match(envelope.data.cache.path, /records\.json$/);
+  assert.equal(envelope.data.cache.refreshed, false);
+  assert.equal(envelope.data.localWorkflows.length, 1);
+  assert.equal(envelope.data.localWorkflows[0].claimPinId, claimPinId);
 });
 
 test('runCli rejects loom draft-task --from without an actor value', async () => {
