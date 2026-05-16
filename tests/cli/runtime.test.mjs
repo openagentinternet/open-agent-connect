@@ -1407,6 +1407,17 @@ test('services publish persists a local directory entry that network services --
     true
   );
 
+  const cachedListed = await runCommand(homeDir, ['network', 'services', '--cached', '--online']);
+
+  assert.equal(cachedListed.exitCode, 0);
+  assert.equal(cachedListed.payload.ok, true);
+  assert.equal(cachedListed.payload.data.discoverySource, 'cache');
+  assert.equal(cachedListed.payload.data.services.length, 1);
+  assert.equal(cachedListed.payload.data.services[0].servicePinId, published.payload.data.servicePinId);
+  assert.equal(cachedListed.payload.data.services[0].displayName, 'Weather Oracle');
+  assert.equal(cachedListed.payload.data.services[0].online, true);
+  assert.equal(cachedListed.payload.data.services[0].providerGlobalMetaId, created.payload.data.globalMetaId);
+
   const listed = await runCommand(homeDir, ['network', 'services', '--online']);
 
   assert.equal(listed.exitCode, 0);

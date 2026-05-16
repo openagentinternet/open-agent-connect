@@ -3156,6 +3156,66 @@ async function listRuntimeDirectoryServices(input: {
   };
 }
 
+function collectServiceCacheIdentityKeys(service: Record<string, unknown>): Set<string> {
+  return new Set(
+    [
+      service.servicePinId,
+      service.pinId,
+      service.sourceServicePinId,
+      ...(Array.isArray(service.chainPinIds) ? service.chainPinIds : []),
+    ]
+      .map((value) => normalizeText(value))
+      .filter(Boolean),
+  );
+}
+
+async function upsertPublishedLocalServiceIntoOnlineCache(input: {
+  service: Record<string, unknown>;
+  onlineServiceCacheStore: ReturnType<typeof createOnlineServiceCacheStore>;
+  ratingDetailStateStore?: ReturnType<typeof createRatingDetailStateStore>;
+  resolvePeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
+  socketPresenceApiBaseUrl?: string;
+  socketPresenceFailureMode?: 'throw' | 'assume_service_providers_online';
+}): Promise<void> {
+  const decorated = await decorateServicesWithSocketPresence({
+    services: [input.service],
+    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+    socketPresenceFailureMode: input.socketPresenceFailureMode,
+    onlineOnly: false,
+  });
+  const enriched = await enrichServicesWithProviderChatPublicKeys({
+    services: decorated,
+    resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
+  });
+  const publishedService = enriched[0];
+  if (!publishedService) {
+    return;
+  }
+
+  const publishedKeys = collectServiceCacheIdentityKeys(publishedService);
+  const ratingState = await input.ratingDetailStateStore?.read().catch(() => null);
+  await input.onlineServiceCacheStore.update((current) => {
+    const retainedServices = current.services.filter((service) => {
+      const serviceKeys = collectServiceCacheIdentityKeys(service as unknown as Record<string, unknown>);
+      for (const key of publishedKeys) {
+        if (serviceKeys.has(key)) {
+          return false;
+        }
+      }
+      return true;
+    });
+    return buildOnlineServiceCacheState({
+      services: [
+        publishedService,
+        ...retainedServices.map((service) => ({ ...(service as unknown as Record<string, unknown>) })),
+      ],
+      ratingDetails: ratingState?.items ?? [],
+      discoverySource: current.discoverySource,
+      fallbackUsed: current.fallbackUsed,
+    });
+  });
+}
+
 async function listRuntimeDirectoryMasters(input: {
   masterStateStore: ReturnType<typeof createPublishedMasterStateStore>;
   directorySeedsPath: string;
@@ -11174,13 +11234,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
             network,
           });
 
-          await profileRuntimeStateStore.writeState({
+          const nextState = {
             ...state,
             services: [
               published.record,
               ...state.services.filter((service) => service.currentPinId !== published.record.currentPinId),
             ],
-          });
+          };
+          await profileRuntimeStateStore.writeState(nextState);
+          await upsertPublishedLocalServiceIntoOnlineCache({
+            service: summarizeService(published.record),
+            onlineServiceCacheStore,
+            ratingDetailStateStore,
+            resolvePeerChatPublicKey,
+            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceFailureMode: input.socketPresenceFailureMode,
+          }).catch(() => null);
 
           return commandSuccess({
             ...summarizeService(published.record),
