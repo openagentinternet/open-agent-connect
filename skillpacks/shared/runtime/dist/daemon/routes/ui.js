@@ -13,6 +13,7 @@ const app_4 = require("../../ui/pages/publish/app");
 const app_5 = require("../../ui/pages/refund/app");
 const app_6 = require("../../ui/pages/trace/app");
 const app_7 = require("../../ui/pages/bot/app");
+const app_8 = require("../../ui/pages/loom/app");
 const uiMetaApps_1 = require("./uiMetaApps");
 const UI_ROUTE_PREFIX = '/ui/';
 const PLATFORM_ASSET_PREFIX = '/ui/assets/platforms/';
@@ -31,6 +32,7 @@ const PAGE_BUILDERS = {
     'refund': app_5.buildRefundPageDefinition,
     'chat-viewer': app_2.buildChatViewerPageDefinition,
     'bot': app_7.buildBotPageDefinition,
+    'loom': app_8.buildLoomPageDefinition,
 };
 const NAV_ITEMS = [
     { page: 'hub', label: 'Hub' },
@@ -39,6 +41,7 @@ const NAV_ITEMS = [
     { page: 'my-services', label: 'My Services' },
     { page: 'trace', label: 'Trace' },
     { page: 'refund', label: 'Refund' },
+    { page: 'loom', label: 'Loom' },
 ];
 const HIDDEN_UI_PAGES = new Set();
 function escapeHtml(value) {

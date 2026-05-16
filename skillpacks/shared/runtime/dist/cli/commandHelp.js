@@ -198,6 +198,7 @@ const COMMAND_HELP_SPECS = [
             { name: 'sync', summary: 'Synchronize raw Loom protocol records into the local cache.' },
             { name: 'list', summary: 'List task-centric Loom records from the local cache.' },
             { name: 'show', summary: 'Show one Loom task and grouped related raw records.' },
+            { name: 'dashboard', summary: 'Show the Loom task dashboard.' },
         ],
         optionalFlags: [HELP_JSON_FLAG],
     },
@@ -531,6 +532,37 @@ const COMMAND_HELP_SPECS = [
         examples: [
             `metabot loom show ${'a'.repeat(64)}i0`,
             `metabot loom show ${'a'.repeat(64)}i0 --refresh`,
+        ],
+    },
+    {
+        commandPath: ['loom', 'dashboard'],
+        summary: 'Show the Loom task dashboard from raw cache, with optional refresh and task filters.',
+        usage: 'metabot loom dashboard [--from <bot-slug>] [--refresh] [--limit <n>] [--state <state-or-column>] [--role <all|requester|developer|needs_action>] [--query <text>]',
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--refresh', description: 'Refresh raw Loom chain records before building the dashboard index.' },
+            { flag: '--limit', value: '<n>', description: 'Maximum dashboard task count to return.' },
+            { flag: '--state', value: '<state-or-column>', description: 'Return tasks matching a derived state or dashboard column.' },
+            { flag: '--role', value: '<all|requester|developer|needs_action>', description: 'Return tasks by actor relationship. Defaults to all.' },
+            { flag: '--query', value: '<text>', description: 'Return tasks whose dashboard text matches this query.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: [
+            'dashboard.summary',
+            'dashboard.columns',
+            'dashboard.tasks',
+            'dashboard.details',
+            'cache',
+            'indexPath',
+        ],
+        failureSemantics: [
+            'Fails with invalid_flag when --limit, --state, or --role is invalid.',
+            'Fails with not_implemented when the dashboard handler is not configured.',
+            'Refresh updates the local raw Loom cache and dashboard index; it does not write chain data, perform payments, or mutate GitHub or browsers.',
+        ],
+        examples: [
+            'metabot loom dashboard',
+            'metabot loom dashboard --from alice --refresh --state review --role needs_action --query github',
         ],
     },
     {

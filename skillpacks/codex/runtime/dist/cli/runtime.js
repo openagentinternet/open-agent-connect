@@ -172,6 +172,17 @@ async function listLocalLoomWorkflowsForTask(paths, taskPinId) {
     }
     return workflows.sort((left, right) => left.claimPinId.localeCompare(right.claimPinId));
 }
+async function listLocalLoomWorkflowsForRawCache(paths, rawState) {
+    const taskPinIds = Array.from(new Set(rawState.records.task.map((record) => record.pinId)));
+    const workflows = [];
+    for (const taskPinId of taskPinIds) {
+        workflows.push(...(await listLocalLoomWorkflowsForTask(paths, taskPinId)));
+    }
+    return workflows.sort((left, right) => {
+        const taskOrder = left.taskPinId.localeCompare(right.taskPinId);
+        return taskOrder || left.claimPinId.localeCompare(right.claimPinId);
+    });
+}
 async function refreshLoomRawState(context, cacheStore) {
     const syncResult = await (0, loom_1.readLoomRawChainRecords)({
         chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
@@ -2455,6 +2466,39 @@ function createDefaultCliDependencies(context) {
                         refreshed,
                     },
                 });
+            },
+            dashboard: async (input) => {
+                const actor = await resolveActorProfileReadonly(context, input.from);
+                if (!('homeDir' in actor)) {
+                    return actor;
+                }
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const rawCacheStore = (0, loom_1.createLoomRawCacheStore)(paths);
+                const dashboardStore = (0, loom_1.createLoomDashboardStore)(paths);
+                const service = (0, loom_1.createLoomDashboardService)({
+                    rawCacheStore,
+                    dashboardStore,
+                    refreshRawCache: async (refreshInput) => {
+                        const pageSize = refreshInput.limit ? Math.max(1, Math.floor(refreshInput.limit)) : undefined;
+                        const maxPages = refreshInput.limit ? 1 : undefined;
+                        const syncResult = await (0, loom_1.readLoomRawChainRecords)({
+                            chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+                            pageSize,
+                            maxPages,
+                        });
+                        return rawCacheStore.update(syncResult.records);
+                    },
+                    readWorkflowStates: async () => {
+                        const rawState = await rawCacheStore.read();
+                        return listLocalLoomWorkflowsForRawCache(paths, rawState);
+                    },
+                    resolveActorContext: async () => ({
+                        globalMetaId: actor.profile.globalMetaId,
+                        address: actor.profile.mvcAddress,
+                        profileSlug: actor.profile.slug,
+                    }),
+                });
+                return service.getDashboard(input);
             },
             state: async (input) => {
                 const homeDir = normalizeHomeDir(context.env, context.cwd);

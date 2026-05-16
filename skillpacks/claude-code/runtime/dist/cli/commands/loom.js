@@ -157,6 +157,53 @@ function parseOptionalCurrency(args) {
     }
     return { ok: true, currency };
 }
+const LOOM_DASHBOARD_STATE_FILTERS = new Set([
+    'open',
+    'claimed',
+    'in_progress',
+    'delivered',
+    'revision_needed',
+    'rejected',
+    'accepted_paid',
+    'failed',
+    'working',
+    'review',
+    'revision',
+    'closed',
+]);
+function parseOptionalDashboardRole(args) {
+    const hasRoleFlag = args.includes('--role');
+    const role = (0, helpers_1.readFlagValue)(args, '--role');
+    if (!hasRoleFlag) {
+        return { ok: true };
+    }
+    if (role !== 'all'
+        && role !== 'requester'
+        && role !== 'developer'
+        && role !== 'needs_action') {
+        return {
+            ok: false,
+            result: (0, commandResult_1.commandFailed)('invalid_flag', '--role must be one of all, requester, developer, or needs_action.'),
+        };
+    }
+    return { ok: true, role };
+}
+function parseOptionalDashboardState(args) {
+    const stateInput = readOptionalValue(args, '--state');
+    if (!stateInput.ok) {
+        return stateInput;
+    }
+    if (!stateInput.value) {
+        return { ok: true };
+    }
+    if (!LOOM_DASHBOARD_STATE_FILTERS.has(stateInput.value)) {
+        return {
+            ok: false,
+            result: (0, commandResult_1.commandFailed)('invalid_flag', '--state must be one of open, claimed, in_progress, delivered, revision_needed, rejected, accepted_paid, failed, working, review, revision, or closed.'),
+        };
+    }
+    return { ok: true, state: stateInput.value };
+}
 function invalidJsonValidation(protocol, message) {
     return {
         valid: false,
@@ -312,6 +359,43 @@ async function runShowCommand(args, context) {
         taskPinId,
         refresh: (0, helpers_1.hasFlag)(args, '--refresh'),
     }) ?? (0, commandResult_1.commandFailed)('dependency_unavailable', 'Loom show dependency is unavailable.');
+}
+async function runDashboardCommand(args, context) {
+    const limit = parseOptionalLimit(args);
+    if (!limit.ok) {
+        return limit.result;
+    }
+    const role = parseOptionalDashboardRole(args);
+    if (!role.ok) {
+        return role.result;
+    }
+    const fromInput = readOptionalValue(args, '--from');
+    if (!fromInput.ok) {
+        return fromInput.result;
+    }
+    const state = parseOptionalDashboardState(args);
+    if (!state.ok) {
+        return state.result;
+    }
+    const queryInput = readOptionalValue(args, '--query');
+    if (!queryInput.ok) {
+        return queryInput.result;
+    }
+    const input = {
+        refresh: (0, helpers_1.hasFlag)(args, '--refresh'),
+    };
+    if (fromInput.value)
+        input.from = fromInput.value;
+    if (limit.limit !== undefined)
+        input.limit = limit.limit;
+    if (state.state)
+        input.state = state.state;
+    if (role.role)
+        input.role = role.role;
+    if (queryInput.value)
+        input.query = queryInput.value;
+    return context.dependencies.loom?.dashboard?.(input)
+        ?? (0, commandResult_1.commandFailed)('not_implemented', 'Loom dashboard handler is not configured.');
 }
 async function runDraftTaskCommand(args, context) {
     const wish = (0, helpers_1.readFlagValue)(args, '--wish');
@@ -588,6 +672,8 @@ async function runLoomCommand(args, context) {
             return runListCommand(args, context);
         case 'show':
             return runShowCommand(args, context);
+        case 'dashboard':
+            return runDashboardCommand(args, context);
         case 'draft-task':
             return runDraftTaskCommand(args, context);
         case 'post-task':

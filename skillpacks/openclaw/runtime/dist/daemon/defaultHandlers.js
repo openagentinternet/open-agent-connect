@@ -62,6 +62,7 @@ const conversationStore_1 = require("../core/a2a/conversationStore");
 const conversationPersistence_1 = require("../core/a2a/conversationPersistence");
 const traceProjection_1 = require("../core/a2a/traceProjection");
 const localIdentityBootstrap_1 = require("../core/bootstrap/localIdentityBootstrap");
+const loom_1 = require("../core/loom");
 const delegationOrderMessage_1 = require("../core/orders/delegationOrderMessage");
 const orderMessage_1 = require("../core/orders/orderMessage");
 const servicePayment_1 = require("../core/payments/servicePayment");
@@ -105,6 +106,43 @@ const DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS = [1_500, 5_000, 10_000];
 const SERVICE_REFUND_REQUEST_PATH = '/protocols/service-refund-request';
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
+}
+async function listLocalLoomWorkflowsForTask(paths, taskPinId) {
+    const workflowStore = (0, loom_1.createLoomWorkflowStore)(paths);
+    const taskWorkflowDir = node_path_1.default.dirname(workflowStore.resolve(taskPinId, 'claim').workflowPath);
+    let entries;
+    try {
+        entries = await node_fs_1.promises.readdir(taskWorkflowDir, { withFileTypes: true });
+    }
+    catch (error) {
+        if (error.code === 'ENOENT') {
+            return [];
+        }
+        throw error;
+    }
+    const workflows = [];
+    for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith('.json')) {
+            continue;
+        }
+        const claimPinId = node_path_1.default.basename(entry.name, '.json');
+        const workflow = await workflowStore.read(taskPinId, claimPinId);
+        if (workflow) {
+            workflows.push(workflow);
+        }
+    }
+    return workflows.sort((left, right) => left.claimPinId.localeCompare(right.claimPinId));
+}
+async function listLocalLoomWorkflowsForRawCache(paths, rawState) {
+    const taskPinIds = Array.from(new Set(rawState.records.task.map((record) => record.pinId)));
+    const workflows = [];
+    for (const taskPinId of taskPinIds) {
+        workflows.push(...(await listLocalLoomWorkflowsForTask(paths, taskPinId)));
+    }
+    return workflows.sort((left, right) => {
+        const taskOrder = left.taskPinId.localeCompare(right.taskPinId);
+        return taskOrder || left.claimPinId.localeCompare(right.claimPinId);
+    });
 }
 async function sleep(ms) {
     await new Promise((resolve) => {
@@ -7046,6 +7084,43 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
         });
     }
+    async function createLoomDashboardServiceForInput(rawInput) {
+        const profile = await resolveLlmProfileForActor({ from: rawInput.from });
+        if ('failure' in profile)
+            return { failure: profile.failure };
+        const paths = (0, paths_1.resolveMetabotPaths)(profile.homeDir);
+        const rawCacheStore = (0, loom_1.createLoomRawCacheStore)(paths);
+        const dashboardStore = (0, loom_1.createLoomDashboardStore)(paths);
+        const service = (0, loom_1.createLoomDashboardService)({
+            rawCacheStore,
+            dashboardStore,
+            refreshRawCache: async (refreshInput) => {
+                const pageSize = refreshInput.limit ? Math.max(1, Math.floor(refreshInput.limit)) : undefined;
+                const maxPages = refreshInput.limit ? 1 : undefined;
+                const syncResult = await (0, loom_1.readLoomRawChainRecords)({
+                    chainApiBaseUrl: input.chainApiBaseUrl,
+                    pageSize,
+                    maxPages,
+                });
+                return rawCacheStore.update(syncResult.records);
+            },
+            readWorkflowStates: async () => {
+                const rawState = await rawCacheStore.read();
+                return listLocalLoomWorkflowsForRawCache(paths, rawState);
+            },
+            resolveActorContext: async () => {
+                const profiles = await (0, identityProfiles_1.listIdentityProfiles)(normalizedSystemHomeDir).catch(() => []);
+                const matched = profiles.find((candidate) => candidate.slug === profile.slug)
+                    ?? profiles.find((candidate) => node_path_1.default.resolve(candidate.homeDir) === node_path_1.default.resolve(profile.homeDir));
+                return {
+                    profileSlug: profile.slug,
+                    globalMetaId: matched?.globalMetaId,
+                    address: matched?.mvcAddress,
+                };
+            },
+        });
+        return { service };
+    }
     return {
         config: {
             get: async () => (0, commandResult_1.commandSuccess)(await configStore.read()),
@@ -7257,6 +7332,29 @@ function createDefaultMetabotDaemonHandlers(input) {
                         homeDir: p.homeDir,
                     })),
                 });
+            },
+        },
+        loom: {
+            getDashboard: async (rawInput = {}) => {
+                const resolved = await createLoomDashboardServiceForInput(rawInput);
+                if ('failure' in resolved)
+                    return resolved.failure;
+                const { service } = resolved;
+                return service.getDashboard(rawInput);
+            },
+            getTaskDetail: async (rawInput) => {
+                const resolved = await createLoomDashboardServiceForInput(rawInput);
+                if ('failure' in resolved)
+                    return resolved.failure;
+                const { service } = resolved;
+                return service.getTaskDetail(rawInput);
+            },
+            refresh: async (rawInput = {}) => {
+                const resolved = await createLoomDashboardServiceForInput(rawInput);
+                if ('failure' in resolved)
+                    return resolved.failure;
+                const { service } = resolved;
+                return service.refresh(rawInput);
             },
         },
         master: {

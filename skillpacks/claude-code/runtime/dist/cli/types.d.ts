@@ -282,6 +282,14 @@ export interface CliDependencies {
             taskPinId: string;
             refresh: boolean;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        dashboard?: (input: {
+            from?: string;
+            refresh: boolean;
+            limit?: number;
+            state?: string;
+            role?: 'all' | 'requester' | 'developer' | 'needs_action';
+            query?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         draftTask?: (input: {
             wish: string;
             from?: string;
