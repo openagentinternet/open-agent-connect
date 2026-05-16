@@ -81,6 +81,7 @@ export interface A2ASimplemsgListenerManager {
   start(): Promise<A2ASimplemsgListenerStartReport>;
   stop(): void;
   isRunning(): boolean;
+  getLastReport(): A2ASimplemsgListenerStartReport;
 }
 
 interface LoadedProfileIdentity {
@@ -481,6 +482,13 @@ export function createA2ASimplemsgListenerManager(input: {
 
     isRunning() {
       return running;
+    },
+
+    getLastReport() {
+      return {
+        started: lastReport.started.map((profile) => ({ ...profile })),
+        skipped: lastReport.skipped.map((profile) => ({ ...profile })),
+      };
     },
   };
 }

@@ -62,6 +62,7 @@ import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeer
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { createA2ASimplemsgListenerManager } from '../core/a2a/simplemsgListener';
+import { createA2ASimplemsgPresenceWatchdog } from '../core/a2a/simplemsgPresenceWatchdog';
 import { classifySimplemsgContent } from '../core/a2a/simplemsgClassifier';
 import { createSocketIoMetaWebMasterReplyWaiter, type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
 import { parseMasterResponse } from '../core/master/masterMessageSchema';
@@ -2883,8 +2884,21 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       console.warn('[A2A simplemsg listener]', error.message);
     },
   });
+  const simplemsgPresenceWatchdog = createA2ASimplemsgPresenceWatchdog({
+    manager: simplemsgListener,
+    onRestart: (event) => {
+      const missingNames = event.missing
+        .map((profile) => `${profile.name || profile.slug} (${profile.globalMetaId})`)
+        .join(', ');
+      console.warn(`[A2A simplemsg listener] restarted after socket presence missed local profiles: ${missingNames}`);
+    },
+    onError: (error) => {
+      console.warn('[A2A simplemsg listener watchdog]', error.message);
+    },
+  });
   if (daemonConfig.a2a.simplemsgListenerEnabled) {
     await simplemsgListener.start();
+    simplemsgPresenceWatchdog.start();
     chatAutoReplyBackfill.start();
   }
 
@@ -2892,6 +2906,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const shutdown = async (exitCode: number) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    simplemsgPresenceWatchdog.stop();
     simplemsgListener.stop();
     chatAutoReplyBackfill.stop();
     providerHeartbeatLoop.stop();
