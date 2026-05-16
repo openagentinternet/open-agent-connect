@@ -33,6 +33,9 @@ export interface LoomDashboardTaskDetailRequest {
 export interface LoomDashboardRefreshRequest {
     from?: string;
     limit?: number;
+    state?: string;
+    role?: string;
+    query?: string;
 }
 export interface LoomDashboardServiceResult {
     dashboard: LoomDashboardState;

@@ -467,21 +467,30 @@ test('loom page script loads dashboard JSON, renders board cards with Bot names,
   assert.equal(writes[0], TASK_PIN);
 });
 
-test('loom page filters reload dashboard and refresh posts the selected actor', async () => {
-  const { elements, fetchCalls } = await runLoomScript();
+test('loom page filters reload dashboard and refresh preserves current filters', async () => {
+  const { elements, fetchCalls } = await runLoomScript({
+    payloads: [dashboard(), dashboard(), dashboard()],
+  });
 
-  elements['[data-loom-state-filter]'].value = 'review';
+  elements['[data-loom-state-filter]'].value = 'delivered';
   elements['[data-loom-role-filter]'].value = 'needs_action';
   elements['[data-loom-query-filter]'].value = 'github';
   await elements['[data-loom-state-filter]'].listeners.get('change')();
 
-  assert.equal(fetchCalls.at(-1).url, '/api/loom/dashboard?from=eric&state=review&role=needs_action&query=github');
+  assert.equal(fetchCalls.at(-1).url, '/api/loom/dashboard?from=eric&state=delivered&role=needs_action&query=github');
 
   await elements['[data-loom-refresh]'].listeners.get('click')();
   const refreshCall = fetchCalls.find((call) => call.url === '/api/loom/refresh');
   assert.ok(refreshCall, 'expected refresh endpoint to be called');
   assert.equal(refreshCall.options.method, 'POST');
-  assert.deepEqual(JSON.parse(refreshCall.options.body), { from: 'eric' });
+  assert.deepEqual(JSON.parse(refreshCall.options.body), {
+    from: 'eric',
+    state: 'delivered',
+    role: 'needs_action',
+    query: 'github',
+  });
+  assert.match(elements['[data-loom-metrics]'].innerHTML, /Total tasks[\s\S]*<strong>1<\/strong>/);
+  assert.match(elements['[data-loom-board]'].innerHTML, /Wire Loom board UI/);
 });
 
 test('loom page script displays dashboard load errors without throwing', async () => {

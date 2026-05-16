@@ -645,7 +645,7 @@ export function buildLoomPageScript(): string {
     renderBoard();
     renderDetail();
   };
-  const dashboardUrl = () => {
+  const dashboardRequestParams = () => {
     const params = new URLSearchParams();
     const from = fromQuery();
     const state = elements.stateFilter ? text(elements.stateFilter.value) : '';
@@ -655,6 +655,10 @@ export function buildLoomPageScript(): string {
     if (state) params.set('state', state);
     if (role) params.set('role', role);
     if (query) params.set('query', query);
+    return params;
+  };
+  const dashboardUrl = () => {
+    const params = dashboardRequestParams();
     return '/api/loom/dashboard' + (params.toString() ? '?' + params.toString() : '');
   };
   const loadDashboard = async () => {
@@ -674,8 +678,7 @@ export function buildLoomPageScript(): string {
     if (elements.refresh) elements.refresh.disabled = true;
     setStatus('Refreshing dashboard...', 'busy');
     try {
-      const from = fromQuery();
-      const body = from ? { from } : {};
+      const body = Object.fromEntries(dashboardRequestParams().entries());
       const response = await fetch('/api/loom/refresh', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

@@ -79,6 +79,9 @@ export interface LoomDashboardTaskDetailRequest {
 export interface LoomDashboardRefreshRequest {
   from?: string;
   limit?: number;
+  state?: string;
+  role?: string;
+  query?: string;
 }
 
 export interface LoomDashboardServiceResult {
@@ -487,6 +490,9 @@ export function createLoomDashboardService(input: LoomDashboardServiceInput): Lo
       return getDashboard({
         from: request.from,
         limit: request.limit,
+        state: request.state,
+        role: request.role,
+        query: request.query,
         refresh: true,
       });
     },

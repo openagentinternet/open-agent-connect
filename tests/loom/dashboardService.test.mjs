@@ -213,6 +213,49 @@ test('refresh calls raw refresh, writes derived dashboard index, and returns ref
   assert.deepEqual(dashboardStore.writes[0].filters, {});
 });
 
+test('refresh preserves supported filters when returning refreshed dashboard', async () => {
+  const records = emptyRecords();
+  const openTask = taskRecord('o', { title: 'Open unfiltered task' });
+  const workingTask = taskRecord('w', { title: 'Developer filtered task' });
+  const workingClaimPinId = pin('wc');
+  records.task.push(openTask, workingTask);
+  records.claim.push(claimRecord(workingTask.pinId, workingClaimPinId));
+  records.status.push(statusRecord(workingTask.pinId, workingClaimPinId, 'in_progress'));
+  const refreshed = cache(records, 1750000035000);
+  const dashboardStore = createMemoryDashboardStore();
+  const { service } = createService({
+    rawState: cache(emptyRecords()),
+    dashboardStore,
+    dependencies: {
+      async refreshRawCache() {
+        return refreshed;
+      },
+      async resolveActorContext() {
+        return { globalMetaId: developerGlobalMetaId, address: 'developer-address' };
+      },
+    },
+  });
+
+  const result = await service.refresh({
+    from: 'developer',
+    state: 'working',
+    role: 'developer',
+    query: 'filtered',
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.dashboard.filters, {
+    state: 'working',
+    role: 'developer',
+    query: 'filtered',
+  });
+  assert.deepEqual(result.data.dashboard.tasks.map((task) => task.taskPinId), [workingTask.pinId]);
+  assert.equal(result.data.dashboard.summary.totalTasks, 1);
+  assert.equal(result.data.dashboard.summary.needsMyAction, 1);
+  assert.equal(dashboardStore.writes.length, 1);
+  assert.deepEqual(dashboardStore.writes[0].filters, {});
+});
+
 test('filtered refresh writes a full reusable dashboard index while returning the filtered view', async () => {
   const records = emptyRecords();
   const openTask = taskRecord('o', { title: 'Open reusable index task' });

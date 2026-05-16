@@ -370,6 +370,9 @@ function createLoomDashboardService(input) {
             return getDashboard({
                 from: request.from,
                 limit: request.limit,
+                state: request.state,
+                role: request.role,
+                query: request.query,
                 refresh: true,
             });
         },
