@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import type { Dirent } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
@@ -166,6 +167,15 @@ import {
   createMetabotSubsidyStep,
   isIdentityBootstrapReady,
 } from '../core/bootstrap/localIdentityBootstrap';
+import {
+  createLoomDashboardService,
+  createLoomDashboardStore,
+  createLoomRawCacheStore,
+  createLoomWorkflowStore,
+  readLoomRawChainRecords,
+  type LoomRawCacheState,
+  type LoomWorkflowState,
+} from '../core/loom';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import { buildDelegationOrderPayload } from '../core/orders/delegationOrderMessage';
 import {
@@ -268,6 +278,51 @@ const SERVICE_REFUND_REQUEST_PATH = '/protocols/service-refund-request';
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+async function listLocalLoomWorkflowsForTask(
+  paths: MetabotPaths,
+  taskPinId: string,
+): Promise<LoomWorkflowState[]> {
+  const workflowStore = createLoomWorkflowStore(paths);
+  const taskWorkflowDir = path.dirname(workflowStore.resolve(taskPinId, 'claim').workflowPath);
+  let entries: Array<Dirent<string>>;
+  try {
+    entries = await fs.readdir(taskWorkflowDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+
+  const workflows: LoomWorkflowState[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) {
+      continue;
+    }
+    const claimPinId = path.basename(entry.name, '.json');
+    const workflow = await workflowStore.read(taskPinId, claimPinId);
+    if (workflow) {
+      workflows.push(workflow);
+    }
+  }
+  return workflows.sort((left, right) => left.claimPinId.localeCompare(right.claimPinId));
+}
+
+async function listLocalLoomWorkflowsForRawCache(
+  paths: MetabotPaths,
+  rawState: LoomRawCacheState,
+): Promise<LoomWorkflowState[]> {
+  const taskPinIds = Array.from(new Set(rawState.records.task.map((record) => record.pinId)));
+  const workflows: LoomWorkflowState[] = [];
+  for (const taskPinId of taskPinIds) {
+    workflows.push(...(await listLocalLoomWorkflowsForTask(paths, taskPinId)));
+  }
+  return workflows.sort((left, right) => {
+    const taskOrder = left.taskPinId.localeCompare(right.taskPinId);
+    return taskOrder || left.claimPinId.localeCompare(right.claimPinId);
+  });
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -8640,6 +8695,46 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
+  async function createLoomDashboardServiceForInput(rawInput: Record<string, unknown>): Promise<
+    | { service: ReturnType<typeof createLoomDashboardService> }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const profile = await resolveLlmProfileForActor({ from: rawInput.from });
+    if ('failure' in profile) return { failure: profile.failure };
+    const paths = resolveMetabotPaths(profile.homeDir);
+    const rawCacheStore = createLoomRawCacheStore(paths);
+    const dashboardStore = createLoomDashboardStore(paths);
+    const service = createLoomDashboardService({
+      rawCacheStore,
+      dashboardStore,
+      refreshRawCache: async (refreshInput) => {
+        const pageSize = refreshInput.limit ? Math.max(1, Math.floor(refreshInput.limit)) : undefined;
+        const maxPages = refreshInput.limit ? 1 : undefined;
+        const syncResult = await readLoomRawChainRecords({
+          chainApiBaseUrl: input.chainApiBaseUrl,
+          pageSize,
+          maxPages,
+        });
+        return rawCacheStore.update(syncResult.records);
+      },
+      readWorkflowStates: async () => {
+        const rawState = await rawCacheStore.read();
+        return listLocalLoomWorkflowsForRawCache(paths, rawState);
+      },
+      resolveActorContext: async () => {
+        const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        const matched = profiles.find((candidate) => candidate.slug === profile.slug)
+          ?? profiles.find((candidate) => path.resolve(candidate.homeDir) === path.resolve(profile.homeDir));
+        return {
+          profileSlug: profile.slug,
+          globalMetaId: matched?.globalMetaId,
+          address: matched?.mvcAddress,
+        };
+      },
+    });
+    return { service };
+  }
+
   return {
     config: {
       get: async () => commandSuccess(await configStore.read()),
@@ -8886,6 +8981,26 @@ export function createDefaultMetabotDaemonHandlers(input: {
             homeDir: p.homeDir,
           })),
         });
+      },
+    },
+    loom: {
+      getDashboard: async (rawInput = {}) => {
+        const resolved = await createLoomDashboardServiceForInput(rawInput);
+        if ('failure' in resolved) return resolved.failure;
+        const { service } = resolved;
+        return service.getDashboard(rawInput as Parameters<typeof service.getDashboard>[0]);
+      },
+      getTaskDetail: async (rawInput) => {
+        const resolved = await createLoomDashboardServiceForInput(rawInput);
+        if ('failure' in resolved) return resolved.failure;
+        const { service } = resolved;
+        return service.getTaskDetail(rawInput as Parameters<typeof service.getTaskDetail>[0]);
+      },
+      refresh: async (rawInput = {}) => {
+        const resolved = await createLoomDashboardServiceForInput(rawInput);
+        if ('failure' in resolved) return resolved.failure;
+        const { service } = resolved;
+        return service.refresh(rawInput as Parameters<typeof service.refresh>[0]);
       },
     },
     master: {

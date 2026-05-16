@@ -54,6 +54,9 @@ async function startServer(options = {}) {
     botConfigSet: [],
     configGet: [],
     configSet: [],
+    loomDashboard: [],
+    loomTaskDetail: [],
+    loomRefresh: [],
   };
 
   const server = createHttpServer({
@@ -695,6 +698,39 @@ async function startServer(options = {}) {
         });
       },
     },
+    loom: {
+      getDashboard: async (input) => {
+        calls.loomDashboard.push(input);
+        return commandSuccess({
+          dashboard: {
+            filters: input,
+            tasks: [],
+            details: [],
+          },
+        });
+      },
+      getTaskDetail: async (input) => {
+        calls.loomTaskDetail.push(input);
+        if (input.taskPinId === 'task-missing') {
+          return commandFailed('loom_dashboard_task_not_found', 'Loom dashboard task was not found.', {
+            data: { taskPinId: input.taskPinId },
+          });
+        }
+        return commandSuccess({
+          detail: {
+            taskPinId: input.taskPinId,
+            title: 'Implement route',
+          },
+        });
+      },
+      refresh: async (input) => {
+        calls.loomRefresh.push(input);
+        return commandSuccess({
+          refreshed: true,
+          input,
+        });
+      },
+    },
     ui: useBuiltInUiPages
       ? undefined
       : {
@@ -940,6 +976,114 @@ test('POST /api/buzz/post parses the JSON body and forwards it to buzz.post', as
       attachments: ['metafile://file-pin-1.png'],
     },
   });
+});
+
+test('GET /api/loom/dashboard forwards query filters to loom.getDashboard', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/loom/dashboard?refresh=true&from=eric&limit=25&state=review&role=needs_action&query=github`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.loomDashboard, [
+    {
+      refresh: true,
+      from: 'eric',
+      limit: 25,
+      state: 'review',
+      role: 'needs_action',
+      query: 'github',
+    },
+  ]);
+  assert.equal(payload.ok, true);
+});
+
+test('GET /api/loom/tasks/:taskPinId forwards taskPinId, from, and refresh to loom.getTaskDetail', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/loom/tasks/task-123?from=eric&refresh=true`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.loomTaskDetail, [
+    {
+      taskPinId: 'task-123',
+      from: 'eric',
+      refresh: true,
+    },
+  ]);
+  assert.equal(payload.ok, true);
+});
+
+test('POST /api/loom/refresh forwards the JSON body to loom.refresh', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const request = { from: 'eric', limit: 200 };
+  const response = await fetch(`${server.baseUrl}/api/loom/refresh`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.loomRefresh, [request]);
+  assert.equal(payload.ok, true);
+});
+
+test('unsupported method on /api/loom/dashboard returns method_not_allowed', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/loom/dashboard`, {
+    method: 'POST',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 405);
+  assert.equal(response.headers.get('allow'), 'GET');
+  assert.deepEqual(payload, commandFailed('method_not_allowed', 'Expected GET.'));
+});
+
+test('unsupported methods on loom task and refresh routes return method_not_allowed', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const taskResponse = await fetch(`${server.baseUrl}/api/loom/tasks/task-123`, {
+    method: 'POST',
+  });
+  const taskPayload = await taskResponse.json();
+
+  assert.equal(taskResponse.status, 405);
+  assert.equal(taskResponse.headers.get('allow'), 'GET');
+  assert.deepEqual(taskPayload, commandFailed('method_not_allowed', 'Expected GET.'));
+
+  const refreshResponse = await fetch(`${server.baseUrl}/api/loom/refresh`, {
+    method: 'GET',
+  });
+  const refreshPayload = await refreshResponse.json();
+
+  assert.equal(refreshResponse.status, 405);
+  assert.equal(refreshResponse.headers.get('allow'), 'POST');
+  assert.deepEqual(refreshPayload, commandFailed('method_not_allowed', 'Expected POST.'));
+});
+
+test('GET /api/loom/tasks/:taskPinId returns stable not-found payload from handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/loom/tasks/task-missing?from=eric`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 404);
+  assert.deepEqual(payload, commandFailed('loom_dashboard_task_not_found', 'Loom dashboard task was not found.', {
+    data: { taskPinId: 'task-missing' },
+  }));
 });
 
 test('POST /api/llm/execute forwards the request and returns an accepted session id', async (t) => {

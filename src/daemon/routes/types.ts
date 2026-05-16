@@ -25,6 +25,11 @@ export interface MetabotDaemonHttpHandlers {
     create?: (input: { name: string; host?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;
   };
+  loom?: {
+    getDashboard?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    getTaskDetail?: (input: { taskPinId: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    refresh?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   master?: {
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     list?: (input: { online?: boolean; masterKind?: string }) => Awaitable<MetabotCommandResult<unknown>>;
