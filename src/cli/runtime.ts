@@ -62,6 +62,8 @@ import {
   draftLoomTask,
   assertGitHubToolsReady,
   buildLoomWorkflowTaskState,
+  createLoomDashboardService,
+  createLoomDashboardStore,
   createLoomWorkflowStore,
   createLoomRawCacheStore,
   createNodeLoomCommandRunner,
@@ -80,6 +82,7 @@ import {
   writeLoomProcessLogFile,
   type LoomRawCacheState,
   type LoomRawCacheStore,
+  type LoomWorkflowState,
 } from '../core/loom';
 import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain } from '../daemon/defaultHandlers';
@@ -278,6 +281,21 @@ async function listLocalLoomWorkflowsForTask(
     }
   }
   return workflows.sort((left, right) => left.claimPinId.localeCompare(right.claimPinId));
+}
+
+async function listLocalLoomWorkflowsForRawCache(
+  paths: MetabotPaths,
+  rawState: LoomRawCacheState,
+): Promise<LoomWorkflowState[]> {
+  const taskPinIds = Array.from(new Set(rawState.records.task.map((record) => record.pinId)));
+  const workflows: LoomWorkflowState[] = [];
+  for (const taskPinId of taskPinIds) {
+    workflows.push(...(await listLocalLoomWorkflowsForTask(paths, taskPinId)));
+  }
+  return workflows.sort((left, right) => {
+    const taskOrder = left.taskPinId.localeCompare(right.taskPinId);
+    return taskOrder || left.claimPinId.localeCompare(right.claimPinId);
+  });
 }
 
 async function refreshLoomRawState(
@@ -2947,6 +2965,40 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             refreshed,
           },
         });
+      },
+      dashboard: async (input) => {
+        const actor = await resolveActorProfileReadonly(context, input.from);
+        if (!('homeDir' in actor)) {
+          return actor;
+        }
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const rawCacheStore = createLoomRawCacheStore(paths);
+        const dashboardStore = createLoomDashboardStore(paths);
+        const service = createLoomDashboardService({
+          rawCacheStore,
+          dashboardStore,
+          refreshRawCache: async (refreshInput) => {
+            const pageSize = refreshInput.limit ? Math.max(1, Math.floor(refreshInput.limit)) : undefined;
+            const maxPages = refreshInput.limit ? 1 : undefined;
+            const syncResult = await readLoomRawChainRecords({
+              chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+              pageSize,
+              maxPages,
+            });
+            return rawCacheStore.update(syncResult.records);
+          },
+          readWorkflowStates: async () => {
+            const rawState = await rawCacheStore.read();
+            return listLocalLoomWorkflowsForRawCache(paths, rawState);
+          },
+          resolveActorContext: async () => ({
+            globalMetaId: actor.profile.globalMetaId,
+            address: actor.profile.mvcAddress,
+            profileSlug: actor.profile.slug,
+          }),
+        });
+
+        return service.getDashboard(input);
       },
       state: async (input) => {
         const homeDir = normalizeHomeDir(context.env, context.cwd);

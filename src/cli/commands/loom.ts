@@ -206,6 +206,82 @@ function parseOptionalCurrency(args: string[]): { ok: true; currency?: string } 
   return { ok: true, currency };
 }
 
+type LoomDashboardRole = 'all' | 'requester' | 'developer' | 'needs_action';
+type LoomDashboardStateFilter =
+  | 'open'
+  | 'claimed'
+  | 'in_progress'
+  | 'delivered'
+  | 'revision_needed'
+  | 'rejected'
+  | 'accepted_paid'
+  | 'failed'
+  | 'working'
+  | 'review'
+  | 'revision'
+  | 'closed';
+
+const LOOM_DASHBOARD_STATE_FILTERS = new Set<string>([
+  'open',
+  'claimed',
+  'in_progress',
+  'delivered',
+  'revision_needed',
+  'rejected',
+  'accepted_paid',
+  'failed',
+  'working',
+  'review',
+  'revision',
+  'closed',
+]);
+
+function parseOptionalDashboardRole(args: string[]): {
+  ok: true;
+  role?: LoomDashboardRole;
+} | { ok: false; result: MetabotCommandResult<never> } {
+  const hasRoleFlag = args.includes('--role');
+  const role = readFlagValue(args, '--role');
+  if (!hasRoleFlag) {
+    return { ok: true };
+  }
+  if (
+    role !== 'all'
+    && role !== 'requester'
+    && role !== 'developer'
+    && role !== 'needs_action'
+  ) {
+    return {
+      ok: false,
+      result: commandFailed('invalid_flag', '--role must be one of all, requester, developer, or needs_action.'),
+    };
+  }
+  return { ok: true, role };
+}
+
+function parseOptionalDashboardState(args: string[]): {
+  ok: true;
+  state?: LoomDashboardStateFilter;
+} | { ok: false; result: MetabotCommandResult<never> } {
+  const stateInput = readOptionalValue(args, '--state');
+  if (!stateInput.ok) {
+    return stateInput;
+  }
+  if (!stateInput.value) {
+    return { ok: true };
+  }
+  if (!LOOM_DASHBOARD_STATE_FILTERS.has(stateInput.value)) {
+    return {
+      ok: false,
+      result: commandFailed(
+        'invalid_flag',
+        '--state must be one of open, claimed, in_progress, delivered, revision_needed, rejected, accepted_paid, failed, working, review, revision, or closed.',
+      ),
+    };
+  }
+  return { ok: true, state: stateInput.value as LoomDashboardStateFilter };
+}
+
 function invalidJsonValidation(
   protocol: LoomProtocolName,
   message: string,
@@ -415,6 +491,51 @@ async function runShowCommand(
     taskPinId,
     refresh: hasFlag(args, '--refresh'),
   }) ?? commandFailed('dependency_unavailable', 'Loom show dependency is unavailable.');
+}
+
+async function runDashboardCommand(
+  args: string[],
+  context: CliRuntimeContext,
+): Promise<MetabotCommandResult<unknown>> {
+  const limit = parseOptionalLimit(args);
+  if (!limit.ok) {
+    return limit.result;
+  }
+  const role = parseOptionalDashboardRole(args);
+  if (!role.ok) {
+    return role.result;
+  }
+  const fromInput = readOptionalValue(args, '--from');
+  if (!fromInput.ok) {
+    return fromInput.result;
+  }
+  const state = parseOptionalDashboardState(args);
+  if (!state.ok) {
+    return state.result;
+  }
+  const queryInput = readOptionalValue(args, '--query');
+  if (!queryInput.ok) {
+    return queryInput.result;
+  }
+
+  const input: {
+    from?: string;
+    refresh: boolean;
+    limit?: number;
+    state?: LoomDashboardStateFilter;
+    role?: LoomDashboardRole;
+    query?: string;
+  } = {
+    refresh: hasFlag(args, '--refresh'),
+  };
+  if (fromInput.value) input.from = fromInput.value;
+  if (limit.limit !== undefined) input.limit = limit.limit;
+  if (state.state) input.state = state.state;
+  if (role.role) input.role = role.role;
+  if (queryInput.value) input.query = queryInput.value;
+
+  return context.dependencies.loom?.dashboard?.(input)
+    ?? commandFailed('not_implemented', 'Loom dashboard handler is not configured.');
 }
 
 async function runDraftTaskCommand(
@@ -732,6 +853,8 @@ export async function runLoomCommand(
       return runListCommand(args, context);
     case 'show':
       return runShowCommand(args, context);
+    case 'dashboard':
+      return runDashboardCommand(args, context);
     case 'draft-task':
       return runDraftTaskCommand(args, context);
     case 'post-task':

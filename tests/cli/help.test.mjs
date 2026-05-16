@@ -68,6 +68,7 @@ test('runCli prints loom group help for validation and export commands', async (
   assert.match(output, /sync\s+Synchronize raw Loom protocol records into the local cache\./);
   assert.match(output, /list\s+List task-centric Loom records from the local cache\./);
   assert.match(output, /show\s+Show one Loom task and grouped related raw records\./);
+  assert.match(output, /dashboard\s+Show the Loom task dashboard\./);
 });
 
 test('runCli prints loom validate help with protocol and payload-file flags', async () => {
@@ -137,6 +138,28 @@ test('runCli prints loom sync, list, and show help', async () => {
   });
   assert.equal(showExitCode, 0);
   assert.match(showStdout.join(''), /^Usage:\s+metabot loom show <taskPinId> \[--refresh\]/m);
+});
+
+test('runCli prints loom dashboard help with filter flags', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['loom', 'dashboard', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot loom dashboard \[--from <bot-slug>\] \[--refresh\] \[--limit <n>\] \[--state <state-or-column>\] \[--role <all\|requester\|developer\|needs_action>\] \[--query <text>\]/m);
+  assert.match(output, /--from <bot-slug>/);
+  assert.match(output, /--refresh/);
+  assert.match(output, /--limit <n>/);
+  assert.match(output, /--state <state-or-column>/);
+  assert.match(output, /--role <all\|requester\|developer\|needs_action>/);
+  assert.match(output, /--query <text>/);
+  assert.match(output, /not_implemented/);
+  assert.match(output, /updates the local raw Loom cache and dashboard index/);
+  assert.match(output, /does not write chain data, perform payments, or mutate GitHub or browsers/);
 });
 
 test('runCli prints loom draft-task help with wish and actor flags', async () => {

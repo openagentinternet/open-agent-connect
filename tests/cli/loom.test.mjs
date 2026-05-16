@@ -8,6 +8,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
+const { runLoomCommand } = require('../../dist/cli/commands/loom.js');
 const {
   LOOM_DEV_ROUND_LLM_TIMEOUT_MS,
   LOOM_DRAFT_LLM_TIMEOUT_MS,
@@ -488,6 +489,187 @@ test('runCli forwards from and allowInvalid to loom draft-task dependencies', as
     from: 'alice',
     allowInvalid: true,
   }]);
+});
+
+test('runCli delegates loom dashboard filters to runtime dependencies', async () => {
+  const calls = [];
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'dashboard',
+    '--refresh',
+    '--from',
+    'eric',
+    '--limit',
+    '25',
+    '--state',
+    'review',
+    '--role',
+    'needs_action',
+    '--query',
+    'github',
+  ], {
+    dependencies: {
+      loom: {
+        dashboard: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { dashboard: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    from: 'eric',
+    refresh: true,
+    limit: 25,
+    state: 'review',
+    role: 'needs_action',
+    query: 'github',
+  }]);
+  assert.equal(envelope.ok, true);
+  assert.deepEqual(envelope.data, { dashboard: true });
+});
+
+test('runCli rejects invalid loom dashboard limit before delegation', async () => {
+  const calls = [];
+  for (const limit of ['0', '-1', 'abc']) {
+    const { exitCode, envelope } = await runLoom([
+      'loom',
+      'dashboard',
+      '--limit',
+      limit,
+    ], {
+      dependencies: {
+        loom: {
+          dashboard: async (input) => {
+            calls.push(input);
+            return { ok: true, state: 'success', data: { dashboard: true } };
+          },
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.state, 'failed');
+    assert.equal(envelope.code, 'invalid_flag');
+    assert.match(envelope.message, /--limit/);
+  }
+  assert.deepEqual(calls, []);
+});
+
+test('runCli rejects invalid loom dashboard role before delegation', async () => {
+  const calls = [];
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'dashboard',
+    '--role',
+    'reviewer',
+  ], {
+    dependencies: {
+      loom: {
+        dashboard: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { dashboard: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.state, 'failed');
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /--role/);
+  assert.deepEqual(calls, []);
+});
+
+test('runCli rejects invalid loom dashboard state before delegation', async () => {
+  const calls = [];
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'dashboard',
+    '--state',
+    'blocked',
+  ], {
+    dependencies: {
+      loom: {
+        dashboard: async (input) => {
+          calls.push(input);
+          return { ok: true, state: 'success', data: { dashboard: true } };
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.state, 'failed');
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /--state/);
+  assert.deepEqual(calls, []);
+});
+
+test('runLoomCommand reports not_implemented when loom dashboard dependency is missing', async () => {
+  const result = await runLoomCommand(['dashboard'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    env: {},
+    cwd: process.cwd(),
+    readTextFile: async () => '',
+    dependencies: { loom: {} },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'not_implemented');
+  assert.match(result.message, /dashboard handler/i);
+});
+
+test('runCli default loom dashboard reads raw cache without network refresh', async () => {
+  const home = await createIndexedHome({ globalMetaId: fixtureGlobalMetaId });
+  const task = cachedLoomRecord('task', validTaskPinId, {
+    title: 'Dashboard smoke task',
+    requirementContentType: 'text/markdown',
+    requirement: 'Read cached Loom records.',
+    criteriaContentType: 'text/markdown',
+    criteria: 'Dashboard returns cached task cards.',
+    projectBase: 'chain',
+    project: {
+      repoUri: 'https://github.com/openagentinternet/open-agent-connect',
+      baseBranch: 'main',
+    },
+    bounty: {
+      amount: '1',
+      currency: 'SPACE',
+    },
+    tags: ['smoke'],
+  }, {
+    globalMetaId: fixtureGlobalMetaId,
+    creatorAddress: 'requester-address',
+  });
+  await writeRawLoomCache(home, { task: [task] });
+
+  const { exitCode, envelope } = await runLoom([
+    'loom',
+    'dashboard',
+    '--from',
+    'eric',
+  ], {
+    env: {
+      ...process.env,
+      HOME: home,
+      METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:1',
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.data.dashboard.summary.totalTasks, 1);
+  assert.equal(envelope.data.dashboard.tasks[0].taskPinId, validTaskPinId);
+  assert.equal(envelope.data.dashboard.actor.profileSlug, 'eric');
+  assert.equal(envelope.data.cache.refreshed, false);
 });
 
 test('runCli delegates loom post-task payload-file input to runtime dependencies', async () => {
