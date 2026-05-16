@@ -29,6 +29,8 @@
 - All documentation, code comments, and SKILL content must be English.
 - Do not introduce legacy `.metabot/hot` references.
 - Do not add browser-side chain writes, wallet payment, GitHub mutation, or local repository mutation in Phase 3.
+- Treat Bot identity as first-class task UI data. Task cards and details must show requester and developer Bot names/avatars when available, with stable fallback labels when not.
+- For frontend work, apply `frontend-skill` in app mode: compact operational workspace, restrained hierarchy, no landing hero, no decorative gradients, no nested cards, and visual continuity with existing `/ui` pages.
 
 ## File Structure
 
@@ -36,12 +38,14 @@ Create:
 
 - `src/core/loom/dashboardTypes.ts`: shared dashboard model types.
 - `src/core/loom/dashboardAggregation.ts`: pure raw-cache-to-dashboard projection.
+- `src/core/loom/dashboardIdentity.ts`: best-effort Bot identity projection from raw authors, profile context, and optional cached profile data.
 - `src/core/loom/dashboardStore.ts`: profile-scoped derived dashboard index persistence.
 - `src/core/loom/dashboardService.ts`: refresh/read service that composes raw sync, workflow stores, and aggregation.
 - `src/ui/pages/loom/viewModel.ts`: UI-specific projection from dashboard API payload.
 - `src/ui/pages/loom/app.ts`: page definition and client-side script.
 - `src/ui/pages/loom/index.html`: local board HTML/CSS template.
 - `tests/loom/dashboardAggregation.test.mjs`
+- `tests/loom/dashboardIdentity.test.mjs`
 - `tests/loom/dashboardStore.test.mjs`
 - `tests/loom/dashboardService.test.mjs`
 - `tests/ui/loomViewModel.test.mjs`
@@ -88,8 +92,10 @@ Use fake raw cache records. Do not call real chain, GitHub, wallets, daemon, or 
 **Files:**
 - Create: `src/core/loom/dashboardTypes.ts`
 - Create: `src/core/loom/dashboardAggregation.ts`
+- Create: `src/core/loom/dashboardIdentity.ts`
 - Modify: `src/core/loom/index.ts`
 - Test: `tests/loom/dashboardAggregation.test.mjs`
+- Test: `tests/loom/dashboardIdentity.test.mjs`
 
 - [ ] **Step 1: Write failing aggregation tests**
 
@@ -99,12 +105,14 @@ Cover at least these cases:
 - accepted paid task requires a valid passed acceptance with `releasePayment: true` and `paymentTxId`;
 - invalid status author does not affect state and appears as a warning;
 - multiple claims are summarized on one task card and listed in detail;
+- requester and active developer identities expose display name, avatar URI, globalMetaId, address, and stable fallbacks;
+- missing avatar/profile data does not hide the task and produces stable initials or short-id fallbacks;
 - local workflow enrichment adds local branch, workspace, LLM sessions, commits, and process logs without overriding chain state.
 
 Run:
 
 ```bash
-npm run build && node --test tests/loom/dashboardAggregation.test.mjs
+npm run build && node --test tests/loom/dashboardAggregation.test.mjs tests/loom/dashboardIdentity.test.mjs
 ```
 
 Expected: FAIL because exports do not exist.
@@ -122,6 +130,7 @@ Create `src/core/loom/dashboardTypes.ts` with exported interfaces for:
 - `LoomDashboardTimelineEvent`
 - `LoomDashboardWarning`
 - `LoomDashboardActorContext`
+- `LoomDashboardBotIdentity`
 - `LoomDashboardFilters`
 - `BuildLoomDashboardOptions`
 
@@ -141,6 +150,16 @@ Implementation rules:
 - sort timeline events by timestamp ascending;
 - build board columns using the exact spec column mapping.
 
+Create `src/core/loom/dashboardIdentity.ts`.
+
+Implementation rules:
+
+- project raw task authors into requester Bot identities;
+- project valid claim authors into developer Bot identities;
+- keep globalMetaId and address visible even when profile name/avatar is unavailable;
+- create stable fallback initials or short-id labels without querying network during pure aggregation;
+- do not let missing identity data change task state.
+
 - [ ] **Step 4: Export and verify**
 
 Modify `src/core/loom/index.ts` to export the new modules.
@@ -148,7 +167,7 @@ Modify `src/core/loom/index.ts` to export the new modules.
 Run:
 
 ```bash
-npm run build && node --test tests/loom/dashboardAggregation.test.mjs
+npm run build && node --test tests/loom/dashboardAggregation.test.mjs tests/loom/dashboardIdentity.test.mjs
 ```
 
 Expected: PASS.
@@ -156,7 +175,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit and post diary**
 
 ```bash
-git add src/core/loom/dashboardTypes.ts src/core/loom/dashboardAggregation.ts src/core/loom/index.ts tests/loom/dashboardAggregation.test.mjs
+git add src/core/loom/dashboardTypes.ts src/core/loom/dashboardAggregation.ts src/core/loom/dashboardIdentity.ts src/core/loom/index.ts tests/loom/dashboardAggregation.test.mjs tests/loom/dashboardIdentity.test.mjs
 git commit -m "feat: add loom dashboard aggregation"
 ```
 
@@ -508,6 +527,12 @@ Expected: FAIL.
 
 Create `buildLoomPageDefinition()` in `src/ui/pages/loom/app.ts`.
 
+Frontend direction:
+
+- visual thesis: a compact MetaWeb operations board where task flow is central and Bot identity is always visible;
+- content plan: toolbar and metrics first, board columns second, selected task detail and timeline third, warnings and CLI handoffs in context;
+- interaction thesis: quick refresh feedback, subtle selected-card/detail transition, and restrained hover/copy affordances that help scanning without decorative motion.
+
 The page should include:
 
 - toolbar with refresh and filters;
@@ -518,6 +543,7 @@ The page should include:
 - warning panel;
 - copy buttons;
 - external PR links.
+- requester and developer Bot avatars/names on task cards and in the detail header.
 
 - [ ] **Step 3: Implement template**
 
@@ -529,6 +555,8 @@ Design constraints:
 - dense operational layout;
 - responsive board;
 - no nested cards;
+- colors, font sizes, borders, and control styling should match the existing `/ui` product family;
+- task cards should remain compact, with Bot avatar/name rows designed as scan anchors rather than large profile panels;
 - stable column and card dimensions;
 - no text overflow in cards, buttons, badges, or filters.
 
@@ -653,6 +681,8 @@ Open the returned URL. Verify:
 
 - board renders without overlap at desktop width;
 - board renders without overlap at mobile width;
+- requester and developer avatars/names are visible on cards and details when data exists;
+- fallback initials/short IDs are visible when Bot avatar/name data is missing;
 - refresh works;
 - filters work;
 - selecting a task updates details;

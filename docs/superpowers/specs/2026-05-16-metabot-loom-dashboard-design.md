@@ -54,6 +54,7 @@ The Phase 3 goal is not another chain-write workflow. The goal is a read-first a
 - aggregate the six Loom protocols into task-centric workflow records;
 - preserve invalid and disputed records as visible evidence instead of silently dropping them;
 - combine global raw chain records with local workflow state when available;
+- make requester and developer MetaBots visible as first-class actors through names and avatars;
 - expose a daemon JSON API for the dashboard and future agents;
 - add a `metabot loom dashboard` read command for testability and terminal use;
 - add a `metabot ui open --page loom` handoff and a built-in `/ui/loom` board;
@@ -88,6 +89,8 @@ The dashboard may show action handoffs, such as copyable CLI commands, PR links,
 8. The task detail view shows a timeline that combines every valid and invalid related record.
 9. UI refresh uses the same raw sync pipeline as CLI refresh. If chain refresh fails, the dashboard may render stale cached data with an explicit warning.
 10. The UI is local and operator-focused: dense, scannable, predictable, and built for repeated inspection.
+11. Task flow is the primary object, but Bot identity is also a primary signal. Every task card and detail view should make the requester Bot and active developer Bot visible when profile data is available.
+12. The visual language should feel like the existing OAC `/ui` pages: same product family, restrained palette, compact spacing, similar typography, and utility-first controls.
 
 ## Layer Model
 
@@ -232,7 +235,8 @@ Each task card should show:
 - task title;
 - derived state label and tone;
 - task PIN short form with copy affordance in UI;
-- requester label;
+- requester Bot name and avatar when available, with a stable fallback label from globalMetaId or creator address;
+- active developer Bot name and avatar when a valid active claim exists, with a stable fallback label from globalMetaId or claim author address;
 - bounty amount and currency;
 - repository owner/name and base branch when GitHub-based;
 - tags;
@@ -249,6 +253,8 @@ Each task card should show:
 The detail view should show:
 
 - task requirement and acceptance criteria;
+- requester Bot identity, avatar, globalMetaId, and author address;
+- every claimant/developer Bot identity, avatar, globalMetaId, author address, and payout address;
 - GitHub repository link;
 - all claims;
 - claim reject records;
@@ -293,6 +299,20 @@ The dashboard should derive the active profile context when available:
   - both: show a neutral mixed-role marker, never silently choose one side.
 
 Actor context must be advisory. It must not change the protocol-derived task state.
+
+### Bot Identity Projection
+
+The dashboard should enrich raw protocol authors with local or cached profile data when available. This is important because Loom is meant to show different AI agents collaborating on MetaWeb, not just anonymous PIN records.
+
+Preferred identity fields:
+
+- `displayName`: profile name, published Bot name, or shortened globalMetaId fallback;
+- `avatarUri`: profile avatar, published Bot avatar, or deterministic initials fallback;
+- `globalMetaId`;
+- `address`: creator or payout address when relevant;
+- `role`: requester, developer, reviewer, or unknown.
+
+Identity enrichment must be best-effort and non-blocking. Missing avatar data must not break aggregation or rendering. UI fallbacks should preserve stable layout dimensions so cards do not jump when avatars load.
 
 ## State Derivation Rules
 
@@ -431,6 +451,8 @@ Visual stance:
 - no marketing copy;
 - no decorative gradients or cards inside cards;
 - cards are only task cards and modal/detail panels;
+- task cards must visually include requester and developer Bot identity, not only task state;
+- align colors, type scale, borders, button styling, and spacing with the existing `/ui` product family;
 - use stable dimensions for board columns and task cards;
 - text must not overflow buttons, badges, or cards;
 - use icons for refresh, copy, external link, warning, PR, payment, and process log actions when the repo already has a suitable icon strategy; otherwise use compact text buttons.
@@ -489,10 +511,13 @@ Positive acceptance:
 3. A task with a delivery and no acceptance appears in the Review column.
 4. A task with revision requested appears in the Revision column and marks developer action needed.
 5. A task with local workflow state shows local branch, workspace, LLM session, process logs, and commits when available.
-6. `metabot loom dashboard --refresh --json` returns the dashboard model.
-7. `GET /api/loom/dashboard?refresh=true` returns the same dashboard model shape.
-8. `metabot ui open --page loom` returns a local UI URL.
-9. `/ui/loom` renders the board, supports refresh, filters, task selection, copy buttons, and external PR links.
+6. Task cards show requester Bot avatar/name and active developer Bot avatar/name when those identities can be resolved, with stable fallbacks when they cannot.
+7. Task detail shows every requester, claimant, developer, reviewer, author globalMetaId, and payout address that is relevant to the task flow.
+8. `/ui/loom` uses the same visual family as existing `/ui` pages while remaining a compact operational board.
+9. `metabot loom dashboard --refresh --json` returns the dashboard model.
+10. `GET /api/loom/dashboard?refresh=true` returns the same dashboard model shape.
+11. `metabot ui open --page loom` returns a local UI URL.
+12. `/ui/loom` renders the board, supports refresh, filters, task selection, copy buttons, and external PR links.
 
 Negative acceptance:
 
@@ -506,6 +531,7 @@ Negative acceptance:
 8. Refresh failure with no previous index returns a stable failed result.
 9. Unsupported filter values return `loom_dashboard_invalid_filter`.
 10. Browser UI does not perform payment or chain writes.
+11. Missing Bot profile/avatar data never hides a task or breaks card layout.
 
 ## Manual Validation Flow
 
