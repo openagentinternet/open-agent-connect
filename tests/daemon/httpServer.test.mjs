@@ -2260,6 +2260,27 @@ test('GET /ui/refund renders buyer and seller refund operations', async (t) => {
   assert.doesNotMatch(html, /\/api\/provider\/refund\/settle/);
 });
 
+test('GET /ui/loom renders the built-in Loom board and includes Loom in navigation', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/loom`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /Loom Board/);
+  assert.match(html, /data-loom-refresh/);
+  assert.match(html, /data-loom-board/);
+  assert.match(html, /data-loom-detail/);
+  assert.match(html, /\/api\/loom\/dashboard/);
+  assert.match(html, /\/api\/loom\/refresh/);
+  assert.match(html, /href="\/ui\/loom"/);
+  assert.doesNotMatch(html, /\/api\/chain/);
+  assert.doesNotMatch(html, /\/api\/wallet/);
+  assert.doesNotMatch(html, /\/api\/services\/rate/);
+});
+
 test('GET /ui/buzz serves the bundled Buzz MetaApp entry from the daemon server', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());

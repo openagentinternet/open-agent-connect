@@ -4,7 +4,7 @@ import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 
 export type Awaitable<T> = T | Promise<T>;
 
-export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'chat-viewer' | 'bot';
+export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'chat-viewer' | 'bot' | 'loom';
 
 export interface MetabotDaemonHttpHandlers {
   config?: {
