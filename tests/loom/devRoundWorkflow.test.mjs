@@ -152,9 +152,27 @@ function createWorkflowStore(events, state = workflowState()) {
 function createRunner(events, options = {}) {
   const changedFiles = options.changedFiles ?? ['src/core/loom/devRoundWorkflow.ts'];
   const checkFailures = new Set(options.checkFailures ?? []);
+  const commitsSinceBase = options.commitsSinceBase ?? [];
   return {
     async run(input) {
       events.push({ type: 'runner.run', input });
+      if (input.command === 'git' && input.args.join(' ') === 'rev-list --reverse base-head..HEAD') {
+        return commandRun(input, commitsSinceBase.map((commit) => commit.sha).join('\n'));
+      }
+      const showCommit = input.command === 'git'
+        && input.args[0] === 'show'
+        && input.args[1] === '--name-only'
+        && input.args[2] === '--format=%s'
+        && input.args[3];
+      if (showCommit) {
+        const commitInfo = commitsSinceBase.find((commit) => commit.sha === input.args[3]);
+        if (commitInfo) {
+          return commandRun(input, `${commitInfo.message}\n\n${commitInfo.files.join('\n')}\n`);
+        }
+      }
+      if (input.command === 'git' && input.args.join(' ') === 'rev-parse HEAD' && options.baseHead) {
+        return commandRun(input, options.baseHead);
+      }
       if (input.command === 'git' && input.args.join(' ') === 'status --porcelain') {
         return commandRun(input, changedFiles.length > 0 ? ` M ${changedFiles[0]}\n` : '');
       }
@@ -279,6 +297,10 @@ test('buildLoomDevRoundPrompt includes task, repo, previous status, checks, and 
   assert.match(prompt, /Make the smallest useful slice/);
   assert.match(prompt, /one focused implementation round/i);
   assert.match(prompt, /leave the repo committable/i);
+  assert.match(prompt, /do not run git commit/i);
+  assert.match(prompt, /do not run git push/i);
+  assert.match(prompt, /do not create a pull request/i);
+  assert.match(prompt, /do not publish Loom protocol records/i);
 });
 
 test('runLoomDevRoundWorkflow denies a claim owned by another author', async () => {
@@ -313,6 +335,7 @@ test('runLoomDevRoundWorkflow completes when LLM succeeds, checks pass, and git 
   assert.equal(result.ok, true);
   assert.equal(result.data.status, 'completed');
   assert.deepEqual(commands(events), [
+    'git rev-parse HEAD',
     'npm run build',
     'git status --porcelain',
     'git diff --name-only',
@@ -320,6 +343,7 @@ test('runLoomDevRoundWorkflow completes when LLM succeeds, checks pass, and git 
     'git commit -m feat: add loom dev round workflow',
     'git rev-parse HEAD',
     'git show --name-only --format=%s HEAD',
+    'git rev-list --reverse abc123456789..HEAD',
   ]);
   const logInput = events.find((event) => event.type === 'writeLogFile').input;
   assert.deepEqual(logInput.checks[0], {
@@ -344,6 +368,75 @@ test('runLoomDevRoundWorkflow completes when LLM succeeds, checks pass, and git 
   assert.equal(workflowWrite.state.statuses.at(-1).commits[0].sha, 'abc123456789');
 });
 
+test('runLoomDevRoundWorkflow records commits created by the LLM runtime before status decision', async () => {
+  const events = [];
+  const { input } = createDeps({
+    events,
+    runner: createRunner(events, {
+      baseHead: 'base-head\n',
+      changedFiles: [],
+      commitsSinceBase: [{
+        sha: 'def456789abc',
+        message: 'docs: note loom cli e2e run',
+        files: ['TASK_NOTE.md'],
+      }],
+    }),
+    workflowStore: createWorkflowStore(events),
+  });
+
+  const result = await runLoomDevRoundWorkflow(input);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.status, 'completed');
+  assert.equal(result.data.checksPassed, true);
+  assert.deepEqual(result.data.commits, [{
+    sha: 'def456789abc',
+    message: 'docs: note loom cli e2e run',
+    files: ['TASK_NOTE.md'],
+  }]);
+  assert.ok(!commands(events).includes('git commit -m feat: add loom dev round workflow'));
+  const payload = statusPayloads(events).at(-1);
+  assert.equal(payload.status, 'completed');
+  assert.equal(payload.commits[0].sha, 'def456789abc');
+});
+
+test('runLoomDevRoundWorkflow accepts a timed-out LLM round only when commits exist and checks pass', async () => {
+  const events = [];
+  const { input } = createDeps({
+    events,
+    runner: createRunner(events, {
+      baseHead: 'base-head\n',
+      changedFiles: [],
+      commitsSinceBase: [{
+        sha: 'timeout123456',
+        message: 'docs: note loom cli e2e run',
+        files: ['TASK_NOTE.md'],
+      }],
+    }),
+    workflowStore: createWorkflowStore(events),
+    async executeLlmRound(prompt, cwd) {
+      events.push({ type: 'executeLlmRound', prompt, cwd });
+      return {
+        sessionId: 'llm-session-timeout',
+        status: 'timeout',
+        output: 'Edited, checked, committed, and pushed before timeout.',
+        error: 'codex timed out after 120000ms',
+      };
+    },
+  });
+
+  const result = await runLoomDevRoundWorkflow(input);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.status, 'completed');
+  assert.equal(result.data.checksPassed, true);
+  assert.equal(result.data.commits[0].sha, 'timeout123456');
+  const payload = statusPayloads(events).at(-1);
+  assert.equal(payload.status, 'completed');
+  assert.match(payload.progressSummary, /timed out/i);
+  assert.match(payload.progressSummary, /checks passing/i);
+});
+
 test('runLoomDevRoundWorkflow stays in progress when a check fails but still commits changes', async () => {
   const events = [];
   const { input } = createDeps({
@@ -358,6 +451,7 @@ test('runLoomDevRoundWorkflow stays in progress when a check fails but still com
   assert.equal(result.ok, true);
   assert.equal(result.data.status, 'in_progress');
   assert.deepEqual(commands(events), [
+    'git rev-parse HEAD',
     'npm run build',
     'npm test',
     'git status --porcelain',
@@ -366,6 +460,7 @@ test('runLoomDevRoundWorkflow stays in progress when a check fails but still com
     'git commit -m feat: add loom dev round workflow',
     'git rev-parse HEAD',
     'git show --name-only --format=%s HEAD',
+    'git rev-list --reverse abc123456789..HEAD',
   ]);
   const logInput = events.find((event) => event.type === 'writeLogFile').input;
   assert.deepEqual(logInput.checks, [{

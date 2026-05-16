@@ -7,6 +7,8 @@ import type { ChatReplyRunner, PrivateChatAutoReplyConfig, PrivateChatInboundMes
 import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
 import { LlmExecutor } from '../core/llm/executor';
 import type { CliDependencies, CliRuntimeContext } from './types';
+export declare const LOOM_DRAFT_LLM_TIMEOUT_MS = 120000;
+export declare const LOOM_DEV_ROUND_LLM_TIMEOUT_MS = 900000;
 type A2ASimplemsgInboundDispatcherMessage = Pick<PrivateChatInboundMessage, 'fromGlobalMetaId' | 'content' | 'messagePinId' | 'timestamp'> & Partial<PrivateChatInboundMessage>;
 export declare function buildA2ASimplemsgInboundDispatcher(input: {
     handleOrderProtocolMessage?: (message: A2ASimplemsgInboundDispatcherMessage) => Promise<MetabotCommandResult<unknown>> | MetabotCommandResult<unknown>;

@@ -8,11 +8,21 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
+const {
+  LOOM_DEV_ROUND_LLM_TIMEOUT_MS,
+  LOOM_DRAFT_LLM_TIMEOUT_MS,
+} = require('../../dist/cli/runtime.js');
 
 const validTaskPinId = `${'a'.repeat(64)}i0`;
 const fixtureMnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const fixturePath = "m/44'/10001'/0'/0/0";
 const fixtureGlobalMetaId = 'idq1970463ym8fqmgawe4lylktne97ahhw4kqehkch';
+
+test('loom dev rounds use a production-sized LLM timeout distinct from draft generation', () => {
+  assert.equal(LOOM_DRAFT_LLM_TIMEOUT_MS, 120_000);
+  assert.ok(LOOM_DEV_ROUND_LLM_TIMEOUT_MS > LOOM_DRAFT_LLM_TIMEOUT_MS);
+  assert.ok(LOOM_DEV_ROUND_LLM_TIMEOUT_MS >= 900_000);
+});
 
 function validClaimPayload(overrides = {}) {
   return {

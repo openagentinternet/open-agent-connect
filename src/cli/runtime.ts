@@ -135,7 +135,8 @@ const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
-const LOOM_DRAFT_LLM_TIMEOUT_MS = 120_000;
+export const LOOM_DRAFT_LLM_TIMEOUT_MS = 120_000;
+export const LOOM_DEV_ROUND_LLM_TIMEOUT_MS = 900_000;
 const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 let cachedDaemonRuntimeFingerprint: string | null = null;
 
@@ -3145,11 +3146,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
                 runtimeId: runtime.id,
                 runtime,
                 prompt,
-                timeout: LOOM_DRAFT_LLM_TIMEOUT_MS,
+                timeout: LOOM_DEV_ROUND_LLM_TIMEOUT_MS,
                 cwd,
                 metaBotSlug: developerMetaBotSlug,
               });
-              const deadline = Date.now() + LOOM_DRAFT_LLM_TIMEOUT_MS;
+              const deadline = Date.now() + LOOM_DEV_ROUND_LLM_TIMEOUT_MS;
               while (Date.now() <= deadline) {
                 const session = await llmExecutor.getSession(sessionId);
                 if (session?.result) {

@@ -70,6 +70,12 @@ function buildLoomDevRoundPrompt(input) {
         '',
         'Make one focused implementation round. Avoid unrelated refactors, metadata churn, and broad rewrites.',
         'Keep changes scoped to the task requirements and leave the repo committable.',
+        'Do not run git commit.',
+        'Do not run git push.',
+        'Do not run gh pr.',
+        'Do not create a pull request.',
+        'Do not publish Loom protocol records or run metabot loom commands.',
+        'Leave changed files in the working tree; the Loom workflow will run checks, create commits, publish status, and handle delivery.',
     ].join('\n');
 }
 function findClaimAuthor(state, claimPinId) {
@@ -198,8 +204,59 @@ async function createCommit(input) {
         files,
     });
 }
+async function readHeadRevision(runner, cwd) {
+    const revParse = await runner.run({
+        command: 'git',
+        args: ['rev-parse', 'HEAD'],
+        cwd,
+    });
+    if (revParse.exitCode !== 0) {
+        return (0, commandResult_1.commandFailed)('git_rev_parse_failed', `Failed to read current revision: ${commandDetail(revParse)}`);
+    }
+    return (0, commandResult_1.commandSuccess)(revParse.stdout.trim());
+}
+async function readCommitRecord(input) {
+    const show = await input.runner.run({
+        command: 'git',
+        args: ['show', '--name-only', '--format=%s', input.sha],
+        cwd: input.cwd,
+    });
+    if (show.exitCode !== 0) {
+        return (0, commandResult_1.commandFailed)('git_show_failed', `Failed to read commit summary: ${commandDetail(show)}`);
+    }
+    const lines = show.stdout.split(/\r?\n/);
+    return (0, commandResult_1.commandSuccess)({
+        sha: input.sha,
+        message: lines[0]?.trim() || input.sha,
+        files: lines.slice(1).map((line) => line.trim()).filter(Boolean),
+    });
+}
+async function readCommitsSince(input) {
+    const revList = await input.runner.run({
+        command: 'git',
+        args: ['rev-list', '--reverse', `${input.baseHead}..HEAD`],
+        cwd: input.cwd,
+    });
+    if (revList.exitCode !== 0) {
+        return (0, commandResult_1.commandFailed)('git_rev_list_failed', `Failed to read development round commits: ${commandDetail(revList)}`);
+    }
+    const commits = [];
+    for (const sha of revList.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)) {
+        const commit = await readCommitRecord({
+            runner: input.runner,
+            cwd: input.cwd,
+            sha,
+        });
+        if (!commit.ok) {
+            return commit;
+        }
+        commits.push(commit.data);
+    }
+    return (0, commandResult_1.commandSuccess)(commits);
+}
 function decideStatus(input) {
-    if (input.llm.status !== 'completed') {
+    const acceptedTimeoutWork = input.llm.status === 'timeout' && input.commits.length > 0;
+    if (input.llm.status !== 'completed' && !acceptedTimeoutWork) {
         return {
             status: 'failed',
             checksPassed: null,
@@ -220,16 +277,20 @@ function decideStatus(input) {
         return {
             status: 'completed',
             checksPassed: true,
-            summary: `Completed a development round with ${input.commits.length} commit(s) and all checks passing.`,
+            summary: acceptedTimeoutWork
+                ? `LLM runtime timed out after producing ${input.commits.length} commit(s), but all checks passing.`
+                : `Completed a development round with ${input.commits.length} commit(s) and all checks passing.`,
         };
     }
     if (!checksPassed) {
         return {
             status: 'in_progress',
             checksPassed: false,
-            summary: input.commits.length > 0
-                ? 'A development round was committed, but one or more checks failed.'
-                : 'One or more checks failed and no file changes were detected; no commit was created.',
+            summary: acceptedTimeoutWork
+                ? 'LLM runtime timed out after producing commits, and one or more checks failed.'
+                : input.commits.length > 0
+                    ? 'A development round was committed, but one or more checks failed.'
+                    : 'One or more checks failed and no file changes were detected; no commit was created.',
         };
     }
     return {
@@ -381,12 +442,16 @@ async function runLoomDevRoundWorkflow(input) {
         checks: input.checks,
         roundNote: input.roundNote,
     });
+    const baseHead = await readHeadRevision(input.runner, workflow.workspacePath);
+    if (!baseHead.ok) {
+        return baseHead;
+    }
     const llm = await input.executeLlmRound(prompt, workflow.workspacePath);
     const errors = [];
     let git = { statusPorcelain: '', changedFiles: [] };
     let checkRuns = [];
     let commits = [];
-    if (llm.status === 'completed') {
+    if (llm.status === 'completed' || llm.status === 'timeout') {
         checkRuns = await runChecks(input.runner, workflow.workspacePath, input.checks);
         const snapshot = await readGitSnapshot(input.runner, workflow.workspacePath);
         if (!snapshot.ok) {
@@ -404,9 +469,23 @@ async function runLoomDevRoundWorkflow(input) {
             }
             commits = [commit.data];
         }
+        const commitsSinceBase = await readCommitsSince({
+            runner: input.runner,
+            cwd: workflow.workspacePath,
+            baseHead: baseHead.data,
+        });
+        if (!commitsSinceBase.ok) {
+            return commitsSinceBase;
+        }
+        if (commitsSinceBase.data.length > 0) {
+            commits = commitsSinceBase.data;
+        }
     }
     else {
         errors.push(llm.error ?? `LLM runtime ended with status ${llm.status}.`);
+    }
+    if (llm.status === 'timeout') {
+        errors.push(llm.error ?? 'LLM runtime timed out.');
     }
     const decision = decideStatus({
         llm,

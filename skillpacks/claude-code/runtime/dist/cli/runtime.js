@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.LOOM_DEV_ROUND_LLM_TIMEOUT_MS = exports.LOOM_DRAFT_LLM_TIMEOUT_MS = void 0;
 exports.buildA2ASimplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher;
 exports.getDefaultDaemonPort = getDefaultDaemonPort;
 exports.getDaemonRuntimeFingerprint = getDaemonRuntimeFingerprint;
@@ -86,7 +87,8 @@ const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
-const LOOM_DRAFT_LLM_TIMEOUT_MS = 120_000;
+exports.LOOM_DRAFT_LLM_TIMEOUT_MS = 120_000;
+exports.LOOM_DEV_ROUND_LLM_TIMEOUT_MS = 900_000;
 const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 let cachedDaemonRuntimeFingerprint = null;
 function normalizeDispatcherPrivateChatMessage(message) {
@@ -771,11 +773,11 @@ async function draftLoomTaskFromWish(context, input) {
                     runtime: resolved.runtime,
                     prompt,
                     systemPrompt,
-                    timeout: LOOM_DRAFT_LLM_TIMEOUT_MS,
+                    timeout: exports.LOOM_DRAFT_LLM_TIMEOUT_MS,
                     cwd: context.cwd,
                     metaBotSlug,
                 });
-                const deadline = Date.now() + LOOM_DRAFT_LLM_TIMEOUT_MS;
+                const deadline = Date.now() + exports.LOOM_DRAFT_LLM_TIMEOUT_MS;
                 while (Date.now() <= deadline) {
                     const session = await llmExecutor.getSession(sessionId);
                     if (session?.result) {
@@ -2651,11 +2653,11 @@ function createDefaultCliDependencies(context) {
                                 runtimeId: runtime.id,
                                 runtime,
                                 prompt,
-                                timeout: LOOM_DRAFT_LLM_TIMEOUT_MS,
+                                timeout: exports.LOOM_DEV_ROUND_LLM_TIMEOUT_MS,
                                 cwd,
                                 metaBotSlug: developerMetaBotSlug,
                             });
-                            const deadline = Date.now() + LOOM_DRAFT_LLM_TIMEOUT_MS;
+                            const deadline = Date.now() + exports.LOOM_DEV_ROUND_LLM_TIMEOUT_MS;
                             while (Date.now() <= deadline) {
                                 const session = await llmExecutor.getSession(sessionId);
                                 if (session?.result) {
