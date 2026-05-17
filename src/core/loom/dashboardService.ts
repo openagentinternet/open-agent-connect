@@ -7,6 +7,11 @@ import {
   buildLoomDashboard,
   findLoomDashboardTaskDetail,
 } from './dashboardAggregation';
+import {
+  buildLoomDashboardSummaryPreview,
+  projectLoomDashboardNextActions,
+  selectLoomDashboardCardAction,
+} from './dashboardActions';
 import type {
   LoomDashboardActorContext,
   LoomDashboardColumn,
@@ -150,7 +155,7 @@ function actorContextForStaleTask(
     (actorGlobalMetaId && claim.globalMetaId && actorGlobalMetaId === claim.globalMetaId)
     || (actorAddress && claim.creatorAddress && actorAddress === claim.creatorAddress),
   ));
-  const requesterNeedsAction = isRequester && (state === 'delivered' || state === 'revision_needed');
+  const requesterNeedsAction = isRequester && state === 'delivered';
   const developerNeedsAction = isDeveloper && ['claimed', 'in_progress', 'revision_needed'].includes(state);
   return {
     isRequester,
@@ -289,7 +294,18 @@ export function createLoomDashboardService(input: LoomDashboardServiceInput): Lo
           ...card,
           actorContext: actorContextForStaleTask(actorContext, detail.task, activeClaimRecords(detail), card.state),
         };
-        return { card: nextCard, detail };
+        const nextDetail: LoomDashboardTaskDetail = {
+          ...detail,
+          nextActions: [],
+        };
+        nextDetail.nextActions = projectLoomDashboardNextActions({
+          card: nextCard,
+          detail: nextDetail,
+          actor: actorContext,
+        });
+        nextCard.summaryPreview = buildLoomDashboardSummaryPreview({ card: nextCard, detail: nextDetail });
+        nextCard.nextAction = selectLoomDashboardCardAction(nextDetail.nextActions);
+        return { card: nextCard, detail: nextDetail };
       })
       .filter((pair): pair is { card: LoomDashboardTaskCard; detail: LoomDashboardTaskDetail } => Boolean(pair))
       .filter(({ card, detail }) => matchesStaleFilters(card, detail, filters));

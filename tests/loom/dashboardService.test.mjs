@@ -89,6 +89,42 @@ function statusRecord(taskPinId, claimPinId, status, options = {}) {
   });
 }
 
+function deliveryRecord(taskPinId, claimPinId, deliveryPinId, options = {}) {
+  return record('delivery', deliveryPinId, {
+    taskPinId,
+    claimPinId,
+    deliveryBase: 'github',
+    deliverySummary: options.deliverySummary ?? 'Ready for review.',
+    delivery: {
+      prUrl: options.prUrl ?? 'https://github.com/openagentinternet/open-agent-connect/pull/1',
+      prBranch: 'codex/metabot-loom-cli',
+      prBaseBranch: 'main',
+      prTitle: 'feat: loom dashboard',
+    },
+    reviewChecklist: [{ item: 'Tests pass.', status: 'passed' }],
+  }, {
+    timestamp: options.timestamp ?? 1750000003000,
+    creatorAddress: 'developer-address',
+    globalMetaId: developerGlobalMetaId,
+  });
+}
+
+function acceptanceRecord(taskPinId, deliveryPinId, verdict, options = {}) {
+  return record('acceptance', options.pinId ?? pin('a'), {
+    taskPinId,
+    deliveryPinId,
+    verdict,
+    score: verdict === 'passed' ? 5 : 3,
+    comment: `Acceptance verdict is ${verdict}.`,
+    releasePayment: verdict === 'passed',
+    ...(verdict === 'passed' ? { paymentTxId: 'payment-txid' } : {}),
+  }, {
+    timestamp: options.timestamp ?? 1750000004000,
+    creatorAddress: 'requester-address',
+    globalMetaId: requesterGlobalMetaId,
+  });
+}
+
 function cache(records, updatedAt = 1750000010000) {
   return {
     version: 1,
@@ -480,7 +516,61 @@ test('refresh stale fallback applies current filters and actor context', async (
   assert.deepEqual(result.data.dashboard.tasks.map((task) => task.taskPinId), [developerTask.pinId]);
   assert.equal(result.data.dashboard.tasks[0].actorContext.role, 'developer');
   assert.equal(result.data.dashboard.tasks[0].actorContext.needsMyAction, true);
+  assert.equal(result.data.dashboard.tasks[0].nextAction.id, 'runDevRound');
+  assert.equal(result.data.dashboard.details[0].nextActions.some((action) => action.id === 'runDevRound'), true);
   assert.equal(result.data.dashboard.columns.find((column) => column.id === 'working').cards.length, 1);
+});
+
+test('refresh stale fallback treats revision_needed as developer action', async () => {
+  const records = emptyRecords();
+  const task = taskRecord('r', { title: 'Revision stale task' });
+  const claimPinId = pin('rc');
+  const deliveryPinId = pin('rd');
+  records.task.push(task);
+  records.claim.push(claimRecord(task.pinId, claimPinId));
+  records.delivery.push(deliveryRecord(task.pinId, claimPinId, deliveryPinId));
+  records.acceptance.push(acceptanceRecord(task.pinId, deliveryPinId, 'revision_needed'));
+  const staleDashboard = buildLoomDashboard(cache(records));
+
+  const requester = createService({
+    rawState: cache(emptyRecords()),
+    dashboardStore: createMemoryDashboardStore(staleDashboard),
+    dependencies: {
+      async refreshRawCache() {
+        throw new Error('chain offline');
+      },
+      async resolveActorContext() {
+        return { globalMetaId: requesterGlobalMetaId, address: 'requester-address' };
+      },
+    },
+  });
+  const requesterResult = await requester.service.getDashboard({ refresh: true, from: 'requester' });
+
+  assert.equal(requesterResult.ok, true);
+  assert.equal(requesterResult.data.dashboard.tasks[0].state, 'revision_needed');
+  assert.equal(requesterResult.data.dashboard.tasks[0].actorContext.isRequester, true);
+  assert.equal(requesterResult.data.dashboard.tasks[0].actorContext.needsMyAction, false);
+  assert.equal(requesterResult.data.dashboard.summary.needsMyAction, 0);
+
+  const developer = createService({
+    rawState: cache(emptyRecords()),
+    dashboardStore: createMemoryDashboardStore(staleDashboard),
+    dependencies: {
+      async refreshRawCache() {
+        throw new Error('chain offline');
+      },
+      async resolveActorContext() {
+        return { globalMetaId: developerGlobalMetaId, address: 'developer-address' };
+      },
+    },
+  });
+  const developerResult = await developer.service.getDashboard({ refresh: true, from: 'developer' });
+
+  assert.equal(developerResult.ok, true);
+  assert.equal(developerResult.data.dashboard.tasks[0].actorContext.isDeveloper, true);
+  assert.equal(developerResult.data.dashboard.tasks[0].actorContext.needsMyAction, true);
+  assert.equal(developerResult.data.dashboard.summary.needsMyAction, 1);
+  assert.equal(developerResult.data.dashboard.tasks[0].nextAction.id, 'runDevRound');
 });
 
 test('refresh failure returns command failure when dashboard index read throws and raw cache is empty', async () => {

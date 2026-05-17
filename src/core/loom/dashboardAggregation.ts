@@ -6,6 +6,11 @@ import {
 } from './workflowState';
 import type { LoomDerivedTaskState, LoomWorkflowState } from './workflowTypes';
 import { projectLoomDashboardBotIdentity } from './dashboardIdentity';
+import {
+  buildLoomDashboardSummaryPreview,
+  projectLoomDashboardNextActions,
+  selectLoomDashboardCardAction,
+} from './dashboardActions';
 import type {
   BuildLoomDashboardOptions,
   LoomDashboardActorContext,
@@ -313,7 +318,7 @@ function actorContextForTask(
     (actorGlobalMetaId && claim.globalMetaId === actorGlobalMetaId)
     || (actorAddress && claim.creatorAddress === actorAddress),
   ));
-  const requesterNeedsAction = isRequester && (state === 'delivered' || state === 'revision_needed');
+  const requesterNeedsAction = isRequester && state === 'delivered';
   const developerNeedsAction = isDeveloper && ['claimed', 'in_progress', 'revision_needed'].includes(state);
   return {
     isRequester,
@@ -530,6 +535,7 @@ export function buildLoomDashboard(
       warnings,
       timeline,
       localWorkflow,
+      nextActions: [],
       task,
       validRecords: {
         claims: valid.claims,
@@ -539,6 +545,13 @@ export function buildLoomDashboard(
         claimRejects: valid.claimRejects,
       },
     };
+    card.summaryPreview = buildLoomDashboardSummaryPreview({ card, detail });
+    detail.nextActions = projectLoomDashboardNextActions({
+      card,
+      detail,
+      actor: options.actorContext,
+    });
+    card.nextAction = selectLoomDashboardCardAction(detail.nextActions);
     cards.push(card);
     details.push(detail);
   }

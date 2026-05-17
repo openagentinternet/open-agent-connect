@@ -376,6 +376,41 @@ test('actor address fallback marks requester and developer context without globa
   assert.equal(developerCard.actorContext.role, 'developer');
 });
 
+test('revision_needed tasks need developer action, not requester action', () => {
+  const records = emptyRecords();
+  const task = taskRecord('n');
+  const claimPinId = pin('nc');
+  const deliveryPinId = pin('nd');
+  records.task.push(task);
+  records.claim.push(claimRecord(task.pinId, claimPinId));
+  records.delivery.push(deliveryRecord(task.pinId, claimPinId, deliveryPinId));
+  records.acceptance.push(acceptanceRecord(task.pinId, deliveryPinId, 'revision_needed'));
+
+  const requesterDashboard = buildLoomDashboard(cache(records), {
+    actorContext: { globalMetaId: requesterGlobalMetaId, address: '1RequesterAddress' },
+  });
+  const requesterCard = requesterDashboard.tasks.find((taskCard) => taskCard.taskPinId === task.pinId);
+
+  assert.equal(requesterCard.state, 'revision_needed');
+  assert.equal(requesterCard.actorContext.isRequester, true);
+  assert.equal(requesterCard.actorContext.isDeveloper, false);
+  assert.equal(requesterCard.actorContext.needsMyAction, false);
+  assert.equal(requesterDashboard.summary.needsMyAction, 0);
+  assert.equal(requesterCard.nextAction.id, 'runDevRound');
+  assert.match(requesterCard.nextAction.disabledReason, /developer actor/);
+
+  const developerDashboard = buildLoomDashboard(cache(records), {
+    actorContext: { globalMetaId: developerGlobalMetaId, address: '1DeveloperAddress' },
+  });
+  const developerCard = developerDashboard.tasks.find((taskCard) => taskCard.taskPinId === task.pinId);
+
+  assert.equal(developerCard.actorContext.isRequester, false);
+  assert.equal(developerCard.actorContext.isDeveloper, true);
+  assert.equal(developerCard.actorContext.needsMyAction, true);
+  assert.equal(developerDashboard.summary.needsMyAction, 1);
+  assert.equal(developerCard.nextAction.id, 'runDevRound');
+});
+
 test('requester and developer identities use supplied profiles and stable fallbacks', () => {
   const records = emptyRecords();
   const task = taskRecord('i', { globalMetaId: requesterGlobalMetaId, creatorAddress: '1RequesterAddress' });
@@ -453,4 +488,45 @@ test('local workflow enrichment is included without overriding chain state', () 
   assert.deepEqual(card.local?.processLogUris, ['metafile://local-process-log']);
   assert.deepEqual(card.local?.commits.map((commit) => commit.sha), ['local123']);
   assert.ok(detail.timeline.some((event) => event.kind === 'local_workflow'));
+});
+
+test('compact summaries and state-aware actions are attached to cards and detail', () => {
+  const records = emptyRecords();
+  const task = taskRecord('u');
+  const claimPinId = pin('uc');
+  const deliveryPinId = pin('ud');
+  records.task.push(task);
+  records.claim.push(claimRecord(task.pinId, claimPinId));
+  records.delivery.push(deliveryRecord(task.pinId, claimPinId, deliveryPinId, {
+    deliverySummary: 'Ready for requester review with tests passing.',
+  }));
+
+  const dashboard = buildLoomDashboard(cache(records), {
+    actorContext: { profileSlug: 'requester', globalMetaId: requesterGlobalMetaId, address: '1RequesterAddress' },
+  });
+  const card = dashboard.tasks.find((taskCard) => taskCard.taskPinId === task.pinId);
+  const detail = findLoomDashboardTaskDetail(dashboard, task.pinId);
+
+  assert.equal(card.summaryPreview, 'Ready for requester review with tests passing.');
+  assert.equal(card.nextAction.id, 'acceptAndPay');
+  assert.equal(card.nextAction.label, 'Accept and pay');
+  assert.deepEqual(detail.nextActions.map((action) => action.id), ['acceptAndPay', 'requestRevision', 'reject', 'openPr']);
+});
+
+test('global dashboard mode does not mark delivered tasks as needsMyAction', () => {
+  const records = emptyRecords();
+  const task = taskRecord('g');
+  const claimPinId = pin('gc');
+  const deliveryPinId = pin('gd');
+  records.task.push(task);
+  records.claim.push(claimRecord(task.pinId, claimPinId));
+  records.delivery.push(deliveryRecord(task.pinId, claimPinId, deliveryPinId));
+
+  const dashboard = buildLoomDashboard(cache(records));
+  const card = dashboard.tasks.find((taskCard) => taskCard.taskPinId === task.pinId);
+
+  assert.equal(card.actorContext.needsMyAction, false);
+  assert.equal(dashboard.summary.needsMyAction, 0);
+  assert.equal(card.nextAction.label, 'Review required');
+  assert.equal(card.nextAction.requiresActor, true);
 });
