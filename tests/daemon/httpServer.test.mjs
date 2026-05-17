@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const { createHttpServer } = require('../../dist/daemon/httpServer.js');
 const {
   commandSuccess,
+  commandAwaitingConfirmation,
   commandManualActionRequired,
   commandFailed,
 } = require('../../dist/core/contracts/commandResult.js');
@@ -57,6 +58,7 @@ async function startServer(options = {}) {
     loomDashboard: [],
     loomTaskDetail: [],
     loomRefresh: [],
+    loomActions: [],
   };
 
   const server = createHttpServer({
@@ -730,6 +732,28 @@ async function startServer(options = {}) {
           input,
         });
       },
+      actions: async (input) => {
+        calls.loomActions.push(input);
+        switch (input.result) {
+          case 'preview':
+            return commandAwaitingConfirmation({ action: input.action });
+          case 'validation':
+            return commandFailed('loom_action_invalid', 'Unsupported Loom UI action.');
+          case 'permission':
+            return commandFailed('permission_denied', 'This actor cannot mutate the task.');
+          case 'conflict':
+            return commandFailed('already_delivered', 'This claim is already delivered.');
+          case 'stale':
+            return commandFailed('stale_task_state', 'Refresh the task before retrying.');
+          case 'finalized':
+            return commandFailed('delivery_finalized_conflict', 'This delivery has already been finalized.');
+          default:
+            return commandSuccess({
+              action: input.action,
+              accepted: true,
+            });
+        }
+      },
     },
     ui: useBuiltInUiPages
       ? undefined
@@ -1034,6 +1058,95 @@ test('POST /api/loom/refresh forwards the JSON body to loom.refresh', async (t) 
   assert.equal(response.status, 200);
   assert.deepEqual(server.calls.loomRefresh, [request]);
   assert.equal(payload.ok, true);
+});
+
+test('POST /api/loom/actions forwards the JSON body to loom.actions', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const request = { action: 'claimAndStart', confirm: true, from: 'dev', taskPinId: 'task-1' };
+  const response = await fetch(`${server.baseUrl}/api/loom/actions`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.loomActions, [request]);
+  assert.deepEqual(payload, commandSuccess({
+    action: 'claimAndStart',
+    accepted: true,
+  }));
+});
+
+test('unsupported method on /api/loom/actions returns method_not_allowed', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/loom/actions`, {
+    method: 'GET',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 405);
+  assert.equal(response.headers.get('allow'), 'POST');
+  assert.deepEqual(payload, commandFailed('method_not_allowed', 'Expected POST.'));
+});
+
+test('POST /api/loom/actions returns bad_request for invalid JSON', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/loom/actions`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: '{"action":',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'bad_request');
+  assert.deepEqual(server.calls.loomActions, []);
+});
+
+test('POST /api/loom/actions maps action result states to HTTP statuses', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const cases = [
+    { result: 'preview', status: 200, state: 'awaiting_confirmation' },
+    { result: 'validation', status: 400, code: 'loom_action_invalid' },
+    { result: 'permission', status: 403, code: 'permission_denied' },
+    { result: 'conflict', status: 409, code: 'already_delivered' },
+    { result: 'stale', status: 409, code: 'stale_task_state' },
+    { result: 'finalized', status: 409, code: 'delivery_finalized_conflict' },
+  ];
+
+  for (const entry of cases) {
+    const response = await fetch(`${server.baseUrl}/api/loom/actions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ action: 'acceptAndPay', result: entry.result }),
+    });
+    const payload = await response.json();
+
+    assert.equal(response.status, entry.status);
+    if (entry.state) {
+      assert.equal(payload.ok, true);
+      assert.equal(payload.state, entry.state);
+    } else {
+      assert.equal(payload.ok, false);
+      assert.equal(payload.code, entry.code);
+    }
+  }
 });
 
 test('unsupported method on /api/loom/dashboard returns method_not_allowed', async (t) => {
