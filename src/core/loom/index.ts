@@ -23,3 +23,4 @@ export * from './dashboardActions';
 export * from './dashboardAggregation';
 export * from './dashboardStore';
 export * from './dashboardService';
+export * from './uiActionService';
