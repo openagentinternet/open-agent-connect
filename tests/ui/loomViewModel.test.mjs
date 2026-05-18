@@ -206,7 +206,7 @@ test('buildLoomDashboardViewModel exposes active actor identity for toolbar disp
 
   const anonymous = buildLoomDashboardViewModel({ dashboard: { actor: {} } }, NOW);
   assert.equal(anonymous.actor.profileSlug, '');
-  assert.equal(anonymous.actor.displayLabel, 'No active Bot');
+  assert.equal(anonymous.actor.displayLabel, 'Global Loom');
   assert.equal(anonymous.actor.globalMetaId.copyValue, '');
   assert.equal(anonymous.actor.address, null);
 });
@@ -235,6 +235,8 @@ test('buildLoomDashboardViewModel preserves stable board order and builds compac
   assert.equal(card.title, 'Add deterministic loom dashboard view model');
   assert.equal(card.stateLabel, 'Needs revision');
   assert.equal(card.stateTone, 'warning');
+  assert.equal(card.summaryPreview, 'Tests added; implementation pending.');
+  assert.equal(card.activityLabel, 'updated just now');
   assert.equal(card.bountyLabel, '0.25 SPACE');
   assert.equal(card.repoLabel, 'openagentinternet/foo.bar @ main');
   assert.equal(card.warningTone, 'warning');
@@ -250,6 +252,14 @@ test('buildLoomDashboardViewModel preserves stable board order and builds compac
   assert.equal(card.paymentTxId.copyValue, LONG_TXID);
   assert.match(card.paymentTxId.label, /^txid123/);
   assert.match(card.paymentTxId.label, /cdef$/);
+});
+
+test('buildLoomDashboardViewModel hides actor-specific action labels in global mode', () => {
+  const model = buildLoomDashboardViewModel(dashboard({ actor: {} }), NOW);
+  const [card] = model.columns[4].cards;
+
+  assert.equal(model.actor.displayLabel, 'Global Loom');
+  assert.equal(card.actionLabel, '');
 });
 
 test('buildLoomDashboardViewModel sorts task detail timeline and exposes full copy values', () => {

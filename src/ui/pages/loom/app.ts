@@ -10,26 +10,19 @@ export function buildLoomPageDefinition(): LocalUiPageDefinition {
     panels: [],
     contentHtml: `
       <section class="loom-shell" data-loom-shell>
+        <section class="loom-board-shell" aria-label="Loom board">
         <section class="loom-toolbar" aria-label="Loom board controls">
           <div class="loom-toolbar-main">
-            <div>
-              <div class="loom-kicker">Loom Board</div>
-              <h1>Task operations</h1>
+            <div class="loom-title-block">
+              <h1>Loom</h1>
+              <span class="loom-scope-label" data-loom-scope-label>Global</span>
             </div>
-            <button type="button" class="loom-icon-button loom-refresh" data-loom-refresh title="Refresh dashboard" aria-label="Refresh dashboard">↻</button>
+            <div class="loom-toolbar-actions">
+              <button type="button" class="loom-action-button" data-loom-new-task disabled title="New task">New task</button>
+              <button type="button" class="loom-icon-button loom-refresh" data-loom-refresh title="Refresh dashboard" aria-label="Refresh dashboard">↻</button>
+            </div>
           </div>
-          <div class="loom-toolbar-context">
-            <div class="loom-context-item">
-              <span>Actor</span>
-              <strong data-loom-actor>Loading...</strong>
-            </div>
-            <div class="loom-context-item">
-              <span>Last refresh</span>
-              <strong data-loom-updated>Loading...</strong>
-            </div>
-            <div class="loom-context-warning" data-loom-stale-warning></div>
-          </div>
-          <div class="loom-filters" aria-label="Loom board filters">
+          <div class="loom-filters" aria-label="Loom board filters" hidden>
             <label>
               <span>State</span>
               <select data-loom-state-filter>
@@ -60,6 +53,7 @@ export function buildLoomPageDefinition(): LocalUiPageDefinition {
           </div>
           <div class="loom-status-line">
             <span data-loom-status>Loading dashboard...</span>
+            <span class="loom-context-warning" data-loom-stale-warning></span>
             <span data-loom-error></span>
           </div>
         </section>
@@ -75,6 +69,7 @@ export function buildLoomPageDefinition(): LocalUiPageDefinition {
             </div>
           </aside>
         </section>
+        </section>
       </section>
     `,
     script: buildLoomPageScript(),
@@ -86,8 +81,8 @@ export function buildLoomPageScript(): string {
   const elements = {
     status: document.querySelector('[data-loom-status]'),
     refresh: document.querySelector('[data-loom-refresh]'),
-    actor: document.querySelector('[data-loom-actor]'),
-    updated: document.querySelector('[data-loom-updated]'),
+    newTask: document.querySelector('[data-loom-new-task]'),
+    scopeLabel: document.querySelector('[data-loom-scope-label]'),
     staleWarning: document.querySelector('[data-loom-stale-warning]'),
     stateFilter: document.querySelector('[data-loom-state-filter]'),
     roleFilter: document.querySelector('[data-loom-role-filter]'),
@@ -194,6 +189,10 @@ export function buildLoomPageScript(): string {
     const bounty = obj(value);
     return [text(bounty.amount), text(bounty.currency)].filter(Boolean).join(' ') || 'Bounty not set';
   };
+  const previewText = (...values) => {
+    const normalized = values.map(text).find(Boolean) || '';
+    return normalized.length <= 96 ? normalized : normalized.slice(0, 93).trimEnd() + '...';
+  };
   const repoLabel = (value) => {
     const repo = obj(value);
     const repoUri = text(repo.repoUri);
@@ -211,7 +210,7 @@ export function buildLoomPageScript(): string {
       label: repoLabel(repo),
     };
   };
-  const cardModel = (value) => {
+  const cardModel = (value, hasActor) => {
     const card = obj(value);
     const taskPinId = text(card.taskPinId);
     if (!taskPinId) return null;
@@ -230,13 +229,15 @@ export function buildLoomPageScript(): string {
       repo: repoModel(card.repo),
       repoLabel: repoLabel(card.repo),
       tags: arr(card.tags).filter((item) => typeof item === 'string'),
+      summaryPreview: previewText(card.latestStatusSummary, card.summary, card.description),
+      activityLabel: num(card.updatedAt) ? 'updated ' + relativeTime(num(card.updatedAt)) : '',
       latestStatusSummary: text(card.latestStatusSummary),
       prUrl: text(card.prUrl),
       paymentTxId: compact(card.paymentTxId),
       activeClaimCount: num(card.activeClaimCount),
       warningCount,
       warningLabel: countLabel(warningCount, 'warning', 'warnings'),
-      needsAction: obj(card.actorContext).needsMyAction === true,
+      actionLabel: hasActor && obj(card.actorContext).needsMyAction === true ? 'Needs my action' : '',
       updatedAt: num(card.updatedAt),
       createdAt: num(card.createdAt),
     };
@@ -330,13 +331,21 @@ export function buildLoomPageScript(): string {
     const dashboard = dashboardFrom(payload);
     const summary = obj(dashboard.summary);
     const rawColumns = arr(dashboard.columns);
-    const cardsFromTasks = arr(dashboard.tasks).map(cardModel).filter(Boolean);
-    const cardsFromColumns = rawColumns.flatMap((column) => arr(obj(column).cards)).map(cardModel).filter(Boolean);
+    const actor = obj(dashboard.actor);
+    const actorModel = {
+      profileSlug: text(actor.profileSlug),
+      displayLabel: text(actor.profileSlug) || compact(actor.globalMetaId).label || compact(actor.address).label || 'Global Loom',
+      globalMetaId: compact(actor.globalMetaId),
+      address: compact(actor.address),
+    };
+    const hasActor = Boolean(actorModel.profileSlug || actorModel.globalMetaId.copyValue || actorModel.address.copyValue);
+    const cardsFromTasks = arr(dashboard.tasks).map((card) => cardModel(card, hasActor)).filter(Boolean);
+    const cardsFromColumns = rawColumns.flatMap((column) => arr(obj(column).cards)).map((card) => cardModel(card, hasActor)).filter(Boolean);
     const cards = cardsFromTasks.length ? cardsFromTasks : cardsFromColumns;
     const cardsByColumn = new Map();
     rawColumns.forEach((column) => {
       const columnObj = obj(column);
-      const columnCards = arr(columnObj.cards).map(cardModel).filter(Boolean);
+      const columnCards = arr(columnObj.cards).map((card) => cardModel(card, hasActor)).filter(Boolean);
       if (columnCards.length) cardsByColumn.set(text(columnObj.id), columnCards);
     });
     cards.forEach((card) => {
@@ -344,17 +353,11 @@ export function buildLoomPageScript(): string {
         cardsByColumn.set(card.columnId, cards.filter((entry) => entry.columnId === card.columnId));
       }
     });
-    const actor = obj(dashboard.actor);
     const refresh = obj(dashboard.refresh);
     const updatedAt = num(refresh.updatedAt) || num(dashboard.updatedAt);
     const warning = text(refresh.warning) || (updatedAt && Date.now() - updatedAt > 900000 ? 'Dashboard data may be stale.' : '');
     return {
-      actor: {
-        profileSlug: text(actor.profileSlug),
-        displayLabel: text(actor.profileSlug) || compact(actor.globalMetaId).label || compact(actor.address).label || 'No active Bot',
-        globalMetaId: compact(actor.globalMetaId),
-        address: compact(actor.address),
-      },
+      actor: actorModel,
       summary: {
         metrics: [
           ['totalTasks', 'Total tasks', num(summary.totalTasks), false],
@@ -399,28 +402,25 @@ export function buildLoomPageScript(): string {
   };
   const botInline = (bot, label) => '<div class="loom-bot"><div>' + avatar(bot) + '</div><div class="loom-bot-text"><span>' + esc(label) + '</span><strong>' + esc(bot.displayName) + '</strong><small>' + esc(bot.globalMetaId || bot.fallbackLabel) + '</small></div></div>';
   const renderMetrics = () => {
-    setHtml(elements.metrics, currentModel.summary.metrics.map((metric) => (
+    const visibleMetrics = currentModel.summary.metrics.filter((metric) => (
+      ['totalTasks', 'open', 'working', 'review', 'revision', 'invalidRecords'].includes(metric[0])
+    ));
+    setHtml(elements.metrics, visibleMetrics.map((metric) => (
       '<article class="loom-metric" data-tone="' + (metric[3] ? 'warning' : 'neutral') + '">' +
       '<span>' + esc(metric[1]) + '</span>' +
-      '<strong>' + esc(Number(metric[2]).toLocaleString('en-US')) + '</strong>' +
+      '<strong>' + esc(metric[0] === 'totalTasks' ? countLabel(Number(metric[2]), 'task', 'tasks') : Number(metric[2]).toLocaleString('en-US')) + '</strong>' +
       '</article>'
     )).join(''));
   };
   const renderCard = (card) => (
     '<article class="loom-task-card' + (card.taskPinId === selectedTaskPinId ? ' is-selected' : '') + '" data-loom-card="' + esc(card.taskPinId) + '" tabindex="0">' +
     '<div class="loom-card-top"><h3>' + esc(card.title) + '</h3><span class="loom-state" data-tone="' + esc(card.stateTone) + '">' + esc(card.stateLabel) + '</span></div>' +
-    '<div class="loom-card-pin"><span>' + esc(card.taskPin.label) + '</span>' + copyButton('Copy', card.taskPin.copyValue) + '</div>' +
+    (card.summaryPreview ? '<p>' + esc(card.summaryPreview) + '</p>' : '') +
     '<div class="loom-card-bots">' + botInline(card.requester, 'Requester') + (card.developer ? botInline(card.developer, 'Developer') : '<div class="loom-bot loom-bot-empty">No developer claim</div>') + '</div>' +
-    '<div class="loom-card-meta"><span>' + esc(card.bountyLabel) + '</span><span>' + esc(card.repoLabel) + '</span></div>' +
-    (card.tags.length ? '<div class="loom-tag-row">' + card.tags.slice(0, 4).map((tag) => '<span class="loom-chip">' + esc(tag) + '</span>').join('') + '</div>' : '') +
-    (card.latestStatusSummary ? '<p>' + esc(card.latestStatusSummary) + '</p>' : '') +
     '<div class="loom-card-footer">' +
-    (card.updatedAt ? '<span class="loom-chip">Updated ' + esc(relativeTime(card.updatedAt)) + '</span>' : '') +
-    (card.activeClaimCount ? '<span class="loom-chip">' + esc(countLabel(card.activeClaimCount, 'claim', 'claims')) + '</span>' : '') +
-    (card.paymentTxId.copyValue ? '<span class="loom-chip">Paid ' + esc(card.paymentTxId.label) + '</span>' + copyButton('Copy tx', card.paymentTxId.copyValue) : '') +
-    (card.needsAction ? '<span class="loom-chip warning">Needs my action</span>' : '') +
+    (card.activityLabel ? '<span class="loom-chip">' + esc(card.activityLabel) + '</span>' : '') +
+    (card.actionLabel ? '<span class="loom-chip warning">' + esc(card.actionLabel) + '</span>' : '') +
     (card.warningCount ? '<span class="loom-chip warning">' + esc(card.warningLabel) + '</span>' : '') +
-    (card.prUrl ? safeExternalLink(card.prUrl, isHttpUrl(card.prUrl) ? 'PR ↗' : card.prUrl, 'loom-chip') : '') +
     '</div>' +
     '</article>'
   );
@@ -431,7 +431,7 @@ export function buildLoomPageScript(): string {
     }
     setHtml(elements.board, currentModel.columns.map((column) => (
       '<section class="loom-column" data-column="' + esc(column.id) + '">' +
-      '<header><h2>' + esc(column.title) + '</h2><span>' + String(column.cards.length) + '</span></header>' +
+      '<header><h2>' + esc(column.title) + '</h2><span>' + esc(countLabel(column.cards.length, 'task', 'tasks')) + '</span></header>' +
       '<div class="loom-column-list">' + (column.cards.length ? column.cards.map(renderCard).join('') : '<p class="loom-empty-column">No tasks</p>') + '</div>' +
       '</section>'
     )).join(''));
@@ -636,8 +636,7 @@ export function buildLoomPageScript(): string {
     if (!selectedTaskPinId || !currentModel.cards.some((card) => card.taskPinId === selectedTaskPinId)) {
       selectedTaskPinId = currentModel.cards[0] ? currentModel.cards[0].taskPinId : '';
     }
-    setText(elements.actor, currentModel.actor.displayLabel);
-    setText(elements.updated, currentModel.refresh.updatedLabel);
+    setText(elements.scopeLabel, fromQuery() ? 'From ' + fromQuery() : 'Global');
     setText(elements.staleWarning, currentModel.refresh.warningLabel);
     setStatus(currentModel.cards.length ? 'Dashboard loaded.' : 'No Loom tasks found.', 'ready');
     setText(elements.error, '');
@@ -701,6 +700,7 @@ export function buildLoomPageScript(): string {
   });
   if (elements.queryFilter) elements.queryFilter.addEventListener('input', loadDashboard);
   if (elements.refresh) elements.refresh.addEventListener('click', refreshDashboard);
+  if (elements.newTask) elements.newTask.disabled = true;
   loadDashboard();
 })();`;
 }

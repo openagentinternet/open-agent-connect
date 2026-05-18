@@ -48,6 +48,8 @@ export interface LoomCardViewModel {
   bountyLabel: string;
   repoLabel: string;
   tags: string[];
+  summaryPreview: string;
+  activityLabel: string;
   latestStatusSummary: string;
   prUrl: string;
   paymentTxId: LoomCopyLabelViewModel | null;
@@ -255,7 +257,7 @@ function actorViewModel(value: unknown): LoomActorViewModel {
   const profileSlug = text(actor.profileSlug);
   const globalMetaId = requiredCompactLabel(actor.globalMetaId);
   const address = compactLabel(text(actor.address));
-  const displayLabel = profileSlug || globalMetaId.label || address?.label || 'No active Bot';
+  const displayLabel = profileSlug || globalMetaId.label || address?.label || 'Global Loom';
 
   return {
     profileSlug,
@@ -293,12 +295,21 @@ function repoLabel(value: unknown): string {
   return [readableRepo || 'Repository not set', baseBranch].filter(Boolean).join(' @ ');
 }
 
-function actionLabel(actorContext: unknown): string {
+function previewText(...values: unknown[]): string {
+  const normalized = values
+    .map((value) => text(value))
+    .find(Boolean) ?? '';
+  if (normalized.length <= 96) return normalized;
+  return `${normalized.slice(0, 93).trimEnd()}...`;
+}
+
+function actionLabel(actorContext: unknown, hasActor: boolean): string {
+  if (!hasActor) return '';
   const actor = asObject(actorContext);
   return actor?.needsMyAction === true ? 'Needs my action' : '';
 }
 
-function cardViewModel(value: unknown): LoomCardViewModel | null {
+function cardViewModel(value: unknown, options: { hasActor: boolean; now: number }): LoomCardViewModel | null {
   const card = asObject(value);
   if (!card) return null;
   const taskPinId = text(card.taskPinId);
@@ -319,40 +330,44 @@ function cardViewModel(value: unknown): LoomCardViewModel | null {
     bountyLabel: bountyLabel(card.bounty),
     repoLabel: repoLabel(card.repo),
     tags: stringArray(card.tags),
+    summaryPreview: previewText(card.latestStatusSummary, card.summary, card.description),
+    activityLabel: numberValue(card.updatedAt)
+      ? `updated ${relativeTimeLabel(numberValue(card.updatedAt), options.now)}`
+      : '',
     latestStatusSummary: text(card.latestStatusSummary),
     prUrl: text(card.prUrl),
     paymentTxId,
     warningCount,
     warningLabel: countLabel(warningCount, 'warning', 'warnings'),
     warningTone: warningCount > 0 ? 'warning' : 'neutral',
-    actionLabel: actionLabel(card.actorContext),
+    actionLabel: actionLabel(card.actorContext, options.hasActor),
     updatedAt: numberValue(card.updatedAt),
     createdAt: numberValue(card.createdAt),
   };
 }
 
-function flattenColumnCards(columns: PlainObject[]): LoomCardViewModel[] {
+function flattenColumnCards(columns: PlainObject[], options: { hasActor: boolean; now: number }): LoomCardViewModel[] {
   return columns
     .flatMap((column) => asArray(column.cards))
-    .map(cardViewModel)
+    .map((card) => cardViewModel(card, options))
     .filter((card): card is LoomCardViewModel => Boolean(card));
 }
 
-function buildCards(dashboard: PlainObject, columns: PlainObject[]): LoomCardViewModel[] {
+function buildCards(dashboard: PlainObject, columns: PlainObject[], options: { hasActor: boolean; now: number }): LoomCardViewModel[] {
   const taskCards = asArray(dashboard.tasks)
-    .map(cardViewModel)
+    .map((card) => cardViewModel(card, options))
     .filter((card): card is LoomCardViewModel => Boolean(card));
-  return taskCards.length ? taskCards : flattenColumnCards(columns);
+  return taskCards.length ? taskCards : flattenColumnCards(columns, options);
 }
 
-function columnsViewModel(dashboard: PlainObject, allCards: LoomCardViewModel[]): LoomColumnViewModel[] {
+function columnsViewModel(dashboard: PlainObject, allCards: LoomCardViewModel[], options: { hasActor: boolean; now: number }): LoomColumnViewModel[] {
   const rawColumns = asArray(dashboard.columns);
   const cardsByColumn = new Map<LoomDashboardColumnId, LoomCardViewModel[]>();
 
   for (const column of rawColumns) {
     const id = safeColumnId(column.id);
     const cards = asArray(column.cards)
-      .map(cardViewModel)
+      .map((card) => cardViewModel(card, options))
       .filter((card): card is LoomCardViewModel => Boolean(card));
     if (cards.length) {
       cardsByColumn.set(id, cards);
@@ -516,14 +531,17 @@ function detailViewModel(value: unknown): LoomDetailViewModel | null {
 export function buildLoomDashboardViewModel(input: unknown, now = Date.now()): LoomDashboardViewModel {
   const dashboard = dashboardFrom(input);
   const rawColumns = asArray(dashboard.columns);
-  const cards = buildCards(dashboard, rawColumns);
-  const columns = columnsViewModel(dashboard, cards);
+  const actor = actorViewModel(dashboard.actor);
+  const hasActor = Boolean(actor.profileSlug || actor.globalMetaId.copyValue || actor.address?.copyValue);
+  const cardOptions = { hasActor, now };
+  const cards = buildCards(dashboard, rawColumns, cardOptions);
+  const columns = columnsViewModel(dashboard, cards, cardOptions);
   const details = asArray(dashboard.details)
     .map(detailViewModel)
     .filter((detail): detail is LoomDetailViewModel => Boolean(detail));
 
   return {
-    actor: actorViewModel(dashboard.actor),
+    actor,
     summary: summaryViewModel(dashboard, now),
     columns,
     cards,

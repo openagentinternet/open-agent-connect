@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import vm from 'node:vm';
@@ -158,7 +159,7 @@ function dashboard(overrides = {}) {
     dashboard: {
       version: 1,
       updatedAt: NOW - 5_000,
-      actor: { profileSlug: 'eric', globalMetaId: 'gm-eric', address: '1EricAddress' },
+      actor: {},
       summary: {
         totalTasks: 1,
         open: 0,
@@ -302,8 +303,8 @@ async function runLoomScript(options = {}) {
   const elements = {
     '[data-loom-status]': new FakeElement(),
     '[data-loom-refresh]': new FakeElement(),
-    '[data-loom-actor]': new FakeElement(),
-    '[data-loom-updated]': new FakeElement(),
+    '[data-loom-new-task]': new FakeElement(),
+    '[data-loom-scope-label]': new FakeElement(),
     '[data-loom-stale-warning]': new FakeElement(),
     '[data-loom-state-filter]': new FakeElement(options.state || ''),
     '[data-loom-role-filter]': new FakeElement(options.role || ''),
@@ -356,7 +357,7 @@ async function runLoomScript(options = {}) {
     Error,
     Array,
     window: {
-      location: { search: options.search || '?from=eric' },
+      location: { search: options.search || '' },
     },
     navigator: {
       clipboard: {
@@ -400,16 +401,28 @@ async function runLoomScript(options = {}) {
 test('loom page script loads dashboard JSON, renders board cards with Bot names, and selects task detail', async () => {
   const { elements, fetchCalls, writes } = await runLoomScript();
 
-  assert.equal(fetchCalls[0].url, '/api/loom/dashboard?from=eric');
-  assert.match(elements['[data-loom-actor]'].textContent, /eric/);
-  assert.match(elements['[data-loom-metrics]'].innerHTML, /Needs my action/);
+  const contentHtml = buildLoomPageDefinition().contentHtml;
+  assert.equal(fetchCalls[0].url, '/api/loom/dashboard');
+  assert.equal(elements['[data-loom-scope-label]'].textContent, 'Global');
+  assert.equal(elements['[data-loom-new-task]'].disabled, true);
+  assert.doesNotMatch(contentHtml, /data-loom-actor|data-loom-updated/);
+  assert.match(contentHtml, /class="loom-filters"[^>]*hidden/u);
+  assert.doesNotMatch(contentHtml, /later phase/i);
+  assert.doesNotMatch(elements['[data-loom-metrics]'].innerHTML, /Needs my action/);
+  assert.match(elements['[data-loom-metrics]'].innerHTML, /1 task/);
   assert.match(elements['[data-loom-board]'].innerHTML, /Review/);
+  assert.match(elements['[data-loom-board]'].innerHTML, /Review[\s\S]*1 task/);
+  assert.match(elements['[data-loom-board]'].innerHTML, /Open[\s\S]*0 tasks/);
   assert.match(elements['[data-loom-board]'].innerHTML, /Wire Loom board UI/);
+  assert.match(elements['[data-loom-board]'].innerHTML, /Delivery is ready for review/);
   assert.match(elements['[data-loom-board]'].innerHTML, /Requester Bot/);
   assert.match(elements['[data-loom-board]'].innerHTML, /Active Developer Bot/);
-  assert.match(elements['[data-loom-board]'].innerHTML, /phase-3/);
-  assert.match(elements['[data-loom-board]'].innerHTML, /1 claim/);
-  assert.match(elements['[data-loom-board]'].innerHTML, new RegExp(PAYMENT_TXID.slice(0, 8)));
+  assert.match(elements['[data-loom-board]'].innerHTML, /1 warning/);
+  assert.doesNotMatch(elements['[data-loom-board]'].innerHTML, /Needs my action/);
+  assert.doesNotMatch(elements['[data-loom-board]'].innerHTML, /phase-3/);
+  assert.doesNotMatch(elements['[data-loom-board]'].innerHTML, /0\.5 SPACE/);
+  assert.doesNotMatch(elements['[data-loom-board]'].innerHTML, /openagentinternet\/open-agent-connect/);
+  assert.doesNotMatch(elements['[data-loom-board]'].innerHTML, new RegExp(PAYMENT_TXID.slice(0, 8)));
   assert.match(elements['[data-loom-board]'].innerHTML, /just now/);
 
   const [card] = elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
@@ -467,8 +480,39 @@ test('loom page script loads dashboard JSON, renders board cards with Bot names,
   assert.equal(writes[0], TASK_PIN);
 });
 
+test('loom page script uses dashboard actor presence for scoped action labels', async () => {
+  const noActorDashboard = dashboard({ actor: {} });
+  const noActorResult = await runLoomScript({ search: '?from=eric', payloads: [noActorDashboard] });
+
+  assert.equal(noActorResult.fetchCalls[0].url, '/api/loom/dashboard?from=eric');
+  assert.equal(noActorResult.elements['[data-loom-scope-label]'].textContent, 'From eric');
+  assert.doesNotMatch(noActorResult.elements['[data-loom-board]'].innerHTML, /Needs my action/);
+
+  const actorDashboard = dashboard({
+    actor: { profileSlug: 'eric', globalMetaId: 'gm-eric', address: '1EricAddress' },
+  });
+  const actorResult = await runLoomScript({ search: '?from=eric', payloads: [actorDashboard] });
+
+  assert.equal(actorResult.fetchCalls[0].url, '/api/loom/dashboard?from=eric');
+  assert.match(actorResult.elements['[data-loom-board]'].innerHTML, /Needs my action/);
+});
+
+test('loom page stylesheet keeps tablet layout inside the board shell', () => {
+  const template = readFileSync(new URL('../../src/ui/pages/loom/index.html', import.meta.url), 'utf8');
+
+  assert.match(template, /@supports \(height: 100svh\)/u);
+  assert.doesNotMatch(template, /\.loom-workspace\s*\{[^}]*overflow:\s*auto/);
+  assert.doesNotMatch(template, /\.loom-workspace\s*\{[^}]*flex-direction:\s*column/);
+  assert.doesNotMatch(template, /\.loom-board\s*\{[^}]*min-height:\s*560px/);
+  assert.match(template, /@media \(max-width: 680px\)\s*\{[\s\S]*?\.loom-detail\s*\{[^}]*display:\s*none[^}]*\}/u);
+  assert.match(template, /@media \(max-width: 680px\)\s*\{[\s\S]*?\.loom-board\s*\{[^}]*overflow-x:\s*auto[^}]*\}/u);
+  assert.match(template, /@media \(max-width: 680px\)\s*\{[\s\S]*?\.loom-column\s*\{[^}]*width:\s*280px[^}]*flex-basis:\s*280px[^}]*\}/u);
+  assert.match(template, /\.loom-column-list\s*\{[^}]*overflow-y:\s*auto/su);
+});
+
 test('loom page filters reload dashboard and refresh preserves current filters', async () => {
   const { elements, fetchCalls } = await runLoomScript({
+    search: '?from=eric',
     payloads: [dashboard(), dashboard(), dashboard()],
   });
 
@@ -489,7 +533,7 @@ test('loom page filters reload dashboard and refresh preserves current filters',
     role: 'needs_action',
     query: 'github',
   });
-  assert.match(elements['[data-loom-metrics]'].innerHTML, /Total tasks[\s\S]*<strong>1<\/strong>/);
+  assert.match(elements['[data-loom-metrics]'].innerHTML, /Total tasks[\s\S]*<strong>1 task<\/strong>/);
   assert.match(elements['[data-loom-board]'].innerHTML, /Wire Loom board UI/);
 });
 
@@ -513,7 +557,7 @@ test('loom page does not render unsafe dashboard URLs as clickable links', async
   await card.listeners.get('click')();
   assert.doesNotMatch(elements['[data-loom-detail]'].innerHTML, /href="javascript:/i);
   assert.doesNotMatch(elements['[data-loom-detail]'].innerHTML, /href="data:/i);
-  assert.match(elements['[data-loom-board]'].innerHTML, /javascript:alert\(1\)/);
+  assert.doesNotMatch(elements['[data-loom-board]'].innerHTML, /javascript:alert\(1\)/);
   assert.match(elements['[data-loom-detail]'].innerHTML, /javascript:alert\(1\)/);
   assert.match(elements['[data-loom-detail]'].innerHTML, /data:text\/html,x/);
 });
