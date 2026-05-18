@@ -80,6 +80,7 @@ export interface SellerReceivedRefundItem {
     refundCompletedAt: number | null;
     counterpartyGlobalMetaId: string | null;
     counterpartyName: string | null;
+    localMetabotSlug: string | null;
     traceId: string | null;
     traceHref: string | null;
     runtimeSessionId: string | null;

@@ -2389,6 +2389,54 @@ async function listRuntimeDirectoryServices(input) {
         fallbackUsed: directory.fallbackUsed,
     };
 }
+function collectServiceCacheIdentityKeys(service) {
+    return new Set([
+        service.servicePinId,
+        service.pinId,
+        service.sourceServicePinId,
+        ...(Array.isArray(service.chainPinIds) ? service.chainPinIds : []),
+    ]
+        .map((value) => normalizeText(value))
+        .filter(Boolean));
+}
+async function upsertPublishedLocalServiceIntoOnlineCache(input) {
+    const decorated = await decorateServicesWithSocketPresence({
+        services: [input.service],
+        socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+        socketPresenceFailureMode: input.socketPresenceFailureMode,
+        onlineOnly: false,
+    });
+    const enriched = await enrichServicesWithProviderChatPublicKeys({
+        services: decorated,
+        resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
+    });
+    const publishedService = enriched[0];
+    if (!publishedService) {
+        return;
+    }
+    const publishedKeys = collectServiceCacheIdentityKeys(publishedService);
+    const ratingState = await input.ratingDetailStateStore?.read().catch(() => null);
+    await input.onlineServiceCacheStore.update((current) => {
+        const retainedServices = current.services.filter((service) => {
+            const serviceKeys = collectServiceCacheIdentityKeys(service);
+            for (const key of publishedKeys) {
+                if (serviceKeys.has(key)) {
+                    return false;
+                }
+            }
+            return true;
+        });
+        return (0, onlineServiceCache_1.buildOnlineServiceCacheState)({
+            services: [
+                publishedService,
+                ...retainedServices.map((service) => ({ ...service })),
+            ],
+            ratingDetails: ratingState?.items ?? [],
+            discoverySource: current.discoverySource,
+            fallbackUsed: current.fallbackUsed,
+        });
+    });
+}
 async function listRuntimeDirectoryMasters(input) {
     const localMasterState = await input.masterStateStore.read();
     const localMasters = localMasterState.masters
@@ -9160,6 +9208,65 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('service_revoke_failed', error instanceof Error ? error.message : String(error));
                 }
             },
+            listRefunds: async (request = {}) => {
+                const requestedFrom = normalizeText(request.from);
+                const kind = normalizeText(request.kind);
+                const scoped = await resolveScopedProviderForActor(request.from);
+                if (scoped.failure) {
+                    return scoped.failure;
+                }
+                if (scoped.provider?.getRefunds) {
+                    return scoped.provider.getRefunds({
+                        from: requestedFrom,
+                        ...(kind ? { kind } : {}),
+                    });
+                }
+                if (!requestedFrom && request.all === true) {
+                    const states = await loadProviderRefundProfileStates();
+                    return (0, commandResult_1.commandSuccess)(mergeProviderRefundsPayloads(states.map((state) => buildProviderRefundsPayload({ state })), kind));
+                }
+                const state = await runtimeStateStore.readState();
+                const payload = buildProviderRefundsPayload({ state });
+                if (kind === 'initiated') {
+                    const initiatedByMe = payload.initiatedByMe;
+                    return (0, commandResult_1.commandSuccess)({
+                        initiatedByMe,
+                        receivedByMe: [],
+                        totalCount: initiatedByMe.length,
+                        pendingCount: initiatedByMe.filter((entry) => entry.status === 'refund_pending').length,
+                    });
+                }
+                if (kind === 'received') {
+                    const receivedByMe = payload.receivedByMe;
+                    return (0, commandResult_1.commandSuccess)({
+                        initiatedByMe: [],
+                        receivedByMe,
+                        totalCount: receivedByMe.length,
+                        pendingCount: receivedByMe.filter((entry) => entry.status !== 'refunded').length,
+                    });
+                }
+                return (0, commandResult_1.commandSuccess)(payload);
+            },
+            inspectOrder: async ({ from, orderId, paymentTxid }) => {
+                const scoped = await resolveScopedProviderForActor(from);
+                if (scoped.failure) {
+                    return scoped.failure;
+                }
+                if (scoped.provider?.inspectOrder) {
+                    return scoped.provider.inspectOrder({ from, orderId, paymentTxid });
+                }
+                return inspectProviderSellerOrder({ orderId, paymentTxid });
+            },
+            settleRefund: async ({ from, orderId, paymentTxid }) => {
+                const scoped = await resolveScopedProviderForActor(from);
+                if (scoped.failure) {
+                    return scoped.failure;
+                }
+                if (scoped.provider?.settleRefund) {
+                    return scoped.provider.settleRefund({ from, orderId, paymentTxid });
+                }
+                return settleProviderSellerRefund({ orderId, paymentTxid });
+            },
             listPublishSkills: async (request = {}) => {
                 const requestedSlug = normalizeText(request.from) || normalizeText(request.slug);
                 const selectedProfile = requestedSlug
@@ -9286,13 +9393,22 @@ function createDefaultMetabotDaemonHandlers(input) {
                         now,
                         network,
                     });
-                    await profileRuntimeStateStore.writeState({
+                    const nextState = {
                         ...state,
                         services: [
                             published.record,
                             ...state.services.filter((service) => service.currentPinId !== published.record.currentPinId),
                         ],
-                    });
+                    };
+                    await profileRuntimeStateStore.writeState(nextState);
+                    await upsertPublishedLocalServiceIntoOnlineCache({
+                        service: summarizeService(published.record),
+                        onlineServiceCacheStore,
+                        ratingDetailStateStore,
+                        resolvePeerChatPublicKey,
+                        socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+                        socketPresenceFailureMode: input.socketPresenceFailureMode,
+                    }).catch(() => null);
                     return (0, commandResult_1.commandSuccess)({
                         ...summarizeService(published.record),
                         txids: published.chainWrite.txids,

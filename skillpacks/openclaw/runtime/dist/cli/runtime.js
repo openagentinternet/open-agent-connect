@@ -50,6 +50,7 @@ const registry_1 = require("../core/chain/adapters/registry");
 const daemon_1 = require("../daemon");
 const defaultHandlers_1 = require("../daemon/defaultHandlers");
 const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
+const simplemsgPresenceWatchdog_1 = require("../core/a2a/simplemsgPresenceWatchdog");
 const simplemsgClassifier_1 = require("../core/a2a/simplemsgClassifier");
 const metawebMasterReplyWaiter_1 = require("../core/master/metawebMasterReplyWaiter");
 const masterMessageSchema_1 = require("../core/master/masterMessageSchema");
@@ -1467,7 +1468,7 @@ function createDefaultCliDependencies(context) {
                 if (input.from) {
                     query.set('from', input.from);
                 }
-                return requestJson(context, 'GET', `/api/services/my?${query.toString()}`);
+                return requestJson(context, 'GET', `/api/services/owned?${query.toString()}`);
             },
             listOwnedOrders: async (input) => {
                 const query = new URLSearchParams({
@@ -1480,10 +1481,10 @@ function createDefaultCliDependencies(context) {
                 if (input.from) {
                     query.set('from', input.from);
                 }
-                return requestJson(context, 'GET', `/api/services/my/orders?${query.toString()}`);
+                return requestJson(context, 'GET', `/api/services/owned/orders?${query.toString()}`);
             },
-            modifyOwned: async (input) => requestJson(context, 'POST', '/api/services/my/modify', input),
-            revokeOwned: async (input) => requestJson(context, 'POST', '/api/services/my/revoke', input),
+            modifyOwned: async (input) => requestJson(context, 'POST', '/api/services/owned/modify', input),
+            revokeOwned: async (input) => requestJson(context, 'POST', '/api/services/owned/revoke', input),
             listRefunds: async (input) => {
                 const query = new URLSearchParams();
                 if (input.from) {
@@ -1491,12 +1492,9 @@ function createDefaultCliDependencies(context) {
                 }
                 query.set('all', input.all ? 'true' : 'false');
                 query.set('kind', input.kind);
-                const path = input.kind === 'initiated'
-                    ? '/api/provider/refunds/initiated'
-                    : '/api/provider/refunds';
-                return requestJson(context, 'GET', `${path}?${query.toString()}`);
+                return requestJson(context, 'GET', `/api/services/refunds?${query.toString()}`);
             },
-            settleRefund: async (input) => requestJson(context, 'POST', '/api/provider/refund/settle', input),
+            settleRefund: async (input) => requestJson(context, 'POST', '/api/services/refunds/settle', input),
             inspectOrder: async (input) => {
                 const query = new URLSearchParams();
                 if (input.orderId) {
@@ -1509,7 +1507,7 @@ function createDefaultCliDependencies(context) {
                     query.set('from', input.from);
                 }
                 const suffix = query.size ? `?${query.toString()}` : '';
-                return requestJson(context, 'GET', `/api/provider/order${suffix}`);
+                return requestJson(context, 'GET', `/api/services/orders/inspect${suffix}`);
             },
         },
         provider: {
@@ -1521,10 +1519,13 @@ function createDefaultCliDependencies(context) {
                 if (input.paymentTxid) {
                     query.set('paymentTxid', input.paymentTxid);
                 }
+                if (input.from) {
+                    query.set('from', input.from);
+                }
                 const suffix = query.size ? `?${query.toString()}` : '';
-                return requestJson(context, 'GET', `/api/provider/order${suffix}`);
+                return requestJson(context, 'GET', `/api/services/orders/inspect${suffix}`);
             },
-            settleRefund: async (input) => requestJson(context, 'POST', '/api/provider/refund/settle', input),
+            settleRefund: async (input) => requestJson(context, 'POST', '/api/services/refunds/settle', input),
         },
         chat: {
             private: async (input) => requestJson(context, 'POST', '/api/chat/private', input),
@@ -2446,8 +2447,21 @@ async function serveCliDaemonProcess(context) {
             console.warn('[A2A simplemsg listener]', error.message);
         },
     });
+    const simplemsgPresenceWatchdog = (0, simplemsgPresenceWatchdog_1.createA2ASimplemsgPresenceWatchdog)({
+        manager: simplemsgListener,
+        onRestart: (event) => {
+            const missingNames = event.missing
+                .map((profile) => `${profile.name || profile.slug} (${profile.globalMetaId})`)
+                .join(', ');
+            console.warn(`[A2A simplemsg listener] restarted after socket presence missed local profiles: ${missingNames}`);
+        },
+        onError: (error) => {
+            console.warn('[A2A simplemsg listener watchdog]', error.message);
+        },
+    });
     if (daemonConfig.a2a.simplemsgListenerEnabled) {
         await simplemsgListener.start();
+        simplemsgPresenceWatchdog.start();
         chatAutoReplyBackfill.start();
     }
     let shuttingDown = false;
@@ -2455,6 +2469,7 @@ async function serveCliDaemonProcess(context) {
         if (shuttingDown)
             return;
         shuttingDown = true;
+        simplemsgPresenceWatchdog.stop();
         simplemsgListener.stop();
         chatAutoReplyBackfill.stop();
         providerHeartbeatLoop.stop();

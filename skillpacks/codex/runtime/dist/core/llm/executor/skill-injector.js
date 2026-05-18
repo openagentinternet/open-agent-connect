@@ -22,6 +22,27 @@ function assertSafeSkillName(skillName) {
         throw new Error(`Unsafe skill name: ${skillName}`);
     }
 }
+function normalizeOptionalPath(value) {
+    return typeof value === 'string' ? value.trim() : '';
+}
+async function findReadableSkillSource(input, skillName) {
+    const explicitSource = normalizeOptionalPath(input.skillSourcePaths?.[skillName]);
+    const candidates = [
+        explicitSource,
+        node_path_1.default.join(input.skillsRoot, skillName),
+    ].filter(Boolean);
+    const errors = [];
+    for (const candidate of candidates) {
+        try {
+            await node_fs_1.promises.access(candidate);
+            return candidate;
+        }
+        catch (error) {
+            errors.push(error instanceof Error ? error.message : String(error));
+        }
+    }
+    throw new Error(errors[0] ?? `Skill source not found: ${skillName}`);
+}
 async function injectSkills(input) {
     const skillRoot = resolveProviderSkillRoot(input.provider, input.cwd);
     await node_fs_1.promises.mkdir(skillRoot, { recursive: true });
@@ -30,9 +51,12 @@ async function injectSkills(input) {
     for (const skillName of input.skills) {
         try {
             assertSafeSkillName(skillName);
-            const srcDir = node_path_1.default.join(input.skillsRoot, skillName);
+            const srcDir = await findReadableSkillSource(input, skillName);
             const dstDir = node_path_1.default.join(skillRoot, skillName);
-            await node_fs_1.promises.access(srcDir);
+            if (node_path_1.default.resolve(srcDir) === node_path_1.default.resolve(dstDir)) {
+                injected.push(skillName);
+                continue;
+            }
             try {
                 await node_fs_1.promises.access(dstDir);
                 injected.push(skillName);

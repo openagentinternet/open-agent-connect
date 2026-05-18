@@ -16,6 +16,7 @@ export interface LlmExecutionRequest {
     semanticInactivityTimeout?: number;
     cwd?: string;
     skills?: string[];
+    skillSourcePaths?: Record<string, string>;
     resumeSessionId?: string;
     model?: string;
     metaBotSlug?: string;
@@ -73,6 +74,7 @@ export interface LlmSessionRecord {
     prompt: string;
     systemPrompt?: string;
     skills?: string[];
+    skillSourcePaths?: Record<string, string>;
     model?: string;
     cwd?: string;
     providerSessionId?: string;

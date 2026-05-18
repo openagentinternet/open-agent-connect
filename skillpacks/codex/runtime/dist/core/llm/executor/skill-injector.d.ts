@@ -1,6 +1,7 @@
 export interface SkillInjectorInput {
     skills: string[];
     skillsRoot: string;
+    skillSourcePaths?: Record<string, string>;
     provider: string;
     cwd: string;
 }

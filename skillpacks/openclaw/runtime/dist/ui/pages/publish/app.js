@@ -29,7 +29,7 @@ function buildPublishPageDefinition() {
 
               <label class="publish-field">
                 <span>Provider MetaBot</span>
-                <select name="metaBotSlug" data-metabot-select required disabled>
+                <select name="from" data-metabot-select required disabled>
                   <option value="">Loading MetaBots...</option>
                 </select>
               </label>
@@ -514,7 +514,7 @@ function buildPublishPageDefinition() {
     }
     setStatus('Loading selected MetaBot primary runtime skills...', 'busy');
     try {
-      const envelope = await loadJson('/api/services/publish/skills?slug=' + encodeURIComponent(slug));
+      const envelope = await loadJson('/api/services/skills?from=' + encodeURIComponent(slug));
       if (token !== skillLoadToken) return;
       if (envelope && envelope.ok === true) {
         state.publishSkills = envelope.data;
@@ -545,12 +545,7 @@ function buildPublishPageDefinition() {
 
   const loadPublishContext = async () => {
     setStatus('Loading MetaBots and runtimes...', 'busy');
-    const [summaryEnvelope, profilesEnvelope, runtimesEnvelope] = await Promise.all([
-      loadJson('/api/provider/summary').catch((error) => ({
-        ok: false,
-        code: 'provider_summary_failed',
-        message: error instanceof Error ? error.message : String(error),
-      })),
+    const [profilesEnvelope, runtimesEnvelope] = await Promise.all([
       loadJson('/api/bot/profiles').catch((error) => ({
         ok: false,
         code: 'metabot_profiles_failed',
@@ -563,7 +558,7 @@ function buildPublishPageDefinition() {
       })),
     ]);
 
-    state.providerSummary = summaryEnvelope && summaryEnvelope.ok === true ? summaryEnvelope.data : null;
+    state.providerSummary = null;
     state.profiles = profilesEnvelope && profilesEnvelope.ok === true && profilesEnvelope.data && Array.isArray(profilesEnvelope.data.profiles)
       ? profilesEnvelope.data.profiles
       : [];
@@ -599,7 +594,7 @@ function buildPublishPageDefinition() {
   });
 
   const validateClientPayload = (payload) => {
-    if (!payload.metaBotSlug) return 'Provider MetaBot is required.';
+    if (!payload.from) return 'Provider MetaBot is required.';
     if (!payload.providerSkill) return 'Provider skill is required.';
     if (!payload.displayName) return 'Display name is required.';
     if (!payload.serviceName) return 'Service name is required.';
@@ -619,7 +614,7 @@ function buildPublishPageDefinition() {
   const buildSubmitPayload = () => {
     const formData = new FormData(elements.form);
     const payload = {
-      metaBotSlug: selectedMetaBotSlug(),
+      from: selectedMetaBotSlug(),
       providerSkill: selectedSkillValue(),
       displayName: normalizeText(formData.get('displayName')),
       serviceName: normalizeText(formData.get('serviceName')),

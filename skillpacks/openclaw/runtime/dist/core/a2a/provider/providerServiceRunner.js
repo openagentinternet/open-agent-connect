@@ -78,6 +78,60 @@ function withRuntimeMetadata(result, input) {
 function createRuntimeFailedResult(code, message, input) {
     return withRuntimeMetadata((0, serviceRunnerContracts_1.createServiceRunnerFailedResult)(code, message), input);
 }
+function isRetryableProviderRuntimeFailure(code) {
+    return code === 'provider_execution_failed'
+        || code === 'provider_execution_timeout'
+        || code === 'provider_execution_cancelled';
+}
+function buildSessionFailure(run, providerSkill) {
+    const { session, sessionId, runtime, selection } = run;
+    if (session?.status === 'failed' || session?.status === 'cancelled' || session?.status === 'timeout') {
+        const sessionError = session.error;
+        const code = session.status === 'timeout'
+            ? 'provider_execution_timeout'
+            : session.status === 'cancelled'
+                ? 'provider_execution_cancelled'
+                : 'provider_execution_failed';
+        return {
+            result: createRuntimeFailedResult(code, normalizeText(sessionError) || 'Provider execution did not complete successfully.', {
+                runtime,
+                providerSkill,
+                sessionId,
+                selection,
+            }),
+            retryable: isRetryableProviderRuntimeFailure(code),
+        };
+    }
+    if (!session?.result) {
+        const code = 'provider_execution_timeout';
+        return {
+            result: createRuntimeFailedResult(code, 'The provider runtime did not produce a terminal session result before timeout.', {
+                runtime,
+                providerSkill,
+                sessionId,
+                selection,
+            }),
+            retryable: true,
+        };
+    }
+    if (session.result.status !== 'completed') {
+        const code = session.result.status === 'timeout'
+            ? 'provider_execution_timeout'
+            : session.result.status === 'cancelled'
+                ? 'provider_execution_cancelled'
+                : 'provider_execution_failed';
+        return {
+            result: createRuntimeFailedResult(code, session.result.error || 'Provider execution did not complete successfully.', {
+                runtime,
+                providerSkill,
+                sessionId,
+                selection,
+            }),
+            retryable: isRetryableProviderRuntimeFailure(code),
+        };
+    }
+    return null;
+}
 async function waitForSession(llmExecutor, sessionId, timeoutMs, pollIntervalMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() <= deadline) {
@@ -90,7 +144,7 @@ async function waitForSession(llmExecutor, sessionId, timeoutMs, pollIntervalMs)
     return llmExecutor.getSession(sessionId);
 }
 async function readRuntimeSelection(deps, runtime, providerSkill, fallbackSelected) {
-    if (!(0, platformRegistry_1.isPlatformId)(runtime.provider) || !normalizeText(runtime.binaryPath) || runtime.health === 'unavailable') {
+    if (!isInjectableSkillRuntime(runtime)) {
         return null;
     }
     const canStartRuntime = deps.canStartRuntime ?? defaultCanStartRuntime;
@@ -152,6 +206,31 @@ async function readRuntimeSelection(deps, runtime, providerSkill, fallbackSelect
         }
     }
     return null;
+}
+function isInjectableSkillRuntime(runtime) {
+    return (0, platformRegistry_1.isPlatformId)(runtime.provider) && Boolean(normalizeText(runtime.binaryPath)) && runtime.health !== 'unavailable';
+}
+async function canRunInjectedSkillRuntime(deps, runtime) {
+    if (!isInjectableSkillRuntime(runtime)) {
+        return false;
+    }
+    const canStartRuntime = deps.canStartRuntime ?? defaultCanStartRuntime;
+    return canStartRuntime(runtime);
+}
+async function readFallbackSelection(deps, fallbackRuntime, providerSkill, sourceSelection) {
+    const fallbackSelection = await readRuntimeSelection(deps, fallbackRuntime, providerSkill, true);
+    if (fallbackSelection) {
+        return fallbackSelection;
+    }
+    if (!await canRunInjectedSkillRuntime(deps, fallbackRuntime)) {
+        return null;
+    }
+    return {
+        runtime: fallbackRuntime,
+        skill: sourceSelection.skill,
+        rootDiagnostics: sourceSelection.rootDiagnostics,
+        fallbackSelected: true,
+    };
 }
 function selectBinding(bindings, metaBotSlug, role) {
     return bindings
@@ -219,90 +298,85 @@ function createProviderServiceRunner(input) {
                 userTask: order.userTask,
                 taskContext: order.taskContext,
             });
-            const executeWithRuntime = async (selectedRuntime) => input.llmExecutor.execute({
-                runtimeId: selectedRuntime.id,
-                runtime: selectedRuntime,
-                prompt: buildPaidOrderUserPrompt(order),
-                systemPrompt,
-                skills: [order.providerSkill],
-                metaBotSlug: input.metaBotSlug,
-                timeout: sessionTimeoutMs,
+            const executeWithSelection = async (selectedSelection) => {
+                const selectedRuntime = selectedSelection.runtime;
+                const sessionId = await input.llmExecutor.execute({
+                    runtimeId: selectedRuntime.id,
+                    runtime: selectedRuntime,
+                    prompt: buildPaidOrderUserPrompt(order),
+                    systemPrompt,
+                    cwd: input.projectRoot,
+                    skills: [order.providerSkill],
+                    skillSourcePaths: {
+                        [order.providerSkill]: selectedSelection.skill.absolutePath,
+                    },
+                    metaBotSlug: input.metaBotSlug,
+                    timeout: sessionTimeoutMs,
+                });
+                return {
+                    runtime: selectedRuntime,
+                    selection: selectedSelection,
+                    sessionId,
+                    session: await waitForSession(input.llmExecutor, sessionId, sessionTimeoutMs, pollIntervalMs),
+                };
+            };
+            const resolveFallbackSelection = async (failedRuntime, failedSelection) => {
+                if (failedSelection.fallbackSelected) {
+                    return null;
+                }
+                const fallbackRuntime = await resolveFallbackRuntime(input, primaryRuntime, resolutionState.fallbackRuntime);
+                if (!fallbackRuntime || fallbackRuntime.id === failedRuntime.id) {
+                    return null;
+                }
+                return readFallbackSelection(input, fallbackRuntime, order.providerSkill, failedSelection);
+            };
+            const executionFailure = (error, failedRuntime, failedSelection) => createRuntimeFailedResult('provider_execution_failed', error instanceof Error ? error.message : String(error), {
+                runtime: failedRuntime,
+                providerSkill: order.providerSkill,
+                selection: failedSelection,
             });
-            let sessionId;
+            let run;
             try {
-                sessionId = await executeWithRuntime(runtime);
+                run = await executeWithSelection(selection);
             }
             catch (error) {
-                if (!selection.fallbackSelected) {
-                    const fallbackRuntime = await resolveFallbackRuntime(input, primaryRuntime, resolutionState.fallbackRuntime);
-                    const fallbackSelection = fallbackRuntime
-                        ? await readRuntimeSelection(input, fallbackRuntime, order.providerSkill, true)
-                        : null;
-                    if (fallbackRuntime && fallbackSelection) {
-                        try {
-                            runtime = fallbackRuntime;
-                            selection = fallbackSelection;
-                            sessionId = await executeWithRuntime(fallbackRuntime);
-                        }
-                        catch (fallbackError) {
-                            return createRuntimeFailedResult('provider_execution_failed', fallbackError instanceof Error ? fallbackError.message : String(fallbackError), {
-                                runtime: fallbackRuntime,
-                                providerSkill: order.providerSkill,
-                                selection: fallbackSelection,
-                            });
-                        }
-                    }
-                    else {
-                        return createRuntimeFailedResult('provider_execution_failed', error instanceof Error ? error.message : String(error), {
-                            runtime,
-                            providerSkill: order.providerSkill,
-                            selection,
-                        });
-                    }
+                const fallbackSelection = await resolveFallbackSelection(runtime, selection);
+                if (!fallbackSelection) {
+                    return executionFailure(error, runtime, selection);
                 }
-                else {
-                    return createRuntimeFailedResult('provider_execution_failed', error instanceof Error ? error.message : String(error), {
-                        runtime,
-                        providerSkill: order.providerSkill,
-                        selection,
-                    });
+                try {
+                    run = await executeWithSelection(fallbackSelection);
+                }
+                catch (fallbackError) {
+                    return executionFailure(fallbackError, fallbackSelection.runtime, fallbackSelection);
                 }
             }
-            const session = await waitForSession(input.llmExecutor, sessionId, sessionTimeoutMs, pollIntervalMs);
-            if (session?.status === 'failed' || session?.status === 'cancelled' || session?.status === 'timeout') {
-                const sessionError = session.error;
-                return createRuntimeFailedResult(session.status === 'timeout'
-                    ? 'provider_execution_timeout'
-                    : session.status === 'cancelled'
-                        ? 'provider_execution_cancelled'
-                        : 'provider_execution_failed', normalizeText(sessionError) || 'Provider execution did not complete successfully.', {
-                    runtime,
-                    providerSkill: order.providerSkill,
-                    sessionId,
-                    selection,
-                });
+            let failure = buildSessionFailure(run, order.providerSkill);
+            if (failure?.retryable) {
+                const fallbackSelection = await resolveFallbackSelection(run.runtime, run.selection);
+                if (fallbackSelection) {
+                    try {
+                        const fallbackRun = await executeWithSelection(fallbackSelection);
+                        const fallbackFailure = buildSessionFailure(fallbackRun, order.providerSkill);
+                        if (fallbackFailure) {
+                            return fallbackFailure.result;
+                        }
+                        run = fallbackRun;
+                        failure = null;
+                    }
+                    catch (fallbackError) {
+                        return executionFailure(fallbackError, fallbackSelection.runtime, fallbackSelection);
+                    }
+                }
             }
-            if (!session?.result) {
-                return createRuntimeFailedResult('provider_execution_timeout', 'The provider runtime did not produce a terminal session result before timeout.', {
-                    runtime,
-                    providerSkill: order.providerSkill,
-                    sessionId,
-                    selection,
-                });
+            if (failure) {
+                return failure.result;
             }
-            if (session.result.status !== 'completed') {
-                return createRuntimeFailedResult(session.result.status === 'timeout'
-                    ? 'provider_execution_timeout'
-                    : session.result.status === 'cancelled'
-                        ? 'provider_execution_cancelled'
-                        : 'provider_execution_failed', session.result.error || 'Provider execution did not complete successfully.', {
-                    runtime,
-                    providerSkill: order.providerSkill,
-                    sessionId,
-                    selection,
-                });
-            }
-            const responseText = normalizeText(session.result.output);
+            runtime = run.runtime;
+            selection = run.selection;
+            const sessionId = run.sessionId;
+            const session = run.session;
+            const responseText = normalizeText(session?.result?.output);
             if (!responseText) {
                 return createRuntimeFailedResult('provider_execution_empty', 'The provider runtime returned an empty result.', {
                     runtime,

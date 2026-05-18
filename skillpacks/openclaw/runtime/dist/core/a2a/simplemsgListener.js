@@ -356,5 +356,11 @@ function createA2ASimplemsgListenerManager(input) {
         isRunning() {
             return running;
         },
+        getLastReport() {
+            return {
+                started: lastReport.started.map((profile) => ({ ...profile })),
+                skipped: lastReport.skipped.map((profile) => ({ ...profile })),
+            };
+        },
     };
 }

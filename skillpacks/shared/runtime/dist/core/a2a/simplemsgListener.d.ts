@@ -46,6 +46,7 @@ export interface A2ASimplemsgListenerManager {
     start(): Promise<A2ASimplemsgListenerStartReport>;
     stop(): void;
     isRunning(): boolean;
+    getLastReport(): A2ASimplemsgListenerStartReport;
 }
 interface LoadedProfileIdentity {
     paths: MetabotPaths;
