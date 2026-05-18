@@ -5,6 +5,7 @@ import { getProjectSkillRoot, isPlatformId } from '../../platform/platformRegist
 export interface SkillInjectorInput {
   skills: string[];
   skillsRoot: string;
+  skillSourcePaths?: Record<string, string>;
   provider: string;
   cwd: string;
 }
@@ -30,6 +31,30 @@ function assertSafeSkillName(skillName: string): void {
   }
 }
 
+function normalizeOptionalPath(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+async function findReadableSkillSource(input: SkillInjectorInput, skillName: string): Promise<string> {
+  const explicitSource = normalizeOptionalPath(input.skillSourcePaths?.[skillName]);
+  const candidates = [
+    explicitSource,
+    path.join(input.skillsRoot, skillName),
+  ].filter(Boolean);
+
+  const errors: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  throw new Error(errors[0] ?? `Skill source not found: ${skillName}`);
+}
+
 export async function injectSkills(input: SkillInjectorInput): Promise<SkillInjectionResult> {
   const skillRoot = resolveProviderSkillRoot(input.provider, input.cwd);
   await fs.mkdir(skillRoot, { recursive: true });
@@ -40,9 +65,12 @@ export async function injectSkills(input: SkillInjectorInput): Promise<SkillInje
   for (const skillName of input.skills) {
     try {
       assertSafeSkillName(skillName);
-      const srcDir = path.join(input.skillsRoot, skillName);
+      const srcDir = await findReadableSkillSource(input, skillName);
       const dstDir = path.join(skillRoot, skillName);
-      await fs.access(srcDir);
+      if (path.resolve(srcDir) === path.resolve(dstDir)) {
+        injected.push(skillName);
+        continue;
+      }
 
       try {
         await fs.access(dstDir);

@@ -483,6 +483,31 @@ test('skill injector copies requested skills into provider-native skill roots', 
   assert.match(copiedScript, /export/);
 });
 
+test('skill injector copies explicit selected skill sources outside the default root', async () => {
+  const base = await createTempDir();
+  const skillsRoot = path.join(base, 'default-skills');
+  const selectedSource = path.join(base, 'codex-skills', 'weibo-hot-trend');
+  const cwd = path.join(base, 'work');
+  await fs.mkdir(selectedSource, { recursive: true });
+  await fs.writeFile(path.join(selectedSource, 'SKILL.md'), '# Weibo Hot Trend\n', 'utf8');
+
+  const result = await injectSkills({
+    skills: ['weibo-hot-trend'],
+    skillsRoot,
+    skillSourcePaths: {
+      'weibo-hot-trend': selectedSource,
+    },
+    provider: 'claude-code',
+    cwd,
+  });
+
+  assert.deepEqual(result.injected, ['weibo-hot-trend']);
+  assert.deepEqual(result.errors, []);
+
+  const copiedSkill = await fs.readFile(path.join(cwd, '.claude', 'skills', 'weibo-hot-trend', 'SKILL.md'), 'utf8');
+  assert.match(copiedSkill, /Weibo Hot Trend/);
+});
+
 test('skill injector resolves provider roots from registry project skill roots', async () => {
   const base = await createTempDir();
   const cwd = path.join(base, 'work');

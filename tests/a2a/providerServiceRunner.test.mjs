@@ -177,7 +177,7 @@ test('createProviderServiceRunner uses fallback only before execution starts', a
   await cleanupProfileHome(homeDir);
 });
 
-test('createProviderServiceRunner does not fallback after execution has started', async () => {
+test('createProviderServiceRunner falls back when primary session fails after start', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   await runtimeStore.write({
     version: 1,
@@ -187,6 +187,7 @@ test('createProviderServiceRunner does not fallback after execution has started'
     ],
   });
   let fallbackCalls = 0;
+  const executeCalls = [];
   const runner = createProviderServiceRunner({
     metaBotSlug: 'alice',
     systemHomeDir,
@@ -195,12 +196,23 @@ test('createProviderServiceRunner does not fallback after execution has started'
     bindingStore,
     llmExecutor: {
       async execute(request) {
-        assert.equal(request.runtimeId, 'runtime-primary');
-        return 'session-1';
+        executeCalls.push(request);
+        return request.runtimeId === 'runtime-primary' ? 'session-primary' : 'session-fallback';
       },
-      async getSession() {
+      async getSession(sessionId) {
+        if (sessionId === 'session-fallback') {
+          return {
+            sessionId,
+            status: 'completed',
+            result: {
+              status: 'completed',
+              output: 'Fallback handled the order.',
+              durationMs: 10,
+            },
+          };
+        }
         return {
-          sessionId: 'session-1',
+          sessionId,
           status: 'failed',
           result: {
             status: 'failed',
@@ -230,8 +242,82 @@ test('createProviderServiceRunner does not fallback after execution has started'
     taskContext: 'Focus on city weather',
   });
 
-  assert.equal(result.state, 'failed');
-  assert.equal(fallbackCalls, 0);
+  assert.equal(result.state, 'completed');
+  assert.equal(result.runtimeId, 'runtime-fallback');
+  assert.equal(fallbackCalls, 1);
+  assert.deepEqual(executeCalls.map((call) => call.runtimeId), ['runtime-primary', 'runtime-fallback']);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner reuses selected primary skill source for fallback runtime', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await fs.rm(path.join(systemHomeDir, '.claude'), { recursive: true, force: true });
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+      runtime({ id: 'runtime-fallback', provider: 'claude-code', health: 'healthy' }),
+    ],
+  });
+  await bindingStore.write({
+    version: 1,
+    bindings: [
+      binding('binding-primary', 'alice', 'runtime-primary', 'primary'),
+      binding('binding-fallback', 'alice', 'runtime-fallback', 'fallback'),
+    ],
+  });
+
+  const executeCalls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        executeCalls.push(request);
+        return request.runtimeId === 'runtime-primary' ? 'session-primary' : 'session-fallback';
+      },
+      async getSession(sessionId) {
+        if (sessionId === 'session-primary') {
+          return {
+            sessionId,
+            status: 'failed',
+            result: {
+              status: 'failed',
+              output: '',
+              error: 'codex vendor binary missing',
+              durationMs: 10,
+            },
+          };
+        }
+        return {
+          sessionId,
+          status: 'completed',
+          result: {
+            status: 'completed',
+            output: 'Fallback reused the Codex skill source.',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder());
+
+  assert.equal(result.state, 'completed');
+  assert.equal(result.runtimeId, 'runtime-fallback');
+  assert.deepEqual(executeCalls.map((call) => call.runtimeId), ['runtime-primary', 'runtime-fallback']);
+  assert.equal(
+    executeCalls[1].skillSourcePaths['weather.oracle'],
+    path.join(systemHomeDir, '.codex', 'skills', 'weather.oracle'),
+  );
   await cleanupProfileHome(homeDir);
 });
 
@@ -270,6 +356,42 @@ test('createProviderServiceRunner reads provider skills from project roots', asy
   assert.equal(result.selection.skill.rootKind, 'project');
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].skills, ['weather.oracle']);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner passes selected global skill source path to executor', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'Global-root skill executed.',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder());
+
+  assert.equal(result.state, 'completed');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].cwd, homeDir);
+  assert.equal(
+    calls[0].skillSourcePaths['weather.oracle'],
+    path.join(systemHomeDir, '.codex', 'skills', 'weather.oracle'),
+  );
   await cleanupProfileHome(homeDir);
 });
 
@@ -347,7 +469,7 @@ test('createProviderServiceRunner returns structured failure without a session w
   await cleanupProfileHome(homeDir);
 });
 
-test('createProviderServiceRunner maps started terminal failures without fallback retry', async () => {
+test('createProviderServiceRunner retries fallback on started terminal runtime failures', async () => {
   const terminalCases = [
     {
       result: { status: 'failed', output: '', error: 'runtime failed', durationMs: 10 },
@@ -396,8 +518,8 @@ test('createProviderServiceRunner maps started terminal failures without fallbac
 
     assert.equal(result.state, 'failed');
     assert.equal(result.code, testCase.code);
-    assert.equal(calls.length, 1);
-    assert.equal(fallbackCalls, 0);
+    assert.equal(calls.length, testCase.code === 'provider_execution_empty' ? 1 : 2);
+    assert.equal(fallbackCalls, testCase.code === 'provider_execution_empty' ? 0 : 1);
     await cleanupProfileHome(homeDir);
   }
 });
