@@ -80,6 +80,7 @@ export class LlmExecutor {
       prompt: request.prompt,
       systemPrompt: request.systemPrompt,
       skills: request.skills,
+      skillSourcePaths: request.skillSourcePaths,
       model: request.model,
       cwd: request.cwd,
       resumeSessionId: request.resumeSessionId,
@@ -179,6 +180,7 @@ export class LlmExecutor {
       const injection = await injectSkills({
         skills: request.skills,
         skillsRoot: this.skillsRoot,
+        skillSourcePaths: request.skillSourcePaths,
         provider: request.runtime.provider,
         cwd,
       });
