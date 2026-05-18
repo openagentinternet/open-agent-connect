@@ -305,6 +305,10 @@ test('buildLoomDevRoundPrompt includes task, repo, previous status, checks, and 
   assert.match(prompt, /do not wait for approval/i);
   assert.match(prompt, /do not stop after presenting a design/i);
   assert.match(prompt, /edit the repository files/i);
+  assert.match(prompt, /do not spawn subagents/i);
+  assert.match(prompt, /limit exploration/i);
+  assert.match(prompt, /If AGENTS\.md conflicts/i);
+  assert.match(prompt, /Loom workflow instructions take precedence/i);
 });
 
 test('runLoomDevRoundWorkflow denies a claim owned by another author', async () => {
