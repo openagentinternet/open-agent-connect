@@ -369,6 +369,72 @@ function dashboard(overrides = {}) {
   };
 }
 
+function developerActionDashboard(options = {}) {
+  const payload = dashboard();
+  const card = payload.dashboard.tasks[0];
+  const detail = payload.dashboard.details[0];
+  payload.dashboard.actor = {
+    profileSlug: 'developer-bot',
+    globalMetaId: 'gm-dev',
+    address: '1DeveloperPayoutAddress',
+  };
+  card.actorContext = { needsMyAction: true, isRequester: false };
+  if (payload.dashboard.columns[0]?.cards?.[0]) {
+    payload.dashboard.columns[0].cards[0].actorContext = card.actorContext;
+  }
+  if (options.state === 'open') {
+    card.state = 'open';
+    card.columnId = 'open';
+    card.developer = null;
+    detail.state = 'open';
+    detail.columnId = 'open';
+    detail.claims = [];
+    detail.localWorkflow = [];
+    detail.validRecords.deliveries = [];
+    detail.nextActions = [{
+      id: 'claimAndStart',
+      label: 'Claim and start',
+      tone: 'primary',
+      actorRole: 'developer',
+      requiresActor: false,
+      requiresConfirmation: true,
+      disabledReason: '',
+      cliFallback: `metabot loom claim-and-start --from 'developer-bot' --task-pin-id '${TASK_PIN}' --payout-address '<payout-address>'`,
+    }];
+    payload.dashboard.columns = [{ id: 'open', title: 'Open', cards: [card] }];
+  } else {
+    card.state = options.state || 'in_progress';
+    card.columnId = card.state === 'revision_needed' ? 'revision' : 'working';
+    detail.state = card.state;
+    detail.columnId = card.columnId;
+    detail.nextActions = [
+      {
+        id: 'runDevRound',
+        label: card.state === 'revision_needed' ? 'Run revision round' : 'Run dev round',
+        tone: 'primary',
+        actorRole: 'developer',
+        requiresActor: false,
+        requiresConfirmation: true,
+        disabledReason: options.missingWorkflow ? 'No local workflow evidence is available for this claim.' : '',
+        cliFallback: `metabot loom run-dev-round --from 'developer-bot' --task-pin-id '${TASK_PIN}' --claim-pin-id '${CLAIM_PIN}'`,
+      },
+      {
+        id: 'deliver',
+        label: 'Deliver for review',
+        tone: 'neutral',
+        actorRole: 'developer',
+        requiresActor: false,
+        requiresConfirmation: true,
+        disabledReason: options.missingWorkflow ? 'No local workflow evidence is available for this claim.' : '',
+        cliFallback: `metabot loom deliver --from 'developer-bot' --task-pin-id '${TASK_PIN}' --claim-pin-id '${CLAIM_PIN}'`,
+      },
+    ];
+    if (options.missingWorkflow) detail.localWorkflow = [];
+    payload.dashboard.columns = [{ id: card.columnId, title: 'Working', cards: [card] }];
+  }
+  return payload;
+}
+
 function dashboardWithPublishedTask(options = {}) {
   const payload = dashboard();
   const sourceCard = payload.dashboard.tasks[0];
@@ -1123,6 +1189,206 @@ test('loom delivered detail sends revision and reject defaults through preview a
   assert.equal(actionBodies[3].confirm, true);
 });
 
+test('loom open developer action previews claim/start before confirm and refreshes after success', async () => {
+  const initial = developerActionDashboard({ state: 'open' });
+  const refreshed = developerActionDashboard({ state: 'in_progress' });
+  const { elements, fetchCalls } = await runLoomScript({
+    search: '?from=developer-bot',
+    actionResults: [
+      {
+        ok: true,
+        state: 'awaiting_confirmation',
+        data: {
+          preview: {
+            dryRun: true,
+            github: {
+              repoUri: 'https://github.com/openagentinternet/open-agent-connect',
+            },
+            preview: {
+              claimPinId: 'pending-claim-pin',
+              workspaceRepoPath: '/tmp/loom-workspace',
+              stagingRepoPath: '/tmp/loom-staging',
+              branchName: 'loom/task-claim',
+            },
+          },
+          cliFallback: `metabot loom claim-and-start --from 'developer-bot' --task-pin-id '${TASK_PIN}'`,
+        },
+      },
+      { ok: true, state: 'success', data: { claimPinId: CLAIM_PIN, workspacePath: '/tmp/loom-workspace' } },
+    ],
+    payloads: [initial, refreshed],
+  });
+  const [card] = elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
+
+  await card.listeners.get('click')();
+  const claimButton = elements['[data-loom-detail-actions]']
+    .querySelectorAll('[data-loom-detail-action]')
+    .find((button) => button.getAttribute('data-loom-detail-action') === 'claimAndStart');
+  assert.ok(claimButton, 'expected claim/start action button');
+  await claimButton.listeners.get('click')();
+
+  const previewBody = JSON.parse(fetchCalls.filter((call) => call.url === '/api/loom/actions').at(-1).options.body);
+  assert.deepEqual(previewBody, {
+    action: 'claimAndStart',
+    from: 'developer-bot',
+    taskPinId: TASK_PIN,
+    payoutAddress: '1DeveloperPayoutAddress',
+    confirm: false,
+  });
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /Confirm Claim and start/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /\/tmp\/loom-workspace/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /\/tmp\/loom-staging/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /loom\/task-claim/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /https:\/\/github.com\/openagentinternet\/open-agent-connect/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /pending-claim-pin/);
+
+  await elements['[data-loom-detail-actions]'].querySelectorAll('[data-loom-confirm-detail-action]')[0].listeners.get('click')();
+
+  const actionBodies = fetchCalls
+    .filter((call) => call.url === '/api/loom/actions')
+    .map((call) => JSON.parse(call.options.body));
+  assert.equal(actionBodies.length, 2);
+  assert.deepEqual({ ...actionBodies[1], confirm: false }, actionBodies[0]);
+  assert.equal(actionBodies[1].confirm, true);
+  assert.ok(fetchCalls.some((call) => call.url === '/api/loom/refresh'), 'expected success refresh');
+});
+
+test('loom developer workflow actions use active claim, local evidence, and cancel blocks confirm', async () => {
+  const { elements, fetchCalls } = await runLoomScript({
+    search: '?from=developer-bot',
+    actionResults: [
+      {
+        ok: true,
+        state: 'awaiting_confirmation',
+        data: {
+          claimPinId: CLAIM_PIN,
+          cliFallback: `metabot loom run-dev-round --task-pin-id '${TASK_PIN}' --claim-pin-id '${CLAIM_PIN}'`,
+        },
+      },
+      {
+        ok: true,
+        state: 'awaiting_confirmation',
+        data: {
+          preview: {
+            dryRun: true,
+            push: {
+              workspacePath: '/tmp/loom-workspace',
+              branchName: 'codex/loom-board',
+            },
+            pullRequest: {
+              repo: 'openagentinternet/open-agent-connect',
+              baseBranch: 'main',
+              head: 'alice:codex/loom-board',
+              title: 'feat: wire developer actions',
+            },
+            deliveryPayload: {
+              delivery: {
+                prUrl: '(pending pull request URL)',
+                prBranch: 'codex/loom-board',
+              },
+            },
+          },
+        },
+      },
+      { ok: true, state: 'success', data: { deliveryPinId: DELIVERY_PIN } },
+    ],
+    payloads: [developerActionDashboard(), developerActionDashboard()],
+  });
+  const [card] = elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
+
+  await card.listeners.get('click')();
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /Run dev round/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /Deliver for review/);
+
+  const runButton = elements['[data-loom-detail-actions]']
+    .querySelectorAll('[data-loom-detail-action]')
+    .find((button) => button.getAttribute('data-loom-detail-action') === 'runDevRound');
+  await runButton.listeners.get('click')();
+  const runPreviewBody = JSON.parse(fetchCalls.filter((call) => call.url === '/api/loom/actions').at(-1).options.body);
+  assert.equal(runPreviewBody.action, 'runDevRound');
+  assert.equal(runPreviewBody.taskPinId, TASK_PIN);
+  assert.equal(runPreviewBody.claimPinId, CLAIM_PIN);
+  assert.equal(runPreviewBody.confirm, false);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /\/tmp\/loom-workspace/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /codex\/loom-board/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /llm-session-123/);
+
+  await elements['[data-loom-detail-actions]'].querySelectorAll('[data-loom-cancel-detail-action]')[0].listeners.get('click')();
+  assert.equal(fetchCalls.filter((call) => call.url === '/api/loom/actions').length, 1);
+
+  const deliverButton = elements['[data-loom-detail-actions]']
+    .querySelectorAll('[data-loom-detail-action]')
+    .find((button) => button.getAttribute('data-loom-detail-action') === 'deliver');
+  await deliverButton.listeners.get('click')();
+  const deliverPreviewBody = JSON.parse(fetchCalls.filter((call) => call.url === '/api/loom/actions').at(-1).options.body);
+  assert.equal(deliverPreviewBody.action, 'deliver');
+  assert.equal(deliverPreviewBody.claimPinId, CLAIM_PIN);
+  assert.equal(deliverPreviewBody.confirm, false);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /\/tmp\/loom-workspace/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /codex\/loom-board/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /openagentinternet\/open-agent-connect/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /alice:codex\/loom-board/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /feat: wire developer actions/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /\(pending pull request URL\)/);
+
+  await elements['[data-loom-detail-actions]'].querySelectorAll('[data-loom-confirm-detail-action]')[0].listeners.get('click')();
+  const actionBodies = fetchCalls
+    .filter((call) => call.url === '/api/loom/actions')
+    .map((call) => JSON.parse(call.options.body));
+  assert.equal(actionBodies.at(-1).action, 'deliver');
+  assert.equal(actionBodies.at(-1).confirm, true);
+  assert.ok(fetchCalls.some((call) => call.url === '/api/loom/refresh'), 'expected success refresh');
+});
+
+test('loom developer action disabled and dependency failures render CLI fallback clearly', async () => {
+  const missingWorkflow = await runLoomScript({
+    search: '?from=developer-bot',
+    payloads: [developerActionDashboard({ missingWorkflow: true })],
+  });
+  const [missingCard] = missingWorkflow.elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
+  await missingCard.listeners.get('click')();
+
+  assert.match(missingWorkflow.elements['[data-loom-detail-actions]'].innerHTML, /No local workflow evidence is available for this claim/);
+  assert.match(missingWorkflow.elements['[data-loom-detail-actions]'].innerHTML, /metabot loom run-dev-round/);
+  assert.match(missingWorkflow.elements['[data-loom-detail-actions]'].innerHTML, /metabot loom deliver/);
+
+  const failures = [
+    ['git_missing', 'git executable was not found.'],
+    ['gh_missing', 'GitHub CLI gh was not found.'],
+    ['wallet_unavailable', 'Wallet runtime is unavailable.'],
+    ['llm_runtime_unavailable', 'LLM runtime unavailable. Install or configure Codex.'],
+  ];
+  for (const [code, message] of failures) {
+    const failureResult = await runLoomScript({
+      search: '?from=developer-bot',
+      actionResults: [
+        {
+          httpOk: false,
+          ok: false,
+          state: 'failed',
+          code,
+          message,
+          data: {
+            cliFallback: `metabot loom run-dev-round --task-pin-id '${TASK_PIN}' --claim-pin-id '${CLAIM_PIN}'`,
+          },
+        },
+      ],
+      payloads: [developerActionDashboard()],
+    });
+    const [failureCard] = failureResult.elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
+    await failureCard.listeners.get('click')();
+    const runButton = failureResult.elements['[data-loom-detail-actions]']
+      .querySelectorAll('[data-loom-detail-action]')
+      .find((button) => button.getAttribute('data-loom-detail-action') === 'runDevRound');
+    await runButton.listeners.get('click')();
+
+    assert.equal(failureResult.elements['[data-loom-detail-modal]'].hidden, false);
+    assert.match(failureResult.elements['[data-loom-detail-actions]'].innerHTML, new RegExp(message.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')));
+    assert.match(failureResult.elements['[data-loom-detail-actions]'].innerHTML, new RegExp(code));
+    assert.match(failureResult.elements['[data-loom-detail-actions]'].innerHTML, /metabot loom run-dev-round/);
+  }
+});
+
 test('loom detail action failures and disabled reasons keep detail open with recovery guidance', async () => {
   const disabled = dashboard();
   disabled.dashboard.details[0].nextActions[0].disabledReason = 'Only the requester can accept and pay.';
@@ -1182,6 +1448,94 @@ test('loom detail action failures and disabled reasons keep detail open with rec
   await revisionButton.listeners.get('click')();
   assert.equal(permissionResult.elements['[data-loom-detail-modal]'].hidden, false);
   assert.match(permissionResult.elements['[data-loom-detail-actions]'].innerHTML, /Only the requester can review this delivery/);
+});
+
+test('loom copy-only detail actions copy CLI fallback without mutating', async () => {
+  const failed = dashboard();
+  failed.dashboard.tasks[0].state = 'failed';
+  failed.dashboard.tasks[0].columnId = 'closed';
+  failed.dashboard.tasks[0].stateTone = 'failed';
+  failed.dashboard.columns = [{ id: 'closed', title: 'Closed', cards: [failed.dashboard.tasks[0]] }];
+  failed.dashboard.details[0].state = 'failed';
+  failed.dashboard.details[0].columnId = 'closed';
+  failed.dashboard.details[0].nextActions = [{
+    id: 'copyCli',
+    label: 'Review failure',
+    tone: 'neutral',
+    actorRole: 'any',
+    requiresActor: false,
+    requiresConfirmation: false,
+    cliFallback: `metabot loom state '${TASK_PIN}' --refresh`,
+  }];
+  const { elements, fetchCalls, writes } = await runLoomScript({ payloads: [failed] });
+  const [card] = elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
+
+  await card.listeners.get('click')();
+  const copyOnlyButton = elements['[data-loom-detail-actions]']
+    .querySelectorAll('[data-loom-detail-action]')
+    .find((button) => button.getAttribute('data-loom-detail-action') === 'copyCli');
+  assert.ok(copyOnlyButton, 'expected copy-only action button');
+  await copyOnlyButton.listeners.get('click')();
+
+  assert.equal(fetchCalls.filter((call) => call.url === '/api/loom/actions').length, 0);
+  assert.equal(writes.at(-1), `metabot loom state '${TASK_PIN}' --refresh`);
+  assert.doesNotMatch(elements['[data-loom-detail-actions]'].innerHTML, /Unsupported Loom UI action/);
+});
+
+test('loom detail action preview clears stale delivery targets after refresh', async () => {
+  const initial = dashboard();
+  const refreshed = dashboard();
+  const newerDelivery = JSON.parse(JSON.stringify(refreshed.dashboard.details[0].validRecords.deliveries[0]));
+  newerDelivery.pinId = LATEST_DELIVERY_PIN;
+  newerDelivery.timestamp = NOW - 100;
+  newerDelivery.payload.delivery.deliverySummary = 'Newest delivery after refresh.';
+  refreshed.dashboard.details[0].validRecords.deliveries.push(newerDelivery);
+  refreshed.dashboard.details[0].timeline.push({
+    id: `delivery:${LATEST_DELIVERY_PIN}`,
+    kind: 'delivery',
+    title: 'Delivery posted',
+    summary: 'Newest delivery after refresh.',
+    timestamp: NOW - 100,
+    pinId: LATEST_DELIVERY_PIN,
+  });
+  refreshed.dashboard.details[0].nextActions = refreshed.dashboard.details[0].nextActions.map((action) => ({
+    ...action,
+    cliFallback: action.cliFallback.replaceAll(DELIVERY_PIN, LATEST_DELIVERY_PIN),
+  }));
+
+  const { elements, fetchCalls } = await runLoomScript({
+    search: '?from=requester-bot',
+    actionResults: [
+      { ok: true, state: 'awaiting_confirmation', data: { verdict: 'revision_needed' } },
+      { ok: true, state: 'awaiting_confirmation', data: { verdict: 'revision_needed' } },
+    ],
+    payloads: [initial, refreshed],
+  });
+  const [card] = elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
+
+  await card.listeners.get('click')();
+  const revisionButton = elements['[data-loom-detail-actions]']
+    .querySelectorAll('[data-loom-detail-action]')
+    .find((button) => button.getAttribute('data-loom-detail-action') === 'requestRevision');
+  await revisionButton.listeners.get('click')();
+  const staleConfirmButton = elements['[data-loom-detail-actions]'].querySelectorAll('[data-loom-confirm-detail-action]')[0];
+  assert.ok(staleConfirmButton, 'expected initial preview confirm button');
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, new RegExp(DELIVERY_PIN.slice(0, 8)));
+
+  await elements['[data-loom-refresh]'].listeners.get('click')();
+  assert.doesNotMatch(elements['[data-loom-detail-actions]'].innerHTML, /Confirm Request revision/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, new RegExp("--delivery-pin-id " + shellQuotedHtml(LATEST_DELIVERY_PIN)));
+  assert.doesNotMatch(elements['[data-loom-detail-actions]'].innerHTML, new RegExp("--delivery-pin-id " + shellQuotedHtml(DELIVERY_PIN)));
+
+  await staleConfirmButton.listeners.get('click')();
+  const actionBodies = fetchCalls
+    .filter((call) => call.url === '/api/loom/actions')
+    .map((call) => JSON.parse(call.options.body));
+  assert.equal(actionBodies.length, 2);
+  assert.equal(actionBodies[0].deliveryPinId, DELIVERY_PIN);
+  assert.equal(actionBodies[0].confirm, false);
+  assert.equal(actionBodies[1].deliveryPinId, LATEST_DELIVERY_PIN);
+  assert.equal(actionBodies[1].confirm, false);
 });
 
 test('loom Open PR action is non-mutating and preserves safe URL behavior', async () => {

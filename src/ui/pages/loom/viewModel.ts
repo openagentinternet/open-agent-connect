@@ -103,6 +103,7 @@ export interface LoomCommitViewModel {
 }
 
 export interface LoomLocalWorkflowViewModel {
+  claimPinId: string;
   developerMetaBotSlug: string;
   branchName: string;
   workspacePath: string;
@@ -559,6 +560,7 @@ function claimViewModel(value: unknown): LoomClaimViewModel | null {
 function localWorkflowViewModel(value: unknown): LoomLocalWorkflowViewModel {
   const workflow = asObject(value) ?? {};
   return {
+    claimPinId: text(workflow.claimPinId),
     developerMetaBotSlug: text(workflow.developerMetaBotSlug),
     branchName: text(workflow.branchName),
     workspacePath: text(workflow.workspacePath),

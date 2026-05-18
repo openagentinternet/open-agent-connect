@@ -878,6 +878,18 @@ export function buildLoomPageScript(): string {
       .sort((left, right) => right.timestamp - left.timestamp);
     return deliveryEvents.length ? deliveryEvents[0].pin.copyValue : '';
   };
+  const activeClaim = (detail) => detail.claims.find((claim) => claim.active && claim.pin.copyValue) || detail.claims.find((claim) => claim.pin.copyValue) || null;
+  const localWorkflowForClaim = (detail, claimPinId) => {
+    const workflows = arr(detail.localWorkflow);
+    if (!workflows.length) return null;
+    const matching = claimPinId ? workflows.filter((workflow) => text(workflow.claimPinId) === claimPinId) : [];
+    return (matching.length ? matching : workflows).at(-1) || null;
+  };
+  const developerActionWorkflow = (detail, body) => localWorkflowForClaim(detail, text(body.claimPinId) || (activeClaim(detail)?.pin.copyValue || ''));
+  const defaultPayoutAddress = (detail) => {
+    const claim = activeClaim(detail);
+    return firstText(claim && claim.payoutAddress, currentModel && currentModel.actor && currentModel.actor.address && currentModel.actor.address.copyValue);
+  };
   const actionDefaults = (actionId) => {
     if (actionId === 'acceptAndPay') return { score: 5, comment: 'Accepted.' };
     if (actionId === 'requestRevision') return { score: 3, comment: 'Revision requested. Please address the review notes and submit a revised delivery.' };
@@ -885,10 +897,47 @@ export function buildLoomPageScript(): string {
     return { score: undefined, comment: '' };
   };
   const detailActionBody = (detail, action, confirm) => {
+    const from = fromQuery();
+    if (action.id === 'claimAndStart') {
+      const body = {
+        action: action.id,
+        from,
+        taskPinId: detail.taskPinId,
+        payoutAddress: defaultPayoutAddress(detail),
+        confirm: Boolean(confirm),
+      };
+      const claim = activeClaim(detail);
+      if (claim && claim.message) body.message = claim.message;
+      return body;
+    }
+    if (action.id === 'runDevRound') {
+      const claim = activeClaim(detail);
+      return {
+        action: action.id,
+        from,
+        taskPinId: detail.taskPinId,
+        claimPinId: claim ? claim.pin.copyValue : '',
+        roundNote: '',
+        confirm: Boolean(confirm),
+      };
+    }
+    if (action.id === 'deliver') {
+      const claim = activeClaim(detail);
+      const workflow = localWorkflowForClaim(detail, claim ? claim.pin.copyValue : '');
+      return {
+        action: action.id,
+        from,
+        taskPinId: detail.taskPinId,
+        claimPinId: claim ? claim.pin.copyValue : '',
+        prTitle: '',
+        deliverySummary: workflow && workflow.branchName ? 'Delivery from ' + workflow.branchName + '.' : '',
+        confirm: Boolean(confirm),
+      };
+    }
     const defaults = actionDefaults(action.id);
     const body = {
       action: action.id,
-      from: fromQuery(),
+      from,
       taskPinId: detail.taskPinId,
       deliveryPinId: latestDeliveryPinId(detail),
       confirm: Boolean(confirm),
@@ -896,6 +945,32 @@ export function buildLoomPageScript(): string {
     if (defaults.score !== undefined) body.score = defaults.score;
     if (defaults.comment) body.comment = defaults.comment;
     return body;
+  };
+  const stableActionBodyKey = (body) => JSON.stringify(Object.keys(body || {}).sort().reduce((next, key) => {
+    next[key] = body[key];
+    return next;
+  }, {}));
+  const detailActionPreviewKey = (detail, action) => stableActionBodyKey(detailActionBody(detail, action, false));
+  const currentDetailFor = (detail) => {
+    const taskPinId = text(detail && detail.taskPinId);
+    return (currentModel && currentModel.details.find((entry) => entry.taskPinId === taskPinId)) || detail;
+  };
+  const currentCardFor = (card, detail) => {
+    const taskPinId = text((detail && detail.taskPinId) || (card && card.taskPinId));
+    return (currentModel && currentModel.cards.find((entry) => entry.taskPinId === taskPinId)) || card;
+  };
+  const currentActionFor = (detail, action) => arr(detail && detail.nextActions).find((entry) => entry.id === action.id) || action;
+  const detailActionStateFor = (detail) => {
+    const state = detailActionStates.get(detail.taskPinId);
+    if (!state) return null;
+    if (state.phase !== 'preview') return state;
+    const action = arr(detail && detail.nextActions).find((entry) => entry.id === (state.action || {}).id);
+    const key = action && !action.disabledReason ? detailActionPreviewKey(detail, action) : '';
+    if (!key || key !== state.previewKey) {
+      detailActionStates.delete(detail.taskPinId);
+      return null;
+    }
+    return state;
   };
   const resultData = (result) => obj(obj(result).data);
   const previewData = (result) => {
@@ -924,23 +999,109 @@ export function buildLoomPageScript(): string {
     const root = obj(result);
     return text(root.message) || text(root.code) || fallback;
   };
-  const renderPreviewRows = (body, result) => {
+  const repositoryLabel = (...values) => {
+    for (const value of values) {
+      const valueText = text(value);
+      if (valueText) return valueText;
+      const repo = obj(value);
+      const direct = firstText(repo.repoUri, repo.url, repo.htmlUrl, repo.fullName, repo.full_name);
+      if (direct) return direct;
+      const owner = firstText(repo.owner, repo.org, repo.organization);
+      const name = firstText(repo.name, repo.repo);
+      if (owner && name) return owner + '/' + name;
+    }
+    return '';
+  };
+  const pullRequestLabel = (...values) => {
+    for (const value of values) {
+      const valueText = text(value);
+      if (valueText) return valueText;
+      const pr = obj(value);
+      const direct = firstText(pr.url, pr.htmlUrl, pr.prUrl, pr.pullRequestUrl);
+      if (direct) return direct;
+      const title = text(pr.title);
+      if (title) return title;
+      const number = firstText(pr.number, pr.id);
+      if (number) return '#' + number;
+    }
+    return '';
+  };
+  const previewStringList = (...values) => values.flatMap((value) => Array.isArray(value) ? value.map(text).filter(Boolean) : [text(value)].filter(Boolean));
+  const renderPreviewRows = (body, result, detail) => {
     const data = resultData(result);
     const preview = previewData(result);
     const chain = chainData(result);
+    const root = obj(result);
+    const workflow = developerActionWorkflow(detail, body);
+    const workflowPreview = obj(preview.preview);
+    const push = obj(data.push || preview.push);
+    const pullRequest = obj(data.pullRequest || preview.pullRequest);
+    const deliveryPayload = obj(data.deliveryPayload || preview.deliveryPayload);
+    const delivery = obj(deliveryPayload.delivery);
+    const repository = repositoryLabel(
+      data.repository,
+      preview.repository,
+      workflowPreview.repository,
+      data.repo,
+      preview.repo,
+      workflowPreview.repo,
+      data.githubRepository,
+      preview.githubRepository,
+      workflowPreview.githubRepository,
+      data.github,
+      preview.github,
+      workflowPreview.github,
+      pullRequest.repo,
+    );
+    const prTarget = firstText(
+      data.prUrl,
+      preview.prUrl,
+      workflowPreview.prUrl,
+      data.pullRequestUrl,
+      preview.pullRequestUrl,
+      workflowPreview.pullRequestUrl,
+      delivery.prUrl,
+      pullRequest.url,
+      pullRequest.htmlUrl,
+      pullRequest.prUrl,
+    )
+      || pullRequestLabel(data.pr, preview.pr, data.pullRequest, preview.pullRequest, data.githubPr, preview.githubPr);
+    const prTitle = firstText(data.prTitle, preview.prTitle, workflowPreview.prTitle, delivery.prTitle, pullRequest.title);
+    const prTargetSummary = [firstText(pullRequest.repo), firstText(pullRequest.baseBranch), firstText(pullRequest.head)]
+      .filter(Boolean)
+      .join(' ');
+    const llmSessionIds = previewStringList(data.llmSessionIds, preview.llmSessionIds, workflowPreview.llmSessionIds, workflow && workflow.llmSessionIds);
+    const processLogs = previewStringList(data.processLogPaths, preview.processLogPaths, workflowPreview.processLogPaths, data.processLogUris, preview.processLogUris, workflowPreview.processLogUris, workflow && workflow.processLogPaths, workflow && workflow.processLogUris);
     const amount = firstText(preview.amount, preview.amountRaw, data.amount, data.amountRaw);
     const currency = firstText(preview.currency, data.currency);
     const payoutAddress = firstText(preview.payoutAddress, preview.toAddress, data.payoutAddress, data.toAddress);
+    const claimPinId = firstText(body.claimPinId, data.claimPinId, preview.claimPinId, workflowPreview.claimPinId);
+    const deliveryPinId = firstText(body.deliveryPinId, data.deliveryPinId, preview.deliveryPinId, workflowPreview.deliveryPinId);
+    const workspacePath = firstText(data.workspacePath, preview.workspacePath, workflowPreview.workspacePath, data.workspaceRepoPath, preview.workspaceRepoPath, workflowPreview.workspaceRepoPath, push.workspacePath, workflow && workflow.workspacePath);
+    const stagingRepoPath = firstText(data.stagingRepoPath, preview.stagingRepoPath, workflowPreview.stagingRepoPath);
+    const branchName = firstText(data.branchName, preview.branchName, workflowPreview.branchName, push.branchName, delivery.prBranch, workflow && workflow.branchName);
     const rows = [
       ['Actor', body.from || 'Global'],
       ['Task PIN', body.taskPinId],
-      ['Delivery PIN', body.deliveryPinId],
+      claimPinId ? ['Claim PIN', claimPinId] : null,
+      deliveryPinId ? ['Delivery PIN', deliveryPinId] : null,
+      body.payoutAddress ? ['Payout address', body.payoutAddress] : null,
+      workspacePath ? ['Workspace', workspacePath] : null,
+      stagingRepoPath ? ['Staging repo', stagingRepoPath] : null,
+      branchName ? ['Branch', branchName] : null,
+      repository ? ['Repository', repository] : null,
+      prTarget ? ['GitHub PR', prTarget] : null,
+      prTargetSummary ? ['PR target', prTargetSummary] : null,
+      prTitle && prTitle !== prTarget ? ['PR title', prTitle] : null,
+      llmSessionIds.length ? ['LLM sessions', llmSessionIds.join(' ')] : null,
+      processLogs.length ? ['Process logs', processLogs.join(' ')] : null,
       amount ? ['Amount', amount] : null,
       currency ? ['Currency', currency] : null,
-      payoutAddress ? ['Payout address', payoutAddress] : null,
+      payoutAddress && payoutAddress !== body.payoutAddress ? ['Preview payout', payoutAddress] : null,
       firstText(chain.name, chain.chain) ? ['Chain', firstText(chain.name, chain.chain)] : null,
       text(chain.path) ? ['Chain path', text(chain.path)] : null,
       text(chain.txId) ? ['Tx', text(chain.txId)] : null,
+      text(root.code) ? ['Failure code', text(root.code)] : null,
     ].filter(Boolean);
     return '<dl>' + rows.map(([label, value]) => '<div><dt>' + esc(label) + '</dt><dd>' + esc(value) + '</dd></div>').join('') + '</dl>';
   };
@@ -967,7 +1128,7 @@ export function buildLoomPageScript(): string {
       '<h3>' + esc(title) + '</h3>' +
       '<p>' + esc(message) + '</p>' +
       (recovery ? '<p class="loom-action-warning">Do not pay again. The payment appears to have succeeded; use the recovery guidance to publish or retry only the acceptance write.</p>' : '') +
-      renderPreviewRows(body, result) +
+      renderPreviewRows(body, result, state.detail || { localWorkflow: [], claims: [] }) +
       (paymentTxId ? '<div class="loom-inline-copy"><code>' + esc(compact(paymentTxId).label) + '</code>' + copyButton('Copy payment txid', paymentTxId) + '</div>' : '') +
       (text(data.retryGuidance) ? '<p class="loom-action-warning">' + esc(text(data.retryGuidance)) + '</p>' : '') +
       (cliFallback ? '<div class="loom-inline-copy"><code>' + esc(cliFallback) + '</code>' + copyButton('Copy CLI', cliFallback) + '</div>' : '') +
@@ -995,7 +1156,7 @@ export function buildLoomPageScript(): string {
       '</div>';
   };
   const renderDetailActionPanel = (detail, card, handoffCommands) => {
-    const state = detailActionStates.get(detail.taskPinId);
+    const state = detailActionStateFor(detail);
     const prUrl = prUrlForDetail(card, detail);
     const unsafePrFallback = text(card.prUrl) && !isHttpUrl(card.prUrl)
       ? '<span>' + esc(text(card.prUrl)) + '</span>'
@@ -1021,18 +1182,39 @@ export function buildLoomPageScript(): string {
       }
     } catch {}
   };
+  const copyDetailActionFallback = async (action) => {
+    const value = text(action.cliFallback);
+    if (!value) return;
+    try {
+      if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(value);
+      }
+      setStatus('CLI fallback copied.', 'ready');
+    } catch {
+      setStatus('Unable to copy CLI fallback.', 'error');
+    }
+  };
   const postDetailAction = async (detail, card, action, confirm) => {
-    if (action.disabledReason) return;
-    if (action.id === 'openPr') {
-      await openPrAction(card, detail);
+    const latestDetail = currentDetailFor(detail);
+    const latestCard = currentCardFor(card, latestDetail);
+    const latestAction = currentActionFor(latestDetail, action);
+    if (latestAction.disabledReason) return;
+    if (latestAction.id === 'openPr') {
+      await openPrAction(latestCard, latestDetail);
       return;
     }
-    const previous = detailActionStates.get(detail.taskPinId);
-    const body = confirm && previous && previous.phase === 'preview' && previous.action.id === action.id
+    if (latestAction.id === 'copyCli' || latestAction.requiresConfirmation === false) {
+      await copyDetailActionFallback(latestAction);
+      return;
+    }
+    const previewKey = detailActionPreviewKey(latestDetail, latestAction);
+    const previous = detailActionStateFor(latestDetail);
+    const canConfirm = Boolean(confirm && previous && previous.phase === 'preview' && previous.action.id === latestAction.id && previous.previewKey === previewKey);
+    const body = canConfirm
       ? { ...previous.body, confirm: true }
-      : detailActionBody(detail, action, confirm);
-    const stateBase = { action, body };
-    detailActionStates.set(detail.taskPinId, { ...stateBase, phase: confirm ? 'confirming' : 'previewing', result: {} });
+      : detailActionBody(latestDetail, latestAction, false);
+    const stateBase = { action: latestAction, body, detail: latestDetail, previewKey };
+    detailActionStates.set(latestDetail.taskPinId, { ...stateBase, phase: canConfirm ? 'confirming' : 'previewing', result: {} });
     renderDetailModal();
     try {
       const response = await fetch('/api/loom/actions', {
@@ -1042,22 +1224,22 @@ export function buildLoomPageScript(): string {
       });
       const result = await response.json();
       if (!response.ok || result.ok === false) {
-        detailActionStates.set(detail.taskPinId, { ...stateBase, phase: 'error', result });
+        detailActionStates.set(latestDetail.taskPinId, { ...stateBase, phase: 'error', result });
         renderDetailModal();
         return;
       }
-      if (confirm) {
-        detailActionStates.set(detail.taskPinId, { ...stateBase, phase: 'success', result });
+      if (canConfirm) {
+        detailActionStates.set(latestDetail.taskPinId, { ...stateBase, phase: 'success', result });
         await refreshDashboard();
         setStatus('Action completed.', 'ready');
         if (elements.detailModal && !elements.detailModal.hidden) renderDetailModal();
         return;
       }
-      detailActionStates.set(detail.taskPinId, { ...stateBase, phase: 'preview', result });
+      detailActionStates.set(latestDetail.taskPinId, { ...stateBase, phase: 'preview', result });
       renderDetailModal();
     } catch (error) {
       const result = { ok: false, message: error instanceof Error ? error.message : String(error) };
-      detailActionStates.set(detail.taskPinId, { ...stateBase, phase: 'error', result });
+      detailActionStates.set(latestDetail.taskPinId, { ...stateBase, phase: 'error', result });
       renderDetailModal();
     }
   };
@@ -1144,7 +1326,7 @@ export function buildLoomPageScript(): string {
     );
     setHtml(elements.detailActions, renderDetailActionPanel(detail, card, handoffCommands));
     if (elements.detailModal) {
-      const state = detailActionStates.get(detail.taskPinId);
+      const state = detailActionStateFor(detail);
       elements.detailModal.dataset.confirmationActive = state && state.phase === 'preview' ? 'true' : '';
     }
     bindCopyActions(elements.detailBody);
