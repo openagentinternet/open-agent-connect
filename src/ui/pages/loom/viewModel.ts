@@ -91,7 +91,32 @@ export interface LoomClaimViewModel {
   active: boolean;
   message: string;
   timestamp: number;
+  payoutAddress: string;
   developer: LoomBotViewModel;
+}
+
+export interface LoomCommitViewModel {
+  sha: string;
+  message: string;
+  files: string[];
+}
+
+export interface LoomLocalWorkflowViewModel {
+  developerMetaBotSlug: string;
+  branchName: string;
+  workspacePath: string;
+  llmSessionIds: string[];
+  processLogPaths: string[];
+  processLogUris: string[];
+  commits: LoomCommitViewModel[];
+}
+
+export interface LoomRecordViewModel {
+  pin: LoomCopyLabelViewModel;
+  timestamp: number;
+  globalMetaId: string;
+  address: string;
+  payload: PlainObject;
 }
 
 export interface LoomDetailViewModel {
@@ -107,6 +132,13 @@ export interface LoomDetailViewModel {
   claims: LoomClaimViewModel[];
   warnings: LoomWarningViewModel[];
   timeline: LoomTimelineEventViewModel[];
+  localWorkflow: LoomLocalWorkflowViewModel[];
+  validRecords: {
+    statuses: LoomRecordViewModel[];
+    deliveries: LoomRecordViewModel[];
+    acceptances: LoomRecordViewModel[];
+    claimRejects: LoomRecordViewModel[];
+  };
 }
 
 export interface LoomDashboardViewModel {
@@ -175,6 +207,16 @@ function numberValue(value: unknown): number {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function commitViewModels(value: unknown): LoomCommitViewModel[] {
+  return asArray(value)
+    .map((commit) => ({
+      sha: text(commit.sha),
+      message: text(commit.message),
+      files: stringArray(commit.files),
+    }))
+    .filter((commit) => commit.sha || commit.message);
 }
 
 function dashboardFrom(input: unknown): PlainObject {
@@ -496,8 +538,38 @@ function claimViewModel(value: unknown): LoomClaimViewModel | null {
     active: claim.active === true,
     message: text(claim.message),
     timestamp: numberValue(claim.timestamp),
+    payoutAddress: text(claim.payoutAddress),
     developer: botViewModel(claim.developer, 'developer'),
   };
+}
+
+function localWorkflowViewModel(value: unknown): LoomLocalWorkflowViewModel {
+  const workflow = asObject(value) ?? {};
+  return {
+    developerMetaBotSlug: text(workflow.developerMetaBotSlug),
+    branchName: text(workflow.branchName),
+    workspacePath: text(workflow.workspacePath),
+    llmSessionIds: stringArray(workflow.llmSessionIds),
+    processLogPaths: stringArray(workflow.processLogPaths),
+    processLogUris: stringArray(workflow.processLogUris),
+    commits: commitViewModels(workflow.commits),
+  };
+}
+
+function recordViewModels(value: unknown): LoomRecordViewModel[] {
+  return asArray(value)
+    .map((record) => {
+      const pin = compactLabel(text(record.pinId));
+      if (!pin) return null;
+      return {
+        pin,
+        timestamp: numberValue(record.timestamp),
+        globalMetaId: text(record.globalMetaId),
+        address: text(record.creatorAddress) || text(record.address),
+        payload: asObject(record.payload) ?? {},
+      };
+    })
+    .filter((record): record is LoomRecordViewModel => Boolean(record));
 }
 
 function detailViewModel(value: unknown): LoomDetailViewModel | null {
@@ -505,6 +577,7 @@ function detailViewModel(value: unknown): LoomDetailViewModel | null {
   if (!detail) return null;
   const taskPinId = text(detail.taskPinId);
   if (!taskPinId) return null;
+  const validRecords = asObject(detail.validRecords) ?? {};
   const timeline = asArray(detail.timeline)
     .map(timelineEventViewModel)
     .filter((event): event is LoomTimelineEventViewModel => Boolean(event));
@@ -525,6 +598,13 @@ function detailViewModel(value: unknown): LoomDetailViewModel | null {
       .map(warningViewModel)
       .filter((warning): warning is LoomWarningViewModel => Boolean(warning)),
     timeline: sortTimeline(timeline),
+    localWorkflow: asArray(detail.localWorkflow).map(localWorkflowViewModel),
+    validRecords: {
+      statuses: recordViewModels(validRecords.statuses),
+      deliveries: recordViewModels(validRecords.deliveries),
+      acceptances: recordViewModels(validRecords.acceptances),
+      claimRejects: recordViewModels(validRecords.claimRejects),
+    },
   };
 }
 

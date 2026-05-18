@@ -62,14 +62,23 @@ export function buildLoomPageDefinition(): LocalUiPageDefinition {
 
         <section class="loom-workspace">
           <div class="loom-board" data-loom-board aria-label="Loom task board"></div>
-          <aside class="loom-detail" data-loom-detail aria-label="Selected Loom task detail">
-            <div class="loom-empty-detail">
-              <h2>Select a task</h2>
-              <p>Task requirements, Bot identities, timeline, warnings, and handoff commands will appear here.</p>
+        </section>
+        </section>
+        <div class="loom-detail-modal" data-loom-detail-modal hidden>
+          <section class="loom-detail-dialog" data-loom-detail-dialog role="dialog" aria-modal="true" aria-labelledby="loom-detail-title" tabindex="-1">
+            <header class="loom-modal-head">
+              <div>
+                <span class="loom-kicker">Selected task</span>
+                <h2 id="loom-detail-title" data-loom-detail-title>Loom task detail</h2>
+              </div>
+              <button type="button" class="loom-icon-button loom-detail-close" data-loom-detail-close aria-label="Close task detail">×</button>
+            </header>
+            <div class="loom-modal-grid">
+              <div class="loom-detail-body" data-loom-detail-body></div>
+              <aside class="loom-detail-actions" data-loom-detail-actions aria-label="Task actions"></aside>
             </div>
-          </aside>
-        </section>
-        </section>
+          </section>
+        </div>
       </section>
     `,
     script: buildLoomPageScript(),
@@ -89,7 +98,12 @@ export function buildLoomPageScript(): string {
     queryFilter: document.querySelector('[data-loom-query-filter]'),
     metrics: document.querySelector('[data-loom-metrics]'),
     board: document.querySelector('[data-loom-board]'),
-    detail: document.querySelector('[data-loom-detail]'),
+    detailModal: document.querySelector('[data-loom-detail-modal]'),
+    detailDialog: document.querySelector('[data-loom-detail-dialog]'),
+    detailTitle: document.querySelector('[data-loom-detail-title]'),
+    detailBody: document.querySelector('[data-loom-detail-body]'),
+    detailActions: document.querySelector('[data-loom-detail-actions]'),
+    detailClose: document.querySelector('[data-loom-detail-close]'),
     error: document.querySelector('[data-loom-error]'),
   };
   const boardColumns = [
@@ -102,6 +116,7 @@ export function buildLoomPageScript(): string {
   ];
   let currentModel = null;
   let selectedTaskPinId = '';
+  let selectedCardElement = null;
 
   const esc = (value) => String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -401,6 +416,17 @@ export function buildLoomPageScript(): string {
     return '<span class="loom-avatar loom-avatar-fallback">' + esc(bot.initials) + '</span>';
   };
   const botInline = (bot, label) => '<div class="loom-bot"><div>' + avatar(bot) + '</div><div class="loom-bot-text"><span>' + esc(label) + '</span><strong>' + esc(bot.displayName) + '</strong><small>' + esc(bot.globalMetaId || bot.fallbackLabel) + '</small></div></div>';
+  const participantBlock = (bot, label, payoutAddress) => {
+    if (!bot) return '<div class="loom-bot loom-bot-empty">No ' + esc(label.toLowerCase()) + '</div>';
+    return '<div class="loom-participant">' +
+      botInline(bot, label) +
+      '<div class="loom-participant-meta">' +
+      (bot.globalMetaId ? '<span>GMID: <code>' + esc(bot.globalMetaId) + '</code></span>' : '') +
+      (bot.address ? '<span>Address: <code>' + esc(bot.address) + '</code></span>' : '') +
+      (payoutAddress ? '<span>Payout: <code>' + esc(payoutAddress) + '</code></span>' : '') +
+      '</div>' +
+      '</div>';
+  };
   const renderMetrics = () => {
     const visibleMetrics = currentModel.summary.metrics.filter((metric) => (
       ['totalTasks', 'open', 'working', 'review', 'revision', 'invalidRecords'].includes(metric[0])
@@ -544,12 +570,41 @@ export function buildLoomPageScript(): string {
         '</div>';
     }).join('') + '</section>'
   ) : '';
-  const renderDetail = () => {
+  const renderRawRecordIndex = (detail) => {
+    const groups = [
+      ['Status', detail.validRecords.statuses],
+      ['Delivery', detail.validRecords.deliveries],
+      ['Acceptance', detail.validRecords.acceptances],
+      ['Claim reject', detail.validRecords.claimRejects],
+    ];
+    const rows = groups.flatMap(([label, records]) => records.map((record) => {
+      const payload = obj(record.payload);
+      const summary = label === 'Claim reject' ? text(payload.reason) : '';
+      return '<li><strong>' + esc(label) + '</strong>' +
+        (summary ? '<p>' + esc(summary) + '</p>' : '') +
+        renderRecordPin(record) +
+        renderRecordAuthor(record) +
+        '</li>';
+    }));
+    return rows.length ? '<ul class="loom-raw-index">' + rows.join('') + '</ul>' : '<p>No raw records available.</p>';
+  };
+  const closeDetailModal = (returnFocus) => {
+    if (elements.detailModal) {
+      elements.detailModal.hidden = true;
+      elements.detailModal.dataset.state = 'closed';
+    }
+    if (returnFocus !== false && selectedCardElement && selectedCardElement.focus) {
+      selectedCardElement.focus();
+    }
+  };
+  const renderDetailModal = () => {
     const detail = currentModel.details.find((entry) => entry.taskPinId === selectedTaskPinId) || null;
-    const card = currentModel.cards.find((entry) => entry.taskPinId === selectedTaskPinId) || currentModel.cards[0] || null;
+    const card = currentModel.cards.find((entry) => entry.taskPinId === selectedTaskPinId) || null;
     if (!detail || !card) {
-      setHtml(elements.detail, '<div class="loom-empty-detail"><h2>Select a task</h2><p>Task requirements, Bot identities, timeline, warnings, and handoff commands will appear here.</p></div>');
-      return;
+      setHtml(elements.detailBody, '');
+      setHtml(elements.detailActions, '');
+      closeDetailModal(false);
+      return false;
     }
     const firstClaim = detail.claims[0] || null;
     const activeClaim = detail.claims.find((claim) => claim.active) || null;
@@ -574,30 +629,47 @@ export function buildLoomPageScript(): string {
       renderCommitEvidence(workflow.commits) +
       '</div>'
     )).join('') : '';
-    setHtml(elements.detail,
+    setText(elements.detailTitle, detail.title);
+    setHtml(elements.detailBody,
       '<div class="loom-detail-head">' +
-      '<div><span class="loom-kicker">Selected task</span><h2>' + esc(detail.title) + '</h2><div class="loom-detail-actors">' + botInline(detail.requester, 'Requester') + (headerDeveloper ? botInline(headerDeveloper, 'Developer') : '<div class="loom-bot loom-bot-empty">No developer claim</div>') + '</div></div>' +
+      '<div><span class="loom-kicker">State</span><h2>' + esc(detail.title) + '</h2><div class="loom-detail-actors">' + botInline(detail.requester, 'Requester') + (headerDeveloper ? botInline(headerDeveloper, 'Developer') : '<div class="loom-bot loom-bot-empty">No developer claim</div>') + '</div></div>' +
       '<span class="loom-state" data-tone="' + esc(card.stateTone) + '">' + esc(detail.stateLabel) + '</span>' +
       '</div>' +
       '<div class="loom-detail-copy"><code>' + esc(detail.taskPin.label) + '</code>' + copyButton('Copy task pin', detail.taskPin.copyValue) + '</div>' +
+      '<section class="loom-detail-section"><h3>State explanation</h3><p>' + esc(card.latestStatusSummary || detail.stateLabel || 'No state summary available.') + '</p></section>' +
       '<section class="loom-detail-section"><h3>Requirement</h3><p>' + esc(detail.requirement || 'No requirement text available.') + '</p><h3>Acceptance criteria</h3><p>' + esc(detail.criteria || 'No acceptance criteria available.') + '</p></section>' +
       renderRepositorySection(card) +
-      '<section class="loom-detail-section"><h3>Bot identities</h3><div class="loom-identity-grid">' + botInline(detail.requester, 'Requester') + (headerDeveloper ? botInline(headerDeveloper, 'Developer') : '<div class="loom-bot loom-bot-empty">No developer claim</div>') + '</div></section>' +
+      '<section class="loom-detail-section"><h3>Participants</h3><div class="loom-identity-grid">' + participantBlock(detail.requester, 'Requester', '') + participantBlock(headerDeveloper, 'Developer', activeClaim ? activeClaim.payoutAddress : '') + '</div></section>' +
       '<section class="loom-detail-section"><h3>Claims</h3>' + (detail.claims.length ? detail.claims.map((claim) => '<div class="loom-claim"><strong>' + esc(claim.developer.displayName) + (claim.active ? ' · active' : '') + '</strong><p>' + esc(claim.message || 'No claim message.') + '</p><div class="loom-claim-meta">' + (claim.developer.globalMetaId ? '<span>GMID: <code>' + esc(claim.developer.globalMetaId) + '</code></span>' : '') + (claim.developer.address ? '<span>Address: <code>' + esc(claim.developer.address) + '</code></span>' : '') + (claim.payoutAddress ? '<span>Payout: <code>' + esc(claim.payoutAddress) + '</code></span>' : '') + '</div><div class="loom-inline-copy"><code>' + esc(claim.pin.label) + '</code>' + copyButton('Copy claim pin', claim.pin.copyValue) + '</div></div>').join('') : '<p>No claims yet.</p>') + '</section>' +
+      '<section class="loom-detail-section"><h3>Delivery</h3>' + (detail.validRecords.deliveries.length ? renderDeliveryRecords(detail.validRecords.deliveries) : '<p>No delivery record yet.</p>') + '</section>' +
+      '<section class="loom-detail-section"><h3>Payment</h3>' + (card.paymentTxId.copyValue ? '<div class="loom-inline-copy"><code>' + esc(card.paymentTxId.label) + '</code>' + copyButton('Copy payment txid', card.paymentTxId.copyValue) + '</div>' : '<p>No payment transaction recorded.</p>') + renderAcceptanceRecords(detail.validRecords.acceptances) + '</section>' +
+      '<section class="loom-detail-section"><h3>Process evidence</h3>' + (localEvidence || '<p>No local process evidence recorded.</p>') + renderStatusRecords(detail.validRecords.statuses) + '</section>' +
+      '<section class="loom-detail-section"><h3>Timeline</h3><ol class="loom-timeline">' + renderTimeline(detail) + '</ol></section>' +
       '<section class="loom-detail-section"><h3>Warnings</h3>' + (detail.warnings.length ? '<ul class="loom-warning-list">' + detail.warnings.map((warning) => '<li><strong>' + esc(warning.code || warning.protocol || 'warning') + '</strong><p>' + esc(warning.message) + '</p><div class="loom-inline-copy"><code>' + esc(warning.pin.label) + '</code>' + copyButton('Copy warning pin', warning.pin.copyValue) + '</div></li>').join('') + '</ul>' : '<p>No warnings for this task.</p>') + '</section>' +
-      (localEvidence ? '<section class="loom-detail-section"><h3>Local evidence</h3>' + localEvidence + '</section>' : '') +
-      renderStatusRecords(detail.validRecords.statuses) +
-      renderDeliveryRecords(detail.validRecords.deliveries) +
-      renderAcceptanceRecords(detail.validRecords.acceptances) +
-      renderClaimRejectRecords(detail.validRecords.claimRejects) +
-      '<section class="loom-detail-section"><h3>Handoffs</h3><div class="loom-handoff">' +
-      (card.prUrl ? safeExternalLink(card.prUrl, isHttpUrl(card.prUrl) ? 'Open PR ↗' : card.prUrl, '') : '') +
-      (card.paymentTxId.copyValue ? '<div class="loom-inline-copy"><code>' + esc(card.paymentTxId.label) + '</code>' + copyButton('Copy payment txid', card.paymentTxId.copyValue) + '</div>' : '') +
-      handoffCommands.map((command) => '<div class="loom-inline-copy"><code>' + esc(command) + '</code>' + copyButton('Copy CLI', command) + '</div>').join('') +
-      '</div></section>' +
-      '<section class="loom-detail-section"><h3>Timeline</h3><ol class="loom-timeline">' + renderTimeline(detail) + '</ol></section>'
+      '<section class="loom-detail-section"><h3>Raw records</h3>' +
+      renderRawRecordIndex(detail) +
+      '</section>'
     );
-    bindCopyActions(elements.detail);
+    setHtml(elements.detailActions,
+      '<section class="loom-detail-section"><h3>Action panel</h3><p>' + esc(card.actionLabel || detail.stateLabel || 'No operator action selected.') + '</p></section>' +
+      '<section class="loom-detail-section"><h3>CLI fallback</h3><div class="loom-handoff">' +
+      (card.prUrl ? safeExternalLink(card.prUrl, isHttpUrl(card.prUrl) ? 'Open PR ↗' : card.prUrl, '') : '') +
+      handoffCommands.map((command) => '<div class="loom-inline-copy"><code>' + esc(command) + '</code>' + copyButton('Copy CLI', command) + '</div>').join('') +
+      '</div></section>'
+    );
+    bindCopyActions(elements.detailBody);
+    bindCopyActions(elements.detailActions);
+    return true;
+  };
+  const openDetailModal = (taskPinId, cardElement) => {
+    selectedTaskPinId = taskPinId;
+    selectedCardElement = cardElement || selectedCardElement;
+    if (!renderDetailModal()) return;
+    if (elements.detailModal) {
+      elements.detailModal.hidden = false;
+      elements.detailModal.dataset.state = 'open';
+    }
+    if (elements.detailDialog && elements.detailDialog.focus) elements.detailDialog.focus();
   };
   const bindCopyActions = (root) => {
     if (!root || !root.querySelectorAll) return;
@@ -621,28 +693,27 @@ export function buildLoomPageScript(): string {
     if (!elements.board || !elements.board.querySelectorAll) return;
     elements.board.querySelectorAll('[data-loom-card]').forEach((card) => {
       const select = () => {
-        selectedTaskPinId = card.getAttribute('data-loom-card') || '';
-        renderBoard();
-        renderDetail();
+        openDetailModal(card.getAttribute('data-loom-card') || '', card);
       };
       card.addEventListener('click', select);
       card.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') select();
+        if (event.key === 'Enter' || event.key === ' ') {
+          if (event.preventDefault) event.preventDefault();
+          select();
+        }
       });
     });
   };
   const render = (payload) => {
     currentModel = buildModel(payload);
-    if (!selectedTaskPinId || !currentModel.cards.some((card) => card.taskPinId === selectedTaskPinId)) {
-      selectedTaskPinId = currentModel.cards[0] ? currentModel.cards[0].taskPinId : '';
-    }
+    if (selectedTaskPinId && !currentModel.cards.some((card) => card.taskPinId === selectedTaskPinId)) closeDetailModal(false);
     setText(elements.scopeLabel, fromQuery() ? 'From ' + fromQuery() : 'Global');
     setText(elements.staleWarning, currentModel.refresh.warningLabel);
     setStatus(currentModel.cards.length ? 'Dashboard loaded.' : 'No Loom tasks found.', 'ready');
     setText(elements.error, '');
     renderMetrics();
     renderBoard();
-    renderDetail();
+    if (elements.detailModal && !elements.detailModal.hidden && selectedTaskPinId) renderDetailModal();
   };
   const dashboardRequestParams = () => {
     const params = new URLSearchParams();
@@ -700,6 +771,27 @@ export function buildLoomPageScript(): string {
   });
   if (elements.queryFilter) elements.queryFilter.addEventListener('input', loadDashboard);
   if (elements.refresh) elements.refresh.addEventListener('click', refreshDashboard);
+  if (elements.detailClose) elements.detailClose.addEventListener('click', () => closeDetailModal(true));
+  if (elements.detailModal) {
+    elements.detailModal.addEventListener('click', (event) => {
+      const confirmationActive = elements.detailModal.dataset.confirmationActive === 'true';
+      if (!confirmationActive && event && event.target === elements.detailModal) closeDetailModal(true);
+    });
+    elements.detailModal.addEventListener('keydown', (event) => {
+      if (event && event.key === 'Escape') {
+        if (event.preventDefault) event.preventDefault();
+        closeDetailModal(true);
+      }
+    });
+  }
+  if (document && document.addEventListener) {
+    document.addEventListener('keydown', (event) => {
+      if (event && event.key === 'Escape' && elements.detailModal && !elements.detailModal.hidden) {
+        if (event.preventDefault) event.preventDefault();
+        closeDetailModal(true);
+      }
+    });
+  }
   if (elements.newTask) elements.newTask.disabled = true;
   loadDashboard();
 })();`;

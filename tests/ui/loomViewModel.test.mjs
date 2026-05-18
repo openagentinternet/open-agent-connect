@@ -280,6 +280,39 @@ test('buildLoomDashboardViewModel sorts task detail timeline and exposes full co
   assert.equal(detail.warnings[0].pin.copyValue, 'invalid-pin-0000000000000000000000000000000000000000');
 });
 
+test('buildLoomDashboardViewModel carries dense detail evidence for modal rendering', () => {
+  const model = buildLoomDashboardViewModel({
+    dashboard: dashboard({
+      details: [{
+        ...dashboard().details[0],
+        localWorkflow: [{
+          developerMetaBotSlug: 'alice-dev',
+          branchName: 'codex/loom-modal',
+          workspacePath: '/tmp/loom-modal',
+          llmSessionIds: ['llm-session-1'],
+          processLogPaths: ['/tmp/process.md'],
+          processLogUris: ['metafile://process-log'],
+          commits: [{ sha: 'abcdef1234567890', message: 'Add modal', files: ['src/ui/pages/loom/app.ts'] }],
+        }],
+        validRecords: {
+          statuses: [{ pinId: 'status-pin', timestamp: NOW - 90_000, payload: { status: 'in_progress' } }],
+          deliveries: [{ pinId: LONG_DELIVERY_PIN, timestamp: NOW - 80_000, payload: { delivery: { prUrl: 'https://example.com/pr/1' } } }],
+          acceptances: [{ pinId: LONG_ACCEPTANCE_PIN, timestamp: NOW - 70_000, payload: { paymentTxId: LONG_TXID } }],
+          claimRejects: [{ pinId: 'reject-pin', timestamp: NOW - 60_000, payload: { reason: 'superseded' } }],
+        },
+      }],
+    }),
+  }, NOW);
+  const [detail] = model.details;
+
+  assert.equal(detail.localWorkflow[0].developerMetaBotSlug, 'alice-dev');
+  assert.equal(detail.localWorkflow[0].commits[0].sha, 'abcdef1234567890');
+  assert.equal(detail.validRecords.statuses[0].pin.copyValue, 'status-pin');
+  assert.equal(detail.validRecords.deliveries[0].pin.copyValue, LONG_DELIVERY_PIN);
+  assert.equal(detail.validRecords.acceptances[0].pin.copyValue, LONG_ACCEPTANCE_PIN);
+  assert.equal(detail.validRecords.claimRejects[0].pin.copyValue, 'reject-pin');
+});
+
 test('buildLoomDashboardViewModel returns a useful empty state for missing dashboard data', () => {
   const model = buildLoomDashboardViewModel({}, NOW);
 

@@ -30,15 +30,28 @@ function shellQuotedHtml(value) {
   return `&#39;${String(value).replace(/'/gu, '&#39;\\&#39;&#39;')}&#39;`;
 }
 
+function sectionHtml(html, heading, nextHeading) {
+  const start = html.indexOf(`<h3>${heading}</h3>`);
+  if (start < 0) return '';
+  const end = nextHeading ? html.indexOf(`<h3>${nextHeading}</h3>`, start) : -1;
+  return end < 0 ? html.slice(start) : html.slice(start, end);
+}
+
+function matchCount(value, pattern) {
+  return Array.from(String(value).matchAll(pattern)).length;
+}
+
 class FakeElement {
   constructor(value = '') {
     this.textContent = '';
     this.value = value;
     this.dataset = {};
     this.disabled = false;
+    this.hidden = false;
     this.listeners = new Map();
     this.attrs = {};
     this.nodes = [];
+    this.focusCount = 0;
   }
 
   set innerHTML(value) {
@@ -70,6 +83,10 @@ class FakeElement {
     this.listeners.set(eventName, handler);
   }
 
+  focus() {
+    this.focusCount += 1;
+  }
+
   getAttribute(name) {
     return this.attrs[name] || '';
   }
@@ -82,6 +99,10 @@ class FakeElement {
       return this.nodes.filter((node) => node.attrs['data-loom-copy'] !== undefined);
     }
     return [];
+  }
+
+  contains(target) {
+    return target === this || this.nodes.includes(target);
   }
 }
 
@@ -311,9 +332,14 @@ async function runLoomScript(options = {}) {
     '[data-loom-query-filter]': new FakeElement(options.query || ''),
     '[data-loom-metrics]': new FakeElement(),
     '[data-loom-board]': new FakeElement(),
-    '[data-loom-detail]': new FakeElement(),
+    '[data-loom-detail-modal]': new FakeElement(),
+    '[data-loom-detail-dialog]': new FakeElement(),
+    '[data-loom-detail-body]': new FakeElement(),
+    '[data-loom-detail-actions]': new FakeElement(),
+    '[data-loom-detail-close]': new FakeElement(),
     '[data-loom-error]': new FakeElement(),
   };
+  elements['[data-loom-detail-modal]'].hidden = true;
   const fetchCalls = [];
   const writes = [];
   const payloads = options.payloads || [dashboard(), dashboard({
@@ -366,7 +392,11 @@ async function runLoomScript(options = {}) {
     },
     document: {
       readyState: 'complete',
-      addEventListener() {},
+      listeners: new Map(),
+      activeElement: null,
+      addEventListener(eventName, handler) {
+        this.listeners.set(eventName, handler);
+      },
       querySelector: (selector) => elements[selector] || null,
     },
     fetch: async (url, requestOptions = {}) => {
@@ -395,10 +425,10 @@ async function runLoomScript(options = {}) {
 
   vm.runInNewContext(buildLoomPageDefinition().script, context);
   await waitFor(() => elements['[data-loom-board]'].innerHTML.includes('Wire Loom board UI') || elements['[data-loom-error]'].textContent, 'initial Loom render');
-  return { elements, fetchCalls, writes };
+  return { elements, fetchCalls, writes, document: context.document };
 }
 
-test('loom page script loads dashboard JSON, renders board cards with Bot names, and selects task detail', async () => {
+test('loom page script loads dashboard JSON and renders board cards with Bot names without an initial detail panel', async () => {
   const { elements, fetchCalls, writes } = await runLoomScript();
 
   const contentHtml = buildLoomPageDefinition().contentHtml;
@@ -424,60 +454,140 @@ test('loom page script loads dashboard JSON, renders board cards with Bot names,
   assert.doesNotMatch(elements['[data-loom-board]'].innerHTML, /openagentinternet\/open-agent-connect/);
   assert.doesNotMatch(elements['[data-loom-board]'].innerHTML, new RegExp(PAYMENT_TXID.slice(0, 8)));
   assert.match(elements['[data-loom-board]'].innerHTML, /just now/);
+  assert.doesNotMatch(contentHtml, /data-loom-detail aria-label="Selected Loom task detail"/);
+  assert.equal(elements['[data-loom-detail-modal]'].hidden, true);
+  assert.equal(elements['[data-loom-detail-body]'].innerHTML, '');
 
   const [card] = elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
   await card.listeners.get('click')();
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Create the built-in Loom operations board/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Repository/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /openagentinternet\/open-agent-connect/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /href="https:\/\/github\.com\/openagentinternet\/open-agent-connect"/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Base branch:.*main/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Active Developer Bot/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /gm-dev/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /1DeveloperAddress/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /1ActivePayoutAddress/);
-  assert.doesNotMatch(elements['[data-loom-detail]'].innerHTML.split('Requirement')[0], /Inactive Developer Bot/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Status author is not the active developer/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Delivery posted/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /codex\/loom-board/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /\/tmp\/loom-workspace/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /llm-session-123/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /\/tmp\/loom-process\.md/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /metafile:\/\/loom-process-log/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /1234567/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Render local workflow commits/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Raw status says tests are passing/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /gm-status-author/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /1StatusAuthorAddress/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /abcdef1/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Add raw status evidence/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /metafile:\/\/raw-process-log/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /metafile:\/\/raw-artifact/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Loom board PR/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /gm-delivery-author/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /1DeliveryAuthorAddress/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Branches:.*codex\/loom-board -&gt; main/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Tests pass/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /done/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /accepted/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /gm-acceptance-author/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /1AcceptanceAuthorAddress/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Score: 5/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Accepted with payment/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /Requester selected a newer claim/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /gm-reject-author/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /1RejectAuthorAddress/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, new RegExp(PAYMENT_TXID.slice(0, 8)));
-  assert.match(elements['[data-loom-detail]'].innerHTML, new RegExp("metabot loom state " + shellQuotedHtml(TASK_PIN) + " --refresh"));
-  assert.match(elements['[data-loom-detail]'].innerHTML, new RegExp("--delivery-pin-id " + shellQuotedHtml(DELIVERY_PIN)));
-  assert.match(elements['[data-loom-detail]'].innerHTML, /metabot loom accept-and-pay/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /metabot loom review-delivery/);
-  assert.doesNotMatch(elements['[data-loom-detail]'].innerHTML, /state --task-pin-id/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /target="_blank"/);
+  assert.equal(elements['[data-loom-detail-modal]'].hidden, false);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Create the built-in Loom operations board/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Requirement/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Acceptance criteria/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Participants/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Delivery/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Payment/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Process evidence/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Timeline/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Warnings/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Raw records/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /CLI fallback/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Repository/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /openagentinternet\/open-agent-connect/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /href="https:\/\/github\.com\/openagentinternet\/open-agent-connect"/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Base branch:.*main/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Active Developer Bot/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /gm-dev/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /1DeveloperAddress/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /1ActivePayoutAddress/);
+  const participantsHtml = sectionHtml(elements['[data-loom-detail-body]'].innerHTML, 'Participants', 'Claims');
+  assert.match(participantsHtml, /Requester Bot/);
+  assert.match(participantsHtml, /gm-requester/);
+  assert.match(participantsHtml, /1RequesterAddress/);
+  assert.match(participantsHtml, /Active Developer Bot/);
+  assert.match(participantsHtml, /gm-dev/);
+  assert.match(participantsHtml, /1DeveloperAddress/);
+  assert.match(participantsHtml, /1ActivePayoutAddress/);
+  assert.doesNotMatch(participantsHtml, /1InactivePayoutAddress/);
+  assert.doesNotMatch(elements['[data-loom-detail-body]'].innerHTML.split('Requirement')[0], /Inactive Developer Bot/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Status author is not the active developer/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Delivery posted/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /codex\/loom-board/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /\/tmp\/loom-workspace/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /llm-session-123/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /\/tmp\/loom-process\.md/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /metafile:\/\/loom-process-log/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /1234567/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Render local workflow commits/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Raw status says tests are passing/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /gm-status-author/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /1StatusAuthorAddress/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /abcdef1/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Add raw status evidence/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /metafile:\/\/raw-process-log/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /metafile:\/\/raw-artifact/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Loom board PR/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /gm-delivery-author/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /1DeliveryAuthorAddress/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Branches:.*codex\/loom-board -&gt; main/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Tests pass/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /done/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /accepted/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /gm-acceptance-author/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /1AcceptanceAuthorAddress/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Score: 5/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Accepted with payment/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Requester selected a newer claim/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /gm-reject-author/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /1RejectAuthorAddress/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, new RegExp(PAYMENT_TXID.slice(0, 8)));
+  assert.equal(matchCount(elements['[data-loom-detail-body]'].innerHTML, /<h3>Status records<\/h3>/gu), 1);
+  assert.equal(matchCount(elements['[data-loom-detail-body]'].innerHTML, /<h3>Delivery records<\/h3>/gu), 1);
+  assert.equal(matchCount(elements['[data-loom-detail-body]'].innerHTML, /<h3>Acceptance records<\/h3>/gu), 1);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, new RegExp("metabot loom state " + shellQuotedHtml(TASK_PIN) + " --refresh"));
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, new RegExp("--delivery-pin-id " + shellQuotedHtml(DELIVERY_PIN)));
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /metabot loom accept-and-pay/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /metabot loom review-delivery/);
+  assert.doesNotMatch(elements['[data-loom-detail-actions]'].innerHTML, /state --task-pin-id/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /target="_blank"/);
 
-  const [copyButton] = elements['[data-loom-detail]'].querySelectorAll('[data-loom-copy]');
+  const [copyButton] = elements['[data-loom-detail-body]'].querySelectorAll('[data-loom-copy]');
   await copyButton.listeners.get('click')();
   assert.equal(writes[0], TASK_PIN);
+});
+
+test('loom detail modal closes with Escape or button and returns focus to the selected card', async () => {
+  const { elements, document } = await runLoomScript();
+  const [card] = elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
+
+  await card.listeners.get('click')();
+  assert.equal(elements['[data-loom-detail-modal]'].hidden, false);
+
+  elements['[data-loom-detail-modal]'].listeners.get('click')({
+    target: elements['[data-loom-detail-modal]'],
+  });
+  assert.equal(elements['[data-loom-detail-modal]'].hidden, true);
+  assert.equal(card.focusCount, 1);
+
+  await card.listeners.get('click')();
+  elements['[data-loom-detail-modal]'].dataset.confirmationActive = 'true';
+  elements['[data-loom-detail-modal]'].listeners.get('click')({
+    target: elements['[data-loom-detail-modal]'],
+  });
+  assert.equal(elements['[data-loom-detail-modal]'].hidden, false);
+  elements['[data-loom-detail-modal]'].dataset.confirmationActive = '';
+
+  elements['[data-loom-detail-close]'].listeners.get('click')();
+  assert.equal(elements['[data-loom-detail-modal]'].hidden, true);
+  assert.equal(card.focusCount, 2);
+
+  await card.listeners.get('click')();
+  elements['[data-loom-detail-modal]'].listeners.get('keydown')({
+    key: 'Escape',
+    preventDefault() {},
+  });
+  assert.equal(elements['[data-loom-detail-modal]'].hidden, true);
+  assert.equal(card.focusCount, 3);
+
+  await card.listeners.get('click')();
+  document.listeners.get('keydown')({
+    key: 'Escape',
+    preventDefault() {},
+  });
+  assert.equal(elements['[data-loom-detail-modal]'].hidden, true);
+  assert.equal(card.focusCount, 4);
+});
+
+test('loom detail modal stays hidden when a card has no matching detail record', async () => {
+  const missingDetail = dashboard({ details: [] });
+  const { elements } = await runLoomScript({ payloads: [missingDetail] });
+  const [card] = elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
+
+  await card.listeners.get('click')();
+
+  assert.equal(elements['[data-loom-detail-modal]'].hidden, true);
+  assert.equal(elements['[data-loom-detail-body]'].innerHTML, '');
+  assert.equal(elements['[data-loom-detail-actions]'].innerHTML, '');
 });
 
 test('loom page script uses dashboard actor presence for scoped action labels', async () => {
@@ -504,7 +614,8 @@ test('loom page stylesheet keeps tablet layout inside the board shell', () => {
   assert.doesNotMatch(template, /\.loom-workspace\s*\{[^}]*overflow:\s*auto/);
   assert.doesNotMatch(template, /\.loom-workspace\s*\{[^}]*flex-direction:\s*column/);
   assert.doesNotMatch(template, /\.loom-board\s*\{[^}]*min-height:\s*560px/);
-  assert.match(template, /@media \(max-width: 680px\)\s*\{[\s\S]*?\.loom-detail\s*\{[^}]*display:\s*none[^}]*\}/u);
+  assert.match(template, /\.loom-detail-dialog\s*\{[^}]*width:\s*min\(1040px,\s*calc\(100vw - 48px\)\)[^}]*max-height:\s*calc\(100vh - 64px\)/u);
+  assert.match(template, /\.loom-detail-body\s*\{[^}]*overflow:\s*auto/su);
   assert.match(template, /@media \(max-width: 680px\)\s*\{[\s\S]*?\.loom-board\s*\{[^}]*overflow-x:\s*auto[^}]*\}/u);
   assert.match(template, /@media \(max-width: 680px\)\s*\{[\s\S]*?\.loom-column\s*\{[^}]*width:\s*280px[^}]*flex-basis:\s*280px[^}]*\}/u);
   assert.match(template, /\.loom-column-list\s*\{[^}]*overflow-y:\s*auto/su);
@@ -555,11 +666,11 @@ test('loom page does not render unsafe dashboard URLs as clickable links', async
 
   const [card] = elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
   await card.listeners.get('click')();
-  assert.doesNotMatch(elements['[data-loom-detail]'].innerHTML, /href="javascript:/i);
-  assert.doesNotMatch(elements['[data-loom-detail]'].innerHTML, /href="data:/i);
+  assert.doesNotMatch(elements['[data-loom-detail-body]'].innerHTML, /href="javascript:/i);
+  assert.doesNotMatch(elements['[data-loom-detail-body]'].innerHTML, /href="data:/i);
   assert.doesNotMatch(elements['[data-loom-board]'].innerHTML, /javascript:alert\(1\)/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /javascript:alert\(1\)/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, /data:text\/html,x/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /javascript:alert\(1\)/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /data:text\/html,x/);
 });
 
 test('loom page shell-quotes URL-controlled CLI handoff arguments', async () => {
@@ -568,12 +679,12 @@ test('loom page shell-quotes URL-controlled CLI handoff arguments', async () => 
   const [card] = elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
   await card.listeners.get('click')();
 
-  assert.match(elements['[data-loom-detail]'].innerHTML, /--from &#39;eric --confirm-payment&#39;/);
-  assert.match(elements['[data-loom-detail]'].innerHTML, new RegExp("metabot loom state " + shellQuotedHtml(TASK_PIN) + " --refresh"));
-  assert.match(elements['[data-loom-detail]'].innerHTML, new RegExp("--delivery-pin-id " + shellQuotedHtml(DELIVERY_PIN)));
-  assert.doesNotMatch(elements['[data-loom-detail]'].innerHTML, /--from eric --confirm-payment/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /--from &#39;eric --confirm-payment&#39;/);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, new RegExp("metabot loom state " + shellQuotedHtml(TASK_PIN) + " --refresh"));
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, new RegExp("--delivery-pin-id " + shellQuotedHtml(DELIVERY_PIN)));
+  assert.doesNotMatch(elements['[data-loom-detail-actions]'].innerHTML, /--from eric --confirm-payment/);
 
-  const cliCopyButton = elements['[data-loom-detail]']
+  const cliCopyButton = elements['[data-loom-detail-actions]']
     .querySelectorAll('[data-loom-copy]')
     .find((button) => button.getAttribute('title') === 'Copy Copy CLI');
   assert.ok(cliCopyButton, 'expected CLI copy button');
