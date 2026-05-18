@@ -35,7 +35,7 @@ import {
   isLlmProvider,
   normalizeLlmBinding,
 } from '../core/llm/llmTypes';
-import type { LlmProvider, LlmRuntime } from '../core/llm/llmTypes';
+import type { LlmBindingRole, LlmProvider, LlmRuntime } from '../core/llm/llmTypes';
 import type { LlmExecutor, LlmExecutionRequest } from '../core/llm/executor';
 import {
   buildMetabotProfileDraftFromIdentity,
@@ -192,7 +192,11 @@ import {
   type LoomUiActionServiceDependencies,
   type LoomWorkflowState,
 } from '../core/loom';
-import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
+import {
+  createLlmRuntimeResolver,
+  summarizeResolvedLlmRuntime,
+} from '../core/llm/llmRuntimeResolver';
+import { runLlmPromptWithRuntimeFallback } from '../core/llm/llmRuntimeExecution';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import { buildDelegationOrderPayload } from '../core/orders/delegationOrderMessage';
 import {
@@ -344,6 +348,9 @@ export function createLoomDaemonActionDependencies(input: {
   ) => Promise<ReturnType<typeof buildLoomWorkflowTaskState> | MetabotCommandResult<never>>;
   readPayloadFile: (filePath: string) => Promise<Record<string, unknown>>;
   draftTask: (actor: LoomDaemonActionActorContext, wish: string) => Promise<MetabotCommandResult<unknown>>;
+  resolveDeveloperRuntime?: (
+    actor: LoomDaemonActionActorContext,
+  ) => Promise<{ developerRuntime?: Record<string, unknown> } | { failure: MetabotCommandResult<never> }>;
   ensureDevRoundLlmAvailable?: (actor: LoomDaemonActionActorContext) => Promise<MetabotCommandResult<never> | undefined>;
   executeDevRoundLlm: (actor: LoomDaemonActionActorContext, prompt: string, cwd: string) => ReturnType<Parameters<typeof runLoomDevRoundWorkflow>[0]['executeLlmRound']>;
   walletTransfer: (
@@ -421,6 +428,12 @@ export function createLoomDaemonActionDependencies(input: {
       if ('ok' in actor) return actor;
       const state = await taskStateFor(actor, rawInput.taskPinId);
       if ('ok' in state) return state;
+      const resolvedDeveloperRuntime = input.resolveDeveloperRuntime
+        ? await input.resolveDeveloperRuntime(actor)
+        : undefined;
+      if (resolvedDeveloperRuntime && 'failure' in resolvedDeveloperRuntime) {
+        return resolvedDeveloperRuntime.failure;
+      }
       return workflows.claimAndStart({
         from: normalizeText(rawInput.from) || undefined,
         taskPinId: normalizeText(rawInput.taskPinId),
@@ -429,6 +442,7 @@ export function createLoomDaemonActionDependencies(input: {
         chain: normalizeText(rawInput.chain) || undefined,
         fileChain: normalizeText(rawInput.fileChain) || undefined,
         message: normalizeText(rawInput.message) || undefined,
+        developerRuntime: resolvedDeveloperRuntime?.developerRuntime,
         dryRun: rawInput.dryRun === true,
         resetWorkspace: rawInput.resetWorkspace === true,
         developerMetaBotSlug: actor.metaBotSlug,
@@ -9105,10 +9119,27 @@ export function createDefaultMetabotDaemonHandlers(input: {
   }
 
   async function resolveLoomRuntime(actor: { paths: MetabotPaths; metaBotSlug: string }): Promise<
-    | { runtime: LlmRuntime; bindingId?: string; runtimeResolver: ReturnType<typeof createLlmRuntimeResolver> }
+    | {
+      runtime: LlmRuntime;
+      bindingId?: string;
+      bindingRole?: LlmBindingRole;
+      runtimeResolver: ReturnType<typeof createLlmRuntimeResolver>;
+    }
     | { failure: MetabotCommandResult<never> }
   > {
     const runtimeStore = createLlmRuntimeStore(actor.paths);
+    const previous = await runtimeStore.read();
+    const discoveryResult = await discoverLlmRuntimes({ env: process.env });
+    const discoveredRuntimeIds = new Set(discoveryResult.runtimes.map((runtime) => runtime.id));
+    for (const runtime of discoveryResult.runtimes) {
+      await runtimeStore.upsertRuntime(runtime);
+    }
+    for (const runtime of previous.runtimes) {
+      if (runtime.provider === 'custom') continue;
+      if (!discoveredRuntimeIds.has(runtime.id) && runtime.health !== 'unavailable') {
+        await runtimeStore.updateHealth(runtime.id, 'unavailable');
+      }
+    }
     const bindingStore = createLlmBindingStore(actor.paths);
     const runtimeResolver = createLlmRuntimeResolver({
       runtimeStore,
@@ -9136,6 +9167,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       runtime: resolved.runtime,
       runtimeResolver,
       ...(resolved.bindingId ? { bindingId: resolved.bindingId } : {}),
+      ...(resolved.bindingRole ? { bindingRole: resolved.bindingRole } : {}),
     };
   }
 
@@ -9208,52 +9240,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
         error: resolved.failure.message,
       };
     }
-    let sessionId: string | undefined;
-    try {
-      sessionId = await input.llmExecutor.execute({
-        runtimeId: resolved.runtime.id,
-        runtime: resolved.runtime,
-        prompt,
-        timeout: LOOM_DEV_ROUND_LLM_TIMEOUT_MS,
-        cwd,
-        metaBotSlug: actor.metaBotSlug,
-      });
-      const deadline = Date.now() + LOOM_DEV_ROUND_LLM_TIMEOUT_MS;
-      while (Date.now() <= deadline) {
-        const session = await input.llmExecutor.getSession(sessionId);
-        if (session?.result) {
-          if (session.result.status === 'completed') {
-            if (resolved.bindingId) {
-              resolved.runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => {});
-            }
-          } else {
-            resolved.runtimeResolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
-          }
-          return {
-            sessionId,
-            status: session.result.status,
-            output: session.result.output,
-            error: session.result.error,
-          };
-        }
-        await sleep(LOOM_DRAFT_LLM_POLL_INTERVAL_MS);
-      }
-      resolved.runtimeResolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
-      return {
-        sessionId,
-        status: 'failed',
-        output: '',
-        error: 'LLM runtime timed out while running Loom development round.',
-      };
-    } catch (error) {
-      resolved.runtimeResolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
-      return {
-        sessionId,
-        status: 'failed',
-        output: '',
-        error: error instanceof Error ? error.message : 'LLM runtime is unavailable.',
-      };
-    }
+    return runLlmPromptWithRuntimeFallback({
+      runtimeResolver: resolved.runtimeResolver,
+      llmExecutor: input.llmExecutor,
+      metaBotSlug: actor.metaBotSlug,
+      prompt,
+      timeoutMs: LOOM_DEV_ROUND_LLM_TIMEOUT_MS,
+      pollIntervalMs: LOOM_DRAFT_LLM_POLL_INTERVAL_MS,
+      cwd,
+    });
   }
 
   function parseLoomTransferAmount(raw: string) {
@@ -9358,6 +9353,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
     readPayloadFile: readJsonObjectFile,
     draftTask: executeLoomDraftWish,
+    resolveDeveloperRuntime: async (actor) => {
+      const resolved = await resolveLoomRuntime(actor);
+      if ('failure' in resolved) {
+        return { failure: resolved.failure };
+      }
+      return {
+        developerRuntime: summarizeResolvedLlmRuntime({
+          runtime: resolved.runtime,
+          bindingId: resolved.bindingId,
+          bindingRole: resolved.bindingRole,
+        }),
+      };
+    },
     ensureDevRoundLlmAvailable: async (actor) => {
       if (!input.llmExecutor) {
         return commandFailed('llm_runtime_unavailable', `No healthy LLM runtime is available for MetaBot ${actor.metaBotSlug}.`);

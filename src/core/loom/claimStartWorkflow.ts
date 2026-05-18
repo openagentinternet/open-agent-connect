@@ -78,6 +78,7 @@ export interface LoomClaimAndStartWorkflowInput {
   chain?: string;
   fileChain?: string;
   message?: string;
+  developerRuntime?: Record<string, unknown>;
   dryRun?: boolean;
   resetWorkspace?: boolean;
   developerMetaBotSlug: string;
@@ -181,6 +182,9 @@ function createClaimPayload(input: LoomClaimAndStartWorkflowInput, now: number):
   };
   if (input.message) {
     payload.message = input.message;
+  }
+  if (input.developerRuntime) {
+    payload.developerRuntime = input.developerRuntime;
   }
   return payload;
 }

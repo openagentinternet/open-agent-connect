@@ -71,6 +71,14 @@ function createWorkflowHarness(overrides = {}) {
     },
     readPayloadFile: async () => ({ title: 'From file' }),
     draftTask: async () => success({ payload: { title: 'Drafted' } }),
+    resolveDeveloperRuntime: async () => ({
+      developerRuntime: {
+        provider: 'claude-code',
+        displayName: 'Claude Code',
+        health: 'healthy',
+        selectedRole: 'primary',
+      },
+    }),
     ensureDevRoundLlmAvailable: async () => undefined,
     executeDevRoundLlm: async () => ({ status: 'completed', output: 'done' }),
     walletTransfer: async (_actor, rawActor, transferInput) => {
@@ -163,6 +171,12 @@ test('claimAndStart confirm true reaches claim/start workflow layer and workflow
   assert.deepEqual(calls.map((call) => call.name), ['claimAndStart']);
   assert.equal(calls[0].input.dryRun, false);
   assert.equal(calls[0].input.taskPinId, 'task-1');
+  assert.deepEqual(calls[0].input.developerRuntime, {
+    provider: 'claude-code',
+    displayName: 'Claude Code',
+    health: 'healthy',
+    selectedRole: 'primary',
+  });
   assert.deepEqual(signerWrites, [{ path: '/protocols/loom-claim', payload: '{}' }]);
 });
 

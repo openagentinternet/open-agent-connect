@@ -312,7 +312,13 @@ test('missing git or gh returns tool_missing before chain writes', async () => {
 });
 
 test('dry-run returns planned payloads and final previews without side effects', async () => {
-  const { input, events } = createDeps({ dryRun: true });
+  const developerRuntime = {
+    provider: 'claude-code',
+    displayName: 'Claude Code',
+    health: 'healthy',
+    selectedRole: 'primary',
+  };
+  const { input, events } = createDeps({ dryRun: true, developerRuntime });
 
   const result = await runLoomClaimAndStartWorkflow(input);
 
@@ -320,6 +326,7 @@ test('dry-run returns planned payloads and final previews without side effects',
   assert.equal(result.data.dryRun, true);
   assert.equal(result.data.claimPayload.taskPinId, taskPinId);
   assert.equal(result.data.claimPayload.payoutAddress, '1DeveloperPayoutAddress');
+  assert.deepEqual(result.data.claimPayload.developerRuntime, developerRuntime);
   assert.equal(result.data.statusPayload.status, 'started');
   assert.equal(result.data.statusPayload.claimPinId, 'pending-claim');
   assert.equal(result.data.statusPayload.branchName, 'loom/aaaaaaaa-pending-claim');

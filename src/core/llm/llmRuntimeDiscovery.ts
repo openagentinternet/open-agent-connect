@@ -19,6 +19,13 @@ export interface DiscoveryResult {
   errors: Array<{ provider: string; message: string }>;
 }
 
+export interface ExecutableVersionProbe {
+  ok: boolean;
+  version?: string;
+  exitCode?: number | null;
+  message?: string;
+}
+
 function getPathEnv(env?: NodeJS.ProcessEnv): string {
   return (env ?? process.env).PATH ?? '';
 }
@@ -48,6 +55,16 @@ export async function readExecutableVersion(
   timeoutMs = 5_000,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string | undefined> {
+  const probe = await probeExecutableVersion(binaryPath, versionArgs, timeoutMs, env);
+  return probe.ok ? probe.version : undefined;
+}
+
+export async function probeExecutableVersion(
+  binaryPath: string,
+  versionArgs: string[] = ['--version'],
+  timeoutMs = 5_000,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ExecutableVersionProbe> {
   return new Promise((resolve) => {
     const child = spawn(binaryPath, versionArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -56,9 +73,16 @@ export async function readExecutableVersion(
     });
 
     let output = '';
+    let settled = false;
+    const finish = (probe: ExecutableVersionProbe): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(probe);
+    };
     const timer = setTimeout(() => {
       try { child.kill('SIGTERM'); } catch { /* best effort */ }
-      resolve(undefined);
+      finish({ ok: false, message: `Version probe timed out after ${timeoutMs}ms.` });
     }, timeoutMs);
 
     child.stdout?.setEncoding('utf8');
@@ -67,20 +91,30 @@ export async function readExecutableVersion(
     child.stdout?.on('data', (chunk: string) => { output += chunk; });
     child.stderr?.on('data', (chunk: string) => { output += chunk; });
 
-    child.on('close', () => {
-      clearTimeout(timer);
+    child.on('close', (code) => {
       const trimmed = output.trim();
+      if (code !== 0) {
+        finish({
+          ok: false,
+          exitCode: code,
+          message: trimmed || `Version probe exited with code ${code ?? 'unknown'}.`,
+        });
+        return;
+      }
       if (!trimmed) {
-        resolve(undefined);
+        finish({ ok: true, exitCode: code });
         return;
       }
       const match = trimmed.match(/(\d+\.\d+\.\d+(?:[-+][^\s]+)?)/);
-      resolve(match ? match[1] : trimmed.split(/\s+/).pop() ?? undefined);
+      finish({
+        ok: true,
+        exitCode: code,
+        version: match ? match[1] : trimmed.split(/\s+/).pop() ?? undefined,
+      });
     });
 
-    child.on('error', () => {
-      clearTimeout(timer);
-      resolve(undefined);
+    child.on('error', (error) => {
+      finish({ ok: false, message: error.message });
     });
   });
 }
@@ -109,7 +143,7 @@ export async function discoverProvider(
   if (!binaryPath) return null;
 
   const env = options?.env ?? process.env;
-  const version = await readExecutableVersion(
+  const versionProbe = await probeExecutableVersion(
     binaryPath,
     platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'],
     5_000,
@@ -126,10 +160,10 @@ export async function discoverProvider(
     provider,
     displayName: platform.displayName,
     binaryPath,
-    version,
+    version: versionProbe.version,
     logoPath: platform.logoPath,
     authState,
-    health: 'healthy',
+    health: versionProbe.ok ? 'healthy' : 'unavailable',
     capabilities: [...platform.runtime.capabilities],
     lastSeenAt: now,
     createdAt: now,
