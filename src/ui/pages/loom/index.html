@@ -286,10 +286,38 @@
         cursor: pointer;
       }
       .loom-copy:hover { color: var(--text); border-color: var(--accent); }
-      .loom-card-bots,
       .loom-identity-grid {
         display: grid;
         gap: 6px;
+      }
+      .loom-card-bots {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        flex-wrap: wrap;
+      }
+      .loom-card-bot {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        min-width: 0;
+        max-width: 100%;
+        color: var(--muted);
+        font: 10px var(--mono);
+      }
+      .loom-card-bot .loom-avatar {
+        width: 20px;
+        height: 20px;
+      }
+      .loom-card-bot strong {
+        color: var(--text);
+        font: 11px var(--sans);
+        min-width: 0;
+        max-width: 116px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .loom-participant {
         border: 1px solid var(--border);
@@ -386,7 +414,7 @@
       .loom-new-task-modal[hidden] { display: none; }
       .loom-detail-dialog {
         width: min(1040px, calc(100vw - 48px));
-        max-height: calc(100vh - 64px);
+        max-height: calc(100vh - 116px);
         border: 1px solid var(--border);
         border-radius: var(--radius);
         background: var(--surface);
@@ -398,7 +426,7 @@
       }
       .loom-new-task-dialog {
         width: min(760px, calc(100vw - 40px));
-        max-height: calc(100vh - 64px);
+        max-height: calc(100vh - 108px);
         border: 1px solid var(--border);
         border-radius: var(--radius);
         background: var(--surface);
@@ -791,11 +819,11 @@
         }
         .loom-detail-dialog {
           width: calc(100vw - 24px);
-          max-height: calc(100vh - 32px);
+          max-height: calc(100vh - 84px);
         }
         .loom-new-task-dialog {
           width: calc(100vw - 24px);
-          max-height: calc(100vh - 32px);
+          max-height: calc(100vh - 84px);
         }
         .loom-new-task-fields,
         .loom-new-task-confirmation dl {

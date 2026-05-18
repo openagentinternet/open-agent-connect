@@ -804,6 +804,50 @@ test('loom new task modal opens and validation blocks preview without closing it
   assert.equal(fetchCalls.filter((call) => call.url === '/api/loom/actions').length, 0);
 });
 
+test('loom new task validation blocks missing title, criteria, repo, and bounty before preview', async () => {
+  const { elements, fetchCalls } = await runLoomScript();
+
+  await elements['[data-loom-new-task]'].listeners.get('click')();
+  fillValidNewTask(elements, {
+    '[data-loom-new-task-title]': '',
+    '[data-loom-new-task-criteria]': '',
+    '[data-loom-new-task-repo-uri]': '',
+    '[data-loom-new-task-bounty-amount]': '',
+  });
+  await elements['[data-loom-new-task-form]'].listeners.get('submit')({
+    preventDefault() {},
+  });
+
+  assert.equal(fetchCalls.filter((call) => call.url === '/api/loom/actions').length, 0);
+  assert.match(elements['[data-loom-new-task-error]'].textContent, /Title is required/);
+  assert.match(elements['[data-loom-new-task-error]'].textContent, /Criteria is required/);
+  assert.match(elements['[data-loom-new-task-error]'].textContent, /Repo URI is required/);
+  assert.match(elements['[data-loom-new-task-error]'].textContent, /Bounty amount is required/);
+  assert.equal(elements['[data-loom-new-task-confirm]'].disabled, true);
+});
+
+test('loom browser reload does not resubmit pending new-task preview actions', async () => {
+  const firstLoad = await runLoomScript({
+    actionResults: [
+      { ok: true, state: 'awaiting_confirmation', data: { cliFallback: 'metabot loom post-task' } },
+    ],
+  });
+
+  await firstLoad.elements['[data-loom-new-task]'].listeners.get('click')();
+  fillValidNewTask(firstLoad.elements);
+  await firstLoad.elements['[data-loom-new-task-form]'].listeners.get('submit')({
+    preventDefault() {},
+  });
+  assert.equal(firstLoad.fetchCalls.filter((call) => call.url === '/api/loom/actions').length, 1);
+  assert.equal(firstLoad.elements['[data-loom-new-task-confirm]'].disabled, false);
+
+  const reloaded = await runLoomScript();
+  assert.equal(reloaded.fetchCalls.filter((call) => call.url === '/api/loom/actions').length, 0);
+  assert.equal(reloaded.fetchCalls[0].url, '/api/loom/dashboard');
+  assert.equal(reloaded.elements['[data-loom-new-task-confirm]'].disabled, true);
+  assert.equal(reloaded.elements['[data-loom-new-task-summary]'].innerHTML, '');
+});
+
 test('loom new task preview builds protocol payload and confirm publishes only a fresh preview', async () => {
   const { elements, fetchCalls } = await runLoomScript({
     search: '?from=query-requester',
@@ -1100,6 +1144,78 @@ test('loom delivered detail renders review actions and accept/pay previews befor
   assert.match(elements['[data-loom-detail-actions]'].innerHTML, /Action completed/);
   assert.doesNotMatch(elements['[data-loom-detail-actions]'].innerHTML, /Do not pay again/i);
   assert.match(elements['[data-loom-detail-actions]'].innerHTML, new RegExp(PAYMENT_TXID.slice(0, 8)));
+});
+
+test('loom accept/pay blocks duplicate confirmation submissions while one is pending', async () => {
+  const { elements, fetchCalls } = await runLoomScript({
+    search: '?from=requester-bot',
+    actionResults: [
+      { ok: true, state: 'awaiting_confirmation', data: { preview: { amount: '0.5', currency: 'SPACE' } } },
+      { ok: true, state: 'success', data: { paymentTxId: PAYMENT_TXID } },
+      { ok: true, state: 'awaiting_confirmation', data: { preview: { amount: '0.5', currency: 'SPACE' } } },
+    ],
+    payloads: [dashboard(), dashboard()],
+  });
+  const [card] = elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
+
+  await card.listeners.get('click')();
+  const acceptButton = elements['[data-loom-detail-actions]']
+    .querySelectorAll('[data-loom-detail-action]')
+    .find((button) => button.getAttribute('data-loom-detail-action') === 'acceptAndPay');
+  await acceptButton.listeners.get('click')();
+
+  const confirmButton = elements['[data-loom-detail-actions]'].querySelectorAll('[data-loom-confirm-detail-action]')[0];
+  assert.ok(confirmButton, 'expected action confirm button');
+  const firstConfirm = confirmButton.listeners.get('click')();
+  const secondConfirm = confirmButton.listeners.get('click')();
+  await Promise.all([firstConfirm, secondConfirm]);
+
+  const actionBodies = fetchCalls
+    .filter((call) => call.url === '/api/loom/actions')
+    .map((call) => JSON.parse(call.options.body));
+  assert.equal(actionBodies.length, 2);
+  assert.deepEqual(actionBodies.map((body) => body.confirm), [false, true]);
+  assert.equal(actionBodies.filter((body) => body.action === 'acceptAndPay' && body.confirm === true).length, 1);
+});
+
+test('loom pending detail action blocks other mutating detail actions', async () => {
+  const { elements, fetchCalls } = await runLoomScript({
+    search: '?from=requester-bot',
+    actionResults: [
+      { ok: true, state: 'awaiting_confirmation', data: { preview: { amount: '0.5', currency: 'SPACE' } } },
+      { ok: true, state: 'success', data: { paymentTxId: PAYMENT_TXID } },
+      { ok: true, state: 'awaiting_confirmation', data: { verdict: 'revision_needed' } },
+    ],
+    payloads: [dashboard(), dashboard()],
+  });
+  const [card] = elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
+
+  await card.listeners.get('click')();
+  const actions = elements['[data-loom-detail-actions]'].querySelectorAll('[data-loom-detail-action]');
+  const acceptButton = actions.find((button) => button.getAttribute('data-loom-detail-action') === 'acceptAndPay');
+  const revisionButton = actions.find((button) => button.getAttribute('data-loom-detail-action') === 'requestRevision');
+  const pendingPreview = acceptButton.listeners.get('click')();
+  await revisionButton.listeners.get('click')();
+  await pendingPreview;
+
+  let actionBodies = fetchCalls
+    .filter((call) => call.url === '/api/loom/actions')
+    .map((call) => JSON.parse(call.options.body));
+  assert.deepEqual(actionBodies.map((body) => [body.action, body.confirm]), [
+    ['acceptAndPay', false],
+  ]);
+
+  const pendingConfirm = elements['[data-loom-detail-actions]'].querySelectorAll('[data-loom-confirm-detail-action]')[0].listeners.get('click')();
+  await revisionButton.listeners.get('click')();
+  await pendingConfirm;
+
+  actionBodies = fetchCalls
+    .filter((call) => call.url === '/api/loom/actions')
+    .map((call) => JSON.parse(call.options.body));
+  assert.deepEqual(actionBodies.map((body) => [body.action, body.confirm]), [
+    ['acceptAndPay', false],
+    ['acceptAndPay', true],
+  ]);
 });
 
 test('loom review actions target the newest delivery after revision cycles', async () => {
@@ -1450,6 +1566,28 @@ test('loom detail action failures and disabled reasons keep detail open with rec
   assert.match(permissionResult.elements['[data-loom-detail-actions]'].innerHTML, /Only the requester can review this delivery/);
 });
 
+test('loom missing payout address disables accept/pay without posting a payment action', async () => {
+  const missingPayout = dashboard();
+  missingPayout.dashboard.details[0].claims[1].payoutAddress = '';
+  missingPayout.dashboard.details[0].nextActions[0].disabledReason = 'Active claim is missing a payout address.';
+
+  const { elements, fetchCalls } = await runLoomScript({
+    search: '?from=requester-bot',
+    payloads: [missingPayout],
+  });
+  const [card] = elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
+  await card.listeners.get('click')();
+
+  const acceptButton = elements['[data-loom-detail-actions]']
+    .querySelectorAll('[data-loom-detail-action]')
+    .find((button) => button.getAttribute('data-loom-detail-action') === 'acceptAndPay');
+  assert.ok(acceptButton, 'expected accept/pay button to remain visible');
+  assert.equal(acceptButton.getAttribute('disabled'), 'disabled');
+  assert.equal(acceptButton.listeners.has('click'), false);
+  assert.match(elements['[data-loom-detail-actions]'].innerHTML, /missing a payout address/);
+  assert.equal(fetchCalls.filter((call) => call.url === '/api/loom/actions').length, 0);
+});
+
 test('loom copy-only detail actions copy CLI fallback without mutating', async () => {
   const failed = dashboard();
   failed.dashboard.tasks[0].state = 'failed';
@@ -1531,11 +1669,9 @@ test('loom detail action preview clears stale delivery targets after refresh', a
   const actionBodies = fetchCalls
     .filter((call) => call.url === '/api/loom/actions')
     .map((call) => JSON.parse(call.options.body));
-  assert.equal(actionBodies.length, 2);
+  assert.equal(actionBodies.length, 1);
   assert.equal(actionBodies[0].deliveryPinId, DELIVERY_PIN);
   assert.equal(actionBodies[0].confirm, false);
-  assert.equal(actionBodies[1].deliveryPinId, LATEST_DELIVERY_PIN);
-  assert.equal(actionBodies[1].confirm, false);
 });
 
 test('loom Open PR action is non-mutating and preserves safe URL behavior', async () => {
@@ -1616,6 +1752,50 @@ test('loom detail modal closes with Escape or button and returns focus to the se
   assert.equal(card.focusCount, 4);
 });
 
+test('loom confirmation cancel and close paths do not confirm or refresh actions', async () => {
+  const cancelResult = await runLoomScript({
+    search: '?from=requester-bot',
+    actionResults: [
+      { ok: true, state: 'awaiting_confirmation', data: { preview: { amount: '0.5', currency: 'SPACE' } } },
+    ],
+  });
+  const [cancelCard] = cancelResult.elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
+  await cancelCard.listeners.get('click')();
+  const acceptButton = cancelResult.elements['[data-loom-detail-actions]']
+    .querySelectorAll('[data-loom-detail-action]')
+    .find((button) => button.getAttribute('data-loom-detail-action') === 'acceptAndPay');
+  await acceptButton.listeners.get('click')();
+  await cancelResult.elements['[data-loom-detail-actions]'].querySelectorAll('[data-loom-cancel-detail-action]')[0].listeners.get('click')();
+
+  const cancelBodies = cancelResult.fetchCalls
+    .filter((call) => call.url === '/api/loom/actions')
+    .map((call) => JSON.parse(call.options.body));
+  assert.deepEqual(cancelBodies.map((body) => body.confirm), [false]);
+  assert.equal(cancelResult.fetchCalls.some((call) => call.url === '/api/loom/refresh'), false);
+  assert.doesNotMatch(cancelResult.elements['[data-loom-detail-actions]'].innerHTML, /Confirm Accept and pay/);
+
+  const closeResult = await runLoomScript({
+    search: '?from=requester-bot',
+    actionResults: [
+      { ok: true, state: 'awaiting_confirmation', data: { preview: { amount: '0.5', currency: 'SPACE' } } },
+    ],
+  });
+  const [closeCard] = closeResult.elements['[data-loom-board]'].querySelectorAll('[data-loom-card]');
+  await closeCard.listeners.get('click')();
+  const closeAcceptButton = closeResult.elements['[data-loom-detail-actions]']
+    .querySelectorAll('[data-loom-detail-action]')
+    .find((button) => button.getAttribute('data-loom-detail-action') === 'acceptAndPay');
+  await closeAcceptButton.listeners.get('click')();
+  closeResult.elements['[data-loom-detail-close]'].listeners.get('click')();
+
+  const closeBodies = closeResult.fetchCalls
+    .filter((call) => call.url === '/api/loom/actions')
+    .map((call) => JSON.parse(call.options.body));
+  assert.deepEqual(closeBodies.map((body) => body.confirm), [false]);
+  assert.equal(closeResult.fetchCalls.some((call) => call.url === '/api/loom/refresh'), false);
+  assert.equal(closeResult.elements['[data-loom-detail-modal]'].hidden, true);
+});
+
 test('loom detail modal stays hidden when a card has no matching detail record', async () => {
   const missingDetail = dashboard({ details: [] });
   const { elements } = await runLoomScript({ payloads: [missingDetail] });
@@ -1629,6 +1809,16 @@ test('loom detail modal stays hidden when a card has no matching detail record',
 });
 
 test('loom page script uses dashboard actor presence for scoped action labels', async () => {
+  const globalNeedsActionDashboard = dashboard();
+  globalNeedsActionDashboard.dashboard.actor = {};
+  globalNeedsActionDashboard.dashboard.tasks[0].actorContext = { needsMyAction: true };
+  globalNeedsActionDashboard.dashboard.columns[0].cards[0].actorContext = { needsMyAction: true };
+  const globalResult = await runLoomScript({ payloads: [globalNeedsActionDashboard] });
+
+  assert.equal(globalResult.fetchCalls[0].url, '/api/loom/dashboard');
+  assert.equal(globalResult.elements['[data-loom-scope-label]'].textContent, 'Global');
+  assert.doesNotMatch(globalResult.elements['[data-loom-board]'].innerHTML, /Needs my action/);
+
   const noActorDashboard = dashboard({ actor: {} });
   const noActorResult = await runLoomScript({ search: '?from=eric', payloads: [noActorDashboard] });
 
@@ -1652,7 +1842,8 @@ test('loom page stylesheet keeps tablet layout inside the board shell', () => {
   assert.doesNotMatch(template, /\.loom-workspace\s*\{[^}]*overflow:\s*auto/);
   assert.doesNotMatch(template, /\.loom-workspace\s*\{[^}]*flex-direction:\s*column/);
   assert.doesNotMatch(template, /\.loom-board\s*\{[^}]*min-height:\s*560px/);
-  assert.match(template, /\.loom-detail-dialog\s*\{[^}]*width:\s*min\(1040px,\s*calc\(100vw - 48px\)\)[^}]*max-height:\s*calc\(100vh - 64px\)/u);
+  assert.match(template, /\.loom-detail-dialog\s*\{[^}]*width:\s*min\(1040px,\s*calc\(100vw - 48px\)\)[^}]*max-height:\s*calc\(100vh - 116px\)/u);
+  assert.match(template, /\.loom-new-task-dialog\s*\{[^}]*width:\s*min\(760px,\s*calc\(100vw - 40px\)\)[^}]*max-height:\s*calc\(100vh - 108px\)/u);
   assert.match(template, /\.loom-detail-body\s*\{[^}]*overflow:\s*auto/su);
   assert.match(template, /@media \(max-width: 680px\)\s*\{[\s\S]*?\.loom-board\s*\{[^}]*overflow-x:\s*auto[^}]*\}/u);
   assert.match(template, /@media \(max-width: 680px\)\s*\{[\s\S]*?\.loom-column\s*\{[^}]*width:\s*280px[^}]*flex-basis:\s*280px[^}]*\}/u);
@@ -1698,6 +1889,7 @@ test('loom page does not render unsafe dashboard URLs as clickable links', async
   unsafe.dashboard.tasks[0].prUrl = 'javascript:alert(1)';
   unsafe.dashboard.columns[0].cards[0].prUrl = 'javascript:alert(1)';
   unsafe.dashboard.details[0].validRecords.deliveries[0].payload.delivery.prUrl = 'data:text/html,x';
+  unsafe.dashboard.details[0].localWorkflow[0].processLogUris = ['javascript:alert(2)', 'data:text/html,y'];
   const { elements } = await runLoomScript({ payloads: [unsafe] });
 
   assert.doesNotMatch(elements['[data-loom-board]'].innerHTML, /href="javascript:/i);
@@ -1709,6 +1901,8 @@ test('loom page does not render unsafe dashboard URLs as clickable links', async
   assert.doesNotMatch(elements['[data-loom-board]'].innerHTML, /javascript:alert\(1\)/);
   assert.match(elements['[data-loom-detail-actions]'].innerHTML, /javascript:alert\(1\)/);
   assert.match(elements['[data-loom-detail-body]'].innerHTML, /data:text\/html,x/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /javascript:alert\(2\)/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /data:text\/html,y/);
 });
 
 test('loom page shell-quotes URL-controlled CLI handoff arguments', async () => {

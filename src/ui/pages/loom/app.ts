@@ -524,6 +524,7 @@ export function buildLoomPageScript(): string {
     return '<span class="loom-avatar loom-avatar-fallback">' + esc(bot.initials) + '</span>';
   };
   const botInline = (bot, label) => '<div class="loom-bot"><div>' + avatar(bot) + '</div><div class="loom-bot-text"><span>' + esc(label) + '</span><strong>' + esc(bot.displayName) + '</strong><small>' + esc(bot.globalMetaId || bot.fallbackLabel) + '</small></div></div>';
+  const cardBotInline = (bot, label) => '<div class="loom-card-bot">' + avatar(bot) + '<span>' + esc(label) + '</span><strong>' + esc(bot.displayName) + '</strong></div>';
   const participantBlock = (bot, label, payoutAddress) => {
     if (!bot) return '<div class="loom-bot loom-bot-empty">No ' + esc(label.toLowerCase()) + '</div>';
     return '<div class="loom-participant">' +
@@ -550,7 +551,7 @@ export function buildLoomPageScript(): string {
     '<article class="loom-task-card' + (card.taskPinId === selectedTaskPinId ? ' is-selected' : '') + '" data-loom-card="' + esc(card.taskPinId) + '" tabindex="0">' +
     '<div class="loom-card-top"><h3>' + esc(card.title) + '</h3><span class="loom-state" data-tone="' + esc(card.stateTone) + '">' + esc(card.stateLabel) + '</span></div>' +
     (card.summaryPreview ? '<p>' + esc(card.summaryPreview) + '</p>' : '') +
-    '<div class="loom-card-bots">' + botInline(card.requester, 'Requester') + (card.developer ? botInline(card.developer, 'Developer') : '<div class="loom-bot loom-bot-empty">No developer claim</div>') + '</div>' +
+    '<div class="loom-card-bots">' + cardBotInline(card.requester, 'Requester') + (card.developer ? cardBotInline(card.developer, 'Developer') : '<div class="loom-card-bot loom-bot-empty">No developer</div>') + '</div>' +
     '<div class="loom-card-footer">' +
     (card.activityLabel ? '<span class="loom-chip">' + esc(card.activityLabel) + '</span>' : '') +
     (card.actionLabel ? '<span class="loom-chip warning">' + esc(card.actionLabel) + '</span>' : '') +
@@ -1209,6 +1210,12 @@ export function buildLoomPageScript(): string {
     }
     const previewKey = detailActionPreviewKey(latestDetail, latestAction);
     const previous = detailActionStateFor(latestDetail);
+    if (previous && (previous.phase === 'previewing' || previous.phase === 'confirming')) return;
+    if (previous && previous.action && previous.action.id === latestAction.id) {
+      if (confirm && (previous.phase !== 'preview' || previous.previewKey !== previewKey)) return;
+    } else if (confirm) {
+      return;
+    }
     const canConfirm = Boolean(confirm && previous && previous.phase === 'preview' && previous.action.id === latestAction.id && previous.previewKey === previewKey);
     const body = canConfirm
       ? { ...previous.body, confirm: true }
@@ -1536,6 +1543,7 @@ export function buildLoomPageScript(): string {
     });
   }
   if (elements.newTask) elements.newTask.disabled = false;
+  if (elements.newTaskConfirm) elements.newTaskConfirm.disabled = true;
   loadDashboard();
 })();`;
 }
