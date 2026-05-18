@@ -1,4 +1,5 @@
 import type {
+  LoomDashboardActionId,
   LoomDashboardColumnId,
   LoomDashboardStateTone,
   LoomDashboardTimelineEventKind,
@@ -119,6 +120,17 @@ export interface LoomRecordViewModel {
   payload: PlainObject;
 }
 
+export interface LoomNextActionViewModel {
+  id: LoomDashboardActionId;
+  label: string;
+  tone: 'primary' | 'neutral' | 'warning' | 'danger';
+  actorRole: 'requester' | 'developer' | 'any';
+  requiresActor: boolean;
+  requiresConfirmation: boolean;
+  disabledReason: string;
+  cliFallback: string;
+}
+
 export interface LoomDetailViewModel {
   taskPinId: string;
   taskPin: LoomCopyLabelViewModel;
@@ -133,6 +145,7 @@ export interface LoomDetailViewModel {
   warnings: LoomWarningViewModel[];
   timeline: LoomTimelineEventViewModel[];
   localWorkflow: LoomLocalWorkflowViewModel[];
+  nextActions: LoomNextActionViewModel[];
   validRecords: {
     statuses: LoomRecordViewModel[];
     deliveries: LoomRecordViewModel[];
@@ -572,6 +585,29 @@ function recordViewModels(value: unknown): LoomRecordViewModel[] {
     .filter((record): record is LoomRecordViewModel => Boolean(record));
 }
 
+function nextActionViewModel(value: unknown): LoomNextActionViewModel | null {
+  const action = asObject(value);
+  if (!action) return null;
+  const id = text(action.id) as LoomDashboardActionId;
+  if (!id) return null;
+  const tone = text(action.tone);
+  const actorRole = text(action.actorRole);
+  return {
+    id,
+    label: text(action.label) || id,
+    tone: ['primary', 'neutral', 'warning', 'danger'].includes(tone)
+      ? tone as LoomNextActionViewModel['tone']
+      : 'neutral',
+    actorRole: ['requester', 'developer', 'any'].includes(actorRole)
+      ? actorRole as LoomNextActionViewModel['actorRole']
+      : 'any',
+    requiresActor: action.requiresActor === true,
+    requiresConfirmation: action.requiresConfirmation !== false,
+    disabledReason: text(action.disabledReason),
+    cliFallback: text(action.cliFallback),
+  };
+}
+
 function detailViewModel(value: unknown): LoomDetailViewModel | null {
   const detail = asObject(value);
   if (!detail) return null;
@@ -599,6 +635,9 @@ function detailViewModel(value: unknown): LoomDetailViewModel | null {
       .filter((warning): warning is LoomWarningViewModel => Boolean(warning)),
     timeline: sortTimeline(timeline),
     localWorkflow: asArray(detail.localWorkflow).map(localWorkflowViewModel),
+    nextActions: asArray(detail.nextActions)
+      .map(nextActionViewModel)
+      .filter((action): action is LoomNextActionViewModel => Boolean(action)),
     validRecords: {
       statuses: recordViewModels(validRecords.statuses),
       deliveries: recordViewModels(validRecords.deliveries),

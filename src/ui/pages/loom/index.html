@@ -658,6 +658,96 @@
         display: grid;
         gap: 8px;
       }
+      .loom-detail-action-list {
+        display: grid;
+        gap: 7px;
+      }
+      .loom-detail-action-row {
+        display: grid;
+        gap: 4px;
+      }
+      .loom-detail-action-row small {
+        color: var(--muted);
+        font: 10px var(--mono);
+        overflow-wrap: anywhere;
+      }
+      .loom-detail-action-button,
+      .loom-action-secondary {
+        min-height: 31px;
+        width: 100%;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border2);
+        background: var(--surface);
+        color: var(--text);
+        padding: 6px 9px;
+        cursor: pointer;
+        font: 12px var(--mono);
+        text-align: left;
+      }
+      .loom-detail-action-button[data-tone="primary"] {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .loom-detail-action-button[data-tone="warning"] {
+        border-color: rgb(180 128 22 / 52%);
+        color: var(--amber);
+      }
+      .loom-detail-action-button[data-tone="danger"] {
+        border-color: rgb(207 67 67 / 52%);
+        color: var(--red);
+      }
+      .loom-detail-action-button:disabled {
+        opacity: .55;
+        cursor: not-allowed;
+      }
+      .loom-action-confirmation {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        padding: 10px;
+        display: grid;
+        gap: 8px;
+      }
+      .loom-action-confirmation[data-phase="error"] {
+        border-color: rgb(207 67 67 / 45%);
+      }
+      .loom-action-confirmation h3 {
+        font: 500 11px var(--mono);
+      }
+      .loom-action-confirmation p,
+      .loom-action-confirmation dd {
+        color: var(--muted);
+        font-size: 11px;
+        overflow-wrap: anywhere;
+      }
+      .loom-action-confirmation dl {
+        display: grid;
+        gap: 6px;
+      }
+      .loom-action-confirmation dt {
+        color: var(--dim);
+        font: 10px var(--mono);
+        text-transform: uppercase;
+      }
+      .loom-action-confirmation .loom-action-warning {
+        color: var(--amber);
+      }
+      .loom-action-confirm-footer {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        align-items: center;
+      }
+      .loom-action-confirm-footer .loom-action-button {
+        width: 100%;
+      }
+      .loom-action-secondary {
+        width: auto;
+        min-width: 78px;
+        text-align: center;
+        background: var(--bg);
+      }
       .loom-handoff a {
         color: var(--accent);
         text-decoration: none;

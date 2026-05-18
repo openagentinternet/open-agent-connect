@@ -175,6 +175,7 @@ export function buildLoomPageScript(): string {
   let selectedTaskPinId = '';
   let selectedCardElement = null;
   let previewedNewTask = null;
+  const detailActionStates = new Map();
 
   const esc = (value) => String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -346,6 +347,23 @@ export function buildLoomPageScript(): string {
       createdAt: num(card.createdAt),
     };
   };
+  const nextActionModel = (value) => {
+    const action = obj(value);
+    const id = text(action.id);
+    if (!id) return null;
+    const tone = text(action.tone);
+    const actorRole = text(action.actorRole);
+    return {
+      id,
+      label: text(action.label) || id,
+      tone: ['primary', 'neutral', 'warning', 'danger'].includes(tone) ? tone : 'neutral',
+      actorRole: ['requester', 'developer', 'any'].includes(actorRole) ? actorRole : 'any',
+      requiresActor: action.requiresActor === true,
+      requiresConfirmation: action.requiresConfirmation !== false,
+      disabledReason: text(action.disabledReason),
+      cliFallback: text(action.cliFallback),
+    };
+  };
   const stringList = (value) => arr(value).filter((entry) => typeof entry === 'string');
   const commitModels = (value) => arr(value).map((commit) => {
     const commitObj = obj(commit);
@@ -412,6 +430,7 @@ export function buildLoomPageScript(): string {
           commits: commitModels(item.commits),
         };
       }),
+      nextActions: arr(detail.nextActions).map(nextActionModel).filter(Boolean),
       validRecords: {
         statuses: recordModels(validRecords.statuses),
         deliveries: recordModels(validRecords.deliveries),
@@ -843,10 +862,233 @@ export function buildLoomPageScript(): string {
     if (elements.detailModal) {
       elements.detailModal.hidden = true;
       elements.detailModal.dataset.state = 'closed';
+      elements.detailModal.dataset.confirmationActive = '';
     }
     if (returnFocus !== false && selectedCardElement && selectedCardElement.focus) {
       selectedCardElement.focus();
     }
+  };
+  const latestDeliveryPinId = (detail) => {
+    const deliveryRecords = detail.validRecords.deliveries
+      .filter((record) => record.pin.copyValue)
+      .sort((left, right) => right.timestamp - left.timestamp);
+    if (deliveryRecords.length) return deliveryRecords[0].pin.copyValue;
+    const deliveryEvents = detail.timeline
+      .filter((entry) => entry.kind === 'delivery' && entry.pin.copyValue)
+      .sort((left, right) => right.timestamp - left.timestamp);
+    return deliveryEvents.length ? deliveryEvents[0].pin.copyValue : '';
+  };
+  const actionDefaults = (actionId) => {
+    if (actionId === 'acceptAndPay') return { score: 5, comment: 'Accepted.' };
+    if (actionId === 'requestRevision') return { score: 3, comment: 'Revision requested. Please address the review notes and submit a revised delivery.' };
+    if (actionId === 'reject') return { score: 1, comment: 'Rejected after review.' };
+    return { score: undefined, comment: '' };
+  };
+  const detailActionBody = (detail, action, confirm) => {
+    const defaults = actionDefaults(action.id);
+    const body = {
+      action: action.id,
+      from: fromQuery(),
+      taskPinId: detail.taskPinId,
+      deliveryPinId: latestDeliveryPinId(detail),
+      confirm: Boolean(confirm),
+    };
+    if (defaults.score !== undefined) body.score = defaults.score;
+    if (defaults.comment) body.comment = defaults.comment;
+    return body;
+  };
+  const resultData = (result) => obj(obj(result).data);
+  const previewData = (result) => {
+    const data = resultData(result);
+    return obj(data.preview || data);
+  };
+  const chainData = (result) => {
+    const data = resultData(result);
+    const preview = previewData(result);
+    return obj(data.chain || preview.chain);
+  };
+  const resultPaymentTxId = (result) => {
+    const data = resultData(result);
+    const preview = previewData(result);
+    return text(data.paymentTxId) || text(preview.paymentTxId);
+  };
+  const detailActionHasPostPaymentRecovery = (result) => {
+    const root = obj(result);
+    const data = resultData(result);
+    return text(root.code) === 'acceptance_write_failed_after_payment'
+      || data.paymentTxId !== undefined
+      || data.retryGuidance !== undefined
+      || data.acceptancePayload !== undefined;
+  };
+  const detailActionErrorMessage = (result, fallback) => {
+    const root = obj(result);
+    return text(root.message) || text(root.code) || fallback;
+  };
+  const renderPreviewRows = (body, result) => {
+    const data = resultData(result);
+    const preview = previewData(result);
+    const chain = chainData(result);
+    const amount = firstText(preview.amount, preview.amountRaw, data.amount, data.amountRaw);
+    const currency = firstText(preview.currency, data.currency);
+    const payoutAddress = firstText(preview.payoutAddress, preview.toAddress, data.payoutAddress, data.toAddress);
+    const rows = [
+      ['Actor', body.from || 'Global'],
+      ['Task PIN', body.taskPinId],
+      ['Delivery PIN', body.deliveryPinId],
+      amount ? ['Amount', amount] : null,
+      currency ? ['Currency', currency] : null,
+      payoutAddress ? ['Payout address', payoutAddress] : null,
+      firstText(chain.name, chain.chain) ? ['Chain', firstText(chain.name, chain.chain)] : null,
+      text(chain.path) ? ['Chain path', text(chain.path)] : null,
+      text(chain.txId) ? ['Tx', text(chain.txId)] : null,
+    ].filter(Boolean);
+    return '<dl>' + rows.map(([label, value]) => '<div><dt>' + esc(label) + '</dt><dd>' + esc(value) + '</dd></div>').join('') + '</dl>';
+  };
+  const renderDetailActionResult = (state) => {
+    if (!state) return '';
+    const body = state.body || {};
+    const action = state.action || {};
+    const result = obj(state.result);
+    const data = resultData(result);
+    const recovery = state.phase === 'error' && detailActionHasPostPaymentRecovery(result);
+    const title = state.phase === 'success'
+      ? 'Action completed'
+      : state.phase === 'error'
+        ? (recovery ? 'Payment recovery required' : 'Action failed')
+        : 'Preview';
+    const message = state.phase === 'error'
+      ? detailActionErrorMessage(result, 'Action failed.')
+      : state.phase === 'success'
+        ? 'Dashboard refreshed. Result is kept here for review.'
+        : 'Review the preview before confirming.';
+    const paymentTxId = resultPaymentTxId(result);
+    const cliFallback = text(data.cliFallback);
+    return '<section class="loom-action-confirmation" data-phase="' + esc(state.phase) + '">' +
+      '<h3>' + esc(title) + '</h3>' +
+      '<p>' + esc(message) + '</p>' +
+      (recovery ? '<p class="loom-action-warning">Do not pay again. The payment appears to have succeeded; use the recovery guidance to publish or retry only the acceptance write.</p>' : '') +
+      renderPreviewRows(body, result) +
+      (paymentTxId ? '<div class="loom-inline-copy"><code>' + esc(compact(paymentTxId).label) + '</code>' + copyButton('Copy payment txid', paymentTxId) + '</div>' : '') +
+      (text(data.retryGuidance) ? '<p class="loom-action-warning">' + esc(text(data.retryGuidance)) + '</p>' : '') +
+      (cliFallback ? '<div class="loom-inline-copy"><code>' + esc(cliFallback) + '</code>' + copyButton('Copy CLI', cliFallback) + '</div>' : '') +
+      (state.phase === 'preview' ? '<footer class="loom-action-confirm-footer"><button type="button" class="loom-action-button" data-loom-confirm-detail-action="' + esc(action.id) + '">Confirm ' + esc(action.label) + '</button><button type="button" class="loom-action-secondary" data-loom-cancel-detail-action="' + esc(action.id) + '">Cancel</button></footer>' : '') +
+      '</section>';
+  };
+  const prUrlForDetail = (card, detail) => {
+    const direct = text(card.prUrl);
+    if (isHttpUrl(direct)) return direct;
+    for (const record of detail.validRecords.deliveries) {
+      const payload = obj(record.payload);
+      const delivery = obj(payload.delivery);
+      const prUrl = firstText(delivery.prUrl, payload.prUrl);
+      if (isHttpUrl(prUrl)) return prUrl;
+    }
+    return '';
+  };
+  const renderActionButton = (action, prUrl) => {
+    if (action.id === 'openPr' && !prUrl) return '';
+    const disabled = action.disabledReason ? ' disabled="disabled" aria-disabled="true"' : '';
+    return '<div class="loom-detail-action-row" data-tone="' + esc(action.tone) + '">' +
+      '<button type="button" class="loom-detail-action-button" data-tone="' + esc(action.tone) + '" data-loom-detail-action="' + esc(action.id) + '"' + disabled + '>' + esc(action.label) + '</button>' +
+      (action.disabledReason ? '<small>' + esc(action.disabledReason) + '</small>' : '') +
+      (action.cliFallback ? '<div class="loom-inline-copy"><code>' + esc(action.cliFallback) + '</code>' + copyButton('Copy CLI', action.cliFallback) + '</div>' : '') +
+      '</div>';
+  };
+  const renderDetailActionPanel = (detail, card, handoffCommands) => {
+    const state = detailActionStates.get(detail.taskPinId);
+    const prUrl = prUrlForDetail(card, detail);
+    const unsafePrFallback = text(card.prUrl) && !isHttpUrl(card.prUrl)
+      ? '<span>' + esc(text(card.prUrl)) + '</span>'
+      : '';
+    const actionButtons = detail.nextActions.length
+      ? detail.nextActions.map((action) => renderActionButton(action, prUrl)).join('')
+      : '<p>' + esc(card.actionLabel || detail.stateLabel || 'No operator action selected.') + '</p>';
+    return '<section class="loom-detail-section"><h3>Action panel</h3><div class="loom-detail-action-list">' + actionButtons + '</div>' + renderDetailActionResult(state) + '</section>' +
+      '<section class="loom-detail-section"><h3>CLI fallback</h3><div class="loom-handoff">' +
+      (prUrl ? safeExternalLink(prUrl, 'Open PR ↗', '') : unsafePrFallback) +
+      handoffCommands.map((command) => '<div class="loom-inline-copy"><code>' + esc(command) + '</code>' + copyButton('Copy CLI', command) + '</div>').join('') +
+      '</div></section>';
+  };
+  const openPrAction = async (card, detail) => {
+    const prUrl = prUrlForDetail(card, detail);
+    if (!prUrl) return;
+    try {
+      if (window && typeof window.open === 'function') window.open(prUrl, '_blank', 'noreferrer');
+    } catch {}
+    try {
+      if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(prUrl);
+      }
+    } catch {}
+  };
+  const postDetailAction = async (detail, card, action, confirm) => {
+    if (action.disabledReason) return;
+    if (action.id === 'openPr') {
+      await openPrAction(card, detail);
+      return;
+    }
+    const previous = detailActionStates.get(detail.taskPinId);
+    const body = confirm && previous && previous.phase === 'preview' && previous.action.id === action.id
+      ? { ...previous.body, confirm: true }
+      : detailActionBody(detail, action, confirm);
+    const stateBase = { action, body };
+    detailActionStates.set(detail.taskPinId, { ...stateBase, phase: confirm ? 'confirming' : 'previewing', result: {} });
+    renderDetailModal();
+    try {
+      const response = await fetch('/api/loom/actions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json();
+      if (!response.ok || result.ok === false) {
+        detailActionStates.set(detail.taskPinId, { ...stateBase, phase: 'error', result });
+        renderDetailModal();
+        return;
+      }
+      if (confirm) {
+        detailActionStates.set(detail.taskPinId, { ...stateBase, phase: 'success', result });
+        await refreshDashboard();
+        setStatus('Action completed.', 'ready');
+        if (elements.detailModal && !elements.detailModal.hidden) renderDetailModal();
+        return;
+      }
+      detailActionStates.set(detail.taskPinId, { ...stateBase, phase: 'preview', result });
+      renderDetailModal();
+    } catch (error) {
+      const result = { ok: false, message: error instanceof Error ? error.message : String(error) };
+      detailActionStates.set(detail.taskPinId, { ...stateBase, phase: 'error', result });
+      renderDetailModal();
+    }
+  };
+  const bindDetailActionButtons = (detail, card) => {
+    if (!elements.detailActions || !elements.detailActions.querySelectorAll) return;
+    const actionsById = new Map(detail.nextActions.map((action) => [action.id, action]));
+    elements.detailActions.querySelectorAll('[data-loom-detail-action]').forEach((button) => {
+      const actionId = button.getAttribute('data-loom-detail-action') || '';
+      const action = actionsById.get(actionId);
+      if (!action || action.disabledReason) return;
+      button.addEventListener('click', (event) => {
+        if (event && event.stopPropagation) event.stopPropagation();
+        return postDetailAction(detail, card, action, false);
+      });
+    });
+    elements.detailActions.querySelectorAll('[data-loom-confirm-detail-action]').forEach((button) => {
+      const actionId = button.getAttribute('data-loom-confirm-detail-action') || '';
+      const action = actionsById.get(actionId);
+      if (!action) return;
+      button.addEventListener('click', (event) => {
+        if (event && event.stopPropagation) event.stopPropagation();
+        return postDetailAction(detail, card, action, true);
+      });
+    });
+    elements.detailActions.querySelectorAll('[data-loom-cancel-detail-action]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        if (event && event.stopPropagation) event.stopPropagation();
+        detailActionStates.delete(detail.taskPinId);
+        renderDetailModal();
+      });
+    });
   };
   const renderDetailModal = () => {
     const detail = currentModel.details.find((entry) => entry.taskPinId === selectedTaskPinId) || null;
@@ -862,8 +1104,7 @@ export function buildLoomPageScript(): string {
     const headerDeveloper = activeClaim ? activeClaim.developer : (card.developer || (firstClaim ? firstClaim.developer : null));
     const from = fromQuery();
     const fromArg = from ? ' --from ' + shellArg(from) : '';
-    const deliveryEvent = detail.timeline.find((event) => event.kind === 'delivery' && event.pin.copyValue);
-    const deliveryPinId = deliveryEvent ? deliveryEvent.pin.copyValue : '';
+    const deliveryPinId = latestDeliveryPinId(detail);
     const handoffCommands = ['metabot loom state ' + shellArg(detail.taskPinId) + ' --refresh' + fromArg];
     if (deliveryPinId) {
       handoffCommands.push('metabot loom accept-and-pay --task-pin-id ' + shellArg(detail.taskPinId) + ' --delivery-pin-id ' + shellArg(deliveryPinId) + ' --score 5 --comment "accepted" --confirm-payment' + fromArg);
@@ -901,15 +1142,14 @@ export function buildLoomPageScript(): string {
       renderRawRecordIndex(detail) +
       '</section>'
     );
-    setHtml(elements.detailActions,
-      '<section class="loom-detail-section"><h3>Action panel</h3><p>' + esc(card.actionLabel || detail.stateLabel || 'No operator action selected.') + '</p></section>' +
-      '<section class="loom-detail-section"><h3>CLI fallback</h3><div class="loom-handoff">' +
-      (card.prUrl ? safeExternalLink(card.prUrl, isHttpUrl(card.prUrl) ? 'Open PR ↗' : card.prUrl, '') : '') +
-      handoffCommands.map((command) => '<div class="loom-inline-copy"><code>' + esc(command) + '</code>' + copyButton('Copy CLI', command) + '</div>').join('') +
-      '</div></section>'
-    );
+    setHtml(elements.detailActions, renderDetailActionPanel(detail, card, handoffCommands));
+    if (elements.detailModal) {
+      const state = detailActionStates.get(detail.taskPinId);
+      elements.detailModal.dataset.confirmationActive = state && state.phase === 'preview' ? 'true' : '';
+    }
     bindCopyActions(elements.detailBody);
     bindCopyActions(elements.detailActions);
+    bindDetailActionButtons(detail, card);
     return true;
   };
   const openDetailModal = (taskPinId, cardElement) => {
