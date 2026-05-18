@@ -15,7 +15,7 @@ export type PlatformId =
   | 'trae'
   | 'codebuddy';
 
-export type RuntimePlatformId = Exclude<PlatformId, 'trae' | 'codebuddy'>;
+export type RuntimePlatformId = PlatformId;
 
 export type PlatformExecutorKind =
   | 'claude-stream-json'
@@ -28,7 +28,9 @@ export type PlatformExecutorKind =
   | 'pi-json'
   | 'cursor-stream-json'
   | 'acp-kimi'
-  | 'acp-kiro';
+  | 'acp-kiro'
+  | 'trae-chat'
+  | 'codebuddy-stream-json';
 
 export interface PlatformDefinition {
   id: PlatformId;
@@ -328,22 +330,46 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
     id: 'trae',
     displayName: 'Trae',
     logoPath: '/ui/assets/platforms/generic.svg',
+    runtime: {
+      binaryNames: ['trae', 'Trae'],
+      versionArgs: ['--version'],
+      authEnv: [],
+      capabilities: DEFAULT_CAPABILITIES,
+    },
     skills: {
       roots: [
         { id: 'trae-home', kind: 'global', path: '~/.trae/skills', autoBind: 'when-parent-exists' },
         { id: 'trae-project', kind: 'project', path: '.trae/skills', autoBind: 'manual' },
       ],
     },
+    executor: {
+      kind: 'trae-chat',
+      backendFactoryExport: 'traeBackendFactory',
+      launchCommand: 'trae chat <prompt> --mode agent --reuse-window',
+      multicaReferencePath: 'agent/trae.go',
+    },
   },
   {
     id: 'codebuddy',
     displayName: 'CodeBuddy',
     logoPath: '/ui/assets/platforms/generic.svg',
+    runtime: {
+      binaryNames: ['codebuddy'],
+      versionArgs: ['--version'],
+      authEnv: ['CODEBUDDY_API_KEY'],
+      capabilities: DEFAULT_CAPABILITIES,
+    },
     skills: {
       roots: [
         { id: 'codebuddy-home', kind: 'global', path: '~/.codebuddy/skills', autoBind: 'when-parent-exists' },
         { id: 'codebuddy-project', kind: 'project', path: '.codebuddy/skills', autoBind: 'manual' },
       ],
+    },
+    executor: {
+      kind: 'codebuddy-stream-json',
+      backendFactoryExport: 'codeBuddyBackendFactory',
+      launchCommand: 'codebuddy -p <prompt> --output-format stream-json --dangerously-skip-permissions',
+      multicaReferencePath: 'agent/codebuddy.go',
     },
   },
 ];

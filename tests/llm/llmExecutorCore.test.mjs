@@ -14,6 +14,7 @@ const {
   createClaudeBackend,
   createCodexBackend,
   createCopilotBackend,
+  createCodeBuddyBackend,
   createCursorBackend,
   createFileSessionManager,
   createGeminiBackend,
@@ -24,9 +25,12 @@ const {
   createOpenCodeBackend,
   createPiBackend,
   createRegistryBackendFactories,
+  createTraeBackend,
   injectSkills,
   openClawBackendFactory,
+  codeBuddyBackendFactory,
   resolveProviderSkillRoot,
+  traeBackendFactory,
 } = require('../../dist/core/llm/executor/index.js');
 const {
   getPlatformDefinition,
@@ -188,10 +192,19 @@ test('registry preserves Claude Code and Codex executor metadata', async () => {
   assert.equal(codex.executor.launchCommand, 'codex app-server --listen stdio://');
   assert.equal(codex.executor.multicaReferencePath, 'agent/codex.go');
 
+  const trae = getPlatformDefinition('trae');
+  assert.equal(trae.id, 'trae');
+  assert.equal(trae.displayName, 'Trae');
+  assert.equal(trae.executor.kind, 'trae-chat');
+  assert.equal(trae.executor.backendFactoryExport, 'traeBackendFactory');
+  assert.equal(trae.executor.launchCommand, 'trae chat <prompt> --mode agent --reuse-window');
+
   const codebuddy = getPlatformDefinition('codebuddy');
   assert.equal(codebuddy.id, 'codebuddy');
   assert.equal(codebuddy.displayName, 'CodeBuddy');
-  assert.equal(codebuddy.executor, undefined);
+  assert.equal(codebuddy.executor.kind, 'codebuddy-stream-json');
+  assert.equal(codebuddy.executor.backendFactoryExport, 'codeBuddyBackendFactory');
+  assert.equal(codebuddy.executor.launchCommand, 'codebuddy -p <prompt> --output-format stream-json --dangerously-skip-permissions');
 });
 
 test('registry backend factory helper covers every managed provider and CLI runtime uses it', async () => {
@@ -203,7 +216,8 @@ test('registry backend factory helper covers every managed provider and CLI runt
   assert.equal(factories['claude-code'], claudeBackendFactory);
   assert.equal(factories.codex, codexBackendFactory);
   assert.equal(factories.openclaw, openClawBackendFactory);
-  assert.equal(factories.codebuddy, undefined);
+  assert.equal(factories.trae, traeBackendFactory);
+  assert.equal(factories.codebuddy, codeBuddyBackendFactory);
 
   const base = await createTempDir();
   const executor = new LlmExecutor({
@@ -1335,6 +1349,114 @@ send({ type: 'result', session_id: 'cursor-session-result', result: 'Cursor done
   assert.deepEqual(events.filter((event) => event.type === 'text').map((event) => event.content), ['Cursor ']);
   assert.equal(events.some((event) => event.type === 'thinking' && event.content === 'cursor thinking'), true);
   assert.equal(events.some((event) => event.type === 'tool_use' && event.tool === 'grep'), true);
+  assert.equal(events.some((event) => event.type === 'tool_result' && event.output === 'ok'), true);
+});
+
+test('Trae backend launches editor chat mode and captures process output', async () => {
+  const base = await createTempDir();
+  const argsPath = path.join(base, 'args.json');
+  const cwdPath = path.join(base, 'cwd.txt');
+  const envPath = path.join(base, 'env.txt');
+  const binaryPath = await writeExecutableScript(base, 'fake-trae.js', `#!/usr/bin/env node
+const fs = require('node:fs');
+fs.writeFileSync(process.env.FAKE_TRAE_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
+fs.writeFileSync(process.env.FAKE_TRAE_CWD_PATH, process.cwd());
+fs.writeFileSync(process.env.FAKE_TRAE_ENV_PATH, process.env.OAC_TEST_MARKER || '');
+process.stdout.write('Trae response\\n');
+process.stderr.write('Trae diagnostic\\n');
+`);
+  const backend = createTraeBackend(binaryPath, {
+    FAKE_TRAE_ARGS_PATH: argsPath,
+    FAKE_TRAE_CWD_PATH: cwdPath,
+    FAKE_TRAE_ENV_PATH: envPath,
+  });
+  const events = [];
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_trae',
+      runtime: { ...runtime, provider: 'trae', binaryPath },
+      prompt: 'hello trae',
+      cwd: base,
+      env: { OAC_TEST_MARKER: 'trae-env' },
+      extraArgs: ['--mode', 'ask', '--new-window', '--maximize'],
+    },
+    { emit: (event) => events.push(event) },
+    new AbortController().signal,
+  );
+
+  const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
+  assert.deepEqual(args.slice(0, 5), ['chat', 'hello trae', '--mode', 'agent', '--reuse-window']);
+  assert.equal(args.includes('ask'), false);
+  assert.equal(args.includes('--new-window'), false);
+  assert.ok(args.includes('--maximize'));
+  await assertSameRealpath(await fs.readFile(cwdPath, 'utf8'), base);
+  assert.equal(await fs.readFile(envPath, 'utf8'), 'trae-env');
+  assert.equal(result.status, 'completed');
+  assert.equal(result.output, 'Trae response');
+  assert.deepEqual(events.filter((event) => event.type === 'text').map((event) => event.content), ['Trae response']);
+  assert.equal(events.some((event) => event.type === 'log' && event.message === 'Trae diagnostic'), true);
+});
+
+test('CodeBuddy backend launches stream-json print mode and normalizes events', async () => {
+  const base = await createTempDir();
+  const argsPath = path.join(base, 'args.json');
+  const cwdPath = path.join(base, 'cwd.txt');
+  const binaryPath = await writeExecutableScript(base, 'fake-codebuddy.js', `#!/usr/bin/env node
+const fs = require('node:fs');
+fs.writeFileSync(process.env.FAKE_CODEBUDDY_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
+fs.writeFileSync(process.env.FAKE_CODEBUDDY_CWD_PATH, process.cwd());
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+send({ type: 'system', subtype: 'init', session_id: 'codebuddy-session-1' });
+send({ type: 'assistant', message: { content: [
+  { type: 'thinking', text: 'codebuddy thinking' },
+  { type: 'output_text', text: 'CodeBuddy ' },
+  { type: 'tool_use', id: 'tool-codebuddy', name: 'Read', input: { file: 'x' } }
+] } });
+send({ type: 'tool_result', tool_id: 'tool-codebuddy', output: 'ok' });
+send({ type: 'result', session_id: 'codebuddy-session-result', result: 'CodeBuddy done', usage: { input_tokens: 21, output_tokens: 22 } });
+`);
+  const backend = createCodeBuddyBackend(binaryPath, { FAKE_CODEBUDDY_ARGS_PATH: argsPath, FAKE_CODEBUDDY_CWD_PATH: cwdPath });
+  const events = [];
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_codebuddy',
+      runtime: { ...runtime, provider: 'codebuddy', binaryPath },
+      prompt: 'hello codebuddy',
+      systemPrompt: 'system codebuddy',
+      cwd: base,
+      model: 'gpt-5',
+      resumeSessionId: 'codebuddy-old',
+      extraArgs: ['--output-format', 'text', '--dangerously-skip-permissions', '--debug'],
+    },
+    { emit: (event) => events.push(event) },
+    new AbortController().signal,
+  );
+
+  const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
+  assert.deepEqual(args.slice(0, 2), ['-p', 'hello codebuddy']);
+  assert.ok(args.includes('--output-format'));
+  assert.ok(args.includes('stream-json'));
+  assert.ok(args.includes('--dangerously-skip-permissions'));
+  assert.ok(args.includes('--system-prompt'));
+  assert.ok(args.includes('system codebuddy'));
+  assert.ok(args.includes('--model'));
+  assert.ok(args.includes('gpt-5'));
+  assert.ok(args.includes('--resume'));
+  assert.ok(args.includes('codebuddy-old'));
+  assert.ok(args.includes('--debug'));
+  assert.equal(args.filter((arg) => arg === '--dangerously-skip-permissions').length, 1);
+  assert.equal(args.includes('text'), false);
+  await assertSameRealpath(await fs.readFile(cwdPath, 'utf8'), base);
+  assert.equal(result.status, 'completed');
+  assert.equal(result.output, 'CodeBuddy ');
+  assert.equal(result.providerSessionId, 'codebuddy-session-result');
+  assert.equal(result.usage.codebuddy.inputTokens, 21);
+  assert.equal(result.usage.codebuddy.outputTokens, 22);
+  assert.deepEqual(events.filter((event) => event.type === 'text').map((event) => event.content), ['CodeBuddy ']);
+  assert.equal(events.some((event) => event.type === 'thinking' && event.content === 'codebuddy thinking'), true);
+  assert.equal(events.some((event) => event.type === 'tool_use' && event.tool === 'Read'), true);
   assert.equal(events.some((event) => event.type === 'tool_result' && event.output === 'ok'), true);
 });
 

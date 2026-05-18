@@ -1,6 +1,7 @@
 import { getRuntimePlatforms, type PlatformExecutorKind } from '../../../platform/platformRegistry';
 import { claudeBackendFactory } from './claude';
 import { codexBackendFactory } from './codex';
+import { codeBuddyBackendFactory } from './codebuddy';
 import { copilotBackendFactory } from './copilot';
 import { cursorBackendFactory } from './cursor';
 import { geminiBackendFactory } from './gemini';
@@ -10,6 +11,7 @@ import { kiroBackendFactory } from './kiro';
 import { openClawBackendFactory } from './openclaw';
 import { opencodeBackendFactory } from './opencode';
 import { piBackendFactory } from './pi';
+import { traeBackendFactory } from './trae';
 import type { LlmBackendFactory } from './backend';
 
 const FACTORY_BY_EXECUTOR_KIND: Record<PlatformExecutorKind, LlmBackendFactory> = {
@@ -24,6 +26,8 @@ const FACTORY_BY_EXECUTOR_KIND: Record<PlatformExecutorKind, LlmBackendFactory> 
   'cursor-stream-json': cursorBackendFactory,
   'acp-kimi': kimiBackendFactory,
   'acp-kiro': kiroBackendFactory,
+  'trae-chat': traeBackendFactory,
+  'codebuddy-stream-json': codeBuddyBackendFactory,
 };
 
 export function createRegistryBackendFactories(): Record<string, LlmBackendFactory> {
