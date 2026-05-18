@@ -18,7 +18,7 @@ export function buildLoomPageDefinition(): LocalUiPageDefinition {
               <span class="loom-scope-label" data-loom-scope-label>Global</span>
             </div>
             <div class="loom-toolbar-actions">
-              <button type="button" class="loom-action-button" data-loom-new-task disabled title="New task">New task</button>
+              <button type="button" class="loom-action-button" data-loom-new-task title="New task">New task</button>
               <button type="button" class="loom-icon-button loom-refresh" data-loom-refresh title="Refresh dashboard" aria-label="Refresh dashboard">↻</button>
             </div>
           </div>
@@ -79,6 +79,41 @@ export function buildLoomPageDefinition(): LocalUiPageDefinition {
             </div>
           </section>
         </div>
+        <div class="loom-new-task-modal" data-loom-new-task-modal hidden>
+          <section class="loom-new-task-dialog" data-loom-new-task-dialog role="dialog" aria-modal="true" aria-labelledby="loom-new-task-title" tabindex="-1">
+            <header class="loom-modal-head">
+              <div>
+                <span class="loom-kicker">Publish task</span>
+                <h2 id="loom-new-task-title">New Loom task</h2>
+              </div>
+              <button type="button" class="loom-icon-button loom-detail-close" data-loom-new-task-close aria-label="Close new task">×</button>
+            </header>
+            <form class="loom-new-task-form" data-loom-new-task-form>
+              <div class="loom-new-task-fields">
+                <label><span>From</span><input data-loom-new-task-from name="from" autocomplete="off" /></label>
+                <label><span>Title</span><input data-loom-new-task-title name="title" autocomplete="off" /></label>
+                <label class="loom-field-wide"><span>Requirement</span><textarea data-loom-new-task-requirement name="requirement" rows="5"></textarea></label>
+                <label><span>Requirement type</span><select data-loom-new-task-requirement-content-type name="requirementContentType"><option value="text/markdown">text/markdown</option></select></label>
+                <label class="loom-field-wide"><span>Criteria</span><textarea data-loom-new-task-criteria name="criteria" rows="4"></textarea></label>
+                <label><span>Criteria type</span><select data-loom-new-task-criteria-content-type name="criteriaContentType"><option value="text/markdown">text/markdown</option></select></label>
+                <label class="loom-field-wide"><span>Repo URI</span><input data-loom-new-task-repo-uri name="repoUri" autocomplete="off" /></label>
+                <label><span>Project base</span><select data-loom-new-task-project-base name="projectBase"><option value="github">github</option></select></label>
+                <label><span>Base branch</span><input data-loom-new-task-base-branch name="baseBranch" value="main" autocomplete="off" /></label>
+                <label><span>Bounty amount</span><input data-loom-new-task-bounty-amount name="bountyAmount" inputmode="decimal" autocomplete="off" /></label>
+                <label><span>Currency</span><select data-loom-new-task-currency name="currency"><option value="SPACE">SPACE</option><option value="BTC">BTC</option><option value="DOGE">DOGE</option><option value="OPCAT">OPCAT</option></select></label>
+                <label><span>Deadline</span><input data-loom-new-task-deadline name="deadline" type="datetime-local" /></label>
+                <label class="loom-field-wide"><span>Tags</span><input data-loom-new-task-tags name="tags" autocomplete="off" /></label>
+                <label class="loom-field-wide"><span>Attachments</span><textarea data-loom-new-task-attachments name="attachments" rows="3"></textarea></label>
+              </div>
+              <div class="loom-new-task-summary" data-loom-new-task-summary></div>
+              <div class="loom-new-task-error" data-loom-new-task-error role="alert" aria-live="polite"></div>
+              <footer class="loom-new-task-actions">
+                <button type="submit" class="loom-action-button" data-loom-new-task-preview>Preview</button>
+                <button type="button" class="loom-action-button" data-loom-new-task-confirm disabled>Confirm publish</button>
+              </footer>
+            </form>
+          </section>
+        </div>
       </section>
     `,
     script: buildLoomPageScript(),
@@ -104,6 +139,28 @@ export function buildLoomPageScript(): string {
     detailBody: document.querySelector('[data-loom-detail-body]'),
     detailActions: document.querySelector('[data-loom-detail-actions]'),
     detailClose: document.querySelector('[data-loom-detail-close]'),
+    newTaskModal: document.querySelector('[data-loom-new-task-modal]'),
+    newTaskDialog: document.querySelector('[data-loom-new-task-dialog]'),
+    newTaskForm: document.querySelector('[data-loom-new-task-form]'),
+    newTaskClose: document.querySelector('[data-loom-new-task-close]'),
+    newTaskFrom: document.querySelector('[data-loom-new-task-from]'),
+    newTaskTitle: document.querySelector('[data-loom-new-task-title]'),
+    newTaskRequirement: document.querySelector('[data-loom-new-task-requirement]'),
+    newTaskRequirementContentType: document.querySelector('[data-loom-new-task-requirement-content-type]'),
+    newTaskCriteria: document.querySelector('[data-loom-new-task-criteria]'),
+    newTaskCriteriaContentType: document.querySelector('[data-loom-new-task-criteria-content-type]'),
+    newTaskRepoUri: document.querySelector('[data-loom-new-task-repo-uri]'),
+    newTaskProjectBase: document.querySelector('[data-loom-new-task-project-base]'),
+    newTaskBaseBranch: document.querySelector('[data-loom-new-task-base-branch]'),
+    newTaskBountyAmount: document.querySelector('[data-loom-new-task-bounty-amount]'),
+    newTaskCurrency: document.querySelector('[data-loom-new-task-currency]'),
+    newTaskDeadline: document.querySelector('[data-loom-new-task-deadline]'),
+    newTaskTags: document.querySelector('[data-loom-new-task-tags]'),
+    newTaskAttachments: document.querySelector('[data-loom-new-task-attachments]'),
+    newTaskPreview: document.querySelector('[data-loom-new-task-preview]'),
+    newTaskConfirm: document.querySelector('[data-loom-new-task-confirm]'),
+    newTaskSummary: document.querySelector('[data-loom-new-task-summary]'),
+    newTaskError: document.querySelector('[data-loom-new-task-error]'),
     error: document.querySelector('[data-loom-error]'),
   };
   const boardColumns = [
@@ -117,6 +174,7 @@ export function buildLoomPageScript(): string {
   let currentModel = null;
   let selectedTaskPinId = '';
   let selectedCardElement = null;
+  let previewedNewTask = null;
 
   const esc = (value) => String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -138,6 +196,33 @@ export function buildLoomPageScript(): string {
       copyValue: normalized,
     };
   };
+  const firstText = (...values) => values.map(text).find(Boolean) || '';
+  const nestedTaskPinId = (value, seen) => {
+    const stack = seen || [];
+    if (!value || typeof value !== 'object' || stack.includes(value)) return '';
+    const nextSeen = [...stack, value];
+    const direct = firstText(value.taskPinId, value.pinId);
+    if (direct) return direct;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = nestedTaskPinId(item, nextSeen);
+        if (found) return found;
+      }
+      return '';
+    }
+    for (const key of ['task', 'record', 'write', 'chainWrite', 'published', 'result', 'data', 'chain', 'dashboardAfterAction']) {
+      const found = nestedTaskPinId(value[key], nextSeen);
+      if (found) return found;
+    }
+    return '';
+  };
+  const taskPinIdFromActionResult = (result) => {
+    const root = obj(result);
+    const data = obj(root.data);
+    return firstText(data.taskPinId, root.taskPinId, data.pinId, root.pinId)
+      || nestedTaskPinId(data)
+      || nestedTaskPinId(root);
+  };
   const setText = (target, value) => {
     if (target) target.textContent = value;
   };
@@ -147,6 +232,10 @@ export function buildLoomPageScript(): string {
   const setStatus = (value, tone) => {
     setText(elements.status, value);
     if (elements.status) elements.status.dataset.tone = tone || 'neutral';
+  };
+  const fieldValue = (target) => target ? text(target.value) : '';
+  const setFieldValue = (target, value) => {
+    if (target) target.value = value;
   };
   const fromQuery = () => new URLSearchParams(window.location.search || '').get('from') || '';
   const relativeTime = (timestamp) => {
@@ -588,6 +677,168 @@ export function buildLoomPageScript(): string {
     }));
     return rows.length ? '<ul class="loom-raw-index">' + rows.join('') + '</ul>' : '<p>No raw records available.</p>';
   };
+  const normalizeList = (value) => {
+    const seen = new Set();
+    return String(value || '').split(/[,\\n]/u).map((entry) => entry.trim()).filter(Boolean).filter((entry) => {
+      const key = entry.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  const validateBountyAmount = (value) => /^(?:[1-9]\\d*(?:\\.\\d+)?|0?\\.\\d+)$/u.test(value) && Number(value) > 0;
+  const allowedCurrencies = ['SPACE', 'BTC', 'DOGE', 'OPCAT'];
+  const validAttachmentUri = (value) => {
+    const uri = text(value);
+    return uri.startsWith('metafile://') && uri.slice('metafile://'.length).trim().length > 0;
+  };
+  const newTaskPreviewKey = (entry) => JSON.stringify({ from: entry.from, payload: entry.payload });
+  const newTaskPayload = () => {
+    const from = fieldValue(elements.newTaskFrom);
+    const title = fieldValue(elements.newTaskTitle);
+    const requirement = fieldValue(elements.newTaskRequirement);
+    const requirementContentType = fieldValue(elements.newTaskRequirementContentType) || 'text/markdown';
+    const criteria = fieldValue(elements.newTaskCriteria);
+    const criteriaContentType = fieldValue(elements.newTaskCriteriaContentType) || 'text/markdown';
+    const repoUri = fieldValue(elements.newTaskRepoUri);
+    const projectBase = fieldValue(elements.newTaskProjectBase) || 'github';
+    const baseBranch = fieldValue(elements.newTaskBaseBranch) || 'main';
+    const amount = fieldValue(elements.newTaskBountyAmount);
+    const currency = fieldValue(elements.newTaskCurrency);
+    const deadlineValue = fieldValue(elements.newTaskDeadline);
+    const tags = normalizeList(elements.newTaskTags ? elements.newTaskTags.value : '');
+    const attachments = normalizeList(elements.newTaskAttachments ? elements.newTaskAttachments.value : '');
+    const errors = [];
+    [
+      ['From', from],
+      ['Title', title],
+      ['Requirement', requirement],
+      ['Criteria', criteria],
+      ['Repo URI', repoUri],
+      ['Base branch', baseBranch],
+      ['Bounty amount', amount],
+      ['Currency', currency],
+    ].forEach(([label, value]) => {
+      if (!value) errors.push(label + ' is required.');
+    });
+    if (amount && !validateBountyAmount(amount)) errors.push('Bounty amount must be a positive decimal.');
+    if (currency && !allowedCurrencies.includes(currency)) errors.push('Currency must be SPACE, BTC, DOGE, or OPCAT.');
+    if (attachments.some((uri) => !validAttachmentUri(uri))) errors.push('Attachments must use metafile:// URIs with a non-empty suffix.');
+    const payload = {
+      title,
+      requirementContentType,
+      requirement,
+      criteriaContentType,
+      criteria,
+      projectBase,
+      project: { repoUri, baseBranch },
+      bounty: { amount, currency },
+    };
+    if (deadlineValue) {
+      const deadline = Date.parse(deadlineValue);
+      if (Number.isFinite(deadline)) payload.deadline = deadline;
+      else errors.push('Deadline must be a valid date.');
+    }
+    if (tags.length) payload.tags = tags;
+    if (attachments.length && !attachments.some((uri) => !validAttachmentUri(uri))) payload.attachments = attachments;
+    return { from, payload, errors };
+  };
+  const actionErrorMessage = (payload, fallback) => {
+    const root = obj(payload);
+    return text(root.message) || text(root.code) || fallback;
+  };
+  const renderNewTaskSummary = (from, payload, result) => {
+    const root = obj(result);
+    const data = obj(root.data);
+    const preview = obj(data.preview);
+    const chain = obj(data.chain || preview.chain);
+    const cliFallback = text(data.cliFallback) || text(preview.cliFallback);
+    setHtml(elements.newTaskSummary,
+      '<section class="loom-new-task-confirmation">' +
+      '<h3>Preview</h3>' +
+      '<dl>' +
+      '<div><dt>Actor</dt><dd>' + esc(from) + '</dd></div>' +
+      '<div><dt>Title</dt><dd>' + esc(payload.title) + '</dd></div>' +
+      '<div><dt>Repo</dt><dd>' + esc(repoLabel(payload.project)) + '</dd></div>' +
+      '<div><dt>Bounty</dt><dd>' + esc(payload.bounty.amount + ' ' + payload.bounty.currency) + '</dd></div>' +
+      (chain.path ? '<div><dt>Chain</dt><dd>' + esc(chain.path) + '</dd></div>' : '') +
+      (chain.txId ? '<div><dt>Tx</dt><dd>' + esc(chain.txId) + '</dd></div>' : '') +
+      (cliFallback ? '<div><dt>CLI</dt><dd><code>' + esc(cliFallback) + '</code></dd></div>' : '') +
+      '</dl>' +
+      '</section>'
+    );
+  };
+  const resetNewTaskPreview = () => {
+    previewedNewTask = null;
+    if (elements.newTaskConfirm) elements.newTaskConfirm.disabled = true;
+    setHtml(elements.newTaskSummary, '');
+  };
+  const openNewTaskModal = () => {
+    resetNewTaskPreview();
+    setText(elements.newTaskError, '');
+    setFieldValue(elements.newTaskFrom, fieldValue(elements.newTaskFrom) || fromQuery());
+    setFieldValue(elements.newTaskBaseBranch, fieldValue(elements.newTaskBaseBranch) || 'main');
+    setFieldValue(elements.newTaskCurrency, fieldValue(elements.newTaskCurrency) || 'SPACE');
+    setFieldValue(elements.newTaskRequirementContentType, fieldValue(elements.newTaskRequirementContentType) || 'text/markdown');
+    setFieldValue(elements.newTaskCriteriaContentType, fieldValue(elements.newTaskCriteriaContentType) || 'text/markdown');
+    setFieldValue(elements.newTaskProjectBase, fieldValue(elements.newTaskProjectBase) || 'github');
+    if (elements.newTaskModal) {
+      elements.newTaskModal.hidden = false;
+      elements.newTaskModal.dataset.state = 'open';
+    }
+    if (elements.newTaskDialog && elements.newTaskDialog.focus) elements.newTaskDialog.focus();
+  };
+  const closeNewTaskModal = (returnFocus) => {
+    if (elements.newTaskModal) {
+      elements.newTaskModal.hidden = true;
+      elements.newTaskModal.dataset.state = 'closed';
+    }
+    if (returnFocus !== false && elements.newTask && elements.newTask.focus) elements.newTask.focus();
+  };
+  const postNewTaskAction = async (confirm) => {
+    const current = newTaskPayload();
+    setText(elements.newTaskError, '');
+    if (current.errors.length) {
+      setText(elements.newTaskError, current.errors.join(' '));
+      resetNewTaskPreview();
+      return;
+    }
+    if (confirm && !previewedNewTask) return;
+    if (confirm && previewedNewTask.previewKey !== newTaskPreviewKey(current)) {
+      resetNewTaskPreview();
+      return;
+    }
+    const next = confirm ? previewedNewTask : current;
+    const button = confirm ? elements.newTaskConfirm : elements.newTaskPreview;
+    if (button) button.disabled = true;
+    try {
+      const body = { action: 'postTask', from: next.from, confirm: Boolean(confirm), payload: next.payload };
+      const response = await fetch('/api/loom/actions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json();
+      if (!response.ok || result.ok === false) throw new Error(actionErrorMessage(result, confirm ? 'Task publish failed.' : 'Task preview failed.'));
+      renderNewTaskSummary(next.from, next.payload, result);
+      if (confirm) {
+        const taskPinId = taskPinIdFromActionResult(result);
+        await refreshDashboard();
+        const selectedPublishedTask = taskPinId ? selectDashboardTask(taskPinId) : false;
+        closeNewTaskModal(!selectedPublishedTask);
+        setStatus('Task published.', 'ready');
+        return;
+      }
+      previewedNewTask = { ...next, previewKey: newTaskPreviewKey(next) };
+      if (elements.newTaskConfirm) elements.newTaskConfirm.disabled = false;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setText(elements.newTaskError, message);
+    } finally {
+      if (button) button.disabled = false;
+      if (!confirm && previewedNewTask && elements.newTaskConfirm) elements.newTaskConfirm.disabled = false;
+    }
+  };
   const closeDetailModal = (returnFocus) => {
     if (elements.detailModal) {
       elements.detailModal.hidden = true;
@@ -670,6 +921,26 @@ export function buildLoomPageScript(): string {
       elements.detailModal.dataset.state = 'open';
     }
     if (elements.detailDialog && elements.detailDialog.focus) elements.detailDialog.focus();
+  };
+  const renderedCardElement = (taskPinId) => {
+    if (!elements.board || !elements.board.querySelectorAll) return null;
+    return Array.from(elements.board.querySelectorAll('[data-loom-card]'))
+      .find((card) => (card.getAttribute('data-loom-card') || '') === taskPinId) || null;
+  };
+  const selectDashboardTask = (taskPinId) => {
+    const id = text(taskPinId);
+    if (!id || !currentModel.cards.some((card) => card.taskPinId === id)) return false;
+    selectedTaskPinId = id;
+    renderBoard();
+    const cardElement = renderedCardElement(id);
+    if (cardElement) selectedCardElement = cardElement;
+    if (currentModel.details.some((detail) => detail.taskPinId === id)) {
+      openDetailModal(id, cardElement);
+    } else {
+      closeDetailModal(false);
+      if (cardElement && cardElement.focus) cardElement.focus();
+    }
+    return true;
   };
   const bindCopyActions = (root) => {
     if (!root || !root.querySelectorAll) return;
@@ -771,7 +1042,53 @@ export function buildLoomPageScript(): string {
   });
   if (elements.queryFilter) elements.queryFilter.addEventListener('input', loadDashboard);
   if (elements.refresh) elements.refresh.addEventListener('click', refreshDashboard);
+  if (elements.newTask) elements.newTask.addEventListener('click', openNewTaskModal);
+  if (elements.newTaskClose) elements.newTaskClose.addEventListener('click', () => closeNewTaskModal(true));
+  if (elements.newTaskForm) {
+    elements.newTaskForm.addEventListener('submit', (event) => {
+      if (event && event.preventDefault) event.preventDefault();
+      return postNewTaskAction(false);
+    });
+    elements.newTaskForm.addEventListener('keydown', (event) => {
+      const tagName = event && event.target && event.target.tagName ? String(event.target.tagName).toUpperCase() : '';
+      if (event && event.key === 'Enter' && tagName === 'INPUT') {
+        if (event.preventDefault) event.preventDefault();
+      }
+    });
+  }
+  if (elements.newTaskConfirm) elements.newTaskConfirm.addEventListener('click', () => postNewTaskAction(true));
+  [
+    elements.newTaskFrom,
+    elements.newTaskTitle,
+    elements.newTaskRequirement,
+    elements.newTaskRequirementContentType,
+    elements.newTaskCriteria,
+    elements.newTaskCriteriaContentType,
+    elements.newTaskRepoUri,
+    elements.newTaskProjectBase,
+    elements.newTaskBaseBranch,
+    elements.newTaskBountyAmount,
+    elements.newTaskCurrency,
+    elements.newTaskDeadline,
+    elements.newTaskTags,
+    elements.newTaskAttachments,
+  ].forEach((field) => {
+    if (!field) return;
+    field.addEventListener('input', resetNewTaskPreview);
+    field.addEventListener('change', resetNewTaskPreview);
+  });
   if (elements.detailClose) elements.detailClose.addEventListener('click', () => closeDetailModal(true));
+  if (elements.newTaskModal) {
+    elements.newTaskModal.addEventListener('click', (event) => {
+      if (event && event.target === elements.newTaskModal) closeNewTaskModal(true);
+    });
+    elements.newTaskModal.addEventListener('keydown', (event) => {
+      if (event && event.key === 'Escape') {
+        if (event.preventDefault) event.preventDefault();
+        closeNewTaskModal(true);
+      }
+    });
+  }
   if (elements.detailModal) {
     elements.detailModal.addEventListener('click', (event) => {
       const confirmationActive = elements.detailModal.dataset.confirmationActive === 'true';
@@ -790,9 +1107,13 @@ export function buildLoomPageScript(): string {
         if (event.preventDefault) event.preventDefault();
         closeDetailModal(true);
       }
+      if (event && event.key === 'Escape' && elements.newTaskModal && !elements.newTaskModal.hidden) {
+        if (event.preventDefault) event.preventDefault();
+        closeNewTaskModal(true);
+      }
     });
   }
-  if (elements.newTask) elements.newTask.disabled = true;
+  if (elements.newTask) elements.newTask.disabled = false;
   loadDashboard();
 })();`;
 }

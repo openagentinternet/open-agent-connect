@@ -16,6 +16,7 @@ const PAYMENT_TXID = `${'e'.repeat(64)}`;
 const STATUS_PIN = `${'f'.repeat(64)}i0`;
 const ACCEPTANCE_PIN = `${'1'.repeat(64)}i0`;
 const CLAIM_REJECT_PIN = `${'2'.repeat(64)}i0`;
+const POSTED_TASK_PIN = `${'3'.repeat(64)}i0`;
 
 function decodeHtmlAttribute(value) {
   return String(value || '')
@@ -320,11 +321,95 @@ function dashboard(overrides = {}) {
   };
 }
 
+function dashboardWithPublishedTask(options = {}) {
+  const payload = dashboard();
+  const sourceCard = payload.dashboard.tasks[0];
+  const postedCard = {
+    ...sourceCard,
+    taskPinId: POSTED_TASK_PIN,
+    state: 'open',
+    stateTone: 'open',
+    columnId: 'open',
+    title: 'Edited after preview',
+    developer: null,
+    bounty: { amount: '0.125', currency: 'SPACE' },
+    tags: ['ui', 'loom'],
+    createdAt: NOW,
+    updatedAt: NOW,
+    activeClaimCount: 0,
+    latestStatusSummary: 'Ready for developers.',
+    prUrl: '',
+    paymentTxId: '',
+    warningCount: 0,
+    actorContext: {},
+  };
+  const postedDetail = {
+    ...payload.dashboard.details[0],
+    taskPinId: POSTED_TASK_PIN,
+    state: 'open',
+    columnId: 'open',
+    title: 'Edited after preview',
+    requirement: 'Build a compact modal for publishing tasks.',
+    criteria: 'Preview must happen before confirm.',
+    claims: [],
+    warnings: [],
+    localWorkflow: [],
+    validRecords: {
+      claims: [],
+      statuses: [],
+      deliveries: [],
+      acceptances: [],
+      claimRejects: [],
+    },
+    timeline: [
+      { id: `task:${POSTED_TASK_PIN}`, kind: 'task', title: 'Task posted', timestamp: NOW, pinId: POSTED_TASK_PIN },
+    ],
+  };
+
+  payload.dashboard.summary = {
+    ...payload.dashboard.summary,
+    totalTasks: 2,
+    open: 1,
+    newestActivityAt: NOW,
+  };
+  payload.dashboard.tasks = [postedCard, ...payload.dashboard.tasks];
+  payload.dashboard.columns = [
+    { id: 'open', title: 'Open', cards: [postedCard] },
+    ...payload.dashboard.columns,
+  ];
+  payload.dashboard.details = options.omitDetail
+    ? payload.dashboard.details
+    : [postedDetail, ...payload.dashboard.details];
+  return payload;
+}
+
 async function runLoomScript(options = {}) {
   const elements = {
     '[data-loom-status]': new FakeElement(),
     '[data-loom-refresh]': new FakeElement(),
     '[data-loom-new-task]': new FakeElement(),
+    '[data-loom-new-task-modal]': new FakeElement(),
+    '[data-loom-new-task-dialog]': new FakeElement(),
+    '[data-loom-new-task-form]': new FakeElement(),
+    '[data-loom-new-task-close]': new FakeElement(),
+    '[data-loom-new-task-from]': new FakeElement(options.newTaskFrom || ''),
+    '[data-loom-new-task-title]': new FakeElement(),
+    '[data-loom-new-task-requirement]': new FakeElement(),
+    '[data-loom-new-task-requirement-content-type]': new FakeElement(),
+    '[data-loom-new-task-criteria]': new FakeElement(),
+    '[data-loom-new-task-criteria-content-type]': new FakeElement(),
+    '[data-loom-new-task-repo-uri]': new FakeElement(),
+    '[data-loom-new-task-project-base]': new FakeElement(),
+    '[data-loom-new-task-base-branch]': new FakeElement(),
+    '[data-loom-new-task-bounty-amount]': new FakeElement(),
+    '[data-loom-new-task-currency]': new FakeElement(),
+    '[data-loom-new-task-deadline]': new FakeElement(),
+    '[data-loom-new-task-tags]': new FakeElement(),
+    '[data-loom-new-task-attachments]': new FakeElement(),
+    '[data-loom-new-task-preview]': new FakeElement(),
+    '[data-loom-new-task-confirm]': new FakeElement(),
+    '[data-loom-new-task-summary]': new FakeElement(),
+    '[data-loom-new-task-error]': new FakeElement(),
     '[data-loom-scope-label]': new FakeElement(),
     '[data-loom-stale-warning]': new FakeElement(),
     '[data-loom-state-filter]': new FakeElement(options.state || ''),
@@ -340,6 +425,12 @@ async function runLoomScript(options = {}) {
     '[data-loom-error]': new FakeElement(),
   };
   elements['[data-loom-detail-modal]'].hidden = true;
+  elements['[data-loom-new-task-modal]'].hidden = true;
+  elements['[data-loom-new-task-base-branch]'].value = 'main';
+  elements['[data-loom-new-task-currency]'].value = 'SPACE';
+  elements['[data-loom-new-task-requirement-content-type]'].value = 'text/markdown';
+  elements['[data-loom-new-task-criteria-content-type]'].value = 'text/markdown';
+  elements['[data-loom-new-task-project-base]'].value = 'github';
   const fetchCalls = [];
   const writes = [];
   const payloads = options.payloads || [dashboard(), dashboard({
@@ -419,6 +510,16 @@ async function runLoomScript(options = {}) {
           json: async () => payloads[Math.min(dashboardRead++, payloads.length - 1)],
         };
       }
+      if (String(url) === '/api/loom/actions') {
+        const actionCallCount = fetchCalls.filter((call) => call.url === '/api/loom/actions').length;
+        const result = options.actionResults
+          ? options.actionResults[Math.min(actionCallCount - 1, options.actionResults.length - 1)]
+          : { ok: true, state: 'awaiting_confirmation', data: { preview: { dryRun: true }, cliFallback: 'metabot loom post-task --from requester' } };
+        return {
+          ok: result.httpOk !== false,
+          json: async () => result,
+        };
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     },
   };
@@ -428,13 +529,44 @@ async function runLoomScript(options = {}) {
   return { elements, fetchCalls, writes, document: context.document };
 }
 
+function fillValidNewTask(elements, overrides = {}) {
+  const values = {
+    '[data-loom-new-task-from]': 'requester-bot',
+    '[data-loom-new-task-title]': 'Ship Loom publish modal',
+    '[data-loom-new-task-requirement]': 'Build a compact modal for publishing tasks.',
+    '[data-loom-new-task-requirement-content-type]': 'text/markdown',
+    '[data-loom-new-task-criteria]': 'Preview must happen before confirm.',
+    '[data-loom-new-task-criteria-content-type]': 'text/markdown',
+    '[data-loom-new-task-repo-uri]': 'https://github.com/openagentinternet/open-agent-connect',
+    '[data-loom-new-task-project-base]': 'github',
+    '[data-loom-new-task-base-branch]': 'main',
+    '[data-loom-new-task-bounty-amount]': '0.125',
+    '[data-loom-new-task-currency]': 'SPACE',
+    '[data-loom-new-task-deadline]': '2026-06-01T12:30',
+    '[data-loom-new-task-tags]': ' ui, loom, ui ',
+    '[data-loom-new-task-attachments]': 'metafile://alpha\nmetafile://beta',
+    ...overrides,
+  };
+  for (const [selector, value] of Object.entries(values)) {
+    elements[selector].value = value;
+  }
+}
+
 test('loom page script loads dashboard JSON and renders board cards with Bot names without an initial detail panel', async () => {
   const { elements, fetchCalls, writes } = await runLoomScript();
 
   const contentHtml = buildLoomPageDefinition().contentHtml;
   assert.equal(fetchCalls[0].url, '/api/loom/dashboard');
   assert.equal(elements['[data-loom-scope-label]'].textContent, 'Global');
-  assert.equal(elements['[data-loom-new-task]'].disabled, true);
+  assert.equal(elements['[data-loom-new-task]'].disabled, false);
+  assert.match(contentHtml, /data-loom-new-task-modal/);
+  assert.match(contentHtml, /data-loom-new-task-form/);
+  assert.match(contentHtml, /data-loom-new-task-requirement/);
+  assert.match(contentHtml, /data-loom-new-task-requirement-content-type/);
+  assert.match(contentHtml, /data-loom-new-task-criteria-content-type/);
+  assert.match(contentHtml, /data-loom-new-task-project-base/);
+  assert.match(contentHtml, /<div class="loom-new-task-error" data-loom-new-task-error role="alert" aria-live="polite"><\/div>/u);
+  assert.match(contentHtml, /<select[^>]+data-loom-new-task-currency[\s\S]*<option value="SPACE">SPACE<\/option>[\s\S]*<option value="BTC">BTC<\/option>[\s\S]*<option value="DOGE">DOGE<\/option>[\s\S]*<option value="OPCAT">OPCAT<\/option>/u);
   assert.doesNotMatch(contentHtml, /data-loom-actor|data-loom-updated/);
   assert.match(contentHtml, /class="loom-filters"[^>]*hidden/u);
   assert.doesNotMatch(contentHtml, /later phase/i);
@@ -534,6 +666,247 @@ test('loom page script loads dashboard JSON and renders board cards with Bot nam
   const [copyButton] = elements['[data-loom-detail-body]'].querySelectorAll('[data-loom-copy]');
   await copyButton.listeners.get('click')();
   assert.equal(writes[0], TASK_PIN);
+});
+
+test('loom new task modal opens and validation blocks preview without closing it', async () => {
+  const { elements, fetchCalls } = await runLoomScript();
+
+  await elements['[data-loom-new-task]'].listeners.get('click')();
+
+  assert.equal(elements['[data-loom-new-task-modal]'].hidden, false);
+  assert.equal(elements['[data-loom-new-task-from]'].value, '');
+  assert.equal(elements['[data-loom-new-task-base-branch]'].value, 'main');
+  assert.equal(elements['[data-loom-new-task-currency]'].value, 'SPACE');
+
+  await elements['[data-loom-new-task-form]'].listeners.get('submit')({
+    preventDefault() {},
+  });
+
+  assert.equal(elements['[data-loom-new-task-modal]'].hidden, false);
+  assert.match(elements['[data-loom-new-task-error]'].textContent, /From is required/);
+  assert.match(elements['[data-loom-new-task-error]'].textContent, /Title is required/);
+  assert.equal(fetchCalls.filter((call) => call.url === '/api/loom/actions').length, 0);
+});
+
+test('loom new task preview builds protocol payload and confirm publishes only a fresh preview', async () => {
+  const { elements, fetchCalls } = await runLoomScript({
+    search: '?from=query-requester',
+    actionResults: [
+      { ok: true, state: 'awaiting_confirmation', data: { chain: { path: '/protocols/loom-task' }, cliFallback: 'metabot loom post-task --from requester' } },
+      { ok: true, state: 'success', data: { taskPinId: 'posted-task-pin', chain: { txId: 'tx-1' }, cliFallback: 'metabot loom post-task --confirm' } },
+    ],
+    payloads: [dashboard(), dashboard()],
+  });
+
+  await elements['[data-loom-new-task]'].listeners.get('click')();
+  fillValidNewTask(elements, { '[data-loom-new-task-from]': 'requester-bot' });
+  await elements['[data-loom-new-task-form]'].listeners.get('submit')({
+    preventDefault() {},
+  });
+
+  const previewCall = fetchCalls.find((call) => call.url === '/api/loom/actions');
+  assert.ok(previewCall, 'expected preview action call');
+  assert.equal(previewCall.options.method, 'POST');
+  const previewBody = JSON.parse(previewCall.options.body);
+  assert.equal(previewBody.action, 'postTask');
+  assert.equal(previewBody.from, 'requester-bot');
+  assert.equal(previewBody.confirm, false);
+  assert.deepEqual(previewBody.payload, {
+    title: 'Ship Loom publish modal',
+    requirementContentType: 'text/markdown',
+    requirement: 'Build a compact modal for publishing tasks.',
+    criteriaContentType: 'text/markdown',
+    criteria: 'Preview must happen before confirm.',
+    projectBase: 'github',
+    project: {
+      repoUri: 'https://github.com/openagentinternet/open-agent-connect',
+      baseBranch: 'main',
+    },
+    bounty: {
+      amount: '0.125',
+      currency: 'SPACE',
+    },
+    deadline: Date.parse('2026-06-01T12:30'),
+    tags: ['ui', 'loom'],
+    attachments: ['metafile://alpha', 'metafile://beta'],
+  });
+  assert.equal(elements['[data-loom-new-task-confirm]'].disabled, false);
+  assert.match(elements['[data-loom-new-task-summary]'].innerHTML, /requester-bot/);
+  assert.match(elements['[data-loom-new-task-summary]'].innerHTML, /Ship Loom publish modal/);
+  assert.match(elements['[data-loom-new-task-summary]'].innerHTML, /open-agent-connect/);
+  assert.match(elements['[data-loom-new-task-summary]'].innerHTML, /0\.125 SPACE/);
+  assert.match(elements['[data-loom-new-task-summary]'].innerHTML, /\/protocols\/loom-task/);
+  assert.match(elements['[data-loom-new-task-summary]'].innerHTML, /metabot loom post-task/);
+
+  elements['[data-loom-new-task-title]'].value = 'Edited after preview';
+  elements['[data-loom-new-task-title]'].listeners.get('input')();
+  assert.equal(elements['[data-loom-new-task-confirm]'].disabled, true);
+  assert.equal(elements['[data-loom-new-task-summary]'].innerHTML, '');
+
+  await elements['[data-loom-new-task-confirm]'].listeners.get('click')();
+  assert.equal(fetchCalls.filter((call) => call.url === '/api/loom/actions').length, 1);
+
+  await elements['[data-loom-new-task-form]'].listeners.get('submit')({
+    preventDefault() {},
+  });
+  const refreshedPreviewBody = JSON.parse(fetchCalls.filter((call) => call.url === '/api/loom/actions').at(-1).options.body);
+  assert.equal(refreshedPreviewBody.confirm, false);
+  assert.equal(refreshedPreviewBody.payload.title, 'Edited after preview');
+
+  await elements['[data-loom-new-task-confirm]'].listeners.get('click')();
+  const actionBodies = fetchCalls
+    .filter((call) => call.url === '/api/loom/actions')
+    .map((call) => JSON.parse(call.options.body));
+  assert.equal(actionBodies.length, 3);
+  assert.equal(actionBodies[2].confirm, true);
+  assert.deepEqual(actionBodies[2].payload, actionBodies[1].payload);
+  assert.equal(actionBodies[2].payload.title, 'Edited after preview');
+  assert.equal(elements['[data-loom-new-task-modal]'].hidden, true);
+  assert.match(elements['[data-loom-status]'].textContent, /Task published/);
+  assert.ok(fetchCalls.some((call) => call.url === '/api/loom/refresh'), 'expected success refresh');
+});
+
+test('loom confirmed new task publish opens and highlights the returned task after refresh', async () => {
+  const { elements } = await runLoomScript({
+    actionResults: [
+      { ok: true, state: 'awaiting_confirmation', data: { cliFallback: 'metabot loom post-task' } },
+      { ok: true, state: 'success', data: { taskPinId: POSTED_TASK_PIN } },
+    ],
+    payloads: [dashboard(), dashboardWithPublishedTask()],
+  });
+
+  await elements['[data-loom-new-task]'].listeners.get('click')();
+  fillValidNewTask(elements);
+  await elements['[data-loom-new-task-form]'].listeners.get('submit')({
+    preventDefault() {},
+  });
+  await elements['[data-loom-new-task-confirm]'].listeners.get('click')();
+
+  assert.equal(elements['[data-loom-new-task-modal]'].hidden, true);
+  assert.equal(elements['[data-loom-detail-modal]'].hidden, false);
+  assert.match(elements['[data-loom-board]'].innerHTML, new RegExp(`is-selected" data-loom-card="${POSTED_TASK_PIN}"`));
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Edited after preview/);
+  assert.match(elements['[data-loom-detail-body]'].innerHTML, /Build a compact modal for publishing tasks/);
+});
+
+test('loom new task validates decimals, currency, metafile attachments, dedupes tags, and ignores Enter confirm', async () => {
+  const { elements, fetchCalls } = await runLoomScript();
+
+  await elements['[data-loom-new-task]'].listeners.get('click')();
+  fillValidNewTask(elements, {
+    '[data-loom-new-task-bounty-amount]': '0',
+    '[data-loom-new-task-currency]': 'ETH',
+    '[data-loom-new-task-attachments]': 'metafile://alpha\nmetafile://\nmetafile://   \nhttps://bad',
+  });
+  await elements['[data-loom-new-task-form]'].listeners.get('submit')({
+    preventDefault() {},
+  });
+
+  assert.match(elements['[data-loom-new-task-error]'].textContent, /Bounty amount must be a positive decimal/);
+  assert.match(elements['[data-loom-new-task-error]'].textContent, /Currency must be SPACE, BTC, DOGE, or OPCAT/);
+  assert.match(elements['[data-loom-new-task-error]'].textContent, /Attachments must use metafile:\/\/ URIs/);
+  assert.equal(fetchCalls.filter((call) => call.url === '/api/loom/actions').length, 0);
+
+  elements['[data-loom-new-task-bounty-amount]'].value = '3.50';
+  elements['[data-loom-new-task-currency]'].value = 'DOGE';
+  elements['[data-loom-new-task-attachments]'].value = 'metafile://alpha';
+  elements['[data-loom-new-task-tags]'].value = 'backend, backend, api';
+  let fieldEnterPrevented = false;
+  await elements['[data-loom-new-task-form]'].listeners.get('keydown')({
+    key: 'Enter',
+    target: { tagName: 'INPUT' },
+    preventDefault() {
+      fieldEnterPrevented = true;
+    },
+  });
+  assert.equal(fieldEnterPrevented, true);
+  let buttonEnterPrevented = false;
+  await elements['[data-loom-new-task-form]'].listeners.get('keydown')({
+    key: 'Enter',
+    target: { tagName: 'BUTTON' },
+    preventDefault() {
+      buttonEnterPrevented = true;
+    },
+  });
+  assert.equal(buttonEnterPrevented, false);
+  assert.equal(fetchCalls.filter((call) => call.url === '/api/loom/actions').length, 0);
+
+  await elements['[data-loom-new-task-form]'].listeners.get('submit')({
+    preventDefault() {},
+  });
+  const previewBody = JSON.parse(fetchCalls.find((call) => call.url === '/api/loom/actions').options.body);
+  assert.equal(previewBody.payload.bounty.amount, '3.50');
+  assert.equal(previewBody.payload.bounty.currency, 'DOGE');
+  assert.deepEqual(previewBody.payload.tags, ['backend', 'api']);
+  assert.deepEqual(previewBody.payload.attachments, ['metafile://alpha']);
+});
+
+test('loom new task modal returns focus to New task after close paths and success', async () => {
+  const { elements, document } = await runLoomScript({
+    actionResults: [
+      { ok: true, state: 'awaiting_confirmation', data: { cliFallback: 'metabot loom post-task' } },
+      { ok: true, state: 'success', data: { taskPinId: 'posted-task-pin' } },
+    ],
+    payloads: [dashboard(), dashboard()],
+  });
+
+  await elements['[data-loom-new-task]'].listeners.get('click')();
+  elements['[data-loom-new-task-close]'].listeners.get('click')();
+  assert.equal(elements['[data-loom-new-task-modal]'].hidden, true);
+  assert.equal(elements['[data-loom-new-task]'].focusCount, 1);
+
+  await elements['[data-loom-new-task]'].listeners.get('click')();
+  elements['[data-loom-new-task-modal]'].listeners.get('click')({
+    target: elements['[data-loom-new-task-modal]'],
+  });
+  assert.equal(elements['[data-loom-new-task]'].focusCount, 2);
+
+  await elements['[data-loom-new-task]'].listeners.get('click')();
+  document.listeners.get('keydown')({
+    key: 'Escape',
+    preventDefault() {},
+  });
+  assert.equal(elements['[data-loom-new-task]'].focusCount, 3);
+
+  await elements['[data-loom-new-task]'].listeners.get('click')();
+  fillValidNewTask(elements);
+  await elements['[data-loom-new-task-form]'].listeners.get('submit')({
+    preventDefault() {},
+  });
+  await elements['[data-loom-new-task-confirm]'].listeners.get('click')();
+  assert.equal(elements['[data-loom-new-task-modal]'].hidden, true);
+  assert.equal(elements['[data-loom-new-task]'].focusCount, 4);
+});
+
+test('loom new task failures preserve input and display action errors', async () => {
+  const { elements, fetchCalls } = await runLoomScript({
+    actionResults: [
+      { httpOk: false, ok: false, state: 'failed', message: 'Preview failed.' },
+      { ok: true, state: 'awaiting_confirmation', data: { cliFallback: 'metabot loom post-task' } },
+      { httpOk: false, ok: false, state: 'failed', message: 'Confirm failed.' },
+    ],
+  });
+
+  await elements['[data-loom-new-task]'].listeners.get('click')();
+  fillValidNewTask(elements);
+  await elements['[data-loom-new-task-form]'].listeners.get('submit')({
+    preventDefault() {},
+  });
+
+  assert.equal(elements['[data-loom-new-task-modal]'].hidden, false);
+  assert.equal(elements['[data-loom-new-task-title]'].value, 'Ship Loom publish modal');
+  assert.match(elements['[data-loom-new-task-error]'].textContent, /Preview failed/);
+
+  await elements['[data-loom-new-task-form]'].listeners.get('submit')({
+    preventDefault() {},
+  });
+  assert.equal(elements['[data-loom-new-task-confirm]'].disabled, false);
+  await elements['[data-loom-new-task-confirm]'].listeners.get('click')();
+
+  assert.equal(elements['[data-loom-new-task-modal]'].hidden, false);
+  assert.equal(elements['[data-loom-new-task-title]'].value, 'Ship Loom publish modal');
+  assert.match(elements['[data-loom-new-task-error]'].textContent, /Confirm failed/);
+  assert.equal(fetchCalls.filter((call) => call.url === '/api/loom/actions').length, 3);
 });
 
 test('loom detail modal closes with Escape or button and returns focus to the selected card', async () => {
