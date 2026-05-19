@@ -210,6 +210,36 @@ test('runtime discovery tries multiple registry binary names in order', async ()
   }
 });
 
+test('runtime discovery ignores a broken PATH shadow when a later binary is healthy', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-path-shadow-'));
+  const brokenBinDir = path.join(tempRoot, 'broken-bin');
+  const healthyBinDir = path.join(tempRoot, 'healthy-bin');
+  await mkdir(brokenBinDir, { recursive: true });
+  await mkdir(healthyBinDir, { recursive: true });
+  const brokenCodexPath = path.join(brokenBinDir, 'codex');
+  const healthyCodexPath = path.join(healthyBinDir, 'codex');
+  await writeFile(brokenCodexPath, [
+    '#!/bin/sh',
+    'echo "Error: spawn missing vendor codex ENOENT" >&2',
+    'exit 1',
+  ].join('\n'), 'utf8');
+  await writeFile(healthyCodexPath, '#!/bin/sh\necho "codex-cli 0.131.0-alpha.9"\n', 'utf8');
+  await chmod(brokenCodexPath, 0o755);
+  await chmod(healthyCodexPath, 0o755);
+
+  const result = await discoverLlmRuntimes({
+    env: { PATH: [brokenBinDir, healthyBinDir].join(path.delimiter) },
+    now: () => '2026-05-20T00:00:00.000Z',
+  });
+
+  assert.equal(result.errors.length, 0);
+  assert.equal(result.runtimes.length, 1);
+  assert.equal(result.runtimes[0].provider, 'codex');
+  assert.equal(result.runtimes[0].binaryPath, healthyCodexPath);
+  assert.equal(result.runtimes[0].health, 'healthy');
+  assert.equal(result.runtimes[0].version, '0.131.0-alpha.9');
+});
+
 test('runtime discovery marks a binary unavailable when version probe exits non-zero', async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-bad-version-'));
   const binDir = path.join(tempRoot, 'bin');

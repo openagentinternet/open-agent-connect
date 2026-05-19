@@ -6,6 +6,7 @@ import {
   getRuntimePlatforms,
   isRuntimePlatformId,
 } from '../platform/platformRegistry';
+import type { RuntimePlatformDefinition } from '../platform/platformRegistry';
 import type { LlmRuntime, LlmProvider, LlmAuthState } from './llmTypes';
 
 export interface DiscoveryInput {
@@ -36,17 +37,26 @@ function splitPath(pathEnv: string): string[] {
 }
 
 export async function findExecutableInPath(name: string, pathDirs?: string[]): Promise<string | null> {
+  const matches = await findExecutablesInPath(name, pathDirs);
+  return matches[0] ?? null;
+}
+
+export async function findExecutablesInPath(name: string, pathDirs?: string[]): Promise<string[]> {
   const dirs = pathDirs ?? splitPath(getPathEnv());
+  const matches: string[] = [];
+  const seen = new Set<string>();
   for (const dir of dirs) {
     const candidate = path.join(dir, name);
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
     try {
       await fs.access(candidate, fs.constants.X_OK);
-      return candidate;
+      matches.push(candidate);
     } catch {
       // Not found / not executable.
     }
   }
-  return null;
+  return matches;
 }
 
 export async function readExecutableVersion(
@@ -126,29 +136,14 @@ function detectAuthState(authEnv: string[], env: NodeJS.ProcessEnv): LlmAuthStat
   return 'unknown';
 }
 
-export async function discoverProvider(
+function buildDiscoveredRuntime(
   provider: LlmProvider,
-  pathDirs: string[],
+  platform: RuntimePlatformDefinition,
+  binaryPath: string,
+  versionProbe: ExecutableVersionProbe,
   options?: { createId?: () => string; now?: () => string; env?: NodeJS.ProcessEnv },
-): Promise<LlmRuntime | null> {
-  if (provider === 'custom') return null; // Custom runtimes are registered manually.
-  if (!isRuntimePlatformId(provider)) return null;
-
-  const platform = getRuntimePlatformDefinition(provider);
-  let binaryPath: string | null = null;
-  for (const binaryName of platform.runtime.binaryNames) {
-    binaryPath = await findExecutableInPath(binaryName, pathDirs);
-    if (binaryPath) break;
-  }
-  if (!binaryPath) return null;
-
+): LlmRuntime {
   const env = options?.env ?? process.env;
-  const versionProbe = await probeExecutableVersion(
-    binaryPath,
-    platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'],
-    5_000,
-    env,
-  );
   const now = (options?.now ?? (() => new Date().toISOString()))();
   // Stable ID: same binary always gets same id, so rediscovery upserts instead of duplicating.
   const defaultId = `llm_${provider.replace(/-/g, '_')}_${binaryPath}`;
@@ -169,6 +164,45 @@ export async function discoverProvider(
     createdAt: now,
     updatedAt: now,
   };
+}
+
+export async function discoverProvider(
+  provider: LlmProvider,
+  pathDirs: string[],
+  options?: { createId?: () => string; now?: () => string; env?: NodeJS.ProcessEnv },
+): Promise<LlmRuntime | null> {
+  if (provider === 'custom') return null; // Custom runtimes are registered manually.
+  if (!isRuntimePlatformId(provider)) return null;
+
+  const platform = getRuntimePlatformDefinition(provider);
+  let firstUnavailableCandidate: { binaryPath: string; versionProbe: ExecutableVersionProbe } | null = null;
+  const env = options?.env ?? process.env;
+  for (const binaryName of platform.runtime.binaryNames) {
+    const binaryPaths = await findExecutablesInPath(binaryName, pathDirs);
+    for (const binaryPath of binaryPaths) {
+      const versionProbe = await probeExecutableVersion(
+        binaryPath,
+        platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'],
+        5_000,
+        env,
+      );
+      if (versionProbe.ok) {
+        return buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, options);
+      }
+      if (!firstUnavailableCandidate) {
+        firstUnavailableCandidate = { binaryPath, versionProbe };
+      }
+    }
+  }
+
+  if (!firstUnavailableCandidate) return null;
+  return buildDiscoveredRuntime(
+    provider,
+    platform,
+    firstUnavailableCandidate.binaryPath,
+    firstUnavailableCandidate.versionProbe,
+    options,
+  );
 }
 
 export async function discoverLlmRuntimes(input?: DiscoveryInput): Promise<DiscoveryResult> {
