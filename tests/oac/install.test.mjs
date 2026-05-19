@@ -116,7 +116,12 @@ test('runOac installs shared skills, metabot shim, and codex host bindings for a
       && root.boundSkills.includes('metabot-ask-master')
   ));
 
-  assert.equal(await fs.readFile(sharedSkillFile, 'utf8').then((body) => body.includes('metabot master ask')), true);
+  const sharedSkill = await fs.readFile(sharedSkillFile, 'utf8');
+  assert.equal(sharedSkill.includes('$HOME/.metabot/bin/metabot master ask'), true);
+  assert.doesNotMatch(
+    sharedSkill,
+    /(?<![\w.$/~-])metabot\s+(?:services|trace|network|identity|doctor|wallet|chat|ui|buzz|file|master|skills|config|chain|llm|evolution)\b/,
+  );
   const shim = await fs.readFile(metabotShimPath, 'utf8');
   assert.match(shim, /dist\/cli\/main\.js/);
   assert.match(shim, /METABOT_NODE/);
@@ -375,5 +380,5 @@ test('runOac uninstall removes guarded registry root symlinks and preserves non-
   assert.equal((await fs.lstat(unrelatedSymlink)).isSymbolicLink(), true);
   assert.equal((await fs.lstat(externalMetabotLink)).isSymbolicLink(), true);
   assert.equal(await fs.readFile(nativeFile, 'utf8'), 'native helper\n');
-  assert.match(await fs.readFile(path.join(sharedAskMaster, 'SKILL.md'), 'utf8'), /metabot master ask/);
+  assert.match(await fs.readFile(path.join(sharedAskMaster, 'SKILL.md'), 'utf8'), /\$HOME\/\.metabot\/bin\/metabot master ask/);
 });

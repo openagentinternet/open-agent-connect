@@ -9,6 +9,7 @@ export interface VerifyServiceOrderPaymentInput {
     amount: string;
     currency: string;
 }
+export type ServiceOrderPaymentVerificationFailureKind = 'input_invalid' | 'adapter_missing' | 'payment_not_found' | 'output_mismatch';
 export interface VerifiedServiceOrderPayment {
     verified: boolean;
     paymentTxid: string | null;
@@ -19,6 +20,7 @@ export interface VerifiedServiceOrderPayment {
     currency: string;
     amountSatoshis: number;
     matchedOutputIndex: number | null;
+    failureKind?: ServiceOrderPaymentVerificationFailureKind | null;
 }
 export declare function decimalPaymentAmountToSatoshis(value: string): number;
 export declare function verifyServiceOrderPayment(input: VerifyServiceOrderPaymentInput): Promise<VerifiedServiceOrderPayment>;

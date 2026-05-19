@@ -11,7 +11,7 @@ Send one encrypted private message over MetaWeb without changing the current `si
 
 ## Routing
 
-Route natural-language intent through `metabot`, then reason over the returned JSON envelope.
+Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason over the returned JSON envelope.
 
 - Prefer JSON and local daemon routes for agent workflows.
 - Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
@@ -51,22 +51,22 @@ Prepare a request JSON file:
 Then call:
 
 ```bash
-metabot chat private --from <bot-slug> --request-file request.json
+$HOME/.metabot/bin/metabot chat private --from <bot-slug> --request-file request.json
 ```
 
 When `--chain` is omitted, the private `simplemsg` write uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
 
 ```bash
-metabot config get --from <bot-slug> chain.defaultWriteNetwork
-metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
+$HOME/.metabot/bin/metabot config get --from <bot-slug> chain.defaultWriteNetwork
+$HOME/.metabot/bin/metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
 ```
 
 When the human explicitly asks to send on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
-metabot chat private --from <bot-slug> --request-file request.json --chain btc
-metabot chat private --from <bot-slug> --request-file request.json --chain doge
-metabot chat private --from <bot-slug> --request-file request.json --chain opcat
+$HOME/.metabot/bin/metabot chat private --from <bot-slug> --request-file request.json --chain btc
+$HOME/.metabot/bin/metabot chat private --from <bot-slug> --request-file request.json --chain doge
+$HOME/.metabot/bin/metabot chat private --from <bot-slug> --request-file request.json --chain opcat
 ```
 
 ## Required Semantics
@@ -116,5 +116,5 @@ metabot chat private --from <bot-slug> --request-file request.json --chain opcat
 
 ## Compatibility
 
-- CLI path: `metabot`
+- CLI path: `$HOME/.metabot/bin/metabot`
 - Compatibility manifest: `release/compatibility.json`

@@ -9758,6 +9758,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
             ? {
                 baseUrl: daemon.baseUrl,
                 pid: daemon.pid,
+                entryPath: process.argv[1] || null,
+                execPath: process.execPath,
+                cwd: process.cwd(),
               }
             : null,
         });

@@ -11,7 +11,7 @@ Create or switch local Bot identities by name without manual runtime-state patch
 
 ## Routing
 
-Route natural-language intent through `metabot`, then reason over the returned JSON envelope.
+Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason over the returned JSON envelope.
 
 - Prefer JSON and local daemon routes for agent workflows.
 - Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
@@ -54,32 +54,32 @@ Do not precompute a slug or inject `METABOT_HOME` for normal create or switch fl
 List local profiles first:
 
 ```bash
-metabot identity list
+$HOME/.metabot/bin/metabot identity list
 ```
 
 If target name already exists, switch directly:
 
 ```bash
-metabot identity assign --name "David"
+$HOME/.metabot/bin/metabot identity assign --name "David"
 ```
 
 If target name does not exist, create it and let the CLI resolve the canonical profile home:
 
 ```bash
 TARGET_NAME="David"
-metabot identity create --name "$TARGET_NAME"
+$HOME/.metabot/bin/metabot identity create --name "$TARGET_NAME"
 ```
 
 After first-create bootstrap, run health checks:
 
 ```bash
-metabot doctor
+$HOME/.metabot/bin/metabot doctor
 ```
 
 Verify and report the active identity at the end:
 
 ```bash
-metabot identity who
+$HOME/.metabot/bin/metabot identity who
 ```
 
 ## First Bot Creation Handoff
@@ -150,22 +150,22 @@ NODE
 Write avatar pin:
 
 ```bash
-metabot chain write --from <bot-slug> --request-file avatar-request.json
+$HOME/.metabot/bin/metabot chain write --from <bot-slug> --request-file avatar-request.json
 ```
 
 When `--chain` is omitted for this manual `chain write`, the daemon uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
 
 ```bash
-metabot config get --from <bot-slug> chain.defaultWriteNetwork
-metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
+$HOME/.metabot/bin/metabot config get --from <bot-slug> chain.defaultWriteNetwork
+$HOME/.metabot/bin/metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
 ```
 
 If the human explicitly asks to write avatar on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
-metabot chain write --from <bot-slug> --request-file avatar-request.json --chain btc
-metabot chain write --from <bot-slug> --request-file avatar-request.json --chain doge
-metabot chain write --from <bot-slug> --request-file avatar-request.json --chain opcat
+$HOME/.metabot/bin/metabot chain write --from <bot-slug> --request-file avatar-request.json --chain btc
+$HOME/.metabot/bin/metabot chain write --from <bot-slug> --request-file avatar-request.json --chain doge
+$HOME/.metabot/bin/metabot chain write --from <bot-slug> --request-file avatar-request.json --chain opcat
 ```
 
 ## In Scope
@@ -201,5 +201,5 @@ metabot chain write --from <bot-slug> --request-file avatar-request.json --chain
 
 ## Compatibility
 
-- CLI path: `metabot`
+- CLI path: `$HOME/.metabot/bin/metabot`
 - Compatibility manifest: `release/compatibility.json`

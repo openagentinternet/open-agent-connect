@@ -32,14 +32,16 @@ const REMOVED_SKILLS = [
   'metabot-network-sources',
   'metabot-trace-inspector',
 ];
-const EXPECTED_CLI_PATH = 'metabot';
+const EXPECTED_CLI_PATH = '$HOME/.metabot/bin/metabot';
 const EXPECTED_COMPATIBILITY_MANIFEST = 'release/compatibility.json';
 const EXPECTED_BUNDLED_COMPATIBILITY_COPY = 'runtime/compatibility.json';
 const EXPECTED_CONFIRMATION_CONTRACT_LINE =
   'Before any paid remote call, show the provider, service, price, currency, and wait for explicit confirmation.';
-const EXPECTED_TRACE_WATCH_LINE = 'metabot trace watch --from <bot-slug> --trace-id trace-123';
-const EXPECTED_TRACE_GET_LINE = 'metabot trace get --from <bot-slug> --trace-id trace-123';
-const EXPECTED_TRACE_UI_LINE = 'metabot ui open --page trace --from <bot-slug> --trace-id trace-123';
+const EXPECTED_TRACE_WATCH_LINE = '$HOME/.metabot/bin/metabot trace watch --from <bot-slug> --trace-id trace-123';
+const EXPECTED_TRACE_GET_LINE = '$HOME/.metabot/bin/metabot trace get --from <bot-slug> --trace-id trace-123';
+const EXPECTED_TRACE_UI_LINE = '$HOME/.metabot/bin/metabot ui open --page trace --from <bot-slug> --trace-id trace-123';
+const BARE_METABOT_COMMAND_PATTERN =
+  /(?<![\w.$/~-])metabot\s+(?:services|trace|network|identity|doctor|wallet|chat|ui|buzz|file|master|skills|config|chain|llm|evolution)\b/;
 
 function escapeForRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -436,7 +438,7 @@ test('buildAgentConnectSkillpacks embeds one shared CLI path and one shared comp
 
   for (const host of HOSTS) {
     const readme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
-    assert.match(readme, new RegExp(`\\b${EXPECTED_CLI_PATH}\\b`));
+    assert.match(readme, new RegExp(escapeForRegex(EXPECTED_CLI_PATH)));
     assert.doesNotMatch(readme, /`agent-connect`|\bagent-connect\s+(?:identity|network|services|chat|ui|doctor|skills|master)\b/);
     assert.match(readme, new RegExp(escapeForRegex(EXPECTED_COMPATIBILITY_MANIFEST)));
   }
@@ -519,6 +521,7 @@ test('buildAgentConnectSkillpacks publishes shared remote-call plus trace-inspec
   assert.match(content, new RegExp(escapeForRegex(EXPECTED_TRACE_WATCH_LINE)));
   assert.match(content, new RegExp(escapeForRegex(EXPECTED_TRACE_GET_LINE)));
   assert.match(content, new RegExp(escapeForRegex(EXPECTED_TRACE_UI_LINE)));
+  assert.doesNotMatch(content, BARE_METABOT_COMMAND_PATTERN);
   assert.match(content, /## Actor Selection/);
   assert.match(content, /wallet balance --from <bot-slug>/);
   assert.match(content, /selected profile's configured `chain\.defaultWriteNetwork`/);

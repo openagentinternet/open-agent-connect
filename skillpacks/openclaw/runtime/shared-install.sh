@@ -192,6 +192,6 @@ write_cli_shim "metabot"
 
 echo "Installed shared MetaBot skills to $SHARED_SKILL_DEST"
 echo "Installed primary CLI shim to $BIN_DIR/metabot"
-echo "Primary CLI path: metabot"
+echo "Primary CLI path: $BIN_DIR/metabot"
 echo "Compatibility manifest: release/compatibility.json"
 echo "Bundled compatibility copy: $BUNDLED_COMPATIBILITY_COPY"

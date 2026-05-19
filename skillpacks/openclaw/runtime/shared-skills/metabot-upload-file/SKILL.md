@@ -11,7 +11,7 @@ Upload one local file to MetaWeb through the public Bot file upload interface. T
 
 ## Routing
 
-Route natural-language intent through `metabot`, then reason over the returned JSON envelope.
+Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason over the returned JSON envelope.
 
 - Prefer JSON and local daemon routes for agent workflows.
 - Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
@@ -50,21 +50,21 @@ Prepare a request JSON file:
 Then call:
 
 ```bash
-metabot file upload --from <bot-slug> --request-file request.json
+$HOME/.metabot/bin/metabot file upload --from <bot-slug> --request-file request.json
 ```
 
 When `--chain` is omitted, the daemon uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). If that configured default is `doge`, file upload fails clearly because DOGE file upload is not supported. To inspect or change the default:
 
 ```bash
-metabot config get --from <bot-slug> chain.defaultWriteNetwork
-metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
+$HOME/.metabot/bin/metabot config get --from <bot-slug> chain.defaultWriteNetwork
+$HOME/.metabot/bin/metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
 ```
 
 When the human explicitly asks to upload on BTC or OPCAT, pass the matching chain flag:
 
 ```bash
-metabot file upload --from <bot-slug> --request-file request.json --chain btc
-metabot file upload --from <bot-slug> --request-file request.json --chain opcat
+$HOME/.metabot/bin/metabot file upload --from <bot-slug> --request-file request.json --chain btc
+$HOME/.metabot/bin/metabot file upload --from <bot-slug> --request-file request.json --chain opcat
 ```
 
 ## Required Semantics
@@ -94,5 +94,5 @@ metabot file upload --from <bot-slug> --request-file request.json --chain opcat
 
 ## Compatibility
 
-- CLI path: `metabot`
+- CLI path: `$HOME/.metabot/bin/metabot`
 - Compatibility manifest: `release/compatibility.json`

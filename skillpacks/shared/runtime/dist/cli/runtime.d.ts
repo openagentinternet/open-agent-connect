@@ -27,6 +27,7 @@ export interface PrivateChatAutoReplyProfileDispatcherOptions {
     autoReplyConfig: PrivateChatAutoReplyConfig;
     resolvePeerChatPublicKey: (globalMetaId: string) => Promise<string | null>;
     llmExecutor: Pick<LlmExecutor, 'execute' | 'getSession'>;
+    handleOrderProtocolMessageForProfile?: (profile: IdentityProfileRecord, message: A2ASimplemsgInboundDispatcherMessage) => Promise<MetabotCommandResult<unknown>> | MetabotCommandResult<unknown>;
     createSignerForHome?: (homeDir: string) => Signer;
     createReplyRunnerForProfile?: (input: {
         paths: MetabotPaths;
@@ -36,6 +37,26 @@ export interface PrivateChatAutoReplyProfileDispatcherOptions {
     }) => ChatReplyRunner;
     createOrchestrator?: (deps: PrivateChatAutoReplyDependencies, config: PrivateChatAutoReplyConfig) => PrivateChatAutoReplyOrchestrator;
 }
+type A2ARecoveredOrderProtocolMessage = A2ASimplemsgInboundDispatcherMessage & {
+    localProfileSlug?: string | null;
+};
+export interface A2AUnhandledOrderReplayResult {
+    profiles: number;
+    conversations: number;
+    scanned: number;
+    replayed: number;
+    skipped: number;
+    failed: number;
+}
+export interface A2AUnhandledOrderReplayOptions {
+    systemHomeDir: string;
+    activeHomeDir?: string | null;
+    handleOrderProtocolMessage?: (message: A2ARecoveredOrderProtocolMessage) => Promise<MetabotCommandResult<unknown>> | MetabotCommandResult<unknown>;
+    listProfiles?: (systemHomeDir: string) => Promise<IdentityProfileRecord[]>;
+    maxMessagesPerProfile?: number;
+    logWarning?: (scope: string, error: unknown) => void;
+}
+export declare function replayUnhandledA2AOrderMessagesForProfiles(input: A2AUnhandledOrderReplayOptions): Promise<A2AUnhandledOrderReplayResult>;
 export declare function createPrivateChatAutoReplyProfileDispatcher(input: PrivateChatAutoReplyProfileDispatcherOptions): PrivateChatAutoReplyProfileDispatcher;
 export declare function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies;
 export declare function mergeCliDependencies(context: CliRuntimeContext): CliDependencies;

@@ -11,7 +11,7 @@ Publish or manage a local capability as a MetaWeb service while preserving provi
 
 ## Routing
 
-Route natural-language intent through `metabot`, then reason over the returned JSON envelope.
+Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason over the returned JSON envelope.
 
 - Prefer JSON and local daemon routes for agent workflows.
 - Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
@@ -44,14 +44,14 @@ Should not trigger when:
 Treat "publish" or "register a skill service" as a guided workflow. Do not ask the human to hand-author JSON unless they explicitly want the low-level command reference.
 
 1. Discover local provider candidates.
-   - Run `metabot identity who --json` to identify the active default MetaBot.
-   - Run `metabot identity list --json` to list other local MetaBots.
+   - Run `$HOME/.metabot/bin/metabot identity who --json` to identify the active default MetaBot.
+   - Run `$HOME/.metabot/bin/metabot identity list --json` to list other local MetaBots.
    - Summarize the default and alternatives, then ask the human to confirm the default provider MetaBot or choose another.
 2. Discover publishable primary runtime skills for the selected MetaBot.
-   - Run `metabot services skills --from <bot-slug> --json`.
+   - Run `$HOME/.metabot/bin/metabot services skills --from <bot-slug> --json`.
    - Present only the skills returned by that command as primary runtime skills.
    - Never manually scan skill roots, include fallback runtime skills, or invent skills.
-   - If `metabot services skills --from <bot-slug> --json` fails, explain the returned failure code and message directly, then stop or ask the human to choose another MetaBot.
+   - If `$HOME/.metabot/bin/metabot services skills --from <bot-slug> --json` fails, explain the returned failure code and message directly, then stop or ask the human to choose another MetaBot.
 3. Ask short questions to collect the service metadata.
    - `providerSkill`: selected from the returned primary runtime skills.
    - `displayName`: human-facing service name.
@@ -68,13 +68,13 @@ Treat "publish" or "register a skill service" as a guided workflow. Do not ask t
 5. Resolve the write chain.
    - If the human explicitly names MVC, BTC, DOGE, or OPCAT for the service record, pass the matching `--chain` flag.
    - Otherwise omit `--chain` so the selected profile's configured default write network applies.
-   - Use `metabot config get --from <bot-slug> chain.defaultWriteNetwork` only when the human asks what the default is or when you need to clarify the preview.
+   - Use `$HOME/.metabot/bin/metabot config get --from <bot-slug> chain.defaultWriteNetwork` only when the human asks what the default is or when you need to clarify the preview.
 6. Preview before publishing.
    - Write the payload JSON to a temporary or task-local file.
    - Show the final JSON and exact command:
 
 ```bash
-metabot services publish --from <bot-slug> --payload-file <path> [--chain <chain>]
+$HOME/.metabot/bin/metabot services publish --from <bot-slug> --payload-file <path> [--chain <chain>]
 ```
 
    - Ask for explicit confirmation before publishing.
@@ -91,7 +91,7 @@ metabot services publish --from <bot-slug> --payload-file <path> [--chain <chain
 List publishable local runtime skills for a selected provider Bot:
 
 ```bash
-metabot services skills --from <bot-slug> --json
+$HOME/.metabot/bin/metabot services skills --from <bot-slug> --json
 ```
 
 Prepare a publish payload file:
@@ -112,22 +112,22 @@ Prepare a publish payload file:
 Then call:
 
 ```bash
-metabot services publish --from <bot-slug> --payload-file payload.json
+$HOME/.metabot/bin/metabot services publish --from <bot-slug> --payload-file payload.json
 ```
 
 When `--chain` is omitted, the daemon uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
 
 ```bash
-metabot config get --from <bot-slug> chain.defaultWriteNetwork
-metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
+$HOME/.metabot/bin/metabot config get --from <bot-slug> chain.defaultWriteNetwork
+$HOME/.metabot/bin/metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
 ```
 
 When the human explicitly asks to publish the service record on BTC, DOGE, or OPCAT, pass the matching write-chain flag:
 
 ```bash
-metabot services publish --from <bot-slug> --payload-file payload.json --chain btc
-metabot services publish --from <bot-slug> --payload-file payload.json --chain doge
-metabot services publish --from <bot-slug> --payload-file payload.json --chain opcat
+$HOME/.metabot/bin/metabot services publish --from <bot-slug> --payload-file payload.json --chain btc
+$HOME/.metabot/bin/metabot services publish --from <bot-slug> --payload-file payload.json --chain doge
+$HOME/.metabot/bin/metabot services publish --from <bot-slug> --payload-file payload.json --chain opcat
 ```
 
 ## Provider Service Lifecycle
@@ -135,18 +135,18 @@ metabot services publish --from <bot-slug> --payload-file payload.json --chain o
 Use the canonical `services` namespace for provider-owned service management:
 
 ```bash
-metabot services owned list --from <bot-slug>
-metabot services owned orders --from <bot-slug> --service-id <service-pin-id>
-metabot services owned modify --from <bot-slug> --payload-file service-update.json
-metabot services owned revoke --from <bot-slug> --service-id <service-pin-id>
+$HOME/.metabot/bin/metabot services owned list --from <bot-slug>
+$HOME/.metabot/bin/metabot services owned orders --from <bot-slug> --service-id <service-pin-id>
+$HOME/.metabot/bin/metabot services owned modify --from <bot-slug> --payload-file service-update.json
+$HOME/.metabot/bin/metabot services owned revoke --from <bot-slug> --service-id <service-pin-id>
 ```
 
 For refund and order operations, keep the selected seller/provider actor:
 
 ```bash
-metabot services refunds list --from <bot-slug> --received
-metabot services orders inspect --from <bot-slug> --order-id <order-id>
-metabot services refunds settle --from <bot-slug> --order-id <order-id>
+$HOME/.metabot/bin/metabot services refunds list --from <bot-slug> --received
+$HOME/.metabot/bin/metabot services orders inspect --from <bot-slug> --order-id <order-id>
+$HOME/.metabot/bin/metabot services refunds settle --from <bot-slug> --order-id <order-id>
 ```
 
 `provider summary`, `provider refunds`, `provider order inspect`, and `provider refund settle` remain compatibility aliases. Prefer the `services ...` command names in new skill instructions because the lifecycle belongs to service ownership rather than a separate provider subsystem.
@@ -186,5 +186,5 @@ metabot services refunds settle --from <bot-slug> --order-id <order-id>
 
 ## Compatibility
 
-- CLI path: `metabot`
+- CLI path: `$HOME/.metabot/bin/metabot`
 - Compatibility manifest: `release/compatibility.json`

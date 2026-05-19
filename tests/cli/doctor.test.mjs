@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,7 +12,8 @@ const {
 } = require('../../dist/core/contracts/commandResult.js');
 const pkg = require('../../package.json');
 
-function createHarness() {
+function createHarness(options = {}) {
+  const homeDir = options.homeDir ?? '/tmp/metabot-cli-doctor-test-home';
   const stdout = [];
   const stderr = [];
   const calls = {
@@ -33,9 +34,10 @@ function createHarness() {
     context: {
       env: {
         ...process.env,
-        HOME: '/tmp/metabot-cli-doctor-test-home',
+        HOME: homeDir,
+        ...options.env,
       },
-      cwd: '/tmp/metabot-cli-doctor-test-home',
+      cwd: homeDir,
       stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
       stderr: { write: (chunk) => { stderr.push(String(chunk)); return true; } },
       dependencies: {
@@ -175,6 +177,45 @@ test('runCli dispatches `metabot doctor` and preserves the doctor envelope', asy
       ],
     },
   });
+});
+
+test('runCli doctor reports when the invoked CLI entry differs from the canonical shim target', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-doctor-entry-'));
+  const canonicalShimPath = path.join(homeDir, '.metabot', 'bin', 'metabot');
+  const canonicalTargetPath = path.join(homeDir, 'dev-worktree', 'dist', 'cli', 'main.js');
+  const currentEntryPath = '/opt/homebrew/lib/node_modules/open-agent-connect/dist/cli/main.js';
+  await mkdir(path.dirname(canonicalShimPath), { recursive: true });
+  await writeFile(
+    canonicalShimPath,
+    [
+      '#!/usr/bin/env bash',
+      'set -euo pipefail',
+      `exec "$NODE_BIN" ${JSON.stringify(canonicalTargetPath)} "$@"`,
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const harness = createHarness({
+    homeDir,
+    env: {
+      METABOT_CLI_CURRENT_ENTRY_PATH: currentEntryPath,
+    },
+  });
+  const exitCode = await runCli(['doctor'], harness.context);
+
+  assert.equal(exitCode, 0);
+  const payload = parseLastJson(harness.stdout);
+  assert.deepEqual(
+    payload.data.checks.find((check) => check.code === 'cli_runtime_matches_canonical_shim'),
+    {
+      code: 'cli_runtime_matches_canonical_shim',
+      ok: false,
+      canonicalShimPath,
+      canonicalTargetPath,
+      currentEntryPath,
+    },
+  );
 });
 
 test('runCli dispatches `metabot identity create --name` with the provided MetaBot name', async () => {

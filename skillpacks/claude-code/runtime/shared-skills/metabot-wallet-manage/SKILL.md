@@ -11,7 +11,7 @@ Handle wallet balance checks and BTC/SPACE/DOGE/OPCAT transfers to a target addr
 
 ## Routing
 
-Route natural-language intent through `metabot`, then reason over the returned JSON envelope.
+Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason over the returned JSON envelope.
 
 - Prefer JSON and local daemon routes for agent workflows.
 - Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
@@ -58,31 +58,31 @@ Should not trigger when:
 For default multi-chain balance (MVC/SPACE + BTC + DOGE + OPCAT):
 
 ```bash
-metabot wallet balance --from <bot-slug>
+$HOME/.metabot/bin/metabot wallet balance --from <bot-slug>
 ```
 
 When the human asks for BTC, Bitcoin, or 比特币:
 
 ```bash
-metabot wallet balance --from <bot-slug> --chain btc
+$HOME/.metabot/bin/metabot wallet balance --from <bot-slug> --chain btc
 ```
 
 When the human asks for DOGE or Dogecoin:
 
 ```bash
-metabot wallet balance --from <bot-slug> --chain doge
+$HOME/.metabot/bin/metabot wallet balance --from <bot-slug> --chain doge
 ```
 
 When the human asks for OPCAT:
 
 ```bash
-metabot wallet balance --from <bot-slug> --chain opcat
+$HOME/.metabot/bin/metabot wallet balance --from <bot-slug> --chain opcat
 ```
 
 When the human asks for SPACE, MVC, 太空币, or any MVC-network currency:
 
 ```bash
-metabot wallet balance --from <bot-slug> --chain mvc
+$HOME/.metabot/bin/metabot wallet balance --from <bot-slug> --chain mvc
 ```
 
 The `mvc` balance response includes `balances.mvc.totalMvc` (the SPACE amount) and `balances.mvc.address` (the MVC/SPACE receiving address). DOGE and OPCAT balances are returned under `balances.doge` and `balances.opcat`.
@@ -94,8 +94,8 @@ Wallet balance and transfer do not use the default write-network setting. Balanc
 Use these commands only when the human asks to inspect or change the default chain for on-chain write commands such as buzz, service publish, rating, private chat, or generic chain write:
 
 ```bash
-metabot config get --from <bot-slug> chain.defaultWriteNetwork
-metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
+$HOME/.metabot/bin/metabot config get --from <bot-slug> chain.defaultWriteNetwork
+$HOME/.metabot/bin/metabot config set --from <bot-slug> chain.defaultWriteNetwork opcat
 ```
 
 Supported values are `mvc`, `btc`, `doge`, and `opcat`. The setting is scoped to the selected local Bot profile.
@@ -122,31 +122,31 @@ Supported values are `mvc`, `btc`, `doge`, and `opcat`. The setting is scoped to
 Run the transfer command **without `--confirm`** to get a preview. Never skip this step.
 
 ```bash
-metabot wallet transfer --from <bot-slug> --to <address> --amount <amount><UNIT>
+$HOME/.metabot/bin/metabot wallet transfer --from <bot-slug> --to <address> --amount <amount><UNIT>
 ```
 
 Example — preview a BTC transfer:
 
 ```bash
-metabot wallet transfer --from <bot-slug> --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC
+$HOME/.metabot/bin/metabot wallet transfer --from <bot-slug> --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC
 ```
 
 Example — preview a SPACE transfer:
 
 ```bash
-metabot wallet transfer --from <bot-slug> --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 1SPACE
+$HOME/.metabot/bin/metabot wallet transfer --from <bot-slug> --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 1SPACE
 ```
 
 Example — preview an OPCAT transfer:
 
 ```bash
-metabot wallet transfer --from <bot-slug> --to o1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 10OPCAT
+$HOME/.metabot/bin/metabot wallet transfer --from <bot-slug> --to o1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 10OPCAT
 ```
 
 Example — preview a DOGE transfer:
 
 ```bash
-metabot wallet transfer --from <bot-slug> --to D9UuD6sjdEUNv8hPC8WtUXZapBCsFn67jo --amount 0.01DOGE
+$HOME/.metabot/bin/metabot wallet transfer --from <bot-slug> --to D9UuD6sjdEUNv8hPC8WtUXZapBCsFn67jo --amount 0.01DOGE
 ```
 
 The response has `state: "awaiting_confirmation"` and `data` containing:
@@ -166,13 +166,13 @@ Present this information clearly to the human and ask for explicit approval befo
 After the human explicitly approves, re-run the same command with `--confirm` appended:
 
 ```bash
-metabot wallet transfer --from <bot-slug> --to <address> --amount <amount><UNIT> --confirm
+$HOME/.metabot/bin/metabot wallet transfer --from <bot-slug> --to <address> --amount <amount><UNIT> --confirm
 ```
 
 Example:
 
 ```bash
-metabot wallet transfer --from <bot-slug> --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC --confirm
+$HOME/.metabot/bin/metabot wallet transfer --from <bot-slug> --to 1EX5NN6npyCp3X6Sv4Yahv6DrBNKRtq4Gw --amount 0.00001BTC --confirm
 ```
 
 On success the response contains:
@@ -223,5 +223,5 @@ Always show the `explorerUrl` to the human so they can verify the transaction on
 
 ## Compatibility
 
-- CLI path: `metabot`
+- CLI path: `$HOME/.metabot/bin/metabot`
 - Compatibility manifest: `release/compatibility.json`

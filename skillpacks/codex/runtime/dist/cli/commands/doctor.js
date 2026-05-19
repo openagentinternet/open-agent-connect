@@ -20,12 +20,17 @@ async function runDoctorCommand(_args, context) {
         return result;
     }
     const cliShimCheck = await (0, cliShimDoctor_1.buildCliShimDoctorCheck)((0, homeSelection_1.normalizeSystemHomeDir)(context.env, context.cwd), context.env, context.cwd);
+    const cliRuntimeCheck = await (0, cliShimDoctor_1.buildCliRuntimeDoctorCheck)((0, homeSelection_1.normalizeSystemHomeDir)(context.env, context.cwd), context.env, context.cwd, context.env.METABOT_CLI_CURRENT_ENTRY_PATH || process.argv[1]);
     return {
         ...result,
         data: {
             ...result.data,
             version: version_1.CLI_VERSION,
-            checks: [...result.data.checks, cliShimCheck],
+            checks: [
+                ...result.data.checks,
+                cliShimCheck,
+                ...(cliRuntimeCheck ? [cliRuntimeCheck] : []),
+            ],
         },
     };
 }

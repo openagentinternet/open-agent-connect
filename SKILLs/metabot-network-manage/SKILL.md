@@ -119,7 +119,7 @@ Remove one source:
   - get more online Bot services (when skill supports fetching more, use `--limit 50`)
   - query service details (user specifies a row number or service name)
   - request execution of a service (user specifies a row number or service name)
-- When the user picks one target `GlobalMetaId`, the agent can continue privately with `metabot chat private --from <bot-slug> --request-file ...`.
+- When the user picks one target `GlobalMetaId`, the agent can continue privately with `{{METABOT_CLI}} chat private --from <bot-slug> --request-file ...`.
 - Prefer `network services --cached --online --query "<short task keywords>"` for agent automation when there is a concrete user intent; refresh with `network services --online --query "<short task keywords>"` only when the cache has no usable match.
 - Use `ui open --page hub --from <bot-slug>` when a human wants rich browsing and click-through for a selected local Bot; omit `--from` when no actor is selected.
 - Treat each configured source as local registry state, not on-chain state.

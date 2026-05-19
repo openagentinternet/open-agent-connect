@@ -23,6 +23,8 @@ class LlmExecutor {
     sessionsRoot;
     transcriptsRoot;
     skillsRoot;
+    systemHomeDir;
+    env;
     backends;
     sessionManager;
     streams = new Map();
@@ -31,6 +33,8 @@ class LlmExecutor {
         this.sessionsRoot = options.sessionsRoot;
         this.transcriptsRoot = options.transcriptsRoot;
         this.skillsRoot = options.skillsRoot;
+        this.systemHomeDir = options.systemHomeDir;
+        this.env = options.env;
         this.backends = options.backends;
         this.sessionManager = options.sessionManager ?? (0, session_manager_1.createFileSessionManager)(options.sessionsRoot);
     }
@@ -146,6 +150,8 @@ class LlmExecutor {
                 skillSourcePaths: request.skillSourcePaths,
                 provider: request.runtime.provider,
                 cwd,
+                systemHomeDir: this.systemHomeDir,
+                env: this.env,
             });
             for (const error of injection.errors) {
                 this.pushEvent(sessionId, {
