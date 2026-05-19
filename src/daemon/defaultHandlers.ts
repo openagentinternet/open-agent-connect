@@ -875,10 +875,10 @@ async function validateMetabotProviderAvailability(
   const runtimeState = await createLlmRuntimeStore(resolveMetabotPaths(profile.homeDir)).read();
   for (const provider of requestedProviders) {
     const available = runtimeState.runtimes.some((runtime) => (
-      runtime.provider === provider && runtime.health !== 'unavailable'
+      runtime.provider === provider && runtime.health === 'healthy'
     ));
     if (!available) {
-      throw new Error(`No available runtime found for provider: ${provider}`);
+      throw new Error(`No healthy runtime found for provider: ${provider}`);
     }
   }
 }
@@ -14017,6 +14017,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
           homeDir: profileHomeDir,
           globalMetaId: 'pending',
           mvcAddress: 'pending',
+          primaryProvider: undefined,
+          fallbackProvider: undefined,
         });
         try {
           await validateMetabotProviderAvailability(providerValidationProfile, {

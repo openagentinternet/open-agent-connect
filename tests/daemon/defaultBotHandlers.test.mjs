@@ -323,7 +323,7 @@ test('default bot createProfile persists requested provider fields after chain b
     version: 1,
     runtimes: [
       runtime('codex', 'runtime-codex', 'healthy'),
-      runtime('claude-code', 'runtime-claude', 'degraded'),
+      runtime('claude-code', 'runtime-claude', 'healthy'),
     ],
   });
   const bioPayloads = [];
@@ -380,6 +380,58 @@ test('default bot createProfile persists requested provider fields after chain b
       ['primary', 'runtime-codex'],
     ],
   );
+});
+
+test('default bot createProfile rejects requested degraded providers before chain writes', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'degraded-provider-bot');
+  await createLlmRuntimeStore(targetHomeDir).write({
+    version: 1,
+    runtimes: [
+      runtime('codex', 'runtime-codex', 'degraded'),
+    ],
+  });
+  const signerCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    identitySyncStepDelayMs: 0,
+    getDaemonRecord: () => null,
+    requestMvcGasSubsidy: async (input) => ({
+      success: true,
+      step1: { address: input.mvcAddress },
+      step2: { txid: 'subsidy-tx-1' },
+    }),
+    createSignerForHome: () => makeSigner(async (input) => {
+      signerCalls.push(input);
+      return {
+        txids: [`degraded-provider-tx-${signerCalls.length}`],
+        pinId: `degraded-provider-pin-${signerCalls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gm-degraded-provider',
+        mvcAddress: 'mvc-degraded-provider',
+      };
+    }),
+  });
+
+  const result = await handlers.bot.createProfile({
+    name: 'Degraded Provider Bot',
+    primaryProvider: 'codex',
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_metabot_profile_create');
+  assert.match(result.message, /No healthy runtime found for provider: codex/);
+  assert.deepEqual(signerCalls, []);
 });
 
 test('default bot createProfile prefers the requested host provider and falls back to a different recent provider', async (t) => {

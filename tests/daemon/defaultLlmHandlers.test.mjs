@@ -51,7 +51,7 @@ test('LLM runtime discovery marks previously known missing runtimes unavailable'
   }));
 
   const originalPath = process.env.PATH;
-  process.env.PATH = binDir;
+  process.env.PATH = [binDir, originalPath].filter(Boolean).join(path.delimiter);
   t.after(() => {
     process.env.PATH = originalPath;
   });
