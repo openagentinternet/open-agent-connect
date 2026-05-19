@@ -219,12 +219,12 @@ function compareRuntimeActivityPreference(left: LlmRuntime, right: LlmRuntime): 
 }
 
 function isDefaultSelectableRuntime(runtime: LlmRuntime): boolean {
-  return runtime.provider !== 'custom' && runtime.health !== 'unavailable';
+  return runtime.provider !== 'custom' && runtime.health === 'healthy';
 }
 
 export function selectRuntimeForProvider(runtimes: LlmRuntime[], provider: LlmProvider): LlmRuntime {
   const candidates = runtimes.filter((runtime) => (
-    runtime.provider === provider && runtime.health !== 'unavailable'
+    runtime.provider === provider && runtime.health === 'healthy'
   )).sort(compareRuntimePreference);
   const runtime = candidates[0];
   if (!runtime) {

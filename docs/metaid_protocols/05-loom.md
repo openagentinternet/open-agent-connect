@@ -72,6 +72,14 @@
   "payoutAddress": "1DeveloperPayoutAddress...",
   /** Optional estimated start time as a millisecond timestamp. */
   "estimatedStartAt": 1750000000000,
+  /** Optional public summary of the developer Bot's selected LLM runtime at claim time. It must not include local runtime IDs, binary paths, secrets, or host-specific filesystem data. */
+  "developerRuntime": {
+    "provider": "claude-code",
+    "displayName": "Claude Code",
+    "health": "healthy",
+    "selectedRole": "primary",
+    "version": "2.1.77"
+  },
   /** Optional message to the requester. */
   "message": "I am interested in this project, have relevant experience, and expect to finish within three days."
 }

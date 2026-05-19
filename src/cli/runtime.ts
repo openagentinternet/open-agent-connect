@@ -35,6 +35,7 @@ import type { SkillActiveVariantRef } from '../core/evolution/types';
 import { resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
 import {
   normalizeSystemHomeDir as normalizeSelectedSystemHomeDir,
+  resolveMetabotManagerLayout,
   resolveMetabotHomeSelectionSync,
 } from '../core/state/homeSelection';
 import {
@@ -57,6 +58,32 @@ import { createDefaultChainAdapterRegistry } from '../core/chain/adapters/regist
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import type { ChainAdapter } from '../core/chain/adapters/types';
 import type { Signer } from '../core/signing/signer';
+import {
+  draftLoomTask,
+  assertGitHubToolsReady,
+  buildLoomWorkflowTaskState,
+  createLoomDashboardService,
+  createLoomDashboardStore,
+  createLoomWorkflowStore,
+  createLoomRawCacheStore,
+  createNodeLoomCommandRunner,
+  listLoomTasksFromCache,
+  prepareGitHubForkWorkspace,
+  pushLoomBranch,
+  readLoomRawChainRecords,
+  createLoomPullRequest,
+  runLoomClaimAndStartWorkflow,
+  runLoomDevRoundWorkflow,
+  runLoomDeliverWorkflow,
+  runLoomAcceptAndPayWorkflow,
+  runLoomPostTaskWorkflow,
+  runLoomReviewDeliveryWorkflow,
+  showLoomTaskFromCache,
+  writeLoomProcessLogFile,
+  type LoomRawCacheState,
+  type LoomRawCacheStore,
+  type LoomWorkflowState,
+} from '../core/loom';
 import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain } from '../daemon/defaultHandlers';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
@@ -83,13 +110,17 @@ import type {
 import { createTestServicePaymentExecutor } from '../core/payments/servicePayment';
 import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
-import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
+import {
+  createLlmRuntimeResolver,
+  summarizeResolvedLlmRuntime,
+} from '../core/llm/llmRuntimeResolver';
 import { discoverLlmRuntimes } from '../core/llm/llmRuntimeDiscovery';
 import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
 import {
   LlmExecutor,
   createRegistryBackendFactories,
 } from '../core/llm/executor';
+import { runLlmPromptWithRuntimeFallback } from '../core/llm/llmRuntimeExecution';
 import { runSystemUpdate } from '../core/system/update';
 import { runSystemUninstall } from '../core/system/uninstall';
 import type { CliDependencies, CliRuntimeContext } from './types';
@@ -112,6 +143,9 @@ const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
+export const LOOM_DRAFT_LLM_TIMEOUT_MS = 120_000;
+export const LOOM_DEV_ROUND_LLM_TIMEOUT_MS = 900_000;
+const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 let cachedDaemonRuntimeFingerprint: string | null = null;
 
 type A2ASimplemsgInboundDispatcherMessage = Pick<
@@ -222,6 +256,97 @@ async function fetchMetaletData<T>(url: string): Promise<T> {
     throw new Error(payload?.message || 'Metalet request failed.');
   }
   return (payload?.data ?? null) as T;
+}
+
+async function listLocalLoomWorkflowsForTask(
+  paths: MetabotPaths,
+  taskPinId: string,
+) {
+  const workflowStore = createLoomWorkflowStore(paths);
+  const taskWorkflowDir = path.dirname(workflowStore.resolve(taskPinId, 'claim').workflowPath);
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(taskWorkflowDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+
+  const workflows = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) {
+      continue;
+    }
+    const claimPinId = path.basename(entry.name, '.json');
+    const workflow = await workflowStore.read(taskPinId, claimPinId);
+    if (workflow) {
+      workflows.push(workflow);
+    }
+  }
+  return workflows.sort((left, right) => left.claimPinId.localeCompare(right.claimPinId));
+}
+
+async function listLocalLoomWorkflowsForRawCache(
+  paths: MetabotPaths,
+  rawState: LoomRawCacheState,
+): Promise<LoomWorkflowState[]> {
+  const taskPinIds = Array.from(new Set(rawState.records.task.map((record) => record.pinId)));
+  const workflows: LoomWorkflowState[] = [];
+  for (const taskPinId of taskPinIds) {
+    workflows.push(...(await listLocalLoomWorkflowsForTask(paths, taskPinId)));
+  }
+  return workflows.sort((left, right) => {
+    const taskOrder = left.taskPinId.localeCompare(right.taskPinId);
+    return taskOrder || left.claimPinId.localeCompare(right.claimPinId);
+  });
+}
+
+async function refreshLoomRawState(
+  context: CliRuntimeContext,
+  cacheStore: LoomRawCacheStore,
+): Promise<LoomRawCacheState> {
+  const syncResult = await readLoomRawChainRecords({
+    chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+  });
+  return cacheStore.update(syncResult.records);
+}
+
+function loomRefreshFailure(error: unknown): MetabotCommandResult<never> {
+  const cause = error instanceof Error ? error.message : String(error);
+  return commandFailed(
+    'loom_refresh_failed',
+    'Loom chain data could not be refreshed before a confirmed payment. Run metabot loom sync and retry after the chain index is reachable.',
+    {
+      data: {
+        syncCommand: 'metabot loom sync',
+        cause,
+      },
+    },
+  );
+}
+
+async function readFreshLoomRawState(
+  context: CliRuntimeContext,
+  cacheStore: LoomRawCacheStore,
+): Promise<LoomRawCacheState> {
+  try {
+    return await refreshLoomRawState(context, cacheStore);
+  } catch {
+    return cacheStore.read();
+  }
+}
+
+async function requireFreshLoomRawState(
+  context: CliRuntimeContext,
+  cacheStore: LoomRawCacheStore,
+): Promise<MetabotCommandResult<LoomRawCacheState>> {
+  try {
+    return commandSuccess(await refreshLoomRawState(context, cacheStore));
+  } catch (error) {
+    return loomRefreshFailure(error);
+  }
 }
 
 interface ParsedTransferAmount {
@@ -659,6 +784,128 @@ async function resolveActorHomeDir(
   return { homeDir: resolved.match.homeDir };
 }
 
+function normalizeReadOnlyIdentityProfile(value: unknown): IdentityProfileRecord | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Partial<IdentityProfileRecord>;
+  const name = normalizeEnvText(record.name);
+  const slug = normalizeEnvText(record.slug);
+  const homeDir = normalizeEnvText(record.homeDir);
+  const globalMetaId = normalizeEnvText(record.globalMetaId);
+  if (!name || !slug || !homeDir) {
+    return null;
+  }
+  return {
+    name,
+    slug,
+    aliases: Array.isArray(record.aliases)
+      ? record.aliases.map((alias) => normalizeEnvText(alias)).filter(Boolean)
+      : [],
+    homeDir: path.resolve(homeDir),
+    globalMetaId,
+    mvcAddress: normalizeEnvText(record.mvcAddress),
+    createdAt: typeof record.createdAt === 'number' && Number.isFinite(record.createdAt)
+      ? record.createdAt
+      : 0,
+    updatedAt: typeof record.updatedAt === 'number' && Number.isFinite(record.updatedAt)
+      ? record.updatedAt
+      : 0,
+  };
+}
+
+async function readIdentityProfilesReadonly(systemHomeDir: string): Promise<IdentityProfileRecord[]> {
+  const layout = resolveMetabotManagerLayout(systemHomeDir);
+  let raw: string;
+  try {
+    raw = await fs.promises.readFile(layout.identityProfilesPath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return [];
+  }
+
+  const record = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as { profiles?: unknown }
+    : {};
+  const profiles = Array.isArray(record.profiles) ? record.profiles : [];
+  return profiles
+    .map(normalizeReadOnlyIdentityProfile)
+    .filter((profile): profile is IdentityProfileRecord => Boolean(profile));
+}
+
+async function readActiveHomeReadonly(systemHomeDir: string): Promise<string | null> {
+  const layout = resolveMetabotManagerLayout(systemHomeDir);
+  let raw: string;
+  try {
+    raw = await fs.promises.readFile(layout.activeHomePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { homeDir?: unknown };
+    const homeDir = typeof parsed.homeDir === 'string' ? normalizeEnvText(parsed.homeDir) : '';
+    return homeDir ? path.resolve(homeDir) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveActorProfileReadonly(
+  context: CliRuntimeContext,
+  from?: string,
+): Promise<{ homeDir: string; profile: IdentityProfileRecord } | MetabotCommandResult<never>> {
+  const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+  const profiles = await readIdentityProfilesReadonly(systemHomeDir);
+  const requestedFrom = normalizeEnvText(from);
+  let profile: IdentityProfileRecord | undefined;
+
+  if (requestedFrom) {
+    const resolved = resolveProfileNameMatch(requestedFrom, profiles);
+    if (resolved.status === 'not_found') {
+      return commandFailed('profile_not_found', resolved.message);
+    }
+    if (resolved.status === 'ambiguous') {
+      return commandFailed('identity_profile_ambiguous', resolved.message);
+    }
+    profile = resolved.match;
+  } else {
+    const explicitHome = normalizeEnvText(context.env.METABOT_HOME);
+    const selectedHome = explicitHome ? path.resolve(explicitHome) : await readActiveHomeReadonly(systemHomeDir);
+    if (!selectedHome) {
+      return commandFailed('profile_not_found', 'No active MetaBot profile found for dry-run delivery.');
+    }
+    profile = profiles.find((entry) => path.resolve(entry.homeDir) === selectedHome);
+    if (!profile) {
+      return commandFailed('profile_not_found', `MetaBot profile not found in the manager index for home: ${selectedHome}`);
+    }
+  }
+
+  if (!profile.globalMetaId) {
+    return commandFailed(
+      'identity_unavailable',
+      `MetaBot profile ${profile.slug} does not have a globalMetaId in the manager index. Initialize or sync the profile identity before dry-run delivery.`,
+    );
+  }
+
+  return {
+    homeDir: profile.homeDir,
+    profile,
+  };
+}
+
 async function resolveActorProfileSlug(
   context: CliRuntimeContext,
   input: { from?: string; slug?: string } = {},
@@ -719,6 +966,125 @@ function resolveLocalUiPath(page: string): string {
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveRuntimeInputPath(context: CliRuntimeContext, filePath: string): string {
+  return path.isAbsolute(filePath) ? filePath : path.resolve(context.cwd, filePath);
+}
+
+async function readJsonObjectFile(
+  context: CliRuntimeContext,
+  filePath: string,
+): Promise<Record<string, unknown>> {
+  const raw = await context.readTextFile(resolveRuntimeInputPath(context, filePath));
+  const parsed = JSON.parse(raw) as unknown;
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('payload file must contain a JSON object.');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+async function readPreferredLlmRuntimeId(paths: MetabotPaths): Promise<string | null> {
+  try {
+    const raw = await fs.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
+    const data = JSON.parse(raw) as { runtimeId?: string | null };
+    return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+  } catch {
+    return null;
+  }
+}
+
+async function refreshLlmRuntimeStoreFromDiscovery(
+  runtimeStore: ReturnType<typeof createLlmRuntimeStore>,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const [previous, result] = await Promise.all([
+    runtimeStore.read(),
+    discoverLlmRuntimes({ env }),
+  ]);
+  const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
+  for (const runtime of result.runtimes) {
+    await runtimeStore.upsertRuntime(runtime);
+  }
+  for (const runtime of previous.runtimes) {
+    if (runtime.provider === 'custom') continue;
+    if (!discoveredRuntimeIds.has(runtime.id) && runtime.health !== 'unavailable') {
+      await runtimeStore.updateHealth(runtime.id, 'unavailable');
+    }
+  }
+}
+
+function createCliLlmRuntimeResolver(paths: MetabotPaths) {
+  return createLlmRuntimeResolver({
+    runtimeStore: createLlmRuntimeStore(paths),
+    bindingStore: createLlmBindingStore(paths),
+    getPreferredRuntimeId: async () => readPreferredLlmRuntimeId(paths),
+  });
+}
+
+async function draftLoomTaskFromWish(
+  context: CliRuntimeContext,
+  input: { wish: string; from?: string; allowInvalid: boolean },
+): Promise<MetabotCommandResult<unknown>> {
+  const actor = await resolveActorHomeDir(context, input.from);
+  if (!('homeDir' in actor)) return actor;
+  const paths = resolveMetabotPaths(actor.homeDir);
+  const metaBotSlug = path.basename(paths.profileRoot);
+  const runtimeStore = createLlmRuntimeStore(paths);
+  await refreshLlmRuntimeStoreFromDiscovery(runtimeStore, context.env);
+  const runtimeResolver = createCliLlmRuntimeResolver(paths);
+  const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
+  if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
+    return commandFailed(
+      'llm_runtime_unavailable',
+      `No healthy LLM runtime is available for MetaBot ${metaBotSlug}.`,
+    );
+  }
+  const llmExecutor = new LlmExecutor({
+    sessionsRoot: paths.llmExecutorSessionsRoot,
+    transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+    skillsRoot: paths.skillsRoot,
+    backends: createRegistryBackendFactories(),
+  });
+
+  try {
+    return await draftLoomTask({
+      wish: input.wish,
+      allowInvalid: input.allowInvalid,
+      executePrompt: async ({ prompt, systemPrompt }) => {
+        const sessionId = await llmExecutor.execute({
+          runtimeId: resolved.runtime!.id,
+          runtime: resolved.runtime!,
+          prompt,
+          systemPrompt,
+          timeout: LOOM_DRAFT_LLM_TIMEOUT_MS,
+          cwd: context.cwd,
+          metaBotSlug,
+        });
+        const deadline = Date.now() + LOOM_DRAFT_LLM_TIMEOUT_MS;
+        while (Date.now() <= deadline) {
+          const session = await llmExecutor.getSession(sessionId);
+          if (session?.result) {
+            if (session.result.status === 'completed') {
+              if (resolved.bindingId) {
+                runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => { /* best effort */ });
+              }
+              return session.result.output;
+            }
+            throw new Error(session.result.error || `LLM runtime ended with status ${session.result.status}.`);
+          }
+          await sleep(LOOM_DRAFT_LLM_POLL_INTERVAL_MS);
+        }
+        throw new Error('LLM runtime timed out while drafting Loom task payload.');
+      },
+    });
+  } catch (error) {
+    await runtimeResolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
+    return commandFailed(
+      'llm_runtime_unavailable',
+      error instanceof Error ? error.message : 'LLM runtime is unavailable.',
+    );
+  }
 }
 
 async function isPortBindable(host: string, port: number): Promise<boolean> {
@@ -1507,6 +1873,115 @@ function createTestMasterReplyWaiter(env: NodeJS.ProcessEnv): MetaWebMasterReply
   };
 }
 
+async function runWalletTransferRuntime(
+  context: CliRuntimeContext,
+  input: { from?: string; toAddress: string; amountRaw: string; confirm: boolean },
+): Promise<MetabotCommandResult<unknown>> {
+  const actor = await resolveActorHomeDir(context, input.from);
+  if (!('homeDir' in actor)) {
+    return actor;
+  }
+  const homeDir = actor.homeDir;
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+  const state = await runtimeStateStore.readState();
+  if (!state.identity) {
+    return commandFailed('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
+  }
+
+  const adapters = createDefaultChainAdapterRegistry();
+
+  let parsed: ParsedTransferAmount;
+  try {
+    parsed = parseTransferAmount(input.amountRaw, adapters);
+  } catch (error) {
+    return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
+  }
+
+  const adapter = parsed.adapter;
+  const minSatoshis = adapter.minTransferSatoshis;
+  if (parsed.satoshis < minSatoshis) {
+    return commandFailed('invalid_argument', `Amount is below the minimum of ${minSatoshis} satoshis for ${parsed.currency}.`);
+  }
+
+  const fromAddress = state.identity.addresses[parsed.chain] ?? state.identity.mvcAddress;
+  if (!fromAddress) {
+    return commandFailed('identity_address_missing', `Current identity has no address for chain "${parsed.chain}".`);
+  }
+
+  const feeRate = await adapter.fetchFeeRate();
+  const feePerByte = adapter.feeRateUnit === 'sat/KB' ? feeRate / 1000 : feeRate;
+  const estimatedFeeSatoshis = Math.ceil(392 * feePerByte);
+  const totalRequired = parsed.satoshis + estimatedFeeSatoshis;
+
+  const balance = await adapter.fetchBalance(fromAddress);
+
+  if (balance.totalSatoshis < totalRequired) {
+    const balanceDisplay = `${balance.totalSatoshis} sats (${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
+    const unconfirmedNote = balance.unconfirmedSatoshis > 0
+      ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
+      : '';
+    return commandFailed(
+      'insufficient_balance',
+      `Total balance ${balanceDisplay}${unconfirmedNote} is below the required ${totalRequired} sats (${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency} + estimated fee ${estimatedFeeSatoshis} sats).`,
+    );
+  }
+
+  if (!input.confirm) {
+    const currentBalanceDisplay = `${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
+    const unconfirmedNote = balance.unconfirmedSatoshis > 0
+      ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
+      : '';
+    return commandAwaitingConfirmation({
+      fromAddress,
+      currentBalance: currentBalanceDisplay + unconfirmedNote,
+      currentBalanceSatoshis: balance.totalSatoshis,
+      toAddress: input.toAddress,
+      amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
+      amountSatoshis: parsed.satoshis,
+      estimatedFee: `${(estimatedFeeSatoshis / 1e8).toFixed(8)} ${parsed.currency}`,
+      estimatedFeeSatoshis,
+      feeRateSatPerVb: feeRate,
+      currency: parsed.currency,
+      chain: parsed.chain,
+    });
+  }
+
+  const secretStore = createFileSecretStore(homeDir);
+  const secrets = await secretStore.readIdentitySecrets();
+  if (!secrets?.mnemonic) {
+    return commandFailed('identity_secrets_missing', 'Identity mnemonic not found in the secret store.');
+  }
+
+  try {
+    const result = await executeTransfer(adapter, {
+      mnemonic: secrets.mnemonic,
+      path: secrets.path ?? state.identity.path ?? "m/44'/10001'/0'/0/0",
+      toAddress: input.toAddress,
+      amountSatoshis: parsed.satoshis,
+      feeRate,
+    });
+
+    const explorerUrl = `${adapter.explorerBaseUrl}/tx/${result.txid}`;
+
+    return commandSuccess({
+      txid: result.txid,
+      explorerUrl,
+      amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
+      toAddress: input.toAddress,
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    const lower = msg.toLowerCase();
+    if (lower.includes('insufficient') || lower.includes('not enough') || lower.includes('余额不足')) {
+      return commandFailed('insufficient_balance', `Balance is insufficient: ${msg}`);
+    }
+    return commandFailed(
+      'transfer_broadcast_failed',
+      `Transfer failed: ${msg}. Verify the recipient address is correct and that you have enough total balance to cover the amount plus fees. If UTXO inputs appear stale, wait a few seconds and retry.`,
+    );
+  }
+}
+
 export function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies {
   return {
     config: {
@@ -1990,110 +2465,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
       },
       transfer: async (input) => {
-        const actor = await resolveActorHomeDir(context, input.from);
-        if (!('homeDir' in actor)) {
-          return actor;
-        }
-        const homeDir = actor.homeDir;
-        const runtimeStateStore = createRuntimeStateStore(homeDir);
-        const state = await runtimeStateStore.readState();
-        if (!state.identity) {
-          return commandFailed('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
-        }
-
-        const adapters = createDefaultChainAdapterRegistry();
-
-        let parsed: ParsedTransferAmount;
-        try {
-          parsed = parseTransferAmount(input.amountRaw, adapters);
-        } catch (error) {
-          return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
-        }
-
-        const adapter = parsed.adapter;
-        const minSatoshis = adapter.minTransferSatoshis;
-        if (parsed.satoshis < minSatoshis) {
-          return commandFailed('invalid_argument', `Amount is below the minimum of ${minSatoshis} satoshis for ${parsed.currency}.`);
-        }
-
-        const fromAddress = state.identity.addresses[parsed.chain] ?? state.identity.mvcAddress;
-        if (!fromAddress) {
-          return commandFailed('identity_address_missing', `Current identity has no address for chain "${parsed.chain}".`);
-        }
-
-        const feeRate = await adapter.fetchFeeRate();
-        // Rough fee estimate: ~392 bytes * feeRate for sat/byte chains, adjusted for sat/KB chains
-        const feePerByte = adapter.feeRateUnit === 'sat/KB' ? feeRate / 1000 : feeRate;
-        const estimatedFeeSatoshis = Math.ceil(392 * feePerByte);
-        const totalRequired = parsed.satoshis + estimatedFeeSatoshis;
-
-        const balance = await adapter.fetchBalance(fromAddress);
-
-        if (balance.totalSatoshis < totalRequired) {
-          const balanceDisplay = `${balance.totalSatoshis} sats (${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
-          const unconfirmedNote = balance.unconfirmedSatoshis > 0
-            ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
-            : '';
-          return commandFailed(
-            'insufficient_balance',
-            `Total balance ${balanceDisplay}${unconfirmedNote} is below the required ${totalRequired} sats (${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency} + estimated fee ${estimatedFeeSatoshis} sats).`
-          );
-        }
-
-        if (!input.confirm) {
-          const currentBalanceDisplay = `${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
-          const unconfirmedNote = balance.unconfirmedSatoshis > 0
-            ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
-            : '';
-          return commandAwaitingConfirmation({
-            fromAddress,
-            currentBalance: currentBalanceDisplay + unconfirmedNote,
-            currentBalanceSatoshis: balance.totalSatoshis,
-            toAddress: input.toAddress,
-            amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
-            amountSatoshis: parsed.satoshis,
-            estimatedFee: `${(estimatedFeeSatoshis / 1e8).toFixed(8)} ${parsed.currency}`,
-            estimatedFeeSatoshis,
-            feeRateSatPerVb: feeRate,
-            currency: parsed.currency,
-            chain: parsed.chain,
-          });
-        }
-
-        const secretStore = createFileSecretStore(homeDir);
-        const secrets = await secretStore.readIdentitySecrets();
-        if (!secrets?.mnemonic) {
-          return commandFailed('identity_secrets_missing', 'Identity mnemonic not found in the secret store.');
-        }
-
-        try {
-          const result = await executeTransfer(adapter, {
-            mnemonic: secrets.mnemonic,
-            path: secrets.path ?? state.identity.path ?? "m/44'/10001'/0'/0/0",
-            toAddress: input.toAddress,
-            amountSatoshis: parsed.satoshis,
-            feeRate,
-          });
-
-          const explorerUrl = `${adapter.explorerBaseUrl}/tx/${result.txid}`;
-
-          return commandSuccess({
-            txid: result.txid,
-            explorerUrl,
-            amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
-            toAddress: input.toAddress,
-          });
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          const lower = msg.toLowerCase();
-          if (lower.includes('insufficient') || lower.includes('not enough') || lower.includes('余额不足')) {
-            return commandFailed('insufficient_balance', `Balance is insufficient: ${msg}`);
-          }
-          return commandFailed(
-            'transfer_broadcast_failed',
-            `Transfer failed: ${msg}. Verify the recipient address is correct and that you have enough total balance to cover the amount plus fees. If UTXO inputs appear stale, wait a few seconds and retry.`
-          );
-        }
+        return runWalletTransferRuntime(context, input);
       },
     },
     trace: {
@@ -2545,6 +2917,475 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         });
       },
     },
+    loom: {
+      sync: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const paths = resolveMetabotPaths(homeDir);
+        const cacheStore = createLoomRawCacheStore(paths);
+        const pageSize = input.limit ? Math.max(1, Math.floor(input.limit)) : undefined;
+        const maxPages = input.limit ? 1 : undefined;
+        const syncResult = await readLoomRawChainRecords({
+          chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+          pageSize,
+          maxPages,
+        });
+        const state = await cacheStore.update(syncResult.records);
+        const cachedRecords = Object.values(state.records).reduce(
+          (total, records) => total + records.length,
+          0,
+        );
+        return commandSuccess({
+          fetchedRecords: syncResult.records.length,
+          fetchedByProtocol: syncResult.byProtocol,
+          cachedRecords,
+          cachePath: cacheStore.cachePath,
+          updatedAt: state.updatedAt,
+        });
+      },
+      list: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const paths = resolveMetabotPaths(homeDir);
+        const cacheStore = createLoomRawCacheStore(paths);
+        let refreshed = false;
+        if (input.refresh) {
+          const syncResult = await readLoomRawChainRecords({
+            chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+          });
+          await cacheStore.update(syncResult.records);
+          refreshed = true;
+        }
+        const state = await cacheStore.read();
+        return commandSuccess({
+          ...listLoomTasksFromCache(state, {
+            limit: input.limit,
+            tag: input.tag,
+            currency: input.currency,
+          }),
+          cache: {
+            path: cacheStore.cachePath,
+            updatedAt: state.updatedAt,
+            refreshed,
+          },
+        });
+      },
+      show: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const paths = resolveMetabotPaths(homeDir);
+        const cacheStore = createLoomRawCacheStore(paths);
+        let refreshed = false;
+        if (input.refresh) {
+          const syncResult = await readLoomRawChainRecords({
+            chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+          });
+          await cacheStore.update(syncResult.records);
+          refreshed = true;
+        }
+        const state = await cacheStore.read();
+        const projection = showLoomTaskFromCache(state, input.taskPinId);
+        if (!projection.found) {
+          return {
+            ...commandFailed('task_not_found', `Loom task not found in cache: ${input.taskPinId}`),
+            data: projection,
+          };
+        }
+        return commandSuccess({
+          ...projection,
+          cache: {
+            path: cacheStore.cachePath,
+            updatedAt: state.updatedAt,
+            refreshed,
+          },
+        });
+      },
+      dashboard: async (input) => {
+        const actor = await resolveActorProfileReadonly(context, input.from);
+        if (!('homeDir' in actor)) {
+          return actor;
+        }
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const rawCacheStore = createLoomRawCacheStore(paths);
+        const dashboardStore = createLoomDashboardStore(paths);
+        const service = createLoomDashboardService({
+          rawCacheStore,
+          dashboardStore,
+          refreshRawCache: async (refreshInput) => {
+            const pageSize = refreshInput.limit ? Math.max(1, Math.floor(refreshInput.limit)) : undefined;
+            const maxPages = refreshInput.limit ? 1 : undefined;
+            const syncResult = await readLoomRawChainRecords({
+              chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+              pageSize,
+              maxPages,
+            });
+            return rawCacheStore.update(syncResult.records);
+          },
+          readWorkflowStates: async () => {
+            const rawState = await rawCacheStore.read();
+            return listLocalLoomWorkflowsForRawCache(paths, rawState);
+          },
+          resolveActorContext: async () => ({
+            globalMetaId: actor.profile.globalMetaId,
+            address: actor.profile.mvcAddress,
+            profileSlug: actor.profile.slug,
+          }),
+        });
+
+        return service.getDashboard(input);
+      },
+      state: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const paths = resolveMetabotPaths(homeDir);
+        const cacheStore = createLoomRawCacheStore(paths);
+        let refreshed = false;
+        if (input.refresh) {
+          const syncResult = await readLoomRawChainRecords({
+            chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+          });
+          await cacheStore.update(syncResult.records);
+          refreshed = true;
+        }
+        const rawState = await cacheStore.read();
+        const projection = buildLoomWorkflowTaskState(rawState, input.taskPinId);
+        const localWorkflows = await listLocalLoomWorkflowsForTask(paths, input.taskPinId);
+        const cache = {
+          path: cacheStore.cachePath,
+          updatedAt: rawState.updatedAt,
+          refreshed,
+        };
+        const data = {
+          ...projection,
+          cache,
+          localWorkflows,
+        };
+        if (!projection.found) {
+          return {
+            ...commandFailed('task_not_found', projection.message),
+            data,
+          };
+        }
+        return commandSuccess(data);
+      },
+      draftTask: async (input) => {
+        return draftLoomTaskFromWish(context, input);
+      },
+      postTask: async (input) => {
+        if (input.from) {
+          const actor = await resolveActorHomeDir(context, input.from);
+          if (!('homeDir' in actor)) return actor;
+        }
+        return runLoomPostTaskWorkflow({
+          from: input.from,
+          payloadFile: input.payloadFile,
+          wish: input.wish,
+          chain: input.chain,
+          dryRun: input.dryRun,
+          readPayloadFile: (payloadFile) => readJsonObjectFile(context, payloadFile),
+          draftTask: (wish) => draftLoomTaskFromWish(context, {
+            wish,
+            from: input.from,
+            allowInvalid: false,
+          }),
+          writeChain: async (request) => context.dependencies.chain?.write?.(request)
+            ?? commandFailed('dependency_unavailable', 'Chain write dependency is unavailable.'),
+        });
+      },
+      claimAndStart: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const homeDir = actor.homeDir;
+        const paths = resolveMetabotPaths(homeDir);
+        const rawCacheStore = createLoomRawCacheStore(paths);
+        const workflowStore = createLoomWorkflowStore(paths);
+        const rawState = await readFreshLoomRawState(context, rawCacheStore);
+        const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
+        const signer = createCliSigner(context, homeDir);
+        const identity = await signer.getIdentity();
+        const runner = createNodeLoomCommandRunner();
+        const developerMetaBotSlug = path.basename(paths.profileRoot);
+        const runtimeStore = createLlmRuntimeStore(paths);
+        await refreshLlmRuntimeStoreFromDiscovery(runtimeStore, context.env);
+        const runtimeResolver = createCliLlmRuntimeResolver(paths);
+        const resolvedRuntime = await runtimeResolver.resolveRuntime({ metaBotSlug: developerMetaBotSlug });
+        if (!resolvedRuntime.runtime) {
+          return commandFailed(
+            'llm_runtime_unavailable',
+            `No healthy LLM runtime is available for MetaBot ${developerMetaBotSlug}.`,
+          );
+        }
+        const developerRuntime = summarizeResolvedLlmRuntime(resolvedRuntime);
+
+        return runLoomClaimAndStartWorkflow({
+          from: input.from,
+          taskPinId: input.taskPinId,
+          payoutAddress: input.payoutAddress,
+          claimPinId: input.claimPinId,
+          chain: input.chain,
+          fileChain: input.fileChain,
+          message: input.message,
+          developerRuntime,
+          dryRun: input.dryRun,
+          resetWorkspace: input.resetWorkspace,
+          developerMetaBotSlug,
+          developerGlobalMetaId: identity.globalMetaId,
+          state: taskState,
+          workflowStore,
+          runner,
+          github: {
+            assertToolsReady: assertGitHubToolsReady,
+            prepareForkWorkspace: prepareGitHubForkWorkspace,
+          },
+          writeChain: async (request) => {
+            const result = await signer.writePin(request);
+            return commandSuccess({
+              pinId: result.pinId,
+              txids: result.txids,
+              network: result.network,
+              globalMetaId: result.globalMetaId,
+              mvcAddress: result.mvcAddress,
+            });
+          },
+          uploadFile: async (uploadInput) => uploadLocalFileToChain({
+            filePath: uploadInput.filePath,
+            contentType: uploadInput.contentType,
+            network: uploadInput.network,
+            signer,
+          }),
+          writeLogFile: writeLoomProcessLogFile,
+          removePath: async (targetPath) => {
+            await fs.promises.rm(targetPath, { recursive: true, force: true });
+          },
+          renamePath: async (from, to) => {
+            await fs.promises.mkdir(path.dirname(to), { recursive: true });
+            await fs.promises.rename(from, to);
+          },
+          pathExists: async (targetPath) => {
+            try {
+              await fs.promises.access(targetPath);
+              return true;
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                return false;
+              }
+              throw error;
+            }
+          },
+        });
+      },
+      runDevRound: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const homeDir = actor.homeDir;
+        const paths = resolveMetabotPaths(homeDir);
+        const rawCacheStore = createLoomRawCacheStore(paths);
+        const workflowStore = createLoomWorkflowStore(paths);
+        const rawState = await readFreshLoomRawState(context, rawCacheStore);
+        const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
+        const signer = createCliSigner(context, homeDir);
+        const identity = await signer.getIdentity();
+        const runner = createNodeLoomCommandRunner();
+        const developerMetaBotSlug = path.basename(paths.profileRoot);
+        const workflow = await workflowStore.read(input.taskPinId, input.claimPinId);
+        if (!workflow) {
+          return commandFailed('claim_not_found', `Local Loom workflow state was not found for claim ${input.claimPinId}.`);
+        }
+        if (workflow.developerGlobalMetaId && workflow.developerGlobalMetaId !== identity.globalMetaId) {
+          return commandFailed('permission_denied', `Loom claim ${input.claimPinId} belongs to another developer.`);
+        }
+
+        const runtimeStore = createLlmRuntimeStore(paths);
+        await refreshLlmRuntimeStoreFromDiscovery(runtimeStore, context.env);
+        const runtimeResolver = createCliLlmRuntimeResolver(paths);
+        const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug: developerMetaBotSlug });
+        if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
+          return commandFailed(
+            'llm_runtime_unavailable',
+            `No healthy LLM runtime is available for MetaBot ${developerMetaBotSlug}.`,
+          );
+        }
+        const llmExecutor = new LlmExecutor({
+          sessionsRoot: paths.llmExecutorSessionsRoot,
+          transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+          skillsRoot: paths.skillsRoot,
+          backends: createRegistryBackendFactories(),
+        });
+
+        return runLoomDevRoundWorkflow({
+          from: input.from,
+          taskPinId: input.taskPinId,
+          claimPinId: input.claimPinId,
+          chain: input.chain,
+          fileChain: input.fileChain,
+          checks: input.checks,
+          roundNote: input.roundNote,
+          developerMetaBotSlug,
+          developerGlobalMetaId: identity.globalMetaId,
+          state: taskState,
+          workflowStore,
+          runner,
+          executeLlmRound: async (prompt, cwd) => runLlmPromptWithRuntimeFallback({
+            runtimeResolver,
+            llmExecutor,
+            metaBotSlug: developerMetaBotSlug,
+            prompt,
+            timeoutMs: LOOM_DEV_ROUND_LLM_TIMEOUT_MS,
+            pollIntervalMs: LOOM_DRAFT_LLM_POLL_INTERVAL_MS,
+            cwd,
+          }),
+          writeChain: async (request) => {
+            const result = await signer.writePin(request);
+            return commandSuccess({
+              pinId: result.pinId,
+              txids: result.txids,
+              network: result.network,
+              globalMetaId: result.globalMetaId,
+              mvcAddress: result.mvcAddress,
+            });
+          },
+          uploadFile: async (uploadInput) => uploadLocalFileToChain({
+            filePath: uploadInput.filePath,
+            contentType: uploadInput.contentType,
+            network: uploadInput.network,
+            signer,
+          }),
+          writeLogFile: writeLoomProcessLogFile,
+        });
+      },
+      deliver: async (input) => {
+        const actor = input.dryRun
+          ? await resolveActorProfileReadonly(context, input.from)
+          : await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) {
+          return actor;
+        }
+        const homeDir = actor.homeDir;
+        const paths = resolveMetabotPaths(homeDir);
+        const rawCacheStore = createLoomRawCacheStore(paths);
+        const workflowStore = createLoomWorkflowStore(paths);
+        const rawState = await readFreshLoomRawState(context, rawCacheStore);
+        const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
+        const runner = createNodeLoomCommandRunner();
+        const developerMetaBotSlug = path.basename(paths.profileRoot);
+        const signer = input.dryRun ? null : createCliSigner(context, homeDir);
+        const dryRunProfile = (actor as { profile?: IdentityProfileRecord }).profile;
+        const developerGlobalMetaId = dryRunProfile
+          ? dryRunProfile.globalMetaId
+          : (await (signer as Signer).getIdentity()).globalMetaId;
+
+        return runLoomDeliverWorkflow({
+          from: input.from,
+          taskPinId: input.taskPinId,
+          claimPinId: input.claimPinId,
+          chain: input.chain,
+          prTitle: input.prTitle,
+          deliverySummary: input.deliverySummary,
+          dryRun: input.dryRun,
+          developerMetaBotSlug,
+          developerGlobalMetaId,
+          state: taskState,
+          workflowStore,
+          runner,
+          github: {
+            assertToolsReady: assertGitHubToolsReady,
+            pushLoomBranch,
+            createLoomPullRequest,
+          },
+          writeChain: async (request) => {
+            if (!signer) {
+              return commandFailed('chain_write_unavailable', 'Dry-run delivery must not write chain data.');
+            }
+            const result = await signer.writePin(request);
+            return commandSuccess({
+              pinId: result.pinId,
+              txids: result.txids,
+              network: result.network,
+              globalMetaId: result.globalMetaId,
+              mvcAddress: result.mvcAddress,
+            });
+          },
+        });
+      },
+      acceptAndPay: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) {
+          return actor;
+        }
+        const homeDir = actor.homeDir;
+        const paths = resolveMetabotPaths(homeDir);
+        const rawCacheStore = createLoomRawCacheStore(paths);
+        const workflowStore = createLoomWorkflowStore(paths);
+        const rawStateResult = input.confirmPayment
+          ? await requireFreshLoomRawState(context, rawCacheStore)
+          : commandSuccess(await readFreshLoomRawState(context, rawCacheStore));
+        if (!rawStateResult.ok) {
+          return rawStateResult;
+        }
+        const rawState = rawStateResult.data;
+        const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
+        const signer = createCliSigner(context, homeDir);
+        const identity = await signer.getIdentity();
+
+        return runLoomAcceptAndPayWorkflow({
+          from: input.from,
+          taskPinId: input.taskPinId,
+          deliveryPinId: input.deliveryPinId,
+          score: input.score,
+          comment: input.comment,
+          chain: input.chain,
+          confirmPayment: input.confirmPayment,
+          requesterGlobalMetaId: identity.globalMetaId,
+          state: taskState,
+          workflowStore,
+          walletTransfer: async (transferInput) => runWalletTransferRuntime(context, transferInput),
+          writeChain: async (request) => {
+            const result = await signer.writePin(request);
+            return commandSuccess({
+              pinId: result.pinId,
+              txids: result.txids,
+              network: result.network,
+              globalMetaId: result.globalMetaId,
+              mvcAddress: result.mvcAddress,
+            });
+          },
+        });
+      },
+      reviewDelivery: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) {
+          return actor;
+        }
+        const homeDir = actor.homeDir;
+        const paths = resolveMetabotPaths(homeDir);
+        const rawCacheStore = createLoomRawCacheStore(paths);
+        const workflowStore = createLoomWorkflowStore(paths);
+        const rawState = await readFreshLoomRawState(context, rawCacheStore);
+        const taskState = buildLoomWorkflowTaskState(rawState, input.taskPinId);
+        const signer = createCliSigner(context, homeDir);
+        const identity = await signer.getIdentity();
+
+        return runLoomReviewDeliveryWorkflow({
+          from: input.from,
+          taskPinId: input.taskPinId,
+          deliveryPinId: input.deliveryPinId,
+          verdict: input.verdict,
+          score: input.score,
+          comment: input.comment,
+          chain: input.chain,
+          attachments: input.attachments,
+          requesterGlobalMetaId: identity.globalMetaId,
+          state: taskState,
+          workflowStore,
+          writeChain: async (request) => {
+            const result = await signer.writePin(request);
+            return commandSuccess({
+              pinId: result.pinId,
+              txids: result.txids,
+              network: result.network,
+              globalMetaId: result.globalMetaId,
+              mvcAddress: result.mvcAddress,
+            });
+          },
+        });
+      },
+    },
     bot: {
       listProfiles: async () => requestJson(context, 'GET', '/api/bot/profiles'),
       getProfile: async (input) =>
@@ -2619,6 +3460,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     host: { ...defaults.host, ...provided.host },
     system: { ...defaults.system, ...provided.system },
     llm: { ...defaults.llm, ...provided.llm },
+    loom: { ...defaults.loom, ...provided.loom },
     bot: { ...defaults.bot, ...provided.bot },
     evolution: { ...defaults.evolution, ...provided.evolution },
   };

@@ -8,7 +8,10 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
-const { createLlmRuntimeResolver } = require('../../dist/core/llm/llmRuntimeResolver.js');
+const {
+  createLlmRuntimeResolver,
+  summarizeResolvedLlmRuntime,
+} = require('../../dist/core/llm/llmRuntimeResolver.js');
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 
 async function createTempProfileHome(slug = 'test-slug') {
@@ -112,6 +115,98 @@ test('resolveRuntime uses preferred runtime when available', async () => {
   });
   const resolved = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
   assert.equal(resolved.runtime.id, 'r_codex');
+});
+
+test('resolveRuntime lets configured primary and fallback bindings override legacy preferred runtime', async () => {
+  const profileRoot = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const runtimeStore = createLlmRuntimeStore(paths);
+  const bindingStore = createLlmBindingStore(paths);
+  await runtimeStore.upsertRuntime(makeRuntime('r_preferred', 'gemini'));
+  await runtimeStore.upsertRuntime(makeRuntime('r_primary', 'claude-code'));
+  await runtimeStore.upsertRuntime(makeRuntime('r_fallback', 'codex'));
+  await bindingStore.upsertBinding(makeBinding('b_primary', 'test-slug', 'r_primary', 'primary', 10, true));
+  await bindingStore.upsertBinding(makeBinding('b_fallback', 'test-slug', 'r_fallback', 'fallback', 0, true));
+  const resolver = createLlmRuntimeResolver({
+    runtimeStore,
+    bindingStore,
+    getPreferredRuntimeId: async () => 'r_preferred',
+  });
+
+  const resolved = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
+
+  assert.equal(resolved.runtime.id, 'r_primary');
+  assert.equal(resolved.bindingId, 'b_primary');
+  assert.equal(resolved.bindingRole, 'primary');
+});
+
+test('summarizeResolvedLlmRuntime exposes public runtime metadata without local ids or paths', () => {
+  const summary = summarizeResolvedLlmRuntime({
+    runtime: {
+      ...makeRuntime('local-runtime-id', 'claude-code'),
+      displayName: 'Claude Code',
+      binaryPath: '/Users/example/.local/bin/claude',
+      version: '2.1.77',
+      logoPath: '/logos/claude.svg',
+    },
+    bindingId: 'local-binding-id',
+    bindingRole: 'primary',
+  });
+
+  assert.deepEqual(summary, {
+    provider: 'claude-code',
+    displayName: 'Claude Code',
+    health: 'healthy',
+    selectedRole: 'primary',
+    version: '2.1.77',
+    logoPath: '/logos/claude.svg',
+  });
+  assert.equal(Object.hasOwn(summary, 'id'), false);
+  assert.equal(Object.hasOwn(summary, 'binaryPath'), false);
+  assert.equal(Object.hasOwn(summary, 'bindingId'), false);
+});
+
+test('resolveRuntime falls back from unavailable primary binding to fallback binding', async () => {
+  const profileRoot = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const runtimeStore = createLlmRuntimeStore(paths);
+  const bindingStore = createLlmBindingStore(paths);
+  await runtimeStore.upsertRuntime(makeRuntime('r_primary', 'claude-code', 'unavailable'));
+  await runtimeStore.upsertRuntime(makeRuntime('r_fallback', 'codex', 'healthy'));
+  await bindingStore.upsertBinding(makeBinding('b_primary', 'test-slug', 'r_primary', 'primary', 0, true));
+  await bindingStore.upsertBinding(makeBinding('b_fallback', 'test-slug', 'r_fallback', 'fallback', 0, true));
+  const resolver = createLlmRuntimeResolver({
+    runtimeStore,
+    bindingStore,
+    getPreferredRuntimeId: async () => null,
+  });
+
+  const resolved = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
+
+  assert.equal(resolved.runtime.id, 'r_fallback');
+  assert.equal(resolved.bindingId, 'b_fallback');
+  assert.equal(resolved.bindingRole, 'fallback');
+});
+
+test('resolveRuntime skips degraded runtimes for execution selection', async () => {
+  const profileRoot = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const runtimeStore = createLlmRuntimeStore(paths);
+  const bindingStore = createLlmBindingStore(paths);
+  await runtimeStore.upsertRuntime(makeRuntime('r_degraded', 'claude-code', 'degraded'));
+  await runtimeStore.upsertRuntime(makeRuntime('r_healthy', 'codex', 'healthy'));
+  await bindingStore.upsertBinding(makeBinding('b_degraded', 'test-slug', 'r_degraded', 'primary', 0, true));
+  await bindingStore.upsertBinding(makeBinding('b_healthy', 'test-slug', 'r_healthy', 'fallback', 0, true));
+  const resolver = createLlmRuntimeResolver({
+    runtimeStore,
+    bindingStore,
+    getPreferredRuntimeId: async () => 'r_degraded',
+  });
+
+  const resolved = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
+
+  assert.equal(resolved.runtime.id, 'r_healthy');
+  assert.equal(resolved.bindingRole, 'fallback');
 });
 
 test('resolveRuntime follows priority order in bindings', async () => {

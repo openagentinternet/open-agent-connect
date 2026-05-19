@@ -14,6 +14,7 @@ const daemon_1 = require("./routes/daemon");
 const chat_1 = require("./routes/chat");
 const file_1 = require("./routes/file");
 const identity_1 = require("./routes/identity");
+const loom_1 = require("./routes/loom");
 const master_1 = require("./routes/master");
 const network_1 = require("./routes/network");
 const provider_1 = require("./routes/provider");
@@ -31,6 +32,7 @@ const ROUTES = [
     chat_1.handleChatRoutes,
     file_1.handleFileRoutes,
     identity_1.handleIdentityRoutes,
+    loom_1.handleLoomRoutes,
     master_1.handleMasterRoutes,
     network_1.handleNetworkRoutes,
     provider_1.handleProviderRoutes,

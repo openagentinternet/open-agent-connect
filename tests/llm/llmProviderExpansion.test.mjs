@@ -209,3 +209,28 @@ test('runtime discovery tries multiple registry binary names in order', async ()
     codexPlatform.runtime.binaryNames = originalBinaryNames;
   }
 });
+
+test('runtime discovery marks a binary unavailable when version probe exits non-zero', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-bad-version-'));
+  const binDir = path.join(tempRoot, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const codexPath = path.join(binDir, 'codex');
+  await writeFile(codexPath, [
+    '#!/bin/sh',
+    'echo "Error: spawn /tmp/node/v20.20.0/lib/node_modules/@openai/codex/vendor/codex ENOENT" >&2',
+    'exit 1',
+  ].join('\n'), 'utf8');
+  await chmod(codexPath, 0o755);
+
+  const result = await discoverLlmRuntimes({
+    env: { PATH: binDir },
+    now: () => '2026-05-06T00:00:00.000Z',
+  });
+
+  assert.equal(result.errors.length, 0);
+  assert.equal(result.runtimes.length, 1);
+  assert.equal(result.runtimes[0].provider, 'codex');
+  assert.equal(result.runtimes[0].binaryPath, codexPath);
+  assert.equal(result.runtimes[0].health, 'unavailable');
+  assert.equal(result.runtimes[0].version, undefined);
+});

@@ -1,4 +1,9 @@
-import type { LlmRuntime, LlmBinding, LlmProvider } from './llmTypes';
+import type {
+  LlmRuntime,
+  LlmBinding,
+  LlmBindingRole,
+  LlmProvider,
+} from './llmTypes';
 import type { LlmRuntimeStore } from './llmRuntimeStore';
 import type { LlmBindingStore } from './llmBindingStore';
 
@@ -17,6 +22,17 @@ export interface ResolveRuntimeInput {
 export interface ResolveRuntimeResult {
   runtime: LlmRuntime | null;
   bindingId?: string;
+  bindingRole?: LlmBindingRole;
+}
+
+export interface ResolvedLlmRuntimeSummary {
+  [key: string]: unknown;
+  provider: LlmProvider;
+  displayName: string;
+  health: LlmRuntime['health'];
+  selectedRole: LlmBindingRole | 'unbound';
+  version?: string;
+  logoPath?: string;
 }
 
 export interface SelectMetaBotInput {
@@ -36,6 +52,43 @@ export interface LlmRuntimeResolver {
   markRuntimeUnavailable(runtimeId: string): Promise<void>;
 }
 
+function bindingRoleRank(role: LlmBindingRole): number {
+  switch (role) {
+    case 'primary':
+      return 0;
+    case 'fallback':
+      return 1;
+    case 'reviewer':
+      return 2;
+    case 'specialist':
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+function compareBindingSelection(left: LlmBinding, right: LlmBinding): number {
+  const roleDelta = bindingRoleRank(left.role) - bindingRoleRank(right.role);
+  if (roleDelta !== 0) return roleDelta;
+  if (left.priority !== right.priority) return left.priority - right.priority;
+  if (left.updatedAt !== right.updatedAt) return right.updatedAt.localeCompare(left.updatedAt);
+  return left.id.localeCompare(right.id);
+}
+
+export function summarizeResolvedLlmRuntime(
+  resolved: ResolveRuntimeResult,
+): ResolvedLlmRuntimeSummary | undefined {
+  if (!resolved.runtime) return undefined;
+  return {
+    provider: resolved.runtime.provider,
+    displayName: resolved.runtime.displayName,
+    health: resolved.runtime.health,
+    selectedRole: resolved.bindingRole ?? 'unbound',
+    ...(resolved.runtime.version ? { version: resolved.runtime.version } : {}),
+    ...(resolved.runtime.logoPath ? { logoPath: resolved.runtime.logoPath } : {}),
+  };
+}
+
 export function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): LlmRuntimeResolver {
   const { runtimeStore, bindingStore, getPreferredRuntimeId } = options;
 
@@ -52,7 +105,7 @@ export function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): Ll
       const runtimeById = new Map(runtimes.map((r) => [r.id, r]));
       const excludedRuntimeIds = new Set(input.excludeRuntimeIds ?? []);
       const isExcluded = (runtime: LlmRuntime): boolean => excludedRuntimeIds.has(runtime.id);
-      const isSelectable = (runtime: LlmRuntime): boolean => !isExcluded(runtime) && runtime.health !== 'unavailable';
+      const isSelectable = (runtime: LlmRuntime): boolean => !isExcluded(runtime) && runtime.health === 'healthy';
 
       // 1. Explicit runtimeId — use it directly.
       if (input.explicitRuntimeId) {
@@ -60,22 +113,22 @@ export function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): Ll
         if (rt && isSelectable(rt)) return { runtime: rt };
       }
 
-      // 2. Preferred runtime for this MetaBot slug.
+      // 2. MetaBot bindings are the canonical primary/fallback runtime configuration.
       if (input.metaBotSlug) {
+        const bindings = await bindingStore.listEnabledByMetaBotSlug(input.metaBotSlug);
+        bindings.sort(compareBindingSelection);
+        for (const binding of bindings) {
+          const rt = runtimeById.get(binding.llmRuntimeId);
+          if (rt && isSelectable(rt)) {
+            return { runtime: rt, bindingId: binding.id, bindingRole: binding.role };
+          }
+        }
+
+        // 3. Preferred runtime remains a legacy fallback when no configured binding is usable.
         const preferredId = await getPreferredRuntimeId(input.metaBotSlug);
         if (preferredId) {
           const rt = runtimeById.get(preferredId);
           if (rt && isSelectable(rt)) return { runtime: rt };
-        }
-
-        // 3. Enabled bindings sorted by priority → first healthy.
-        const bindings = await bindingStore.listEnabledByMetaBotSlug(input.metaBotSlug);
-        bindings.sort((a, b) => a.priority - b.priority);
-        for (const binding of bindings) {
-          const rt = runtimeById.get(binding.llmRuntimeId);
-          if (rt && isSelectable(rt)) {
-            return { runtime: rt, bindingId: binding.id };
-          }
         }
       }
 
@@ -83,8 +136,7 @@ export function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): Ll
       const healthy = runtimes.find((r) => !isExcluded(r) && r.health === 'healthy');
       if (healthy) return { runtime: healthy };
 
-      // 5. First any runtime (absolute fallback).
-      return { runtime: runtimes.find((r) => !isExcluded(r)) ?? null };
+      return { runtime: null };
     },
 
     async selectMetaBot(input) {
@@ -97,7 +149,7 @@ export function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): Ll
       for (const binding of allBindings) {
         if (!binding.enabled) continue;
         const rt = runtimeById.get(binding.llmRuntimeId);
-        if (rt && rt.provider === input.targetProvider) {
+        if (rt && rt.provider === input.targetProvider && rt.health === 'healthy') {
           matching.push({ binding, runtime: rt });
         }
       }

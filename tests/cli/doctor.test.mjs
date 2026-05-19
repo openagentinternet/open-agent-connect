@@ -117,9 +117,13 @@ function createHarness() {
             calls.ui.push(input);
             return commandSuccess({
               page: input.page,
-              localUiUrl: input.traceId
-                ? `/ui/${input.page}?traceId=${encodeURIComponent(input.traceId)}`
-                : `/ui/${input.page}`,
+              localUiUrl: (() => {
+                const query = new URLSearchParams();
+                if (input.from) query.set('from', input.from);
+                if (input.traceId) query.set('traceId', input.traceId);
+                const suffix = query.size ? `?${query.toString()}` : '';
+                return `/ui/${input.page}${suffix}`;
+              })(),
             });
           },
         },
@@ -308,6 +312,22 @@ test('runCli dispatches `metabot ui open --page trace --trace-id` and returns th
     data: {
       page: 'trace',
       localUiUrl: '/ui/trace?traceId=trace-123',
+    },
+  });
+});
+
+test('runCli dispatches `metabot ui open --page loom --from` and forwards the actor URL', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli(['ui', 'open', '--page', 'loom', '--from', 'eric'], harness.context);
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(harness.calls.ui, [{ page: 'loom', from: 'eric' }]);
+  assert.deepEqual(parseLastJson(harness.stdout), {
+    ok: true,
+    state: 'success',
+    data: {
+      page: 'loom',
+      localUiUrl: '/ui/loom?from=eric',
     },
   });
 });

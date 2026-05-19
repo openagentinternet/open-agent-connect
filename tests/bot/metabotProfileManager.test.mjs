@@ -126,7 +126,7 @@ test('createMetabotProfile leaves fallback empty when only one provider is avail
   assert.equal(created.fallbackProvider, null);
 });
 
-test('createMetabotProfile defaults by recent activity even when a newer runtime is degraded', async () => {
+test('createMetabotProfile defaults only from healthy runtimes and skips newer degraded runtimes', async () => {
   const systemHomeDir = await createSystemHome();
   const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'recent-degraded-bot');
   await createLlmRuntimeStore(targetHomeDir).write({
@@ -152,8 +152,8 @@ test('createMetabotProfile defaults by recent activity even when a newer runtime
 
   const created = await createMetabotProfile(systemHomeDir, { name: 'Recent Degraded Bot' });
 
-  assert.equal(created.primaryProvider, 'claude-code');
-  assert.equal(created.fallbackProvider, 'openclaw');
+  assert.equal(created.primaryProvider, 'openclaw');
+  assert.equal(created.fallbackProvider, 'codex');
 });
 
 test('createMetabotProfile validates avatars before creating a profile workspace', async () => {
