@@ -5,10 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOST="codex"
 RESTART_DAEMON=0
 SKIP_BUILD=0
+SUPPORTED_HOSTS="claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro|trae|codebuddy"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/oac-dev-mode.sh [--host <codex|claude-code|openclaw>] [--restart-daemon] [--skip-build]
+Usage: scripts/oac-dev-mode.sh [--host <claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro|trae|codebuddy>] [--restart-daemon] [--skip-build]
 
 Switch the local Open Agent Connect install to this source checkout for fast
 acceptance testing from another host session.
@@ -52,10 +53,10 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$HOST" in
-  codex|claude-code|openclaw)
+  claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro|trae|codebuddy)
     ;;
   *)
-    echo "Unsupported host: $HOST. Use codex, claude-code, or openclaw." >&2
+    echo "Unsupported host: $HOST. Use one of: $SUPPORTED_HOSTS." >&2
     exit 2
     ;;
 esac
