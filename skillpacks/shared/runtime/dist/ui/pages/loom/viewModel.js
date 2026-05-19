@@ -40,6 +40,15 @@ function numberValue(value) {
 function stringArray(value) {
     return Array.isArray(value) ? value.filter((item) => typeof item === 'string') : [];
 }
+function commitViewModels(value) {
+    return asArray(value)
+        .map((commit) => ({
+        sha: text(commit.sha),
+        message: text(commit.message),
+        files: stringArray(commit.files),
+    }))
+        .filter((commit) => commit.sha || commit.message);
+}
 function dashboardFrom(input) {
     const root = asObject(input);
     if (!root)
@@ -114,7 +123,7 @@ function actorViewModel(value) {
     const profileSlug = text(actor.profileSlug);
     const globalMetaId = requiredCompactLabel(actor.globalMetaId);
     const address = compactLabel(text(actor.address));
-    const displayLabel = profileSlug || globalMetaId.label || address?.label || 'No active Bot';
+    const displayLabel = profileSlug || globalMetaId.label || address?.label || 'Global Loom';
     return {
         profileSlug,
         displayLabel,
@@ -151,11 +160,21 @@ function repoLabel(value) {
     }
     return [readableRepo || 'Repository not set', baseBranch].filter(Boolean).join(' @ ');
 }
-function actionLabel(actorContext) {
+function previewText(...values) {
+    const normalized = values
+        .map((value) => text(value))
+        .find(Boolean) ?? '';
+    if (normalized.length <= 96)
+        return normalized;
+    return `${normalized.slice(0, 93).trimEnd()}...`;
+}
+function actionLabel(actorContext, hasActor) {
+    if (!hasActor)
+        return '';
     const actor = asObject(actorContext);
     return actor?.needsMyAction === true ? 'Needs my action' : '';
 }
-function cardViewModel(value) {
+function cardViewModel(value, options) {
     const card = asObject(value);
     if (!card)
         return null;
@@ -177,36 +196,40 @@ function cardViewModel(value) {
         bountyLabel: bountyLabel(card.bounty),
         repoLabel: repoLabel(card.repo),
         tags: stringArray(card.tags),
+        summaryPreview: previewText(card.latestStatusSummary, card.summary, card.description),
+        activityLabel: numberValue(card.updatedAt)
+            ? `updated ${relativeTimeLabel(numberValue(card.updatedAt), options.now)}`
+            : '',
         latestStatusSummary: text(card.latestStatusSummary),
         prUrl: text(card.prUrl),
         paymentTxId,
         warningCount,
         warningLabel: countLabel(warningCount, 'warning', 'warnings'),
         warningTone: warningCount > 0 ? 'warning' : 'neutral',
-        actionLabel: actionLabel(card.actorContext),
+        actionLabel: actionLabel(card.actorContext, options.hasActor),
         updatedAt: numberValue(card.updatedAt),
         createdAt: numberValue(card.createdAt),
     };
 }
-function flattenColumnCards(columns) {
+function flattenColumnCards(columns, options) {
     return columns
         .flatMap((column) => asArray(column.cards))
-        .map(cardViewModel)
+        .map((card) => cardViewModel(card, options))
         .filter((card) => Boolean(card));
 }
-function buildCards(dashboard, columns) {
+function buildCards(dashboard, columns, options) {
     const taskCards = asArray(dashboard.tasks)
-        .map(cardViewModel)
+        .map((card) => cardViewModel(card, options))
         .filter((card) => Boolean(card));
-    return taskCards.length ? taskCards : flattenColumnCards(columns);
+    return taskCards.length ? taskCards : flattenColumnCards(columns, options);
 }
-function columnsViewModel(dashboard, allCards) {
+function columnsViewModel(dashboard, allCards, options) {
     const rawColumns = asArray(dashboard.columns);
     const cardsByColumn = new Map();
     for (const column of rawColumns) {
         const id = safeColumnId(column.id);
         const cards = asArray(column.cards)
-            .map(cardViewModel)
+            .map((card) => cardViewModel(card, options))
             .filter((card) => Boolean(card));
         if (cards.length) {
             cardsByColumn.set(id, cards);
@@ -334,7 +357,61 @@ function claimViewModel(value) {
         active: claim.active === true,
         message: text(claim.message),
         timestamp: numberValue(claim.timestamp),
+        payoutAddress: text(claim.payoutAddress),
         developer: botViewModel(claim.developer, 'developer'),
+    };
+}
+function localWorkflowViewModel(value) {
+    const workflow = asObject(value) ?? {};
+    return {
+        claimPinId: text(workflow.claimPinId),
+        developerMetaBotSlug: text(workflow.developerMetaBotSlug),
+        branchName: text(workflow.branchName),
+        workspacePath: text(workflow.workspacePath),
+        llmSessionIds: stringArray(workflow.llmSessionIds),
+        processLogPaths: stringArray(workflow.processLogPaths),
+        processLogUris: stringArray(workflow.processLogUris),
+        commits: commitViewModels(workflow.commits),
+    };
+}
+function recordViewModels(value) {
+    return asArray(value)
+        .map((record) => {
+        const pin = compactLabel(text(record.pinId));
+        if (!pin)
+            return null;
+        return {
+            pin,
+            timestamp: numberValue(record.timestamp),
+            globalMetaId: text(record.globalMetaId),
+            address: text(record.creatorAddress) || text(record.address),
+            payload: asObject(record.payload) ?? {},
+        };
+    })
+        .filter((record) => Boolean(record));
+}
+function nextActionViewModel(value) {
+    const action = asObject(value);
+    if (!action)
+        return null;
+    const id = text(action.id);
+    if (!id)
+        return null;
+    const tone = text(action.tone);
+    const actorRole = text(action.actorRole);
+    return {
+        id,
+        label: text(action.label) || id,
+        tone: ['primary', 'neutral', 'warning', 'danger'].includes(tone)
+            ? tone
+            : 'neutral',
+        actorRole: ['requester', 'developer', 'any'].includes(actorRole)
+            ? actorRole
+            : 'any',
+        requiresActor: action.requiresActor === true,
+        requiresConfirmation: action.requiresConfirmation !== false,
+        disabledReason: text(action.disabledReason),
+        cliFallback: text(action.cliFallback),
     };
 }
 function detailViewModel(value) {
@@ -344,6 +421,7 @@ function detailViewModel(value) {
     const taskPinId = text(detail.taskPinId);
     if (!taskPinId)
         return null;
+    const validRecords = asObject(detail.validRecords) ?? {};
     const timeline = asArray(detail.timeline)
         .map(timelineEventViewModel)
         .filter((event) => Boolean(event));
@@ -364,18 +442,31 @@ function detailViewModel(value) {
             .map(warningViewModel)
             .filter((warning) => Boolean(warning)),
         timeline: sortTimeline(timeline),
+        localWorkflow: asArray(detail.localWorkflow).map(localWorkflowViewModel),
+        nextActions: asArray(detail.nextActions)
+            .map(nextActionViewModel)
+            .filter((action) => Boolean(action)),
+        validRecords: {
+            statuses: recordViewModels(validRecords.statuses),
+            deliveries: recordViewModels(validRecords.deliveries),
+            acceptances: recordViewModels(validRecords.acceptances),
+            claimRejects: recordViewModels(validRecords.claimRejects),
+        },
     };
 }
 function buildLoomDashboardViewModel(input, now = Date.now()) {
     const dashboard = dashboardFrom(input);
     const rawColumns = asArray(dashboard.columns);
-    const cards = buildCards(dashboard, rawColumns);
-    const columns = columnsViewModel(dashboard, cards);
+    const actor = actorViewModel(dashboard.actor);
+    const hasActor = Boolean(actor.profileSlug || actor.globalMetaId.copyValue || actor.address?.copyValue);
+    const cardOptions = { hasActor, now };
+    const cards = buildCards(dashboard, rawColumns, cardOptions);
+    const columns = columnsViewModel(dashboard, cards, cardOptions);
     const details = asArray(dashboard.details)
         .map(detailViewModel)
         .filter((detail) => Boolean(detail));
     return {
-        actor: actorViewModel(dashboard.actor),
+        actor,
         summary: summaryViewModel(dashboard, now),
         columns,
         cards,

@@ -4,6 +4,7 @@ exports.buildLoomDashboard = buildLoomDashboard;
 exports.findLoomDashboardTaskDetail = findLoomDashboardTaskDetail;
 const workflowState_1 = require("./workflowState");
 const dashboardIdentity_1 = require("./dashboardIdentity");
+const dashboardActions_1 = require("./dashboardActions");
 const BOARD_COLUMNS = [
     { id: 'open', title: 'Open', states: ['open'] },
     { id: 'claimed', title: 'Claimed', states: ['claimed'] },
@@ -245,7 +246,7 @@ function actorContextForTask(actor, requesterGlobalMetaId, requesterAddress, act
         || (actorAddress && requesterAddress && actorAddress === requesterAddress));
     const isDeveloper = activeClaims.some((claim) => Boolean((actorGlobalMetaId && claim.globalMetaId === actorGlobalMetaId)
         || (actorAddress && claim.creatorAddress === actorAddress)));
-    const requesterNeedsAction = isRequester && (state === 'delivered' || state === 'revision_needed');
+    const requesterNeedsAction = isRequester && state === 'delivered';
     const developerNeedsAction = isDeveloper && ['claimed', 'in_progress', 'revision_needed'].includes(state);
     return {
         isRequester,
@@ -432,6 +433,7 @@ function buildLoomDashboard(rawState, options = {}) {
             warnings,
             timeline,
             localWorkflow,
+            nextActions: [],
             task,
             validRecords: {
                 claims: valid.claims,
@@ -441,6 +443,13 @@ function buildLoomDashboard(rawState, options = {}) {
                 claimRejects: valid.claimRejects,
             },
         };
+        card.summaryPreview = (0, dashboardActions_1.buildLoomDashboardSummaryPreview)({ card, detail });
+        detail.nextActions = (0, dashboardActions_1.projectLoomDashboardNextActions)({
+            card,
+            detail,
+            actor: options.actorContext,
+        });
+        card.nextAction = (0, dashboardActions_1.selectLoomDashboardCardAction)(detail.nextActions);
         cards.push(card);
         details.push(detail);
     }

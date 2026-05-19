@@ -152,10 +152,10 @@ function compareRuntimeActivityPreference(left, right) {
     return left.id.localeCompare(right.id);
 }
 function isDefaultSelectableRuntime(runtime) {
-    return runtime.provider !== 'custom' && runtime.health !== 'unavailable';
+    return runtime.provider !== 'custom' && runtime.health === 'healthy';
 }
 function selectRuntimeForProvider(runtimes, provider) {
-    const candidates = runtimes.filter((runtime) => (runtime.provider === provider && runtime.health !== 'unavailable')).sort(compareRuntimePreference);
+    const candidates = runtimes.filter((runtime) => (runtime.provider === provider && runtime.health === 'healthy')).sort(compareRuntimePreference);
     const runtime = candidates[0];
     if (!runtime) {
         throw new Error(`No available runtime found for provider: ${provider}`);

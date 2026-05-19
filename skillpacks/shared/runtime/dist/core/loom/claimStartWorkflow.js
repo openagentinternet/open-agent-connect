@@ -72,6 +72,9 @@ function createClaimPayload(input, now) {
     if (input.message) {
         payload.message = input.message;
     }
+    if (input.developerRuntime) {
+        payload.developerRuntime = input.developerRuntime;
+    }
     return payload;
 }
 function createStartedStatusPayload(input) {

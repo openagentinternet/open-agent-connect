@@ -1,4 +1,5 @@
-import type { LoomDashboardColumnId, LoomDashboardStateTone } from '../../../core/loom/dashboardTypes';
+import type { LoomDashboardActionId, LoomDashboardColumnId, LoomDashboardStateTone } from '../../../core/loom/dashboardTypes';
+type PlainObject = Record<string, unknown>;
 export interface LoomCopyLabelViewModel {
     label: string;
     copyValue: string;
@@ -37,6 +38,8 @@ export interface LoomCardViewModel {
     bountyLabel: string;
     repoLabel: string;
     tags: string[];
+    summaryPreview: string;
+    activityLabel: string;
     latestStatusSummary: string;
     prUrl: string;
     paymentTxId: LoomCopyLabelViewModel | null;
@@ -74,7 +77,40 @@ export interface LoomClaimViewModel {
     active: boolean;
     message: string;
     timestamp: number;
+    payoutAddress: string;
     developer: LoomBotViewModel;
+}
+export interface LoomCommitViewModel {
+    sha: string;
+    message: string;
+    files: string[];
+}
+export interface LoomLocalWorkflowViewModel {
+    claimPinId: string;
+    developerMetaBotSlug: string;
+    branchName: string;
+    workspacePath: string;
+    llmSessionIds: string[];
+    processLogPaths: string[];
+    processLogUris: string[];
+    commits: LoomCommitViewModel[];
+}
+export interface LoomRecordViewModel {
+    pin: LoomCopyLabelViewModel;
+    timestamp: number;
+    globalMetaId: string;
+    address: string;
+    payload: PlainObject;
+}
+export interface LoomNextActionViewModel {
+    id: LoomDashboardActionId;
+    label: string;
+    tone: 'primary' | 'neutral' | 'warning' | 'danger';
+    actorRole: 'requester' | 'developer' | 'any';
+    requiresActor: boolean;
+    requiresConfirmation: boolean;
+    disabledReason: string;
+    cliFallback: string;
 }
 export interface LoomDetailViewModel {
     taskPinId: string;
@@ -89,6 +125,14 @@ export interface LoomDetailViewModel {
     claims: LoomClaimViewModel[];
     warnings: LoomWarningViewModel[];
     timeline: LoomTimelineEventViewModel[];
+    localWorkflow: LoomLocalWorkflowViewModel[];
+    nextActions: LoomNextActionViewModel[];
+    validRecords: {
+        statuses: LoomRecordViewModel[];
+        deliveries: LoomRecordViewModel[];
+        acceptances: LoomRecordViewModel[];
+        claimRejects: LoomRecordViewModel[];
+    };
 }
 export interface LoomDashboardViewModel {
     actor: LoomActorViewModel;
@@ -111,3 +155,4 @@ export interface LoomDashboardViewModel {
     };
 }
 export declare function buildLoomDashboardViewModel(input: unknown, now?: number): LoomDashboardViewModel;
+export {};

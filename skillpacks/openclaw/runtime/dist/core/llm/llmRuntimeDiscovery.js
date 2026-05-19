@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.findExecutableInPath = findExecutableInPath;
 exports.readExecutableVersion = readExecutableVersion;
+exports.probeExecutableVersion = probeExecutableVersion;
 exports.discoverProvider = discoverProvider;
 exports.discoverLlmRuntimes = discoverLlmRuntimes;
 const node_child_process_1 = require("node:child_process");
@@ -33,6 +34,10 @@ async function findExecutableInPath(name, pathDirs) {
     return null;
 }
 async function readExecutableVersion(binaryPath, versionArgs = ['--version'], timeoutMs = 5_000, env = process.env) {
+    const probe = await probeExecutableVersion(binaryPath, versionArgs, timeoutMs, env);
+    return probe.ok ? probe.version : undefined;
+}
+async function probeExecutableVersion(binaryPath, versionArgs = ['--version'], timeoutMs = 5_000, env = process.env) {
     return new Promise((resolve) => {
         const child = (0, node_child_process_1.spawn)(binaryPath, versionArgs, {
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -40,30 +45,48 @@ async function readExecutableVersion(binaryPath, versionArgs = ['--version'], ti
             shell: false,
         });
         let output = '';
+        let settled = false;
+        const finish = (probe) => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(probe);
+        };
         const timer = setTimeout(() => {
             try {
                 child.kill('SIGTERM');
             }
             catch { /* best effort */ }
-            resolve(undefined);
+            finish({ ok: false, message: `Version probe timed out after ${timeoutMs}ms.` });
         }, timeoutMs);
         child.stdout?.setEncoding('utf8');
         child.stderr?.setEncoding('utf8');
         child.stdout?.on('data', (chunk) => { output += chunk; });
         child.stderr?.on('data', (chunk) => { output += chunk; });
-        child.on('close', () => {
-            clearTimeout(timer);
+        child.on('close', (code) => {
             const trimmed = output.trim();
+            if (code !== 0) {
+                finish({
+                    ok: false,
+                    exitCode: code,
+                    message: trimmed || `Version probe exited with code ${code ?? 'unknown'}.`,
+                });
+                return;
+            }
             if (!trimmed) {
-                resolve(undefined);
+                finish({ ok: true, exitCode: code });
                 return;
             }
             const match = trimmed.match(/(\d+\.\d+\.\d+(?:[-+][^\s]+)?)/);
-            resolve(match ? match[1] : trimmed.split(/\s+/).pop() ?? undefined);
+            finish({
+                ok: true,
+                exitCode: code,
+                version: match ? match[1] : trimmed.split(/\s+/).pop() ?? undefined,
+            });
         });
-        child.on('error', () => {
-            clearTimeout(timer);
-            resolve(undefined);
+        child.on('error', (error) => {
+            finish({ ok: false, message: error.message });
         });
     });
 }
@@ -88,7 +111,7 @@ async function discoverProvider(provider, pathDirs, options) {
     if (!binaryPath)
         return null;
     const env = options?.env ?? process.env;
-    const version = await readExecutableVersion(binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], 5_000, env);
+    const versionProbe = await probeExecutableVersion(binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], 5_000, env);
     const now = (options?.now ?? (() => new Date().toISOString()))();
     // Stable ID: same binary always gets same id, so rediscovery upserts instead of duplicating.
     const defaultId = `llm_${provider.replace(/-/g, '_')}_${binaryPath}`;
@@ -99,10 +122,10 @@ async function discoverProvider(provider, pathDirs, options) {
         provider,
         displayName: platform.displayName,
         binaryPath,
-        version,
+        version: versionProbe.version,
         logoPath: platform.logoPath,
         authState,
-        health: 'healthy',
+        health: versionProbe.ok ? 'healthy' : 'unavailable',
         capabilities: [...platform.runtime.capabilities],
         lastSeenAt: now,
         createdAt: now,

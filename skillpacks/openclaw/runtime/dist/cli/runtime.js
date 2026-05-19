@@ -68,6 +68,7 @@ const llmRuntimeResolver_1 = require("../core/llm/llmRuntimeResolver");
 const llmRuntimeDiscovery_1 = require("../core/llm/llmRuntimeDiscovery");
 const platformSkillCatalog_1 = require("../core/services/platformSkillCatalog");
 const executor_1 = require("../core/llm/executor");
+const llmRuntimeExecution_1 = require("../core/llm/llmRuntimeExecution");
 const update_1 = require("../core/system/update");
 const uninstall_1 = require("../core/system/uninstall");
 const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
@@ -743,6 +744,40 @@ async function readJsonObjectFile(context, filePath) {
     }
     return parsed;
 }
+async function readPreferredLlmRuntimeId(paths) {
+    try {
+        const raw = await node_fs_1.default.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
+        const data = JSON.parse(raw);
+        return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+    }
+    catch {
+        return null;
+    }
+}
+async function refreshLlmRuntimeStoreFromDiscovery(runtimeStore, env) {
+    const [previous, result] = await Promise.all([
+        runtimeStore.read(),
+        (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env }),
+    ]);
+    const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
+    for (const runtime of result.runtimes) {
+        await runtimeStore.upsertRuntime(runtime);
+    }
+    for (const runtime of previous.runtimes) {
+        if (runtime.provider === 'custom')
+            continue;
+        if (!discoveredRuntimeIds.has(runtime.id) && runtime.health !== 'unavailable') {
+            await runtimeStore.updateHealth(runtime.id, 'unavailable');
+        }
+    }
+}
+function createCliLlmRuntimeResolver(paths) {
+    return (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
+        runtimeStore: (0, llmRuntimeStore_1.createLlmRuntimeStore)(paths),
+        bindingStore: (0, llmBindingStore_1.createLlmBindingStore)(paths),
+        getPreferredRuntimeId: async () => readPreferredLlmRuntimeId(paths),
+    });
+}
 async function draftLoomTaskFromWish(context, input) {
     const actor = await resolveActorHomeDir(context, input.from);
     if (!('homeDir' in actor))
@@ -750,21 +785,8 @@ async function draftLoomTaskFromWish(context, input) {
     const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
     const metaBotSlug = node_path_1.default.basename(paths.profileRoot);
     const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(paths);
-    const bindingStore = (0, llmBindingStore_1.createLlmBindingStore)(paths);
-    const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
-        runtimeStore,
-        bindingStore,
-        getPreferredRuntimeId: async () => {
-            try {
-                const raw = await node_fs_1.default.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
-                const data = JSON.parse(raw);
-                return typeof data.runtimeId === 'string' ? data.runtimeId : null;
-            }
-            catch {
-                return null;
-            }
-        },
-    });
+    await refreshLlmRuntimeStoreFromDiscovery(runtimeStore, context.env);
+    const runtimeResolver = createCliLlmRuntimeResolver(paths);
     const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
     if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
         return (0, commandResult_1.commandFailed)('llm_runtime_unavailable', `No healthy LLM runtime is available for MetaBot ${metaBotSlug}.`);
@@ -2573,6 +2595,14 @@ function createDefaultCliDependencies(context) {
                 const identity = await signer.getIdentity();
                 const runner = (0, loom_1.createNodeLoomCommandRunner)();
                 const developerMetaBotSlug = node_path_1.default.basename(paths.profileRoot);
+                const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(paths);
+                await refreshLlmRuntimeStoreFromDiscovery(runtimeStore, context.env);
+                const runtimeResolver = createCliLlmRuntimeResolver(paths);
+                const resolvedRuntime = await runtimeResolver.resolveRuntime({ metaBotSlug: developerMetaBotSlug });
+                if (!resolvedRuntime.runtime) {
+                    return (0, commandResult_1.commandFailed)('llm_runtime_unavailable', `No healthy LLM runtime is available for MetaBot ${developerMetaBotSlug}.`);
+                }
+                const developerRuntime = (0, llmRuntimeResolver_1.summarizeResolvedLlmRuntime)(resolvedRuntime);
                 return (0, loom_1.runLoomClaimAndStartWorkflow)({
                     from: input.from,
                     taskPinId: input.taskPinId,
@@ -2581,6 +2611,7 @@ function createDefaultCliDependencies(context) {
                     chain: input.chain,
                     fileChain: input.fileChain,
                     message: input.message,
+                    developerRuntime,
                     dryRun: input.dryRun,
                     resetWorkspace: input.resetWorkspace,
                     developerMetaBotSlug,
@@ -2652,26 +2683,12 @@ function createDefaultCliDependencies(context) {
                     return (0, commandResult_1.commandFailed)('permission_denied', `Loom claim ${input.claimPinId} belongs to another developer.`);
                 }
                 const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(paths);
-                const bindingStore = (0, llmBindingStore_1.createLlmBindingStore)(paths);
-                const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
-                    runtimeStore,
-                    bindingStore,
-                    getPreferredRuntimeId: async () => {
-                        try {
-                            const raw = await node_fs_1.default.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
-                            const data = JSON.parse(raw);
-                            return typeof data.runtimeId === 'string' ? data.runtimeId : null;
-                        }
-                        catch {
-                            return null;
-                        }
-                    },
-                });
+                await refreshLlmRuntimeStoreFromDiscovery(runtimeStore, context.env);
+                const runtimeResolver = createCliLlmRuntimeResolver(paths);
                 const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug: developerMetaBotSlug });
                 if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
                     return (0, commandResult_1.commandFailed)('llm_runtime_unavailable', `No healthy LLM runtime is available for MetaBot ${developerMetaBotSlug}.`);
                 }
-                const runtime = resolved.runtime;
                 const llmExecutor = new executor_1.LlmExecutor({
                     sessionsRoot: paths.llmExecutorSessionsRoot,
                     transcriptsRoot: paths.llmExecutorTranscriptsRoot,
@@ -2691,56 +2708,15 @@ function createDefaultCliDependencies(context) {
                     state: taskState,
                     workflowStore,
                     runner,
-                    executeLlmRound: async (prompt, cwd) => {
-                        let sessionId;
-                        try {
-                            sessionId = await llmExecutor.execute({
-                                runtimeId: runtime.id,
-                                runtime,
-                                prompt,
-                                timeout: exports.LOOM_DEV_ROUND_LLM_TIMEOUT_MS,
-                                cwd,
-                                metaBotSlug: developerMetaBotSlug,
-                            });
-                            const deadline = Date.now() + exports.LOOM_DEV_ROUND_LLM_TIMEOUT_MS;
-                            while (Date.now() <= deadline) {
-                                const session = await llmExecutor.getSession(sessionId);
-                                if (session?.result) {
-                                    if (session.result.status === 'completed') {
-                                        if (resolved.bindingId) {
-                                            runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => { });
-                                        }
-                                    }
-                                    else {
-                                        runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => { });
-                                    }
-                                    return {
-                                        sessionId,
-                                        status: session.result.status,
-                                        output: session.result.output,
-                                        error: session.result.error,
-                                    };
-                                }
-                                await sleep(LOOM_DRAFT_LLM_POLL_INTERVAL_MS);
-                            }
-                            await runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => { });
-                            return {
-                                sessionId,
-                                status: 'failed',
-                                output: '',
-                                error: 'LLM runtime timed out while running Loom development round.',
-                            };
-                        }
-                        catch (error) {
-                            await runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => { });
-                            return {
-                                sessionId,
-                                status: 'failed',
-                                output: '',
-                                error: error instanceof Error ? error.message : 'LLM runtime is unavailable.',
-                            };
-                        }
-                    },
+                    executeLlmRound: async (prompt, cwd) => (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
+                        runtimeResolver,
+                        llmExecutor,
+                        metaBotSlug: developerMetaBotSlug,
+                        prompt,
+                        timeoutMs: exports.LOOM_DEV_ROUND_LLM_TIMEOUT_MS,
+                        pollIntervalMs: LOOM_DRAFT_LLM_POLL_INTERVAL_MS,
+                        cwd,
+                    }),
                     writeChain: async (request) => {
                         const result = await signer.writePin(request);
                         return (0, commandResult_1.commandSuccess)({

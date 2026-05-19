@@ -5,6 +5,17 @@ export type LoomDashboardStateTone = 'neutral' | 'info' | 'progress' | 'review' 
 export type LoomDashboardColumnId = 'open' | 'claimed' | 'working' | 'review' | 'revision' | 'closed';
 export type LoomDashboardTimelineEventKind = 'task' | 'claim' | 'status' | 'delivery' | 'acceptance' | 'claim_reject' | 'local_workflow' | 'invalid_record';
 export type LoomDashboardBotRole = 'requester' | 'developer' | 'reviewer' | 'unknown';
+export type LoomDashboardActionId = 'postTask' | 'claimAndStart' | 'runDevRound' | 'deliver' | 'acceptAndPay' | 'requestRevision' | 'reject' | 'openPr' | 'copyCli';
+export interface LoomDashboardNextAction {
+    id: LoomDashboardActionId;
+    label: string;
+    tone: 'primary' | 'neutral' | 'warning' | 'danger';
+    actorRole: 'requester' | 'developer' | 'any';
+    requiresActor: boolean;
+    requiresConfirmation: boolean;
+    disabledReason?: string;
+    cliFallback?: string;
+}
 export interface LoomDashboardIdentityProfile {
     displayName?: string;
     name?: string;
@@ -98,10 +109,12 @@ export interface LoomDashboardTaskCard {
     updatedAt: number;
     activeClaimCount: number;
     latestStatusSummary?: string;
+    summaryPreview?: string;
     prUrl?: string;
     paymentTxId?: string;
     warningCount: number;
     actorContext: LoomDashboardTaskActorContext;
+    nextAction?: LoomDashboardNextAction;
     local?: LoomDashboardLocalEvidence;
 }
 export interface LoomDashboardTaskDetail {
@@ -116,6 +129,7 @@ export interface LoomDashboardTaskDetail {
     warnings: LoomDashboardWarning[];
     timeline: LoomDashboardTimelineEvent[];
     localWorkflow: LoomDashboardLocalEvidence[];
+    nextActions: LoomDashboardNextAction[];
     task: LoomCachedRecord;
     validRecords: {
         claims: LoomCachedRecord[];

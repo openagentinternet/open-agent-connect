@@ -1,4 +1,6 @@
+import { type MetabotCommandResult } from '../core/contracts/commandResult';
 import { createRuntimeStateStore, type RuntimeDaemonRecord } from '../core/state/runtimeStateStore';
+import { type MetabotPaths } from '../core/state/paths';
 import type { LlmRuntime } from '../core/llm/llmTypes';
 import type { LlmExecutor } from '../core/llm/executor';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
@@ -11,11 +13,72 @@ import type { Signer } from '../core/signing/signer';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
 import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import { type A2AConversationMessagePersister } from '../core/a2a/conversationPersistence';
+import { assertGitHubToolsReady, buildLoomWorkflowTaskState, createLoomRawCacheStore, createLoomWorkflowStore, createNodeLoomCommandRunner, prepareGitHubForkWorkspace, pushLoomBranch, runLoomAcceptAndPayWorkflow, runLoomClaimAndStartWorkflow, runLoomDeliverWorkflow, runLoomDevRoundWorkflow, runLoomPostTaskWorkflow, runLoomReviewDeliveryWorkflow, createLoomPullRequest, writeLoomProcessLogFile, type LoomUiActionServiceDependencies } from '../core/loom';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import { type ServicePaymentExecutor } from '../core/payments/servicePayment';
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import { type MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
+export declare function createLoomDaemonActionHandler(dependencies: LoomUiActionServiceDependencies): NonNullable<NonNullable<MetabotDaemonHttpHandlers['loom']>['actions']>;
+interface LoomDaemonActionActorContext {
+    homeDir: string;
+    paths: MetabotPaths;
+    signer: Signer;
+    workflowStore: ReturnType<typeof createLoomWorkflowStore>;
+    rawCacheStore: ReturnType<typeof createLoomRawCacheStore>;
+    metaBotSlug: string;
+    globalMetaId: string;
+}
+interface LoomDaemonActionWorkflowFunctions {
+    postTask: typeof runLoomPostTaskWorkflow;
+    claimAndStart: typeof runLoomClaimAndStartWorkflow;
+    runDevRound: typeof runLoomDevRoundWorkflow;
+    deliver: typeof runLoomDeliverWorkflow;
+    acceptAndPay: typeof runLoomAcceptAndPayWorkflow;
+    reviewDelivery: typeof runLoomReviewDeliveryWorkflow;
+}
+export declare function createLoomDaemonActionDependencies(input: {
+    resolveActor: (rawActor: unknown) => Promise<LoomDaemonActionActorContext | {
+        failure: MetabotCommandResult<never>;
+    }>;
+    resolveTaskState: (actor: LoomDaemonActionActorContext, taskPinId: string, options?: {
+        requireFresh?: boolean;
+    }) => Promise<ReturnType<typeof buildLoomWorkflowTaskState> | MetabotCommandResult<never>>;
+    readPayloadFile: (filePath: string) => Promise<Record<string, unknown>>;
+    draftTask: (actor: LoomDaemonActionActorContext, wish: string) => Promise<MetabotCommandResult<unknown>>;
+    resolveDeveloperRuntime?: (actor: LoomDaemonActionActorContext) => Promise<{
+        developerRuntime?: Record<string, unknown>;
+    } | {
+        failure: MetabotCommandResult<never>;
+    }>;
+    ensureDevRoundLlmAvailable?: (actor: LoomDaemonActionActorContext) => Promise<MetabotCommandResult<never> | undefined>;
+    executeDevRoundLlm: (actor: LoomDaemonActionActorContext, prompt: string, cwd: string) => ReturnType<Parameters<typeof runLoomDevRoundWorkflow>[0]['executeLlmRound']>;
+    walletTransfer: (actor: LoomDaemonActionActorContext, rawActor: unknown, transferInput: Parameters<Parameters<typeof runLoomAcceptAndPayWorkflow>[0]['walletTransfer']>[0]) => Promise<MetabotCommandResult<unknown>>;
+    writeChain: (actor: LoomDaemonActionActorContext) => (request: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    uploadFile: (actor: LoomDaemonActionActorContext) => (uploadInput: {
+        filePath: string;
+        network: string;
+        contentType?: string;
+    }) => Promise<{
+        metafileUri?: string;
+        uri?: string;
+        pinId?: string;
+        network?: string;
+    }>;
+    runnerFactory: typeof createNodeLoomCommandRunner;
+    github: {
+        assertToolsReady: typeof assertGitHubToolsReady;
+        prepareForkWorkspace: typeof prepareGitHubForkWorkspace;
+        pushLoomBranch: typeof pushLoomBranch;
+        createLoomPullRequest: typeof createLoomPullRequest;
+    };
+    writeLogFile: typeof writeLoomProcessLogFile;
+    removePath: (targetPath: string) => Promise<void>;
+    renamePath: (from: string, to: string) => Promise<void>;
+    pathExists: (targetPath: string) => Promise<boolean>;
+    dashboardAfterAction?: LoomUiActionServiceDependencies['dashboardAfterAction'];
+    workflows?: Partial<LoomDaemonActionWorkflowFunctions>;
+}): LoomUiActionServiceDependencies;
 export declare function resolveServiceOrderPaymentMetadata(currency: unknown): {
     paymentChain?: 'mvc' | 'btc';
     settlementKind?: 'native';
@@ -58,3 +121,4 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
     providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
 }): MetabotDaemonHttpHandlers;
+export {};

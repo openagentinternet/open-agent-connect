@@ -11,8 +11,15 @@ export interface DiscoveryResult {
         message: string;
     }>;
 }
+export interface ExecutableVersionProbe {
+    ok: boolean;
+    version?: string;
+    exitCode?: number | null;
+    message?: string;
+}
 export declare function findExecutableInPath(name: string, pathDirs?: string[]): Promise<string | null>;
 export declare function readExecutableVersion(binaryPath: string, versionArgs?: string[], timeoutMs?: number, env?: NodeJS.ProcessEnv): Promise<string | undefined>;
+export declare function probeExecutableVersion(binaryPath: string, versionArgs?: string[], timeoutMs?: number, env?: NodeJS.ProcessEnv): Promise<ExecutableVersionProbe>;
 export declare function discoverProvider(provider: LlmProvider, pathDirs: string[], options?: {
     createId?: () => string;
     now?: () => string;

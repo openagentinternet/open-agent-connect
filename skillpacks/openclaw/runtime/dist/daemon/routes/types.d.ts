@@ -31,6 +31,7 @@ export interface MetabotDaemonHttpHandlers {
             taskPinId: string;
         } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         refresh?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        actions?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
     master?: {
         publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

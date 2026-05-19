@@ -36,9 +36,8 @@ function addUsage(target, source) {
 function buildClaudeArgs(request) {
     const args = [
         '-p',
+        request.prompt,
         '--output-format',
-        'stream-json',
-        '--input-format',
         'stream-json',
         '--verbose',
         '--permission-mode',
@@ -58,7 +57,7 @@ function buildClaudeArgs(request) {
         args.push('--resume', request.resumeSessionId);
     }
     args.push(...(0, backend_1.filterBlockedArgs)(request.extraArgs, {
-        '-p': { takesValue: false },
+        '-p': { takesValue: true },
         '--output-format': { takesValue: true },
         '--input-format': { takesValue: true },
         '--permission-mode': { takesValue: true },
@@ -94,6 +93,7 @@ function createClaudeBackend(binaryPath, env) {
                 shell: false,
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
+            let stdinOpen = true;
             let output = '';
             let resultOutput;
             let stderr = '';
@@ -115,7 +115,22 @@ function createClaudeBackend(binaryPath, env) {
                 child.once('error', (error) => resolve(error));
             });
             const writeJsonLine = (message) => {
+                if (!stdinOpen || child.stdin.destroyed || child.stdin.writableEnded) {
+                    emitter.emit({ type: 'log', level: 'debug', message: 'claude stdin is closed; skipping control response.' });
+                    return;
+                }
                 child.stdin.write(`${JSON.stringify(message)}\n`);
+            };
+            const closeStdin = () => {
+                if (!stdinOpen)
+                    return;
+                stdinOpen = false;
+                try {
+                    child.stdin.end();
+                }
+                catch {
+                    // Best effort.
+                }
             };
             const stdoutDone = new Promise((resolve) => {
                 child.stdout.setEncoding('utf8');
@@ -216,12 +231,7 @@ function createClaudeBackend(binaryPath, env) {
                             status = 'failed';
                             errorMessage = resultOutput ?? 'claude execution failed';
                         }
-                        try {
-                            child.stdin.end();
-                        }
-                        catch {
-                            // Best effort.
-                        }
+                        closeStdin();
                         return;
                     }
                     if (type === 'log') {
@@ -270,13 +280,7 @@ function createClaudeBackend(binaryPath, env) {
                 }, { once: true });
             });
             try {
-                writeJsonLine({
-                    type: 'user',
-                    message: {
-                        role: 'user',
-                        content: [{ type: 'text', text: request.prompt }],
-                    },
-                });
+                closeStdin();
                 const completion = await Promise.race([
                     Promise.all([stdoutDone, childExit]).then(([, exitCode]) => ({ type: 'exit', exitCode })),
                     timeout.then(() => ({ type: 'terminal' })),
@@ -301,12 +305,7 @@ function createClaudeBackend(binaryPath, env) {
             finally {
                 if (timeoutHandle)
                     clearTimeout(timeoutHandle);
-                try {
-                    child.stdin.end();
-                }
-                catch {
-                    // Best effort.
-                }
+                closeStdin();
                 await (0, backend_1.shutdownChildProcess)(child, childExit, {
                     terminate: status !== 'completed',
                     graceMs: status === 'completed' ? 2_000 : 250,

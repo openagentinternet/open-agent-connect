@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createLoomDashboardService = createLoomDashboardService;
 const commandResult_1 = require("../contracts/commandResult");
 const dashboardAggregation_1 = require("./dashboardAggregation");
+const dashboardActions_1 = require("./dashboardActions");
 const allowedStates = new Set([
     'open',
     'claimed',
@@ -57,7 +58,7 @@ function actorContextForStaleTask(actor, task, activeClaims, state) {
         || (actorAddress && task.creatorAddress && actorAddress === task.creatorAddress));
     const isDeveloper = activeClaims.some((claim) => Boolean((actorGlobalMetaId && claim.globalMetaId && actorGlobalMetaId === claim.globalMetaId)
         || (actorAddress && claim.creatorAddress && actorAddress === claim.creatorAddress)));
-    const requesterNeedsAction = isRequester && (state === 'delivered' || state === 'revision_needed');
+    const requesterNeedsAction = isRequester && state === 'delivered';
     const developerNeedsAction = isDeveloper && ['claimed', 'in_progress', 'revision_needed'].includes(state);
     return {
         isRequester,
@@ -181,7 +182,18 @@ function createLoomDashboardService(input) {
                 ...card,
                 actorContext: actorContextForStaleTask(actorContext, detail.task, activeClaimRecords(detail), card.state),
             };
-            return { card: nextCard, detail };
+            const nextDetail = {
+                ...detail,
+                nextActions: [],
+            };
+            nextDetail.nextActions = (0, dashboardActions_1.projectLoomDashboardNextActions)({
+                card: nextCard,
+                detail: nextDetail,
+                actor: actorContext,
+            });
+            nextCard.summaryPreview = (0, dashboardActions_1.buildLoomDashboardSummaryPreview)({ card: nextCard, detail: nextDetail });
+            nextCard.nextAction = (0, dashboardActions_1.selectLoomDashboardCardAction)(nextDetail.nextActions);
+            return { card: nextCard, detail: nextDetail };
         })
             .filter((pair) => Boolean(pair))
             .filter(({ card, detail }) => matchesStaleFilters(card, detail, filters));

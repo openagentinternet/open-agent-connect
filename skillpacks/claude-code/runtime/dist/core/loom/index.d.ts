@@ -19,6 +19,8 @@ export * from './deliveryWorkflow';
 export * from './reviewWorkflow';
 export * from './dashboardTypes';
 export * from './dashboardIdentity';
+export * from './dashboardActions';
 export * from './dashboardAggregation';
 export * from './dashboardStore';
 export * from './dashboardService';
+export * from './uiActionService';

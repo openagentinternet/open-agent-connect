@@ -10,26 +10,19 @@ export function buildLoomPageDefinition(): LocalUiPageDefinition {
     panels: [],
     contentHtml: `
       <section class="loom-shell" data-loom-shell>
+        <section class="loom-board-shell" aria-label="Loom board">
         <section class="loom-toolbar" aria-label="Loom board controls">
           <div class="loom-toolbar-main">
-            <div>
-              <div class="loom-kicker">Loom Board</div>
-              <h1>Task operations</h1>
+            <div class="loom-title-block">
+              <h1>Loom</h1>
+              <span class="loom-scope-label" data-loom-scope-label>Global</span>
             </div>
-            <button type="button" class="loom-icon-button loom-refresh" data-loom-refresh title="Refresh dashboard" aria-label="Refresh dashboard">↻</button>
+            <div class="loom-toolbar-actions">
+              <button type="button" class="loom-action-button" data-loom-new-task title="New task">New task</button>
+              <button type="button" class="loom-icon-button loom-refresh" data-loom-refresh title="Refresh dashboard" aria-label="Refresh dashboard">↻</button>
+            </div>
           </div>
-          <div class="loom-toolbar-context">
-            <div class="loom-context-item">
-              <span>Actor</span>
-              <strong data-loom-actor>Loading...</strong>
-            </div>
-            <div class="loom-context-item">
-              <span>Last refresh</span>
-              <strong data-loom-updated>Loading...</strong>
-            </div>
-            <div class="loom-context-warning" data-loom-stale-warning></div>
-          </div>
-          <div class="loom-filters" aria-label="Loom board filters">
+          <div class="loom-filters" aria-label="Loom board filters" hidden>
             <label>
               <span>State</span>
               <select data-loom-state-filter>
@@ -60,6 +53,7 @@ export function buildLoomPageDefinition(): LocalUiPageDefinition {
           </div>
           <div class="loom-status-line">
             <span data-loom-status>Loading dashboard...</span>
+            <span class="loom-context-warning" data-loom-stale-warning></span>
             <span data-loom-error></span>
           </div>
         </section>
@@ -68,13 +62,58 @@ export function buildLoomPageDefinition(): LocalUiPageDefinition {
 
         <section class="loom-workspace">
           <div class="loom-board" data-loom-board aria-label="Loom task board"></div>
-          <aside class="loom-detail" data-loom-detail aria-label="Selected Loom task detail">
-            <div class="loom-empty-detail">
-              <h2>Select a task</h2>
-              <p>Task requirements, Bot identities, timeline, warnings, and handoff commands will appear here.</p>
-            </div>
-          </aside>
         </section>
+        </section>
+        <div class="loom-detail-modal" data-loom-detail-modal hidden>
+          <section class="loom-detail-dialog" data-loom-detail-dialog role="dialog" aria-modal="true" aria-labelledby="loom-detail-title" tabindex="-1">
+            <header class="loom-modal-head">
+              <div>
+                <span class="loom-kicker">Selected task</span>
+                <h2 id="loom-detail-title" data-loom-detail-title>Loom task detail</h2>
+              </div>
+              <button type="button" class="loom-icon-button loom-detail-close" data-loom-detail-close aria-label="Close task detail">×</button>
+            </header>
+            <div class="loom-modal-grid">
+              <div class="loom-detail-body" data-loom-detail-body></div>
+              <aside class="loom-detail-actions" data-loom-detail-actions aria-label="Task actions"></aside>
+            </div>
+          </section>
+        </div>
+        <div class="loom-new-task-modal" data-loom-new-task-modal hidden>
+          <section class="loom-new-task-dialog" data-loom-new-task-dialog role="dialog" aria-modal="true" aria-labelledby="loom-new-task-title" tabindex="-1">
+            <header class="loom-modal-head">
+              <div>
+                <span class="loom-kicker">Publish task</span>
+                <h2 id="loom-new-task-title">New Loom task</h2>
+              </div>
+              <button type="button" class="loom-icon-button loom-detail-close" data-loom-new-task-close aria-label="Close new task">×</button>
+            </header>
+            <form class="loom-new-task-form" data-loom-new-task-form>
+              <div class="loom-new-task-fields">
+                <label><span>From</span><input data-loom-new-task-from name="from" autocomplete="off" /></label>
+                <label><span>Title</span><input data-loom-new-task-title name="title" autocomplete="off" /></label>
+                <label class="loom-field-wide"><span>Requirement</span><textarea data-loom-new-task-requirement name="requirement" rows="5"></textarea></label>
+                <label><span>Requirement type</span><select data-loom-new-task-requirement-content-type name="requirementContentType"><option value="text/markdown">text/markdown</option></select></label>
+                <label class="loom-field-wide"><span>Criteria</span><textarea data-loom-new-task-criteria name="criteria" rows="4"></textarea></label>
+                <label><span>Criteria type</span><select data-loom-new-task-criteria-content-type name="criteriaContentType"><option value="text/markdown">text/markdown</option></select></label>
+                <label class="loom-field-wide"><span>Repo URI</span><input data-loom-new-task-repo-uri name="repoUri" autocomplete="off" /></label>
+                <label><span>Project base</span><select data-loom-new-task-project-base name="projectBase"><option value="github">github</option></select></label>
+                <label><span>Base branch</span><input data-loom-new-task-base-branch name="baseBranch" value="main" autocomplete="off" /></label>
+                <label><span>Bounty amount</span><input data-loom-new-task-bounty-amount name="bountyAmount" inputmode="decimal" autocomplete="off" /></label>
+                <label><span>Currency</span><select data-loom-new-task-currency name="currency"><option value="SPACE">SPACE</option><option value="BTC">BTC</option><option value="DOGE">DOGE</option><option value="OPCAT">OPCAT</option></select></label>
+                <label><span>Deadline</span><input data-loom-new-task-deadline name="deadline" type="datetime-local" /></label>
+                <label class="loom-field-wide"><span>Tags</span><input data-loom-new-task-tags name="tags" autocomplete="off" /></label>
+                <label class="loom-field-wide"><span>Attachments</span><textarea data-loom-new-task-attachments name="attachments" rows="3"></textarea></label>
+              </div>
+              <div class="loom-new-task-summary" data-loom-new-task-summary></div>
+              <div class="loom-new-task-error" data-loom-new-task-error role="alert" aria-live="polite"></div>
+              <footer class="loom-new-task-actions">
+                <button type="submit" class="loom-action-button" data-loom-new-task-preview>Preview</button>
+                <button type="button" class="loom-action-button" data-loom-new-task-confirm disabled>Confirm publish</button>
+              </footer>
+            </form>
+          </section>
+        </div>
       </section>
     `,
     script: buildLoomPageScript(),
@@ -86,15 +125,42 @@ export function buildLoomPageScript(): string {
   const elements = {
     status: document.querySelector('[data-loom-status]'),
     refresh: document.querySelector('[data-loom-refresh]'),
-    actor: document.querySelector('[data-loom-actor]'),
-    updated: document.querySelector('[data-loom-updated]'),
+    newTask: document.querySelector('[data-loom-new-task]'),
+    scopeLabel: document.querySelector('[data-loom-scope-label]'),
     staleWarning: document.querySelector('[data-loom-stale-warning]'),
     stateFilter: document.querySelector('[data-loom-state-filter]'),
     roleFilter: document.querySelector('[data-loom-role-filter]'),
     queryFilter: document.querySelector('[data-loom-query-filter]'),
     metrics: document.querySelector('[data-loom-metrics]'),
     board: document.querySelector('[data-loom-board]'),
-    detail: document.querySelector('[data-loom-detail]'),
+    detailModal: document.querySelector('[data-loom-detail-modal]'),
+    detailDialog: document.querySelector('[data-loom-detail-dialog]'),
+    detailTitle: document.querySelector('[data-loom-detail-title]'),
+    detailBody: document.querySelector('[data-loom-detail-body]'),
+    detailActions: document.querySelector('[data-loom-detail-actions]'),
+    detailClose: document.querySelector('[data-loom-detail-close]'),
+    newTaskModal: document.querySelector('[data-loom-new-task-modal]'),
+    newTaskDialog: document.querySelector('[data-loom-new-task-dialog]'),
+    newTaskForm: document.querySelector('[data-loom-new-task-form]'),
+    newTaskClose: document.querySelector('[data-loom-new-task-close]'),
+    newTaskFrom: document.querySelector('[data-loom-new-task-from]'),
+    newTaskTitle: document.querySelector('[data-loom-new-task-title]'),
+    newTaskRequirement: document.querySelector('[data-loom-new-task-requirement]'),
+    newTaskRequirementContentType: document.querySelector('[data-loom-new-task-requirement-content-type]'),
+    newTaskCriteria: document.querySelector('[data-loom-new-task-criteria]'),
+    newTaskCriteriaContentType: document.querySelector('[data-loom-new-task-criteria-content-type]'),
+    newTaskRepoUri: document.querySelector('[data-loom-new-task-repo-uri]'),
+    newTaskProjectBase: document.querySelector('[data-loom-new-task-project-base]'),
+    newTaskBaseBranch: document.querySelector('[data-loom-new-task-base-branch]'),
+    newTaskBountyAmount: document.querySelector('[data-loom-new-task-bounty-amount]'),
+    newTaskCurrency: document.querySelector('[data-loom-new-task-currency]'),
+    newTaskDeadline: document.querySelector('[data-loom-new-task-deadline]'),
+    newTaskTags: document.querySelector('[data-loom-new-task-tags]'),
+    newTaskAttachments: document.querySelector('[data-loom-new-task-attachments]'),
+    newTaskPreview: document.querySelector('[data-loom-new-task-preview]'),
+    newTaskConfirm: document.querySelector('[data-loom-new-task-confirm]'),
+    newTaskSummary: document.querySelector('[data-loom-new-task-summary]'),
+    newTaskError: document.querySelector('[data-loom-new-task-error]'),
     error: document.querySelector('[data-loom-error]'),
   };
   const boardColumns = [
@@ -107,6 +173,9 @@ export function buildLoomPageScript(): string {
   ];
   let currentModel = null;
   let selectedTaskPinId = '';
+  let selectedCardElement = null;
+  let previewedNewTask = null;
+  const detailActionStates = new Map();
 
   const esc = (value) => String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -128,6 +197,33 @@ export function buildLoomPageScript(): string {
       copyValue: normalized,
     };
   };
+  const firstText = (...values) => values.map(text).find(Boolean) || '';
+  const nestedTaskPinId = (value, seen) => {
+    const stack = seen || [];
+    if (!value || typeof value !== 'object' || stack.includes(value)) return '';
+    const nextSeen = [...stack, value];
+    const direct = firstText(value.taskPinId, value.pinId);
+    if (direct) return direct;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = nestedTaskPinId(item, nextSeen);
+        if (found) return found;
+      }
+      return '';
+    }
+    for (const key of ['task', 'record', 'write', 'chainWrite', 'published', 'result', 'data', 'chain', 'dashboardAfterAction']) {
+      const found = nestedTaskPinId(value[key], nextSeen);
+      if (found) return found;
+    }
+    return '';
+  };
+  const taskPinIdFromActionResult = (result) => {
+    const root = obj(result);
+    const data = obj(root.data);
+    return firstText(data.taskPinId, root.taskPinId, data.pinId, root.pinId)
+      || nestedTaskPinId(data)
+      || nestedTaskPinId(root);
+  };
   const setText = (target, value) => {
     if (target) target.textContent = value;
   };
@@ -137,6 +233,10 @@ export function buildLoomPageScript(): string {
   const setStatus = (value, tone) => {
     setText(elements.status, value);
     if (elements.status) elements.status.dataset.tone = tone || 'neutral';
+  };
+  const fieldValue = (target) => target ? text(target.value) : '';
+  const setFieldValue = (target, value) => {
+    if (target) target.value = value;
   };
   const fromQuery = () => new URLSearchParams(window.location.search || '').get('from') || '';
   const relativeTime = (timestamp) => {
@@ -194,6 +294,10 @@ export function buildLoomPageScript(): string {
     const bounty = obj(value);
     return [text(bounty.amount), text(bounty.currency)].filter(Boolean).join(' ') || 'Bounty not set';
   };
+  const previewText = (...values) => {
+    const normalized = values.map(text).find(Boolean) || '';
+    return normalized.length <= 96 ? normalized : normalized.slice(0, 93).trimEnd() + '...';
+  };
   const repoLabel = (value) => {
     const repo = obj(value);
     const repoUri = text(repo.repoUri);
@@ -211,7 +315,7 @@ export function buildLoomPageScript(): string {
       label: repoLabel(repo),
     };
   };
-  const cardModel = (value) => {
+  const cardModel = (value, hasActor) => {
     const card = obj(value);
     const taskPinId = text(card.taskPinId);
     if (!taskPinId) return null;
@@ -230,15 +334,34 @@ export function buildLoomPageScript(): string {
       repo: repoModel(card.repo),
       repoLabel: repoLabel(card.repo),
       tags: arr(card.tags).filter((item) => typeof item === 'string'),
+      summaryPreview: previewText(card.latestStatusSummary, card.summary, card.description),
+      activityLabel: num(card.updatedAt) ? 'updated ' + relativeTime(num(card.updatedAt)) : '',
       latestStatusSummary: text(card.latestStatusSummary),
       prUrl: text(card.prUrl),
       paymentTxId: compact(card.paymentTxId),
       activeClaimCount: num(card.activeClaimCount),
       warningCount,
       warningLabel: countLabel(warningCount, 'warning', 'warnings'),
-      needsAction: obj(card.actorContext).needsMyAction === true,
+      actionLabel: hasActor && obj(card.actorContext).needsMyAction === true ? 'Needs my action' : '',
       updatedAt: num(card.updatedAt),
       createdAt: num(card.createdAt),
+    };
+  };
+  const nextActionModel = (value) => {
+    const action = obj(value);
+    const id = text(action.id);
+    if (!id) return null;
+    const tone = text(action.tone);
+    const actorRole = text(action.actorRole);
+    return {
+      id,
+      label: text(action.label) || id,
+      tone: ['primary', 'neutral', 'warning', 'danger'].includes(tone) ? tone : 'neutral',
+      actorRole: ['requester', 'developer', 'any'].includes(actorRole) ? actorRole : 'any',
+      requiresActor: action.requiresActor === true,
+      requiresConfirmation: action.requiresConfirmation !== false,
+      disabledReason: text(action.disabledReason),
+      cliFallback: text(action.cliFallback),
     };
   };
   const stringList = (value) => arr(value).filter((entry) => typeof entry === 'string');
@@ -307,6 +430,7 @@ export function buildLoomPageScript(): string {
           commits: commitModels(item.commits),
         };
       }),
+      nextActions: arr(detail.nextActions).map(nextActionModel).filter(Boolean),
       validRecords: {
         statuses: recordModels(validRecords.statuses),
         deliveries: recordModels(validRecords.deliveries),
@@ -330,13 +454,21 @@ export function buildLoomPageScript(): string {
     const dashboard = dashboardFrom(payload);
     const summary = obj(dashboard.summary);
     const rawColumns = arr(dashboard.columns);
-    const cardsFromTasks = arr(dashboard.tasks).map(cardModel).filter(Boolean);
-    const cardsFromColumns = rawColumns.flatMap((column) => arr(obj(column).cards)).map(cardModel).filter(Boolean);
+    const actor = obj(dashboard.actor);
+    const actorModel = {
+      profileSlug: text(actor.profileSlug),
+      displayLabel: text(actor.profileSlug) || compact(actor.globalMetaId).label || compact(actor.address).label || 'Global Loom',
+      globalMetaId: compact(actor.globalMetaId),
+      address: compact(actor.address),
+    };
+    const hasActor = Boolean(actorModel.profileSlug || actorModel.globalMetaId.copyValue || actorModel.address.copyValue);
+    const cardsFromTasks = arr(dashboard.tasks).map((card) => cardModel(card, hasActor)).filter(Boolean);
+    const cardsFromColumns = rawColumns.flatMap((column) => arr(obj(column).cards)).map((card) => cardModel(card, hasActor)).filter(Boolean);
     const cards = cardsFromTasks.length ? cardsFromTasks : cardsFromColumns;
     const cardsByColumn = new Map();
     rawColumns.forEach((column) => {
       const columnObj = obj(column);
-      const columnCards = arr(columnObj.cards).map(cardModel).filter(Boolean);
+      const columnCards = arr(columnObj.cards).map((card) => cardModel(card, hasActor)).filter(Boolean);
       if (columnCards.length) cardsByColumn.set(text(columnObj.id), columnCards);
     });
     cards.forEach((card) => {
@@ -344,17 +476,11 @@ export function buildLoomPageScript(): string {
         cardsByColumn.set(card.columnId, cards.filter((entry) => entry.columnId === card.columnId));
       }
     });
-    const actor = obj(dashboard.actor);
     const refresh = obj(dashboard.refresh);
     const updatedAt = num(refresh.updatedAt) || num(dashboard.updatedAt);
     const warning = text(refresh.warning) || (updatedAt && Date.now() - updatedAt > 900000 ? 'Dashboard data may be stale.' : '');
     return {
-      actor: {
-        profileSlug: text(actor.profileSlug),
-        displayLabel: text(actor.profileSlug) || compact(actor.globalMetaId).label || compact(actor.address).label || 'No active Bot',
-        globalMetaId: compact(actor.globalMetaId),
-        address: compact(actor.address),
-      },
+      actor: actorModel,
       summary: {
         metrics: [
           ['totalTasks', 'Total tasks', num(summary.totalTasks), false],
@@ -398,29 +524,38 @@ export function buildLoomPageScript(): string {
     return '<span class="loom-avatar loom-avatar-fallback">' + esc(bot.initials) + '</span>';
   };
   const botInline = (bot, label) => '<div class="loom-bot"><div>' + avatar(bot) + '</div><div class="loom-bot-text"><span>' + esc(label) + '</span><strong>' + esc(bot.displayName) + '</strong><small>' + esc(bot.globalMetaId || bot.fallbackLabel) + '</small></div></div>';
+  const cardBotInline = (bot, label) => '<div class="loom-card-bot">' + avatar(bot) + '<span>' + esc(label) + '</span><strong>' + esc(bot.displayName) + '</strong></div>';
+  const participantBlock = (bot, label, payoutAddress) => {
+    if (!bot) return '<div class="loom-bot loom-bot-empty">No ' + esc(label.toLowerCase()) + '</div>';
+    return '<div class="loom-participant">' +
+      botInline(bot, label) +
+      '<div class="loom-participant-meta">' +
+      (bot.globalMetaId ? '<span>GMID: <code>' + esc(bot.globalMetaId) + '</code></span>' : '') +
+      (bot.address ? '<span>Address: <code>' + esc(bot.address) + '</code></span>' : '') +
+      (payoutAddress ? '<span>Payout: <code>' + esc(payoutAddress) + '</code></span>' : '') +
+      '</div>' +
+      '</div>';
+  };
   const renderMetrics = () => {
-    setHtml(elements.metrics, currentModel.summary.metrics.map((metric) => (
+    const visibleMetrics = currentModel.summary.metrics.filter((metric) => (
+      ['totalTasks', 'open', 'working', 'review', 'revision', 'invalidRecords'].includes(metric[0])
+    ));
+    setHtml(elements.metrics, visibleMetrics.map((metric) => (
       '<article class="loom-metric" data-tone="' + (metric[3] ? 'warning' : 'neutral') + '">' +
       '<span>' + esc(metric[1]) + '</span>' +
-      '<strong>' + esc(Number(metric[2]).toLocaleString('en-US')) + '</strong>' +
+      '<strong>' + esc(metric[0] === 'totalTasks' ? countLabel(Number(metric[2]), 'task', 'tasks') : Number(metric[2]).toLocaleString('en-US')) + '</strong>' +
       '</article>'
     )).join(''));
   };
   const renderCard = (card) => (
     '<article class="loom-task-card' + (card.taskPinId === selectedTaskPinId ? ' is-selected' : '') + '" data-loom-card="' + esc(card.taskPinId) + '" tabindex="0">' +
     '<div class="loom-card-top"><h3>' + esc(card.title) + '</h3><span class="loom-state" data-tone="' + esc(card.stateTone) + '">' + esc(card.stateLabel) + '</span></div>' +
-    '<div class="loom-card-pin"><span>' + esc(card.taskPin.label) + '</span>' + copyButton('Copy', card.taskPin.copyValue) + '</div>' +
-    '<div class="loom-card-bots">' + botInline(card.requester, 'Requester') + (card.developer ? botInline(card.developer, 'Developer') : '<div class="loom-bot loom-bot-empty">No developer claim</div>') + '</div>' +
-    '<div class="loom-card-meta"><span>' + esc(card.bountyLabel) + '</span><span>' + esc(card.repoLabel) + '</span></div>' +
-    (card.tags.length ? '<div class="loom-tag-row">' + card.tags.slice(0, 4).map((tag) => '<span class="loom-chip">' + esc(tag) + '</span>').join('') + '</div>' : '') +
-    (card.latestStatusSummary ? '<p>' + esc(card.latestStatusSummary) + '</p>' : '') +
+    (card.summaryPreview ? '<p>' + esc(card.summaryPreview) + '</p>' : '') +
+    '<div class="loom-card-bots">' + cardBotInline(card.requester, 'Requester') + (card.developer ? cardBotInline(card.developer, 'Developer') : '<div class="loom-card-bot loom-bot-empty">No developer</div>') + '</div>' +
     '<div class="loom-card-footer">' +
-    (card.updatedAt ? '<span class="loom-chip">Updated ' + esc(relativeTime(card.updatedAt)) + '</span>' : '') +
-    (card.activeClaimCount ? '<span class="loom-chip">' + esc(countLabel(card.activeClaimCount, 'claim', 'claims')) + '</span>' : '') +
-    (card.paymentTxId.copyValue ? '<span class="loom-chip">Paid ' + esc(card.paymentTxId.label) + '</span>' + copyButton('Copy tx', card.paymentTxId.copyValue) : '') +
-    (card.needsAction ? '<span class="loom-chip warning">Needs my action</span>' : '') +
+    (card.activityLabel ? '<span class="loom-chip">' + esc(card.activityLabel) + '</span>' : '') +
+    (card.actionLabel ? '<span class="loom-chip warning">' + esc(card.actionLabel) + '</span>' : '') +
     (card.warningCount ? '<span class="loom-chip warning">' + esc(card.warningLabel) + '</span>' : '') +
-    (card.prUrl ? safeExternalLink(card.prUrl, isHttpUrl(card.prUrl) ? 'PR ↗' : card.prUrl, 'loom-chip') : '') +
     '</div>' +
     '</article>'
   );
@@ -431,7 +566,7 @@ export function buildLoomPageScript(): string {
     }
     setHtml(elements.board, currentModel.columns.map((column) => (
       '<section class="loom-column" data-column="' + esc(column.id) + '">' +
-      '<header><h2>' + esc(column.title) + '</h2><span>' + String(column.cards.length) + '</span></header>' +
+      '<header><h2>' + esc(column.title) + '</h2><span>' + esc(countLabel(column.cards.length, 'task', 'tasks')) + '</span></header>' +
       '<div class="loom-column-list">' + (column.cards.length ? column.cards.map(renderCard).join('') : '<p class="loom-empty-column">No tasks</p>') + '</div>' +
       '</section>'
     )).join(''));
@@ -544,20 +679,621 @@ export function buildLoomPageScript(): string {
         '</div>';
     }).join('') + '</section>'
   ) : '';
-  const renderDetail = () => {
-    const detail = currentModel.details.find((entry) => entry.taskPinId === selectedTaskPinId) || null;
-    const card = currentModel.cards.find((entry) => entry.taskPinId === selectedTaskPinId) || currentModel.cards[0] || null;
-    if (!detail || !card) {
-      setHtml(elements.detail, '<div class="loom-empty-detail"><h2>Select a task</h2><p>Task requirements, Bot identities, timeline, warnings, and handoff commands will appear here.</p></div>');
+  const renderRawRecordIndex = (detail) => {
+    const groups = [
+      ['Status', detail.validRecords.statuses],
+      ['Delivery', detail.validRecords.deliveries],
+      ['Acceptance', detail.validRecords.acceptances],
+      ['Claim reject', detail.validRecords.claimRejects],
+    ];
+    const rows = groups.flatMap(([label, records]) => records.map((record) => {
+      const payload = obj(record.payload);
+      const summary = label === 'Claim reject' ? text(payload.reason) : '';
+      return '<li><strong>' + esc(label) + '</strong>' +
+        (summary ? '<p>' + esc(summary) + '</p>' : '') +
+        renderRecordPin(record) +
+        renderRecordAuthor(record) +
+        '</li>';
+    }));
+    return rows.length ? '<ul class="loom-raw-index">' + rows.join('') + '</ul>' : '<p>No raw records available.</p>';
+  };
+  const normalizeList = (value) => {
+    const seen = new Set();
+    return String(value || '').split(/[,\\n]/u).map((entry) => entry.trim()).filter(Boolean).filter((entry) => {
+      const key = entry.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  const validateBountyAmount = (value) => /^(?:[1-9]\\d*(?:\\.\\d+)?|0?\\.\\d+)$/u.test(value) && Number(value) > 0;
+  const allowedCurrencies = ['SPACE', 'BTC', 'DOGE', 'OPCAT'];
+  const validAttachmentUri = (value) => {
+    const uri = text(value);
+    return uri.startsWith('metafile://') && uri.slice('metafile://'.length).trim().length > 0;
+  };
+  const newTaskPreviewKey = (entry) => JSON.stringify({ from: entry.from, payload: entry.payload });
+  const newTaskPayload = () => {
+    const from = fieldValue(elements.newTaskFrom);
+    const title = fieldValue(elements.newTaskTitle);
+    const requirement = fieldValue(elements.newTaskRequirement);
+    const requirementContentType = fieldValue(elements.newTaskRequirementContentType) || 'text/markdown';
+    const criteria = fieldValue(elements.newTaskCriteria);
+    const criteriaContentType = fieldValue(elements.newTaskCriteriaContentType) || 'text/markdown';
+    const repoUri = fieldValue(elements.newTaskRepoUri);
+    const projectBase = fieldValue(elements.newTaskProjectBase) || 'github';
+    const baseBranch = fieldValue(elements.newTaskBaseBranch) || 'main';
+    const amount = fieldValue(elements.newTaskBountyAmount);
+    const currency = fieldValue(elements.newTaskCurrency);
+    const deadlineValue = fieldValue(elements.newTaskDeadline);
+    const tags = normalizeList(elements.newTaskTags ? elements.newTaskTags.value : '');
+    const attachments = normalizeList(elements.newTaskAttachments ? elements.newTaskAttachments.value : '');
+    const errors = [];
+    [
+      ['From', from],
+      ['Title', title],
+      ['Requirement', requirement],
+      ['Criteria', criteria],
+      ['Repo URI', repoUri],
+      ['Base branch', baseBranch],
+      ['Bounty amount', amount],
+      ['Currency', currency],
+    ].forEach(([label, value]) => {
+      if (!value) errors.push(label + ' is required.');
+    });
+    if (amount && !validateBountyAmount(amount)) errors.push('Bounty amount must be a positive decimal.');
+    if (currency && !allowedCurrencies.includes(currency)) errors.push('Currency must be SPACE, BTC, DOGE, or OPCAT.');
+    if (attachments.some((uri) => !validAttachmentUri(uri))) errors.push('Attachments must use metafile:// URIs with a non-empty suffix.');
+    const payload = {
+      title,
+      requirementContentType,
+      requirement,
+      criteriaContentType,
+      criteria,
+      projectBase,
+      project: { repoUri, baseBranch },
+      bounty: { amount, currency },
+    };
+    if (deadlineValue) {
+      const deadline = Date.parse(deadlineValue);
+      if (Number.isFinite(deadline)) payload.deadline = deadline;
+      else errors.push('Deadline must be a valid date.');
+    }
+    if (tags.length) payload.tags = tags;
+    if (attachments.length && !attachments.some((uri) => !validAttachmentUri(uri))) payload.attachments = attachments;
+    return { from, payload, errors };
+  };
+  const actionErrorMessage = (payload, fallback) => {
+    const root = obj(payload);
+    return text(root.message) || text(root.code) || fallback;
+  };
+  const renderNewTaskSummary = (from, payload, result) => {
+    const root = obj(result);
+    const data = obj(root.data);
+    const preview = obj(data.preview);
+    const chain = obj(data.chain || preview.chain);
+    const cliFallback = text(data.cliFallback) || text(preview.cliFallback);
+    setHtml(elements.newTaskSummary,
+      '<section class="loom-new-task-confirmation">' +
+      '<h3>Preview</h3>' +
+      '<dl>' +
+      '<div><dt>Actor</dt><dd>' + esc(from) + '</dd></div>' +
+      '<div><dt>Title</dt><dd>' + esc(payload.title) + '</dd></div>' +
+      '<div><dt>Repo</dt><dd>' + esc(repoLabel(payload.project)) + '</dd></div>' +
+      '<div><dt>Bounty</dt><dd>' + esc(payload.bounty.amount + ' ' + payload.bounty.currency) + '</dd></div>' +
+      (chain.path ? '<div><dt>Chain</dt><dd>' + esc(chain.path) + '</dd></div>' : '') +
+      (chain.txId ? '<div><dt>Tx</dt><dd>' + esc(chain.txId) + '</dd></div>' : '') +
+      (cliFallback ? '<div><dt>CLI</dt><dd><code>' + esc(cliFallback) + '</code></dd></div>' : '') +
+      '</dl>' +
+      '</section>'
+    );
+  };
+  const resetNewTaskPreview = () => {
+    previewedNewTask = null;
+    if (elements.newTaskConfirm) elements.newTaskConfirm.disabled = true;
+    setHtml(elements.newTaskSummary, '');
+  };
+  const openNewTaskModal = () => {
+    resetNewTaskPreview();
+    setText(elements.newTaskError, '');
+    setFieldValue(elements.newTaskFrom, fieldValue(elements.newTaskFrom) || fromQuery());
+    setFieldValue(elements.newTaskBaseBranch, fieldValue(elements.newTaskBaseBranch) || 'main');
+    setFieldValue(elements.newTaskCurrency, fieldValue(elements.newTaskCurrency) || 'SPACE');
+    setFieldValue(elements.newTaskRequirementContentType, fieldValue(elements.newTaskRequirementContentType) || 'text/markdown');
+    setFieldValue(elements.newTaskCriteriaContentType, fieldValue(elements.newTaskCriteriaContentType) || 'text/markdown');
+    setFieldValue(elements.newTaskProjectBase, fieldValue(elements.newTaskProjectBase) || 'github');
+    if (elements.newTaskModal) {
+      elements.newTaskModal.hidden = false;
+      elements.newTaskModal.dataset.state = 'open';
+    }
+    if (elements.newTaskDialog && elements.newTaskDialog.focus) elements.newTaskDialog.focus();
+  };
+  const closeNewTaskModal = (returnFocus) => {
+    if (elements.newTaskModal) {
+      elements.newTaskModal.hidden = true;
+      elements.newTaskModal.dataset.state = 'closed';
+    }
+    if (returnFocus !== false && elements.newTask && elements.newTask.focus) elements.newTask.focus();
+  };
+  const postNewTaskAction = async (confirm) => {
+    const current = newTaskPayload();
+    setText(elements.newTaskError, '');
+    if (current.errors.length) {
+      setText(elements.newTaskError, current.errors.join(' '));
+      resetNewTaskPreview();
       return;
+    }
+    if (confirm && !previewedNewTask) return;
+    if (confirm && previewedNewTask.previewKey !== newTaskPreviewKey(current)) {
+      resetNewTaskPreview();
+      return;
+    }
+    const next = confirm ? previewedNewTask : current;
+    const button = confirm ? elements.newTaskConfirm : elements.newTaskPreview;
+    if (button) button.disabled = true;
+    try {
+      const body = { action: 'postTask', from: next.from, confirm: Boolean(confirm), payload: next.payload };
+      const response = await fetch('/api/loom/actions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json();
+      if (!response.ok || result.ok === false) throw new Error(actionErrorMessage(result, confirm ? 'Task publish failed.' : 'Task preview failed.'));
+      renderNewTaskSummary(next.from, next.payload, result);
+      if (confirm) {
+        const taskPinId = taskPinIdFromActionResult(result);
+        await refreshDashboard();
+        const selectedPublishedTask = taskPinId ? selectDashboardTask(taskPinId) : false;
+        closeNewTaskModal(!selectedPublishedTask);
+        setStatus('Task published.', 'ready');
+        return;
+      }
+      previewedNewTask = { ...next, previewKey: newTaskPreviewKey(next) };
+      if (elements.newTaskConfirm) elements.newTaskConfirm.disabled = false;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setText(elements.newTaskError, message);
+    } finally {
+      if (button) button.disabled = false;
+      if (!confirm && previewedNewTask && elements.newTaskConfirm) elements.newTaskConfirm.disabled = false;
+    }
+  };
+  const closeDetailModal = (returnFocus) => {
+    if (elements.detailModal) {
+      elements.detailModal.hidden = true;
+      elements.detailModal.dataset.state = 'closed';
+      elements.detailModal.dataset.confirmationActive = '';
+    }
+    if (returnFocus !== false && selectedCardElement && selectedCardElement.focus) {
+      selectedCardElement.focus();
+    }
+  };
+  const latestDeliveryPinId = (detail) => {
+    const deliveryRecords = detail.validRecords.deliveries
+      .filter((record) => record.pin.copyValue)
+      .sort((left, right) => right.timestamp - left.timestamp);
+    if (deliveryRecords.length) return deliveryRecords[0].pin.copyValue;
+    const deliveryEvents = detail.timeline
+      .filter((entry) => entry.kind === 'delivery' && entry.pin.copyValue)
+      .sort((left, right) => right.timestamp - left.timestamp);
+    return deliveryEvents.length ? deliveryEvents[0].pin.copyValue : '';
+  };
+  const activeClaim = (detail) => detail.claims.find((claim) => claim.active && claim.pin.copyValue) || detail.claims.find((claim) => claim.pin.copyValue) || null;
+  const localWorkflowForClaim = (detail, claimPinId) => {
+    const workflows = arr(detail.localWorkflow);
+    if (!workflows.length) return null;
+    const matching = claimPinId ? workflows.filter((workflow) => text(workflow.claimPinId) === claimPinId) : [];
+    return (matching.length ? matching : workflows).at(-1) || null;
+  };
+  const developerActionWorkflow = (detail, body) => localWorkflowForClaim(detail, text(body.claimPinId) || (activeClaim(detail)?.pin.copyValue || ''));
+  const defaultPayoutAddress = (detail) => {
+    const claim = activeClaim(detail);
+    return firstText(claim && claim.payoutAddress, currentModel && currentModel.actor && currentModel.actor.address && currentModel.actor.address.copyValue);
+  };
+  const actionDefaults = (actionId) => {
+    if (actionId === 'acceptAndPay') return { score: 5, comment: 'Accepted.' };
+    if (actionId === 'requestRevision') return { score: 3, comment: 'Revision requested. Please address the review notes and submit a revised delivery.' };
+    if (actionId === 'reject') return { score: 1, comment: 'Rejected after review.' };
+    return { score: undefined, comment: '' };
+  };
+  const detailActionBody = (detail, action, confirm) => {
+    const from = fromQuery();
+    if (action.id === 'claimAndStart') {
+      const body = {
+        action: action.id,
+        from,
+        taskPinId: detail.taskPinId,
+        payoutAddress: defaultPayoutAddress(detail),
+        confirm: Boolean(confirm),
+      };
+      const claim = activeClaim(detail);
+      if (claim && claim.message) body.message = claim.message;
+      return body;
+    }
+    if (action.id === 'runDevRound') {
+      const claim = activeClaim(detail);
+      return {
+        action: action.id,
+        from,
+        taskPinId: detail.taskPinId,
+        claimPinId: claim ? claim.pin.copyValue : '',
+        roundNote: '',
+        confirm: Boolean(confirm),
+      };
+    }
+    if (action.id === 'deliver') {
+      const claim = activeClaim(detail);
+      const workflow = localWorkflowForClaim(detail, claim ? claim.pin.copyValue : '');
+      return {
+        action: action.id,
+        from,
+        taskPinId: detail.taskPinId,
+        claimPinId: claim ? claim.pin.copyValue : '',
+        prTitle: '',
+        deliverySummary: workflow && workflow.branchName ? 'Delivery from ' + workflow.branchName + '.' : '',
+        confirm: Boolean(confirm),
+      };
+    }
+    const defaults = actionDefaults(action.id);
+    const body = {
+      action: action.id,
+      from,
+      taskPinId: detail.taskPinId,
+      deliveryPinId: latestDeliveryPinId(detail),
+      confirm: Boolean(confirm),
+    };
+    if (defaults.score !== undefined) body.score = defaults.score;
+    if (defaults.comment) body.comment = defaults.comment;
+    return body;
+  };
+  const stableActionBodyKey = (body) => JSON.stringify(Object.keys(body || {}).sort().reduce((next, key) => {
+    next[key] = body[key];
+    return next;
+  }, {}));
+  const detailActionPreviewKey = (detail, action) => stableActionBodyKey(detailActionBody(detail, action, false));
+  const currentDetailFor = (detail) => {
+    const taskPinId = text(detail && detail.taskPinId);
+    return (currentModel && currentModel.details.find((entry) => entry.taskPinId === taskPinId)) || detail;
+  };
+  const currentCardFor = (card, detail) => {
+    const taskPinId = text((detail && detail.taskPinId) || (card && card.taskPinId));
+    return (currentModel && currentModel.cards.find((entry) => entry.taskPinId === taskPinId)) || card;
+  };
+  const currentActionFor = (detail, action) => arr(detail && detail.nextActions).find((entry) => entry.id === action.id) || action;
+  const detailActionStateFor = (detail) => {
+    const state = detailActionStates.get(detail.taskPinId);
+    if (!state) return null;
+    if (state.phase !== 'preview') return state;
+    const action = arr(detail && detail.nextActions).find((entry) => entry.id === (state.action || {}).id);
+    const key = action && !action.disabledReason ? detailActionPreviewKey(detail, action) : '';
+    if (!key || key !== state.previewKey) {
+      detailActionStates.delete(detail.taskPinId);
+      return null;
+    }
+    return state;
+  };
+  const resultData = (result) => obj(obj(result).data);
+  const previewData = (result) => {
+    const data = resultData(result);
+    return obj(data.preview || data);
+  };
+  const chainData = (result) => {
+    const data = resultData(result);
+    const preview = previewData(result);
+    return obj(data.chain || preview.chain);
+  };
+  const resultPaymentTxId = (result) => {
+    const data = resultData(result);
+    const preview = previewData(result);
+    return text(data.paymentTxId) || text(preview.paymentTxId);
+  };
+  const detailActionHasPostPaymentRecovery = (result) => {
+    const root = obj(result);
+    const data = resultData(result);
+    return text(root.code) === 'acceptance_write_failed_after_payment'
+      || data.paymentTxId !== undefined
+      || data.retryGuidance !== undefined
+      || data.acceptancePayload !== undefined;
+  };
+  const detailActionErrorMessage = (result, fallback) => {
+    const root = obj(result);
+    return text(root.message) || text(root.code) || fallback;
+  };
+  const repositoryLabel = (...values) => {
+    for (const value of values) {
+      const valueText = text(value);
+      if (valueText) return valueText;
+      const repo = obj(value);
+      const direct = firstText(repo.repoUri, repo.url, repo.htmlUrl, repo.fullName, repo.full_name);
+      if (direct) return direct;
+      const owner = firstText(repo.owner, repo.org, repo.organization);
+      const name = firstText(repo.name, repo.repo);
+      if (owner && name) return owner + '/' + name;
+    }
+    return '';
+  };
+  const pullRequestLabel = (...values) => {
+    for (const value of values) {
+      const valueText = text(value);
+      if (valueText) return valueText;
+      const pr = obj(value);
+      const direct = firstText(pr.url, pr.htmlUrl, pr.prUrl, pr.pullRequestUrl);
+      if (direct) return direct;
+      const title = text(pr.title);
+      if (title) return title;
+      const number = firstText(pr.number, pr.id);
+      if (number) return '#' + number;
+    }
+    return '';
+  };
+  const previewStringList = (...values) => values.flatMap((value) => Array.isArray(value) ? value.map(text).filter(Boolean) : [text(value)].filter(Boolean));
+  const renderPreviewRows = (body, result, detail) => {
+    const data = resultData(result);
+    const preview = previewData(result);
+    const chain = chainData(result);
+    const root = obj(result);
+    const workflow = developerActionWorkflow(detail, body);
+    const workflowPreview = obj(preview.preview);
+    const push = obj(data.push || preview.push);
+    const pullRequest = obj(data.pullRequest || preview.pullRequest);
+    const deliveryPayload = obj(data.deliveryPayload || preview.deliveryPayload);
+    const delivery = obj(deliveryPayload.delivery);
+    const repository = repositoryLabel(
+      data.repository,
+      preview.repository,
+      workflowPreview.repository,
+      data.repo,
+      preview.repo,
+      workflowPreview.repo,
+      data.githubRepository,
+      preview.githubRepository,
+      workflowPreview.githubRepository,
+      data.github,
+      preview.github,
+      workflowPreview.github,
+      pullRequest.repo,
+    );
+    const prTarget = firstText(
+      data.prUrl,
+      preview.prUrl,
+      workflowPreview.prUrl,
+      data.pullRequestUrl,
+      preview.pullRequestUrl,
+      workflowPreview.pullRequestUrl,
+      delivery.prUrl,
+      pullRequest.url,
+      pullRequest.htmlUrl,
+      pullRequest.prUrl,
+    )
+      || pullRequestLabel(data.pr, preview.pr, data.pullRequest, preview.pullRequest, data.githubPr, preview.githubPr);
+    const prTitle = firstText(data.prTitle, preview.prTitle, workflowPreview.prTitle, delivery.prTitle, pullRequest.title);
+    const prTargetSummary = [firstText(pullRequest.repo), firstText(pullRequest.baseBranch), firstText(pullRequest.head)]
+      .filter(Boolean)
+      .join(' ');
+    const llmSessionIds = previewStringList(data.llmSessionIds, preview.llmSessionIds, workflowPreview.llmSessionIds, workflow && workflow.llmSessionIds);
+    const processLogs = previewStringList(data.processLogPaths, preview.processLogPaths, workflowPreview.processLogPaths, data.processLogUris, preview.processLogUris, workflowPreview.processLogUris, workflow && workflow.processLogPaths, workflow && workflow.processLogUris);
+    const amount = firstText(preview.amount, preview.amountRaw, data.amount, data.amountRaw);
+    const currency = firstText(preview.currency, data.currency);
+    const payoutAddress = firstText(preview.payoutAddress, preview.toAddress, data.payoutAddress, data.toAddress);
+    const claimPinId = firstText(body.claimPinId, data.claimPinId, preview.claimPinId, workflowPreview.claimPinId);
+    const deliveryPinId = firstText(body.deliveryPinId, data.deliveryPinId, preview.deliveryPinId, workflowPreview.deliveryPinId);
+    const workspacePath = firstText(data.workspacePath, preview.workspacePath, workflowPreview.workspacePath, data.workspaceRepoPath, preview.workspaceRepoPath, workflowPreview.workspaceRepoPath, push.workspacePath, workflow && workflow.workspacePath);
+    const stagingRepoPath = firstText(data.stagingRepoPath, preview.stagingRepoPath, workflowPreview.stagingRepoPath);
+    const branchName = firstText(data.branchName, preview.branchName, workflowPreview.branchName, push.branchName, delivery.prBranch, workflow && workflow.branchName);
+    const rows = [
+      ['Actor', body.from || 'Global'],
+      ['Task PIN', body.taskPinId],
+      claimPinId ? ['Claim PIN', claimPinId] : null,
+      deliveryPinId ? ['Delivery PIN', deliveryPinId] : null,
+      body.payoutAddress ? ['Payout address', body.payoutAddress] : null,
+      workspacePath ? ['Workspace', workspacePath] : null,
+      stagingRepoPath ? ['Staging repo', stagingRepoPath] : null,
+      branchName ? ['Branch', branchName] : null,
+      repository ? ['Repository', repository] : null,
+      prTarget ? ['GitHub PR', prTarget] : null,
+      prTargetSummary ? ['PR target', prTargetSummary] : null,
+      prTitle && prTitle !== prTarget ? ['PR title', prTitle] : null,
+      llmSessionIds.length ? ['LLM sessions', llmSessionIds.join(' ')] : null,
+      processLogs.length ? ['Process logs', processLogs.join(' ')] : null,
+      amount ? ['Amount', amount] : null,
+      currency ? ['Currency', currency] : null,
+      payoutAddress && payoutAddress !== body.payoutAddress ? ['Preview payout', payoutAddress] : null,
+      firstText(chain.name, chain.chain) ? ['Chain', firstText(chain.name, chain.chain)] : null,
+      text(chain.path) ? ['Chain path', text(chain.path)] : null,
+      text(chain.txId) ? ['Tx', text(chain.txId)] : null,
+      text(root.code) ? ['Failure code', text(root.code)] : null,
+    ].filter(Boolean);
+    return '<dl>' + rows.map(([label, value]) => '<div><dt>' + esc(label) + '</dt><dd>' + esc(value) + '</dd></div>').join('') + '</dl>';
+  };
+  const renderDetailActionResult = (state) => {
+    if (!state) return '';
+    const body = state.body || {};
+    const action = state.action || {};
+    const result = obj(state.result);
+    const data = resultData(result);
+    const recovery = state.phase === 'error' && detailActionHasPostPaymentRecovery(result);
+    const title = state.phase === 'success'
+      ? 'Action completed'
+      : state.phase === 'error'
+        ? (recovery ? 'Payment recovery required' : 'Action failed')
+        : 'Preview';
+    const message = state.phase === 'error'
+      ? detailActionErrorMessage(result, 'Action failed.')
+      : state.phase === 'success'
+        ? 'Dashboard refreshed. Result is kept here for review.'
+        : 'Review the preview before confirming.';
+    const paymentTxId = resultPaymentTxId(result);
+    const cliFallback = text(data.cliFallback);
+    return '<section class="loom-action-confirmation" data-phase="' + esc(state.phase) + '">' +
+      '<h3>' + esc(title) + '</h3>' +
+      '<p>' + esc(message) + '</p>' +
+      (recovery ? '<p class="loom-action-warning">Do not pay again. The payment appears to have succeeded; use the recovery guidance to publish or retry only the acceptance write.</p>' : '') +
+      renderPreviewRows(body, result, state.detail || { localWorkflow: [], claims: [] }) +
+      (paymentTxId ? '<div class="loom-inline-copy"><code>' + esc(compact(paymentTxId).label) + '</code>' + copyButton('Copy payment txid', paymentTxId) + '</div>' : '') +
+      (text(data.retryGuidance) ? '<p class="loom-action-warning">' + esc(text(data.retryGuidance)) + '</p>' : '') +
+      (cliFallback ? '<div class="loom-inline-copy"><code>' + esc(cliFallback) + '</code>' + copyButton('Copy CLI', cliFallback) + '</div>' : '') +
+      (state.phase === 'preview' ? '<footer class="loom-action-confirm-footer"><button type="button" class="loom-action-button" data-loom-confirm-detail-action="' + esc(action.id) + '">Confirm ' + esc(action.label) + '</button><button type="button" class="loom-action-secondary" data-loom-cancel-detail-action="' + esc(action.id) + '">Cancel</button></footer>' : '') +
+      '</section>';
+  };
+  const prUrlForDetail = (card, detail) => {
+    const direct = text(card.prUrl);
+    if (isHttpUrl(direct)) return direct;
+    for (const record of detail.validRecords.deliveries) {
+      const payload = obj(record.payload);
+      const delivery = obj(payload.delivery);
+      const prUrl = firstText(delivery.prUrl, payload.prUrl);
+      if (isHttpUrl(prUrl)) return prUrl;
+    }
+    return '';
+  };
+  const renderActionButton = (action, prUrl) => {
+    if (action.id === 'openPr' && !prUrl) return '';
+    const disabled = action.disabledReason ? ' disabled="disabled" aria-disabled="true"' : '';
+    return '<div class="loom-detail-action-row" data-tone="' + esc(action.tone) + '">' +
+      '<button type="button" class="loom-detail-action-button" data-tone="' + esc(action.tone) + '" data-loom-detail-action="' + esc(action.id) + '"' + disabled + '>' + esc(action.label) + '</button>' +
+      (action.disabledReason ? '<small>' + esc(action.disabledReason) + '</small>' : '') +
+      (action.cliFallback ? '<div class="loom-inline-copy"><code>' + esc(action.cliFallback) + '</code>' + copyButton('Copy CLI', action.cliFallback) + '</div>' : '') +
+      '</div>';
+  };
+  const renderDetailActionPanel = (detail, card, handoffCommands) => {
+    const state = detailActionStateFor(detail);
+    const prUrl = prUrlForDetail(card, detail);
+    const unsafePrFallback = text(card.prUrl) && !isHttpUrl(card.prUrl)
+      ? '<span>' + esc(text(card.prUrl)) + '</span>'
+      : '';
+    const actionButtons = detail.nextActions.length
+      ? detail.nextActions.map((action) => renderActionButton(action, prUrl)).join('')
+      : '<p>' + esc(card.actionLabel || detail.stateLabel || 'No operator action selected.') + '</p>';
+    return '<section class="loom-detail-section"><h3>Action panel</h3><div class="loom-detail-action-list">' + actionButtons + '</div>' + renderDetailActionResult(state) + '</section>' +
+      '<section class="loom-detail-section"><h3>CLI fallback</h3><div class="loom-handoff">' +
+      (prUrl ? safeExternalLink(prUrl, 'Open PR ↗', '') : unsafePrFallback) +
+      handoffCommands.map((command) => '<div class="loom-inline-copy"><code>' + esc(command) + '</code>' + copyButton('Copy CLI', command) + '</div>').join('') +
+      '</div></section>';
+  };
+  const openPrAction = async (card, detail) => {
+    const prUrl = prUrlForDetail(card, detail);
+    if (!prUrl) return;
+    try {
+      if (window && typeof window.open === 'function') window.open(prUrl, '_blank', 'noreferrer');
+    } catch {}
+    try {
+      if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(prUrl);
+      }
+    } catch {}
+  };
+  const copyDetailActionFallback = async (action) => {
+    const value = text(action.cliFallback);
+    if (!value) return;
+    try {
+      if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(value);
+      }
+      setStatus('CLI fallback copied.', 'ready');
+    } catch {
+      setStatus('Unable to copy CLI fallback.', 'error');
+    }
+  };
+  const postDetailAction = async (detail, card, action, confirm) => {
+    const latestDetail = currentDetailFor(detail);
+    const latestCard = currentCardFor(card, latestDetail);
+    const latestAction = currentActionFor(latestDetail, action);
+    if (latestAction.disabledReason) return;
+    if (latestAction.id === 'openPr') {
+      await openPrAction(latestCard, latestDetail);
+      return;
+    }
+    if (latestAction.id === 'copyCli' || latestAction.requiresConfirmation === false) {
+      await copyDetailActionFallback(latestAction);
+      return;
+    }
+    const previewKey = detailActionPreviewKey(latestDetail, latestAction);
+    const previous = detailActionStateFor(latestDetail);
+    if (previous && (previous.phase === 'previewing' || previous.phase === 'confirming')) return;
+    if (previous && previous.action && previous.action.id === latestAction.id) {
+      if (confirm && (previous.phase !== 'preview' || previous.previewKey !== previewKey)) return;
+    } else if (confirm) {
+      return;
+    }
+    const canConfirm = Boolean(confirm && previous && previous.phase === 'preview' && previous.action.id === latestAction.id && previous.previewKey === previewKey);
+    const body = canConfirm
+      ? { ...previous.body, confirm: true }
+      : detailActionBody(latestDetail, latestAction, false);
+    const stateBase = { action: latestAction, body, detail: latestDetail, previewKey };
+    detailActionStates.set(latestDetail.taskPinId, { ...stateBase, phase: canConfirm ? 'confirming' : 'previewing', result: {} });
+    renderDetailModal();
+    try {
+      const response = await fetch('/api/loom/actions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json();
+      if (!response.ok || result.ok === false) {
+        detailActionStates.set(latestDetail.taskPinId, { ...stateBase, phase: 'error', result });
+        renderDetailModal();
+        return;
+      }
+      if (canConfirm) {
+        detailActionStates.set(latestDetail.taskPinId, { ...stateBase, phase: 'success', result });
+        await refreshDashboard();
+        setStatus('Action completed.', 'ready');
+        if (elements.detailModal && !elements.detailModal.hidden) renderDetailModal();
+        return;
+      }
+      detailActionStates.set(latestDetail.taskPinId, { ...stateBase, phase: 'preview', result });
+      renderDetailModal();
+    } catch (error) {
+      const result = { ok: false, message: error instanceof Error ? error.message : String(error) };
+      detailActionStates.set(latestDetail.taskPinId, { ...stateBase, phase: 'error', result });
+      renderDetailModal();
+    }
+  };
+  const bindDetailActionButtons = (detail, card) => {
+    if (!elements.detailActions || !elements.detailActions.querySelectorAll) return;
+    const actionsById = new Map(detail.nextActions.map((action) => [action.id, action]));
+    elements.detailActions.querySelectorAll('[data-loom-detail-action]').forEach((button) => {
+      const actionId = button.getAttribute('data-loom-detail-action') || '';
+      const action = actionsById.get(actionId);
+      if (!action || action.disabledReason) return;
+      button.addEventListener('click', (event) => {
+        if (event && event.stopPropagation) event.stopPropagation();
+        return postDetailAction(detail, card, action, false);
+      });
+    });
+    elements.detailActions.querySelectorAll('[data-loom-confirm-detail-action]').forEach((button) => {
+      const actionId = button.getAttribute('data-loom-confirm-detail-action') || '';
+      const action = actionsById.get(actionId);
+      if (!action) return;
+      button.addEventListener('click', (event) => {
+        if (event && event.stopPropagation) event.stopPropagation();
+        return postDetailAction(detail, card, action, true);
+      });
+    });
+    elements.detailActions.querySelectorAll('[data-loom-cancel-detail-action]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        if (event && event.stopPropagation) event.stopPropagation();
+        detailActionStates.delete(detail.taskPinId);
+        renderDetailModal();
+      });
+    });
+  };
+  const renderDetailModal = () => {
+    const detail = currentModel.details.find((entry) => entry.taskPinId === selectedTaskPinId) || null;
+    const card = currentModel.cards.find((entry) => entry.taskPinId === selectedTaskPinId) || null;
+    if (!detail || !card) {
+      setHtml(elements.detailBody, '');
+      setHtml(elements.detailActions, '');
+      closeDetailModal(false);
+      return false;
     }
     const firstClaim = detail.claims[0] || null;
     const activeClaim = detail.claims.find((claim) => claim.active) || null;
     const headerDeveloper = activeClaim ? activeClaim.developer : (card.developer || (firstClaim ? firstClaim.developer : null));
     const from = fromQuery();
     const fromArg = from ? ' --from ' + shellArg(from) : '';
-    const deliveryEvent = detail.timeline.find((event) => event.kind === 'delivery' && event.pin.copyValue);
-    const deliveryPinId = deliveryEvent ? deliveryEvent.pin.copyValue : '';
+    const deliveryPinId = latestDeliveryPinId(detail);
     const handoffCommands = ['metabot loom state ' + shellArg(detail.taskPinId) + ' --refresh' + fromArg];
     if (deliveryPinId) {
       handoffCommands.push('metabot loom accept-and-pay --task-pin-id ' + shellArg(detail.taskPinId) + ' --delivery-pin-id ' + shellArg(deliveryPinId) + ' --score 5 --comment "accepted" --confirm-payment' + fromArg);
@@ -574,30 +1310,66 @@ export function buildLoomPageScript(): string {
       renderCommitEvidence(workflow.commits) +
       '</div>'
     )).join('') : '';
-    setHtml(elements.detail,
+    setText(elements.detailTitle, detail.title);
+    setHtml(elements.detailBody,
       '<div class="loom-detail-head">' +
-      '<div><span class="loom-kicker">Selected task</span><h2>' + esc(detail.title) + '</h2><div class="loom-detail-actors">' + botInline(detail.requester, 'Requester') + (headerDeveloper ? botInline(headerDeveloper, 'Developer') : '<div class="loom-bot loom-bot-empty">No developer claim</div>') + '</div></div>' +
+      '<div><span class="loom-kicker">State</span><h2>' + esc(detail.title) + '</h2><div class="loom-detail-actors">' + botInline(detail.requester, 'Requester') + (headerDeveloper ? botInline(headerDeveloper, 'Developer') : '<div class="loom-bot loom-bot-empty">No developer claim</div>') + '</div></div>' +
       '<span class="loom-state" data-tone="' + esc(card.stateTone) + '">' + esc(detail.stateLabel) + '</span>' +
       '</div>' +
       '<div class="loom-detail-copy"><code>' + esc(detail.taskPin.label) + '</code>' + copyButton('Copy task pin', detail.taskPin.copyValue) + '</div>' +
+      '<section class="loom-detail-section"><h3>State explanation</h3><p>' + esc(card.latestStatusSummary || detail.stateLabel || 'No state summary available.') + '</p></section>' +
       '<section class="loom-detail-section"><h3>Requirement</h3><p>' + esc(detail.requirement || 'No requirement text available.') + '</p><h3>Acceptance criteria</h3><p>' + esc(detail.criteria || 'No acceptance criteria available.') + '</p></section>' +
       renderRepositorySection(card) +
-      '<section class="loom-detail-section"><h3>Bot identities</h3><div class="loom-identity-grid">' + botInline(detail.requester, 'Requester') + (headerDeveloper ? botInline(headerDeveloper, 'Developer') : '<div class="loom-bot loom-bot-empty">No developer claim</div>') + '</div></section>' +
+      '<section class="loom-detail-section"><h3>Participants</h3><div class="loom-identity-grid">' + participantBlock(detail.requester, 'Requester', '') + participantBlock(headerDeveloper, 'Developer', activeClaim ? activeClaim.payoutAddress : '') + '</div></section>' +
       '<section class="loom-detail-section"><h3>Claims</h3>' + (detail.claims.length ? detail.claims.map((claim) => '<div class="loom-claim"><strong>' + esc(claim.developer.displayName) + (claim.active ? ' · active' : '') + '</strong><p>' + esc(claim.message || 'No claim message.') + '</p><div class="loom-claim-meta">' + (claim.developer.globalMetaId ? '<span>GMID: <code>' + esc(claim.developer.globalMetaId) + '</code></span>' : '') + (claim.developer.address ? '<span>Address: <code>' + esc(claim.developer.address) + '</code></span>' : '') + (claim.payoutAddress ? '<span>Payout: <code>' + esc(claim.payoutAddress) + '</code></span>' : '') + '</div><div class="loom-inline-copy"><code>' + esc(claim.pin.label) + '</code>' + copyButton('Copy claim pin', claim.pin.copyValue) + '</div></div>').join('') : '<p>No claims yet.</p>') + '</section>' +
+      '<section class="loom-detail-section"><h3>Delivery</h3>' + (detail.validRecords.deliveries.length ? renderDeliveryRecords(detail.validRecords.deliveries) : '<p>No delivery record yet.</p>') + '</section>' +
+      '<section class="loom-detail-section"><h3>Payment</h3>' + (card.paymentTxId.copyValue ? '<div class="loom-inline-copy"><code>' + esc(card.paymentTxId.label) + '</code>' + copyButton('Copy payment txid', card.paymentTxId.copyValue) + '</div>' : '<p>No payment transaction recorded.</p>') + renderAcceptanceRecords(detail.validRecords.acceptances) + '</section>' +
+      '<section class="loom-detail-section"><h3>Process evidence</h3>' + (localEvidence || '<p>No local process evidence recorded.</p>') + renderStatusRecords(detail.validRecords.statuses) + '</section>' +
+      '<section class="loom-detail-section"><h3>Timeline</h3><ol class="loom-timeline">' + renderTimeline(detail) + '</ol></section>' +
       '<section class="loom-detail-section"><h3>Warnings</h3>' + (detail.warnings.length ? '<ul class="loom-warning-list">' + detail.warnings.map((warning) => '<li><strong>' + esc(warning.code || warning.protocol || 'warning') + '</strong><p>' + esc(warning.message) + '</p><div class="loom-inline-copy"><code>' + esc(warning.pin.label) + '</code>' + copyButton('Copy warning pin', warning.pin.copyValue) + '</div></li>').join('') + '</ul>' : '<p>No warnings for this task.</p>') + '</section>' +
-      (localEvidence ? '<section class="loom-detail-section"><h3>Local evidence</h3>' + localEvidence + '</section>' : '') +
-      renderStatusRecords(detail.validRecords.statuses) +
-      renderDeliveryRecords(detail.validRecords.deliveries) +
-      renderAcceptanceRecords(detail.validRecords.acceptances) +
-      renderClaimRejectRecords(detail.validRecords.claimRejects) +
-      '<section class="loom-detail-section"><h3>Handoffs</h3><div class="loom-handoff">' +
-      (card.prUrl ? safeExternalLink(card.prUrl, isHttpUrl(card.prUrl) ? 'Open PR ↗' : card.prUrl, '') : '') +
-      (card.paymentTxId.copyValue ? '<div class="loom-inline-copy"><code>' + esc(card.paymentTxId.label) + '</code>' + copyButton('Copy payment txid', card.paymentTxId.copyValue) + '</div>' : '') +
-      handoffCommands.map((command) => '<div class="loom-inline-copy"><code>' + esc(command) + '</code>' + copyButton('Copy CLI', command) + '</div>').join('') +
-      '</div></section>' +
-      '<section class="loom-detail-section"><h3>Timeline</h3><ol class="loom-timeline">' + renderTimeline(detail) + '</ol></section>'
+      '<section class="loom-detail-section"><h3>Raw records</h3>' +
+      renderRawRecordIndex(detail) +
+      '</section>'
     );
-    bindCopyActions(elements.detail);
+    setHtml(elements.detailActions, renderDetailActionPanel(detail, card, handoffCommands));
+    if (elements.detailModal) {
+      const state = detailActionStateFor(detail);
+      elements.detailModal.dataset.confirmationActive = state && state.phase === 'preview' ? 'true' : '';
+    }
+    bindCopyActions(elements.detailBody);
+    bindCopyActions(elements.detailActions);
+    bindDetailActionButtons(detail, card);
+    return true;
+  };
+  const openDetailModal = (taskPinId, cardElement) => {
+    selectedTaskPinId = taskPinId;
+    selectedCardElement = cardElement || selectedCardElement;
+    if (!renderDetailModal()) return;
+    if (elements.detailModal) {
+      elements.detailModal.hidden = false;
+      elements.detailModal.dataset.state = 'open';
+    }
+    if (elements.detailDialog && elements.detailDialog.focus) elements.detailDialog.focus();
+  };
+  const renderedCardElement = (taskPinId) => {
+    if (!elements.board || !elements.board.querySelectorAll) return null;
+    return Array.from(elements.board.querySelectorAll('[data-loom-card]'))
+      .find((card) => (card.getAttribute('data-loom-card') || '') === taskPinId) || null;
+  };
+  const selectDashboardTask = (taskPinId) => {
+    const id = text(taskPinId);
+    if (!id || !currentModel.cards.some((card) => card.taskPinId === id)) return false;
+    selectedTaskPinId = id;
+    renderBoard();
+    const cardElement = renderedCardElement(id);
+    if (cardElement) selectedCardElement = cardElement;
+    if (currentModel.details.some((detail) => detail.taskPinId === id)) {
+      openDetailModal(id, cardElement);
+    } else {
+      closeDetailModal(false);
+      if (cardElement && cardElement.focus) cardElement.focus();
+    }
+    return true;
   };
   const bindCopyActions = (root) => {
     if (!root || !root.querySelectorAll) return;
@@ -621,29 +1393,27 @@ export function buildLoomPageScript(): string {
     if (!elements.board || !elements.board.querySelectorAll) return;
     elements.board.querySelectorAll('[data-loom-card]').forEach((card) => {
       const select = () => {
-        selectedTaskPinId = card.getAttribute('data-loom-card') || '';
-        renderBoard();
-        renderDetail();
+        openDetailModal(card.getAttribute('data-loom-card') || '', card);
       };
       card.addEventListener('click', select);
       card.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') select();
+        if (event.key === 'Enter' || event.key === ' ') {
+          if (event.preventDefault) event.preventDefault();
+          select();
+        }
       });
     });
   };
   const render = (payload) => {
     currentModel = buildModel(payload);
-    if (!selectedTaskPinId || !currentModel.cards.some((card) => card.taskPinId === selectedTaskPinId)) {
-      selectedTaskPinId = currentModel.cards[0] ? currentModel.cards[0].taskPinId : '';
-    }
-    setText(elements.actor, currentModel.actor.displayLabel);
-    setText(elements.updated, currentModel.refresh.updatedLabel);
+    if (selectedTaskPinId && !currentModel.cards.some((card) => card.taskPinId === selectedTaskPinId)) closeDetailModal(false);
+    setText(elements.scopeLabel, fromQuery() ? 'From ' + fromQuery() : 'Global');
     setText(elements.staleWarning, currentModel.refresh.warningLabel);
     setStatus(currentModel.cards.length ? 'Dashboard loaded.' : 'No Loom tasks found.', 'ready');
     setText(elements.error, '');
     renderMetrics();
     renderBoard();
-    renderDetail();
+    if (elements.detailModal && !elements.detailModal.hidden && selectedTaskPinId) renderDetailModal();
   };
   const dashboardRequestParams = () => {
     const params = new URLSearchParams();
@@ -701,6 +1471,79 @@ export function buildLoomPageScript(): string {
   });
   if (elements.queryFilter) elements.queryFilter.addEventListener('input', loadDashboard);
   if (elements.refresh) elements.refresh.addEventListener('click', refreshDashboard);
+  if (elements.newTask) elements.newTask.addEventListener('click', openNewTaskModal);
+  if (elements.newTaskClose) elements.newTaskClose.addEventListener('click', () => closeNewTaskModal(true));
+  if (elements.newTaskForm) {
+    elements.newTaskForm.addEventListener('submit', (event) => {
+      if (event && event.preventDefault) event.preventDefault();
+      return postNewTaskAction(false);
+    });
+    elements.newTaskForm.addEventListener('keydown', (event) => {
+      const tagName = event && event.target && event.target.tagName ? String(event.target.tagName).toUpperCase() : '';
+      if (event && event.key === 'Enter' && tagName === 'INPUT') {
+        if (event.preventDefault) event.preventDefault();
+      }
+    });
+  }
+  if (elements.newTaskConfirm) elements.newTaskConfirm.addEventListener('click', () => postNewTaskAction(true));
+  [
+    elements.newTaskFrom,
+    elements.newTaskTitle,
+    elements.newTaskRequirement,
+    elements.newTaskRequirementContentType,
+    elements.newTaskCriteria,
+    elements.newTaskCriteriaContentType,
+    elements.newTaskRepoUri,
+    elements.newTaskProjectBase,
+    elements.newTaskBaseBranch,
+    elements.newTaskBountyAmount,
+    elements.newTaskCurrency,
+    elements.newTaskDeadline,
+    elements.newTaskTags,
+    elements.newTaskAttachments,
+  ].forEach((field) => {
+    if (!field) return;
+    field.addEventListener('input', resetNewTaskPreview);
+    field.addEventListener('change', resetNewTaskPreview);
+  });
+  if (elements.detailClose) elements.detailClose.addEventListener('click', () => closeDetailModal(true));
+  if (elements.newTaskModal) {
+    elements.newTaskModal.addEventListener('click', (event) => {
+      if (event && event.target === elements.newTaskModal) closeNewTaskModal(true);
+    });
+    elements.newTaskModal.addEventListener('keydown', (event) => {
+      if (event && event.key === 'Escape') {
+        if (event.preventDefault) event.preventDefault();
+        closeNewTaskModal(true);
+      }
+    });
+  }
+  if (elements.detailModal) {
+    elements.detailModal.addEventListener('click', (event) => {
+      const confirmationActive = elements.detailModal.dataset.confirmationActive === 'true';
+      if (!confirmationActive && event && event.target === elements.detailModal) closeDetailModal(true);
+    });
+    elements.detailModal.addEventListener('keydown', (event) => {
+      if (event && event.key === 'Escape') {
+        if (event.preventDefault) event.preventDefault();
+        closeDetailModal(true);
+      }
+    });
+  }
+  if (document && document.addEventListener) {
+    document.addEventListener('keydown', (event) => {
+      if (event && event.key === 'Escape' && elements.detailModal && !elements.detailModal.hidden) {
+        if (event.preventDefault) event.preventDefault();
+        closeDetailModal(true);
+      }
+      if (event && event.key === 'Escape' && elements.newTaskModal && !elements.newTaskModal.hidden) {
+        if (event.preventDefault) event.preventDefault();
+        closeNewTaskModal(true);
+      }
+    });
+  }
+  if (elements.newTask) elements.newTask.disabled = false;
+  if (elements.newTaskConfirm) elements.newTaskConfirm.disabled = true;
   loadDashboard();
 })();`;
 }
