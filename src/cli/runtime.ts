@@ -1589,6 +1589,10 @@ export interface PrivateChatAutoReplyProfileDispatcherOptions {
   autoReplyConfig: PrivateChatAutoReplyConfig;
   resolvePeerChatPublicKey: (globalMetaId: string) => Promise<string | null>;
   llmExecutor: Pick<LlmExecutor, 'execute' | 'getSession'>;
+  handleOrderProtocolMessageForProfile?: (
+    profile: IdentityProfileRecord,
+    message: A2ASimplemsgInboundDispatcherMessage
+  ) => Promise<MetabotCommandResult<unknown>> | MetabotCommandResult<unknown>;
   createSignerForHome?: (homeDir: string) => Signer;
   createReplyRunnerForProfile?: (input: {
     paths: MetabotPaths;
@@ -1673,7 +1677,21 @@ export function createPrivateChatAutoReplyProfileDispatcher(
     async handleInboundMessage(profile, message) {
       const orchestrator = getOrCreateOrchestrator(profile);
       if (!orchestrator) return;
-      await orchestrator.handleInboundMessage(message);
+      if (!input.handleOrderProtocolMessageForProfile) {
+        await orchestrator.handleInboundMessage(message);
+        return;
+      }
+
+      const dispatcher = buildA2ASimplemsgInboundDispatcher({
+        handleOrderProtocolMessage: async (orderMessage) => input.handleOrderProtocolMessageForProfile!(
+          profile,
+          orderMessage,
+        ),
+        handleGenericPrivateChatMessage: async (genericMessage) => {
+          await orchestrator.handleInboundMessage(genericMessage);
+        },
+      });
+      await dispatcher(message);
     },
   };
 }
@@ -3696,6 +3714,16 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     autoReplyConfig: sharedAutoReplyConfig,
     resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
     llmExecutor,
+    handleOrderProtocolMessageForProfile: async (profile, message) => {
+      const handler = handlers.services?.handleInboundOrderProtocolMessage;
+      if (!handler) {
+        return commandSuccess({ handled: false });
+      }
+      return handler({
+        ...message,
+        localProfileSlug: profile.slug,
+      });
+    },
   });
 
   const daemonConfig = await createConfigStore(paths).read();

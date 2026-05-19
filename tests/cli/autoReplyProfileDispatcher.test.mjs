@@ -91,3 +91,83 @@ test('auto-reply dispatcher handles inbound private chat for non-active local pr
   assert.equal(handled[0].selfGlobalMetaId, 'idq1beta00000000000000000000000000000');
   assert.equal(handled[0].message.content, 'hello beta');
 });
+
+test('auto-reply dispatcher routes inbound ORDER for non-active profiles to order handler', async (t) => {
+  const betaHomeDir = await createProfileHome(t, 'beta-bot');
+  const orderCalls = [];
+  const genericCalls = [];
+
+  const dispatcher = createPrivateChatAutoReplyProfileDispatcher({
+    autoReplyConfig: {
+      enabled: true,
+      acceptPolicy: 'accept_all',
+      defaultStrategyId: null,
+    },
+    resolvePeerChatPublicKey: async () => 'peer-chat-key',
+    llmExecutor: {
+      execute: async () => 'unused-session',
+      getSession: async () => null,
+    },
+    handleOrderProtocolMessageForProfile: async (profile, message) => {
+      orderCalls.push({
+        slug: profile.slug,
+        content: message.content,
+        messagePinId: message.messagePinId,
+      });
+      return { ok: true, data: { handled: true } };
+    },
+    createSignerForHome: (homeDir) => ({
+      getIdentity: async () => ({
+        globalMetaId: `identity-for-${path.basename(homeDir)}`,
+        mvcAddress: `mvc-${path.basename(homeDir)}`,
+      }),
+      getPrivateChatIdentity: async () => ({
+        globalMetaId: `identity-for-${path.basename(homeDir)}`,
+        privateKeyHex: 'private-key',
+        chatPublicKey: 'chat-public-key',
+      }),
+      writePin: async () => ({
+        txids: ['tx-1'],
+        pinId: 'pin-1',
+        totalCost: 1,
+        network: 'mvc',
+        operation: 'create',
+        path: '/protocols/simplemsg',
+        contentType: 'application/json',
+        encoding: 'utf-8',
+        globalMetaId: `identity-for-${path.basename(homeDir)}`,
+        mvcAddress: `mvc-${path.basename(homeDir)}`,
+      }),
+    }),
+    createOrchestrator: () => ({
+      handleInboundMessage: async (message) => {
+        genericCalls.push(message.content);
+      },
+    }),
+  });
+
+  await dispatcher.handleInboundMessage({
+    name: 'Beta Bot',
+    slug: 'beta-bot',
+    aliases: ['beta-bot'],
+    homeDir: betaHomeDir,
+    globalMetaId: 'idq1beta00000000000000000000000000000',
+    mvcAddress: 'mvc-beta',
+    createdAt: 1_777_000_000_000,
+    updatedAt: 1_777_000_000_000,
+  }, {
+    fromGlobalMetaId: 'idq1peer00000000000000000000000000000',
+    content: '[ORDER] please run beta skill',
+    messagePinId: `${'6'.repeat(64)}i0`,
+    fromChatPublicKey: 'peer-chat-key',
+    timestamp: 1_777_000_000_001,
+    rawMessage: null,
+  });
+
+  assert.deepEqual(orderCalls, [{
+    slug: 'beta-bot',
+    content: '[ORDER] please run beta skill',
+    messagePinId: `${'6'.repeat(64)}i0`,
+  }]);
+  assert.deepEqual(genericCalls, []);
+});

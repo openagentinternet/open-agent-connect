@@ -8159,7 +8159,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
     content: string;
     messagePinId?: string | null;
     timestamp?: number | null;
+    localProfileSlug?: string | null;
   }): Promise<MetabotCommandResult<Record<string, unknown>>> {
+    const localProfileSlug = normalizeText(inputMessage.localProfileSlug);
+    if (localProfileSlug) {
+      const scoped = await resolveScopedServicesForActor(localProfileSlug);
+      if (scoped.failure) {
+        return scoped.failure;
+      }
+      if (scoped.services?.handleInboundOrderProtocolMessage) {
+        return scoped.services.handleInboundOrderProtocolMessage({
+          fromGlobalMetaId: inputMessage.fromGlobalMetaId,
+          content: inputMessage.content,
+          messagePinId: inputMessage.messagePinId,
+          timestamp: inputMessage.timestamp,
+        }) as Promise<MetabotCommandResult<Record<string, unknown>>>;
+      }
+    }
+
     const content = normalizeText(inputMessage.content);
     if (/^\[ORDER\]/iu.test(content)) {
       const orderTxid = normalizeOrderProtocolReference(inputMessage.messagePinId)
