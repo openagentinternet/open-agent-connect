@@ -48,6 +48,49 @@ function truncateForPrompt(value: string, maxChars: number): string {
   ].filter(Boolean).join('\n\n');
 }
 
+function compactInlineText(value: string, maxChars: number): string {
+  const text = normalizeText(value).replace(/\s+/gu, ' ');
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+function containsCjk(value: string): boolean {
+  return /[\u3400-\u9fff]/u.test(value);
+}
+
+function isGenericPrivateChatRating(value: string): boolean {
+  const text = normalizeText(value);
+  if (!text) {
+    return true;
+  }
+  return /^(Hello!|Thanks for your message\.|Thanks for sharing that\.|It has been a great conversation\.|We have been chatting for a while now\.|Thank you for the conversation! It was nice chatting with you\. See you next time!)/u.test(text);
+}
+
+function buildContextualBuyerRatingFallback(input: {
+  providerName: string;
+  originalRequest: string;
+  serviceResult: string;
+  expectedOutputType: string;
+}): string {
+  const providerName = compactInlineText(input.providerName, 80) || 'Remote MetaBot';
+  const originalRequest = compactInlineText(input.originalRequest, 130);
+  const serviceResult = compactInlineText(input.serviceResult, 180);
+  const expectedOutputType = compactInlineText(input.expectedOutputType, 40) || 'text';
+  const score = serviceResult ? 5 : 3;
+  const useChinese = containsCjk(`${input.originalRequest}\n${input.serviceResult}`);
+  if (useChinese) {
+    const requestPart = originalRequest ? `，覆盖了我的请求「${originalRequest}」` : '';
+    const resultPart = serviceResult ? `，结果摘要：${serviceResult}` : '，但本地没有记录到完整结果';
+    return `评分：${score}分。${providerName} 已交付 ${expectedOutputType} 服务结果${requestPart}${resultPart}。谢谢。`;
+  }
+
+  const requestPart = originalRequest ? ` for my request "${originalRequest}"` : '';
+  const resultPart = serviceResult ? ` Result summary: ${serviceResult}` : ' The local trace did not record a complete result.';
+  return `Rating: ${score}/5. ${providerName} delivered the ${expectedOutputType} service result${requestPart}.${resultPart} Thank you.`;
+}
+
 function findLatestOrderText(items: BuyerRatingTranscriptItem[]): string {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
@@ -185,7 +228,15 @@ export async function generateBuyerServiceRating(input: {
     inboundMessage,
   });
   const generated = normalizeText(runnerResult.content);
-  const comment = generated || '评分：3分。服务已完成，感谢交付。';
+  const contextualFallback = buildContextualBuyerRatingFallback({
+    providerName,
+    originalRequest,
+    serviceResult,
+    expectedOutputType,
+  });
+  const comment = generated && !isGenericPrivateChatRating(generated)
+    ? generated
+    : contextualFallback;
   return {
     rate: extractBuyerRatingScore(comment),
     comment: comment.slice(0, 500),

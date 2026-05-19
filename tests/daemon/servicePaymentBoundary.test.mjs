@@ -316,6 +316,7 @@ async function createInboundProviderOrderHarness(t, options = {}) {
     },
     providerRuntimeCanStart: async () => true,
     a2aConversationPersister: options.a2aConversationPersister,
+    providerOrderReplyRunner: options.providerOrderReplyRunner,
   });
 
   function makeOrderContent(overrides = {}) {
@@ -1900,9 +1901,19 @@ test('private chat local A2A store failure does not mask successful chain broadc
 test('inbound provider ORDER executes through runner and sends delivery plus rating request once', async (t) => {
   const orderTxid = 'a'.repeat(64);
   const paymentTxid = 'b'.repeat(64);
+  const protocolReplyCalls = [];
+  const customAcknowledgement = 'Weather Oracle here: I have your Shanghai forecast order and will read the sky now.';
+  const customRatingRequest = 'The forecast is delivered in my Weather Oracle voice; rate it if it helped.';
   const harness = await createInboundProviderOrderHarness(t, {
     rawTxs: {
       [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerOrderReplyRunner: async (input) => {
+      protocolReplyCalls.push(input);
+      return {
+        state: 'reply',
+        content: protocolReplyCalls.length === 1 ? customAcknowledgement : customRatingRequest,
+      };
     },
   });
   const content = harness.makeOrderContent({ paymentTxid });
@@ -1932,10 +1943,21 @@ test('inbound provider ORDER executes through runner and sends delivery plus rat
   const simplemsgWrites = harness.writes.filter((entry) => entry.path === '/protocols/simplemsg');
   assert.equal(simplemsgWrites.length, 3);
   const contents = simplemsgWrites.map((entry) => harness.decryptProviderWrite(entry));
+  const acknowledgementMessages = contents.filter((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`));
   const deliveryMessages = contents.filter((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`));
   const ratingMessages = contents.filter((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`));
+  assert.equal(acknowledgementMessages.length, 1);
   assert.equal(deliveryMessages.length, 1);
   assert.equal(ratingMessages.length, 1);
+  assert.equal(acknowledgementMessages[0], `[ORDER_STATUS:${orderTxid}] ${customAcknowledgement}`);
+  assert.equal(ratingMessages[0], `[NeedsRating:${orderTxid}] ${customRatingRequest}`);
+  assert.doesNotMatch(contents.join('\n'), /I received the order and started processing\.|Please rate this service\./);
+  assert.equal(protocolReplyCalls.length, 2);
+  assert.match(protocolReplyCalls[0].inboundMessage.content, /Stage: acknowledgement/);
+  assert.match(protocolReplyCalls[0].inboundMessage.content, /Weather Oracle/);
+  assert.match(protocolReplyCalls[0].inboundMessage.content, /Tell me tomorrow weather/);
+  assert.match(protocolReplyCalls[1].inboundMessage.content, /Stage: rating_request/);
+  assert.match(protocolReplyCalls[1].inboundMessage.content, /Tomorrow weather: bright with light wind/);
   const delivery = parseDeliveryMessage(deliveryMessages[0]);
   const rating = parseNeedsRatingMessage(ratingMessages[0]);
   assert.equal(delivery.paymentTxid, paymentTxid);

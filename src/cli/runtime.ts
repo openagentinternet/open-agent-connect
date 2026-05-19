@@ -3782,7 +3782,6 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     : undefined;
   const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
   const callerReplyWaiter = createTestMetaWebReplyWaiter(context.env);
-  const buyerRatingReplyRunner = createTestBuyerRatingReplyRunner(context.env) ?? createHostLlmChatReplyRunner();
   const masterReplyWaiter = createTestMasterReplyWaiter(context.env) ?? createSocketIoMetaWebMasterReplyWaiter();
   const servicePaymentExecutor = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
     ? createTestServicePaymentExecutor()
@@ -3823,6 +3822,32 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     env: context.env,
     backends: providerLlmBackends,
   });
+  const daemonMetaBotSlug = path.basename(paths.profileRoot);
+  const daemonRuntimeResolver = createLlmRuntimeResolver({
+    runtimeStore: createLlmRuntimeStore(paths),
+    bindingStore: createLlmBindingStore(paths),
+    getPreferredRuntimeId: async () => {
+      try {
+        const raw = await fs.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
+        const data = JSON.parse(raw) as { runtimeId?: string | null };
+        return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+      } catch {
+        return null;
+      }
+    },
+  });
+  const buyerRatingHostReplyRunner = createHostLlmChatReplyRunner({
+    runtimeResolver: daemonRuntimeResolver,
+    llmExecutor,
+    metaBotSlug: daemonMetaBotSlug,
+  });
+  const buyerRatingReplyRunner = createTestBuyerRatingReplyRunner(context.env) ?? buyerRatingHostReplyRunner;
+  const providerOrderReplyRunner = createHostLlmChatReplyRunner({
+    runtimeResolver: daemonRuntimeResolver,
+    llmExecutor,
+    metaBotSlug: daemonMetaBotSlug,
+    timeoutMs: 45_000,
+  });
 
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
@@ -3840,6 +3865,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     fetchPeerChatPublicKey,
     callerReplyWaiter,
     buyerRatingReplyRunner,
+    providerOrderReplyRunner,
     masterReplyWaiter,
     servicePaymentExecutor,
     requestMvcGasSubsidy,

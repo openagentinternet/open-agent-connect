@@ -3195,7 +3195,6 @@ async function serveCliDaemonProcess(context) {
         : undefined;
     const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
     const callerReplyWaiter = createTestMetaWebReplyWaiter(context.env);
-    const buyerRatingReplyRunner = createTestBuyerRatingReplyRunner(context.env) ?? (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)();
     const masterReplyWaiter = createTestMasterReplyWaiter(context.env) ?? (0, metawebMasterReplyWaiter_1.createSocketIoMetaWebMasterReplyWaiter)();
     const servicePaymentExecutor = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
         ? (0, servicePayment_1.createTestServicePaymentExecutor)()
@@ -3234,6 +3233,33 @@ async function serveCliDaemonProcess(context) {
         env: context.env,
         backends: providerLlmBackends,
     });
+    const daemonMetaBotSlug = node_path_1.default.basename(paths.profileRoot);
+    const daemonRuntimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
+        runtimeStore: (0, llmRuntimeStore_1.createLlmRuntimeStore)(paths),
+        bindingStore: (0, llmBindingStore_1.createLlmBindingStore)(paths),
+        getPreferredRuntimeId: async () => {
+            try {
+                const raw = await node_fs_1.default.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
+                const data = JSON.parse(raw);
+                return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+            }
+            catch {
+                return null;
+            }
+        },
+    });
+    const buyerRatingHostReplyRunner = (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)({
+        runtimeResolver: daemonRuntimeResolver,
+        llmExecutor,
+        metaBotSlug: daemonMetaBotSlug,
+    });
+    const buyerRatingReplyRunner = createTestBuyerRatingReplyRunner(context.env) ?? buyerRatingHostReplyRunner;
+    const providerOrderReplyRunner = (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)({
+        runtimeResolver: daemonRuntimeResolver,
+        llmExecutor,
+        metaBotSlug: daemonMetaBotSlug,
+        timeoutMs: 45_000,
+    });
     const handlers = (0, defaultHandlers_1.createDefaultMetabotDaemonHandlers)({
         homeDir,
         systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
@@ -3250,6 +3276,7 @@ async function serveCliDaemonProcess(context) {
         fetchPeerChatPublicKey,
         callerReplyWaiter,
         buyerRatingReplyRunner,
+        providerOrderReplyRunner,
         masterReplyWaiter,
         servicePaymentExecutor,
         requestMvcGasSubsidy,

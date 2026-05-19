@@ -114,6 +114,7 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     ratingFollowupRetryDelaysMs?: number[];
     a2aConversationPersister?: A2AConversationMessagePersister;
     buyerRatingReplyRunner?: ChatReplyRunner;
+    providerOrderReplyRunner?: ChatReplyRunner;
     onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
     requestMvcGasSubsidy?: (options: RequestMvcGasSubsidyOptions) => Promise<RequestMvcGasSubsidyResult>;
     createSignerForHome?: (homeDir: string) => Signer;

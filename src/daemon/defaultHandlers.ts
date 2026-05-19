@@ -114,7 +114,7 @@ import { exportSessionArtifacts } from '../core/chat/transcriptExport';
 import { sendPrivateChat } from '../core/chat/privateChat';
 import { loadChatPersona } from '../core/chat/chatPersonaLoader';
 import { createDefaultChatReplyRunner } from '../core/chat/defaultChatReplyRunner';
-import type { ChatReplyRunner } from '../core/chat/privateChatTypes';
+import type { ChatPersona, ChatReplyRunner, ChatReplyRunnerInput } from '../core/chat/privateChatTypes';
 import type { ChainWriteRequest, ChainWriteResult } from '../core/chain/writePin';
 import {
   buildPrivateConversationResponse,
@@ -302,6 +302,205 @@ const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+type ProviderOrderProtocolReplyStage = 'acknowledgement' | 'rating_request';
+
+interface ProviderOrderProtocolReplyTextInput {
+  replyRunner: ChatReplyRunner | null;
+  paths: MetabotPaths;
+  providerIdentity: RuntimeIdentityRecord | null;
+  buyerGlobalMetaId: string;
+  service: PublishedServiceRecord;
+  orderTxid: string;
+  paymentTxid: string | null;
+  orderReference: string | null;
+  paymentAmount: string | null;
+  paymentCurrency: string | null;
+  userTask: string;
+  taskContext?: string | null;
+  responseText?: string | null;
+  stage: ProviderOrderProtocolReplyStage;
+  now?: number;
+}
+
+function compactInlineText(value: unknown, maxChars: number): string {
+  const text = normalizeText(value).replace(/\s+/gu, ' ');
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+function stripProtocolTagsFromReply(value: string): string {
+  let text = normalizeText(value);
+  for (let index = 0; index < 3; index += 1) {
+    const stripped = text.replace(/^\[(?:ORDER_STATUS|NeedsRating|NEEDS_RATING|DELIVERY|ORDER_END)[^\]]*\]\s*/iu, '').trim();
+    if (stripped === text) {
+      break;
+    }
+    text = stripped;
+  }
+  const lines = text.split(/\r?\n/u);
+  while (lines.length && lines[lines.length - 1]?.trim().toLowerCase() === 'bye') {
+    lines.pop();
+  }
+  return lines.join('\n').trim();
+}
+
+function isGenericPrivateChatFallbackReply(value: string): boolean {
+  const text = normalizeText(value);
+  if (!text) {
+    return true;
+  }
+  return /^(Hello!|Thanks for your message\.|Thanks for sharing that\.|It has been a great conversation\.|We have been chatting for a while now\.|Thank you for the conversation! It was nice chatting with you\. See you next time!)/u.test(text);
+}
+
+function buildProviderOrderProtocolInstruction(input: ProviderOrderProtocolReplyTextInput): string {
+  const serviceName = normalizeText(input.service.displayName) || normalizeText(input.service.serviceName) || 'Skill Service';
+  const request = normalizeText(input.userTask) || 'No buyer request was recorded.';
+  const taskContext = normalizeText(input.taskContext);
+  const responseText = normalizeText(input.responseText);
+  const paymentRef = normalizeText(input.paymentTxid) || normalizeText(input.orderReference) || 'not recorded';
+  const stagePurpose = input.stage === 'acknowledgement'
+    ? 'Confirm that you accepted the order and are starting the service work.'
+    : 'Invite the buyer to rate the delivered service result.';
+  const lines = [
+    `Stage: ${input.stage}`,
+    `Purpose: ${stagePurpose}`,
+    'Write only the natural-language body of the provider message.',
+    'The system will add the protocol tag automatically; do not include tags such as [ORDER_STATUS], [NeedsRating], [DELIVERY], or txid labels.',
+    'Speak as the provider bot, following its role, style, and goal. Use the buyer request language when it is clear.',
+    'Keep the message concise and specific to this order.',
+    `Service: ${serviceName}`,
+    `Skill: ${normalizeText(input.service.providerSkill) || 'unknown'}`,
+    `Output type: ${normalizeText(input.service.outputType) || 'text'}`,
+    `Order id: ${normalizeText(input.orderTxid) || 'unknown'}`,
+    `Payment reference: ${paymentRef}`,
+    `Payment amount: ${normalizeText(input.paymentAmount) || normalizeText(input.service.price) || '0'} ${normalizeText(input.paymentCurrency) || normalizeText(input.service.currency) || ''}`.trim(),
+    `Buyer request: ${request}`,
+  ];
+  if (taskContext) {
+    lines.push(`Task context: ${taskContext}`);
+  }
+  if (responseText) {
+    lines.push(`Delivered result: ${responseText}`);
+  }
+  lines.push('Return only the message body, under 280 characters.');
+  return lines.join('\n');
+}
+
+function buildProviderOrderProtocolFallbackText(
+  input: ProviderOrderProtocolReplyTextInput,
+  persona: ChatPersona,
+): string {
+  const serviceName = compactInlineText(
+    normalizeText(input.service.displayName) || normalizeText(input.service.serviceName) || 'this service',
+    80,
+  );
+  const providerName = compactInlineText(input.providerIdentity?.name, 80) || 'Your provider bot';
+  const request = compactInlineText(input.userTask, 120);
+  const roleHint = compactInlineText(persona.role || persona.goal || persona.soul, 120);
+  const result = compactInlineText(input.responseText, 160);
+  const requestPart = request ? ` for "${request}"` : '';
+  const voicePart = roleHint ? ` In my role as ${roleHint},` : '';
+
+  if (input.stage === 'acknowledgement') {
+    return `${providerName} has accepted the ${serviceName} order${requestPart}.${voicePart} I will work on it now.`;
+  }
+
+  const resultPart = result ? ` Result summary: ${result}` : '';
+  return `${providerName} has delivered the ${serviceName} result${requestPart}.${resultPart} Please leave a rating when you have a moment.`;
+}
+
+async function generateProviderOrderProtocolReplyText(
+  input: ProviderOrderProtocolReplyTextInput,
+): Promise<string> {
+  const persona = await loadChatPersona(input.paths);
+  const fallback = buildProviderOrderProtocolFallbackText(input, persona);
+  if (!input.replyRunner) {
+    return fallback;
+  }
+
+  const now = typeof input.now === 'number' && Number.isFinite(input.now)
+    ? Math.trunc(input.now)
+    : Date.now();
+  const conversationId = `provider-order-${input.stage}-${normalizeText(input.orderTxid) || now}`;
+  const instruction = buildProviderOrderProtocolInstruction(input);
+  const inboundMessage = {
+    conversationId,
+    messageId: `${conversationId}-instruction`,
+    direction: 'inbound' as const,
+    senderGlobalMetaId: normalizeText(input.buyerGlobalMetaId) || 'buyer',
+    content: instruction,
+    messagePinId: null,
+    extensions: {
+      protocol: 'a2a_order',
+      stage: input.stage,
+      orderTxid: normalizeText(input.orderTxid) || null,
+    },
+    timestamp: now,
+  };
+  const runnerInput: ChatReplyRunnerInput = {
+    conversation: {
+      conversationId,
+      peerGlobalMetaId: normalizeText(input.buyerGlobalMetaId) || 'buyer',
+      peerName: 'Buyer MetaBot',
+      topic: 'a2a_skill_service_order',
+      strategyId: `provider-order-${input.stage}`,
+      state: 'active',
+      turnCount: input.stage === 'acknowledgement' ? 2 : 3,
+      lastDirection: 'inbound',
+      createdAt: now,
+      updatedAt: now,
+    },
+    recentMessages: [
+      {
+        conversationId,
+        messageId: `${conversationId}-request`,
+        direction: 'inbound',
+        senderGlobalMetaId: normalizeText(input.buyerGlobalMetaId) || 'buyer',
+        content: `Buyer request: ${normalizeText(input.userTask) || 'No buyer request was recorded.'}`,
+        messagePinId: null,
+        extensions: null,
+        timestamp: now - 2,
+      },
+      ...(normalizeText(input.responseText)
+        ? [{
+          conversationId,
+          messageId: `${conversationId}-result`,
+          direction: 'outbound' as const,
+          senderGlobalMetaId: normalizeText(input.providerIdentity?.globalMetaId) || 'provider',
+          content: `Delivered result: ${normalizeText(input.responseText)}`,
+          messagePinId: null,
+          extensions: null,
+          timestamp: now - 1,
+        }]
+        : []),
+      inboundMessage,
+    ],
+    persona,
+    strategy: {
+      id: `provider-order-${input.stage}`,
+      maxTurns: 6,
+      maxIdleMs: 0,
+      exitCriteria: input.stage === 'acknowledgement'
+        ? 'Acknowledge the order without ending the conversation.'
+        : 'Ask for a buyer rating after delivery without ending the conversation.',
+    },
+    inboundMessage,
+  };
+
+  try {
+    const result = await input.replyRunner(runnerInput);
+    const generated = stripProtocolTagsFromReply(normalizeText(result.content)).slice(0, 500).trim();
+    if (generated && !isGenericPrivateChatFallbackReply(generated)) {
+      return generated;
+    }
+  } catch {
+    return fallback;
+  }
+  return fallback;
 }
 
 export function createLoomDaemonActionHandler(
@@ -4800,6 +4999,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   ratingFollowupRetryDelaysMs?: number[];
   a2aConversationPersister?: A2AConversationMessagePersister;
   buyerRatingReplyRunner?: ChatReplyRunner;
+  providerOrderReplyRunner?: ChatReplyRunner;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   requestMvcGasSubsidy?: (
     options: RequestMvcGasSubsidyOptions
@@ -4937,6 +5137,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   );
   const a2aConversationPersister = input.a2aConversationPersister ?? persistA2AConversationMessage;
   const buyerRatingReplyRunner = input.buyerRatingReplyRunner ?? createDefaultChatReplyRunner();
+  const providerOrderReplyRunner = input.providerOrderReplyRunner ?? null;
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const getDaemonRecord = input.getDaemonRecord;
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
@@ -7669,7 +7870,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
       return commandManualActionRequired('peer_chat_public_key_missing', failureText);
     }
 
-    const acknowledgement = buildOrderStatusMessage(orderTxid, 'I received the order and started processing.');
+    const acknowledgementText = await generateProviderOrderProtocolReplyText({
+      replyRunner: providerOrderReplyRunner,
+      paths: runtimeStateStore.paths,
+      providerIdentity: state.identity,
+      buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+      service,
+      orderTxid,
+      paymentTxid: paymentTxid || null,
+      orderReference: orderReference || null,
+      paymentAmount: amountLine.amount || service.price,
+      paymentCurrency: amountLine.currency || service.currency,
+      userTask,
+      taskContext: '',
+      stage: 'acknowledgement',
+    });
+    const acknowledgement = buildOrderStatusMessage(orderTxid, acknowledgementText);
     let acknowledgementWrite: { pinId: string | null; txids: string[] };
     try {
       acknowledgementWrite = await sendProviderOrderPrivateMessage({
@@ -8029,7 +8245,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
       result: responseText,
       deliveredAt: Date.now(),
     }, orderTxid);
-    const needsRatingMessage = buildNeedsRatingMessage(orderTxid, 'Please rate this service.');
+    const ratingRequestText = await generateProviderOrderProtocolReplyText({
+      replyRunner: providerOrderReplyRunner,
+      paths: runtimeStateStore.paths,
+      providerIdentity: state.identity,
+      buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+      service,
+      orderTxid,
+      paymentTxid: paymentTxid || null,
+      orderReference: orderReference || null,
+      paymentAmount: amountLine.amount || service.price,
+      paymentCurrency: amountLine.currency || service.currency,
+      userTask,
+      taskContext: '',
+      responseText,
+      stage: 'rating_request',
+    });
+    const needsRatingMessage = buildNeedsRatingMessage(orderTxid, ratingRequestText);
     let deliveryWrite: { pinId: string | null; txids: string[] };
     try {
       deliveryWrite = await sendProviderOrderPrivateMessage({
@@ -8201,7 +8433,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           timestamp: Date.now(),
           type: 'needs_rating' as const,
           sender: 'provider' as const,
-          content: 'Please rate this service.',
+          content: ratingRequestText,
           metadata: {
             protocolTag: 'NeedsRating',
             orderTxid,
