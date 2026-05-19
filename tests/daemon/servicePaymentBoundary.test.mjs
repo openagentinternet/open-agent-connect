@@ -2067,6 +2067,65 @@ test('inbound provider ORDER with forged txid does not execute or deliver before
   assert.equal(harness.writes.some((entry) => entry.path === '/protocols/simplemsg'), false);
 });
 
+test('inbound provider ORDER records and reports payment verification failure without executing', async (t) => {
+  const orderTxid = '8'.repeat(64);
+  const paymentTxid = '9'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t);
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'order_payment_unverified');
+  assert.deepEqual(harness.fetchRawTxCalls, [paymentTxid]);
+  assert.deepEqual(harness.fetchUtxosCalls, [MVC_PAYMENT_ADDRESS]);
+  assert.equal(harness.llmCalls.length, 0);
+
+  const simplemsgContents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[ORDER_END:${orderTxid} failed]`)), true);
+
+  const conversation = await createA2AConversationStore({
+    homeDir: harness.homeDir,
+    local: {
+      globalMetaId: harness.identity.globalMetaId,
+      name: harness.identity.name,
+      chatPublicKey: harness.identity.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: harness.buyerGlobalMetaId,
+      chatPublicKey: harness.buyerPair.publicKeyHex,
+    },
+  }).readConversation();
+  const orderSession = conversation.sessions.find((entry) => entry.sessionId === `a2a-order-${orderTxid}`);
+  assert.ok(orderSession);
+  assert.equal(orderSession.state, 'failed');
+  assert.equal(orderSession.paymentTxid, paymentTxid);
+  assert.match(orderSession.failureReason, /payment could not be verified/i);
+
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.paymentTxid === paymentTxid);
+  assert.ok(sellerOrder, 'expected seller order for payment verification failure');
+  assert.equal(sellerOrder.state, 'failed');
+  assert.equal(sellerOrder.orderTxid, orderTxid);
+  assert.match(sellerOrder.failureReason, /payment could not be verified/i);
+
+  const trace = state.traces.find((entry) => entry.order?.paymentTxid === paymentTxid);
+  assert.ok(trace, 'expected seller failure trace for payment verification failure');
+  assert.equal(trace.order.role, 'seller');
+  assert.equal(trace.order.orderTxid, orderTxid);
+  assert.equal(trace.a2a.publicStatus, 'remote_failed');
+  assert.equal(trace.providerRuntime.providerSkill, harness.service.providerSkill);
+});
+
 test('inbound provider ORDER accepts MVC payment when raw tx lookup falls back to provider UTXO evidence', async (t) => {
   const orderTxid = '4'.repeat(64);
   const paymentTxid = '5'.repeat(64);
