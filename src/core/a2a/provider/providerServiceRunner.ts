@@ -78,13 +78,18 @@ function buildPaidOrderSystemPrompt(input: {
   userTask: string;
   taskContext: string;
 }): string {
+  const providerSkill = normalizeText(input.providerSkill);
   return [
-    'You are handling a paid service order.',
+    'You are the provider-side service executor for this paid service order, already paid and inbound.',
     `Service: ${normalizeText(input.serviceName) || normalizeText(input.displayName) || 'Service Order'}.`,
-    `Required provider skill: ${normalizeText(input.providerSkill)}.`,
-    `You must use the selected provider skill "${normalizeText(input.providerSkill)}" to complete this paid order.`,
+    `Required provider skill: ${providerSkill}.`,
+    `You must use only the injected local skill "${providerSkill}" to complete this paid order.`,
+    'Treat the selected skill as the local service implementation, even when the runtime and skill source came from different platforms.',
     `Expected output type: ${normalizeText(input.outputType) || 'text'}.`,
-    'Do not repeat payment metadata, service ids, greetings, or rating boilerplate in the final answer.',
+    'The buyer has already selected and paid for this service. Do not call any remote service, run metabot services call, act as a buyer, or discover services.',
+    'The final answer must contain only the deliverable the buyer requested.',
+    'Do not repeat payment metadata or include process narration, greetings, rating boilerplate, service ids, chain txids, trace ids, skill paths, or instructions for the user to run commands.',
+    'Do not include daemon diagnostics, CLI startup logs, trace-watch output, or internal troubleshooting notes.',
     `Client request: ${normalizeText(input.userTask)}`,
     input.taskContext ? `Task context: ${normalizeText(input.taskContext)}` : '',
   ].filter(Boolean).join('\n');
@@ -106,6 +111,7 @@ function resolveSkillRootAbsolutePath(
 
 function buildPaidOrderUserPrompt(input: ProviderServiceOrderInput): string {
   const lines = [
+    'Provider execution mode: fulfill this inbound order locally with the selected skill. Do not delegate it.',
     `Service order for ${normalizeText(input.serviceName) || normalizeText(input.displayName) || 'Service Order'}.`,
     `User task: ${normalizeText(input.userTask)}`,
   ];

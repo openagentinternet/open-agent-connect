@@ -124,6 +124,11 @@ test('buildProviderServiceOrderPrompt includes paid-order guidance and required 
   assert.match(prompt, /must use.*weather\.oracle/i);
   assert.match(prompt, /do not repeat payment/i);
   assert.match(prompt, /output type/i);
+  assert.match(prompt, /provider-side service executor/i);
+  assert.match(prompt, /local skill/i);
+  assert.match(prompt, /do not call.*remote service/i);
+  assert.match(prompt, /final answer.*only.*deliverable/i);
+  assert.match(prompt, /do not include.*daemon/i);
 });
 
 test('createProviderServiceRunner uses fallback only before execution starts', async () => {

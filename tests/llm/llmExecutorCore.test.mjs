@@ -1383,6 +1383,35 @@ send({ type: 'result', session_id: 'cursor-session-result', result: 'Cursor done
   assert.equal(events.some((event) => event.type === 'tool_result' && event.output === 'ok'), true);
 });
 
+test('Cursor backend includes system prompt in chat prompt when no native system channel exists', async () => {
+  const base = await createTempDir();
+  const argsPath = path.join(base, 'args.json');
+  const binaryPath = await writeExecutableScript(base, 'fake-cursor-system.js', `#!/usr/bin/env node
+const fs = require('node:fs');
+fs.writeFileSync(process.env.FAKE_CURSOR_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
+process.stdout.write(JSON.stringify({ type: 'result', result: 'done' }) + '\\n');
+`);
+  const backend = createCursorBackend(binaryPath, { FAKE_CURSOR_ARGS_PATH: argsPath });
+
+  await backend.execute(
+    {
+      runtimeId: 'llm_cursor',
+      runtime: { ...runtime, provider: 'cursor', binaryPath },
+      prompt: 'User task only.',
+      systemPrompt: 'Provider-only system contract.',
+      cwd: base,
+    },
+    { emit: () => undefined },
+    new AbortController().signal,
+  );
+
+  const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
+  assert.equal(args[0], 'chat');
+  assert.equal(args[1], '-p');
+  assert.match(args[2], /Provider-only system contract/);
+  assert.match(args[2], /User task only/);
+});
+
 test('Trae backend launches editor chat mode and captures process output', async () => {
   const base = await createTempDir();
   const argsPath = path.join(base, 'args.json');
