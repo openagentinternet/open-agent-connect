@@ -1044,6 +1044,8 @@ async function draftLoomTaskFromWish(
     sessionsRoot: paths.llmExecutorSessionsRoot,
     transcriptsRoot: paths.llmExecutorTranscriptsRoot,
     skillsRoot: paths.skillsRoot,
+    systemHomeDir: paths.systemHomeDir,
+    env: context.env,
     backends: createRegistryBackendFactories(),
   });
 
@@ -3223,6 +3225,8 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           sessionsRoot: paths.llmExecutorSessionsRoot,
           transcriptsRoot: paths.llmExecutorTranscriptsRoot,
           skillsRoot: paths.skillsRoot,
+          systemHomeDir: paths.systemHomeDir,
+          env: context.env,
           backends: createRegistryBackendFactories(),
         });
 
@@ -3538,6 +3542,8 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     sessionsRoot: paths.llmExecutorSessionsRoot,
     transcriptsRoot: paths.llmExecutorTranscriptsRoot,
     skillsRoot: paths.skillsRoot,
+    systemHomeDir: paths.systemHomeDir,
+    env: context.env,
     backends: providerLlmBackends,
   });
 

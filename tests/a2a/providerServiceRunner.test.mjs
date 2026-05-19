@@ -469,6 +469,50 @@ test('createProviderServiceRunner returns structured failure without a session w
   await cleanupProfileHome(homeDir);
 });
 
+test('createProviderServiceRunner injects a locally installed skill into a healthy primary runtime', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'cursor', health: 'healthy', binaryPath: '/bin/cursor-agent' }),
+    ],
+  });
+  await bindingStore.write({
+    version: 1,
+    bindings: [
+      binding('binding-primary', 'alice', 'runtime-primary', 'primary'),
+    ],
+  });
+  await fs.mkdir(path.join(systemHomeDir, '.codex', 'skills', 'codex.only'), { recursive: true });
+  await fs.writeFile(path.join(systemHomeDir, '.codex', 'skills', 'codex.only', 'SKILL.md'), '# Codex Only\n', 'utf8');
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'Primary runtime used injected local skill.',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ providerSkill: 'codex.only' }));
+
+  assert.equal(result.state, 'completed');
+  assert.equal(result.runtimeId, 'runtime-primary');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].runtimeId, 'runtime-primary');
+  assert.equal(
+    calls[0].skillSourcePaths['codex.only'],
+    path.join(systemHomeDir, '.codex', 'skills', 'codex.only'),
+  );
+  await cleanupProfileHome(homeDir);
+});
+
 test('createProviderServiceRunner retries fallback on started terminal runtime failures', async () => {
   const terminalCases = [
     {

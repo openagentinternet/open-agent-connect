@@ -6,7 +6,15 @@ import type { LlmRuntimeStore } from '../../llm/llmRuntimeStore';
 import type { LlmBinding, LlmRuntime } from '../../llm/llmTypes';
 import { isSafeProviderSkillName, type PlatformSkillCatalogEntry, type PlatformSkillRootDiagnostic } from '../../services/platformSkillCatalog';
 import { createServiceRunnerFailedResult, type ProviderServiceRunnerResult } from './serviceRunnerContracts';
-import { getPlatformDefinition, getPlatformSkillRoots, isPlatformId, resolvePlatformSkillRootPath, type PlatformId } from '../../platform/platformRegistry';
+import {
+  getInstallSkillRoots,
+  getPlatformDefinition,
+  getPlatformSkillRoots,
+  isPlatformId,
+  resolvePlatformSkillRootPath,
+  type PlatformId,
+  type PlatformSkillRoot,
+} from '../../platform/platformRegistry';
 
 export interface ProviderServiceOrderInput {
   servicePinId: string;
@@ -85,6 +93,15 @@ function buildPaidOrderSystemPrompt(input: {
 function isTextOutputType(value: unknown): boolean {
   const outputType = normalizeText(value).toLowerCase();
   return !outputType || outputType === 'text';
+}
+
+function resolveSkillRootAbsolutePath(
+  deps: ProviderServiceRunnerDependencies,
+  root: PlatformSkillRoot,
+): string {
+  return root.kind === 'project'
+    ? path.resolve(deps.projectRoot, root.path)
+    : resolvePlatformSkillRootPath(root, deps.systemHomeDir, deps.env);
 }
 
 function buildPaidOrderUserPrompt(input: ProviderServiceOrderInput): string {
@@ -276,9 +293,7 @@ async function readRuntimeSelection(
   const rootDiagnostics: PlatformSkillRootDiagnostic[] = [];
 
   for (const root of roots) {
-    const absolutePath = root.kind === 'project'
-      ? path.resolve(deps.projectRoot, root.path)
-      : resolvePlatformSkillRootPath(root, deps.systemHomeDir, deps.env);
+    const absolutePath = resolveSkillRootAbsolutePath(deps, root);
     try {
       const entries = await fs.readdir(absolutePath, { withFileTypes: true });
       rootDiagnostics.push({
@@ -331,6 +346,78 @@ async function readRuntimeSelection(
   return null;
 }
 
+async function readPortableSkillSelection(
+  deps: ProviderServiceRunnerDependencies,
+  runtime: LlmRuntime,
+  providerSkill: string,
+  fallbackSelected: boolean,
+): Promise<ProviderServiceRunnerSelection | null> {
+  if (!isInjectableSkillRuntime(runtime)) {
+    return null;
+  }
+  const canStartRuntime = deps.canStartRuntime ?? defaultCanStartRuntime;
+  if (!await canStartRuntime(runtime)) {
+    return null;
+  }
+
+  const rootDiagnostics: PlatformSkillRootDiagnostic[] = [];
+  const seenRoots = new Set<string>();
+  for (const root of getInstallSkillRoots()) {
+    const absolutePath = resolveSkillRootAbsolutePath(deps, root);
+    const rootKey = path.resolve(absolutePath);
+    if (seenRoots.has(rootKey)) {
+      continue;
+    }
+    seenRoots.add(rootKey);
+
+    try {
+      await fs.access(absolutePath);
+      rootDiagnostics.push({
+        rootId: root.id,
+        kind: root.kind,
+        absolutePath,
+        status: 'readable',
+      });
+
+      const skillDocumentPath = path.join(absolutePath, providerSkill, 'SKILL.md');
+      const stat = await fs.stat(skillDocumentPath).catch(() => null);
+      if (!stat?.isFile()) {
+        continue;
+      }
+
+      const sourcePlatformId = isPlatformId(root.platformId) ? root.platformId : runtime.provider;
+      const platformDisplayName = isPlatformId(root.platformId)
+        ? getPlatformDefinition(root.platformId).displayName
+        : 'Shared Agents';
+      return {
+        runtime,
+        skill: {
+          skillName: providerSkill,
+          platformId: sourcePlatformId,
+          platformDisplayName,
+          rootId: root.id,
+          rootKind: root.kind,
+          absolutePath: path.join(absolutePath, providerSkill),
+          skillDocumentPath,
+        },
+        rootDiagnostics,
+        fallbackSelected,
+      };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      rootDiagnostics.push({
+        rootId: root.id,
+        kind: root.kind,
+        absolutePath,
+        status: code === 'ENOENT' ? 'missing' : 'unreadable',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return null;
+}
+
 function isInjectableSkillRuntime(runtime: LlmRuntime): runtime is InjectableSkillRuntime {
   return isPlatformId(runtime.provider) && Boolean(normalizeText(runtime.binaryPath)) && runtime.health !== 'unavailable';
 }
@@ -355,6 +442,10 @@ async function readFallbackSelection(
   const fallbackSelection = await readRuntimeSelection(deps, fallbackRuntime, providerSkill, true);
   if (fallbackSelection) {
     return fallbackSelection;
+  }
+  const portableFallbackSelection = await readPortableSkillSelection(deps, fallbackRuntime, providerSkill, true);
+  if (portableFallbackSelection) {
+    return portableFallbackSelection;
   }
   if (!await canRunInjectedSkillRuntime(deps, fallbackRuntime)) {
     return null;
@@ -434,13 +525,15 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
       const primaryRuntime = resolutionState.primaryRuntime;
       const primarySelection = primaryRuntime ? await readRuntimeSelection(input, primaryRuntime, order.providerSkill, false) : null;
       let runtime = primaryRuntime;
-      let selection = primarySelection;
+      let selection = primarySelection
+        ?? (primaryRuntime ? await readPortableSkillSelection(input, primaryRuntime, order.providerSkill, false) : null);
       if (!runtime || !selection) {
         runtime = await resolveFallbackRuntime(input, primaryRuntime, resolutionState.fallbackRuntime);
         if (!runtime) {
           return createServiceRunnerFailedResult('provider_runtime_unavailable', 'No primary or fallback runtime was available before provider execution started.');
         }
-        selection = await readRuntimeSelection(input, runtime, order.providerSkill, true);
+        selection = await readRuntimeSelection(input, runtime, order.providerSkill, true)
+          ?? await readPortableSkillSelection(input, runtime, order.providerSkill, true);
         if (!selection) {
           return createServiceRunnerFailedResult('provider_skill_missing', `providerSkill is not installed in the selected MetaBot primary runtime skill roots: ${order.providerSkill}`);
         }

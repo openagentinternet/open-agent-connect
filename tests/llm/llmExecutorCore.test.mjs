@@ -511,12 +511,18 @@ test('skill injector copies explicit selected skill sources outside the default 
 test('skill injector resolves provider roots from registry project skill roots', async () => {
   const base = await createTempDir();
   const cwd = path.join(base, 'work');
+  const systemHomeDir = path.join(base, 'home');
 
   assert.equal(resolveProviderSkillRoot('claude-code', cwd), path.join(cwd, '.claude', 'skills'));
   assert.equal(resolveProviderSkillRoot('codex', cwd), path.join(cwd, '.codex', 'skills'));
   assert.equal(resolveProviderSkillRoot('openclaw', cwd), path.join(cwd, '.openclaw', 'skills'));
   assert.equal(resolveProviderSkillRoot('gemini', cwd), path.join(cwd, '.gemini', 'skills'));
   assert.equal(resolveProviderSkillRoot('hermes', cwd), path.join(cwd, '.agent_context', 'skills'));
+  assert.equal(resolveProviderSkillRoot('cursor', cwd), path.join(cwd, '.agent_context', 'skills'));
+  assert.equal(
+    resolveProviderSkillRoot('cursor', cwd, { systemHomeDir }),
+    path.join(systemHomeDir, '.cursor', 'skills'),
+  );
   assert.equal(resolveProviderSkillRoot('unknown-provider', cwd), path.join(cwd, '.agent_context', 'skills'));
 });
 
