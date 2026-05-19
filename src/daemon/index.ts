@@ -5,6 +5,10 @@ import { createHttpServer } from './httpServer';
 import { resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 
+const DAEMON_LOCK_BASE_DELAY_MS = 50;
+const DAEMON_LOCK_MAX_ATTEMPTS = 40;
+const DAEMON_LOCK_STALE_WITHOUT_PID_MS = 5_000;
+
 export interface MetabotDaemonAddress {
   host: string;
   port: number;
@@ -26,6 +30,71 @@ export interface CreateMetabotDaemonOptions {
 
 function resolvePaths(input: string | MetabotPaths): MetabotPaths {
   return typeof input === 'string' ? resolveMetabotPaths(input) : input;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function readLockInfo(filePath: string): Promise<{ ownerId?: string; pid?: number; acquiredAt?: number } | null> {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    const parsed = JSON.parse(raw) as { ownerId?: unknown; pid?: unknown; acquiredAt?: unknown };
+    return {
+      ownerId: typeof parsed.ownerId === 'string' ? parsed.ownerId : undefined,
+      pid: typeof parsed.pid === 'number' ? parsed.pid : undefined,
+      acquiredAt: typeof parsed.acquiredAt === 'number' ? parsed.acquiredAt : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code !== 'ESRCH';
+  }
+}
+
+async function quarantineStaleLock(lockPath: string): Promise<void> {
+  const stalePath = `${lockPath}.stale-${Date.now()}`;
+  try {
+    await fs.rename(lockPath, stalePath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      throw error;
+    }
+  }
+}
+
+async function recoverStaleLock(lockPath: string): Promise<boolean> {
+  const stat = await fs.stat(lockPath);
+  const lockInfo = await readLockInfo(lockPath);
+  const lockPid = typeof lockInfo?.pid === 'number' ? lockInfo.pid : null;
+  const acquiredAt = typeof lockInfo?.acquiredAt === 'number' ? lockInfo.acquiredAt : stat.mtimeMs;
+
+  if (lockPid && !isProcessAlive(lockPid)) {
+    await quarantineStaleLock(lockPath);
+    return true;
+  }
+
+  if (!lockPid && Date.now() - acquiredAt > DAEMON_LOCK_STALE_WITHOUT_PID_MS) {
+    await quarantineStaleLock(lockPath);
+    return true;
+  }
+
+  return false;
 }
 
 async function closeServer(server: http.Server | null): Promise<void> {
@@ -56,18 +125,48 @@ export function createMetabotDaemon(options: CreateMetabotDaemonOptions): Metabo
 
   async function acquireLock(): Promise<void> {
     await fs.mkdir(paths.locksRoot, { recursive: true });
-    await fs.writeFile(lockPath, `${JSON.stringify({ ownerId, acquiredAt: Date.now() }, null, 2)}\n`, {
-      encoding: 'utf8',
-      flag: 'wx',
-    });
-    lockHeld = true;
+    for (let attempt = 0; attempt < DAEMON_LOCK_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        await fs.writeFile(lockPath, `${JSON.stringify({
+          ownerId,
+          pid: process.pid,
+          acquiredAt: Date.now(),
+        }, null, 2)}\n`, {
+          encoding: 'utf8',
+          flag: 'wx',
+        });
+        lockHeld = true;
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'EEXIST') {
+          throw error;
+        }
+        try {
+          if (await recoverStaleLock(lockPath)) {
+            continue;
+          }
+        } catch (recoverError) {
+          const recoverCode = (recoverError as NodeJS.ErrnoException).code;
+          if (recoverCode !== 'ENOENT') {
+            throw recoverError;
+          }
+        }
+        await sleep(Math.min(DAEMON_LOCK_BASE_DELAY_MS * (attempt + 1), 250));
+      }
+    }
+
+    throw new Error(`Timed out acquiring daemon lock: ${lockPath}`);
   }
 
   async function releaseLock(): Promise<void> {
     if (!lockHeld) return;
     lockHeld = false;
     try {
-      await fs.rm(lockPath);
+      const lockInfo = await readLockInfo(lockPath);
+      if (lockInfo?.ownerId === ownerId && lockInfo.pid === process.pid) {
+        await fs.rm(lockPath);
+      }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'ENOENT') {
