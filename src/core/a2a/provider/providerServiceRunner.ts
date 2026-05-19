@@ -54,6 +54,31 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function isLeadingProcessNarration(value: string, providerSkill: string): boolean {
+  const text = normalizeText(value);
+  if (!text || text.length > 320) {
+    return false;
+  }
+  const lower = text.toLowerCase();
+  const skillName = normalizeText(providerSkill).toLowerCase();
+  const startsWithProcessVerb = /^(reading|fetching|checking|searching|loading|using|running|calling|starting|inspecting|looking up)\b/.test(lower);
+  const referencesInternalExecution = /\b(skill|metabot|daemon|trace|payment|txid|order|provider|remote service|services call|cli)\b/.test(lower)
+    || (Boolean(skillName) && lower.includes(skillName));
+  return startsWithProcessVerb && referencesInternalExecution;
+}
+
+function sanitizeProviderDeliverableText(value: string, providerSkill: string): string {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    return '';
+  }
+  const paragraphs = normalized.split(/\n{2,}/);
+  while (paragraphs.length > 1 && isLeadingProcessNarration(paragraphs[0], providerSkill)) {
+    paragraphs.shift();
+  }
+  return paragraphs.join('\n\n').trim();
+}
+
 async function defaultCanStartRuntime(runtime: LlmRuntime): Promise<boolean> {
   const binaryPath = normalizeText(runtime.binaryPath);
   if (!binaryPath) {
@@ -88,6 +113,7 @@ function buildPaidOrderSystemPrompt(input: {
     `Expected output type: ${normalizeText(input.outputType) || 'text'}.`,
     'The buyer has already selected and paid for this service. Do not call any remote service, run metabot services call, act as a buyer, or discover services.',
     'The final answer must contain only the deliverable the buyer requested.',
+    'Start directly with the result title or data; never start with status narration such as "Reading the skill" or "Fetching data".',
     'Do not repeat payment metadata or include process narration, greetings, rating boilerplate, service ids, chain txids, trace ids, skill paths, or instructions for the user to run commands.',
     'Do not include daemon diagnostics, CLI startup logs, trace-watch output, or internal troubleshooting notes.',
     `Client request: ${normalizeText(input.userTask)}`,
@@ -643,7 +669,7 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
       const sessionId = run.sessionId;
       const session = run.session;
 
-      const responseText = normalizeText(session?.result?.output);
+      const responseText = sanitizeProviderDeliverableText(session?.result?.output ?? '', order.providerSkill);
       if (!responseText) {
         return createRuntimeFailedResult(
           'provider_execution_empty',

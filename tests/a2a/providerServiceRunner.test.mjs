@@ -400,6 +400,37 @@ test('createProviderServiceRunner passes selected global skill source path to ex
   await cleanupProfileHome(homeDir);
 });
 
+test('createProviderServiceRunner strips leading process narration from provider deliverables', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'Reading the weather.oracle skill to fetch the latest data.\n\nWeather Oracle Result\nSunny, 25C',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder());
+
+  assert.equal(result.state, 'completed');
+  assert.equal(result.responseText, 'Weather Oracle Result\nSunny, 25C');
+  await cleanupProfileHome(homeDir);
+});
+
 test('createProviderServiceRunner resolves fallback runtime from fallback binding before execution', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   await bindingStore.write({
