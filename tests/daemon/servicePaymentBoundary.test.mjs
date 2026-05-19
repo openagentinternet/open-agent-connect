@@ -29,6 +29,7 @@ const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretSto
 
 const MVC_PAYMENT_ADDRESS = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 const MVC_OTHER_ADDRESS = '1dice8EMZmqKvrGE4Qc9bUFf9PX3xaYDp';
+const LOWER_HEX_64_RE = /^[0-9a-f]{64}$/;
 
 async function waitForCondition(predicate, timeoutMs = 1000, intervalMs = 20) {
   const deadline = Date.now() + timeoutMs;
@@ -755,26 +756,29 @@ test('free simplemsg service orders use an order reference instead of a payment 
   assert.equal(called.ok, false);
   assert.equal(called.state, 'waiting');
   assert.equal(called.data.paymentTxid, null);
-  assert.match(called.data.orderReference, /^free-order-/);
+  assert.match(called.data.orderReference, LOWER_HEX_64_RE);
 
   const simplemsgWrite = harness.writes.find((entry) => entry.path === '/protocols/simplemsg');
   assert.ok(simplemsgWrite, 'expected a simplemsg order write');
   const plaintext = decryptSimplemsgOrder(simplemsgWrite, harness);
   assert.match(plaintext, /^\[ORDER\]/);
-  assert.doesNotMatch(plaintext, /\ntxid:\s*free-order-/i);
-  assert.match(plaintext, /\norder id:\s*free-order-/i);
+  assert.match(plaintext, /\n支付金额 0 SPACE/i);
+  assert.doesNotMatch(plaintext, /\ntxid:/i);
+  assert.doesNotMatch(plaintext, /free-order-/i);
+  assert.match(plaintext, new RegExp(`\\norder id:\\s*${called.data.orderReference}`, 'i'));
+  assert.match(plaintext, /\nsettlement kind:\s*native/i);
 
   const state = await harness.runtimeStateStore.readState();
   const trace = state.traces.find((entry) => entry.traceId === called.data.traceId);
   assert.ok(trace, 'expected caller trace to be persisted');
   assert.equal(trace.order.paymentTxid, null);
-  assert.match(trace.order.orderReference, /^free-order-/);
+  assert.match(trace.order.orderReference, LOWER_HEX_64_RE);
 });
 
 test('inbound free provider ORDER rejects replayed order reference with a different simplemsg tx', async (t) => {
   const firstMessageTxid = '1'.repeat(64);
   const replayMessageTxid = '2'.repeat(64);
-  const orderReference = 'free-order-phase4-replay';
+  const orderReference = 'a'.repeat(64);
   const harness = await createInboundProviderOrderHarness(t, {
     service: { price: '0', currency: 'SPACE' },
   });
@@ -811,7 +815,7 @@ test('inbound free provider ORDER rejects replayed order reference with a differ
 test('concurrent inbound free provider ORDER replay with same order reference does not execute twice', async (t) => {
   const firstMessageTxid = '3'.repeat(64);
   const replayMessageTxid = '4'.repeat(64);
-  const orderReference = 'free-order-phase4-concurrent-replay';
+  const orderReference = 'c'.repeat(64);
   const harness = await createInboundProviderOrderHarness(t, {
     service: { price: '0', currency: 'SPACE' },
     llmDelayMs: 50,
