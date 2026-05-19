@@ -1608,6 +1608,283 @@ export interface PrivateChatAutoReplyProfileDispatcherOptions {
   ) => PrivateChatAutoReplyOrchestrator;
 }
 
+type A2ARecoveredOrderProtocolMessage = A2ASimplemsgInboundDispatcherMessage & {
+  localProfileSlug?: string | null;
+};
+
+export interface A2AUnhandledOrderReplayResult {
+  profiles: number;
+  conversations: number;
+  scanned: number;
+  replayed: number;
+  skipped: number;
+  failed: number;
+}
+
+export interface A2AUnhandledOrderReplayOptions {
+  systemHomeDir: string;
+  activeHomeDir?: string | null;
+  handleOrderProtocolMessage?: (
+    message: A2ARecoveredOrderProtocolMessage
+  ) => Promise<MetabotCommandResult<unknown>> | MetabotCommandResult<unknown>;
+  listProfiles?: (systemHomeDir: string) => Promise<IdentityProfileRecord[]>;
+  maxMessagesPerProfile?: number;
+  logWarning?: (scope: string, error: unknown) => void;
+}
+
+function normalizeReplayText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeReplayOrderTxid(value: unknown): string {
+  const normalized = normalizeReplayText(value);
+  const pinMatch = normalized.match(/^([0-9a-f]{64})i\d+$/iu);
+  if (pinMatch) {
+    return pinMatch[1].toLowerCase();
+  }
+  return /^[0-9a-f]{64}$/iu.test(normalized) ? normalized.toLowerCase() : '';
+}
+
+function messageOrderTxidForReplay(message: Record<string, unknown>): string {
+  return normalizeReplayOrderTxid(message.orderTxid)
+    || normalizeReplayOrderTxid(message.txid)
+    || normalizeReplayOrderTxid(message.pinId)
+    || normalizeReplayOrderTxid(message.messageId)
+    || normalizeReplayOrderTxid(message.id);
+}
+
+function extractReplayOrderLineValue(content: string, label: string): string {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = content.match(new RegExp(`^\\s*${escaped}\\s*:\\s*(.+?)\\s*$`, 'imu'));
+  return normalizeReplayText(match?.[1]);
+}
+
+function conversationHasServiceOrderSession(
+  conversation: Record<string, unknown>,
+  input: { orderTxid: string; paymentTxid: string },
+): boolean {
+  const sessions = Array.isArray(conversation.sessions) ? conversation.sessions : [];
+  const indexedOrderSession = conversation.indexes
+    && typeof conversation.indexes === 'object'
+    && !Array.isArray(conversation.indexes)
+    ? (conversation.indexes as { orderTxidToSessionId?: unknown; paymentTxidToSessionId?: unknown })
+    : null;
+  const orderIndex = indexedOrderSession?.orderTxidToSessionId
+    && typeof indexedOrderSession.orderTxidToSessionId === 'object'
+    && !Array.isArray(indexedOrderSession.orderTxidToSessionId)
+    ? indexedOrderSession.orderTxidToSessionId as Record<string, unknown>
+    : {};
+  const paymentIndex = indexedOrderSession?.paymentTxidToSessionId
+    && typeof indexedOrderSession.paymentTxidToSessionId === 'object'
+    && !Array.isArray(indexedOrderSession.paymentTxidToSessionId)
+    ? indexedOrderSession.paymentTxidToSessionId as Record<string, unknown>
+    : {};
+  if (input.orderTxid && normalizeReplayText(orderIndex[input.orderTxid])) {
+    return true;
+  }
+  if (input.paymentTxid && normalizeReplayText(paymentIndex[input.paymentTxid])) {
+    return true;
+  }
+
+  return sessions.some((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return false;
+    }
+    const session = entry as Record<string, unknown>;
+    if (normalizeReplayText(session.type) !== 'service_order') {
+      return false;
+    }
+    return Boolean(
+      (input.orderTxid && normalizeReplayOrderTxid(session.orderTxid) === input.orderTxid)
+      || (input.paymentTxid && normalizeReplayText(session.paymentTxid) === input.paymentTxid)
+    );
+  });
+}
+
+async function readA2AConversationStateForReplay(filePath: string): Promise<Record<string, unknown> | null> {
+  try {
+    const parsed = JSON.parse(await fs.promises.readFile(filePath, 'utf8')) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildReplayOrderMessage(input: {
+  profile: IdentityProfileRecord;
+  activeHomeDir: string;
+  conversation: Record<string, unknown>;
+  rawMessage: Record<string, unknown>;
+}): A2ARecoveredOrderProtocolMessage | null {
+  const content = String(input.rawMessage.content ?? '');
+  const classification = classifySimplemsgContent(content);
+  if (classification.kind !== 'order_protocol' || classification.tag !== 'ORDER') {
+    return null;
+  }
+  if (normalizeReplayText(input.rawMessage.direction) !== 'incoming') {
+    return null;
+  }
+  const sender = input.rawMessage.sender
+    && typeof input.rawMessage.sender === 'object'
+    && !Array.isArray(input.rawMessage.sender)
+    ? input.rawMessage.sender as Record<string, unknown>
+    : null;
+  const peer = input.conversation.peer
+    && typeof input.conversation.peer === 'object'
+    && !Array.isArray(input.conversation.peer)
+    ? input.conversation.peer as Record<string, unknown>
+    : null;
+  const fromGlobalMetaId = normalizeReplayText(sender?.globalMetaId) || normalizeReplayText(peer?.globalMetaId);
+  if (!fromGlobalMetaId) {
+    return null;
+  }
+  const activeHomeDir = normalizeReplayText(input.activeHomeDir);
+  const profileHomeDir = normalizeReplayText(input.profile.homeDir);
+  const localProfileSlug = activeHomeDir && profileHomeDir && path.resolve(profileHomeDir) === path.resolve(activeHomeDir)
+    ? null
+    : input.profile.slug;
+  const raw = input.rawMessage.raw
+    && typeof input.rawMessage.raw === 'object'
+    && !Array.isArray(input.rawMessage.raw)
+    ? input.rawMessage.raw as Record<string, unknown>
+    : null;
+  return {
+    fromGlobalMetaId,
+    content,
+    messagePinId: normalizeReplayText(input.rawMessage.pinId)
+      || normalizeReplayText(input.rawMessage.messageId)
+      || null,
+    fromChatPublicKey: normalizeReplayText(sender?.chatPublicKey)
+      || normalizeReplayText(peer?.chatPublicKey)
+      || null,
+    timestamp: Number.isFinite(input.rawMessage.timestamp)
+      ? Math.trunc(Number(input.rawMessage.timestamp))
+      : Date.now(),
+    rawMessage: raw,
+    localProfileSlug,
+  };
+}
+
+export async function replayUnhandledA2AOrderMessagesForProfiles(
+  input: A2AUnhandledOrderReplayOptions,
+): Promise<A2AUnhandledOrderReplayResult> {
+  const result: A2AUnhandledOrderReplayResult = {
+    profiles: 0,
+    conversations: 0,
+    scanned: 0,
+    replayed: 0,
+    skipped: 0,
+    failed: 0,
+  };
+  const handler = input.handleOrderProtocolMessage;
+  if (!handler) {
+    return result;
+  }
+
+  const listProfilesForReplay = input.listProfiles ?? listIdentityProfiles;
+  const profiles = await listProfilesForReplay(input.systemHomeDir).catch((error) => {
+    input.logWarning?.('[A2A order replay profiles]', error);
+    return [];
+  });
+  const maxMessagesPerProfile = Math.max(1, Math.floor(Number(input.maxMessagesPerProfile) || 200));
+  const replayedOrderKeys = new Set<string>();
+
+  for (const profile of profiles) {
+    result.profiles += 1;
+    const paths = resolveMetabotPaths(profile.homeDir);
+    let entries: string[] = [];
+    try {
+      entries = await fs.promises.readdir(paths.a2aRoot);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        input.logWarning?.('[A2A order replay read]', error);
+      }
+      continue;
+    }
+
+    const candidates: Array<{
+      conversation: Record<string, unknown>;
+      message: Record<string, unknown>;
+      orderTxid: string;
+      paymentTxid: string;
+    }> = [];
+    for (const entry of entries) {
+      if (!entry.startsWith('chat-') || !entry.endsWith('.json')) {
+        continue;
+      }
+      const conversation = await readA2AConversationStateForReplay(path.join(paths.a2aRoot, entry));
+      if (!conversation) {
+        continue;
+      }
+      result.conversations += 1;
+      const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+      for (const rawMessage of messages.slice(-maxMessagesPerProfile)) {
+        if (!rawMessage || typeof rawMessage !== 'object' || Array.isArray(rawMessage)) {
+          continue;
+        }
+        const message = rawMessage as Record<string, unknown>;
+        const content = String(message.content ?? '');
+        const classification = classifySimplemsgContent(content);
+        if (
+          normalizeReplayText(message.direction) !== 'incoming'
+          || classification.kind !== 'order_protocol'
+          || classification.tag !== 'ORDER'
+        ) {
+          continue;
+        }
+        const orderTxid = messageOrderTxidForReplay(message);
+        const paymentTxid = normalizeReplayText(message.paymentTxid)
+          || extractReplayOrderLineValue(content, 'txid');
+        const replayKey = orderTxid || paymentTxid || normalizeReplayText(message.messageId);
+        if (!replayKey) {
+          result.skipped += 1;
+          continue;
+        }
+        result.scanned += 1;
+        if (
+          replayedOrderKeys.has(replayKey)
+          || conversationHasServiceOrderSession(conversation, { orderTxid, paymentTxid })
+        ) {
+          result.skipped += 1;
+          continue;
+        }
+        candidates.push({ conversation, message, orderTxid, paymentTxid });
+        replayedOrderKeys.add(replayKey);
+      }
+    }
+
+    candidates.sort((left, right) => {
+      const leftTime = Number.isFinite(left.message.timestamp) ? Number(left.message.timestamp) : 0;
+      const rightTime = Number.isFinite(right.message.timestamp) ? Number(right.message.timestamp) : 0;
+      return leftTime - rightTime;
+    });
+
+    for (const candidate of candidates) {
+      const replayMessage = buildReplayOrderMessage({
+        profile,
+        activeHomeDir: normalizeReplayText(input.activeHomeDir),
+        conversation: candidate.conversation,
+        rawMessage: candidate.message,
+      });
+      if (!replayMessage) {
+        result.skipped += 1;
+        continue;
+      }
+      try {
+        await handler(replayMessage);
+        result.replayed += 1;
+      } catch (error) {
+        result.failed += 1;
+        input.logWarning?.('[A2A order replay handler]', error);
+      }
+    }
+  }
+
+  return result;
+}
+
 export function createPrivateChatAutoReplyProfileDispatcher(
   input: PrivateChatAutoReplyProfileDispatcherOptions,
 ): PrivateChatAutoReplyProfileDispatcher {
@@ -3776,6 +4053,16 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     await simplemsgListener.start();
     simplemsgPresenceWatchdog.start();
     chatAutoReplyBackfill.start();
+    void replayUnhandledA2AOrderMessagesForProfiles({
+      systemHomeDir: paths.systemHomeDir,
+      activeHomeDir: homeDir,
+      handleOrderProtocolMessage: handlers.services?.handleInboundOrderProtocolMessage,
+      logWarning: (scope, error) => {
+        console.warn(scope, error instanceof Error ? error.message : String(error));
+      },
+    }).catch((error) => {
+      console.warn('[A2A order replay]', error instanceof Error ? error.message : String(error));
+    });
   }
 
   let shuttingDown = false;
