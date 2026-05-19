@@ -1934,6 +1934,9 @@ function extractTraceRatingClosure(input) {
             ratingPublished = true;
             ratingMessageSent = true;
             ratingMessagePinId = normalizeText(metadata?.ratingMessagePinId) || ratingMessagePinId;
+            if (!ratingComment && content) {
+                ratingComment = stripRatingReceiptText(content) || content;
+            }
         }
         if (metadataEvent === 'service_rating_message_failed') {
             ratingPublished = true;
@@ -1965,6 +1968,13 @@ function readTranscriptMetadata(item) {
 function normalizedMetadataValue(item, key) {
     return normalizeText(readTranscriptMetadata(item)[key]);
 }
+function normalizePinOrTxReference(value) {
+    const text = normalizeText(value).toLowerCase();
+    const txid = normalizeChainTxid(text);
+    if (!txid)
+        return '';
+    return text.endsWith('i0') ? `${txid}i0` : txid;
+}
 function readTranscriptNestedMetadataValue(item, objectKey, valueKey) {
     const metadata = readTranscriptMetadata(item);
     const nested = metadata[objectKey];
@@ -1979,6 +1989,40 @@ function transcriptItemsShareOrderReference(legacyItem, unifiedItem) {
         const left = normalizedMetadataValue(legacyItem, key);
         const right = normalizedMetadataValue(unifiedItem, key);
         return Boolean(left && right && left === right);
+    });
+}
+function extractRatingPinIdFromText(value) {
+    const match = normalizeText(value).match(/\b([0-9a-f]{64}i\d+)\b/iu);
+    return match?.[1]?.toLowerCase() ?? null;
+}
+function stripRatingReceiptText(value) {
+    return stripOrderProtocolBubblePrefix(normalizeText(value))
+        .replace(/\n+\s*我的评分已记录在链上[\s\S]*$/u, '')
+        .trim();
+}
+function isLocalRatingPublicationItem(item) {
+    const metadata = readTranscriptMetadata(item);
+    const metadataEvent = normalizeText(metadata.event);
+    const ratingPinId = normalizeText(metadata.ratingPinId);
+    return Boolean(ratingPinId
+        && (item.type === 'rating' || metadataEvent === 'service_rating_published'));
+}
+function chainTranscriptConfirmsLocalRatingPublication(localItem, chainItems) {
+    const localMetadata = readTranscriptMetadata(localItem);
+    const localRatingPinId = normalizePinOrTxReference(localMetadata.ratingPinId);
+    const localRatingMessagePinId = normalizePinOrTxReference(localMetadata.ratingMessagePinId);
+    if (!localRatingPinId && !localRatingMessagePinId) {
+        return false;
+    }
+    return chainItems.some((item) => {
+        const metadata = readTranscriptMetadata(item);
+        const rawContent = normalizeText(metadata.rawContent) || normalizeText(item.content);
+        const chainRatingPinId = normalizePinOrTxReference(metadata.ratingPinId)
+            || normalizePinOrTxReference(extractRatingPinIdFromText(rawContent));
+        const chainMessagePinId = normalizePinOrTxReference(metadata.pinId)
+            || normalizePinOrTxReference(item.id);
+        return Boolean((localRatingPinId && chainRatingPinId === localRatingPinId)
+            || (localRatingMessagePinId && chainMessagePinId === localRatingMessagePinId));
     });
 }
 function transcriptItemMatchesTraceOrder(item, trace) {
@@ -2092,9 +2136,18 @@ function mergeLegacyTranscriptWithUnifiedChainMessages(input) {
     const chainTranscriptItems = (input.chainTranscriptItems ?? [])
         .filter((item) => normalizeText(item.id) && normalizeText(item.content));
     if (chainTranscriptItems.length > 0) {
-        return chainTranscriptItems
-            .slice()
-            .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
+        const merged = chainTranscriptItems.slice();
+        const existingIds = new Set(merged.map((item) => item.id));
+        for (const item of input.transcriptItems) {
+            if (existingIds.has(item.id)
+                || !isLocalRatingPublicationItem(item)
+                || !chainTranscriptConfirmsLocalRatingPublication(item, chainTranscriptItems)) {
+                continue;
+            }
+            existingIds.add(item.id);
+            merged.push(item);
+        }
+        return merged.sort((left, right) => (normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp)));
     }
     const unifiedItems = (input.unifiedTranscriptItems ?? [])
         .filter((item) => normalizeText(item.id) && normalizeText(item.content));
@@ -2339,9 +2392,16 @@ function projectPrivateHistorySimpleMessageToTranscript(input) {
     else if (protocolTag === 'ORDER_END') {
         type = 'order_end';
         content = normalizeText(orderEnd?.content) || content;
+        const endReason = normalizeText(orderEnd?.reason);
         metadata.endReason = normalizeText(orderEnd?.reason) || null;
         metadata.orderEnd = true;
         metadata.endState = isRemoteFailureReason(orderEnd?.reason) ? 'remote_failed' : 'completed';
+        if (endReason.toLowerCase() === 'rated') {
+            metadata.event = 'service_rating_message_sent';
+            metadata.ratingPinId = extractRatingPinIdFromText(content);
+            metadata.ratingMessagePinId = normalizeText(input.message.pinId) || null;
+            metadata.ratingMessageError = null;
+        }
     }
     const id = normalizeText(input.message.pinId)
         || normalizeText(input.message.txId)
@@ -2461,7 +2521,8 @@ async function buildTraceInspectorPayload(input) {
         chainApiBaseUrl: input.chainApiBaseUrl,
     });
     const serviceId = normalizeText(input.trace.order?.serviceId);
-    const servicePaidTx = normalizeText(input.trace.order?.paymentTxid);
+    const servicePaidTx = normalizeText(input.trace.order?.paymentTxid)
+        || normalizeText(input.trace.order?.orderReference);
     const ratingDetail = serviceId && servicePaidTx
         ? ratingSnapshot.ratingDetails.find((entry) => (normalizeText(entry.serviceId) === serviceId
             && normalizeText(entry.servicePaidTx) === servicePaidTx)) ?? null
@@ -4544,7 +4605,8 @@ function createDefaultMetabotDaemonHandlers(input) {
         const serviceId = normalizeText(trace.order?.serviceId);
         const servicePrice = normalizeText(trace.order?.paymentAmount);
         const serviceCurrency = normalizeText(trace.order?.paymentCurrency);
-        const servicePaidTx = normalizeText(trace.order?.paymentTxid);
+        const servicePaidTx = normalizeText(trace.order?.paymentTxid)
+            || normalizeText(trace.order?.orderReference);
         const serverBot = normalizeText(trace.session.peerGlobalMetaId ?? trace.a2a?.providerGlobalMetaId);
         if (!serviceId || !servicePrice || !serviceCurrency || !servicePaidTx || !serverBot) {
             return (0, commandResult_1.commandFailed)('service_rating_trace_incomplete', 'Trace is missing service or payment metadata required for skill-service-rate.');

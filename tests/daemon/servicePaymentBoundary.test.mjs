@@ -18,6 +18,7 @@ const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.j
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { buildDelegationOrderPayload } = require('../../dist/core/orders/delegationOrderMessage.js');
+const { createRatingDetailStateStore } = require('../../dist/core/ratings/ratingDetailState.js');
 const {
   SERVICE_ORDER_FREE_REFUND_SKIPPED_REASON,
   SERVICE_ORDER_SELF_REFUND_SKIPPED_REASON,
@@ -434,6 +435,7 @@ async function createServiceCallHarness(t, options = {}) {
     createSignerForHome: options.createSignerForHome,
     fetchPeerChatPublicKey: options.fetchPeerChatPublicKey ?? (async () => providerPair.publicKeyHex),
     ratingFollowupRetryDelaysMs: options.ratingFollowupRetryDelaysMs,
+    buyerRatingReplyRunner: options.buyerRatingReplyRunner,
     callerReplyWaiter: options.callerReplyWaiter ?? {
       async awaitServiceReply() {
         return { state: 'timeout' };
@@ -467,8 +469,10 @@ async function createServiceCallHarness(t, options = {}) {
   };
 }
 
-async function seedBuyerTraceForRating(harness) {
+async function seedBuyerTraceForRating(harness, overrides = {}) {
   const state = await harness.runtimeStateStore.readState();
+  const orderTxid = overrides.orderTxid ?? 'order-tx-1';
+  const paymentTxid = overrides.paymentTxid === undefined ? 'payment-tx-1' : overrides.paymentTxid;
   const trace = buildSessionTrace({
     traceId: 'trace-rating-retry',
     channel: 'a2a',
@@ -488,12 +492,15 @@ async function seedBuyerTraceForRating(harness) {
       role: 'buyer',
       serviceId: 'chain-service-pin-1',
       serviceName: 'Weather Oracle',
-      orderPinId: 'order-pin-1',
-      orderTxid: 'order-tx-1',
-      orderTxids: ['order-tx-1'],
-      paymentTxid: 'payment-tx-1',
+      orderPinId: overrides.orderPinId ?? 'order-pin-1',
+      orderTxid,
+      orderTxids: overrides.orderTxids ?? [orderTxid],
+      paymentTxid,
+      orderReference: overrides.orderReference ?? null,
       paymentCurrency: 'SPACE',
-      paymentAmount: '0.00001',
+      paymentAmount: overrides.paymentAmount ?? '0.00001',
+      paymentChain: overrides.paymentChain ?? 'mvc',
+      settlementKind: overrides.settlementKind ?? 'native',
     },
     a2a: {
       sessionId: 'session-rating-retry-1',
@@ -946,6 +953,124 @@ test('service rating retries skill-service-rate publish after a mempool conflict
   );
   assert.ok(published);
   assert.match(published.metadata.ratingPinId, /\/protocols\/skill-service-rate-pin-/);
+});
+
+test('free service rating uses the order reference as the service paid tx', async (t) => {
+  const orderTxid = '1'.repeat(64);
+  const orderReference = 'a'.repeat(64);
+  const harness = await createServiceCallHarness(t);
+  const sessionStateStore = await seedBuyerTraceForRating(harness, {
+    orderPinId: `${orderTxid}i0`,
+    orderTxid,
+    orderTxids: [orderTxid],
+    paymentTxid: null,
+    orderReference,
+    paymentAmount: '0',
+  });
+
+  const result = await harness.handlers.services.rate({
+    traceId: 'trace-rating-retry',
+    rate: 5,
+    comment: 'Helpful free weather report.',
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.servicePaidTx, orderReference);
+  assert.equal(result.data.ratingMessageSent, true);
+
+  const ratingWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-rate');
+  assert.ok(ratingWrite, 'expected a skill-service-rate write');
+  const payload = JSON.parse(ratingWrite.payload);
+  assert.equal(payload.servicePaidTx, orderReference);
+  assert.equal(payload.servicePrice, '0');
+
+  const sessionState = await sessionStateStore.readState();
+  const published = sessionState.transcriptItems.find(
+    (item) => item.metadata?.event === 'service_rating_published',
+  );
+  assert.ok(published, 'expected rating transcript item');
+  assert.match(published.metadata.ratingPinId, /\/protocols\/skill-service-rate-pin-/);
+});
+
+test('free service trace rating detail sync matches by order reference', async (t) => {
+  const orderTxid = '3'.repeat(64);
+  const orderReference = 'c'.repeat(64);
+  const harness = await createServiceCallHarness(t);
+  await seedBuyerTraceForRating(harness, {
+    orderPinId: `${orderTxid}i0`,
+    orderTxid,
+    orderTxids: [orderTxid],
+    paymentTxid: null,
+    orderReference,
+    paymentAmount: '0',
+  });
+  const ratingStore = createRatingDetailStateStore(harness.homeDir);
+  await ratingStore.write({
+    items: [
+      {
+        pinId: 'free-rating-pin-1',
+        serviceId: 'chain-service-pin-1',
+        servicePaidTx: orderReference,
+        rate: 5,
+        comment: 'Helpful free weather report.',
+        raterGlobalMetaId: 'idq1caller',
+        raterMetaId: 'metaid-caller',
+        createdAt: 1_775_000_003_000,
+      },
+    ],
+    latestPinId: 'free-rating-pin-1',
+    backfillCursor: null,
+    lastSyncedAt: Date.now(),
+  });
+
+  const traceResult = await harness.handlers.trace.getTrace({ traceId: 'trace-rating-retry' });
+
+  assert.equal(traceResult.ok, true);
+  assert.equal(traceResult.data.ratingPublished, true);
+  assert.equal(traceResult.data.ratingPinId, 'free-rating-pin-1');
+  assert.equal(traceResult.data.ratingValue, 5);
+  assert.equal(traceResult.data.ratingComment, 'Helpful free weather report.');
+});
+
+test('inbound free NeedsRating auto-rates the buyer trace with the order reference', async (t) => {
+  const orderTxid = '2'.repeat(64);
+  const orderReference = 'b'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    buyerRatingReplyRunner: async () => ({
+      state: 'reply',
+      content: '评分：5分。免费天气结果清楚完整。',
+    }),
+  });
+  await seedBuyerTraceForRating(harness, {
+    orderPinId: `${orderTxid}i0`,
+    orderTxid,
+    orderTxids: [orderTxid],
+    paymentTxid: null,
+    orderReference,
+    paymentAmount: '0',
+  });
+
+  const handled = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: 'idq1provider',
+    content: `[NeedsRating:${orderTxid}] Please rate this free service.`,
+    messagePinId: 'free-needs-rating-pin',
+    timestamp: 1_775_000_003_000,
+  });
+
+  assert.equal(handled.ok, true, JSON.stringify(handled));
+  assert.equal(handled.data.rated, true);
+
+  const ratingWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-rate');
+  assert.ok(ratingWrite, 'expected an auto-published skill-service-rate write');
+  const payload = JSON.parse(ratingWrite.payload);
+  assert.equal(payload.servicePaidTx, orderReference);
+
+  const traceResult = await harness.handlers.trace.getTrace({ traceId: 'trace-rating-retry' });
+  assert.equal(traceResult.ok, true);
+  assert.equal(traceResult.data.ratingPublished, true);
+  assert.equal(traceResult.data.ratingValue, 5);
+  assert.equal(traceResult.data.ratingComment, '评分：5分。免费天气结果清楚完整。');
+  assert.equal(traceResult.data.ratingMessageSent, true);
 });
 
 test('service rating does not retry provider follow-up simplemsg for non-conflict tx rejection', async (t) => {

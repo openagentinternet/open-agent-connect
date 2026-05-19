@@ -1374,6 +1374,151 @@ test('legacy trace detail prefers scoped on-chain simplemsg history over local s
   assert.equal(detailResult.data.peerAvatar, PEER_AVATAR);
 });
 
+test('trace detail preserves confirmed local rating metadata when chain history has rated follow-up', async () => {
+  const { systemHomeDir, homeDir } = await createProfileFixture();
+  const runtimeStateStore = createRuntimeStateStore(homeDir);
+  const orderTxid = '3'.repeat(64);
+  const orderReference = '4'.repeat(64);
+  const deliveryTxid = '5'.repeat(64);
+  const needsRatingTxid = '6'.repeat(64);
+  const ratingTxid = '7'.repeat(64);
+  const ratingMessageTxid = '8'.repeat(64);
+  const trace = buildSessionTrace({
+    traceId: 'legacy-trace-free-rating-confirmed',
+    channel: 'a2a',
+    exportRoot: runtimeStateStore.paths.exportsRoot,
+    createdAt: BASE_TIME,
+    session: {
+      id: 'session-free-rating-confirmed',
+      title: 'Free Weather Call',
+      type: 'a2a',
+      metabotId: 1,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+      peerName: 'Remote Bot',
+      externalConversationId: null,
+    },
+    order: {
+      id: 'order-free-rating-confirmed',
+      role: 'buyer',
+      serviceId: 'service-pin-free-1',
+      serviceName: 'Weather Oracle',
+      orderPinId: `${orderTxid}i0`,
+      orderTxid,
+      orderTxids: [orderTxid],
+      paymentTxid: null,
+      orderReference,
+      paymentCurrency: 'SPACE',
+      paymentAmount: '0',
+    },
+    a2a: {
+      sessionId: 'legacy-session-free-rating-confirmed',
+      taskRunId: 'legacy-run-free-rating-confirmed',
+      role: 'caller',
+      publicStatus: 'completed',
+      latestEvent: 'provider_completed',
+      taskRunState: 'completed',
+      callerGlobalMetaId: LOCAL_GLOBAL_META_ID,
+      providerGlobalMetaId: PEER_GLOBAL_META_ID,
+      providerName: 'Remote Bot',
+      servicePinId: 'service-pin-free-1',
+    },
+  });
+  await runtimeStateStore.writeState({
+    identity: null,
+    services: [],
+    traces: [trace],
+  });
+  const store = createSessionStateStore(homeDir);
+  await store.writeState({
+    version: 1,
+    sessions: [
+      {
+        sessionId: 'legacy-session-free-rating-confirmed',
+        traceId: 'legacy-trace-free-rating-confirmed',
+        role: 'caller',
+        state: 'completed',
+        createdAt: BASE_TIME,
+        updatedAt: BASE_TIME + 500,
+        callerGlobalMetaId: LOCAL_GLOBAL_META_ID,
+        providerGlobalMetaId: PEER_GLOBAL_META_ID,
+        servicePinId: 'service-pin-free-1',
+        currentTaskRunId: 'legacy-run-free-rating-confirmed',
+        latestTaskRunState: 'completed',
+      },
+    ],
+    taskRuns: [],
+    transcriptItems: [
+      {
+        id: 'local-free-rating-detail',
+        sessionId: 'legacy-session-free-rating-confirmed',
+        taskRunId: 'legacy-run-free-rating-confirmed',
+        timestamp: BASE_TIME + 500,
+        type: 'rating',
+        sender: 'caller',
+        content: 'Helpful free weather report.',
+        metadata: {
+          event: 'service_rating_published',
+          rate: '5',
+          ratingPinId: `${ratingTxid}i0`,
+          ratingMessageSent: true,
+          ratingMessagePinId: `${ratingMessageTxid}i0`,
+          ratingMessageError: null,
+        },
+      },
+    ],
+    cursors: { caller: null, provider: null },
+    publicStatusSnapshots: [],
+  });
+
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
+    fetchPrivateChatHistory: async () => [
+      privateHistoryRow({
+        index: 1,
+        from: 'local',
+        txid: orderTxid,
+        content: `[ORDER] Tell me today weather\n<raw_request>\nTell me today weather\n</raw_request>\n支付金额 0 SPACE\norder id: ${orderReference}\nsettlement kind: native\nservice id: service-pin-free-1\nskill name: Weather Oracle`,
+      }),
+      privateHistoryRow({
+        index: 2,
+        from: 'peer',
+        txid: deliveryTxid,
+        content: `[DELIVERY:${orderTxid}] ${JSON.stringify({
+          paymentTxid: orderReference,
+          servicePinId: 'service-pin-free-1',
+          serviceName: 'Weather Oracle',
+          result: '# Forecast\n\nClear and mild.',
+          deliveredAt: BASE_TIME + 300,
+        })}`,
+      }),
+      privateHistoryRow({
+        index: 3,
+        from: 'peer',
+        txid: needsRatingTxid,
+        content: `[NeedsRating:${orderTxid}] Please rate this free service.`,
+      }),
+      privateHistoryRow({
+        index: 4,
+        from: 'local',
+        txid: ratingMessageTxid,
+        content: `[ORDER_END:${orderTxid} rated] Helpful free weather report.\n\n我的评分已记录在链上（pin ID: ${ratingTxid}i0）。`,
+      }),
+    ],
+  });
+
+  const detailResult = await handlers.trace.getTrace({ traceId: 'legacy-trace-free-rating-confirmed' });
+
+  assert.equal(detailResult.ok, true);
+  assert.equal(detailResult.data.ratingPublished, true);
+  assert.equal(detailResult.data.ratingPinId, `${ratingTxid}i0`);
+  assert.equal(detailResult.data.ratingValue, 5);
+  assert.equal(detailResult.data.ratingComment, 'Helpful free weather report.');
+  assert.equal(detailResult.data.ratingMessageSent, true);
+  assert.equal(detailResult.data.ratingMessagePinId, `${ratingMessageTxid}i0`);
+});
+
 test('default trace handlers sort legacy transcript items with mixed seconds and milliseconds timestamps', async () => {
   const { systemHomeDir, homeDir } = await createProfileFixture();
   const runtimeStateStore = createRuntimeStateStore(homeDir);
