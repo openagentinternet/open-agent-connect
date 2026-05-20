@@ -263,8 +263,13 @@ export function buildRemoteServicesPrompt(availableServices: RemoteServiceDescri
     `    Select the best match by service name, description, rating, rating count, and recency.\n` +
     `    If price is greater than 0, present provider, service, price, currency, and wait for explicit confirmation.\n` +
     `    If price_amount is an explicit numeric 0, the service is free and may be delegated directly when it matches the user's request.\n` +
+    `    The provider is not the user. provider_name and provider_global_metaid identify the remote service provider.\n` +
+    `    rawRequest MUST be the human user's original request text, not a sentence about selecting or requesting the provider.\n` +
+    `    userTask MUST be a short imperative task for the provider, such as "查询微博热搜"; do not include provider names unless the human explicitly asked about that provider.\n` +
+    `    taskContext may mention service selection or routing context; do not put routing context into rawRequest or userTask.\n` +
+    `    Never emit wording like "用户请求 <provider> 的服务" in rawRequest or userTask.\n` +
     `    To delegate, emit [DELEGATE_REMOTE_SERVICE] plus JSON and include policyMode "confirm_paid_only".\n` +
-    `    JSON format: {"servicePinId":"...","serviceName":"...","providerGlobalMetaid":"...","price":"0","currency":"SPACE","rawRequest":"verbatim original request","userTask":"summary","taskContext":"routing context","policyMode":"confirm_paid_only"}\n` +
+    `    JSON format: {"servicePinId":"...","serviceName":"...","providerGlobalMetaid":"...","price":"0","currency":"SPACE","rawRequest":"human user's original request","userTask":"imperative task for provider","taskContext":"routing context","policyMode":"confirm_paid_only"}\n` +
     `  </notice>\n` +
     entries +
     '\n' +

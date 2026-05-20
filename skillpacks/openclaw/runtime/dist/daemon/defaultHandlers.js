@@ -121,6 +121,9 @@ function compactInlineText(value, maxChars) {
     }
     return `${text.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
+function containsCjk(value) {
+    return /[\u3400-\u9fff]/u.test(value);
+}
 function stripProtocolTagsFromReply(value) {
     let text = normalizeText(value);
     for (let index = 0; index < 3; index += 1) {
@@ -143,6 +146,14 @@ function isGenericPrivateChatFallbackReply(value) {
     }
     return /^(Hello!|Thanks for your message\.|Thanks for sharing that\.|It has been a great conversation\.|We have been chatting for a while now\.|Thank you for the conversation! It was nice chatting with you\. See you next time!)/u.test(text);
 }
+function isUnsuitableProviderOrderProtocolReply(value) {
+    const text = normalizeText(value);
+    if (!text) {
+        return true;
+    }
+    return (isGenericPrivateChatFallbackReply(text)
+        || /(?:has accepted|has delivered|In my role as|Result summary|https?:\/\/|\|.+\|)/iu.test(text));
+}
 function buildProviderOrderProtocolInstruction(input) {
     const serviceName = normalizeText(input.service.displayName) || normalizeText(input.service.serviceName) || 'Skill Service';
     const request = normalizeText(input.userTask) || 'No buyer request was recorded.';
@@ -150,15 +161,19 @@ function buildProviderOrderProtocolInstruction(input) {
     const responseText = normalizeText(input.responseText);
     const paymentRef = normalizeText(input.paymentTxid) || normalizeText(input.orderReference) || 'not recorded';
     const stagePurpose = input.stage === 'acknowledgement'
-        ? 'Confirm that you accepted the order and are starting the service work.'
-        : 'Invite the buyer to rate the delivered service result.';
+        ? 'Reply as the provider bot after receiving a buyer order. Say in first person that you received it, started working, it may take a little time, and ask the buyer to wait patiently.'
+        : 'Reply as the provider bot after delivery. Say the service is complete, mention the task only briefly, politely ask for a 1-5 rating, and say the feedback is important to you.';
     const lines = [
         `Stage: ${input.stage}`,
         `Purpose: ${stagePurpose}`,
-        'Write only the natural-language body of the provider message.',
+        'You are the provider bot. The buyer is the other party. The service/provider names identify you or your service; do not treat the provider as the user.',
+        'Write only the natural-language body of the provider message in your own voice.',
         'The system will add the protocol tag automatically; do not include tags such as [ORDER_STATUS], [NeedsRating], [DELIVERY], or txid labels.',
-        'Speak as the provider bot, following its role, style, and goal. Use the buyer request language when it is clear.',
-        'Keep the message concise and specific to this order.',
+        'Use first person when natural. Do not describe yourself in third person with phrases like "has accepted" or "has delivered".',
+        'Follow your role, style, and goal, but do not quote or summarize the persona fields.',
+        'Use the buyer request language when it is clear.',
+        'Keep the message concise: one or two short sentences.',
+        'Do not include payment metadata, order ids, URLs, markdown tables, rankings, or full delivery output.',
         `Service: ${serviceName}`,
         `Skill: ${normalizeText(input.service.providerSkill) || 'unknown'}`,
         `Output type: ${normalizeText(input.service.outputType) || 'text'}`,
@@ -173,22 +188,26 @@ function buildProviderOrderProtocolInstruction(input) {
     if (responseText) {
         lines.push(`Delivered result: ${responseText}`);
     }
-    lines.push('Return only the message body, under 280 characters.');
+    lines.push(input.stage === 'acknowledgement'
+        ? 'Return only the acknowledgement body, under 180 characters.'
+        : 'Return only the rating-request body, under 220 characters.');
     return lines.join('\n');
 }
 function buildProviderOrderProtocolFallbackText(input, persona) {
-    const serviceName = compactInlineText(normalizeText(input.service.displayName) || normalizeText(input.service.serviceName) || 'this service', 80);
-    const providerName = compactInlineText(input.providerIdentity?.name, 80) || 'Your provider bot';
-    const request = compactInlineText(input.userTask, 120);
-    const roleHint = compactInlineText(persona.role || persona.goal || persona.soul, 120);
-    const result = compactInlineText(input.responseText, 160);
-    const requestPart = request ? ` for "${request}"` : '';
-    const voicePart = roleHint ? ` In my role as ${roleHint},` : '';
+    const serviceName = compactInlineText(normalizeText(input.service.displayName) || normalizeText(input.service.serviceName) || 'this service', 48);
+    const request = compactInlineText(input.userTask, 48);
+    const taskLabel = request || serviceName;
+    const useChinese = containsCjk(`${input.userTask}\n${serviceName}\n${persona.role}\n${persona.goal}\n${persona.soul}`);
     if (input.stage === 'acknowledgement') {
-        return `${providerName} has accepted the ${serviceName} order${requestPart}.${voicePart} I will work on it now.`;
+        if (useChinese) {
+            return `我收到你的“${taskLabel}”订单了，会马上开始处理，可能需要一点时间，请耐心等待。`;
+        }
+        return `I've received your "${taskLabel}" order and started working on it. It may take a little time; thanks for waiting.`;
     }
-    const resultPart = result ? ` Result summary: ${result}` : '';
-    return `${providerName} has delivered the ${serviceName} result${requestPart}.${resultPart} Please leave a rating when you have a moment.`;
+    if (useChinese) {
+        return `“${taskLabel}”服务已完成。如果这次结果有帮助，请给我 1-5 分评价；你的反馈对我很重要。`;
+    }
+    return `The "${taskLabel}" service is complete. Please rate it from 1 to 5 when you have a moment; your feedback is important to me.`;
 }
 async function generateProviderOrderProtocolReplyText(input) {
     const persona = await (0, chatPersonaLoader_1.loadChatPersona)(input.paths);
@@ -267,7 +286,7 @@ async function generateProviderOrderProtocolReplyText(input) {
     try {
         const result = await input.replyRunner(runnerInput);
         const generated = stripProtocolTagsFromReply(normalizeText(result.content)).slice(0, 500).trim();
-        if (generated && !isGenericPrivateChatFallbackReply(generated)) {
+        if (generated && !isUnsuitableProviderOrderProtocolReply(generated)) {
             return generated;
         }
     }

@@ -75,20 +75,27 @@ function buildContextualBuyerRatingFallback(input: {
   expectedOutputType: string;
 }): string {
   const providerName = compactInlineText(input.providerName, 80) || 'Remote MetaBot';
-  const originalRequest = compactInlineText(input.originalRequest, 130);
-  const serviceResult = compactInlineText(input.serviceResult, 180);
+  const originalRequest = compactInlineText(input.originalRequest, 80);
   const expectedOutputType = compactInlineText(input.expectedOutputType, 40) || 'text';
-  const score = serviceResult ? 5 : 3;
+  const score = normalizeText(input.serviceResult) ? 5 : 3;
   const useChinese = containsCjk(`${input.originalRequest}\n${input.serviceResult}`);
+  const taskPart = originalRequest || expectedOutputType;
   if (useChinese) {
-    const requestPart = originalRequest ? `，覆盖了我的请求「${originalRequest}」` : '';
-    const resultPart = serviceResult ? `，结果摘要：${serviceResult}` : '，但本地没有记录到完整结果';
-    return `评分：${score}分。${providerName} 已交付 ${expectedOutputType} 服务结果${requestPart}${resultPart}。谢谢。`;
+    return `评分：${score}分。${providerName} 的服务已完成，结果能回应「${taskPart}」。谢谢你的交付。`;
   }
 
-  const requestPart = originalRequest ? ` for my request "${originalRequest}"` : '';
-  const resultPart = serviceResult ? ` Result summary: ${serviceResult}` : ' The local trace did not record a complete result.';
-  return `Rating: ${score}/5. ${providerName} delivered the ${expectedOutputType} service result${requestPart}.${resultPart} Thank you.`;
+  return `Rating: ${score}/5. ${providerName} completed the service for "${taskPart}" and the result addressed my request. Thank you.`;
+}
+
+function isUnsuitableBuyerRating(value: string): boolean {
+  const text = normalizeText(value);
+  if (!text) {
+    return true;
+  }
+  return (
+    isGenericPrivateChatRating(text)
+    || /(?:Result summary|https?:\/\/|\|.+\||TOP\s*\d+)/iu.test(text)
+  );
 }
 
 function findLatestOrderText(items: BuyerRatingTranscriptItem[]): string {
@@ -158,16 +165,20 @@ export async function generateBuyerServiceRating(input: {
   const providerName = normalizeText(input.providerName) || 'Remote MetaBot';
 
   const instruction = [
-    'The remote MetaBot provider has delivered a paid service and is asking for final buyer feedback.',
+    'A remote MetaBot provider has delivered a skill-service result and is asking for final buyer feedback.',
+    'You are the buyer MetaBot that requested the service. The provider is not the user.',
     `Provider: ${providerName}`,
     `Expected output type: ${expectedOutputType}`,
     `Original request:\n${truncateForPrompt(originalRequest || 'No original request was recorded.', 1200)}`,
     `Delivered result:\n${truncateForPrompt(serviceResult || 'No delivery text was recorded.', 1600)}`,
     `Provider rating request:\n${truncateForPrompt(ratingRequestText, 600)}`,
-    'Write the buyer-side rating in the buyer MetaBot voice.',
+    'Write the buyer-side rating in the buyer MetaBot voice and use the original request language when clear.',
     'You MUST include one clear numeric score from 1 to 5, where 5 is best.',
-    'After the rating comment, add a short farewell to the provider.',
-    'Keep the complete message under 500 characters.',
+    'Briefly mention whether the delivered result satisfied the task.',
+    'Thank the provider politely.',
+    'Do not paste or summarize the full delivered result. Do not include tables, rankings, URLs, or long data excerpts.',
+    'Do not write phrases that imply the provider is the user, such as "用户请求 <provider>".',
+    'Keep the complete message under 220 characters.',
   ].join('\n\n');
 
   const conversation: PrivateChatConversation = {
@@ -234,7 +245,7 @@ export async function generateBuyerServiceRating(input: {
     serviceResult,
     expectedOutputType,
   });
-  const comment = generated && !isGenericPrivateChatRating(generated)
+  const comment = generated && !isUnsuitableBuyerRating(generated)
     ? generated
     : contextualFallback;
   return {

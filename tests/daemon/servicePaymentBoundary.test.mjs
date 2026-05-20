@@ -2013,6 +2013,55 @@ test('inbound provider ORDER executes through runner and sends delivery plus rat
   assert.equal(orderSession.servicePinId, harness.service.currentPinId);
 });
 
+test('inbound provider ORDER fallback protocol copy stays concise and service-oriented', async (t) => {
+  const orderTxid = 'c'.repeat(64);
+  const paymentTxid = 'd'.repeat(64);
+  const longWeiboResult = [
+    '微博热搜 TOP 50 更新时间： 2026/5/20 08:24:10',
+    '| 排名 | 话题 | 标签 | 热度(万) | 链接 |',
+    '| 1 | 普京到达北京 | 热 | 164 | https://s.weibo.com/weibo?q=example |',
+    '| 2 | 另一条很长的热搜 | 热 | 120 | https://s.weibo.com/weibo?q=long |',
+  ].join('\n');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: {
+      displayName: '微博热搜',
+      serviceName: 'weibo-hot-trend',
+      providerSkill: 'weibo-hot-trend',
+    },
+    llmOutput: longWeiboResult,
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+  const content = harness.makeOrderContent({
+    paymentTxid,
+    rawRequest: '查询微博热搜',
+    userTask: '查询微博热搜',
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content,
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  const simplemsgWrites = harness.writes.filter((entry) => entry.path === '/protocols/simplemsg');
+  assert.equal(simplemsgWrites.length, 3);
+  const contents = simplemsgWrites.map((entry) => harness.decryptProviderWrite(entry));
+  const acknowledgement = contents.find((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`));
+  const ratingRequest = contents.find((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`));
+  assert.ok(acknowledgement);
+  assert.ok(ratingRequest);
+  assert.match(acknowledgement, /收到|接到|received/i);
+  assert.match(acknowledgement, /耐心|稍等|时间|wait|working/i);
+  assert.doesNotMatch(acknowledgement, /has accepted|In my role as|I am Eric|friendly coding assistant/i);
+  assert.match(ratingRequest, /评价|评分|rate|rating/i);
+  assert.match(ratingRequest, /1-5|1 到 5|1 至 5|one to five/i);
+  assert.doesNotMatch(ratingRequest, /Result summary|https:\/\/|微博热搜 TOP 50|\| 排名 \|/);
+});
+
 test('/api services.execute persists seller lifecycle state and provider runtime diagnostics', async (t) => {
   const harness = await createInboundProviderOrderHarness(t);
   const paymentTxid = '9'.repeat(64);
