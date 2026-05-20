@@ -292,6 +292,7 @@ export function createLlmOrderProtocolTextGenerator(options: {
       timeoutMs,
       pollIntervalMs,
       cwd: input.paths.profileRoot,
+      markRuntimeUnavailableOnFailure: false,
     });
     if (result.status !== 'completed') {
       return null;

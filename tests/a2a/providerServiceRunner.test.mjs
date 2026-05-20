@@ -466,6 +466,121 @@ test('createProviderServiceRunner resolves fallback runtime from fallback bindin
   await cleanupProfileHome(homeDir);
 });
 
+test('createProviderServiceRunner uses a healthy unbound runtime when the configured primary is unavailable', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await fs.rm(path.join(systemHomeDir, '.claude'), { recursive: true, force: true });
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'cursor', health: 'unavailable', binaryPath: '/bin/cursor-agent' }),
+      runtime({ id: 'runtime-unbound', provider: 'claude-code', health: 'healthy', binaryPath: '/bin/claude' }),
+    ],
+  });
+  await bindingStore.write({
+    version: 1,
+    bindings: [
+      binding('binding-primary', 'alice', 'runtime-primary', 'primary'),
+    ],
+  });
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'Unbound runtime used the portable skill source.',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder());
+
+  assert.equal(result.state, 'completed');
+  assert.equal(result.runtimeId, 'runtime-unbound');
+  assert.equal(result.metadata.fallbackSelected, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].runtimeId, 'runtime-unbound');
+  assert.equal(
+    calls[0].skillSourcePaths['weather.oracle'],
+    path.join(systemHomeDir, '.codex', 'skills', 'weather.oracle'),
+  );
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner retries a healthy unbound runtime after primary execution timeout', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await fs.rm(path.join(systemHomeDir, '.claude'), { recursive: true, force: true });
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'cursor', health: 'healthy', binaryPath: '/bin/cursor-agent' }),
+      runtime({ id: 'runtime-unbound', provider: 'claude-code', health: 'healthy', binaryPath: '/bin/claude' }),
+    ],
+  });
+  await bindingStore.write({
+    version: 1,
+    bindings: [
+      binding('binding-primary', 'alice', 'runtime-primary', 'primary'),
+    ],
+  });
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        return request.runtimeId === 'runtime-primary' ? 'session-primary' : 'session-unbound';
+      },
+      async getSession(sessionId) {
+        if (sessionId === 'session-primary') {
+          return {
+            sessionId,
+            status: 'timeout',
+            result: {
+              status: 'timeout',
+              output: '',
+              error: 'primary timed out',
+              durationMs: 10,
+            },
+          };
+        }
+        return {
+          sessionId,
+          status: 'completed',
+          result: {
+            status: 'completed',
+            output: 'Unbound runtime completed after primary timeout.',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder());
+
+  assert.equal(result.state, 'completed');
+  assert.equal(result.runtimeId, 'runtime-unbound');
+  assert.deepEqual(calls.map((call) => call.runtimeId), ['runtime-primary', 'runtime-unbound']);
+  assert.equal(
+    calls[1].skillSourcePaths['weather.oracle'],
+    path.join(systemHomeDir, '.codex', 'skills', 'weather.oracle'),
+  );
+  await cleanupProfileHome(homeDir);
+});
+
 test('createProviderServiceRunner returns structured failure without a session when neither runtime can serve', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   await runtimeStore.write({

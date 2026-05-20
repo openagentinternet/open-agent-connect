@@ -497,6 +497,7 @@ function selectBinding(bindings: LlmBinding[], metaBotSlug: string, role: LlmBin
 }
 
 async function readRuntimeResolutionState(input: ProviderServiceRunnerDependencies): Promise<{
+  runtimes: LlmRuntime[];
   primaryRuntime: LlmRuntime | null;
   fallbackRuntime: LlmRuntime | null;
 }> {
@@ -507,6 +508,7 @@ async function readRuntimeResolutionState(input: ProviderServiceRunnerDependenci
   const primaryBinding = selectBinding(bindingState.bindings, input.metaBotSlug, 'primary');
   const fallbackBinding = selectBinding(bindingState.bindings, input.metaBotSlug, 'fallback');
   return {
+    runtimes: runtimeState.runtimes,
     primaryRuntime: primaryBinding
       ? runtimeState.runtimes.find((entry) => entry.id === primaryBinding.llmRuntimeId) ?? null
       : null,
@@ -516,13 +518,50 @@ async function readRuntimeResolutionState(input: ProviderServiceRunnerDependenci
   };
 }
 
-async function resolveFallbackRuntime(
+async function resolveFallbackRuntimeCandidates(
   deps: ProviderServiceRunnerDependencies,
   primaryRuntime: LlmRuntime | null,
   configuredFallbackRuntime: LlmRuntime | null,
-): Promise<LlmRuntime | null> {
-  const explicitFallbackRuntime = await deps.getFallbackRuntime?.(primaryRuntime) ?? null;
-  return explicitFallbackRuntime ?? configuredFallbackRuntime;
+  knownRuntimes: LlmRuntime[],
+): Promise<LlmRuntime[]> {
+  const candidates: LlmRuntime[] = [];
+  const seenRuntimeIds = new Set<string>();
+  const addCandidate = (candidate: LlmRuntime | null | undefined) => {
+    if (!candidate || candidate.id === primaryRuntime?.id || seenRuntimeIds.has(candidate.id)) {
+      return;
+    }
+    seenRuntimeIds.add(candidate.id);
+    candidates.push(candidate);
+  };
+
+  addCandidate(await deps.getFallbackRuntime?.(primaryRuntime) ?? null);
+  addCandidate(configuredFallbackRuntime);
+
+  for (const runtime of knownRuntimes) {
+    if (runtime.health === 'healthy') {
+      addCandidate(runtime);
+    }
+  }
+
+  return candidates;
+}
+
+async function readFallbackSelectionCandidates(
+  deps: ProviderServiceRunnerDependencies,
+  candidates: LlmRuntime[],
+  providerSkill: string,
+  sourceSelection: ProviderServiceRunnerSelection | null,
+): Promise<ProviderServiceRunnerSelection | null> {
+  for (const candidate of candidates) {
+    const selection = sourceSelection
+      ? await readFallbackSelection(deps, candidate, providerSkill, sourceSelection)
+      : await readRuntimeSelection(deps, candidate, providerSkill, true)
+        ?? await readPortableSkillSelection(deps, candidate, providerSkill, true);
+    if (selection) {
+      return selection;
+    }
+  }
+  return null;
 }
 
 export function buildProviderServiceOrderPrompt(input: {
@@ -560,16 +599,22 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
       let selection = primarySelection
         ?? (primaryRuntime ? await readPortableSkillSelection(input, primaryRuntime, order.providerSkill, false) : null);
       if (!runtime || !selection) {
-        runtime = await resolveFallbackRuntime(input, primaryRuntime, resolutionState.fallbackRuntime);
-        if (!runtime) {
+        const fallbackCandidates = await resolveFallbackRuntimeCandidates(
+          input,
+          primaryRuntime,
+          resolutionState.fallbackRuntime,
+          resolutionState.runtimes,
+        );
+        selection = await readFallbackSelectionCandidates(input, fallbackCandidates, order.providerSkill, null);
+        runtime = selection?.runtime ?? null;
+        if (!runtime && fallbackCandidates.length === 0) {
           return createServiceRunnerFailedResult('provider_runtime_unavailable', 'No primary or fallback runtime was available before provider execution started.');
         }
-        selection = await readRuntimeSelection(input, runtime, order.providerSkill, true)
-          ?? await readPortableSkillSelection(input, runtime, order.providerSkill, true);
         if (!selection) {
-          return createServiceRunnerFailedResult('provider_skill_missing', `providerSkill is not installed in the selected MetaBot primary runtime skill roots: ${order.providerSkill}`);
+          return createServiceRunnerFailedResult('provider_skill_missing', `providerSkill is not installed in any selected runtime skill root: ${order.providerSkill}`);
         }
       }
+      const initialRuntime = selection.runtime;
 
       const systemPrompt = buildPaidOrderSystemPrompt({
         serviceName: order.serviceName ?? '',
@@ -610,11 +655,13 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
         if (failedSelection.fallbackSelected) {
           return null;
         }
-        const fallbackRuntime = await resolveFallbackRuntime(input, primaryRuntime, resolutionState.fallbackRuntime);
-        if (!fallbackRuntime || fallbackRuntime.id === failedRuntime.id) {
-          return null;
-        }
-        return readFallbackSelection(input, fallbackRuntime, order.providerSkill, failedSelection);
+        const fallbackCandidates = (await resolveFallbackRuntimeCandidates(
+          input,
+          primaryRuntime,
+          resolutionState.fallbackRuntime,
+          resolutionState.runtimes,
+        )).filter((candidate) => candidate.id !== failedRuntime.id);
+        return readFallbackSelectionCandidates(input, fallbackCandidates, order.providerSkill, failedSelection);
       };
 
       const executionFailure = (error: unknown, failedRuntime: LlmRuntime, failedSelection: ProviderServiceRunnerSelection) =>
@@ -632,9 +679,9 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
       try {
         run = await executeWithSelection(selection);
       } catch (error) {
-        const fallbackSelection = await resolveFallbackSelection(runtime, selection);
+        const fallbackSelection = await resolveFallbackSelection(initialRuntime, selection);
         if (!fallbackSelection) {
-          return executionFailure(error, runtime, selection);
+          return executionFailure(error, initialRuntime, selection);
         }
         try {
           run = await executeWithSelection(fallbackSelection);
