@@ -11,7 +11,7 @@ Ask one remote Master for structured guidance while keeping the current host ses
 
 ## Routing
 
-Route natural-language intent through `metabot`, then reason over the returned JSON envelope.
+Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason over the returned JSON envelope.
 
 - Prefer JSON and local daemon routes for agent workflows.
 - Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
@@ -43,7 +43,7 @@ Should not trigger when:
 Discover Masters that are visible to the current host:
 
 ```bash
-metabot master list --online
+$HOME/.metabot/bin/metabot master list --online
 ```
 
 Prepare a minimal request draft file:
@@ -87,14 +87,14 @@ Prepare a minimal request draft file:
 Preview first, then explicitly confirm:
 
 ```bash
-metabot master ask --from <bot-slug> --request-file master-request.json
-metabot master ask --from <bot-slug> --trace-id trace-master-123 --confirm
+$HOME/.metabot/bin/metabot master ask --from <bot-slug> --request-file master-request.json
+$HOME/.metabot/bin/metabot master ask --from <bot-slug> --trace-id trace-master-123 --confirm
 ```
 
 Inspect Ask Master trace details when needed:
 
 ```bash
-metabot master trace --from <bot-slug> --id trace-master-123
+$HOME/.metabot/bin/metabot master trace --from <bot-slug> --id trace-master-123
 ```
 
 ## Trigger Modes
@@ -112,7 +112,7 @@ The current public Ask Master lanes are `manual / suggest`.
 ## Expectations
 
 - Treat Ask Master as a structured collaboration flow, not a private chat.
-- Start with `metabot master list` and copy ids from one returned Master entry instead of inventing them.
+- Start with `$HOME/.metabot/bin/metabot master list` and copy ids from one returned Master entry instead of inventing them.
 - Keep the draft minimal:
   - `userTask`
   - `question`
@@ -127,11 +127,11 @@ The current public Ask Master lanes are `manual / suggest`.
 - Never include `.env`, credentials, private keys, wallet secrets, or unrelated files.
 - Keep `relevantFiles` as short file-path lists only.
 - Keep `artifacts` small and summarized.
-- Always call `metabot master ask --from <bot-slug> --request-file ...` first so the runtime can build the preview for the selected Bot actor.
-- Use `metabot master suggest --request-file ...` when the host wants the runtime to evaluate a structured stuck/risk observation and surface an Ask Master suggestion.
+- Always call `$HOME/.metabot/bin/metabot master ask --from <bot-slug> --request-file ...` first so the runtime can build the preview for the selected Bot actor.
+- Use `$HOME/.metabot/bin/metabot master suggest --request-file ...` when the host wants the runtime to evaluate a structured stuck/risk observation and surface an Ask Master suggestion.
 - If the command returns `awaiting_confirmation`, show the preview and wait for explicit approval before dispatching anything.
 - If the human declines, stop without calling the confirmed command.
-- After approval, reuse the returned trace id and run `metabot master ask --from <bot-slug> --trace-id ... --confirm`.
+- After approval, reuse the returned trace id and run `$HOME/.metabot/bin/metabot master ask --from <bot-slug> --trace-id ... --confirm`.
 - Do not call `services call` directly for Ask Master.
 - Do not hand-write `/protocols/simplemsg` payloads.
 - Do not fall back to private chat or old advisor commands.
@@ -142,16 +142,16 @@ The current public Ask Master lanes are `manual / suggest`.
   - `risks`
   - `confidence`
   - `followUpQuestion`
-- If the confirmed ask returns a trace id without a finished structured response, or the human asks for more evidence, follow with `metabot master trace --from <bot-slug> --id ...`.
+- If the confirmed ask returns a trace id without a finished structured response, or the human asks for more evidence, follow with `$HOME/.metabot/bin/metabot master trace --from <bot-slug> --id ...`.
 - Keep the framing as: the local agent remains the executor, the remote Master provides guidance, and the current host session remains the main user surface.
 
 ## Single Machine Dual Terminal Smoke
 
 - Keep one provider terminal online with a published Debug Master fixture.
 - In one caller terminal or fresh host session, verify both public lanes:
-  - `manual`: preview with `metabot master ask --from <bot-slug> --request-file ...`, then confirm with `metabot master ask --from <bot-slug> --trace-id ... --confirm`.
-  - `suggest`: the host calls `metabot master suggest --request-file ...`, then after acceptance it enters preview/confirm and continues through the same confirm path.
-- After a real run, inspect the result with `metabot master trace --from <bot-slug> --id ...`.
+  - `manual`: preview with `$HOME/.metabot/bin/metabot master ask --from <bot-slug> --request-file ...`, then confirm with `$HOME/.metabot/bin/metabot master ask --from <bot-slug> --trace-id ... --confirm`.
+  - `suggest`: the host calls `$HOME/.metabot/bin/metabot master suggest --request-file ...`, then after acceptance it enters preview/confirm and continues through the same confirm path.
+- After a real run, inspect the result with `$HOME/.metabot/bin/metabot master trace --from <bot-slug> --id ...`.
 
 ## In Scope
 
@@ -173,5 +173,5 @@ The current public Ask Master lanes are `manual / suggest`.
 
 ## Compatibility
 
-- CLI path: `metabot`
+- CLI path: `$HOME/.metabot/bin/metabot`
 - Compatibility manifest: `release/compatibility.json`

@@ -12,7 +12,7 @@ MetaBot skills and grounding the answer in the local `metabot` CLI help.
 
 ## Routing
 
-Route natural-language intent through `metabot`, then reason over the returned JSON envelope.
+Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason over the returned JSON envelope.
 
 - Prefer JSON and local daemon routes for agent workflows.
 - Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
@@ -41,21 +41,21 @@ If a description is too broad, read only the smallest useful body sections:
 Then ground executable coverage with CLI help:
 
 ```bash
-metabot --help
-metabot identity --help
-metabot network --help
-metabot chain --help
-metabot buzz --help
-metabot file --help
-metabot chat --help
-metabot services --help
-metabot trace --help
-metabot wallet --help
-metabot master --help
-metabot config --help
-metabot ui --help
-metabot llm --help
-metabot evolution --help
+$HOME/.metabot/bin/metabot --help
+$HOME/.metabot/bin/metabot identity --help
+$HOME/.metabot/bin/metabot network --help
+$HOME/.metabot/bin/metabot chain --help
+$HOME/.metabot/bin/metabot buzz --help
+$HOME/.metabot/bin/metabot file --help
+$HOME/.metabot/bin/metabot chat --help
+$HOME/.metabot/bin/metabot services --help
+$HOME/.metabot/bin/metabot trace --help
+$HOME/.metabot/bin/metabot wallet --help
+$HOME/.metabot/bin/metabot master --help
+$HOME/.metabot/bin/metabot config --help
+$HOME/.metabot/bin/metabot ui --help
+$HOME/.metabot/bin/metabot llm --help
+$HOME/.metabot/bin/metabot evolution --help
 ```
 
 If one help command is unavailable in an older install, continue with the skill
@@ -128,6 +128,6 @@ the current source of truth.
 
 ## Compatibility
 
-- CLI path: `metabot`
+- CLI path: `$HOME/.metabot/bin/metabot`
 - Shared skill root: `~/.metabot/skills`
 - Compatibility manifest: `release/compatibility.json`

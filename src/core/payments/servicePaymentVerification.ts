@@ -14,6 +14,12 @@ export interface VerifyServiceOrderPaymentInput {
   currency: string;
 }
 
+export type ServiceOrderPaymentVerificationFailureKind =
+  | 'input_invalid'
+  | 'adapter_missing'
+  | 'payment_not_found'
+  | 'output_mismatch';
+
 export interface VerifiedServiceOrderPayment {
   verified: boolean;
   paymentTxid: string | null;
@@ -24,6 +30,7 @@ export interface VerifiedServiceOrderPayment {
   currency: string;
   amountSatoshis: number;
   matchedOutputIndex: number | null;
+  failureKind?: ServiceOrderPaymentVerificationFailureKind | null;
 }
 
 function normalizeText(value: unknown): string {
@@ -132,8 +139,9 @@ export async function verifyServiceOrderPayment(
   const paymentAddress = normalizeText(input.paymentAddress) || null;
 
   if (settlementKind === 'free') {
+    const verified = !paymentTxid && amountSatoshis === 0;
     return {
-      verified: !paymentTxid && amountSatoshis === 0,
+      verified,
       paymentTxid: null,
       paymentChain: null,
       settlementKind,
@@ -142,6 +150,7 @@ export async function verifyServiceOrderPayment(
       currency,
       amountSatoshis,
       matchedOutputIndex: null,
+      failureKind: verified ? null : 'input_invalid',
     };
   }
 
@@ -156,6 +165,7 @@ export async function verifyServiceOrderPayment(
       currency,
       amountSatoshis,
       matchedOutputIndex: null,
+      failureKind: 'input_invalid',
     };
   }
 
@@ -171,15 +181,20 @@ export async function verifyServiceOrderPayment(
       currency,
       amountSatoshis,
       matchedOutputIndex: null,
+      failureKind: 'adapter_missing',
     };
   }
 
   let matchedOutputIndex: number | null = null;
+  let failureKind: ServiceOrderPaymentVerificationFailureKind | null = null;
   try {
     const rawTx = await adapter.fetchRawTx(paymentTxid);
     matchedOutputIndex = paymentChain === 'btc'
       ? findBtcPaymentOutput({ rawTx, paymentAddress, amountSatoshis })
       : findMvcPaymentOutput({ rawTx, paymentAddress, amountSatoshis });
+    if (matchedOutputIndex === null) {
+      failureKind = 'output_mismatch';
+    }
   } catch (error) {
     if (paymentChain !== 'mvc') {
       throw error;
@@ -190,6 +205,9 @@ export async function verifyServiceOrderPayment(
       paymentAddress,
       amountSatoshis,
     }).catch(() => null);
+    if (matchedOutputIndex === null) {
+      failureKind = 'payment_not_found';
+    }
   }
 
   return {
@@ -202,5 +220,6 @@ export async function verifyServiceOrderPayment(
     currency,
     amountSatoshis,
     matchedOutputIndex,
+    failureKind: matchedOutputIndex !== null ? null : failureKind,
   };
 }

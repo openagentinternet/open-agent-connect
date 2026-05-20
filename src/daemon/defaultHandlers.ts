@@ -114,7 +114,7 @@ import { exportSessionArtifacts } from '../core/chat/transcriptExport';
 import { sendPrivateChat } from '../core/chat/privateChat';
 import { loadChatPersona } from '../core/chat/chatPersonaLoader';
 import { createDefaultChatReplyRunner } from '../core/chat/defaultChatReplyRunner';
-import type { ChatReplyRunner } from '../core/chat/privateChatTypes';
+import type { ChatPersona, ChatReplyRunner, ChatReplyRunnerInput } from '../core/chat/privateChatTypes';
 import type { ChainWriteRequest, ChainWriteResult } from '../core/chain/writePin';
 import {
   buildPrivateConversationResponse,
@@ -240,6 +240,12 @@ import {
   parseOrderStatusMessage,
 } from '../core/a2a/protocol/orderProtocol';
 import { generateBuyerServiceRating } from '../core/a2a/callerRating';
+import {
+  normalizeGeneratedOrderProtocolText,
+  type BuyerRatingProtocolTextGenerator,
+  type CallerOrderProtocolTextGenerator,
+  type ProviderOrderProtocolTextGenerator,
+} from '../core/a2a/orderProtocolTextGenerator';
 import { parseMasterRequest, parseMasterResponse, type MasterResponseMessage } from '../core/master/masterMessageSchema';
 import {
   type AwaitMetaWebMasterReplyInput,
@@ -302,6 +308,312 @@ const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+const buyerAutoRatingPublishChainsByTrace = new Map<string, Promise<void>>();
+const pendingBuyerRatingPublishesByTrace = new Map<string, Promise<MetabotCommandResult<Record<string, unknown>>>>();
+
+function buildBuyerRatingPublishKey(profileRoot: string, traceId: string): string {
+  const normalizedTraceId = normalizeText(traceId);
+  return normalizedTraceId ? `${path.resolve(profileRoot)}:${normalizedTraceId}` : '';
+}
+
+type ProviderOrderProtocolReplyStage = 'acknowledgement' | 'rating_request';
+
+interface ProviderOrderProtocolReplyTextInput {
+  replyRunner: ChatReplyRunner | null;
+  textGenerator: ProviderOrderProtocolTextGenerator | null;
+  paths: MetabotPaths;
+  providerIdentity: RuntimeIdentityRecord | null;
+  buyerGlobalMetaId: string;
+  service: PublishedServiceRecord;
+  orderTxid: string;
+  paymentTxid: string | null;
+  orderReference: string | null;
+  paymentAmount: string | null;
+  paymentCurrency: string | null;
+  userTask: string;
+  taskContext?: string | null;
+  responseText?: string | null;
+  stage: ProviderOrderProtocolReplyStage;
+  now?: number;
+}
+
+function compactInlineText(value: unknown, maxChars: number): string {
+  const text = normalizeText(value).replace(/\s+/gu, ' ');
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+function containsCjk(value: string): boolean {
+  return /[\u3400-\u9fff]/u.test(value);
+}
+
+function stripProtocolTagsFromReply(value: string): string {
+  let text = normalizeText(value);
+  for (let index = 0; index < 3; index += 1) {
+    const stripped = text.replace(/^\[(?:ORDER_STATUS|NeedsRating|NEEDS_RATING|DELIVERY|ORDER_END)[^\]]*\]\s*/iu, '').trim();
+    if (stripped === text) {
+      break;
+    }
+    text = stripped;
+  }
+  const lines = text.split(/\r?\n/u);
+  while (lines.length && lines[lines.length - 1]?.trim().toLowerCase() === 'bye') {
+    lines.pop();
+  }
+  return lines.join('\n').trim();
+}
+
+function isGenericPrivateChatFallbackReply(value: string): boolean {
+  const text = normalizeText(value);
+  if (!text) {
+    return true;
+  }
+  return /^(Hello!|Thanks for your message\.|Thanks for sharing that\.|It has been a great conversation\.|We have been chatting for a while now\.|Thank you for the conversation! It was nice chatting with you\. See you next time!)/u.test(text);
+}
+
+function isUnsuitableProviderOrderProtocolReply(value: string): boolean {
+  const text = normalizeText(value);
+  if (!text) {
+    return true;
+  }
+  return (
+    isGenericPrivateChatFallbackReply(text)
+    || /(?:has accepted|has delivered|In my role as|Result summary|https?:\/\/|\|.+\|)/iu.test(text)
+  );
+}
+
+function buildProviderOrderProtocolInstruction(input: ProviderOrderProtocolReplyTextInput): string {
+  const serviceName = normalizeText(input.service.displayName) || normalizeText(input.service.serviceName) || 'Skill Service';
+  const request = normalizeText(input.userTask) || 'No buyer request was recorded.';
+  const taskContext = normalizeText(input.taskContext);
+  const responseText = normalizeText(input.responseText);
+  const paymentRef = normalizeText(input.paymentTxid) || normalizeText(input.orderReference) || 'not recorded';
+  const stagePurpose = input.stage === 'acknowledgement'
+    ? 'Reply as the provider bot after receiving a buyer order. Say in first person that you received it, started working, it may take a little time, and ask the buyer to wait patiently.'
+    : 'Reply as the provider bot after delivery. Say the service is complete, mention the task only briefly, politely ask for a 1-5 rating, and say the feedback is important to you.';
+  const lines = [
+    `Stage: ${input.stage}`,
+    `Purpose: ${stagePurpose}`,
+    'You are the provider bot. The buyer is the other party. The service/provider names identify you or your service; do not treat the provider as the user.',
+    'Write only the natural-language body of the provider message in your own voice.',
+    'The system will add the protocol tag automatically; do not include tags such as [ORDER_STATUS], [NeedsRating], [DELIVERY], or txid labels.',
+    'Use first person when natural. Do not describe yourself in third person with phrases like "has accepted" or "has delivered".',
+    'Follow your role, style, and goal, but do not quote or summarize the persona fields.',
+    'Use the buyer request language when it is clear.',
+    'Keep the message concise: one or two short sentences.',
+    'Do not include payment metadata, order ids, URLs, markdown tables, rankings, or full delivery output.',
+    `Service: ${serviceName}`,
+    `Skill: ${normalizeText(input.service.providerSkill) || 'unknown'}`,
+    `Output type: ${normalizeText(input.service.outputType) || 'text'}`,
+    `Order id: ${normalizeText(input.orderTxid) || 'unknown'}`,
+    `Payment reference: ${paymentRef}`,
+    `Payment amount: ${normalizeText(input.paymentAmount) || normalizeText(input.service.price) || '0'} ${normalizeText(input.paymentCurrency) || normalizeText(input.service.currency) || ''}`.trim(),
+    `Buyer request: ${request}`,
+  ];
+  if (taskContext) {
+    lines.push(`Task context: ${taskContext}`);
+  }
+  if (responseText) {
+    lines.push(`Delivered result: ${responseText}`);
+  }
+  lines.push(input.stage === 'acknowledgement'
+    ? 'Return only the acknowledgement body, under 180 characters.'
+    : 'Return only the rating-request body, under 220 characters.');
+  return lines.join('\n');
+}
+
+function buildProviderOrderProtocolFallbackText(
+  input: ProviderOrderProtocolReplyTextInput,
+  persona: ChatPersona,
+): string {
+  const serviceName = compactInlineText(
+    normalizeText(input.service.displayName) || normalizeText(input.service.serviceName) || 'this service',
+    48,
+  );
+  const request = compactInlineText(input.userTask, 48);
+  const taskLabel = request || serviceName;
+  const useChinese = containsCjk(`${input.userTask}\n${serviceName}\n${persona.role}\n${persona.goal}\n${persona.soul}`);
+
+  if (input.stage === 'acknowledgement') {
+    if (useChinese) {
+      return `我收到你的“${taskLabel}”订单了，会马上开始处理，可能需要一点时间，请耐心等待。`;
+    }
+    return `I've received your "${taskLabel}" order and started working on it. It may take a little time; thanks for waiting.`;
+  }
+
+  if (useChinese) {
+    return `“${taskLabel}”服务已完成。如果这次结果有帮助，请给我 1-5 分评价；你的反馈对我很重要。`;
+  }
+  return `The "${taskLabel}" service is complete. Please rate it from 1 to 5 when you have a moment; your feedback is important to me.`;
+}
+
+async function generateProviderOrderProtocolReplyText(
+  input: ProviderOrderProtocolReplyTextInput,
+): Promise<string> {
+  const persona = await loadChatPersona(input.paths);
+  const fallback = buildProviderOrderProtocolFallbackText(input, persona);
+  if (input.textGenerator) {
+    try {
+      const generated = normalizeGeneratedOrderProtocolText(await input.textGenerator({
+        paths: input.paths,
+        persona,
+        providerName: input.providerIdentity?.name ?? null,
+        providerGlobalMetaId: input.providerIdentity?.globalMetaId ?? null,
+        buyerGlobalMetaId: input.buyerGlobalMetaId,
+        service: input.service,
+        stage: input.stage,
+        orderTxid: input.orderTxid,
+        paymentTxid: input.paymentTxid,
+        orderReference: input.orderReference,
+        paymentAmount: input.paymentAmount,
+        paymentCurrency: input.paymentCurrency,
+        userTask: input.userTask,
+        taskContext: input.taskContext,
+        responseText: input.responseText,
+      }), {
+        maxChars: input.stage === 'acknowledgement' ? 360 : 440,
+      });
+      if (generated && !isUnsuitableProviderOrderProtocolReply(generated)) {
+        return generated;
+      }
+    } catch {
+      // Fall through to the legacy runner and final contextual fallback.
+    }
+  }
+  if (!input.replyRunner) {
+    return fallback;
+  }
+
+  const now = typeof input.now === 'number' && Number.isFinite(input.now)
+    ? Math.trunc(input.now)
+    : Date.now();
+  const conversationId = `provider-order-${input.stage}-${normalizeText(input.orderTxid) || now}`;
+  const instruction = buildProviderOrderProtocolInstruction(input);
+  const inboundMessage = {
+    conversationId,
+    messageId: `${conversationId}-instruction`,
+    direction: 'inbound' as const,
+    senderGlobalMetaId: normalizeText(input.buyerGlobalMetaId) || 'buyer',
+    content: instruction,
+    messagePinId: null,
+    extensions: {
+      protocol: 'a2a_order',
+      stage: input.stage,
+      orderTxid: normalizeText(input.orderTxid) || null,
+    },
+    timestamp: now,
+  };
+  const runnerInput: ChatReplyRunnerInput = {
+    conversation: {
+      conversationId,
+      peerGlobalMetaId: normalizeText(input.buyerGlobalMetaId) || 'buyer',
+      peerName: 'Buyer MetaBot',
+      topic: 'a2a_skill_service_order',
+      strategyId: `provider-order-${input.stage}`,
+      state: 'active',
+      turnCount: input.stage === 'acknowledgement' ? 2 : 3,
+      lastDirection: 'inbound',
+      createdAt: now,
+      updatedAt: now,
+    },
+    recentMessages: [
+      {
+        conversationId,
+        messageId: `${conversationId}-request`,
+        direction: 'inbound',
+        senderGlobalMetaId: normalizeText(input.buyerGlobalMetaId) || 'buyer',
+        content: `Buyer request: ${normalizeText(input.userTask) || 'No buyer request was recorded.'}`,
+        messagePinId: null,
+        extensions: null,
+        timestamp: now - 2,
+      },
+      ...(normalizeText(input.responseText)
+        ? [{
+          conversationId,
+          messageId: `${conversationId}-result`,
+          direction: 'outbound' as const,
+          senderGlobalMetaId: normalizeText(input.providerIdentity?.globalMetaId) || 'provider',
+          content: `Delivered result: ${normalizeText(input.responseText)}`,
+          messagePinId: null,
+          extensions: null,
+          timestamp: now - 1,
+        }]
+        : []),
+      inboundMessage,
+    ],
+    persona,
+    strategy: {
+      id: `provider-order-${input.stage}`,
+      maxTurns: 6,
+      maxIdleMs: 0,
+      exitCriteria: input.stage === 'acknowledgement'
+        ? 'Acknowledge the order without ending the conversation.'
+        : 'Ask for a buyer rating after delivery without ending the conversation.',
+    },
+    inboundMessage,
+  };
+
+  try {
+    const result = await input.replyRunner(runnerInput);
+    const generated = stripProtocolTagsFromReply(normalizeText(result.content)).slice(0, 500).trim();
+    if (generated && !isUnsuitableProviderOrderProtocolReply(generated)) {
+      return generated;
+    }
+  } catch {
+    return fallback;
+  }
+  return fallback;
+}
+
+async function generateCallerOrderProtocolText(input: {
+  textGenerator: CallerOrderProtocolTextGenerator | null;
+  paths: MetabotPaths;
+  callerIdentity: RuntimeIdentityRecord | null;
+  providerGlobalMetaId: string;
+  service: Partial<PublishedServiceRecord>;
+  rawRequest?: string | null;
+  userTask?: string | null;
+  taskContext?: string | null;
+  paymentAmount?: string | null;
+  paymentCurrency?: string | null;
+  paymentTxid?: string | null;
+  orderReference?: string | null;
+  outputType?: string | null;
+}): Promise<string> {
+  if (!input.textGenerator) {
+    return '';
+  }
+  const persona = await loadChatPersona(input.paths);
+  try {
+    return normalizeGeneratedOrderProtocolText(await input.textGenerator({
+      paths: input.paths,
+      persona,
+      callerName: input.callerIdentity?.name ?? null,
+      callerGlobalMetaId: input.callerIdentity?.globalMetaId ?? null,
+      providerName: normalizeText(input.service.displayName) || normalizeText(input.service.serviceName),
+      providerGlobalMetaId: input.providerGlobalMetaId,
+      serviceName: normalizeText(input.service.displayName) || normalizeText(input.service.serviceName),
+      providerSkill: normalizeText(input.service.providerSkill) || normalizeText(input.service.serviceName),
+      servicePinId: normalizeText(input.service.currentPinId) || normalizeText(input.service.sourceServicePinId),
+      rawRequest: input.rawRequest,
+      userTask: input.userTask,
+      taskContext: input.taskContext,
+      paymentAmount: input.paymentAmount,
+      paymentCurrency: input.paymentCurrency,
+      paymentTxid: input.paymentTxid,
+      orderReference: input.orderReference,
+      outputType: input.outputType,
+    }), {
+      maxChars: 500,
+      allowUrls: true,
+    });
+  } catch {
+    return '';
+  }
 }
 
 export function createLoomDaemonActionHandler(
@@ -1964,16 +2276,8 @@ function readServiceRateRequest(rawInput: Record<string, unknown>) {
   };
 }
 
-function buildServiceRatingFollowupMessage(input: {
-  comment: string;
-  ratingPinId: string | null;
-}): string {
-  const base = normalizeText(input.comment);
-  const pinId = normalizeText(input.ratingPinId);
-  const pinLine = pinId
-    ? `\n\n我的评分已记录在链上（pin ID: ${pinId}）。`
-    : '';
-  return `${base}${pinLine}`.trim();
+function buildServiceRatingFollowupMessage(comment: string): string {
+  return normalizeText(comment);
 }
 
 function isSuccessfulCommandEnvelope(value: unknown): value is {
@@ -2612,6 +2916,9 @@ function extractTraceRatingClosure(input: {
       ratingPublished = true;
       ratingMessageSent = true;
       ratingMessagePinId = normalizeText(metadata?.ratingMessagePinId) || ratingMessagePinId;
+      if (!ratingComment && content) {
+        ratingComment = stripRatingReceiptText(content) || content;
+      }
     }
 
     if (metadataEvent === 'service_rating_message_failed') {
@@ -2653,6 +2960,13 @@ function normalizedMetadataValue(
   return normalizeText(readTranscriptMetadata(item)[key]);
 }
 
+function normalizePinOrTxReference(value: unknown): string {
+  const text = normalizeText(value).toLowerCase();
+  const txid = normalizeChainTxid(text);
+  if (!txid) return '';
+  return text.endsWith('i0') ? `${txid}i0` : txid;
+}
+
 function readTranscriptNestedMetadataValue(
   item: { metadata?: Record<string, unknown> | null },
   objectKey: string,
@@ -2675,6 +2989,52 @@ function transcriptItemsShareOrderReference(
     const left = normalizedMetadataValue(legacyItem, key);
     const right = normalizedMetadataValue(unifiedItem, key);
     return Boolean(left && right && left === right);
+  });
+}
+
+function extractRatingPinIdFromText(value: unknown): string | null {
+  const match = normalizeText(value).match(/\b([0-9a-f]{64}i\d+)\b/iu);
+  return match?.[1]?.toLowerCase() ?? null;
+}
+
+function stripRatingReceiptText(value: unknown): string {
+  return stripOrderProtocolBubblePrefix(normalizeText(value))
+    .replace(/\n+\s*我的评分已记录在链上[\s\S]*$/u, '')
+    .trim();
+}
+
+function isLocalRatingPublicationItem(item: A2ATranscriptItemRecord): boolean {
+  const metadata = readTranscriptMetadata(item);
+  const metadataEvent = normalizeText(metadata.event);
+  const ratingPinId = normalizeText(metadata.ratingPinId);
+  return Boolean(
+    ratingPinId
+    && (item.type === 'rating' || metadataEvent === 'service_rating_published')
+  );
+}
+
+function chainTranscriptConfirmsLocalRatingPublication(
+  localItem: A2ATranscriptItemRecord,
+  chainItems: A2ATranscriptItemRecord[],
+): boolean {
+  const localMetadata = readTranscriptMetadata(localItem);
+  const localRatingPinId = normalizePinOrTxReference(localMetadata.ratingPinId);
+  const localRatingMessagePinId = normalizePinOrTxReference(localMetadata.ratingMessagePinId);
+  if (!localRatingPinId && !localRatingMessagePinId) {
+    return false;
+  }
+
+  return chainItems.some((item) => {
+    const metadata = readTranscriptMetadata(item);
+    const rawContent = normalizeText(metadata.rawContent) || normalizeText(item.content);
+    const chainRatingPinId = normalizePinOrTxReference(metadata.ratingPinId)
+      || normalizePinOrTxReference(extractRatingPinIdFromText(rawContent));
+    const chainMessagePinId = normalizePinOrTxReference(metadata.pinId)
+      || normalizePinOrTxReference(item.id);
+    return Boolean(
+      (localRatingPinId && chainRatingPinId === localRatingPinId)
+      || (localRatingMessagePinId && chainMessagePinId === localRatingMessagePinId)
+    );
   });
 }
 
@@ -2825,9 +3185,22 @@ function mergeLegacyTranscriptWithUnifiedChainMessages(input: {
   const chainTranscriptItems = (input.chainTranscriptItems ?? [])
     .filter((item) => normalizeText(item.id) && normalizeText(item.content));
   if (chainTranscriptItems.length > 0) {
-    return chainTranscriptItems
-      .slice()
-      .sort((left, right) => normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp));
+    const merged = chainTranscriptItems.slice();
+    const existingIds = new Set(merged.map((item) => item.id));
+    for (const item of input.transcriptItems) {
+      if (
+        existingIds.has(item.id)
+        || !isLocalRatingPublicationItem(item)
+        || !chainTranscriptConfirmsLocalRatingPublication(item, chainTranscriptItems)
+      ) {
+        continue;
+      }
+      existingIds.add(item.id);
+      merged.push(item);
+    }
+    return merged.sort((left, right) => (
+      normalizeTraceTimestamp(left.timestamp) - normalizeTraceTimestamp(right.timestamp)
+    ));
   }
 
   const unifiedItems = (input.unifiedTranscriptItems ?? [])
@@ -3124,9 +3497,16 @@ function projectPrivateHistorySimpleMessageToTranscript(input: {
   } else if (protocolTag === 'ORDER_END') {
     type = 'order_end';
     content = normalizeText(orderEnd?.content) || content;
+    const endReason = normalizeText(orderEnd?.reason);
     metadata.endReason = normalizeText(orderEnd?.reason) || null;
     metadata.orderEnd = true;
     metadata.endState = isRemoteFailureReason(orderEnd?.reason) ? 'remote_failed' : 'completed';
+    if (endReason.toLowerCase() === 'rated') {
+      metadata.event = 'service_rating_message_sent';
+      metadata.ratingPinId = extractRatingPinIdFromText(content);
+      metadata.ratingMessagePinId = normalizeText(input.message.pinId) || null;
+      metadata.ratingMessageError = null;
+    }
   }
 
   const id = normalizeText(input.message.pinId)
@@ -3278,7 +3658,8 @@ async function buildTraceInspectorPayload(input: {
     chainApiBaseUrl: input.chainApiBaseUrl,
   });
   const serviceId = normalizeText(input.trace.order?.serviceId);
-  const servicePaidTx = normalizeText(input.trace.order?.paymentTxid);
+  const servicePaidTx = normalizeText(input.trace.order?.paymentTxid)
+    || normalizeText(input.trace.order?.orderReference);
   const ratingDetail = serviceId && servicePaidTx
     ? ratingSnapshot.ratingDetails.find((entry) => (
         normalizeText(entry.serviceId) === serviceId
@@ -4723,6 +5104,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
   ratingFollowupRetryDelaysMs?: number[];
   a2aConversationPersister?: A2AConversationMessagePersister;
   buyerRatingReplyRunner?: ChatReplyRunner;
+  buyerRatingTextGenerator?: BuyerRatingProtocolTextGenerator;
+  callerOrderTextGenerator?: CallerOrderProtocolTextGenerator;
+  providerOrderReplyRunner?: ChatReplyRunner;
+  providerOrderTextGenerator?: ProviderOrderProtocolTextGenerator;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   requestMvcGasSubsidy?: (
     options: RequestMvcGasSubsidyOptions
@@ -4860,15 +5245,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
   );
   const a2aConversationPersister = input.a2aConversationPersister ?? persistA2AConversationMessage;
   const buyerRatingReplyRunner = input.buyerRatingReplyRunner ?? createDefaultChatReplyRunner();
+  const buyerRatingTextGenerator = input.buyerRatingTextGenerator ?? null;
+  const callerOrderTextGenerator = input.callerOrderTextGenerator ?? null;
+  const providerOrderReplyRunner = input.providerOrderReplyRunner ?? null;
+  const providerOrderTextGenerator = input.providerOrderTextGenerator ?? null;
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const getDaemonRecord = input.getDaemonRecord;
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
-  /** Serializes buyer auto-rating per trace so inbound simplemsg + socket continuation cannot publish duplicates. */
-  const buyerAutoRatingPublishChains = new Map<string, Promise<void>>();
   const pendingProviderOrderExecutions = new Map<string, Promise<MetabotCommandResult<Record<string, unknown>>>>();
   const pendingMasterReplyContinuations = new Map<string, Promise<void>>();
-  const pendingBuyerRatingPublishes = new Map<string, Promise<MetabotCommandResult<Record<string, unknown>>>>();
   let masterTriggerMemoryState = createMasterTriggerMemoryState();
   const masterAutoPrepareCounts = new Map<string, number>();
   let lastMasterAutoPreparedAt: number | null = null;
@@ -5870,18 +6256,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
       return publishBuyerServiceRatingUnlocked(request);
     }
 
-    const pending = pendingBuyerRatingPublishes.get(traceId);
+    const publishKey = buildBuyerRatingPublishKey(runtimeStateStore.paths.profileRoot, traceId);
+    const pending = pendingBuyerRatingPublishesByTrace.get(publishKey);
     if (pending) {
       return pending;
     }
 
     const publish = publishBuyerServiceRatingUnlocked({ ...request, traceId });
-    pendingBuyerRatingPublishes.set(traceId, publish);
+    pendingBuyerRatingPublishesByTrace.set(publishKey, publish);
     try {
       return await publish;
     } finally {
-      if (pendingBuyerRatingPublishes.get(traceId) === publish) {
-        pendingBuyerRatingPublishes.delete(traceId);
+      if (pendingBuyerRatingPublishesByTrace.get(publishKey) === publish) {
+        pendingBuyerRatingPublishesByTrace.delete(publishKey);
       }
     }
   }
@@ -5908,7 +6295,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const serviceId = normalizeText(trace.order?.serviceId);
     const servicePrice = normalizeText(trace.order?.paymentAmount);
     const serviceCurrency = normalizeText(trace.order?.paymentCurrency);
-    const servicePaidTx = normalizeText(trace.order?.paymentTxid);
+    const servicePaidTx = normalizeText(trace.order?.paymentTxid)
+      || normalizeText(trace.order?.orderReference);
     const serverBot = normalizeText(trace.session.peerGlobalMetaId ?? trace.a2a?.providerGlobalMetaId);
     if (!serviceId || !servicePrice || !serviceCurrency || !servicePaidTx || !serverBot) {
       return commandFailed(
@@ -6005,10 +6393,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       || normalizeOrderProtocolReference(trace.order?.orderPinId)
       || normalizeOrderProtocolReference(Array.isArray(trace.order?.orderTxids) ? trace.order?.orderTxids[0] : null)
       || '';
-    const combinedBody = buildServiceRatingFollowupMessage({
-      comment: request.comment,
-      ratingPinId: ratingWrite.pinId ?? null,
-    });
+    const combinedBody = buildServiceRatingFollowupMessage(request.comment);
     const combinedMessage = orderTxid
       ? buildOrderEndMessage(orderTxid, 'rated', combinedBody)
       : buildOrderEndMessage('', 'rated', combinedBody);
@@ -6192,11 +6577,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     trace: SessionTraceRecord;
     reply: AwaitMetaWebServiceReplyResult;
   }): Promise<void> {
-    const traceKey = normalizeText(input.trace.traceId);
+    const traceKey = buildBuyerRatingPublishKey(runtimeStateStore.paths.profileRoot, input.trace.traceId);
     if (!traceKey) {
       return;
     }
-    const previous = buyerAutoRatingPublishChains.get(traceKey) ?? Promise.resolve();
+    const previous = buyerAutoRatingPublishChainsByTrace.get(traceKey) ?? Promise.resolve();
     const job = previous.catch(() => {}).then(async () => {
       const ratingRequestText = input.reply.state === 'completed'
         ? normalizeText(input.reply.ratingRequestText)
@@ -6225,6 +6610,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
       const persona = await loadChatPersona(runtimeStateStore.paths);
       const rating = await generateBuyerServiceRating({
         replyRunner: buyerRatingReplyRunner,
+        textGenerator: buyerRatingTextGenerator
+          ? (ratingInput) => buyerRatingTextGenerator({
+            ...ratingInput,
+            paths: runtimeStateStore.paths,
+          })
+          : null,
         persona,
         traceId: trace.traceId,
         providerGlobalMetaId: normalizeText(trace.a2a?.providerGlobalMetaId) || normalizeText(trace.session.peerGlobalMetaId),
@@ -6242,12 +6633,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
         network: 'mvc',
       });
     });
-    buyerAutoRatingPublishChains.set(traceKey, job);
+    buyerAutoRatingPublishChainsByTrace.set(traceKey, job);
     try {
       await job;
     } finally {
-      if (buyerAutoRatingPublishChains.get(traceKey) === job) {
-        buyerAutoRatingPublishChains.delete(traceKey);
+      if (buyerAutoRatingPublishChainsByTrace.get(traceKey) === job) {
+        buyerAutoRatingPublishChainsByTrace.delete(traceKey);
       }
     }
   }
@@ -7205,6 +7596,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
       return commandFailed('order_payment_unverified', 'Paid inbound ORDER must include payment chain metadata.');
     }
 
+    const traceId = `trace-provider-${sanitizeServiceSegment(orderTxid.slice(0, 16))}`;
+    const orderMessageId = normalizeText(inputMessage.messagePinId) || orderTxid || orderReference;
+
     const paymentVerification = await verifyServiceOrderPayment({
       adapters,
       paymentTxid: paymentTxid || null,
@@ -7215,6 +7609,185 @@ export function createDefaultMetabotDaemonHandlers(input: {
       currency: serviceCurrency,
     }).catch(() => null);
     if (!paymentVerification?.verified) {
+      if (paymentVerification && paymentVerification.failureKind !== 'payment_not_found') {
+        return commandFailed('order_payment_unverified', 'Inbound ORDER payment could not be verified on chain.');
+      }
+      const failureText = 'Inbound ORDER payment could not be verified on chain.';
+      const received = sessionEngine.receiveProviderTask({
+        traceId,
+        servicePinId: service.currentPinId,
+        callerGlobalMetaId: inputMessage.fromGlobalMetaId,
+        providerGlobalMetaId: state.identity.globalMetaId,
+        userTask,
+        taskContext: '',
+      });
+      const receivedStatus = await persistSessionMutation(sessionStateStore, received);
+      await appendA2ATranscriptItems(sessionStateStore, [
+        {
+          id: `${traceId}-provider-order-received`,
+          sessionId: received.session.sessionId,
+          taskRunId: received.taskRun.runId,
+          timestamp: received.session.createdAt,
+          type: 'order',
+          sender: 'caller',
+          content,
+          metadata: {
+            protocolTag: 'ORDER',
+            orderTxid,
+            orderPinId: inputMessage.messagePinId || null,
+            paymentTxid: paymentTxid || null,
+            orderReference: orderReference || null,
+            servicePinId: service.currentPinId,
+            providerSkill: service.providerSkill,
+            publicStatus: receivedStatus.status,
+          },
+        },
+      ]);
+
+      let peerChatPublicKey = '';
+      try {
+        peerChatPublicKey = await resolvePeerChatPublicKey(inputMessage.fromGlobalMetaId) ?? '';
+      } catch {
+        peerChatPublicKey = '';
+      }
+
+      await persistA2AConversationMessageBestEffort({
+        paths: runtimeStateStore.paths,
+        local: {
+          profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+          globalMetaId: state.identity.globalMetaId,
+          name: state.identity.name,
+          chatPublicKey: state.identity.chatPublicKey,
+        },
+        peer: {
+          globalMetaId: inputMessage.fromGlobalMetaId,
+          chatPublicKey: peerChatPublicKey || null,
+        },
+        message: {
+          messageId: normalizeText(inputMessage.messagePinId) || orderTxid,
+          direction: 'incoming',
+          content,
+          pinId: normalizeText(inputMessage.messagePinId) || null,
+          txid: orderTxid,
+          txids: [orderTxid],
+          chain: 'mvc',
+          orderTxid,
+          paymentTxid: paymentTxid || null,
+          timestamp,
+          raw: {
+            protocol: 'ORDER',
+          },
+        },
+        orderSession: {
+          role: 'provider',
+          state: 'received',
+          orderTxid,
+          paymentTxid: paymentTxid || null,
+          servicePinId: service.currentPinId,
+          serviceName: normalizeText(service.displayName) || normalizeText(service.serviceName),
+          outputType: outputType || service.outputType,
+          createdAt: timestamp,
+        },
+      }, a2aConversationPersister);
+
+      const failedResult = createServiceRunnerFailedResult('order_payment_unverified', failureText);
+      const failedApplied = sessionEngine.applyProviderRunnerResult({
+        session: received.session,
+        taskRun: received.taskRun,
+        result: failedResult,
+      });
+      const failedStatus = await persistSessionMutation(sessionStateStore, failedApplied);
+      await appendA2ATranscriptItems(sessionStateStore, [
+        {
+          id: `${traceId}-provider-payment-unverified`,
+          sessionId: failedApplied.session.sessionId,
+          taskRunId: failedApplied.taskRun.runId,
+          timestamp: failedApplied.session.updatedAt,
+          type: 'failure',
+          sender: 'system',
+          content: failureText,
+          metadata: {
+            publicStatus: failedStatus.status,
+            event: failedApplied.event,
+            runnerState: 'failed',
+            orderTxid,
+            paymentTxid: paymentTxid || null,
+            refundRequired: false,
+          },
+        },
+      ]);
+
+      let orderEndWrite: { pinId: string | null; txids: string[] } | null = null;
+      const orderEndContent = buildOrderEndMessage(orderTxid, 'failed', failureText);
+      if (peerChatPublicKey) {
+        try {
+          orderEndWrite = await sendProviderOrderPrivateMessage({
+            toGlobalMetaId: inputMessage.fromGlobalMetaId,
+            peerChatPublicKey,
+            content: orderEndContent,
+          });
+        } catch {
+          orderEndWrite = null;
+        }
+      }
+      await persistA2AConversationMessageBestEffort({
+        paths: runtimeStateStore.paths,
+        local: {
+          profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+          globalMetaId: state.identity.globalMetaId,
+          name: state.identity.name,
+          chatPublicKey: state.identity.chatPublicKey,
+        },
+        peer: {
+          globalMetaId: inputMessage.fromGlobalMetaId,
+          chatPublicKey: peerChatPublicKey || null,
+        },
+        message: {
+          direction: 'outgoing',
+          content: orderEndContent,
+          pinId: orderEndWrite?.pinId ?? null,
+          txid: orderEndWrite?.txids?.[0] ?? orderEndWrite?.pinId ?? null,
+          txids: orderEndWrite?.txids ?? [],
+          chain: 'mvc',
+          orderTxid,
+          paymentTxid: paymentTxid || null,
+          timestamp: Date.now(),
+        },
+        orderSession: {
+          role: 'provider',
+          state: 'failed',
+          orderTxid,
+          paymentTxid: paymentTxid || null,
+          servicePinId: service.currentPinId,
+          serviceName: normalizeText(service.displayName) || normalizeText(service.serviceName),
+          outputType: outputType || service.outputType,
+          endedAt: Date.now(),
+          endReason: 'order_payment_unverified',
+          failureReason: failureText,
+        },
+      }, a2aConversationPersister);
+      await persistProviderFailureTrace({
+        traceId,
+        state,
+        service,
+        buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+        orderTxid,
+        orderMessageId,
+        orderPinId: inputMessage.messagePinId || null,
+        paymentTxid: paymentTxid || null,
+        orderReference: orderReference || null,
+        paymentCurrency: amountLine.currency || service.currency,
+        paymentAmount: amountLine.amount || service.price,
+        paymentChain: paymentChain || null,
+        ...orderPaymentMetadata,
+        session: failedApplied.session,
+        taskRun: failedApplied.taskRun,
+        publicStatus: failedStatus,
+        latestEvent: failedApplied.event,
+        userTask,
+        failureText,
+        failureCode: 'order_payment_unverified',
+      });
       return commandFailed('order_payment_unverified', 'Inbound ORDER payment could not be verified on chain.');
     }
 
@@ -7265,7 +7838,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     }, a2aConversationPersister);
 
-    const traceId = `trace-provider-${sanitizeServiceSegment(orderTxid.slice(0, 16))}`;
     const received = sessionEngine.receiveProviderTask({
       traceId,
       servicePinId: service.currentPinId,
@@ -7275,7 +7847,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
       taskContext: '',
     });
     const receivedStatus = await persistSessionMutation(sessionStateStore, received);
-    const orderMessageId = normalizeText(inputMessage.messagePinId) || orderTxid || orderReference;
     await upsertProviderSellerOrderRecord({
       state,
       service,
@@ -7411,7 +7982,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
       return commandManualActionRequired('peer_chat_public_key_missing', failureText);
     }
 
-    const acknowledgement = buildOrderStatusMessage(orderTxid, 'I received the order and started processing.');
+    const acknowledgementText = await generateProviderOrderProtocolReplyText({
+      replyRunner: providerOrderReplyRunner,
+      textGenerator: providerOrderTextGenerator,
+      paths: runtimeStateStore.paths,
+      providerIdentity: state.identity,
+      buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+      service,
+      orderTxid,
+      paymentTxid: paymentTxid || null,
+      orderReference: orderReference || null,
+      paymentAmount: amountLine.amount || service.price,
+      paymentCurrency: amountLine.currency || service.currency,
+      userTask,
+      taskContext: '',
+      stage: 'acknowledgement',
+    });
+    const acknowledgement = buildOrderStatusMessage(orderTxid, acknowledgementText);
     let acknowledgementWrite: { pinId: string | null; txids: string[] };
     try {
       acknowledgementWrite = await sendProviderOrderPrivateMessage({
@@ -7771,7 +8358,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
       result: responseText,
       deliveredAt: Date.now(),
     }, orderTxid);
-    const needsRatingMessage = buildNeedsRatingMessage(orderTxid, 'Please rate this service.');
+    const ratingRequestText = await generateProviderOrderProtocolReplyText({
+      replyRunner: providerOrderReplyRunner,
+      textGenerator: providerOrderTextGenerator,
+      paths: runtimeStateStore.paths,
+      providerIdentity: state.identity,
+      buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+      service,
+      orderTxid,
+      paymentTxid: paymentTxid || null,
+      orderReference: orderReference || null,
+      paymentAmount: amountLine.amount || service.price,
+      paymentCurrency: amountLine.currency || service.currency,
+      userTask,
+      taskContext: '',
+      responseText,
+      stage: 'rating_request',
+    });
+    const needsRatingMessage = buildNeedsRatingMessage(orderTxid, ratingRequestText);
     let deliveryWrite: { pinId: string | null; txids: string[] };
     try {
       deliveryWrite = await sendProviderOrderPrivateMessage({
@@ -7943,7 +8547,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           timestamp: Date.now(),
           type: 'needs_rating' as const,
           sender: 'provider' as const,
-          content: 'Please rate this service.',
+          content: ratingRequestText,
           metadata: {
             protocolTag: 'NeedsRating',
             orderTxid,
@@ -8159,7 +8763,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
     content: string;
     messagePinId?: string | null;
     timestamp?: number | null;
+    localProfileSlug?: string | null;
   }): Promise<MetabotCommandResult<Record<string, unknown>>> {
+    const localProfileSlug = normalizeText(inputMessage.localProfileSlug);
+    if (localProfileSlug) {
+      const scoped = await resolveScopedServicesForActor(localProfileSlug);
+      if (scoped.failure) {
+        return scoped.failure;
+      }
+      if (scoped.services?.handleInboundOrderProtocolMessage) {
+        return scoped.services.handleInboundOrderProtocolMessage({
+          fromGlobalMetaId: inputMessage.fromGlobalMetaId,
+          content: inputMessage.content,
+          messagePinId: inputMessage.messagePinId,
+          timestamp: inputMessage.timestamp,
+        }) as Promise<MetabotCommandResult<Record<string, unknown>>>;
+      }
+    }
+
     const content = normalizeText(inputMessage.content);
     if (/^\[ORDER\]/iu.test(content)) {
       const orderTxid = normalizeOrderProtocolReference(inputMessage.messagePinId)
@@ -9561,6 +10182,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
             ? {
                 baseUrl: daemon.baseUrl,
                 pid: daemon.pid,
+                entryPath: process.argv[1] || null,
+                execPath: process.execPath,
+                cwd: process.cwd(),
               }
             : null,
         });
@@ -12488,10 +13112,26 @@ export function createDefaultMetabotDaemonHandlers(input: {
           paymentTxid = orderPayment.paymentTxid || '';
           orderReference = orderPayment.orderReference || '';
 
-          const orderPayload = buildDelegationOrderPayload({
+          const callerGeneratedOrderText = await generateCallerOrderProtocolText({
+            textGenerator: callerOrderTextGenerator,
+            paths: runtimeStateStore.paths,
+            callerIdentity: state.identity,
+            providerGlobalMetaId: plan.service.providerGlobalMetaId,
+            service,
             rawRequest: request.rawRequest || request.userTask,
-            taskContext: request.taskContext,
             userTask: request.userTask,
+            taskContext: request.taskContext,
+            paymentAmount: orderPayment.paymentAmount,
+            paymentCurrency: orderPayment.paymentCurrency,
+            paymentTxid,
+            orderReference,
+            outputType: normalizeText(service.outputType),
+          });
+
+          const orderPayload = buildDelegationOrderPayload({
+            rawRequest: callerGeneratedOrderText || request.rawRequest || request.userTask,
+            taskContext: request.taskContext,
+            userTask: callerGeneratedOrderText || request.userTask,
             serviceName: serviceDisplayName,
             providerSkill: normalizeText(service.providerSkill) || normalizeText(service.serviceName),
             servicePinId: plan.service.servicePinId,

@@ -4,6 +4,8 @@ export interface SkillInjectorInput {
     skillSourcePaths?: Record<string, string>;
     provider: string;
     cwd: string;
+    systemHomeDir?: string;
+    env?: NodeJS.ProcessEnv;
 }
 export interface SkillInjectionResult {
     injected: string[];
@@ -12,5 +14,8 @@ export interface SkillInjectionResult {
         error: string;
     }>;
 }
-export declare function resolveProviderSkillRoot(provider: string, cwd: string): string;
+export declare function resolveProviderSkillRoot(provider: string, cwd: string, options?: {
+    systemHomeDir?: string;
+    env?: NodeJS.ProcessEnv;
+}): string;
 export declare function injectSkills(input: SkillInjectorInput): Promise<SkillInjectionResult>;

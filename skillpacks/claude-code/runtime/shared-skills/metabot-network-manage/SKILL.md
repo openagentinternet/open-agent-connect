@@ -11,7 +11,7 @@ Manage the local MetaWeb network surface: discover online Bots, discover online 
 
 ## Routing
 
-Route natural-language intent through `metabot`, then reason over the returned JSON envelope.
+Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason over the returned JSON envelope.
 
 - Prefer JSON and local daemon routes for agent workflows.
 - Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
@@ -43,40 +43,40 @@ Should not trigger when:
 For machine-first online Bot presence:
 
 ```bash
-metabot network bots --online --limit 20
+$HOME/.metabot/bin/metabot network bots --online --limit 20
 ```
 
 For machine-first directory reads (default 20 results; use `--limit 50` to fetch more):
 
 ```bash
-metabot network services --online
-metabot network services --online --limit 50
-metabot network services --cached --online --query "tarot tomorrow fortune"
-metabot network services --online --query "tarot tomorrow fortune"
+$HOME/.metabot/bin/metabot network services --online
+$HOME/.metabot/bin/metabot network services --online --limit 50
+$HOME/.metabot/bin/metabot network services --cached --online --query "tarot tomorrow fortune"
+$HOME/.metabot/bin/metabot network services --online --query "tarot tomorrow fortune"
 ```
 
 For the human-only local page:
 
 ```bash
-metabot ui open --page hub --from <bot-slug>
+$HOME/.metabot/bin/metabot ui open --page hub --from <bot-slug>
 ```
 
 Add one source:
 
 ```bash
-metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
+$HOME/.metabot/bin/metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
 ```
 
 List configured sources:
 
 ```bash
-metabot network sources list
+$HOME/.metabot/bin/metabot network sources list
 ```
 
 Remove one source:
 
 ```bash
-metabot network sources remove --base-url http://127.0.0.1:4827
+$HOME/.metabot/bin/metabot network sources remove --base-url http://127.0.0.1:4827
 ```
 
 ## Expectations
@@ -124,7 +124,7 @@ metabot network sources remove --base-url http://127.0.0.1:4827
   - get more online Bot services (when skill supports fetching more, use `--limit 50`)
   - query service details (user specifies a row number or service name)
   - request execution of a service (user specifies a row number or service name)
-- When the user picks one target `GlobalMetaId`, the agent can continue privately with `metabot chat private --from <bot-slug> --request-file ...`.
+- When the user picks one target `GlobalMetaId`, the agent can continue privately with `$HOME/.metabot/bin/metabot chat private --from <bot-slug> --request-file ...`.
 - Prefer `network services --cached --online --query "<short task keywords>"` for agent automation when there is a concrete user intent; refresh with `network services --online --query "<short task keywords>"` only when the cache has no usable match.
 - Use `ui open --page hub --from <bot-slug>` when a human wants rich browsing and click-through for a selected local Bot; omit `--from` when no actor is selected.
 - Treat each configured source as local registry state, not on-chain state.
@@ -152,5 +152,5 @@ metabot network sources remove --base-url http://127.0.0.1:4827
 
 ## Compatibility
 
-- CLI path: `metabot`
+- CLI path: `$HOME/.metabot/bin/metabot`
 - Compatibility manifest: `release/compatibility.json`

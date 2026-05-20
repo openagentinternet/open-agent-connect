@@ -189,6 +189,9 @@ test('remote service prompt supports natural-language selection and free-service
   assert.match(prompt, /locally cached online remote on-chain services/);
   assert.match(prompt, /rating average|rating/i);
   assert.match(prompt, /policyMode "confirm_paid_only"/);
+  assert.match(prompt, /provider is not the user/i);
+  assert.match(prompt, /rawRequest.*human user's original request/i);
+  assert.match(prompt, /userTask.*imperative task/i);
   assert.match(prompt, /<provider_name>TarotBot<\/provider_name>/);
   assert.match(prompt, /<updated_at>1775000000000<\/updated_at>/);
 

@@ -26,16 +26,8 @@ function normalizeAmount(value) {
     }
     return amount;
 }
-function buildFreeOrderReference(input) {
-    const digest = (0, node_crypto_1.createHash)('sha256')
-        .update([
-        normalizeText(input.traceId),
-        normalizeText(input.servicePinId),
-        normalizeText(input.providerGlobalMetaId),
-    ].join('\n'))
-        .digest('hex')
-        .slice(0, 16);
-    return `free-order-${digest}`;
+function buildFreeOrderReference() {
+    return (0, node_crypto_1.randomBytes)(32).toString('hex');
 }
 function decimalAmountToSatoshis(value) {
     const amount = normalizeText(value);
@@ -120,12 +112,8 @@ async function executeServiceOrderPayment(input) {
             paymentChain: resolvePaymentChain(currency),
             paymentAmount: amount,
             paymentCurrency: currency === 'MVC' ? 'SPACE' : currency,
-            settlementKind: 'free',
-            orderReference: buildFreeOrderReference({
-                traceId: input.traceId,
-                servicePinId: input.servicePinId,
-                providerGlobalMetaId: input.providerGlobalMetaId,
-            }),
+            settlementKind: 'native',
+            orderReference: buildFreeOrderReference(),
             totalCost: 0,
             network: resolvePaymentChain(currency),
         };

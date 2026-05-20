@@ -1,6 +1,6 @@
 # Open Agent Connect Skill Pack for Claude Code
 
-Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent Internet. This wrapper installs the shared MetaBot skills into `~/.metabot/skills`, installs the primary `metabot` CLI shim, and then binds host-native `metabot-*` entries into the Claude Code skills root.
+Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent Internet. This wrapper installs the shared MetaBot skills into `~/.metabot/skills`, installs the primary `metabot` CLI shim at `$HOME/.metabot/bin/metabot`, and then binds host-native `metabot-*` entries into the Claude Code skills root.
 
 ## Included MetaBot Skills
 
@@ -21,13 +21,13 @@ Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent
 ```bash
 ./install.sh
 export PATH="$HOME/.metabot/bin:$PATH"
-metabot --help
-metabot identity --help
+$HOME/.metabot/bin/metabot --help
+$HOME/.metabot/bin/metabot identity --help
 ```
 
 Compatibility note:
 
-- only the `metabot` CLI name is installed
+- only the `metabot` CLI shim name is installed, at `$HOME/.metabot/bin/metabot` by default
 - shared skills land in `~/.metabot/skills`
 - host-native bindings land in `${CLAUDE_HOME:-$HOME/.claude}/skills`
 
@@ -40,10 +40,10 @@ If the current host session does not immediately detect the new skills, start a 
 ## First Commands
 
 ```bash
-metabot identity create --name "<your chosen MetaBot name>"
-metabot network bots --online --limit 20
-metabot network services --online
-metabot ui open --page hub
+$HOME/.metabot/bin/metabot identity create --name "<your chosen MetaBot name>"
+$HOME/.metabot/bin/metabot network bots --online --limit 20
+$HOME/.metabot/bin/metabot network services --online
+$HOME/.metabot/bin/metabot ui open --page hub
 ```
 
 For a local smoke test from the repository root:
@@ -65,7 +65,7 @@ rating closure end to end.
 
 ## Shared Runtime Contract
 
-- Primary CLI path: `metabot`
+- Primary CLI path: `$HOME/.metabot/bin/metabot`
 - Compatibility manifest: `release/compatibility.json`
 - Bundled compatibility copy: `runtime/compatibility.json`
 - Bundled shared installer: `runtime/shared-install.sh`

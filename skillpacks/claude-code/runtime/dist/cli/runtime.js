@@ -8,6 +8,7 @@ exports.buildA2ASimplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher;
 exports.getDefaultDaemonPort = getDefaultDaemonPort;
 exports.getDaemonRuntimeFingerprint = getDaemonRuntimeFingerprint;
 exports.buildDaemonConfigHash = buildDaemonConfigHash;
+exports.replayUnhandledA2AOrderMessagesForProfiles = replayUnhandledA2AOrderMessagesForProfiles;
 exports.createPrivateChatAutoReplyProfileDispatcher = createPrivateChatAutoReplyProfileDispatcher;
 exports.createDefaultCliDependencies = createDefaultCliDependencies;
 exports.mergeCliDependencies = mergeCliDependencies;
@@ -795,6 +796,8 @@ async function draftLoomTaskFromWish(context, input) {
         sessionsRoot: paths.llmExecutorSessionsRoot,
         transcriptsRoot: paths.llmExecutorTranscriptsRoot,
         skillsRoot: paths.skillsRoot,
+        systemHomeDir: paths.systemHomeDir,
+        env: context.env,
         backends: (0, executor_1.createRegistryBackendFactories)(),
     });
     try {
@@ -1234,6 +1237,226 @@ function createCliSigner(context, homeDir) {
     }
     return baseSigner;
 }
+function normalizeReplayText(value) {
+    return typeof value === 'string' ? value.trim() : '';
+}
+function normalizeReplayOrderTxid(value) {
+    const normalized = normalizeReplayText(value);
+    const pinMatch = normalized.match(/^([0-9a-f]{64})i\d+$/iu);
+    if (pinMatch) {
+        return pinMatch[1].toLowerCase();
+    }
+    return /^[0-9a-f]{64}$/iu.test(normalized) ? normalized.toLowerCase() : '';
+}
+function messageOrderTxidForReplay(message) {
+    return normalizeReplayOrderTxid(message.orderTxid)
+        || normalizeReplayOrderTxid(message.txid)
+        || normalizeReplayOrderTxid(message.pinId)
+        || normalizeReplayOrderTxid(message.messageId)
+        || normalizeReplayOrderTxid(message.id);
+}
+function extractReplayOrderLineValue(content, label) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = content.match(new RegExp(`^\\s*${escaped}\\s*:\\s*(.+?)\\s*$`, 'imu'));
+    return normalizeReplayText(match?.[1]);
+}
+function conversationHasServiceOrderSession(conversation, input) {
+    const sessions = Array.isArray(conversation.sessions) ? conversation.sessions : [];
+    const indexedOrderSession = conversation.indexes
+        && typeof conversation.indexes === 'object'
+        && !Array.isArray(conversation.indexes)
+        ? conversation.indexes
+        : null;
+    const orderIndex = indexedOrderSession?.orderTxidToSessionId
+        && typeof indexedOrderSession.orderTxidToSessionId === 'object'
+        && !Array.isArray(indexedOrderSession.orderTxidToSessionId)
+        ? indexedOrderSession.orderTxidToSessionId
+        : {};
+    const paymentIndex = indexedOrderSession?.paymentTxidToSessionId
+        && typeof indexedOrderSession.paymentTxidToSessionId === 'object'
+        && !Array.isArray(indexedOrderSession.paymentTxidToSessionId)
+        ? indexedOrderSession.paymentTxidToSessionId
+        : {};
+    if (input.orderTxid && normalizeReplayText(orderIndex[input.orderTxid])) {
+        return true;
+    }
+    if (input.paymentTxid && normalizeReplayText(paymentIndex[input.paymentTxid])) {
+        return true;
+    }
+    return sessions.some((entry) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+            return false;
+        }
+        const session = entry;
+        if (normalizeReplayText(session.type) !== 'service_order') {
+            return false;
+        }
+        return Boolean((input.orderTxid && normalizeReplayOrderTxid(session.orderTxid) === input.orderTxid)
+            || (input.paymentTxid && normalizeReplayText(session.paymentTxid) === input.paymentTxid));
+    });
+}
+async function readA2AConversationStateForReplay(filePath) {
+    try {
+        const parsed = JSON.parse(await node_fs_1.default.promises.readFile(filePath, 'utf8'));
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? parsed
+            : null;
+    }
+    catch {
+        return null;
+    }
+}
+function buildReplayOrderMessage(input) {
+    const content = String(input.rawMessage.content ?? '');
+    const classification = (0, simplemsgClassifier_1.classifySimplemsgContent)(content);
+    if (classification.kind !== 'order_protocol' || classification.tag !== 'ORDER') {
+        return null;
+    }
+    if (normalizeReplayText(input.rawMessage.direction) !== 'incoming') {
+        return null;
+    }
+    const sender = input.rawMessage.sender
+        && typeof input.rawMessage.sender === 'object'
+        && !Array.isArray(input.rawMessage.sender)
+        ? input.rawMessage.sender
+        : null;
+    const peer = input.conversation.peer
+        && typeof input.conversation.peer === 'object'
+        && !Array.isArray(input.conversation.peer)
+        ? input.conversation.peer
+        : null;
+    const fromGlobalMetaId = normalizeReplayText(sender?.globalMetaId) || normalizeReplayText(peer?.globalMetaId);
+    if (!fromGlobalMetaId) {
+        return null;
+    }
+    const activeHomeDir = normalizeReplayText(input.activeHomeDir);
+    const profileHomeDir = normalizeReplayText(input.profile.homeDir);
+    const localProfileSlug = activeHomeDir && profileHomeDir && node_path_1.default.resolve(profileHomeDir) === node_path_1.default.resolve(activeHomeDir)
+        ? null
+        : input.profile.slug;
+    const raw = input.rawMessage.raw
+        && typeof input.rawMessage.raw === 'object'
+        && !Array.isArray(input.rawMessage.raw)
+        ? input.rawMessage.raw
+        : null;
+    return {
+        fromGlobalMetaId,
+        content,
+        messagePinId: normalizeReplayText(input.rawMessage.pinId)
+            || normalizeReplayText(input.rawMessage.messageId)
+            || null,
+        fromChatPublicKey: normalizeReplayText(sender?.chatPublicKey)
+            || normalizeReplayText(peer?.chatPublicKey)
+            || null,
+        timestamp: Number.isFinite(input.rawMessage.timestamp)
+            ? Math.trunc(Number(input.rawMessage.timestamp))
+            : Date.now(),
+        rawMessage: raw,
+        localProfileSlug,
+    };
+}
+async function replayUnhandledA2AOrderMessagesForProfiles(input) {
+    const result = {
+        profiles: 0,
+        conversations: 0,
+        scanned: 0,
+        replayed: 0,
+        skipped: 0,
+        failed: 0,
+    };
+    const handler = input.handleOrderProtocolMessage;
+    if (!handler) {
+        return result;
+    }
+    const listProfilesForReplay = input.listProfiles ?? identityProfiles_1.listIdentityProfiles;
+    const profiles = await listProfilesForReplay(input.systemHomeDir).catch((error) => {
+        input.logWarning?.('[A2A order replay profiles]', error);
+        return [];
+    });
+    const maxMessagesPerProfile = Math.max(1, Math.floor(Number(input.maxMessagesPerProfile) || 200));
+    const replayedOrderKeys = new Set();
+    for (const profile of profiles) {
+        result.profiles += 1;
+        const paths = (0, paths_1.resolveMetabotPaths)(profile.homeDir);
+        let entries = [];
+        try {
+            entries = await node_fs_1.default.promises.readdir(paths.a2aRoot);
+        }
+        catch (error) {
+            if (error.code !== 'ENOENT') {
+                input.logWarning?.('[A2A order replay read]', error);
+            }
+            continue;
+        }
+        const candidates = [];
+        for (const entry of entries) {
+            if (!entry.startsWith('chat-') || !entry.endsWith('.json')) {
+                continue;
+            }
+            const conversation = await readA2AConversationStateForReplay(node_path_1.default.join(paths.a2aRoot, entry));
+            if (!conversation) {
+                continue;
+            }
+            result.conversations += 1;
+            const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+            for (const rawMessage of messages.slice(-maxMessagesPerProfile)) {
+                if (!rawMessage || typeof rawMessage !== 'object' || Array.isArray(rawMessage)) {
+                    continue;
+                }
+                const message = rawMessage;
+                const content = String(message.content ?? '');
+                const classification = (0, simplemsgClassifier_1.classifySimplemsgContent)(content);
+                if (normalizeReplayText(message.direction) !== 'incoming'
+                    || classification.kind !== 'order_protocol'
+                    || classification.tag !== 'ORDER') {
+                    continue;
+                }
+                const orderTxid = messageOrderTxidForReplay(message);
+                const paymentTxid = normalizeReplayText(message.paymentTxid)
+                    || extractReplayOrderLineValue(content, 'txid');
+                const replayKey = orderTxid || paymentTxid || normalizeReplayText(message.messageId);
+                if (!replayKey) {
+                    result.skipped += 1;
+                    continue;
+                }
+                result.scanned += 1;
+                if (replayedOrderKeys.has(replayKey)
+                    || conversationHasServiceOrderSession(conversation, { orderTxid, paymentTxid })) {
+                    result.skipped += 1;
+                    continue;
+                }
+                candidates.push({ conversation, message, orderTxid, paymentTxid });
+                replayedOrderKeys.add(replayKey);
+            }
+        }
+        candidates.sort((left, right) => {
+            const leftTime = Number.isFinite(left.message.timestamp) ? Number(left.message.timestamp) : 0;
+            const rightTime = Number.isFinite(right.message.timestamp) ? Number(right.message.timestamp) : 0;
+            return leftTime - rightTime;
+        });
+        for (const candidate of candidates) {
+            const replayMessage = buildReplayOrderMessage({
+                profile,
+                activeHomeDir: normalizeReplayText(input.activeHomeDir),
+                conversation: candidate.conversation,
+                rawMessage: candidate.message,
+            });
+            if (!replayMessage) {
+                result.skipped += 1;
+                continue;
+            }
+            try {
+                await handler(replayMessage);
+                result.replayed += 1;
+            }
+            catch (error) {
+                result.failed += 1;
+                input.logWarning?.('[A2A order replay handler]', error);
+            }
+        }
+    }
+    return result;
+}
 function createPrivateChatAutoReplyProfileDispatcher(input) {
     const orchestrators = new Map();
     const createOrchestrator = input.createOrchestrator ?? privateChatAutoReply_1.createPrivateChatAutoReplyOrchestrator;
@@ -1303,7 +1526,17 @@ function createPrivateChatAutoReplyProfileDispatcher(input) {
             const orchestrator = getOrCreateOrchestrator(profile);
             if (!orchestrator)
                 return;
-            await orchestrator.handleInboundMessage(message);
+            if (!input.handleOrderProtocolMessageForProfile) {
+                await orchestrator.handleInboundMessage(message);
+                return;
+            }
+            const dispatcher = buildA2ASimplemsgInboundDispatcher({
+                handleOrderProtocolMessage: async (orderMessage) => input.handleOrderProtocolMessageForProfile(profile, orderMessage),
+                handleGenericPrivateChatMessage: async (genericMessage) => {
+                    await orchestrator.handleInboundMessage(genericMessage);
+                },
+            });
+            await dispatcher(message);
         },
     };
 }
@@ -2693,6 +2926,8 @@ function createDefaultCliDependencies(context) {
                     sessionsRoot: paths.llmExecutorSessionsRoot,
                     transcriptsRoot: paths.llmExecutorTranscriptsRoot,
                     skillsRoot: paths.skillsRoot,
+                    systemHomeDir: paths.systemHomeDir,
+                    env: context.env,
                     backends: (0, executor_1.createRegistryBackendFactories)(),
                 });
                 return (0, loom_1.runLoomDevRoundWorkflow)({
@@ -2960,7 +3195,6 @@ async function serveCliDaemonProcess(context) {
         : undefined;
     const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
     const callerReplyWaiter = createTestMetaWebReplyWaiter(context.env);
-    const buyerRatingReplyRunner = createTestBuyerRatingReplyRunner(context.env) ?? (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)();
     const masterReplyWaiter = createTestMasterReplyWaiter(context.env) ?? (0, metawebMasterReplyWaiter_1.createSocketIoMetaWebMasterReplyWaiter)();
     const servicePaymentExecutor = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
         ? (0, servicePayment_1.createTestServicePaymentExecutor)()
@@ -2995,7 +3229,36 @@ async function serveCliDaemonProcess(context) {
         sessionsRoot: paths.llmExecutorSessionsRoot,
         transcriptsRoot: paths.llmExecutorTranscriptsRoot,
         skillsRoot: paths.skillsRoot,
+        systemHomeDir: paths.systemHomeDir,
+        env: context.env,
         backends: providerLlmBackends,
+    });
+    const daemonMetaBotSlug = node_path_1.default.basename(paths.profileRoot);
+    const daemonRuntimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
+        runtimeStore: (0, llmRuntimeStore_1.createLlmRuntimeStore)(paths),
+        bindingStore: (0, llmBindingStore_1.createLlmBindingStore)(paths),
+        getPreferredRuntimeId: async () => {
+            try {
+                const raw = await node_fs_1.default.promises.readFile(paths.preferredLlmRuntimePath, 'utf8');
+                const data = JSON.parse(raw);
+                return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+            }
+            catch {
+                return null;
+            }
+        },
+    });
+    const buyerRatingHostReplyRunner = (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)({
+        runtimeResolver: daemonRuntimeResolver,
+        llmExecutor,
+        metaBotSlug: daemonMetaBotSlug,
+    });
+    const buyerRatingReplyRunner = createTestBuyerRatingReplyRunner(context.env) ?? buyerRatingHostReplyRunner;
+    const providerOrderReplyRunner = (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)({
+        runtimeResolver: daemonRuntimeResolver,
+        llmExecutor,
+        metaBotSlug: daemonMetaBotSlug,
+        timeoutMs: 45_000,
     });
     const handlers = (0, defaultHandlers_1.createDefaultMetabotDaemonHandlers)({
         homeDir,
@@ -3013,6 +3276,7 @@ async function serveCliDaemonProcess(context) {
         fetchPeerChatPublicKey,
         callerReplyWaiter,
         buyerRatingReplyRunner,
+        providerOrderReplyRunner,
         masterReplyWaiter,
         servicePaymentExecutor,
         requestMvcGasSubsidy,
@@ -3164,6 +3428,16 @@ async function serveCliDaemonProcess(context) {
         autoReplyConfig: sharedAutoReplyConfig,
         resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
         llmExecutor,
+        handleOrderProtocolMessageForProfile: async (profile, message) => {
+            const handler = handlers.services?.handleInboundOrderProtocolMessage;
+            if (!handler) {
+                return (0, commandResult_1.commandSuccess)({ handled: false });
+            }
+            return handler({
+                ...message,
+                localProfileSlug: profile.slug,
+            });
+        },
     });
     const daemonConfig = await (0, configStore_1.createConfigStore)(paths).read();
     const simplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher({
@@ -3209,6 +3483,16 @@ async function serveCliDaemonProcess(context) {
         await simplemsgListener.start();
         simplemsgPresenceWatchdog.start();
         chatAutoReplyBackfill.start();
+        void replayUnhandledA2AOrderMessagesForProfiles({
+            systemHomeDir: paths.systemHomeDir,
+            activeHomeDir: homeDir,
+            handleOrderProtocolMessage: handlers.services?.handleInboundOrderProtocolMessage,
+            logWarning: (scope, error) => {
+                console.warn(scope, error instanceof Error ? error.message : String(error));
+            },
+        }).catch((error) => {
+            console.warn('[A2A order replay]', error instanceof Error ? error.message : String(error));
+        });
     }
     let shuttingDown = false;
     const shutdown = async (exitCode) => {

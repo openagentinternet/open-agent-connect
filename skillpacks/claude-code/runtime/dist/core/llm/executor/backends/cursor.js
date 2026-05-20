@@ -4,8 +4,13 @@ exports.cursorBackendFactory = void 0;
 exports.createCursorBackend = createCursorBackend;
 const backend_1 = require("./backend");
 const jsonProcess_1 = require("./jsonProcess");
+function buildCursorPrompt(request) {
+    return request.systemPrompt
+        ? `${request.systemPrompt}\n\n---\n\n${request.prompt}`
+        : request.prompt;
+}
 function buildCursorArgs(request) {
-    const args = ['chat', '-p', request.prompt, '--output-format', 'stream-json', '--yolo'];
+    const args = ['chat', '-p', buildCursorPrompt(request), '--output-format', 'stream-json', '--yolo'];
     if (request.cwd)
         args.push('--workspace', request.cwd);
     if (request.model)

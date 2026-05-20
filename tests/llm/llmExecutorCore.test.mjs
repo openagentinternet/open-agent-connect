@@ -511,12 +511,18 @@ test('skill injector copies explicit selected skill sources outside the default 
 test('skill injector resolves provider roots from registry project skill roots', async () => {
   const base = await createTempDir();
   const cwd = path.join(base, 'work');
+  const systemHomeDir = path.join(base, 'home');
 
   assert.equal(resolveProviderSkillRoot('claude-code', cwd), path.join(cwd, '.claude', 'skills'));
   assert.equal(resolveProviderSkillRoot('codex', cwd), path.join(cwd, '.codex', 'skills'));
   assert.equal(resolveProviderSkillRoot('openclaw', cwd), path.join(cwd, '.openclaw', 'skills'));
   assert.equal(resolveProviderSkillRoot('gemini', cwd), path.join(cwd, '.gemini', 'skills'));
   assert.equal(resolveProviderSkillRoot('hermes', cwd), path.join(cwd, '.agent_context', 'skills'));
+  assert.equal(resolveProviderSkillRoot('cursor', cwd), path.join(cwd, '.agent_context', 'skills'));
+  assert.equal(
+    resolveProviderSkillRoot('cursor', cwd, { systemHomeDir }),
+    path.join(systemHomeDir, '.cursor', 'skills'),
+  );
   assert.equal(resolveProviderSkillRoot('unknown-provider', cwd), path.join(cwd, '.agent_context', 'skills'));
 });
 
@@ -1375,6 +1381,35 @@ send({ type: 'result', session_id: 'cursor-session-result', result: 'Cursor done
   assert.equal(events.some((event) => event.type === 'thinking' && event.content === 'cursor thinking'), true);
   assert.equal(events.some((event) => event.type === 'tool_use' && event.tool === 'grep'), true);
   assert.equal(events.some((event) => event.type === 'tool_result' && event.output === 'ok'), true);
+});
+
+test('Cursor backend includes system prompt in chat prompt when no native system channel exists', async () => {
+  const base = await createTempDir();
+  const argsPath = path.join(base, 'args.json');
+  const binaryPath = await writeExecutableScript(base, 'fake-cursor-system.js', `#!/usr/bin/env node
+const fs = require('node:fs');
+fs.writeFileSync(process.env.FAKE_CURSOR_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
+process.stdout.write(JSON.stringify({ type: 'result', result: 'done' }) + '\\n');
+`);
+  const backend = createCursorBackend(binaryPath, { FAKE_CURSOR_ARGS_PATH: argsPath });
+
+  await backend.execute(
+    {
+      runtimeId: 'llm_cursor',
+      runtime: { ...runtime, provider: 'cursor', binaryPath },
+      prompt: 'User task only.',
+      systemPrompt: 'Provider-only system contract.',
+      cwd: base,
+    },
+    { emit: () => undefined },
+    new AbortController().signal,
+  );
+
+  const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
+  assert.equal(args[0], 'chat');
+  assert.equal(args[1], '-p');
+  assert.match(args[2], /Provider-only system contract/);
+  assert.match(args[2], /User task only/);
 });
 
 test('Trae backend launches editor chat mode and captures process output', async () => {

@@ -124,6 +124,11 @@ test('buildProviderServiceOrderPrompt includes paid-order guidance and required 
   assert.match(prompt, /must use.*weather\.oracle/i);
   assert.match(prompt, /do not repeat payment/i);
   assert.match(prompt, /output type/i);
+  assert.match(prompt, /provider-side service executor/i);
+  assert.match(prompt, /local skill/i);
+  assert.match(prompt, /do not call.*remote service/i);
+  assert.match(prompt, /final answer.*only.*deliverable/i);
+  assert.match(prompt, /do not include.*daemon/i);
 });
 
 test('createProviderServiceRunner uses fallback only before execution starts', async () => {
@@ -395,6 +400,37 @@ test('createProviderServiceRunner passes selected global skill source path to ex
   await cleanupProfileHome(homeDir);
 });
 
+test('createProviderServiceRunner strips leading process narration from provider deliverables', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'Reading the weather.oracle skill to fetch the latest data.\n\nWeather Oracle Result\nSunny, 25C',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder());
+
+  assert.equal(result.state, 'completed');
+  assert.equal(result.responseText, 'Weather Oracle Result\nSunny, 25C');
+  await cleanupProfileHome(homeDir);
+});
+
 test('createProviderServiceRunner resolves fallback runtime from fallback binding before execution', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   await bindingStore.write({
@@ -427,6 +463,121 @@ test('createProviderServiceRunner resolves fallback runtime from fallback bindin
   assert.equal(calls.length, 1);
   assert.equal(calls[0].runtimeId, 'runtime-fallback');
   assert.equal(result.metadata.fallbackSelected, true);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner uses a healthy unbound runtime when the configured primary is unavailable', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await fs.rm(path.join(systemHomeDir, '.claude'), { recursive: true, force: true });
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'cursor', health: 'unavailable', binaryPath: '/bin/cursor-agent' }),
+      runtime({ id: 'runtime-unbound', provider: 'claude-code', health: 'healthy', binaryPath: '/bin/claude' }),
+    ],
+  });
+  await bindingStore.write({
+    version: 1,
+    bindings: [
+      binding('binding-primary', 'alice', 'runtime-primary', 'primary'),
+    ],
+  });
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'Unbound runtime used the portable skill source.',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder());
+
+  assert.equal(result.state, 'completed');
+  assert.equal(result.runtimeId, 'runtime-unbound');
+  assert.equal(result.metadata.fallbackSelected, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].runtimeId, 'runtime-unbound');
+  assert.equal(
+    calls[0].skillSourcePaths['weather.oracle'],
+    path.join(systemHomeDir, '.codex', 'skills', 'weather.oracle'),
+  );
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner retries a healthy unbound runtime after primary execution timeout', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await fs.rm(path.join(systemHomeDir, '.claude'), { recursive: true, force: true });
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'cursor', health: 'healthy', binaryPath: '/bin/cursor-agent' }),
+      runtime({ id: 'runtime-unbound', provider: 'claude-code', health: 'healthy', binaryPath: '/bin/claude' }),
+    ],
+  });
+  await bindingStore.write({
+    version: 1,
+    bindings: [
+      binding('binding-primary', 'alice', 'runtime-primary', 'primary'),
+    ],
+  });
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        return request.runtimeId === 'runtime-primary' ? 'session-primary' : 'session-unbound';
+      },
+      async getSession(sessionId) {
+        if (sessionId === 'session-primary') {
+          return {
+            sessionId,
+            status: 'timeout',
+            result: {
+              status: 'timeout',
+              output: '',
+              error: 'primary timed out',
+              durationMs: 10,
+            },
+          };
+        }
+        return {
+          sessionId,
+          status: 'completed',
+          result: {
+            status: 'completed',
+            output: 'Unbound runtime completed after primary timeout.',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder());
+
+  assert.equal(result.state, 'completed');
+  assert.equal(result.runtimeId, 'runtime-unbound');
+  assert.deepEqual(calls.map((call) => call.runtimeId), ['runtime-primary', 'runtime-unbound']);
+  assert.equal(
+    calls[1].skillSourcePaths['weather.oracle'],
+    path.join(systemHomeDir, '.codex', 'skills', 'weather.oracle'),
+  );
   await cleanupProfileHome(homeDir);
 });
 
@@ -466,6 +617,50 @@ test('createProviderServiceRunner returns structured failure without a session w
   assert.equal(result.state, 'failed');
   assert.equal(result.code, 'provider_skill_missing');
   assert.equal(calls.length, 0);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner injects a locally installed skill into a healthy primary runtime', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'cursor', health: 'healthy', binaryPath: '/bin/cursor-agent' }),
+    ],
+  });
+  await bindingStore.write({
+    version: 1,
+    bindings: [
+      binding('binding-primary', 'alice', 'runtime-primary', 'primary'),
+    ],
+  });
+  await fs.mkdir(path.join(systemHomeDir, '.codex', 'skills', 'codex.only'), { recursive: true });
+  await fs.writeFile(path.join(systemHomeDir, '.codex', 'skills', 'codex.only', 'SKILL.md'), '# Codex Only\n', 'utf8');
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'Primary runtime used injected local skill.',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ providerSkill: 'codex.only' }));
+
+  assert.equal(result.state, 'completed');
+  assert.equal(result.runtimeId, 'runtime-primary');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].runtimeId, 'runtime-primary');
+  assert.equal(
+    calls[0].skillSourcePaths['codex.only'],
+    path.join(systemHomeDir, '.codex', 'skills', 'codex.only'),
+  );
   await cleanupProfileHome(homeDir);
 });
 

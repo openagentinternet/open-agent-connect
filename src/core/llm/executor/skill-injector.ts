@@ -1,6 +1,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { getProjectSkillRoot, isPlatformId } from '../../platform/platformRegistry';
+import {
+  getPlatformSkillRoots,
+  getProjectSkillRoot,
+  isPlatformId,
+  resolvePlatformSkillRootPath,
+} from '../../platform/platformRegistry';
 
 export interface SkillInjectorInput {
   skills: string[];
@@ -8,6 +13,8 @@ export interface SkillInjectorInput {
   skillSourcePaths?: Record<string, string>;
   provider: string;
   cwd: string;
+  systemHomeDir?: string;
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface SkillInjectionResult {
@@ -17,10 +24,21 @@ export interface SkillInjectionResult {
 
 const FALLBACK_SKILL_ROOT = path.join('.agent_context', 'skills');
 
-export function resolveProviderSkillRoot(provider: string, cwd: string): string {
+export function resolveProviderSkillRoot(
+  provider: string,
+  cwd: string,
+  options: { systemHomeDir?: string; env?: NodeJS.ProcessEnv } = {},
+): string {
   if (isPlatformId(provider)) {
     const projectRoot = getProjectSkillRoot(provider);
     if (projectRoot) return path.resolve(cwd, projectRoot.path);
+    const systemHomeDir = normalizeOptionalPath(options.systemHomeDir);
+    if (systemHomeDir) {
+      const globalRoot = getPlatformSkillRoots(provider).find((root) => root.kind === 'global');
+      if (globalRoot) {
+        return resolvePlatformSkillRootPath(globalRoot, systemHomeDir, options.env);
+      }
+    }
   }
   return path.resolve(cwd, FALLBACK_SKILL_ROOT);
 }
@@ -56,7 +74,10 @@ async function findReadableSkillSource(input: SkillInjectorInput, skillName: str
 }
 
 export async function injectSkills(input: SkillInjectorInput): Promise<SkillInjectionResult> {
-  const skillRoot = resolveProviderSkillRoot(input.provider, input.cwd);
+  const skillRoot = resolveProviderSkillRoot(input.provider, input.cwd, {
+    systemHomeDir: input.systemHomeDir,
+    env: input.env,
+  });
   await fs.mkdir(skillRoot, { recursive: true });
 
   const injected: string[] = [];

@@ -2,8 +2,14 @@ import type { LlmExecutionRequest, LlmExecutionResult, LlmEventEmitter, LlmToken
 import { filterBlockedArgs, type LlmBackend, type LlmBackendFactory } from './backend';
 import { extractUsage, getString, isRecord, numberFromKeys, resolveJsonProcessError, runJsonLineProcess, stringifyContent, usageRecordHasTokens } from './jsonProcess';
 
+function buildCursorPrompt(request: LlmExecutionRequest): string {
+  return request.systemPrompt
+    ? `${request.systemPrompt}\n\n---\n\n${request.prompt}`
+    : request.prompt;
+}
+
 function buildCursorArgs(request: LlmExecutionRequest): string[] {
-  const args = ['chat', '-p', request.prompt, '--output-format', 'stream-json', '--yolo'];
+  const args = ['chat', '-p', buildCursorPrompt(request), '--output-format', 'stream-json', '--yolo'];
   if (request.cwd) args.push('--workspace', request.cwd);
   if (request.model) args.push('--model', request.model);
   if (request.resumeSessionId) args.push('--resume', request.resumeSessionId);

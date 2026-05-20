@@ -11,6 +11,8 @@ interface LlmExecutorOptions {
   sessionsRoot: string;
   transcriptsRoot: string;
   skillsRoot: string;
+  systemHomeDir?: string;
+  env?: NodeJS.ProcessEnv;
   backends: Record<string, LlmBackendFactory>;
   sessionManager?: SessionManager;
 }
@@ -41,6 +43,8 @@ export class LlmExecutor {
   private readonly sessionsRoot: string;
   private readonly transcriptsRoot: string;
   private readonly skillsRoot: string;
+  private readonly systemHomeDir?: string;
+  private readonly env?: NodeJS.ProcessEnv;
   private readonly backends: Record<string, LlmBackendFactory>;
   private readonly sessionManager: SessionManager;
   private readonly streams = new Map<string, EventStreamState>();
@@ -50,6 +54,8 @@ export class LlmExecutor {
     this.sessionsRoot = options.sessionsRoot;
     this.transcriptsRoot = options.transcriptsRoot;
     this.skillsRoot = options.skillsRoot;
+    this.systemHomeDir = options.systemHomeDir;
+    this.env = options.env;
     this.backends = options.backends;
     this.sessionManager = options.sessionManager ?? createFileSessionManager(options.sessionsRoot);
   }
@@ -183,6 +189,8 @@ export class LlmExecutor {
         skillSourcePaths: request.skillSourcePaths,
         provider: request.runtime.provider,
         cwd,
+        systemHomeDir: this.systemHomeDir,
+        env: this.env,
       });
       for (const error of injection.errors) {
         this.pushEvent(sessionId, {

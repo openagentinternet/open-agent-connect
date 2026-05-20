@@ -5,7 +5,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(SCRIPT_PATH), '..');
 const DEFAULT_OUTPUT_ROOT = path.join(DEFAULT_REPO_ROOT, 'skillpacks');
-const PRIMARY_CLI_PATH = 'metabot';
+const PRIMARY_CLI_NAME = 'metabot';
+const PRIMARY_CLI_PATH = '$HOME/.metabot/bin/metabot';
 const SHARED_PACK = 'shared';
 const SHARED_COMPATIBILITY_MANIFEST = 'release/compatibility.json';
 const BUNDLED_COMPATIBILITY_MANIFEST = 'runtime/compatibility.json';
@@ -71,7 +72,7 @@ function renderHostAdapterSection(hostKey, host) {
 function buildSharedReadme({ packageVersion }) {
   return `# Shared MetaBot Skills for Open Agent Connect
 
-This shared pack installs the host-neutral MetaBot skills into \`~/.metabot/skills\` and installs the primary \`${PRIMARY_CLI_PATH}\` shim into \`~/.metabot/bin\`.
+This shared pack installs the host-neutral MetaBot skills into \`~/.metabot/skills\` and installs the primary \`${PRIMARY_CLI_NAME}\` shim at \`${PRIMARY_CLI_PATH}\`.
 
 ## Included MetaBot Skills
 
@@ -82,8 +83,8 @@ ${listSkills(METABOT_SKILLS)}
 \`\`\`bash
 ./install.sh
 export PATH="$HOME/.metabot/bin:$PATH"
-metabot --help
-metabot identity --help
+$HOME/.metabot/bin/metabot --help
+$HOME/.metabot/bin/metabot identity --help
 \`\`\`
 
 Override the shared skill destination with \`METABOT_SHARED_SKILL_DEST\` if you need a non-default shared root.
@@ -104,7 +105,7 @@ If you already have a bundled CLI entry, set \`METABOT_CLI_ENTRY\` directly.
 function buildHostReadme({ hostKey, host, packageVersion }) {
   return `# Open Agent Connect Skill Pack for ${host.displayName}
 
-Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent Internet. This wrapper installs the shared MetaBot skills into \`~/.metabot/skills\`, installs the primary \`${PRIMARY_CLI_PATH}\` CLI shim, and then binds host-native \`metabot-*\` entries into the ${host.displayName} skills root.
+Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent Internet. This wrapper installs the shared MetaBot skills into \`~/.metabot/skills\`, installs the primary \`${PRIMARY_CLI_NAME}\` CLI shim at \`${PRIMARY_CLI_PATH}\`, and then binds host-native \`metabot-*\` entries into the ${host.displayName} skills root.
 
 ## Included MetaBot Skills
 
@@ -115,13 +116,13 @@ ${listSkills(METABOT_SKILLS)}
 \`\`\`bash
 ./install.sh
 export PATH="$HOME/.metabot/bin:$PATH"
-metabot --help
-metabot identity --help
+$HOME/.metabot/bin/metabot --help
+$HOME/.metabot/bin/metabot identity --help
 \`\`\`
 
 Compatibility note:
 
-- only the \`metabot\` CLI name is installed
+- only the \`${PRIMARY_CLI_NAME}\` CLI shim name is installed, at \`${PRIMARY_CLI_PATH}\` by default
 - shared skills land in \`~/.metabot/skills\`
 - host-native bindings land in \`${host.defaultSkillRoot}\`
 
@@ -134,10 +135,10 @@ If the current host session does not immediately detect the new skills, start a 
 ## First Commands
 
 \`\`\`bash
-metabot identity create --name "<your chosen MetaBot name>"
-metabot network bots --online --limit 20
-metabot network services --online
-metabot ui open --page hub
+$HOME/.metabot/bin/metabot identity create --name "<your chosen MetaBot name>"
+$HOME/.metabot/bin/metabot network bots --online --limit 20
+$HOME/.metabot/bin/metabot network services --online
+$HOME/.metabot/bin/metabot ui open --page hub
 \`\`\`
 
 For a local smoke test from the repository root:
@@ -322,11 +323,11 @@ ${renderShellPrintfLines(renderNodeResolverShell())}
   chmod +x "$BIN_DIR/$target_name"
 }
 
-write_cli_shim "${PRIMARY_CLI_PATH}"
+write_cli_shim "${PRIMARY_CLI_NAME}"
 
 echo "Installed shared MetaBot skills to $SHARED_SKILL_DEST"
-echo "Installed primary CLI shim to $BIN_DIR/${PRIMARY_CLI_PATH}"
-echo "Primary CLI path: ${PRIMARY_CLI_PATH}"
+echo "Installed primary CLI shim to $BIN_DIR/${PRIMARY_CLI_NAME}"
+echo "Primary CLI path: $BIN_DIR/${PRIMARY_CLI_NAME}"
 echo "Compatibility manifest: ${SHARED_COMPATIBILITY_MANIFEST}"
 echo "Bundled compatibility copy: $BUNDLED_COMPATIBILITY_COPY"
 `;
@@ -347,7 +348,7 @@ SHARED_INSTALL="$SCRIPT_DIR/${HOST_WRAPPER_SHARED_INSTALL}"
 
 "$SHARED_INSTALL"
 
-METABOT_BIN="$BIN_DIR/${PRIMARY_CLI_PATH}"
+METABOT_BIN="$BIN_DIR/${PRIMARY_CLI_NAME}"
 [ -x "$METABOT_BIN" ] || {
   echo "Expected installed CLI shim at $METABOT_BIN" >&2
   exit 1

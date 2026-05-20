@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
+const LOWER_HEX_64_RE = /^[0-9a-f]{64}$/;
 
 test('executeServiceOrderPayment returns wallet transfer txid for paid native orders', async () => {
   const {
@@ -99,7 +100,7 @@ test('executeServiceOrderPayment does not synthesize txids for paid orders', asy
   );
 });
 
-test('executeServiceOrderPayment uses order reference only for free services', async () => {
+test('executeServiceOrderPayment uses random hex order references for free services', async () => {
   const {
     executeServiceOrderPayment,
   } = require('../../dist/core/payments/servicePayment.js');
@@ -122,10 +123,26 @@ test('executeServiceOrderPayment uses order reference only for free services', a
 
   assert.equal(called, false);
   assert.equal(payment.paymentTxid, null);
-  assert.match(payment.orderReference, /^free-order-/);
+  assert.match(payment.orderReference, LOWER_HEX_64_RE);
   assert.equal(payment.paymentAmount, '0');
   assert.equal(payment.paymentCurrency, 'SPACE');
-  assert.equal(payment.settlementKind, 'free');
+  assert.equal(payment.settlementKind, 'native');
+
+  const nextPayment = await executeServiceOrderPayment({
+    servicePinId: 'free-service-pin',
+    providerGlobalMetaId: 'seller-gmid',
+    paymentAddress: '',
+    amount: '0',
+    currency: 'SPACE',
+    traceId: 'trace-free-1',
+    executor: {
+      execute: async () => {
+        throw new Error('must not be called for free services');
+      },
+    },
+  });
+  assert.match(nextPayment.orderReference, LOWER_HEX_64_RE);
+  assert.notEqual(nextPayment.orderReference, payment.orderReference);
 });
 
 test('executeServiceOrderPayment rejects unsupported settlement before order send', async () => {

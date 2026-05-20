@@ -135,3 +135,55 @@ test('runLlmPromptWithRuntimeFallback fails cleanly when no healthy runtime is a
   assert.equal(result.output, '');
   assert.match(result.error, /No healthy LLM runtime/);
 });
+
+test('runLlmPromptWithRuntimeFallback can avoid mutating runtime health for non-critical prompts', async () => {
+  const primary = makeRuntime('primary-runtime', 'codex');
+  const calls = {
+    unavailable: [],
+  };
+  const result = await runLlmPromptWithRuntimeFallback({
+    runtimeResolver: {
+      async resolveRuntime(input) {
+        if ((input.excludeRuntimeIds ?? []).includes(primary.id)) {
+          return { runtime: null };
+        }
+        return { runtime: primary, bindingId: 'primary-binding', bindingRole: 'primary' };
+      },
+      async markBindingUsed() {},
+      async markRuntimeUnavailable(runtimeId) {
+        calls.unavailable.push(runtimeId);
+      },
+    },
+    llmExecutor: {
+      async execute() {
+        return 'session-primary';
+      },
+      async getSession() {
+        return {
+          sessionId: 'session-primary',
+          runtimeId: primary.id,
+          provider: primary.provider,
+          status: 'timeout',
+          prompt: 'prompt',
+          createdAt: new Date().toISOString(),
+          result: {
+            status: 'timeout',
+            output: '',
+            error: 'copy prompt timed out',
+            durationMs: 1,
+          },
+        };
+      },
+    },
+    metaBotSlug: 'eric',
+    prompt: 'prompt',
+    timeoutMs: 1_000,
+    pollIntervalMs: 1,
+    sleep: async () => {},
+    markRuntimeUnavailableOnFailure: false,
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error, 'copy prompt timed out');
+  assert.deepEqual(calls.unavailable, []);
+});

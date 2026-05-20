@@ -168,6 +168,26 @@ test('buildDelegationOrderPayload preserves Chinese prose that starts with payme
   assert.match(payload, /<raw_request>\n支付金额 不能超过预算\n<\/raw_request>/);
 });
 
+test('buildDelegationOrderPayload removes generated provider-framing from caller task text', () => {
+  const payload = buildDelegationOrderPayload({
+    rawRequest: '用户请求 AI_Sunny 的免费天气查询服务。',
+    userTask: '用户请求 AI_Sunny 的免费天气查询服务。',
+    taskContext: 'Selected cached online service: AI_Sunny 免费天气查询',
+    price: '0',
+    currency: 'SPACE',
+    paymentTxid: '',
+    orderReference: 'a'.repeat(64),
+    serviceName: '免费天气查询',
+    servicePinId: 'service-pin',
+    providerSkill: 'weather-query',
+    outputType: 'text',
+  });
+
+  assert.match(payload, /^\[ORDER\] 免费天气查询服务/m);
+  assert.match(payload, /<raw_request>\n免费天气查询服务\n<\/raw_request>/);
+  assert.doesNotMatch(payload, /用户请求 AI_Sunny/);
+});
+
 test('cleanServiceResultText strips echoed extended order metadata from delivery text', () => {
   const cleaned = cleanServiceResultText(`
 你好，收到你的服务订单。

@@ -14,6 +14,7 @@ const platformRegistry_1 = require("../platform/platformRegistry");
 const platformRegistry_2 = require("../platform/platformRegistry");
 const homeSelection_1 = require("../state/homeSelection");
 const SUPPORTED_HOSTS = [...platformRegistry_1.SUPPORTED_PLATFORM_IDS];
+const PRIMARY_CLI_DOC_PATH = '$HOME/.metabot/bin/metabot';
 class NpmInstallError extends Error {
     code;
     constructor(code, message) {
@@ -54,14 +55,14 @@ async function renderSharedSkill(packageRoot, skillName) {
     const systemRouting = await node_fs_1.promises.readFile(node_path_1.default.join(packageRoot, 'skillpacks', 'common', 'templates', 'system-routing.md'), 'utf8');
     const confirmationContract = await node_fs_1.promises.readFile(node_path_1.default.join(packageRoot, 'skillpacks', 'common', 'templates', 'confirmation-contract.md'), 'utf8');
     return replaceAll(source, {
-        '{{METABOT_CLI}}': 'metabot',
+        '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,
         '{{COMPATIBILITY_MANIFEST}}': 'release/compatibility.json',
         '{{HOST_ADAPTER_SECTION}}': '',
         '{{SYSTEM_ROUTING}}': replaceAll(systemRouting, {
-            '{{METABOT_CLI}}': 'metabot',
+            '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,
         }),
         '{{CONFIRMATION_CONTRACT}}': replaceAll(confirmationContract, {
-            '{{METABOT_CLI}}': 'metabot',
+            '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,
         }),
     });
 }

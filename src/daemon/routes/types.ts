@@ -87,6 +87,7 @@ export interface MetabotDaemonHttpHandlers {
       content: string;
       messagePinId?: string | null;
       timestamp?: number | null;
+      localProfileSlug?: string | null;
     }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   chat?: {

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { LocalIdentitySecrets, SecretStore } from '../secrets/secretStore';
 import { executeTransfer } from '../signing/localMnemonicSigner';
 import type { ChainAdapterRegistry } from '../chain/adapters/types';
@@ -64,20 +64,8 @@ function normalizeAmount(value: unknown): string {
   return amount;
 }
 
-function buildFreeOrderReference(input: {
-  traceId?: string | null;
-  servicePinId: string;
-  providerGlobalMetaId: string;
-}): string {
-  const digest = createHash('sha256')
-    .update([
-      normalizeText(input.traceId),
-      normalizeText(input.servicePinId),
-      normalizeText(input.providerGlobalMetaId),
-    ].join('\n'))
-    .digest('hex')
-    .slice(0, 16);
-  return `free-order-${digest}`;
+function buildFreeOrderReference(): string {
+  return randomBytes(32).toString('hex');
 }
 
 function decimalAmountToSatoshis(value: string): number {
@@ -176,12 +164,8 @@ export async function executeServiceOrderPayment(
       paymentChain: resolvePaymentChain(currency),
       paymentAmount: amount,
       paymentCurrency: currency === 'MVC' ? 'SPACE' : currency,
-      settlementKind: 'free',
-      orderReference: buildFreeOrderReference({
-        traceId: input.traceId,
-        servicePinId: input.servicePinId,
-        providerGlobalMetaId: input.providerGlobalMetaId,
-      }),
+      settlementKind: 'native',
+      orderReference: buildFreeOrderReference(),
       totalCost: 0,
       network: resolvePaymentChain(currency),
     };

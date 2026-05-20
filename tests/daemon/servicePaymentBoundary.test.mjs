@@ -18,6 +18,7 @@ const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.j
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { buildDelegationOrderPayload } = require('../../dist/core/orders/delegationOrderMessage.js');
+const { createRatingDetailStateStore } = require('../../dist/core/ratings/ratingDetailState.js');
 const {
   SERVICE_ORDER_FREE_REFUND_SKIPPED_REASON,
   SERVICE_ORDER_SELF_REFUND_SKIPPED_REASON,
@@ -29,6 +30,7 @@ const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretSto
 
 const MVC_PAYMENT_ADDRESS = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 const MVC_OTHER_ADDRESS = '1dice8EMZmqKvrGE4Qc9bUFf9PX3xaYDp';
+const LOWER_HEX_64_RE = /^[0-9a-f]{64}$/;
 
 async function waitForCondition(predicate, timeoutMs = 1000, intervalMs = 20) {
   const deadline = Date.now() + timeoutMs;
@@ -314,6 +316,8 @@ async function createInboundProviderOrderHarness(t, options = {}) {
     },
     providerRuntimeCanStart: async () => true,
     a2aConversationPersister: options.a2aConversationPersister,
+    providerOrderReplyRunner: options.providerOrderReplyRunner,
+    providerOrderTextGenerator: options.providerOrderTextGenerator,
   });
 
   function makeOrderContent(overrides = {}) {
@@ -433,6 +437,9 @@ async function createServiceCallHarness(t, options = {}) {
     createSignerForHome: options.createSignerForHome,
     fetchPeerChatPublicKey: options.fetchPeerChatPublicKey ?? (async () => providerPair.publicKeyHex),
     ratingFollowupRetryDelaysMs: options.ratingFollowupRetryDelaysMs,
+    buyerRatingReplyRunner: options.buyerRatingReplyRunner,
+    buyerRatingTextGenerator: options.buyerRatingTextGenerator,
+    callerOrderTextGenerator: options.callerOrderTextGenerator,
     callerReplyWaiter: options.callerReplyWaiter ?? {
       async awaitServiceReply() {
         return { state: 'timeout' };
@@ -466,8 +473,10 @@ async function createServiceCallHarness(t, options = {}) {
   };
 }
 
-async function seedBuyerTraceForRating(harness) {
+async function seedBuyerTraceForRating(harness, overrides = {}) {
   const state = await harness.runtimeStateStore.readState();
+  const orderTxid = overrides.orderTxid ?? 'order-tx-1';
+  const paymentTxid = overrides.paymentTxid === undefined ? 'payment-tx-1' : overrides.paymentTxid;
   const trace = buildSessionTrace({
     traceId: 'trace-rating-retry',
     channel: 'a2a',
@@ -487,12 +496,15 @@ async function seedBuyerTraceForRating(harness) {
       role: 'buyer',
       serviceId: 'chain-service-pin-1',
       serviceName: 'Weather Oracle',
-      orderPinId: 'order-pin-1',
-      orderTxid: 'order-tx-1',
-      orderTxids: ['order-tx-1'],
-      paymentTxid: 'payment-tx-1',
+      orderPinId: overrides.orderPinId ?? 'order-pin-1',
+      orderTxid,
+      orderTxids: overrides.orderTxids ?? [orderTxid],
+      paymentTxid,
+      orderReference: overrides.orderReference ?? null,
       paymentCurrency: 'SPACE',
-      paymentAmount: '0.00001',
+      paymentAmount: overrides.paymentAmount ?? '0.00001',
+      paymentChain: overrides.paymentChain ?? 'mvc',
+      settlementKind: overrides.settlementKind ?? 'native',
     },
     a2a: {
       sessionId: 'session-rating-retry-1',
@@ -755,26 +767,68 @@ test('free simplemsg service orders use an order reference instead of a payment 
   assert.equal(called.ok, false);
   assert.equal(called.state, 'waiting');
   assert.equal(called.data.paymentTxid, null);
-  assert.match(called.data.orderReference, /^free-order-/);
+  assert.match(called.data.orderReference, LOWER_HEX_64_RE);
 
   const simplemsgWrite = harness.writes.find((entry) => entry.path === '/protocols/simplemsg');
   assert.ok(simplemsgWrite, 'expected a simplemsg order write');
   const plaintext = decryptSimplemsgOrder(simplemsgWrite, harness);
   assert.match(plaintext, /^\[ORDER\]/);
-  assert.doesNotMatch(plaintext, /\ntxid:\s*free-order-/i);
-  assert.match(plaintext, /\norder id:\s*free-order-/i);
+  assert.match(plaintext, /\n支付金额 0 SPACE/i);
+  assert.doesNotMatch(plaintext, /\ntxid:/i);
+  assert.doesNotMatch(plaintext, /free-order-/i);
+  assert.match(plaintext, new RegExp(`\\norder id:\\s*${called.data.orderReference}`, 'i'));
+  assert.match(plaintext, /\nsettlement kind:\s*native/i);
 
   const state = await harness.runtimeStateStore.readState();
   const trace = state.traces.find((entry) => entry.traceId === called.data.traceId);
   assert.ok(trace, 'expected caller trace to be persisted');
   assert.equal(trace.order.paymentTxid, null);
-  assert.match(trace.order.orderReference, /^free-order-/);
+  assert.match(trace.order.orderReference, LOWER_HEX_64_RE);
+});
+
+test('simplemsg service orders use caller-generated natural request copy', async (t) => {
+  const generatedOrderText = '我来请你查一下上海明天的天气，按天气预报结果返回就好。';
+  const generatorCalls = [];
+  const harness = await createServiceCallHarness(t, {
+    callerOrderTextGenerator: async (input) => {
+      generatorCalls.push(input);
+      return generatedOrderText;
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting', JSON.stringify(called));
+  assert.equal(generatorCalls.length, 1);
+  assert.equal(generatorCalls[0].userTask, 'Tell me tomorrow weather');
+  assert.equal(generatorCalls[0].taskContext, 'User is in Shanghai');
+
+  const simplemsgWrite = harness.writes.find((entry) => entry.path === '/protocols/simplemsg');
+  assert.ok(simplemsgWrite, 'expected a simplemsg order write');
+  const plaintext = decryptSimplemsgOrder(simplemsgWrite, harness);
+  assert.match(plaintext, /^\[ORDER\] 我来请你查一下上海明天的天气，按天气预报结果返回就好/);
+  assert.match(plaintext, new RegExp(`<raw_request>\\n${generatedOrderText}\\n</raw_request>`));
+  assert.doesNotMatch(plaintext, /用户请求 Weather Oracle|Weather Oracle 的用户/);
+  assert.match(plaintext, /\ntxid:\s*b{64}/i);
+  assert.match(plaintext, /\nservice id:\s*chain-service-pin-1/i);
+  assert.match(plaintext, /\nskill name:\s*metabot-weather-oracle/i);
 });
 
 test('inbound free provider ORDER rejects replayed order reference with a different simplemsg tx', async (t) => {
   const firstMessageTxid = '1'.repeat(64);
   const replayMessageTxid = '2'.repeat(64);
-  const orderReference = 'free-order-phase4-replay';
+  const orderReference = 'a'.repeat(64);
   const harness = await createInboundProviderOrderHarness(t, {
     service: { price: '0', currency: 'SPACE' },
   });
@@ -811,7 +865,7 @@ test('inbound free provider ORDER rejects replayed order reference with a differ
 test('concurrent inbound free provider ORDER replay with same order reference does not execute twice', async (t) => {
   const firstMessageTxid = '3'.repeat(64);
   const replayMessageTxid = '4'.repeat(64);
-  const orderReference = 'free-order-phase4-concurrent-replay';
+  const orderReference = 'c'.repeat(64);
   const harness = await createInboundProviderOrderHarness(t, {
     service: { price: '0', currency: 'SPACE' },
     llmDelayMs: 50,
@@ -942,6 +996,130 @@ test('service rating retries skill-service-rate publish after a mempool conflict
   );
   assert.ok(published);
   assert.match(published.metadata.ratingPinId, /\/protocols\/skill-service-rate-pin-/);
+});
+
+test('free service rating uses the order reference as the service paid tx', async (t) => {
+  const orderTxid = '1'.repeat(64);
+  const orderReference = 'a'.repeat(64);
+  const harness = await createServiceCallHarness(t);
+  const sessionStateStore = await seedBuyerTraceForRating(harness, {
+    orderPinId: `${orderTxid}i0`,
+    orderTxid,
+    orderTxids: [orderTxid],
+    paymentTxid: null,
+    orderReference,
+    paymentAmount: '0',
+  });
+
+  const result = await harness.handlers.services.rate({
+    traceId: 'trace-rating-retry',
+    rate: 5,
+    comment: 'Helpful free weather report.',
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.servicePaidTx, orderReference);
+  assert.equal(result.data.ratingMessageSent, true);
+
+  const ratingWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-rate');
+  assert.ok(ratingWrite, 'expected a skill-service-rate write');
+  const payload = JSON.parse(ratingWrite.payload);
+  assert.equal(payload.servicePaidTx, orderReference);
+  assert.equal(payload.servicePrice, '0');
+
+  const sessionState = await sessionStateStore.readState();
+  const published = sessionState.transcriptItems.find(
+    (item) => item.metadata?.event === 'service_rating_published',
+  );
+  assert.ok(published, 'expected rating transcript item');
+  assert.match(published.metadata.ratingPinId, /\/protocols\/skill-service-rate-pin-/);
+});
+
+test('free service trace rating detail sync matches by order reference', async (t) => {
+  const orderTxid = '3'.repeat(64);
+  const orderReference = 'c'.repeat(64);
+  const harness = await createServiceCallHarness(t);
+  await seedBuyerTraceForRating(harness, {
+    orderPinId: `${orderTxid}i0`,
+    orderTxid,
+    orderTxids: [orderTxid],
+    paymentTxid: null,
+    orderReference,
+    paymentAmount: '0',
+  });
+  const ratingStore = createRatingDetailStateStore(harness.homeDir);
+  await ratingStore.write({
+    items: [
+      {
+        pinId: 'free-rating-pin-1',
+        serviceId: 'chain-service-pin-1',
+        servicePaidTx: orderReference,
+        rate: 5,
+        comment: 'Helpful free weather report.',
+        raterGlobalMetaId: 'idq1caller',
+        raterMetaId: 'metaid-caller',
+        createdAt: 1_775_000_003_000,
+      },
+    ],
+    latestPinId: 'free-rating-pin-1',
+    backfillCursor: null,
+    lastSyncedAt: Date.now(),
+  });
+
+  const traceResult = await harness.handlers.trace.getTrace({ traceId: 'trace-rating-retry' });
+
+  assert.equal(traceResult.ok, true);
+  assert.equal(traceResult.data.ratingPublished, true);
+  assert.equal(traceResult.data.ratingPinId, 'free-rating-pin-1');
+  assert.equal(traceResult.data.ratingValue, 5);
+  assert.equal(traceResult.data.ratingComment, 'Helpful free weather report.');
+});
+
+test('inbound free NeedsRating auto-rates the buyer trace with the order reference', async (t) => {
+  const orderTxid = '2'.repeat(64);
+  const orderReference = 'b'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    buyerRatingReplyRunner: async () => ({
+      state: 'reply',
+      content: '评分：5分。免费天气结果清楚完整。',
+    }),
+  });
+  await seedBuyerTraceForRating(harness, {
+    orderPinId: `${orderTxid}i0`,
+    orderTxid,
+    orderTxids: [orderTxid],
+    paymentTxid: null,
+    orderReference,
+    paymentAmount: '0',
+  });
+
+  const handled = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: 'idq1provider',
+    content: `[NeedsRating:${orderTxid}] Please rate this free service.`,
+    messagePinId: 'free-needs-rating-pin',
+    timestamp: 1_775_000_003_000,
+  });
+
+  assert.equal(handled.ok, true, JSON.stringify(handled));
+  assert.equal(handled.data.rated, true);
+
+  const ratingWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-rate');
+  assert.ok(ratingWrite, 'expected an auto-published skill-service-rate write');
+  const payload = JSON.parse(ratingWrite.payload);
+  assert.equal(payload.servicePaidTx, orderReference);
+
+  const traceResult = await harness.handlers.trace.getTrace({ traceId: 'trace-rating-retry' });
+  assert.equal(traceResult.ok, true);
+  assert.equal(traceResult.data.ratingPublished, true);
+  assert.equal(traceResult.data.ratingValue, 5);
+  assert.equal(traceResult.data.ratingComment, '评分：5分。免费天气结果清楚完整。');
+  assert.equal(traceResult.data.ratingMessageSent, true);
+
+  const ratingMessageWrite = harness.writes.find((entry) => entry.path === '/protocols/simplemsg');
+  assert.ok(ratingMessageWrite, 'expected an ORDER_END rating follow-up write');
+  const ratingMessage = decryptSimplemsgOrder(ratingMessageWrite, harness);
+  assert.equal(ratingMessage, `[ORDER_END:${orderTxid} rated] 评分：5分。免费天气结果清楚完整。`);
+  assert.doesNotMatch(ratingMessage, /我的评分已记录在链上/);
 });
 
 test('service rating does not retry provider follow-up simplemsg for non-conflict tx rejection', async (t) => {
@@ -1771,9 +1949,19 @@ test('private chat local A2A store failure does not mask successful chain broadc
 test('inbound provider ORDER executes through runner and sends delivery plus rating request once', async (t) => {
   const orderTxid = 'a'.repeat(64);
   const paymentTxid = 'b'.repeat(64);
+  const protocolReplyCalls = [];
+  const customAcknowledgement = 'Weather Oracle here: I have your Shanghai forecast order and will read the sky now.';
+  const customRatingRequest = 'The forecast is delivered in my Weather Oracle voice; rate it if it helped.';
   const harness = await createInboundProviderOrderHarness(t, {
     rawTxs: {
       [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerOrderReplyRunner: async (input) => {
+      protocolReplyCalls.push(input);
+      return {
+        state: 'reply',
+        content: protocolReplyCalls.length === 1 ? customAcknowledgement : customRatingRequest,
+      };
     },
   });
   const content = harness.makeOrderContent({ paymentTxid });
@@ -1803,10 +1991,21 @@ test('inbound provider ORDER executes through runner and sends delivery plus rat
   const simplemsgWrites = harness.writes.filter((entry) => entry.path === '/protocols/simplemsg');
   assert.equal(simplemsgWrites.length, 3);
   const contents = simplemsgWrites.map((entry) => harness.decryptProviderWrite(entry));
+  const acknowledgementMessages = contents.filter((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`));
   const deliveryMessages = contents.filter((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`));
   const ratingMessages = contents.filter((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`));
+  assert.equal(acknowledgementMessages.length, 1);
   assert.equal(deliveryMessages.length, 1);
   assert.equal(ratingMessages.length, 1);
+  assert.equal(acknowledgementMessages[0], `[ORDER_STATUS:${orderTxid}] ${customAcknowledgement}`);
+  assert.equal(ratingMessages[0], `[NeedsRating:${orderTxid}] ${customRatingRequest}`);
+  assert.doesNotMatch(contents.join('\n'), /I received the order and started processing\.|Please rate this service\./);
+  assert.equal(protocolReplyCalls.length, 2);
+  assert.match(protocolReplyCalls[0].inboundMessage.content, /Stage: acknowledgement/);
+  assert.match(protocolReplyCalls[0].inboundMessage.content, /Weather Oracle/);
+  assert.match(protocolReplyCalls[0].inboundMessage.content, /Tell me tomorrow weather/);
+  assert.match(protocolReplyCalls[1].inboundMessage.content, /Stage: rating_request/);
+  assert.match(protocolReplyCalls[1].inboundMessage.content, /Tomorrow weather: bright with light wind/);
   const delivery = parseDeliveryMessage(deliveryMessages[0]);
   const rating = parseNeedsRatingMessage(ratingMessages[0]);
   assert.equal(delivery.paymentTxid, paymentTxid);
@@ -1860,6 +2059,101 @@ test('inbound provider ORDER executes through runner and sends delivery plus rat
   assert.equal(orderSession.role, 'provider');
   assert.equal(orderSession.paymentTxid, paymentTxid);
   assert.equal(orderSession.servicePinId, harness.service.currentPinId);
+});
+
+test('inbound provider ORDER uses dedicated provider-generated protocol copy', async (t) => {
+  const orderTxid = 'e'.repeat(64);
+  const paymentTxid = 'f'.repeat(64);
+  const generatedAcknowledgement = '我已经收到这单天气查询，会马上处理；可能需要一点时间，请稍等。';
+  const generatedRatingRequest = '天气结果已经交付了，如果这次信息有帮助，请给我 1-5 分评价，你的反馈很重要。';
+  const generatorCalls = [];
+  const harness = await createInboundProviderOrderHarness(t, {
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerOrderTextGenerator: async (input) => {
+      generatorCalls.push(input);
+      return input.stage === 'acknowledgement'
+        ? generatedAcknowledgement
+        : generatedRatingRequest;
+    },
+  });
+  const content = harness.makeOrderContent({ paymentTxid });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content,
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(generatorCalls.length, 2);
+  assert.equal(generatorCalls[0].stage, 'acknowledgement');
+  assert.equal(generatorCalls[1].stage, 'rating_request');
+  assert.match(generatorCalls[1].responseText, /bright with light wind/);
+
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(
+    contents.includes(`[ORDER_STATUS:${orderTxid}] ${generatedAcknowledgement}`),
+    true,
+  );
+  assert.equal(
+    contents.includes(`[NeedsRating:${orderTxid}] ${generatedRatingRequest}`),
+    true,
+  );
+  assert.doesNotMatch(contents.join('\n'), /I received the order and started processing\.|Please rate this service\./);
+});
+
+test('inbound provider ORDER fallback protocol copy stays concise and service-oriented', async (t) => {
+  const orderTxid = 'c'.repeat(64);
+  const paymentTxid = 'd'.repeat(64);
+  const longWeiboResult = [
+    '微博热搜 TOP 50 更新时间： 2026/5/20 08:24:10',
+    '| 排名 | 话题 | 标签 | 热度(万) | 链接 |',
+    '| 1 | 普京到达北京 | 热 | 164 | https://s.weibo.com/weibo?q=example |',
+    '| 2 | 另一条很长的热搜 | 热 | 120 | https://s.weibo.com/weibo?q=long |',
+  ].join('\n');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: {
+      displayName: '微博热搜',
+      serviceName: 'weibo-hot-trend',
+      providerSkill: 'weibo-hot-trend',
+    },
+    llmOutput: longWeiboResult,
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+  const content = harness.makeOrderContent({
+    paymentTxid,
+    rawRequest: '查询微博热搜',
+    userTask: '查询微博热搜',
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content,
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  const simplemsgWrites = harness.writes.filter((entry) => entry.path === '/protocols/simplemsg');
+  assert.equal(simplemsgWrites.length, 3);
+  const contents = simplemsgWrites.map((entry) => harness.decryptProviderWrite(entry));
+  const acknowledgement = contents.find((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`));
+  const ratingRequest = contents.find((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`));
+  assert.ok(acknowledgement);
+  assert.ok(ratingRequest);
+  assert.match(acknowledgement, /收到|接到|received/i);
+  assert.match(acknowledgement, /耐心|稍等|时间|wait|working/i);
+  assert.doesNotMatch(acknowledgement, /has accepted|In my role as|I am Eric|friendly coding assistant/i);
+  assert.match(ratingRequest, /评价|评分|rate|rating/i);
+  assert.match(ratingRequest, /1-5|1 到 5|1 至 5|one to five/i);
+  assert.doesNotMatch(ratingRequest, /Result summary|https:\/\/|微博热搜 TOP 50|\| 排名 \|/);
 });
 
 test('/api services.execute persists seller lifecycle state and provider runtime diagnostics', async (t) => {
@@ -2065,6 +2359,65 @@ test('inbound provider ORDER with forged txid does not execute or deliver before
   assert.deepEqual(harness.fetchRawTxCalls, [paymentTxid]);
   assert.equal(harness.llmCalls.length, 0);
   assert.equal(harness.writes.some((entry) => entry.path === '/protocols/simplemsg'), false);
+});
+
+test('inbound provider ORDER records and reports payment verification failure without executing', async (t) => {
+  const orderTxid = '8'.repeat(64);
+  const paymentTxid = '9'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t);
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'order_payment_unverified');
+  assert.deepEqual(harness.fetchRawTxCalls, [paymentTxid]);
+  assert.deepEqual(harness.fetchUtxosCalls, [MVC_PAYMENT_ADDRESS]);
+  assert.equal(harness.llmCalls.length, 0);
+
+  const simplemsgContents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[ORDER_END:${orderTxid} failed]`)), true);
+
+  const conversation = await createA2AConversationStore({
+    homeDir: harness.homeDir,
+    local: {
+      globalMetaId: harness.identity.globalMetaId,
+      name: harness.identity.name,
+      chatPublicKey: harness.identity.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: harness.buyerGlobalMetaId,
+      chatPublicKey: harness.buyerPair.publicKeyHex,
+    },
+  }).readConversation();
+  const orderSession = conversation.sessions.find((entry) => entry.sessionId === `a2a-order-${orderTxid}`);
+  assert.ok(orderSession);
+  assert.equal(orderSession.state, 'failed');
+  assert.equal(orderSession.paymentTxid, paymentTxid);
+  assert.match(orderSession.failureReason, /payment could not be verified/i);
+
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.paymentTxid === paymentTxid);
+  assert.ok(sellerOrder, 'expected seller order for payment verification failure');
+  assert.equal(sellerOrder.state, 'failed');
+  assert.equal(sellerOrder.orderTxid, orderTxid);
+  assert.match(sellerOrder.failureReason, /payment could not be verified/i);
+
+  const trace = state.traces.find((entry) => entry.order?.paymentTxid === paymentTxid);
+  assert.ok(trace, 'expected seller failure trace for payment verification failure');
+  assert.equal(trace.order.role, 'seller');
+  assert.equal(trace.order.orderTxid, orderTxid);
+  assert.equal(trace.a2a.publicStatus, 'remote_failed');
+  assert.equal(trace.providerRuntime.providerSkill, harness.service.providerSkill);
 });
 
 test('inbound provider ORDER accepts MVC payment when raw tx lookup falls back to provider UTXO evidence', async (t) => {

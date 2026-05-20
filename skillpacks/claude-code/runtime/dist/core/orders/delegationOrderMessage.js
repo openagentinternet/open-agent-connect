@@ -6,6 +6,7 @@ const orderMessage_1 = require("./orderMessage");
 const ORDER_PREFIX_RE = /^\s*\[ORDER\]\s*/i;
 const STRUCTURED_ORDER_METADATA_LINE_RE = /^\s*(?:(?:支付金额)(?:\s+[0-9]+(?:\.[0-9]+)?\s+[A-Za-z0-9._-]+|\s*[:：=])|(?:payment(?: amount)?|payment\s+chain|settlement\s+kind|commit\s+txid|txid|transaction id|mrc20\s+ticker|mrc20\s+id|output\s+type|order(?:\s+id|\s+ref(?:erence)?)?|service(?:\s+pin)?\s+id|service(?:\s+id)?|serviceid|skill(?:\s+name)?|provider\s*skill|service\s+skill|服务(?:\s*pin)?\s*id|服务(?:编号|标识|ID)|订单(?:编号|标识|ID)|技能(?:名称?)?|服务技能|服务名称)\s*[:：=])/i;
 const TRANSPORT_CHATTER_FRAGMENT_PATTERNS = [
+    /^Selected cached online service:[^\n]*/gi,
     /(?:^|[，,。；;])\s*已确认同意使用远程MetaBot服务[^，,。；;\n]*/gi,
     /(?:^|[，,。；;])\s*已支付\s*[0-9]+(?:\.[0-9]+)?\s*(?:SPACE|BTC|DOGE)[^，,。；;\n]*/gi,
     /(?:^|[，,。；;])\s*支付\s*[0-9]+(?:\.[0-9]+)?\s*(?:SPACE|BTC|DOGE)(?:费用|服务费|订单金额)?[^，,。；;\n]*/gi,
@@ -16,6 +17,19 @@ const TRANSPORT_CHATTER_FRAGMENT_PATTERNS = [
 ];
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
+}
+function stripGeneratedProviderFraming(value) {
+    const trimmed = normalizeText(value);
+    const normalized = trimmed.replace(/\s+/g, ' ');
+    const chineseMatch = normalized.match(/^(?:用户|使用者)\s*(?:请求|想要|希望|需要)\s*(?:使用|调用)?\s*[^，,。；;.!！\n]{1,80}?\s*的\s*((?:免费|付费)?[^，,。；;.!！\n]+?)(?:[。.!！\s]*)$/u);
+    if (chineseMatch?.[1]) {
+        return chineseMatch[1].trim();
+    }
+    const englishMatch = normalized.match(/^(?:the\s+)?user\s+(?:requests?|wants|needs)\s+(?:to\s+use\s+)?[^,.;!\n]{1,80}?'s\s+(.+?)(?:[.!]?\s*)$/iu);
+    if (englishMatch?.[1]) {
+        return englishMatch[1].trim();
+    }
+    return trimmed;
 }
 function sanitizeDelegationOrderNaturalText(value) {
     const source = String(value || '').replace(/\r\n?/g, '\n');
@@ -37,21 +51,21 @@ function sanitizeDelegationOrderNaturalText(value) {
     TRANSPORT_CHATTER_FRAGMENT_PATTERNS.forEach((pattern) => {
         cleaned = cleaned.replace(pattern, '');
     });
-    return cleaned
+    return stripGeneratedProviderFraming(cleaned)
         .replace(/\s+/g, ' ')
         .replace(/^[，,。；;:：\s]+/, '')
         .replace(/[，,。；;:：\s]+$/, '')
         .trim();
 }
 function buildDelegationOrderNaturalText(input) {
-    return (sanitizeDelegationOrderNaturalText(input.taskContext)
-        || sanitizeDelegationOrderNaturalText(input.userTask)
+    return (sanitizeDelegationOrderNaturalText(input.userTask)
         || sanitizeDelegationOrderNaturalText(input.rawRequest)
+        || sanitizeDelegationOrderNaturalText(input.taskContext)
         || normalizeText(input.serviceName)
         || resolveDelegationOrderSkillName(input));
 }
 function buildDelegationOrderRawRequest(input) {
-    const explicitRawRequest = (0, orderMessage_1.normalizeOrderRawRequest)(input.rawRequest);
+    const explicitRawRequest = stripGeneratedProviderFraming((0, orderMessage_1.normalizeOrderRawRequest)(input.rawRequest));
     if (explicitRawRequest) {
         return explicitRawRequest;
     }

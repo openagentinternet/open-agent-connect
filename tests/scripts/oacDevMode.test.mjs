@@ -102,6 +102,15 @@ test('oac-dev-mode supports host selection and daemon restart for UI/runtime acc
   assert.match(result.stdout, /Daemon restarted from the development runtime/);
 });
 
+test('oac-dev-mode supports Cursor host binding for cross-platform acceptance', async (t) => {
+  const result = await runDevMode(t, ['--host', 'cursor', '--skip-build']);
+
+  assert.doesNotMatch(result.commands, /^npm run build$/m);
+  assert.match(result.commands, /^node .*dist\/oac\/main\.js install --host cursor$/m);
+  assert.match(result.commands, /^node .*dist\/oac\/main\.js doctor --host cursor$/m);
+  assert.match(result.stdout, /Host: cursor/);
+});
+
 test('oac-dev-mode can skip the build for skill-only or static UI checks', async (t) => {
   const result = await runDevMode(t, ['--skip-build']);
 

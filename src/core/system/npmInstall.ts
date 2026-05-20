@@ -9,6 +9,7 @@ import { normalizeSystemHomeDir } from '../state/homeSelection';
 import type { PlatformId } from '../platform/platformRegistry';
 
 const SUPPORTED_HOSTS: PlatformId[] = [...SUPPORTED_PLATFORM_IDS];
+const PRIMARY_CLI_DOC_PATH = '$HOME/.metabot/bin/metabot';
 
 export interface NpmInstallContext {
   env: NodeJS.ProcessEnv;
@@ -94,14 +95,14 @@ async function renderSharedSkill(packageRoot: string, skillName: string): Promis
   );
 
   return replaceAll(source, {
-    '{{METABOT_CLI}}': 'metabot',
+    '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,
     '{{COMPATIBILITY_MANIFEST}}': 'release/compatibility.json',
     '{{HOST_ADAPTER_SECTION}}': '',
     '{{SYSTEM_ROUTING}}': replaceAll(systemRouting, {
-      '{{METABOT_CLI}}': 'metabot',
+      '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,
     }),
     '{{CONFIRMATION_CONTRACT}}': replaceAll(confirmationContract, {
-      '{{METABOT_CLI}}': 'metabot',
+      '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,
     }),
   });
 }

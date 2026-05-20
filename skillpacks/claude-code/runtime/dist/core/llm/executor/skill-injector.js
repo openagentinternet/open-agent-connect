@@ -9,11 +9,18 @@ const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const platformRegistry_1 = require("../../platform/platformRegistry");
 const FALLBACK_SKILL_ROOT = node_path_1.default.join('.agent_context', 'skills');
-function resolveProviderSkillRoot(provider, cwd) {
+function resolveProviderSkillRoot(provider, cwd, options = {}) {
     if ((0, platformRegistry_1.isPlatformId)(provider)) {
         const projectRoot = (0, platformRegistry_1.getProjectSkillRoot)(provider);
         if (projectRoot)
             return node_path_1.default.resolve(cwd, projectRoot.path);
+        const systemHomeDir = normalizeOptionalPath(options.systemHomeDir);
+        if (systemHomeDir) {
+            const globalRoot = (0, platformRegistry_1.getPlatformSkillRoots)(provider).find((root) => root.kind === 'global');
+            if (globalRoot) {
+                return (0, platformRegistry_1.resolvePlatformSkillRootPath)(globalRoot, systemHomeDir, options.env);
+            }
+        }
     }
     return node_path_1.default.resolve(cwd, FALLBACK_SKILL_ROOT);
 }
@@ -44,7 +51,10 @@ async function findReadableSkillSource(input, skillName) {
     throw new Error(errors[0] ?? `Skill source not found: ${skillName}`);
 }
 async function injectSkills(input) {
-    const skillRoot = resolveProviderSkillRoot(input.provider, input.cwd);
+    const skillRoot = resolveProviderSkillRoot(input.provider, input.cwd, {
+        systemHomeDir: input.systemHomeDir,
+        env: input.env,
+    });
     await node_fs_1.promises.mkdir(skillRoot, { recursive: true });
     const injected = [];
     const errors = [];

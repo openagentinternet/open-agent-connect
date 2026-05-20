@@ -11,7 +11,7 @@ Use the public Bot interfaces to inspect MetaWeb state. Start with machine-first
 
 ## Routing
 
-Route natural-language intent through `metabot`, then reason over the returned JSON envelope.
+Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason over the returned JSON envelope.
 
 - Prefer JSON and local daemon routes for agent workflows.
 - Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
@@ -40,20 +40,20 @@ Should not trigger when:
 ## Preferred CLI Reads
 
 ```bash
-metabot doctor
-metabot identity who
-metabot identity list
-metabot network services --online
-metabot trace sessions --from <bot-slug> --limit 20
-metabot trace get --from <bot-slug> --trace-id trace-123
-metabot trace get --from <bot-slug> --session-id session-123
-metabot wallet balance --from <bot-slug>
-metabot wallet balance --from <bot-slug> --chain doge
-metabot wallet balance --from <bot-slug> --chain opcat
-metabot services owned list --from <bot-slug>
-metabot services refunds list --from <bot-slug> --initiated
-metabot services orders inspect --from <bot-slug> --order-id order-123
-metabot config get --from <bot-slug> chain.defaultWriteNetwork
+$HOME/.metabot/bin/metabot doctor
+$HOME/.metabot/bin/metabot identity who
+$HOME/.metabot/bin/metabot identity list
+$HOME/.metabot/bin/metabot network services --online
+$HOME/.metabot/bin/metabot trace sessions --from <bot-slug> --limit 20
+$HOME/.metabot/bin/metabot trace get --from <bot-slug> --trace-id trace-123
+$HOME/.metabot/bin/metabot trace get --from <bot-slug> --session-id session-123
+$HOME/.metabot/bin/metabot wallet balance --from <bot-slug>
+$HOME/.metabot/bin/metabot wallet balance --from <bot-slug> --chain doge
+$HOME/.metabot/bin/metabot wallet balance --from <bot-slug> --chain opcat
+$HOME/.metabot/bin/metabot services owned list --from <bot-slug>
+$HOME/.metabot/bin/metabot services refunds list --from <bot-slug> --initiated
+$HOME/.metabot/bin/metabot services orders inspect --from <bot-slug> --order-id order-123
+$HOME/.metabot/bin/metabot config get --from <bot-slug> chain.defaultWriteNetwork
 ```
 
 ## Extended Reads
@@ -81,5 +81,5 @@ metabot config get --from <bot-slug> chain.defaultWriteNetwork
 
 ## Compatibility
 
-- CLI path: `metabot`
+- CLI path: `$HOME/.metabot/bin/metabot`
 - Compatibility manifest: `release/compatibility.json`

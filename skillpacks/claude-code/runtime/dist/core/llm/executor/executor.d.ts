@@ -5,6 +5,8 @@ interface LlmExecutorOptions {
     sessionsRoot: string;
     transcriptsRoot: string;
     skillsRoot: string;
+    systemHomeDir?: string;
+    env?: NodeJS.ProcessEnv;
     backends: Record<string, LlmBackendFactory>;
     sessionManager?: SessionManager;
 }
@@ -12,6 +14,8 @@ export declare class LlmExecutor {
     private readonly sessionsRoot;
     private readonly transcriptsRoot;
     private readonly skillsRoot;
+    private readonly systemHomeDir?;
+    private readonly env?;
     private readonly backends;
     private readonly sessionManager;
     private readonly streams;

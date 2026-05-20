@@ -1,6 +1,6 @@
 # Shared MetaBot Skills for Open Agent Connect
 
-This shared pack installs the host-neutral MetaBot skills into `~/.metabot/skills` and installs the primary `metabot` shim into `~/.metabot/bin`.
+This shared pack installs the host-neutral MetaBot skills into `~/.metabot/skills` and installs the primary `metabot` shim at `$HOME/.metabot/bin/metabot`.
 
 ## Included MetaBot Skills
 
@@ -21,8 +21,8 @@ This shared pack installs the host-neutral MetaBot skills into `~/.metabot/skill
 ```bash
 ./install.sh
 export PATH="$HOME/.metabot/bin:$PATH"
-metabot --help
-metabot identity --help
+$HOME/.metabot/bin/metabot --help
+$HOME/.metabot/bin/metabot identity --help
 ```
 
 Override the shared skill destination with `METABOT_SHARED_SKILL_DEST` if you need a non-default shared root.
@@ -32,7 +32,7 @@ If you already have a bundled CLI entry, set `METABOT_CLI_ENTRY` directly.
 
 ## Shared Runtime Contract
 
-- Primary CLI path: `metabot`
+- Primary CLI path: `$HOME/.metabot/bin/metabot`
 - Compatibility manifest: `release/compatibility.json`
 - Bundled compatibility copy: `runtime/compatibility.json`
 - Bundled CLI entry: `runtime/dist/cli/main.js`

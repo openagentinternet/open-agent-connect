@@ -21,6 +21,7 @@ export interface RunLlmPromptWithRuntimeFallbackInput {
   cwd?: string;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  markRuntimeUnavailableOnFailure?: boolean;
 }
 
 export type LlmRuntimeFallbackResult = Pick<LlmExecutionResult, 'status' | 'output' | 'error'> & {
@@ -41,6 +42,12 @@ export async function runLlmPromptWithRuntimeFallback(
   const excludedRuntimeIds = new Set<string>();
   let lastSessionId: string | undefined;
   let lastError = `No healthy LLM runtime is available for MetaBot ${input.metaBotSlug}.`;
+  const shouldMarkRuntimeUnavailable = input.markRuntimeUnavailableOnFailure !== false;
+  const markUnavailable = async (runtimeId: string): Promise<void> => {
+    if (shouldMarkRuntimeUnavailable) {
+      await input.runtimeResolver.markRuntimeUnavailable(runtimeId).catch(() => {});
+    }
+  };
 
   while (true) {
     const resolved = await input.runtimeResolver.resolveRuntime({
@@ -93,7 +100,7 @@ export async function runLlmPromptWithRuntimeFallback(
               error: session.result.error,
             };
           }
-          await input.runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => {});
+          await markUnavailable(runtime.id);
           excludedRuntimeIds.add(runtime.id);
           lastError = resultError(session.result);
           break;
@@ -101,12 +108,12 @@ export async function runLlmPromptWithRuntimeFallback(
         await sleep(input.pollIntervalMs);
       }
       if (!excludedRuntimeIds.has(runtime.id)) {
-        await input.runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => {});
+        await markUnavailable(runtime.id);
         excludedRuntimeIds.add(runtime.id);
         lastError = 'LLM runtime timed out while running prompt.';
       }
     } catch (error) {
-      await input.runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => {});
+      await markUnavailable(runtime.id);
       excludedRuntimeIds.add(runtime.id);
       lastError = error instanceof Error ? error.message : 'LLM runtime is unavailable.';
     }
