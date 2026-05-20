@@ -23,6 +23,7 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-omni-reader',
   'metabot-post-buzz',
   'metabot-post-skillservice',
+  'metabot-loom-wish2task',
   'metabot-upload-file',
   'metabot-wallet-manage',
 ];
@@ -213,6 +214,21 @@ test('buildAgentConnectSkillpacks includes the MetaBot help skill as a dynamic a
   assert.match(content, /optional `--from <bot-slug>`/);
   assert.match(content, /same language/i);
   assert.match(content, /natural-language examples/i);
+});
+
+test('buildAgentConnectSkillpacks includes the Loom wish-to-task publishing workflow skill', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-loom-wish2task'), 'utf8');
+  assert.match(content, /^name:\s*metabot-loom-wish2task$/m);
+  assert.match(content, /rough.*wish/i);
+  assert.match(content, /GitHub repository/i);
+  assert.match(content, /requirement/i);
+  assert.match(content, /criteria/i);
+  assert.match(content, /explicit confirmation/i);
+  assert.match(content, /metabot loom validate --protocol task/);
+  assert.match(content, /metabot loom post-task --from <bot-slug> --payload-file/);
+  assert.match(content, /metabot ui open --page loom/);
 });
 
 test('buildAgentConnectSkillpacks renders shared skills without host-specific adapter sections or host override flags', async () => {
