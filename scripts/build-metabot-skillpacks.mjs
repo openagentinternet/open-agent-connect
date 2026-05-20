@@ -23,6 +23,7 @@ const METABOT_SKILLS = [
   'metabot-omni-reader',
   'metabot-post-buzz',
   'metabot-post-skillservice',
+  'metabot-loom-wish2task',
   'metabot-upload-file',
   'metabot-wallet-manage',
 ];
