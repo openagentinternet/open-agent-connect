@@ -60,3 +60,37 @@ test('buyer service rating fallback avoids dumping provider output or mislabelin
   assert.doesNotMatch(rating.comment, /用户请求 AI_Sunny|AI_Sunny 的用户/);
   assert.doesNotMatch(rating.comment, /微博热搜 TOP 50|https:\/\/|Result summary|\| 排名 \|/);
 });
+
+test('buyer service rating prefers dedicated generated protocol copy over private chat fallback', async () => {
+  const generatedComment = '评分：5分。热搜结果正好回应了我的请求，内容清楚，谢谢你快速交付。';
+  const generatorCalls = [];
+  const rating = await generateBuyerServiceRating({
+    replyRunner: createDefaultChatReplyRunner(),
+    textGenerator: async (input) => {
+      generatorCalls.push(input);
+      return generatedComment;
+    },
+    persona: {
+      role: 'I am a direct buyer bot.',
+      soul: 'Concise and fair.',
+      goal: 'Evaluate service results.',
+    },
+    traceId: 'trace-dedicated-rating',
+    providerGlobalMetaId: 'idq1provider',
+    providerName: 'AI_Sunny',
+    originalRequest: '请求微博热搜',
+    serviceResult: [
+      '微博热搜 TOP 50 更新时间：2026/5/20 08:24:10',
+      '| 排名 | 话题 | 热度 | 链接 |',
+      '| 1 | 普京到达北京 | 164 | https://s.weibo.com/weibo?q=example |',
+    ].join('\n'),
+    expectedOutputType: 'text',
+    ratingRequestText: '服务已完成，请给我一个 1-5 分评价。',
+    transcriptItems: [],
+  });
+
+  assert.equal(generatorCalls.length, 1);
+  assert.equal(generatorCalls[0].providerName, 'AI_Sunny');
+  assert.equal(rating.rate, 5);
+  assert.equal(rating.comment, generatedComment);
+});

@@ -4142,8 +4142,7 @@ test('services rate publishes one buyer-side skill-service-rate record from a co
 
   const transcriptMarkdown = await readFile(rated.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /结果清晰，响应也可靠。/);
-  assert.match(transcriptMarkdown, /我的评分已记录在链上/);
-  assert.match(transcriptMarkdown, /\/protocols\/skill-service-rate-pin-/);
+  assert.doesNotMatch(transcriptMarkdown, /我的评分已记录在链上/);
 });
 
 test('chat private writes encrypted simplemsg on chain and stores a chat trace in the local runtime', async (t) => {

@@ -103,6 +103,7 @@ import { createPrivateChatAutoReplyBackfillLoop } from '../core/chat/privateChat
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
+import { createLlmOrderProtocolTextGenerator } from '../core/a2a/orderProtocolTextGenerator';
 import type {
   ChatReplyRunner,
   PrivateChatAutoReplyConfig,
@@ -3916,10 +3917,8 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     metaBotSlug: daemonMetaBotSlug,
   });
   const buyerRatingReplyRunner = createTestBuyerRatingReplyRunner(context.env) ?? buyerRatingHostReplyRunner;
-  const providerOrderReplyRunner = createHostLlmChatReplyRunner({
-    runtimeResolver: daemonRuntimeResolver,
+  const orderProtocolTextGenerator = createLlmOrderProtocolTextGenerator({
     llmExecutor,
-    metaBotSlug: daemonMetaBotSlug,
     timeoutMs: 45_000,
   });
 
@@ -3939,7 +3938,9 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     fetchPeerChatPublicKey: resolvePeerChatPublicKey,
     callerReplyWaiter,
     buyerRatingReplyRunner,
-    providerOrderReplyRunner,
+    buyerRatingTextGenerator: orderProtocolTextGenerator.generateBuyerRatingText,
+    callerOrderTextGenerator: orderProtocolTextGenerator.generateCallerOrderText,
+    providerOrderTextGenerator: orderProtocolTextGenerator.generateProviderOrderText,
     masterReplyWaiter,
     servicePaymentExecutor,
     requestMvcGasSubsidy,

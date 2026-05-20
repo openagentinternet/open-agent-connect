@@ -5,6 +5,7 @@ import type {
   PrivateChatConversation,
   PrivateChatMessage,
 } from '../chat/privateChatTypes';
+import type { BuyerRatingProtocolTextGeneratorInput } from './orderProtocolTextGenerator';
 
 export interface BuyerRatingTranscriptItem {
   id?: string | null;
@@ -19,6 +20,10 @@ export interface BuyerServiceRatingResult {
   rate: number;
   comment: string;
 }
+
+export type BuyerServiceRatingTextGenerator = (
+  input: Omit<BuyerRatingProtocolTextGeneratorInput, 'paths'>
+) => Promise<string | null | undefined>;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -144,6 +149,7 @@ export function extractBuyerRatingScore(value: string): number {
 
 export async function generateBuyerServiceRating(input: {
   replyRunner: ChatReplyRunner;
+  textGenerator?: BuyerServiceRatingTextGenerator | null;
   persona: ChatPersona;
   traceId: string;
   providerGlobalMetaId: string;
@@ -163,6 +169,35 @@ export async function generateBuyerServiceRating(input: {
   const expectedOutputType = normalizeText(input.expectedOutputType) || 'text';
   const ratingRequestText = normalizeText(input.ratingRequestText) || 'The provider is asking for a buyer rating.';
   const providerName = normalizeText(input.providerName) || 'Remote MetaBot';
+  const contextualFallback = buildContextualBuyerRatingFallback({
+    providerName,
+    originalRequest,
+    serviceResult,
+    expectedOutputType,
+  });
+
+  if (input.textGenerator) {
+    try {
+      const generatedText = normalizeText(await input.textGenerator({
+        persona: input.persona,
+        traceId: input.traceId,
+        providerGlobalMetaId: input.providerGlobalMetaId,
+        providerName,
+        originalRequest,
+        serviceResult,
+        expectedOutputType,
+        ratingRequestText,
+      }));
+      if (generatedText && !isUnsuitableBuyerRating(generatedText)) {
+        return {
+          rate: extractBuyerRatingScore(generatedText),
+          comment: generatedText.slice(0, 500),
+        };
+      }
+    } catch {
+      // Fall through to the existing chat runner and contextual fallback.
+    }
+  }
 
   const instruction = [
     'A remote MetaBot provider has delivered a skill-service result and is asking for final buyer feedback.',
@@ -239,12 +274,6 @@ export async function generateBuyerServiceRating(input: {
     inboundMessage,
   });
   const generated = normalizeText(runnerResult.content);
-  const contextualFallback = buildContextualBuyerRatingFallback({
-    providerName,
-    originalRequest,
-    serviceResult,
-    expectedOutputType,
-  });
   const comment = generated && !isUnsuitableBuyerRating(generated)
     ? generated
     : contextualFallback;

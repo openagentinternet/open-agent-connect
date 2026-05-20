@@ -317,6 +317,7 @@ async function createInboundProviderOrderHarness(t, options = {}) {
     providerRuntimeCanStart: async () => true,
     a2aConversationPersister: options.a2aConversationPersister,
     providerOrderReplyRunner: options.providerOrderReplyRunner,
+    providerOrderTextGenerator: options.providerOrderTextGenerator,
   });
 
   function makeOrderContent(overrides = {}) {
@@ -437,6 +438,8 @@ async function createServiceCallHarness(t, options = {}) {
     fetchPeerChatPublicKey: options.fetchPeerChatPublicKey ?? (async () => providerPair.publicKeyHex),
     ratingFollowupRetryDelaysMs: options.ratingFollowupRetryDelaysMs,
     buyerRatingReplyRunner: options.buyerRatingReplyRunner,
+    buyerRatingTextGenerator: options.buyerRatingTextGenerator,
+    callerOrderTextGenerator: options.callerOrderTextGenerator,
     callerReplyWaiter: options.callerReplyWaiter ?? {
       async awaitServiceReply() {
         return { state: 'timeout' };
@@ -783,6 +786,45 @@ test('free simplemsg service orders use an order reference instead of a payment 
   assert.match(trace.order.orderReference, LOWER_HEX_64_RE);
 });
 
+test('simplemsg service orders use caller-generated natural request copy', async (t) => {
+  const generatedOrderText = '我来请你查一下上海明天的天气，按天气预报结果返回就好。';
+  const generatorCalls = [];
+  const harness = await createServiceCallHarness(t, {
+    callerOrderTextGenerator: async (input) => {
+      generatorCalls.push(input);
+      return generatedOrderText;
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting', JSON.stringify(called));
+  assert.equal(generatorCalls.length, 1);
+  assert.equal(generatorCalls[0].userTask, 'Tell me tomorrow weather');
+  assert.equal(generatorCalls[0].taskContext, 'User is in Shanghai');
+
+  const simplemsgWrite = harness.writes.find((entry) => entry.path === '/protocols/simplemsg');
+  assert.ok(simplemsgWrite, 'expected a simplemsg order write');
+  const plaintext = decryptSimplemsgOrder(simplemsgWrite, harness);
+  assert.match(plaintext, /^\[ORDER\] 我来请你查一下上海明天的天气，按天气预报结果返回就好/);
+  assert.match(plaintext, new RegExp(`<raw_request>\\n${generatedOrderText}\\n</raw_request>`));
+  assert.doesNotMatch(plaintext, /用户请求 Weather Oracle|Weather Oracle 的用户/);
+  assert.match(plaintext, /\ntxid:\s*b{64}/i);
+  assert.match(plaintext, /\nservice id:\s*chain-service-pin-1/i);
+  assert.match(plaintext, /\nskill name:\s*metabot-weather-oracle/i);
+});
+
 test('inbound free provider ORDER rejects replayed order reference with a different simplemsg tx', async (t) => {
   const firstMessageTxid = '1'.repeat(64);
   const replayMessageTxid = '2'.repeat(64);
@@ -1072,6 +1114,12 @@ test('inbound free NeedsRating auto-rates the buyer trace with the order referen
   assert.equal(traceResult.data.ratingValue, 5);
   assert.equal(traceResult.data.ratingComment, '评分：5分。免费天气结果清楚完整。');
   assert.equal(traceResult.data.ratingMessageSent, true);
+
+  const ratingMessageWrite = harness.writes.find((entry) => entry.path === '/protocols/simplemsg');
+  assert.ok(ratingMessageWrite, 'expected an ORDER_END rating follow-up write');
+  const ratingMessage = decryptSimplemsgOrder(ratingMessageWrite, harness);
+  assert.equal(ratingMessage, `[ORDER_END:${orderTxid} rated] 评分：5分。免费天气结果清楚完整。`);
+  assert.doesNotMatch(ratingMessage, /我的评分已记录在链上/);
 });
 
 test('service rating does not retry provider follow-up simplemsg for non-conflict tx rejection', async (t) => {
@@ -2011,6 +2059,52 @@ test('inbound provider ORDER executes through runner and sends delivery plus rat
   assert.equal(orderSession.role, 'provider');
   assert.equal(orderSession.paymentTxid, paymentTxid);
   assert.equal(orderSession.servicePinId, harness.service.currentPinId);
+});
+
+test('inbound provider ORDER uses dedicated provider-generated protocol copy', async (t) => {
+  const orderTxid = 'e'.repeat(64);
+  const paymentTxid = 'f'.repeat(64);
+  const generatedAcknowledgement = '我已经收到这单天气查询，会马上处理；可能需要一点时间，请稍等。';
+  const generatedRatingRequest = '天气结果已经交付了，如果这次信息有帮助，请给我 1-5 分评价，你的反馈很重要。';
+  const generatorCalls = [];
+  const harness = await createInboundProviderOrderHarness(t, {
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerOrderTextGenerator: async (input) => {
+      generatorCalls.push(input);
+      return input.stage === 'acknowledgement'
+        ? generatedAcknowledgement
+        : generatedRatingRequest;
+    },
+  });
+  const content = harness.makeOrderContent({ paymentTxid });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content,
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(generatorCalls.length, 2);
+  assert.equal(generatorCalls[0].stage, 'acknowledgement');
+  assert.equal(generatorCalls[1].stage, 'rating_request');
+  assert.match(generatorCalls[1].responseText, /bright with light wind/);
+
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(
+    contents.includes(`[ORDER_STATUS:${orderTxid}] ${generatedAcknowledgement}`),
+    true,
+  );
+  assert.equal(
+    contents.includes(`[NeedsRating:${orderTxid}] ${generatedRatingRequest}`),
+    true,
+  );
+  assert.doesNotMatch(contents.join('\n'), /I received the order and started processing\.|Please rate this service\./);
 });
 
 test('inbound provider ORDER fallback protocol copy stays concise and service-oriented', async (t) => {
