@@ -12,6 +12,12 @@ async function runLlmPromptWithRuntimeFallback(input) {
     const excludedRuntimeIds = new Set();
     let lastSessionId;
     let lastError = `No healthy LLM runtime is available for MetaBot ${input.metaBotSlug}.`;
+    const shouldMarkRuntimeUnavailable = input.markRuntimeUnavailableOnFailure !== false;
+    const markUnavailable = async (runtimeId) => {
+        if (shouldMarkRuntimeUnavailable) {
+            await input.runtimeResolver.markRuntimeUnavailable(runtimeId).catch(() => { });
+        }
+    };
     while (true) {
         const resolved = await input.runtimeResolver.resolveRuntime({
             metaBotSlug: input.metaBotSlug,
@@ -61,7 +67,7 @@ async function runLlmPromptWithRuntimeFallback(input) {
                             error: session.result.error,
                         };
                     }
-                    await input.runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => { });
+                    await markUnavailable(runtime.id);
                     excludedRuntimeIds.add(runtime.id);
                     lastError = resultError(session.result);
                     break;
@@ -69,13 +75,13 @@ async function runLlmPromptWithRuntimeFallback(input) {
                 await sleep(input.pollIntervalMs);
             }
             if (!excludedRuntimeIds.has(runtime.id)) {
-                await input.runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => { });
+                await markUnavailable(runtime.id);
                 excludedRuntimeIds.add(runtime.id);
                 lastError = 'LLM runtime timed out while running prompt.';
             }
         }
         catch (error) {
-            await input.runtimeResolver.markRuntimeUnavailable(runtime.id).catch(() => { });
+            await markUnavailable(runtime.id);
             excludedRuntimeIds.add(runtime.id);
             lastError = error instanceof Error ? error.message : 'LLM runtime is unavailable.';
         }

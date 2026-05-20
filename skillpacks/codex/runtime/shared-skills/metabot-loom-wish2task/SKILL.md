@@ -11,7 +11,7 @@ Guide a rough human wish into a clear, confirmed `/protocols/loom-task` record t
 
 ## Routing
 
-Route natural-language intent through `metabot`, then reason over the returned JSON envelope.
+Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason over the returned JSON envelope.
 
 - Prefer JSON and local daemon routes for agent workflows.
 - Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
@@ -25,8 +25,8 @@ Loom task publishing commands accept optional `--from <bot-slug>`. Use it whenev
 When the requester actor is unclear, inspect the current identity with:
 
 ```bash
-metabot identity who
-metabot identity list
+$HOME/.metabot/bin/metabot identity who
+$HOME/.metabot/bin/metabot identity list
 ```
 
 ## Trigger Guidance
@@ -47,7 +47,7 @@ Should not trigger when:
 
 ## Core Rule
 
-Do not treat `metabot loom draft-task --wish ...` as the whole workflow. The skill must own clarification, quality control, final JSON assembly, explicit confirmation, publish, and handoff. Use the CLI draft helper only as an optional assistant, never as a substitute for asking missing blocking questions.
+Do not treat `$HOME/.metabot/bin/metabot loom draft-task --wish ...` as the whole workflow. The skill must own clarification, quality control, final JSON assembly, explicit confirmation, publish, and handoff. Use the CLI draft helper only as an optional assistant, never as a substitute for asking missing blocking questions.
 
 ## Clarification Workflow
 
@@ -153,22 +153,22 @@ If the human provides local files as attachments, hand off to `metabot-upload-fi
 Write the payload JSON to a temporary or task-local file, then validate it:
 
 ```bash
-metabot loom validate --protocol task --payload-file <task-payload.json>
+$HOME/.metabot/bin/metabot loom validate --protocol task --payload-file <task-payload.json>
 ```
 
 Preview the publish without writing chain data:
 
 ```bash
-metabot loom post-task --from <bot-slug> --payload-file <task-payload.json> --dry-run
+$HOME/.metabot/bin/metabot loom post-task --from <bot-slug> --payload-file <task-payload.json> --dry-run
 ```
 
 When the human explicitly chooses MVC, BTC, DOGE, or OPCAT for the Loom record, pass the matching write-chain flag:
 
 ```bash
-metabot loom post-task --from <bot-slug> --payload-file <task-payload.json> --chain mvc --dry-run
-metabot loom post-task --from <bot-slug> --payload-file <task-payload.json> --chain btc --dry-run
-metabot loom post-task --from <bot-slug> --payload-file <task-payload.json> --chain doge --dry-run
-metabot loom post-task --from <bot-slug> --payload-file <task-payload.json> --chain opcat --dry-run
+$HOME/.metabot/bin/metabot loom post-task --from <bot-slug> --payload-file <task-payload.json> --chain mvc --dry-run
+$HOME/.metabot/bin/metabot loom post-task --from <bot-slug> --payload-file <task-payload.json> --chain btc --dry-run
+$HOME/.metabot/bin/metabot loom post-task --from <bot-slug> --payload-file <task-payload.json> --chain doge --dry-run
+$HOME/.metabot/bin/metabot loom post-task --from <bot-slug> --payload-file <task-payload.json> --chain opcat --dry-run
 ```
 
 Show the human:
@@ -186,7 +186,7 @@ Wait for explicit confirmation before publishing. Treat unclear approval as a pa
 After explicit confirmation, run the same command without `--dry-run`:
 
 ```bash
-metabot loom post-task --from <bot-slug> --payload-file <task-payload.json>
+$HOME/.metabot/bin/metabot loom post-task --from <bot-slug> --payload-file <task-payload.json>
 ```
 
 On success, report returned fields that exist:
@@ -205,7 +205,7 @@ On failure, stop and surface the exact failure code and message. Do not invent a
 After publish, get the local dashboard URL:
 
 ```bash
-metabot ui open --page loom --from <bot-slug>
+$HOME/.metabot/bin/metabot ui open --page loom --from <bot-slug>
 ```
 
 Return the `localUiUrl` when present.
@@ -238,5 +238,5 @@ Include handoff data:
 
 ## Compatibility
 
-- CLI path: `metabot`
+- CLI path: `$HOME/.metabot/bin/metabot`
 - Compatibility manifest: `release/compatibility.json`

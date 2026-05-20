@@ -58,6 +58,12 @@ export interface A2AUnhandledOrderReplayOptions {
 }
 export declare function replayUnhandledA2AOrderMessagesForProfiles(input: A2AUnhandledOrderReplayOptions): Promise<A2AUnhandledOrderReplayResult>;
 export declare function createPrivateChatAutoReplyProfileDispatcher(input: PrivateChatAutoReplyProfileDispatcherOptions): PrivateChatAutoReplyProfileDispatcher;
+export declare function resolvePeerChatPublicKeyFromLocalProfiles(systemHomeDir: string, globalMetaId: string): Promise<string | null>;
+export declare function createPeerChatPublicKeyResolver(input: {
+    systemHomeDir: string;
+    fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
+    chainApiBaseUrl?: string;
+}): (globalMetaId: string) => Promise<string | null>;
 export declare function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies;
 export declare function mergeCliDependencies(context: CliRuntimeContext): CliDependencies;
 export declare function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'env' | 'cwd'>): Promise<never>;

@@ -15,6 +15,7 @@ export interface RunLlmPromptWithRuntimeFallbackInput {
     cwd?: string;
     now?: () => number;
     sleep?: (ms: number) => Promise<void>;
+    markRuntimeUnavailableOnFailure?: boolean;
 }
 export type LlmRuntimeFallbackResult = Pick<LlmExecutionResult, 'status' | 'output' | 'error'> & {
     sessionId?: string;

@@ -344,6 +344,7 @@ async function readRuntimeResolutionState(input) {
     const primaryBinding = selectBinding(bindingState.bindings, input.metaBotSlug, 'primary');
     const fallbackBinding = selectBinding(bindingState.bindings, input.metaBotSlug, 'fallback');
     return {
+        runtimes: runtimeState.runtimes,
         primaryRuntime: primaryBinding
             ? runtimeState.runtimes.find((entry) => entry.id === primaryBinding.llmRuntimeId) ?? null
             : null,
@@ -352,9 +353,36 @@ async function readRuntimeResolutionState(input) {
             : null,
     };
 }
-async function resolveFallbackRuntime(deps, primaryRuntime, configuredFallbackRuntime) {
-    const explicitFallbackRuntime = await deps.getFallbackRuntime?.(primaryRuntime) ?? null;
-    return explicitFallbackRuntime ?? configuredFallbackRuntime;
+async function resolveFallbackRuntimeCandidates(deps, primaryRuntime, configuredFallbackRuntime, knownRuntimes) {
+    const candidates = [];
+    const seenRuntimeIds = new Set();
+    const addCandidate = (candidate) => {
+        if (!candidate || candidate.id === primaryRuntime?.id || seenRuntimeIds.has(candidate.id)) {
+            return;
+        }
+        seenRuntimeIds.add(candidate.id);
+        candidates.push(candidate);
+    };
+    addCandidate(await deps.getFallbackRuntime?.(primaryRuntime) ?? null);
+    addCandidate(configuredFallbackRuntime);
+    for (const runtime of knownRuntimes) {
+        if (runtime.health === 'healthy') {
+            addCandidate(runtime);
+        }
+    }
+    return candidates;
+}
+async function readFallbackSelectionCandidates(deps, candidates, providerSkill, sourceSelection) {
+    for (const candidate of candidates) {
+        const selection = sourceSelection
+            ? await readFallbackSelection(deps, candidate, providerSkill, sourceSelection)
+            : await readRuntimeSelection(deps, candidate, providerSkill, true)
+                ?? await readPortableSkillSelection(deps, candidate, providerSkill, true);
+        if (selection) {
+            return selection;
+        }
+    }
+    return null;
 }
 function buildProviderServiceOrderPrompt(input) {
     return buildPaidOrderSystemPrompt({
@@ -381,16 +409,17 @@ function createProviderServiceRunner(input) {
             let selection = primarySelection
                 ?? (primaryRuntime ? await readPortableSkillSelection(input, primaryRuntime, order.providerSkill, false) : null);
             if (!runtime || !selection) {
-                runtime = await resolveFallbackRuntime(input, primaryRuntime, resolutionState.fallbackRuntime);
-                if (!runtime) {
+                const fallbackCandidates = await resolveFallbackRuntimeCandidates(input, primaryRuntime, resolutionState.fallbackRuntime, resolutionState.runtimes);
+                selection = await readFallbackSelectionCandidates(input, fallbackCandidates, order.providerSkill, null);
+                runtime = selection?.runtime ?? null;
+                if (!runtime && fallbackCandidates.length === 0) {
                     return (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)('provider_runtime_unavailable', 'No primary or fallback runtime was available before provider execution started.');
                 }
-                selection = await readRuntimeSelection(input, runtime, order.providerSkill, true)
-                    ?? await readPortableSkillSelection(input, runtime, order.providerSkill, true);
                 if (!selection) {
-                    return (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)('provider_skill_missing', `providerSkill is not installed in the selected MetaBot primary runtime skill roots: ${order.providerSkill}`);
+                    return (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)('provider_skill_missing', `providerSkill is not installed in any selected runtime skill root: ${order.providerSkill}`);
                 }
             }
+            const initialRuntime = selection.runtime;
             const systemPrompt = buildPaidOrderSystemPrompt({
                 serviceName: order.serviceName ?? '',
                 displayName: order.displayName ?? '',
@@ -425,11 +454,8 @@ function createProviderServiceRunner(input) {
                 if (failedSelection.fallbackSelected) {
                     return null;
                 }
-                const fallbackRuntime = await resolveFallbackRuntime(input, primaryRuntime, resolutionState.fallbackRuntime);
-                if (!fallbackRuntime || fallbackRuntime.id === failedRuntime.id) {
-                    return null;
-                }
-                return readFallbackSelection(input, fallbackRuntime, order.providerSkill, failedSelection);
+                const fallbackCandidates = (await resolveFallbackRuntimeCandidates(input, primaryRuntime, resolutionState.fallbackRuntime, resolutionState.runtimes)).filter((candidate) => candidate.id !== failedRuntime.id);
+                return readFallbackSelectionCandidates(input, fallbackCandidates, order.providerSkill, failedSelection);
             };
             const executionFailure = (error, failedRuntime, failedSelection) => createRuntimeFailedResult('provider_execution_failed', error instanceof Error ? error.message : String(error), {
                 runtime: failedRuntime,
@@ -441,9 +467,9 @@ function createProviderServiceRunner(input) {
                 run = await executeWithSelection(selection);
             }
             catch (error) {
-                const fallbackSelection = await resolveFallbackSelection(runtime, selection);
+                const fallbackSelection = await resolveFallbackSelection(initialRuntime, selection);
                 if (!fallbackSelection) {
-                    return executionFailure(error, runtime, selection);
+                    return executionFailure(error, initialRuntime, selection);
                 }
                 try {
                     run = await executeWithSelection(fallbackSelection);

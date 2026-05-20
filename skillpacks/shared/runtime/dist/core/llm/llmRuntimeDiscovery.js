@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.findExecutableInPath = findExecutableInPath;
+exports.findExecutablesInPath = findExecutablesInPath;
 exports.readExecutableVersion = readExecutableVersion;
 exports.probeExecutableVersion = probeExecutableVersion;
 exports.discoverProvider = discoverProvider;
@@ -20,18 +21,27 @@ function splitPath(pathEnv) {
     return pathEnv.split(separator).filter(Boolean);
 }
 async function findExecutableInPath(name, pathDirs) {
+    const matches = await findExecutablesInPath(name, pathDirs);
+    return matches[0] ?? null;
+}
+async function findExecutablesInPath(name, pathDirs) {
     const dirs = pathDirs ?? splitPath(getPathEnv());
+    const matches = [];
+    const seen = new Set();
     for (const dir of dirs) {
         const candidate = node_path_1.default.join(dir, name);
+        if (seen.has(candidate))
+            continue;
+        seen.add(candidate);
         try {
             await node_fs_1.promises.access(candidate, node_fs_1.promises.constants.X_OK);
-            return candidate;
+            matches.push(candidate);
         }
         catch {
             // Not found / not executable.
         }
     }
-    return null;
+    return matches;
 }
 async function readExecutableVersion(binaryPath, versionArgs = ['--version'], timeoutMs = 5_000, env = process.env) {
     const probe = await probeExecutableVersion(binaryPath, versionArgs, timeoutMs, env);
@@ -96,22 +106,8 @@ function detectAuthState(authEnv, env) {
     }
     return 'unknown';
 }
-async function discoverProvider(provider, pathDirs, options) {
-    if (provider === 'custom')
-        return null; // Custom runtimes are registered manually.
-    if (!(0, platformRegistry_1.isRuntimePlatformId)(provider))
-        return null;
-    const platform = (0, platformRegistry_1.getRuntimePlatformDefinition)(provider);
-    let binaryPath = null;
-    for (const binaryName of platform.runtime.binaryNames) {
-        binaryPath = await findExecutableInPath(binaryName, pathDirs);
-        if (binaryPath)
-            break;
-    }
-    if (!binaryPath)
-        return null;
+function buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, options) {
     const env = options?.env ?? process.env;
-    const versionProbe = await probeExecutableVersion(binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], 5_000, env);
     const now = (options?.now ?? (() => new Date().toISOString()))();
     // Stable ID: same binary always gets same id, so rediscovery upserts instead of duplicating.
     const defaultId = `llm_${provider.replace(/-/g, '_')}_${binaryPath}`;
@@ -131,6 +127,30 @@ async function discoverProvider(provider, pathDirs, options) {
         createdAt: now,
         updatedAt: now,
     };
+}
+async function discoverProvider(provider, pathDirs, options) {
+    if (provider === 'custom')
+        return null; // Custom runtimes are registered manually.
+    if (!(0, platformRegistry_1.isRuntimePlatformId)(provider))
+        return null;
+    const platform = (0, platformRegistry_1.getRuntimePlatformDefinition)(provider);
+    let firstUnavailableCandidate = null;
+    const env = options?.env ?? process.env;
+    for (const binaryName of platform.runtime.binaryNames) {
+        const binaryPaths = await findExecutablesInPath(binaryName, pathDirs);
+        for (const binaryPath of binaryPaths) {
+            const versionProbe = await probeExecutableVersion(binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], 5_000, env);
+            if (versionProbe.ok) {
+                return buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, options);
+            }
+            if (!firstUnavailableCandidate) {
+                firstUnavailableCandidate = { binaryPath, versionProbe };
+            }
+        }
+    }
+    if (!firstUnavailableCandidate)
+        return null;
+    return buildDiscoveredRuntime(provider, platform, firstUnavailableCandidate.binaryPath, firstUnavailableCandidate.versionProbe, options);
 }
 async function discoverLlmRuntimes(input) {
     const pathDirs = splitPath(getPathEnv(input?.env));

@@ -18,6 +18,7 @@ import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '..
 import { type ServicePaymentExecutor } from '../core/payments/servicePayment';
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import { type MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
+import { type BuyerRatingProtocolTextGenerator, type CallerOrderProtocolTextGenerator, type ProviderOrderProtocolTextGenerator } from '../core/a2a/orderProtocolTextGenerator';
 import { type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
 export declare function createLoomDaemonActionHandler(dependencies: LoomUiActionServiceDependencies): NonNullable<NonNullable<MetabotDaemonHttpHandlers['loom']>['actions']>;
 interface LoomDaemonActionActorContext {
@@ -114,7 +115,10 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     ratingFollowupRetryDelaysMs?: number[];
     a2aConversationPersister?: A2AConversationMessagePersister;
     buyerRatingReplyRunner?: ChatReplyRunner;
+    buyerRatingTextGenerator?: BuyerRatingProtocolTextGenerator;
+    callerOrderTextGenerator?: CallerOrderProtocolTextGenerator;
     providerOrderReplyRunner?: ChatReplyRunner;
+    providerOrderTextGenerator?: ProviderOrderProtocolTextGenerator;
     onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
     requestMvcGasSubsidy?: (options: RequestMvcGasSubsidyOptions) => Promise<RequestMvcGasSubsidyResult>;
     createSignerForHome?: (homeDir: string) => Signer;

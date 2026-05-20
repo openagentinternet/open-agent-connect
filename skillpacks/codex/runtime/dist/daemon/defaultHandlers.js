@@ -82,6 +82,7 @@ const configTypes_1 = require("../core/config/configTypes");
 const metawebReplyWaiter_1 = require("../core/a2a/metawebReplyWaiter");
 const orderProtocol_1 = require("../core/a2a/protocol/orderProtocol");
 const callerRating_1 = require("../core/a2a/callerRating");
+const orderProtocolTextGenerator_1 = require("../core/a2a/orderProtocolTextGenerator");
 const masterMessageSchema_1 = require("../core/master/masterMessageSchema");
 const masterProviderRuntime_1 = require("../core/master/masterProviderRuntime");
 const masterDirectory_1 = require("../core/master/masterDirectory");
@@ -113,6 +114,12 @@ const LOOM_DEV_ROUND_LLM_TIMEOUT_MS = 900_000;
 const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
+}
+const buyerAutoRatingPublishChainsByTrace = new Map();
+const pendingBuyerRatingPublishesByTrace = new Map();
+function buildBuyerRatingPublishKey(profileRoot, traceId) {
+    const normalizedTraceId = normalizeText(traceId);
+    return normalizedTraceId ? `${node_path_1.default.resolve(profileRoot)}:${normalizedTraceId}` : '';
 }
 function compactInlineText(value, maxChars) {
     const text = normalizeText(value).replace(/\s+/gu, ' ');
@@ -212,6 +219,35 @@ function buildProviderOrderProtocolFallbackText(input, persona) {
 async function generateProviderOrderProtocolReplyText(input) {
     const persona = await (0, chatPersonaLoader_1.loadChatPersona)(input.paths);
     const fallback = buildProviderOrderProtocolFallbackText(input, persona);
+    if (input.textGenerator) {
+        try {
+            const generated = (0, orderProtocolTextGenerator_1.normalizeGeneratedOrderProtocolText)(await input.textGenerator({
+                paths: input.paths,
+                persona,
+                providerName: input.providerIdentity?.name ?? null,
+                providerGlobalMetaId: input.providerIdentity?.globalMetaId ?? null,
+                buyerGlobalMetaId: input.buyerGlobalMetaId,
+                service: input.service,
+                stage: input.stage,
+                orderTxid: input.orderTxid,
+                paymentTxid: input.paymentTxid,
+                orderReference: input.orderReference,
+                paymentAmount: input.paymentAmount,
+                paymentCurrency: input.paymentCurrency,
+                userTask: input.userTask,
+                taskContext: input.taskContext,
+                responseText: input.responseText,
+            }), {
+                maxChars: input.stage === 'acknowledgement' ? 360 : 440,
+            });
+            if (generated && !isUnsuitableProviderOrderProtocolReply(generated)) {
+                return generated;
+            }
+        }
+        catch {
+            // Fall through to the legacy runner and final contextual fallback.
+        }
+    }
     if (!input.replyRunner) {
         return fallback;
     }
@@ -294,6 +330,39 @@ async function generateProviderOrderProtocolReplyText(input) {
         return fallback;
     }
     return fallback;
+}
+async function generateCallerOrderProtocolText(input) {
+    if (!input.textGenerator) {
+        return '';
+    }
+    const persona = await (0, chatPersonaLoader_1.loadChatPersona)(input.paths);
+    try {
+        return (0, orderProtocolTextGenerator_1.normalizeGeneratedOrderProtocolText)(await input.textGenerator({
+            paths: input.paths,
+            persona,
+            callerName: input.callerIdentity?.name ?? null,
+            callerGlobalMetaId: input.callerIdentity?.globalMetaId ?? null,
+            providerName: normalizeText(input.service.displayName) || normalizeText(input.service.serviceName),
+            providerGlobalMetaId: input.providerGlobalMetaId,
+            serviceName: normalizeText(input.service.displayName) || normalizeText(input.service.serviceName),
+            providerSkill: normalizeText(input.service.providerSkill) || normalizeText(input.service.serviceName),
+            servicePinId: normalizeText(input.service.currentPinId) || normalizeText(input.service.sourceServicePinId),
+            rawRequest: input.rawRequest,
+            userTask: input.userTask,
+            taskContext: input.taskContext,
+            paymentAmount: input.paymentAmount,
+            paymentCurrency: input.paymentCurrency,
+            paymentTxid: input.paymentTxid,
+            orderReference: input.orderReference,
+            outputType: input.outputType,
+        }), {
+            maxChars: 500,
+            allowUrls: true,
+        });
+    }
+    catch {
+        return '';
+    }
 }
 function createLoomDaemonActionHandler(dependencies) {
     const service = (0, loom_1.createLoomUiActionService)(dependencies);
@@ -1665,13 +1734,8 @@ function readServiceRateRequest(rawInput) {
         comment: normalizeText(request.comment),
     };
 }
-function buildServiceRatingFollowupMessage(input) {
-    const base = normalizeText(input.comment);
-    const pinId = normalizeText(input.ratingPinId);
-    const pinLine = pinId
-        ? `\n\n我的评分已记录在链上（pin ID: ${pinId}）。`
-        : '';
-    return `${base}${pinLine}`.trim();
+function buildServiceRatingFollowupMessage(comment) {
+    return normalizeText(comment);
 }
 function isSuccessfulCommandEnvelope(value) {
     return Boolean(value && typeof value === 'object' && value.ok === true);
@@ -3955,16 +4019,16 @@ function createDefaultMetabotDaemonHandlers(input) {
     const ratingMempoolRetryDelaysMs = normalizeRetryDelays(input.ratingFollowupRetryDelaysMs, DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS);
     const a2aConversationPersister = input.a2aConversationPersister ?? conversationPersistence_1.persistA2AConversationMessage;
     const buyerRatingReplyRunner = input.buyerRatingReplyRunner ?? (0, defaultChatReplyRunner_1.createDefaultChatReplyRunner)();
+    const buyerRatingTextGenerator = input.buyerRatingTextGenerator ?? null;
+    const callerOrderTextGenerator = input.callerOrderTextGenerator ?? null;
     const providerOrderReplyRunner = input.providerOrderReplyRunner ?? null;
+    const providerOrderTextGenerator = input.providerOrderTextGenerator ?? null;
     const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
     const getDaemonRecord = input.getDaemonRecord;
     // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
     const pendingCallerReplyContinuations = new Map();
-    /** Serializes buyer auto-rating per trace so inbound simplemsg + socket continuation cannot publish duplicates. */
-    const buyerAutoRatingPublishChains = new Map();
     const pendingProviderOrderExecutions = new Map();
     const pendingMasterReplyContinuations = new Map();
-    const pendingBuyerRatingPublishes = new Map();
     let masterTriggerMemoryState = (0, masterTriggerEngine_1.createMasterTriggerMemoryState)();
     const masterAutoPrepareCounts = new Map();
     let lastMasterAutoPreparedAt = null;
@@ -4757,18 +4821,19 @@ function createDefaultMetabotDaemonHandlers(input) {
         if (!traceId) {
             return publishBuyerServiceRatingUnlocked(request);
         }
-        const pending = pendingBuyerRatingPublishes.get(traceId);
+        const publishKey = buildBuyerRatingPublishKey(runtimeStateStore.paths.profileRoot, traceId);
+        const pending = pendingBuyerRatingPublishesByTrace.get(publishKey);
         if (pending) {
             return pending;
         }
         const publish = publishBuyerServiceRatingUnlocked({ ...request, traceId });
-        pendingBuyerRatingPublishes.set(traceId, publish);
+        pendingBuyerRatingPublishesByTrace.set(publishKey, publish);
         try {
             return await publish;
         }
         finally {
-            if (pendingBuyerRatingPublishes.get(traceId) === publish) {
-                pendingBuyerRatingPublishes.delete(traceId);
+            if (pendingBuyerRatingPublishesByTrace.get(publishKey) === publish) {
+                pendingBuyerRatingPublishesByTrace.delete(publishKey);
             }
         }
     }
@@ -4872,10 +4937,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             || (0, metawebReplyWaiter_1.normalizeOrderProtocolReference)(trace.order?.orderPinId)
             || (0, metawebReplyWaiter_1.normalizeOrderProtocolReference)(Array.isArray(trace.order?.orderTxids) ? trace.order?.orderTxids[0] : null)
             || '';
-        const combinedBody = buildServiceRatingFollowupMessage({
-            comment: request.comment,
-            ratingPinId: ratingWrite.pinId ?? null,
-        });
+        const combinedBody = buildServiceRatingFollowupMessage(request.comment);
         const combinedMessage = orderTxid
             ? (0, orderProtocol_1.buildOrderEndMessage)(orderTxid, 'rated', combinedBody)
             : (0, orderProtocol_1.buildOrderEndMessage)('', 'rated', combinedBody);
@@ -5050,11 +5112,11 @@ function createDefaultMetabotDaemonHandlers(input) {
         });
     }
     async function autoPublishBuyerRatingForReply(input) {
-        const traceKey = normalizeText(input.trace.traceId);
+        const traceKey = buildBuyerRatingPublishKey(runtimeStateStore.paths.profileRoot, input.trace.traceId);
         if (!traceKey) {
             return;
         }
-        const previous = buyerAutoRatingPublishChains.get(traceKey) ?? Promise.resolve();
+        const previous = buyerAutoRatingPublishChainsByTrace.get(traceKey) ?? Promise.resolve();
         const job = previous.catch(() => { }).then(async () => {
             const ratingRequestText = input.reply.state === 'completed'
                 ? normalizeText(input.reply.ratingRequestText)
@@ -5081,6 +5143,12 @@ function createDefaultMetabotDaemonHandlers(input) {
             const persona = await (0, chatPersonaLoader_1.loadChatPersona)(runtimeStateStore.paths);
             const rating = await (0, callerRating_1.generateBuyerServiceRating)({
                 replyRunner: buyerRatingReplyRunner,
+                textGenerator: buyerRatingTextGenerator
+                    ? (ratingInput) => buyerRatingTextGenerator({
+                        ...ratingInput,
+                        paths: runtimeStateStore.paths,
+                    })
+                    : null,
                 persona,
                 traceId: trace.traceId,
                 providerGlobalMetaId: normalizeText(trace.a2a?.providerGlobalMetaId) || normalizeText(trace.session.peerGlobalMetaId),
@@ -5098,13 +5166,13 @@ function createDefaultMetabotDaemonHandlers(input) {
                 network: 'mvc',
             });
         });
-        buyerAutoRatingPublishChains.set(traceKey, job);
+        buyerAutoRatingPublishChainsByTrace.set(traceKey, job);
         try {
             await job;
         }
         finally {
-            if (buyerAutoRatingPublishChains.get(traceKey) === job) {
-                buyerAutoRatingPublishChains.delete(traceKey);
+            if (buyerAutoRatingPublishChainsByTrace.get(traceKey) === job) {
+                buyerAutoRatingPublishChainsByTrace.delete(traceKey);
             }
         }
     }
@@ -6249,6 +6317,7 @@ function createDefaultMetabotDaemonHandlers(input) {
         }
         const acknowledgementText = await generateProviderOrderProtocolReplyText({
             replyRunner: providerOrderReplyRunner,
+            textGenerator: providerOrderTextGenerator,
             paths: runtimeStateStore.paths,
             providerIdentity: state.identity,
             buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
@@ -6621,6 +6690,7 @@ function createDefaultMetabotDaemonHandlers(input) {
         }, orderTxid);
         const ratingRequestText = await generateProviderOrderProtocolReplyText({
             replyRunner: providerOrderReplyRunner,
+            textGenerator: providerOrderTextGenerator,
             paths: runtimeStateStore.paths,
             providerIdentity: state.identity,
             buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
@@ -10942,10 +11012,25 @@ function createDefaultMetabotDaemonHandlers(input) {
                     orderPayment = paymentResult.payment;
                     paymentTxid = orderPayment.paymentTxid || '';
                     orderReference = orderPayment.orderReference || '';
-                    const orderPayload = (0, delegationOrderMessage_1.buildDelegationOrderPayload)({
+                    const callerGeneratedOrderText = await generateCallerOrderProtocolText({
+                        textGenerator: callerOrderTextGenerator,
+                        paths: runtimeStateStore.paths,
+                        callerIdentity: state.identity,
+                        providerGlobalMetaId: plan.service.providerGlobalMetaId,
+                        service,
                         rawRequest: request.rawRequest || request.userTask,
-                        taskContext: request.taskContext,
                         userTask: request.userTask,
+                        taskContext: request.taskContext,
+                        paymentAmount: orderPayment.paymentAmount,
+                        paymentCurrency: orderPayment.paymentCurrency,
+                        paymentTxid,
+                        orderReference,
+                        outputType: normalizeText(service.outputType),
+                    });
+                    const orderPayload = (0, delegationOrderMessage_1.buildDelegationOrderPayload)({
+                        rawRequest: callerGeneratedOrderText || request.rawRequest || request.userTask,
+                        taskContext: request.taskContext,
+                        userTask: callerGeneratedOrderText || request.userTask,
                         serviceName: serviceDisplayName,
                         providerSkill: normalizeText(service.providerSkill) || normalizeText(service.serviceName),
                         servicePinId: plan.service.servicePinId,

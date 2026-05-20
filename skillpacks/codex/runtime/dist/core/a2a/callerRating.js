@@ -115,6 +115,35 @@ async function generateBuyerServiceRating(input) {
     const expectedOutputType = normalizeText(input.expectedOutputType) || 'text';
     const ratingRequestText = normalizeText(input.ratingRequestText) || 'The provider is asking for a buyer rating.';
     const providerName = normalizeText(input.providerName) || 'Remote MetaBot';
+    const contextualFallback = buildContextualBuyerRatingFallback({
+        providerName,
+        originalRequest,
+        serviceResult,
+        expectedOutputType,
+    });
+    if (input.textGenerator) {
+        try {
+            const generatedText = normalizeText(await input.textGenerator({
+                persona: input.persona,
+                traceId: input.traceId,
+                providerGlobalMetaId: input.providerGlobalMetaId,
+                providerName,
+                originalRequest,
+                serviceResult,
+                expectedOutputType,
+                ratingRequestText,
+            }));
+            if (generatedText && !isUnsuitableBuyerRating(generatedText)) {
+                return {
+                    rate: extractBuyerRatingScore(generatedText),
+                    comment: generatedText.slice(0, 500),
+                };
+            }
+        }
+        catch {
+            // Fall through to the existing chat runner and contextual fallback.
+        }
+    }
     const instruction = [
         'A remote MetaBot provider has delivered a skill-service result and is asking for final buyer feedback.',
         'You are the buyer MetaBot that requested the service. The provider is not the user.',
@@ -188,12 +217,6 @@ async function generateBuyerServiceRating(input) {
         inboundMessage,
     });
     const generated = normalizeText(runnerResult.content);
-    const contextualFallback = buildContextualBuyerRatingFallback({
-        providerName,
-        originalRequest,
-        serviceResult,
-        expectedOutputType,
-    });
     const comment = generated && !isUnsuitableBuyerRating(generated)
         ? generated
         : contextualFallback;

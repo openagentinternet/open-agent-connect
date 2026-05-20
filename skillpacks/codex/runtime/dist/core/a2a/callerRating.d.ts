@@ -1,4 +1,5 @@
 import type { ChatPersona, ChatReplyRunner } from '../chat/privateChatTypes';
+import type { BuyerRatingProtocolTextGeneratorInput } from './orderProtocolTextGenerator';
 export interface BuyerRatingTranscriptItem {
     id?: string | null;
     timestamp?: number | null;
@@ -11,9 +12,11 @@ export interface BuyerServiceRatingResult {
     rate: number;
     comment: string;
 }
+export type BuyerServiceRatingTextGenerator = (input: Omit<BuyerRatingProtocolTextGeneratorInput, 'paths'>) => Promise<string | null | undefined>;
 export declare function extractBuyerRatingScore(value: string): number;
 export declare function generateBuyerServiceRating(input: {
     replyRunner: ChatReplyRunner;
+    textGenerator?: BuyerServiceRatingTextGenerator | null;
     persona: ChatPersona;
     traceId: string;
     providerGlobalMetaId: string;
