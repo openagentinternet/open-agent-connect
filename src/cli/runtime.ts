@@ -49,6 +49,7 @@ import { refreshOnlineServiceCacheFromChain } from '../core/discovery/onlineServ
 import { buildRemoteServicesPrompt } from '../core/delegation/remoteCall';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
+import type { LocalIdentitySecrets } from '../core/secrets/secretStore';
 import {
   createLocalMnemonicSigner,
   executeTransfer,
@@ -2005,6 +2006,74 @@ function createTestProviderChatPublicKeyFetcher(
   return async () => publicKey;
 }
 
+export async function resolvePeerChatPublicKeyFromLocalProfiles(
+  systemHomeDir: string,
+  globalMetaId: string,
+): Promise<string | null> {
+  const normalizedGlobalMetaId = normalizeEnvText(globalMetaId);
+  if (!normalizedGlobalMetaId) {
+    return null;
+  }
+
+  const profiles = await listIdentityProfiles(systemHomeDir).catch(() => []);
+  for (const profile of profiles) {
+    const profileGlobalMetaId = normalizeEnvText(profile.globalMetaId);
+    const profileMatches = profileGlobalMetaId === normalizedGlobalMetaId;
+
+    const runtimeState = await createRuntimeStateStore(profile.homeDir).readState().catch(() => null);
+    const runtimeIdentity = runtimeState?.identity ?? null;
+    const runtimeIdentityMatches = normalizeEnvText(runtimeIdentity?.globalMetaId) === normalizedGlobalMetaId;
+    if (profileMatches || runtimeIdentityMatches) {
+      const runtimeChatPublicKey = normalizeEnvText(runtimeIdentity?.chatPublicKey);
+      if (runtimeChatPublicKey) {
+        return runtimeChatPublicKey;
+      }
+    }
+
+    const secrets = await createFileSecretStore(profile.homeDir)
+      .readIdentitySecrets<LocalIdentitySecrets>()
+      .catch(() => null);
+    const secretGlobalMetaId = normalizeEnvText(secrets?.globalMetaId);
+    const secretsMatch = secretGlobalMetaId === normalizedGlobalMetaId || (!secretGlobalMetaId && profileMatches);
+    if (secretsMatch) {
+      const secretChatPublicKey = normalizeEnvText(secrets?.chatPublicKey);
+      if (secretChatPublicKey) {
+        return secretChatPublicKey;
+      }
+    }
+  }
+
+  return null;
+}
+
+export function createPeerChatPublicKeyResolver(input: {
+  systemHomeDir: string;
+  fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
+  chainApiBaseUrl?: string;
+}): (globalMetaId: string) => Promise<string | null> {
+  return async (globalMetaId: string) => {
+    const normalizedGlobalMetaId = normalizeEnvText(globalMetaId);
+    if (!normalizedGlobalMetaId) {
+      return null;
+    }
+
+    const primary = input.fetchPeerChatPublicKey
+      ? await input.fetchPeerChatPublicKey(normalizedGlobalMetaId)
+      : await fetchPeerChatPublicKeyFromChain(normalizedGlobalMetaId, {
+        chainApiBaseUrl: input.chainApiBaseUrl,
+      });
+    const primaryChatPublicKey = normalizeEnvText(primary);
+    if (primaryChatPublicKey) {
+      return primaryChatPublicKey;
+    }
+
+    return resolvePeerChatPublicKeyFromLocalProfiles(
+      input.systemHomeDir,
+      normalizedGlobalMetaId,
+    );
+  };
+}
+
 function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceReplyWaiter | undefined {
   const raw = typeof env[TEST_FAKE_METAWEB_REPLY_ENV] === 'string'
     ? env[TEST_FAKE_METAWEB_REPLY_ENV]!.trim()
@@ -3781,6 +3850,11 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     ? createTestSubsidyRequester()
     : undefined;
   const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
+  const resolvePeerChatPublicKey = createPeerChatPublicKeyResolver({
+    systemHomeDir: paths.systemHomeDir,
+    fetchPeerChatPublicKey,
+    chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
+  });
   const callerReplyWaiter = createTestMetaWebReplyWaiter(context.env);
   const masterReplyWaiter = createTestMasterReplyWaiter(context.env) ?? createSocketIoMetaWebMasterReplyWaiter();
   const servicePaymentExecutor = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
@@ -3862,7 +3936,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       ? 'assume_service_providers_online'
       : 'throw',
     identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
-    fetchPeerChatPublicKey,
+    fetchPeerChatPublicKey: resolvePeerChatPublicKey,
     callerReplyWaiter,
     buyerRatingReplyRunner,
     providerOrderReplyRunner,
@@ -3945,10 +4019,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
         ? 'assume_service_providers_online'
         : 'throw',
-      resolvePeerChatPublicKey: fetchPeerChatPublicKey
-        ?? ((globalMetaId: string) => fetchPeerChatPublicKeyFromChain(globalMetaId, {
-          chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
-        })),
+      resolvePeerChatPublicKey,
     });
   };
   void refreshOnlineServiceCache().catch((error) => {
@@ -3988,7 +4059,6 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
 
   const chatStateStore = createPrivateChatStateStore(paths);
   const chatStrategyStore = createChatStrategyStore(paths);
-  const resolvePeerChatPublicKeyForChat = fetchPeerChatPublicKey ?? fetchPeerChatPublicKeyFromChain;
   const chatAutoReplyOrchestrator = createPrivateChatAutoReplyOrchestrator({
     stateStore: chatStateStore,
     strategyStore: chatStrategyStore,
@@ -3998,7 +4068,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       const state = await runtimeStore.readState();
       return state.identity?.globalMetaId ?? null;
     },
-    resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+    resolvePeerChatPublicKey,
     replyRunner: createHostLlmChatReplyRunner({
       runtimeResolver: llmResolver,
       llmExecutor,
@@ -4013,7 +4083,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       return state.identity?.globalMetaId ?? null;
     },
     getLocalPrivateChatIdentity: async () => signer.getPrivateChatIdentity(),
-    resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+    resolvePeerChatPublicKey,
     handleInboundMessage: async (message) => chatAutoReplyOrchestrator.handleInboundMessage(message),
     onError: (error) => {
       console.warn('[private chat auto-reply backfill]', error.message);
@@ -4021,7 +4091,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   });
   const profileAutoReplyDispatcher = createPrivateChatAutoReplyProfileDispatcher({
     autoReplyConfig: sharedAutoReplyConfig,
-    resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+    resolvePeerChatPublicKey,
     llmExecutor,
     handleOrderProtocolMessageForProfile: async (profile, message) => {
       const handler = handlers.services?.handleInboundOrderProtocolMessage;
@@ -4047,7 +4117,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   });
   const simplemsgListener = createA2ASimplemsgListenerManager({
     systemHomeDir: paths.systemHomeDir,
-    resolvePeerChatPublicKey: resolvePeerChatPublicKeyForChat,
+    resolvePeerChatPublicKey,
     onMessage: (profile, message) => {
       if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
         void simplemsgInboundDispatcher(message).catch((error) => {

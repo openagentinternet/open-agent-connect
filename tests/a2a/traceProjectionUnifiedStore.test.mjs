@@ -1093,7 +1093,7 @@ test('parallel inbound NeedsRating handlers publish only one skill-service-rate 
     ],
   });
   const writes = [];
-  const handlers = createDefaultMetabotDaemonHandlers({
+  const createHandlers = () => createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir,
     getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
@@ -1144,22 +1144,24 @@ test('parallel inbound NeedsRating handlers publish only one skill-service-rate 
       },
     },
   });
+  const handlersA = createHandlers();
+  const handlersB = createHandlers();
 
   const ratingBody = `[NeedsRating:${ORDER_TXID}] Please rate this service.`;
   await Promise.all([
-    handlers.services.handleInboundOrderProtocolMessage({
+    handlersA.services.handleInboundOrderProtocolMessage({
       fromGlobalMetaId: PEER_GLOBAL_META_ID,
       content: ratingBody,
       messagePinId: 'needs-rating-parallel-a',
       timestamp: BASE_TIME + 80,
     }),
-    handlers.services.handleInboundOrderProtocolMessage({
+    handlersB.services.handleInboundOrderProtocolMessage({
       fromGlobalMetaId: PEER_GLOBAL_META_ID,
       content: ratingBody,
       messagePinId: 'needs-rating-parallel-b',
       timestamp: BASE_TIME + 81,
     }),
-    handlers.services.handleInboundOrderProtocolMessage({
+    handlersA.services.handleInboundOrderProtocolMessage({
       fromGlobalMetaId: PEER_GLOBAL_META_ID,
       content: ratingBody,
       messagePinId: 'needs-rating-parallel-c',

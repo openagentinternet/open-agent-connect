@@ -304,6 +304,14 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+const buyerAutoRatingPublishChainsByTrace = new Map<string, Promise<void>>();
+const pendingBuyerRatingPublishesByTrace = new Map<string, Promise<MetabotCommandResult<Record<string, unknown>>>>();
+
+function buildBuyerRatingPublishKey(profileRoot: string, traceId: string): string {
+  const normalizedTraceId = normalizeText(traceId);
+  return normalizedTraceId ? `${path.resolve(profileRoot)}:${normalizedTraceId}` : '';
+}
+
 type ProviderOrderProtocolReplyStage = 'acknowledgement' | 'rating_request';
 
 interface ProviderOrderProtocolReplyTextInput {
@@ -5165,11 +5173,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const getDaemonRecord = input.getDaemonRecord;
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
-  /** Serializes buyer auto-rating per trace so inbound simplemsg + socket continuation cannot publish duplicates. */
-  const buyerAutoRatingPublishChains = new Map<string, Promise<void>>();
   const pendingProviderOrderExecutions = new Map<string, Promise<MetabotCommandResult<Record<string, unknown>>>>();
   const pendingMasterReplyContinuations = new Map<string, Promise<void>>();
-  const pendingBuyerRatingPublishes = new Map<string, Promise<MetabotCommandResult<Record<string, unknown>>>>();
   let masterTriggerMemoryState = createMasterTriggerMemoryState();
   const masterAutoPrepareCounts = new Map<string, number>();
   let lastMasterAutoPreparedAt: number | null = null;
@@ -6171,18 +6176,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
       return publishBuyerServiceRatingUnlocked(request);
     }
 
-    const pending = pendingBuyerRatingPublishes.get(traceId);
+    const publishKey = buildBuyerRatingPublishKey(runtimeStateStore.paths.profileRoot, traceId);
+    const pending = pendingBuyerRatingPublishesByTrace.get(publishKey);
     if (pending) {
       return pending;
     }
 
     const publish = publishBuyerServiceRatingUnlocked({ ...request, traceId });
-    pendingBuyerRatingPublishes.set(traceId, publish);
+    pendingBuyerRatingPublishesByTrace.set(publishKey, publish);
     try {
       return await publish;
     } finally {
-      if (pendingBuyerRatingPublishes.get(traceId) === publish) {
-        pendingBuyerRatingPublishes.delete(traceId);
+      if (pendingBuyerRatingPublishesByTrace.get(publishKey) === publish) {
+        pendingBuyerRatingPublishesByTrace.delete(publishKey);
       }
     }
   }
@@ -6494,11 +6500,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     trace: SessionTraceRecord;
     reply: AwaitMetaWebServiceReplyResult;
   }): Promise<void> {
-    const traceKey = normalizeText(input.trace.traceId);
+    const traceKey = buildBuyerRatingPublishKey(runtimeStateStore.paths.profileRoot, input.trace.traceId);
     if (!traceKey) {
       return;
     }
-    const previous = buyerAutoRatingPublishChains.get(traceKey) ?? Promise.resolve();
+    const previous = buyerAutoRatingPublishChainsByTrace.get(traceKey) ?? Promise.resolve();
     const job = previous.catch(() => {}).then(async () => {
       const ratingRequestText = input.reply.state === 'completed'
         ? normalizeText(input.reply.ratingRequestText)
@@ -6544,12 +6550,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
         network: 'mvc',
       });
     });
-    buyerAutoRatingPublishChains.set(traceKey, job);
+    buyerAutoRatingPublishChainsByTrace.set(traceKey, job);
     try {
       await job;
     } finally {
-      if (buyerAutoRatingPublishChains.get(traceKey) === job) {
-        buyerAutoRatingPublishChains.delete(traceKey);
+      if (buyerAutoRatingPublishChainsByTrace.get(traceKey) === job) {
+        buyerAutoRatingPublishChainsByTrace.delete(traceKey);
       }
     }
   }
