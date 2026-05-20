@@ -4039,7 +4039,7 @@ test('services call auto-rates with ORDER_END after a provider NeedsRating reque
   assert.ok(orderEnd, 'expected automatic rating to persist an outgoing ORDER_END message');
   assert.equal(orderEnd.direction, 'outgoing');
   assert.match(orderEnd.content, /^\[ORDER_END(?::[0-9a-f]{64})? rated\]/);
-  assert.match(orderEnd.content, /\/protocols\/skill-service-rate-pin-/);
+  assert.doesNotMatch(orderEnd.content, /\/protocols\/skill-service-rate-pin-/);
 });
 
 test('services rate publishes one buyer-side skill-service-rate record from a completed remote trace', async (t) => {
