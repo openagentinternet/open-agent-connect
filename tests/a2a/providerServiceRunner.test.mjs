@@ -678,10 +678,6 @@ test('createProviderServiceRunner retries fallback on started terminal runtime f
       result: { status: 'cancelled', output: '', error: 'runtime cancelled', durationMs: 10 },
       code: 'provider_execution_cancelled',
     },
-    {
-      result: { status: 'completed', output: '   ', durationMs: 10 },
-      code: 'provider_execution_empty',
-    },
   ];
 
   for (const testCase of terminalCases) {
@@ -713,10 +709,76 @@ test('createProviderServiceRunner retries fallback on started terminal runtime f
 
     assert.equal(result.state, 'failed');
     assert.equal(result.code, testCase.code);
-    assert.equal(calls.length, testCase.code === 'provider_execution_empty' ? 1 : 2);
-    assert.equal(fallbackCalls, testCase.code === 'provider_execution_empty' ? 0 : 1);
+    assert.equal(calls.length, 2);
+    assert.equal(fallbackCalls, 1);
     await cleanupProfileHome(homeDir);
   }
+});
+
+test('createProviderServiceRunner retries fallback when primary completes with empty output', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+      runtime({ id: 'runtime-fallback', provider: 'claude-code' }),
+    ],
+  });
+  let fallbackCalls = 0;
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        return request.runtimeId === 'runtime-primary' ? 'session-primary' : 'session-fallback';
+      },
+      async getSession(sessionId) {
+        if (sessionId === 'session-fallback') {
+          return {
+            sessionId,
+            status: 'completed',
+            result: {
+              status: 'completed',
+              output: 'Fallback handled the empty primary result.',
+              durationMs: 10,
+            },
+          };
+        }
+        return {
+          sessionId,
+          status: 'completed',
+          result: {
+            status: 'completed',
+            output: '   ',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+    getFallbackRuntime: async () => {
+      fallbackCalls += 1;
+      return runtime({ id: 'runtime-fallback', provider: 'claude-code' });
+    },
+  });
+
+  const result = await runner.execute(baseOrder());
+
+  assert.equal(result.state, 'completed');
+  assert.equal(result.runtimeId, 'runtime-fallback');
+  assert.equal(result.responseText, 'Fallback handled the empty primary result.');
+  assert.equal(result.metadata.fallbackSelected, true);
+  assert.equal(fallbackCalls, 1);
+  assert.deepEqual(calls.map((call) => call.runtimeId), ['runtime-primary', 'runtime-fallback']);
+  await cleanupProfileHome(homeDir);
 });
 
 test('createProviderServiceRunner rejects non-text deliverables after session start without fallback retry', async () => {

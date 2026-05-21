@@ -501,9 +501,30 @@ function createProviderServiceRunner(input) {
             }
             runtime = run.runtime;
             selection = run.selection;
-            const sessionId = run.sessionId;
-            const session = run.session;
-            const responseText = sanitizeProviderDeliverableText(session?.result?.output ?? '', order.providerSkill);
+            let sessionId = run.sessionId;
+            let session = run.session;
+            let responseText = sanitizeProviderDeliverableText(session?.result?.output ?? '', order.providerSkill);
+            if (!responseText) {
+                const fallbackSelection = await resolveFallbackSelection(runtime, selection);
+                if (fallbackSelection) {
+                    try {
+                        const fallbackRun = await executeWithSelection(fallbackSelection);
+                        const fallbackFailure = buildSessionFailure(fallbackRun, order.providerSkill);
+                        if (fallbackFailure) {
+                            return fallbackFailure.result;
+                        }
+                        run = fallbackRun;
+                        runtime = run.runtime;
+                        selection = run.selection;
+                        sessionId = run.sessionId;
+                        session = run.session;
+                        responseText = sanitizeProviderDeliverableText(session?.result?.output ?? '', order.providerSkill);
+                    }
+                    catch (fallbackError) {
+                        return executionFailure(fallbackError, fallbackSelection.runtime, fallbackSelection);
+                    }
+                }
+            }
             if (!responseText) {
                 return createRuntimeFailedResult('provider_execution_empty', 'The provider runtime returned an empty result.', {
                     runtime,

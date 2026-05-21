@@ -121,6 +121,11 @@ export function createTraeBackend(binaryPath: string, env?: Record<string, strin
         });
       }
 
+      if (status === 'completed' && !output.trim()) {
+        status = 'failed';
+        errorMessage = 'trae chat exited without returning text output. The installed Trae CLI may have opened the editor chat UI instead of providing a non-interactive response.';
+      }
+
       if (stderrTail.trim() && status !== 'completed') {
         errorMessage = `${errorMessage ?? 'trae failed'}\n${stderrTail.trim()}`;
       }
