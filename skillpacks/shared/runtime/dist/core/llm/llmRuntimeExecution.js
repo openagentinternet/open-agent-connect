@@ -4,6 +4,9 @@ exports.runLlmPromptWithRuntimeFallback = runLlmPromptWithRuntimeFallback;
 function resultError(result) {
     return result.error || `LLM runtime ended with status ${result.status}.`;
 }
+function completedResultHasOutput(result) {
+    return result.output.trim().length > 0;
+}
 async function runLlmPromptWithRuntimeFallback(input) {
     const now = input.now ?? (() => Date.now());
     const sleep = input.sleep ?? ((ms) => new Promise((resolve) => {
@@ -57,15 +60,21 @@ async function runLlmPromptWithRuntimeFallback(input) {
                 const session = await input.llmExecutor.getSession(sessionId);
                 if (session?.result) {
                     if (session.result.status === 'completed') {
-                        if (resolved.bindingId) {
-                            await input.runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => { });
+                        if (completedResultHasOutput(session.result)) {
+                            if (resolved.bindingId) {
+                                await input.runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => { });
+                            }
+                            return {
+                                sessionId,
+                                status: session.result.status,
+                                output: session.result.output,
+                                error: session.result.error,
+                            };
                         }
-                        return {
-                            sessionId,
-                            status: session.result.status,
-                            output: session.result.output,
-                            error: session.result.error,
-                        };
+                        await markUnavailable(runtime.id);
+                        excludedRuntimeIds.add(runtime.id);
+                        lastError = 'LLM runtime completed without returning output.';
+                        break;
                     }
                     await markUnavailable(runtime.id);
                     excludedRuntimeIds.add(runtime.id);

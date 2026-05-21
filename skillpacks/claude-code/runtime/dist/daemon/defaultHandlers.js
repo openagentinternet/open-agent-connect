@@ -4414,6 +4414,17 @@ function createDefaultMetabotDaemonHandlers(input) {
             homeDir: profile.homeDir,
         });
     }
+    async function notifyIdentityProfileRegistered() {
+        if (!input.onIdentityProfileRegistered) {
+            return;
+        }
+        try {
+            await input.onIdentityProfileRegistered();
+        }
+        catch {
+            // Listener refresh is best-effort and must not make identity creation fail.
+        }
+    }
     function createSignerForProfileHome(profileHomeDir) {
         const normalizedProfileHomeDir = node_path_1.default.resolve(profileHomeDir);
         if (normalizedProfileHomeDir === node_path_1.default.resolve(input.homeDir)) {
@@ -8386,6 +8397,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         name: existingIdentity.name,
                     });
                     await registerActiveIdentityProfile(existingIdentity);
+                    await notifyIdentityProfileRegistered();
                     return (0, commandResult_1.commandSuccess)(existingIdentity);
                 }
                 const resolvedHome = (0, profileWorkspace_1.resolveIdentityCreateProfileHome)({
@@ -8422,6 +8434,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 const nextState = await runtimeStateStore.readState();
                 if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
                     await registerActiveIdentityProfile(nextState.identity);
+                    await notifyIdentityProfileRegistered();
                     await ensureDefaultPersonaFiles(runtimeStateStore.paths, normalizedName);
                     try {
                         const preferredProvider = normalizePreferredCreateProvider(host)

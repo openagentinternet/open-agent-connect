@@ -89,8 +89,15 @@ import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain } from '../daemon/defaultHandlers';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
-import { createA2ASimplemsgListenerManager } from '../core/a2a/simplemsgListener';
-import { createA2ASimplemsgPresenceWatchdog } from '../core/a2a/simplemsgPresenceWatchdog';
+import {
+  createA2ASimplemsgListenerManager,
+  type A2ASimplemsgListenerManager,
+  type A2ASimplemsgListenerStartReport,
+} from '../core/a2a/simplemsgListener';
+import {
+  createA2ASimplemsgPresenceWatchdog,
+  type A2ASimplemsgPresenceWatchdog,
+} from '../core/a2a/simplemsgPresenceWatchdog';
 import { classifySimplemsgContent } from '../core/a2a/simplemsgClassifier';
 import { createSocketIoMetaWebMasterReplyWaiter, type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
 import { parseMasterResponse } from '../core/master/masterMessageSchema';
@@ -197,6 +204,28 @@ export function buildA2ASimplemsgInboundDispatcher(input: {
       }
     }
     await input.handleGenericPrivateChatMessage(normalizeDispatcherPrivateChatMessage(message));
+  };
+}
+
+export async function refreshA2ASimplemsgListenerForIdentityProfileRegistration(input: {
+  enabled: boolean;
+  listener: Pick<A2ASimplemsgListenerManager, 'start' | 'stop'>;
+  watchdog?: Pick<A2ASimplemsgPresenceWatchdog, 'start' | 'stop'>;
+}): Promise<{ refreshed: boolean; report: A2ASimplemsgListenerStartReport | null }> {
+  if (!input.enabled) {
+    return {
+      refreshed: false,
+      report: null,
+    };
+  }
+
+  input.watchdog?.stop();
+  input.listener.stop();
+  const report = await input.listener.start();
+  input.watchdog?.start();
+  return {
+    refreshed: true,
+    report,
   };
 }
 
@@ -3921,6 +3950,10 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     llmExecutor,
     timeoutMs: 45_000,
   });
+  let pendingA2ASimplemsgRefreshAfterIdentityRegistration = false;
+  let refreshA2ASimplemsgListenerAfterIdentityRegistration: () => Promise<void> = async () => {
+    pendingA2ASimplemsgRefreshAfterIdentityRegistration = true;
+  };
 
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
@@ -3956,6 +3989,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     autoReplyConfig: sharedAutoReplyConfig,
     llmExecutor,
     providerRuntimeCanStart: useFakeProviderLlm ? async () => true : undefined,
+    onIdentityProfileRegistered: () => refreshA2ASimplemsgListenerAfterIdentityRegistration(),
   });
 
   const daemon = createMetabotDaemon({
@@ -4146,6 +4180,14 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       console.warn('[A2A simplemsg listener watchdog]', error.message);
     },
   });
+  refreshA2ASimplemsgListenerAfterIdentityRegistration = async () => {
+    const currentConfig = await createConfigStore(paths).read().catch(() => daemonConfig);
+    await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
+      enabled: currentConfig.a2a.simplemsgListenerEnabled,
+      listener: simplemsgListener,
+      watchdog: simplemsgPresenceWatchdog,
+    });
+  };
   if (daemonConfig.a2a.simplemsgListenerEnabled) {
     await simplemsgListener.start();
     simplemsgPresenceWatchdog.start();
@@ -4160,6 +4202,10 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     }).catch((error) => {
       console.warn('[A2A order replay]', error instanceof Error ? error.message : String(error));
     });
+  }
+  if (pendingA2ASimplemsgRefreshAfterIdentityRegistration) {
+    pendingA2ASimplemsgRefreshAfterIdentityRegistration = false;
+    await refreshA2ASimplemsgListenerAfterIdentityRegistration();
   }
 
   let shuttingDown = false;

@@ -8,7 +8,10 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
-const { getDefaultDaemonPort } = require('../../dist/cli/runtime.js');
+const {
+  getDefaultDaemonPort,
+  refreshA2ASimplemsgListenerForIdentityProfileRegistration,
+} = require('../../dist/cli/runtime.js');
 const { resolveMetabotHomeSelection } = require('../../dist/core/state/homeSelection.js');
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
@@ -225,6 +228,73 @@ async function runCommand(homeDir, args, envOverrides = {}) {
     payload: parseLastJson(stdout),
   };
 }
+
+test('refreshA2ASimplemsgListenerForIdentityProfileRegistration restarts the listener and watchdog when enabled', async () => {
+  const events = [];
+  const listener = {
+    stop: () => {
+      events.push('listener:stop');
+    },
+    start: async () => {
+      events.push('listener:start');
+      return {
+        started: [
+          {
+            slug: 'new-bot',
+            name: 'New Bot',
+            homeDir: '/tmp/new-bot',
+            globalMetaId: 'idq1newbot',
+          },
+        ],
+        skipped: [],
+      };
+    },
+  };
+  const watchdog = {
+    stop: () => {
+      events.push('watchdog:stop');
+    },
+    start: () => {
+      events.push('watchdog:start');
+    },
+  };
+
+  const result = await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
+    enabled: true,
+    listener,
+    watchdog,
+  });
+
+  assert.deepEqual(events, [
+    'watchdog:stop',
+    'listener:stop',
+    'listener:start',
+    'watchdog:start',
+  ]);
+  assert.equal(result.refreshed, true);
+  assert.deepEqual(result.report.started.map((profile) => profile.slug), ['new-bot']);
+});
+
+test('refreshA2ASimplemsgListenerForIdentityProfileRegistration is a no-op when disabled', async () => {
+  const events = [];
+
+  const result = await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
+    enabled: false,
+    listener: {
+      stop: () => {
+        events.push('listener:stop');
+      },
+      start: async () => {
+        events.push('listener:start');
+        return { started: [], skipped: [] };
+      },
+    },
+  });
+
+  assert.deepEqual(events, []);
+  assert.equal(result.refreshed, false);
+  assert.equal(result.report, null);
+});
 
 async function runCommandWithEnv(cwd, args, envOverrides = {}) {
   const stdout = [];

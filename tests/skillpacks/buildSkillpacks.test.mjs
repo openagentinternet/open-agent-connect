@@ -588,10 +588,15 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   const content = await readFile(sharedSkillFile(outputRoot, 'metabot-identity-manage'), 'utf8');
   assert.match(content, /^name:\s*metabot-identity-manage$/m);
   assert.match(content, /identity create --name/);
+  assert.match(content, /identity create --name "\$TARGET_NAME" --host <platform>/);
+  assert.match(content, /Cursor[\s\S]*--host cursor/i);
   assert.match(content, /identity list/);
   assert.match(content, /identity assign --name/);
   assert.match(content, /identity who/);
   assert.match(content, /metabot doctor/);
+  assert.match(content, /ui open --page bot/);
+  assert.match(content, /localUiUrl/);
+  assert.match(content, /management and modification/i);
   assert.match(content, /## First Bot Creation Handoff/);
   assert.match(content, /Bot, bot, and MetaBot as equivalent and case-insensitive/i);
   assert.match(content, /user chosen\s+name as part of the onboarding experience/i);

@@ -1457,6 +1457,34 @@ process.stderr.write('Trae diagnostic\\n');
   assert.equal(events.some((event) => event.type === 'log' && event.message === 'Trae diagnostic'), true);
 });
 
+test('Trae backend reports empty editor launch output as failed', async () => {
+  const base = await createTempDir();
+  const argsPath = path.join(base, 'args.json');
+  const binaryPath = await writeExecutableScript(base, 'fake-empty-trae.js', `#!/usr/bin/env node
+const fs = require('node:fs');
+fs.writeFileSync(process.env.FAKE_TRAE_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
+`);
+  const backend = createTraeBackend(binaryPath, {
+    FAKE_TRAE_ARGS_PATH: argsPath,
+  });
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_trae',
+      runtime: { ...runtime, provider: 'trae', binaryPath },
+      prompt: 'hello trae',
+      cwd: base,
+    },
+    { emit: () => undefined },
+    new AbortController().signal,
+  );
+
+  const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
+  assert.deepEqual(args.slice(0, 5), ['chat', 'hello trae', '--mode', 'agent', '--reuse-window']);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.output, '');
+  assert.match(result.error, /without returning text output/);
+});
+
 test('CodeBuddy backend launches stream-json print mode and normalizes events', async () => {
   const base = await createTempDir();
   const argsPath = path.join(base, 'args.json');

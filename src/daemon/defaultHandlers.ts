@@ -5109,6 +5109,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   providerOrderReplyRunner?: ChatReplyRunner;
   providerOrderTextGenerator?: ProviderOrderProtocolTextGenerator;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
+  onIdentityProfileRegistered?: () => Promise<void> | void;
   requestMvcGasSubsidy?: (
     options: RequestMvcGasSubsidyOptions
   ) => Promise<RequestMvcGasSubsidyResult>;
@@ -5734,6 +5735,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
       systemHomeDir: normalizedSystemHomeDir,
       homeDir: profile.homeDir,
     });
+  }
+
+  async function notifyIdentityProfileRegistered(): Promise<void> {
+    if (!input.onIdentityProfileRegistered) {
+      return;
+    }
+    try {
+      await input.onIdentityProfileRegistered();
+    } catch {
+      // Listener refresh is best-effort and must not make identity creation fail.
+    }
   }
 
   function createSignerForProfileHome(profileHomeDir: string): Signer {
@@ -10234,6 +10246,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             name: existingIdentity.name,
           });
           await registerActiveIdentityProfile(existingIdentity);
+          await notifyIdentityProfileRegistered();
           return commandSuccess(existingIdentity);
         }
 
@@ -10276,6 +10289,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const nextState = await runtimeStateStore.readState();
         if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
           await registerActiveIdentityProfile(nextState.identity);
+          await notifyIdentityProfileRegistered();
           await ensureDefaultPersonaFiles(runtimeStateStore.paths, normalizedName);
 
           try {

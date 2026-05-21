@@ -120,6 +120,7 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     providerOrderReplyRunner?: ChatReplyRunner;
     providerOrderTextGenerator?: ProviderOrderProtocolTextGenerator;
     onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
+    onIdentityProfileRegistered?: () => Promise<void> | void;
     requestMvcGasSubsidy?: (options: RequestMvcGasSubsidyOptions) => Promise<RequestMvcGasSubsidyResult>;
     createSignerForHome?: (homeDir: string) => Signer;
     autoReplyConfig?: PrivateChatAutoReplyConfig;
