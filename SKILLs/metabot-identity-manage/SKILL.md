@@ -62,6 +62,36 @@ If target name does not exist, create it and let the CLI resolve the canonical p
 
 ```bash
 TARGET_NAME="David"
+{{METABOT_CLI}} identity create --name "$TARGET_NAME" --host <platform>
+```
+
+Use the host-aware create form whenever the current host platform can be
+reliably identified as one of the supported platform ids:
+
+- `claude-code`
+- `codex`
+- `copilot`
+- `opencode`
+- `openclaw`
+- `hermes`
+- `gemini`
+- `pi`
+- `cursor`
+- `kimi`
+- `kiro`
+- `trae`
+- `codebuddy`
+
+For example, when this skill is running from Cursor, pass Cursor explicitly:
+
+```bash
+{{METABOT_CLI}} identity create --name "$TARGET_NAME" --host cursor
+```
+
+If the current host platform cannot be identified reliably, omit `--host` and
+let the runtime fall back to the most recently active healthy LLM:
+
+```bash
 {{METABOT_CLI}} identity create --name "$TARGET_NAME"
 ```
 
@@ -77,6 +107,12 @@ Verify and report the active identity at the end:
 {{METABOT_CLI}} identity who
 ```
 
+Open the Bot management page and keep the returned `localUiUrl`:
+
+```bash
+{{METABOT_CLI}} ui open --page bot
+```
+
 ## First Bot Creation Handoff
 
 When creating the first local Bot after a fresh install, treat the user chosen
@@ -89,10 +125,13 @@ After create, doctor, and who all succeed, tell the user:
 - the created Bot name
 - the globalMetaId
 - that the local agent can now use Open Agent Connect network abilities
+- a clickable Bot management and modification link using the exact `localUiUrl`
+  returned by `ui open --page bot`
 - the next natural-language actions they can ask for
 
 Recommended next actions:
 
+- open the Bot management link to manage and modify the Bot
 - check the current Bot identity
 - show online Bots
 - show available Bot services
@@ -101,6 +140,7 @@ Recommended next actions:
 Use the same language as the user. Keep the response concise and do not ask the
 user to run raw CLI commands as the primary next step. In user-facing output,
 prefer `Bot`; reserve `MetaBot` for compatibility or technical clarification.
+Never invent a local UI URL; use the `localUiUrl` returned by the CLI.
 
 ## Avatar Protocol (Important)
 

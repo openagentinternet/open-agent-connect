@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.LOOM_DEV_ROUND_LLM_TIMEOUT_MS = exports.LOOM_DRAFT_LLM_TIMEOUT_MS = void 0;
 exports.buildA2ASimplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher;
+exports.refreshA2ASimplemsgListenerForIdentityProfileRegistration = refreshA2ASimplemsgListenerForIdentityProfileRegistration;
 exports.getDefaultDaemonPort = getDefaultDaemonPort;
 exports.getDaemonRuntimeFingerprint = getDaemonRuntimeFingerprint;
 exports.buildDaemonConfigHash = buildDaemonConfigHash;
@@ -130,6 +131,22 @@ function buildA2ASimplemsgInboundDispatcher(input) {
             }
         }
         await input.handleGenericPrivateChatMessage(normalizeDispatcherPrivateChatMessage(message));
+    };
+}
+async function refreshA2ASimplemsgListenerForIdentityProfileRegistration(input) {
+    if (!input.enabled) {
+        return {
+            refreshed: false,
+            report: null,
+        };
+    }
+    input.watchdog?.stop();
+    input.listener.stop();
+    const report = await input.listener.start();
+    input.watchdog?.start();
+    return {
+        refreshed: true,
+        report,
     };
 }
 const EVOLUTION_IMPORT_SKILL_NAME = 'metabot-network-directory';
@@ -3316,6 +3333,10 @@ async function serveCliDaemonProcess(context) {
         llmExecutor,
         timeoutMs: 45_000,
     });
+    let pendingA2ASimplemsgRefreshAfterIdentityRegistration = false;
+    let refreshA2ASimplemsgListenerAfterIdentityRegistration = async () => {
+        pendingA2ASimplemsgRefreshAfterIdentityRegistration = true;
+    };
     const handlers = (0, defaultHandlers_1.createDefaultMetabotDaemonHandlers)({
         homeDir,
         systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
@@ -3350,6 +3371,7 @@ async function serveCliDaemonProcess(context) {
         autoReplyConfig: sharedAutoReplyConfig,
         llmExecutor,
         providerRuntimeCanStart: useFakeProviderLlm ? async () => true : undefined,
+        onIdentityProfileRegistered: () => refreshA2ASimplemsgListenerAfterIdentityRegistration(),
     });
     const daemon = (0, daemon_1.createMetabotDaemon)({
         homeDirOrPaths: paths,
@@ -3533,6 +3555,14 @@ async function serveCliDaemonProcess(context) {
             console.warn('[A2A simplemsg listener watchdog]', error.message);
         },
     });
+    refreshA2ASimplemsgListenerAfterIdentityRegistration = async () => {
+        const currentConfig = await (0, configStore_1.createConfigStore)(paths).read().catch(() => daemonConfig);
+        await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
+            enabled: currentConfig.a2a.simplemsgListenerEnabled,
+            listener: simplemsgListener,
+            watchdog: simplemsgPresenceWatchdog,
+        });
+    };
     if (daemonConfig.a2a.simplemsgListenerEnabled) {
         await simplemsgListener.start();
         simplemsgPresenceWatchdog.start();
@@ -3547,6 +3577,10 @@ async function serveCliDaemonProcess(context) {
         }).catch((error) => {
             console.warn('[A2A order replay]', error instanceof Error ? error.message : String(error));
         });
+    }
+    if (pendingA2ASimplemsgRefreshAfterIdentityRegistration) {
+        pendingA2ASimplemsgRefreshAfterIdentityRegistration = false;
+        await refreshA2ASimplemsgListenerAfterIdentityRegistration();
     }
     let shuttingDown = false;
     const shutdown = async (exitCode) => {

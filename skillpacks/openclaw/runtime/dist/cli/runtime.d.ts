@@ -2,6 +2,8 @@ import { type MetabotCommandResult } from '../core/contracts/commandResult';
 import { type IdentityProfileRecord } from '../core/identity/identityProfiles';
 import { type MetabotPaths } from '../core/state/paths';
 import type { Signer } from '../core/signing/signer';
+import { type A2ASimplemsgListenerManager, type A2ASimplemsgListenerStartReport } from '../core/a2a/simplemsgListener';
+import { type A2ASimplemsgPresenceWatchdog } from '../core/a2a/simplemsgPresenceWatchdog';
 import { type PrivateChatAutoReplyDependencies, type PrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
 import type { ChatReplyRunner, PrivateChatAutoReplyConfig, PrivateChatInboundMessage } from '../core/chat/privateChatTypes';
 import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
@@ -15,6 +17,14 @@ export declare function buildA2ASimplemsgInboundDispatcher(input: {
     handleGenericPrivateChatMessage: (message: PrivateChatInboundMessage) => Promise<void> | void;
     logWarning?: (scope: string, error: unknown) => void;
 }): (message: A2ASimplemsgInboundDispatcherMessage) => Promise<void>;
+export declare function refreshA2ASimplemsgListenerForIdentityProfileRegistration(input: {
+    enabled: boolean;
+    listener: Pick<A2ASimplemsgListenerManager, 'start' | 'stop'>;
+    watchdog?: Pick<A2ASimplemsgPresenceWatchdog, 'start' | 'stop'>;
+}): Promise<{
+    refreshed: boolean;
+    report: A2ASimplemsgListenerStartReport | null;
+}>;
 export declare function getDefaultDaemonPort(homeDir?: string): number;
 export declare function getDaemonRuntimeFingerprint(rootDir?: string): string;
 export declare function buildDaemonConfigHash(env: NodeJS.ProcessEnv, options?: {

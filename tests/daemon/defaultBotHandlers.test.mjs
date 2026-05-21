@@ -532,6 +532,111 @@ test('default bot createProfile from UI defaults providers by recent runtime act
   assert.equal(result.data.profile.fallbackProvider, 'codex');
 });
 
+test('default identity create notifies the daemon after registering the profile', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-identity-create-', 'callback-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  let registrationCallbackCalls = 0;
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    identitySyncStepDelayMs: 0,
+    getDaemonRecord: () => null,
+    requestMvcGasSubsidy: async (input) => ({
+      success: true,
+      step1: { address: input.mvcAddress },
+      step2: { txid: 'subsidy-tx-1' },
+    }),
+    signer: makeSigner(async (input) => ({
+      txids: ['identity-callback-tx'],
+      pinId: 'identity-callback-pin',
+      totalCost: 1,
+      network: 'mvc',
+      operation: input.operation,
+      path: input.path,
+      contentType: input.contentType,
+      encoding: input.encoding ?? 'utf-8',
+      globalMetaId: 'gm-identity-callback',
+      mvcAddress: 'mvc-identity-callback',
+    })),
+    onIdentityProfileRegistered: async () => {
+      registrationCallbackCalls += 1;
+    },
+  });
+
+  const result = await handlers.identity.create({
+    name: 'Callback Bot',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(registrationCallbackCalls, 1);
+});
+
+test('default identity create prefers the requested Cursor host provider over newer Trae activity', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-identity-create-', 'cursor-default-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await createLlmRuntimeStore(homeDir).write({
+    version: 1,
+    runtimes: [
+      {
+        ...runtime('cursor', 'runtime-cursor', 'healthy'),
+        lastSeenAt: '2026-05-06T00:01:00.000Z',
+        updatedAt: '2026-05-06T00:01:00.000Z',
+      },
+      {
+        ...runtime('trae', 'runtime-trae', 'healthy'),
+        lastSeenAt: '2026-05-06T00:05:00.000Z',
+        updatedAt: '2026-05-06T00:05:00.000Z',
+      },
+    ],
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    identitySyncStepDelayMs: 0,
+    getDaemonRecord: () => null,
+    requestMvcGasSubsidy: async (input) => ({
+      success: true,
+      step1: { address: input.mvcAddress },
+      step2: { txid: 'subsidy-tx-1' },
+    }),
+    signer: makeSigner(async (input) => ({
+      txids: ['identity-cursor-tx'],
+      pinId: 'identity-cursor-pin',
+      totalCost: 1,
+      network: 'mvc',
+      operation: input.operation,
+      path: input.path,
+      contentType: input.contentType,
+      encoding: input.encoding ?? 'utf-8',
+      globalMetaId: 'gm-identity-cursor',
+      mvcAddress: 'mvc-identity-cursor',
+    })),
+  });
+
+  const result = await handlers.identity.create({
+    name: 'Cursor Default Bot',
+    host: 'cursor',
+  });
+  const bindingState = await createLlmBindingStore(homeDir).read();
+  const runtimeState = await createLlmRuntimeStore(homeDir).read();
+  const providerByRuntimeId = new Map(runtimeState.runtimes.map((entry) => [entry.id, entry.provider]));
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    bindingState.bindings.map((binding) => [binding.role, providerByRuntimeId.get(binding.llmRuntimeId)]).sort(),
+    [
+      ['fallback', 'trae'],
+      ['primary', 'cursor'],
+    ],
+  );
+});
+
 test('default bot createProfile removes pending local files when subsidy or chain bootstrap fails', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
   t.after(async () => {
