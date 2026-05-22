@@ -125,6 +125,10 @@ import {
 } from '../core/chat/privateConversation';
 import { createLocalMnemonicSigner, executeTransfer } from '../core/signing/localMnemonicSigner';
 import type { LocalIdentitySecrets, SecretStore } from '../core/secrets/secretStore';
+import {
+  confirmWalletTransfer,
+  previewWalletTransfer,
+} from '../core/wallet/nativeWallet';
 import type { Signer } from '../core/signing/signer';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
@@ -9944,31 +9948,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
-  function parseLoomTransferAmount(raw: string) {
-    const trimmed = raw.trim();
-    const match = trimmed.match(/^([\d.]+)\s*(btc|space|doge|opcat)$/i);
-    if (!match) {
-      throw new Error('Missing or unsupported currency unit. Append BTC, SPACE, DOGE, or OPCAT to the amount.');
-    }
-    const chain = match[2].toUpperCase() === 'BTC'
-      ? 'btc'
-      : match[2].toUpperCase() === 'DOGE'
-        ? 'doge'
-        : match[2].toUpperCase() === 'OPCAT'
-          ? 'opcat'
-          : 'mvc';
-    const adapter = adapters.get(chain as Parameters<typeof adapters.get>[0]);
-    if (!adapter) {
-      throw new Error(`No adapter registered for chain "${chain}".`);
-    }
-    return {
-      chain,
-      currency: match[2].toUpperCase(),
-      satoshis: decimalAmountToSatoshis(match[1]),
-      adapter,
-    };
-  }
-
   async function runLoomWalletTransfer(rawActor: unknown, transferInput: { toAddress: string; amountRaw: string; confirm: boolean }) {
     const actor = await resolveActorWriteContext(rawActor);
     if ('failure' in actor) {
@@ -9978,55 +9957,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
     if (!state.identity) {
       return commandFailed('identity_missing', 'No local MetaBot identity is loaded for the selected MetaBot.');
     }
-    let parsed: ReturnType<typeof parseLoomTransferAmount>;
-    try {
-      parsed = parseLoomTransferAmount(transferInput.amountRaw);
-    } catch (error) {
-      return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
-    }
-    const fromAddress = state.identity.addresses[parsed.chain as keyof typeof state.identity.addresses] ?? state.identity.mvcAddress;
-    if (!fromAddress) {
-      return commandFailed('identity_address_missing', `Current identity has no address for chain "${parsed.chain}".`);
-    }
-    const feeRate = await parsed.adapter.fetchFeeRate();
-    const feePerByte = parsed.adapter.feeRateUnit === 'sat/KB' ? feeRate / 1000 : feeRate;
-    const estimatedFeeSatoshis = Math.ceil(392 * feePerByte);
-    const balance = await parsed.adapter.fetchBalance(fromAddress);
-    if (balance.totalSatoshis < parsed.satoshis + estimatedFeeSatoshis) {
-      return commandFailed('insufficient_balance', `Total balance is below the required ${parsed.satoshis + estimatedFeeSatoshis} sats.`);
-    }
     if (!transferInput.confirm) {
-      return commandAwaitingConfirmation({
-        fromAddress,
-        currentBalanceSatoshis: balance.totalSatoshis,
+      return previewWalletTransfer({
+        identity: state.identity,
+        adapters,
         toAddress: transferInput.toAddress,
-        amountSatoshis: parsed.satoshis,
-        estimatedFeeSatoshis,
-        currency: parsed.currency,
-        chain: parsed.chain,
+        amountRaw: transferInput.amountRaw,
       });
     }
-    const secrets = await createFileSecretStore(actor.homeDir).readIdentitySecrets<LocalIdentitySecrets>();
-    if (!secrets?.mnemonic) {
-      return commandFailed('identity_secrets_missing', 'Identity mnemonic not found in the secret store.');
-    }
-    try {
-      const result = await executeTransfer(parsed.adapter, {
-        mnemonic: secrets.mnemonic,
-        path: secrets.path ?? state.identity.path ?? "m/44'/10001'/0'/0/0",
-        toAddress: transferInput.toAddress,
-        amountSatoshis: parsed.satoshis,
-        feeRate,
-      });
-      return commandSuccess({
-        txid: result.txid,
-        explorerUrl: `${parsed.adapter.explorerBaseUrl}/tx/${result.txid}`,
-        amountSatoshis: parsed.satoshis,
-        toAddress: transferInput.toAddress,
-      });
-    } catch (error) {
-      return commandFailed('transfer_broadcast_failed', error instanceof Error ? error.message : String(error));
-    }
+
+    return confirmWalletTransfer({
+      identity: state.identity,
+      adapters,
+      toAddress: transferInput.toAddress,
+      amountRaw: transferInput.amountRaw,
+      secretStore: createFileSecretStore(actor.homeDir),
+    });
   }
 
   const loomActionHandler = createLoomDaemonActionHandler(createLoomDaemonActionDependencies({
