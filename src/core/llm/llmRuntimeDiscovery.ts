@@ -18,6 +18,7 @@ export interface DiscoveryInput {
   readinessProbe?: RuntimeReadinessProbe;
   readinessTimeoutMs?: number;
   cwd?: string;
+  shellResolvedExecutables?: Record<string, string>;
 }
 
 export interface DiscoveryResult {
@@ -45,8 +46,11 @@ export type RuntimeReadinessProbe = (input: {
   cwd?: string;
 }) => Promise<RuntimeReadinessProbeResult>;
 
-const DEFAULT_READINESS_TIMEOUT_MS = 20_000;
+const DEFAULT_READINESS_TIMEOUT_MS = 30_000;
+const DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS = 15_000;
 const READINESS_PROMPT = 'Reply exactly OK.';
+const LOGIN_SHELL_RESOLVE_TIMEOUT_MS = 3_000;
+const LOGIN_SHELL_RESOLVE_KILL_GRACE_MS = 2_000;
 
 function getPathEnv(env?: NodeJS.ProcessEnv): string {
   return (env ?? process.env).PATH ?? '';
@@ -78,6 +82,115 @@ export async function findExecutablesInPath(name: string, pathDirs?: string[]): 
     }
   }
   return matches;
+}
+
+function safeAgentName(name: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(name);
+}
+
+function buildLoginShellResolveScript(names: string[]): string {
+  return [
+    `for n in ${names.join(' ')}; do`,
+    '  unalias "$n" 2>/dev/null',
+    '  unset -f "$n" 2>/dev/null',
+    '  p=$(command -v "$n" 2>/dev/null) || continue',
+    '  [ -n "$p" ] || continue',
+    '  case "$p" in /*) ;; *) continue ;; esac',
+    '  d=$(dirname "$p") && f=$(basename "$p") && c=$(cd "$d" 2>/dev/null && pwd -P) || continue',
+    '  printf \'%s\\t%s\\n\' "$n" "$c/$f"',
+    'done',
+  ].join('\n');
+}
+
+async function resolveExecutablesViaLoginShell(
+  names: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<Record<string, string>> {
+  const safeNames = [...new Set(names)].filter(safeAgentName);
+  if (!safeNames.length) return {};
+
+  const shell = (env.SHELL ?? '').trim();
+  const shellName = path.basename(shell);
+  if (!shell || !['bash', 'zsh', 'sh', 'dash', 'ksh'].includes(shellName)) return {};
+
+  return new Promise((resolve) => {
+    const child = spawn(shell, ['-ilc', buildLoginShellResolveScript(safeNames)], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env,
+      shell: false,
+    });
+    let output = '';
+    let settled = false;
+    let graceTimer: NodeJS.Timeout | undefined;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      if (graceTimer) clearTimeout(graceTimer);
+      const resolved: Record<string, string> = {};
+      for (const line of output.trim().split('\n')) {
+        const [name, candidate] = line.split('\t', 2);
+        if (!name || !candidate || !path.isAbsolute(candidate)) continue;
+        resolved[name] = candidate;
+      }
+      resolve(resolved);
+    };
+    const timeoutTimer = setTimeout(() => {
+      try { child.kill('SIGTERM'); } catch { /* best effort */ }
+      graceTimer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch { /* best effort */ }
+        finish();
+      }, LOGIN_SHELL_RESOLVE_KILL_GRACE_MS);
+    }, LOGIN_SHELL_RESOLVE_TIMEOUT_MS);
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => { output += chunk; });
+    child.on('close', finish);
+    child.on('error', finish);
+  });
+}
+
+function normalizeEnvKey(value: string): string {
+  return value.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase();
+}
+
+function providerPathEnvNames(provider: LlmProvider, platform: RuntimePlatformDefinition): string[] {
+  const aliases = new Set<string>();
+  aliases.add(normalizeEnvKey(provider));
+  for (const binaryName of platform.runtime.binaryNames) {
+    aliases.add(normalizeEnvKey(binaryName));
+  }
+  if (provider === 'claude-code') aliases.add('CLAUDE');
+  return [...aliases].flatMap((alias) => [
+    `OAC_${alias}_PATH`,
+    `METABOT_${alias}_PATH`,
+    `OPEN_AGENT_CONNECT_${alias}_PATH`,
+  ]);
+}
+
+async function executableCandidatesForProvider(
+  provider: LlmProvider,
+  platform: RuntimePlatformDefinition,
+  binaryName: string,
+  pathDirs: string[],
+  env: NodeJS.ProcessEnv,
+  shellResolvedExecutables?: Record<string, string>,
+): Promise<string[]> {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const add = (candidate: string | undefined) => {
+    const trimmed = candidate?.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    candidates.push(trimmed);
+  };
+  for (const envName of providerPathEnvNames(provider, platform)) {
+    add(env[envName]);
+  }
+  for (const candidate of await findExecutablesInPath(binaryName, pathDirs)) {
+    add(candidate);
+  }
+  add(shellResolvedExecutables?.[binaryName]);
+  return candidates;
 }
 
 export async function readExecutableVersion(
@@ -234,7 +347,7 @@ async function defaultRuntimeReadinessProbe(input: {
     runtime: input.runtime,
     prompt: READINESS_PROMPT,
     timeout: input.timeoutMs,
-    semanticInactivityTimeout: Math.min(input.timeoutMs, 5_000),
+    semanticInactivityTimeout: Math.min(input.timeoutMs, DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS),
     cwd: input.cwd ?? process.cwd(),
   }, {
     emit(event: LlmExecutionEvent) {
@@ -273,6 +386,7 @@ export async function discoverProvider(
     readinessProbe?: RuntimeReadinessProbe;
     readinessTimeoutMs?: number;
     cwd?: string;
+    shellResolvedExecutables?: Record<string, string>;
   },
 ): Promise<LlmRuntime | null> {
   if (provider === 'custom') return null; // Custom runtimes are registered manually.
@@ -285,7 +399,14 @@ export async function discoverProvider(
   const readinessProbe = options?.readinessProbe ?? defaultRuntimeReadinessProbe;
   const readinessTimeoutMs = options?.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
   for (const binaryName of platform.runtime.binaryNames) {
-    const binaryPaths = await findExecutablesInPath(binaryName, pathDirs);
+    const binaryPaths = await executableCandidatesForProvider(
+      provider,
+      platform,
+      binaryName,
+      pathDirs,
+      env,
+      options?.shellResolvedExecutables,
+    );
     for (const binaryPath of binaryPaths) {
       const versionProbe = await probeExecutableVersion(
         binaryPath,
@@ -339,9 +460,14 @@ export async function discoverProvider(
 }
 
 export async function discoverLlmRuntimes(input?: DiscoveryInput): Promise<DiscoveryResult> {
-  const pathDirs = splitPath(getPathEnv(input?.env));
+  const env = input?.env ?? process.env;
+  const pathDirs = splitPath(getPathEnv(env));
   const runtimes: LlmRuntime[] = [];
   const errors: Array<{ provider: string; message: string }> = [];
+  const shellResolvedExecutables = input?.shellResolvedExecutables ?? await resolveExecutablesViaLoginShell(
+    getRuntimePlatforms().flatMap((platform) => platform.runtime.binaryNames),
+    env,
+  );
 
   // Discover each supported provider. Run in sequence to keep it simple;
   // the binary spawns are the slow part, and they're already async.
@@ -350,10 +476,11 @@ export async function discoverLlmRuntimes(input?: DiscoveryInput): Promise<Disco
       const runtime = await discoverProvider(platform.id, pathDirs, {
         createId: input?.createId,
         now: input?.now,
-        env: input?.env ?? process.env,
+        env,
         readinessProbe: input?.readinessProbe,
         readinessTimeoutMs: input?.readinessTimeoutMs,
         cwd: input?.cwd,
+        shellResolvedExecutables,
       });
       if (runtime) {
         runtimes.push(runtime);

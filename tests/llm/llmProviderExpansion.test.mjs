@@ -212,6 +212,52 @@ test('runtime discovery tries multiple registry binary names in order', async ()
   }
 });
 
+test('runtime discovery honors explicit provider path environment overrides outside PATH', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-env-path-'));
+  const binDir = path.join(tempRoot, 'external-bin');
+  await mkdir(binDir, { recursive: true });
+  const opencodePath = path.join(binDir, 'opencode');
+  await writeFile(opencodePath, '#!/bin/sh\necho "opencode 0.9.1"\n', 'utf8');
+  await chmod(opencodePath, 0o755);
+
+  const result = await discoverLlmRuntimes({
+    env: {
+      PATH: '',
+      OAC_OPENCODE_PATH: opencodePath,
+    },
+    now: () => '2026-05-22T03:00:00.000Z',
+    readinessProbe: async () => ({ ok: true, output: 'OK' }),
+  });
+
+  assert.equal(result.errors.length, 0);
+  assert.equal(result.runtimes.length, 1);
+  assert.equal(result.runtimes[0].provider, 'opencode');
+  assert.equal(result.runtimes[0].binaryPath, opencodePath);
+  assert.equal(result.runtimes[0].health, 'healthy');
+});
+
+test('runtime discovery uses login-shell resolved executables when daemon PATH misses a provider', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-shell-path-'));
+  const binDir = path.join(tempRoot, 'login-shell-bin');
+  await mkdir(binDir, { recursive: true });
+  const codebuddyPath = path.join(binDir, 'codebuddy');
+  await writeFile(codebuddyPath, '#!/bin/sh\necho "CodeBuddy 2.0.0"\n', 'utf8');
+  await chmod(codebuddyPath, 0o755);
+
+  const result = await discoverLlmRuntimes({
+    env: { PATH: '' },
+    shellResolvedExecutables: { codebuddy: codebuddyPath },
+    now: () => '2026-05-22T03:30:00.000Z',
+    readinessProbe: async () => ({ ok: true, output: 'OK' }),
+  });
+
+  assert.equal(result.errors.length, 0);
+  assert.equal(result.runtimes.length, 1);
+  assert.equal(result.runtimes[0].provider, 'codebuddy');
+  assert.equal(result.runtimes[0].binaryPath, codebuddyPath);
+  assert.equal(result.runtimes[0].health, 'healthy');
+});
+
 test('runtime discovery ignores a broken PATH shadow when a later binary is healthy', async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-path-shadow-'));
   const brokenBinDir = path.join(tempRoot, 'broken-bin');
@@ -317,6 +363,31 @@ test('runtime discovery marks binaries healthy only after readiness returns non-
   assert.equal(result.runtimes[0].health, 'healthy');
   assert.equal(result.runtimes[0].healthReason, undefined);
   assert.equal(result.runtimes[0].healthCheckedAt, '2026-05-22T01:00:00.000Z');
+});
+
+test('runtime discovery gives readiness probes the full default readiness window', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-readiness-timeout-'));
+  const binDir = path.join(tempRoot, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const cursorPath = path.join(binDir, 'cursor-agent');
+  await writeFile(cursorPath, '#!/bin/sh\necho "cursor-agent 2026.05.16"\n', 'utf8');
+  await chmod(cursorPath, 0o755);
+
+  let observedTimeoutMs = 0;
+  const result = await discoverLlmRuntimes({
+    env: { PATH: binDir },
+    now: () => '2026-05-22T04:00:00.000Z',
+    readinessProbe: async ({ timeoutMs }) => {
+      observedTimeoutMs = timeoutMs;
+      return { ok: true, output: 'OK' };
+    },
+  });
+
+  assert.equal(result.errors.length, 0);
+  assert.equal(result.runtimes.length, 1);
+  assert.equal(result.runtimes[0].provider, 'cursor');
+  assert.equal(result.runtimes[0].health, 'healthy');
+  assert.equal(observedTimeoutMs, 30_000);
 });
 
 test('runtime discovery keeps scanning when an earlier binary is only detected', async () => {
