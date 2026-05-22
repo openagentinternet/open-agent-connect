@@ -143,6 +143,20 @@ export const handleBotRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  const runtimeTestMatch = url.pathname.match(/^\/api\/bot\/runtimes\/([^/]+)\/test$/);
+  if (runtimeTestMatch && req.method === 'POST') {
+    const runtimeId = normalizeSlug(runtimeTestMatch[1]);
+    const from = normalizeSlug(url.searchParams.get('from') ?? '');
+    const result = handlers.bot?.testRuntime
+      ? await handlers.bot.testRuntime({
+          runtimeId,
+          ...(from ? { from } : {}),
+        })
+      : commandFailed('not_implemented', 'MetaBot runtime test handler not configured.');
+    context.sendJson(result.ok ? 200 : result.code === 'runtime_not_found' ? 404 : 400, result);
+    return true;
+  }
+
   if (url.pathname === '/api/bot/sessions' && req.method === 'GET') {
     const slug = normalizeSlug(url.searchParams.get('slug') ?? '');
     const limit = normalizeLimit(url.searchParams.get('limit'));

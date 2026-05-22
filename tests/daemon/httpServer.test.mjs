@@ -50,6 +50,7 @@ async function startServer(options = {}) {
     botDeleteProfile: [],
     botListRuntimes: [],
     botDiscoverRuntimes: [],
+    botTestRuntime: [],
     botListSessions: [],
     botConfigGet: [],
     botConfigSet: [],
@@ -635,6 +636,39 @@ async function startServer(options = {}) {
             },
           ],
           errors: [],
+        });
+      },
+      testRuntime: async (input) => {
+        calls.botTestRuntime.push(input);
+        return commandSuccess({
+          runtime: {
+            id: input.runtimeId,
+            provider: 'codex',
+            displayName: 'Codex',
+            binaryPath: '/bin/codex',
+            authState: 'authenticated',
+            health: 'healthy',
+            capabilities: ['streaming'],
+            lastSeenAt: '2026-05-05T00:00:00.000Z',
+            healthCheckedAt: '2026-05-22T06:00:00.000Z',
+            createdAt: '2026-05-05T00:00:00.000Z',
+            updatedAt: '2026-05-22T06:00:00.000Z',
+          },
+          runtimes: [
+            {
+              id: input.runtimeId,
+              provider: 'codex',
+              displayName: 'Codex',
+              binaryPath: '/bin/codex',
+              authState: 'authenticated',
+              health: 'healthy',
+              capabilities: ['streaming'],
+              lastSeenAt: '2026-05-05T00:00:00.000Z',
+              healthCheckedAt: '2026-05-22T06:00:00.000Z',
+              createdAt: '2026-05-05T00:00:00.000Z',
+              updatedAt: '2026-05-22T06:00:00.000Z',
+            },
+          ],
         });
       },
       listSessions: async (input) => {
@@ -1598,6 +1632,36 @@ test('GET and POST /api/bot/runtimes use the MetaBot runtime handlers', async (t
   assert.equal(discoverPayload.data.discovered, 1);
 });
 
+test('POST /api/bot/runtimes/:runtimeId/test forwards to the MetaBot runtime test handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/runtimes/llm-runtime-1/test`, {
+    method: 'POST',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botTestRuntime, [{ runtimeId: 'llm-runtime-1' }]);
+  assert.equal(payload.data.runtime.id, 'llm-runtime-1');
+  assert.equal(payload.data.runtime.health, 'healthy');
+});
+
+test('POST /api/bot/runtimes/:runtimeId/test supports encoded runtime ids with paths', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const runtimeId = 'llm_trae_/usr/local/bin/trae';
+  const response = await fetch(`${server.baseUrl}/api/bot/runtimes/${encodeURIComponent(runtimeId)}/test`, {
+    method: 'POST',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botTestRuntime, [{ runtimeId }]);
+  assert.equal(payload.data.runtime.id, runtimeId);
+});
+
 test('GET /api/bot/sessions forwards slug and clamped limit to the MetaBot sessions handler', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
@@ -1733,6 +1797,8 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.equal(response.status, 200);
   assert.match(html, /data-stat-bots/);
   assert.match(html, /data-stat-runtimes/);
+  assert.match(html, /data-act="open-runtime-modal"/);
+  assert.match(html, /data-runtime-modal-status/);
   assert.match(html, /data-stat-executions/);
   assert.match(html, /data-stat-success/);
   assert.match(html, /data-metabot-list/);
@@ -1764,6 +1830,7 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.match(html, /r\.health==='healthy'&&r\.provider/);
   assert.ok(!html.includes(" / unavailable"));
   assert.match(html, /max-height:\s*220px/);
+  assert.match(html, /\.runtime-modal-box\s*\{[\s\S]*width:\s*min\(920px,\s*calc\(100vw - 40px\)\)/);
   assert.match(html, /MetaBot Created On-Chain/);
   assert.match(html, /Profile Updated On-Chain/);
   assert.doesNotMatch(html, /✓ Saved/);

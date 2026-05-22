@@ -30,7 +30,7 @@ import {
 import { resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
 import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
-import { discoverLlmRuntimes } from '../core/llm/llmRuntimeDiscovery';
+import { discoverLlmRuntimes, testLlmRuntimeReadiness } from '../core/llm/llmRuntimeDiscovery';
 import {
   isLlmProvider,
   normalizeLlmBinding,
@@ -5117,6 +5117,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   autoReplyConfig?: PrivateChatAutoReplyConfig;
   llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
   providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
+  testLlmRuntimeReadiness?: typeof testLlmRuntimeReadiness;
 }): MetabotDaemonHttpHandlers {
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   // Create default adapter registry if none provided (backward compat)
@@ -14874,6 +14875,30 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
         const updated = await runtimeStore.read();
         return commandSuccess({ discovered: result.runtimes.length, runtimes: updated.runtimes, errors: result.errors });
+      },
+      testRuntime: async (request) => {
+        const requestedSlug = normalizeText(request.from);
+        const runtimeId = normalizeText(request.runtimeId);
+        const selectedProfile = requestedSlug
+          ? await getMetabotProfile(normalizedSystemHomeDir, requestedSlug)
+          : null;
+        if (requestedSlug && !selectedProfile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`);
+        }
+        const runtimeStore = createLlmRuntimeStore(selectedProfile?.homeDir ?? input.homeDir);
+        const state = await runtimeStore.read();
+        const runtime = state.runtimes.find((entry) => entry.id === runtimeId);
+        if (!runtime) {
+          return commandFailed('runtime_not_found', `LLM runtime was not found: ${runtimeId || '<missing>'}`);
+        }
+        const testedRuntime = await (input.testLlmRuntimeReadiness ?? testLlmRuntimeReadiness)(runtime, {
+          env: process.env,
+        });
+        const updated = await runtimeStore.upsertRuntime(testedRuntime);
+        return commandSuccess({
+          runtime: updated.runtimes.find((entry) => entry.id === testedRuntime.id) ?? testedRuntime,
+          runtimes: updated.runtimes,
+        });
       },
       listSessions: async ({ slug, limit }) => {
         if (!input.llmExecutor) {
