@@ -684,8 +684,35 @@
         display: grid;
         gap: 4px;
       }
+      .wallet-row-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .wallet-balance {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+      .wallet-transfer-grid,
+      .wallet-confirm-grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .wallet-transfer-grid > div,
+      .wallet-confirm-grid > div {
+        min-width: 0;
+      }
+      .wallet-transfer-grid .field-full,
+      .wallet-confirm-grid > div:nth-child(3) {
+        grid-column: 1 / -1;
+      }
       .identity-result span,
       .wallet-row span,
+      .wallet-transfer-grid span,
+      .wallet-confirm-grid span,
       .delete-target span,
       .txid-path {
         color: var(--dim);
@@ -696,6 +723,8 @@
       }
       .identity-result code,
       .wallet-row code,
+      .wallet-transfer-grid code,
+      .wallet-confirm-grid code,
       .txid-row code {
         color: var(--text);
         font-family: var(--mono);

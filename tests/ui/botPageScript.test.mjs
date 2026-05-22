@@ -367,7 +367,7 @@ test('bot page save flow reports chain txids in a modal instead of inline saved 
   assert.deepEqual(success.chainWrites[0].txids, ['tx-save-name']);
 });
 
-test('bot page wallet and backup panels render copyable addresses and twelve mnemonic words', () => {
+test('bot page wallet and backup panels render copyable four-chain addresses, balances, and twelve mnemonic words', () => {
   const context = {
     document: {
       querySelector: () => null,
@@ -382,6 +382,14 @@ test('bot page wallet and backup panels render copyable addresses and twelve mne
     addresses: {
       btc: 'btc-address',
       mvc: 'mvc-address',
+      doge: 'doge-address',
+      opcat: 'opcat-address',
+    },
+    balances: {
+      btc: { totalSatoshis: 100000000 },
+      mvc: { totalSatoshis: 200000000 },
+      doge: { totalSatoshis: 300000000 },
+      opcat: { totalSatoshis: 400 },
     },
   });
   const backupMarkup = context.backupBodyMarkup({
@@ -392,9 +400,146 @@ test('bot page wallet and backup panels render copyable addresses and twelve mne
   assert.match(walletMarkup, /btc-address/);
   assert.match(walletMarkup, /MVC/);
   assert.match(walletMarkup, /mvc-address/);
+  assert.match(walletMarkup, /DOGE/);
+  assert.match(walletMarkup, /doge-address/);
+  assert.match(walletMarkup, /OPCAT/);
+  assert.match(walletMarkup, /opcat-address/);
+  assert.match(walletMarkup, /Balance: 1\.00000000 BTC/);
+  assert.match(walletMarkup, /Balance: 2\.00000000 SPACE/);
+  assert.match(walletMarkup, /Balance: 3\.00000000 Doge/);
+  assert.match(walletMarkup, /Balance: 0\.00000400 OPCAT-BTC/);
   assert.match(walletMarkup, /data-act="copy-wallet-value"/);
+  assert.equal((walletMarkup.match(/data-act="wallet-transfer"/g) || []).length, 4);
   assert.match(backupMarkup, /Write these 12 words down/);
   assert.equal((backupMarkup.match(/class="mnemonic-word"/g) || []).length, 12);
+});
+
+test('bot page wallet transfer preview blocks amounts above the local balance', async () => {
+  const fields = {
+    '[data-field="wallet-transfer-to"]': field('recipient-address'),
+    '[data-field="wallet-transfer-amount"]': field('1.00000001'),
+    '[data-wallet-transfer-status]': field(),
+    '[data-act="wallet-transfer-preview"]': field(),
+  };
+  let didFetch = false;
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: () => {
+      didFetch = true;
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) });
+    },
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state._walletPanel = {
+    addresses: { btc: 'btc-address' },
+    balances: { btc: { totalSatoshis: 100000000 } },
+  };
+  context.openWalletTransferForm('btc');
+
+  await context.submitWalletTransferPreview();
+
+  assert.equal(didFetch, false);
+  assert.match(fields['[data-wallet-transfer-status]'].textContent, /Amount exceeds available balance: 1\.00000000 BTC/);
+  assert.match(fields['[data-wallet-transfer-status]'].className, /error/);
+});
+
+test('bot page wallet transfer preview posts the canonical route body', async () => {
+  const fields = {
+    '[data-field="wallet-transfer-to"]': field('recipient-address'),
+    '[data-field="wallet-transfer-amount"]': field('0.25'),
+    '[data-wallet-transfer-status]': field(),
+    '[data-act="wallet-transfer-preview"]': field(),
+  };
+  let request = null;
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: (url, options) => {
+      request = { url, body: JSON.parse(options.body) };
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true, data: { preview: { feeSatoshis: 1000 } } }),
+      });
+    },
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state._walletPanel = {
+    addresses: { mvc: 'mvc-address' },
+    balances: { mvc: { totalSatoshis: 200000000 } },
+  };
+  context.openWalletTransferForm('mvc');
+  context.openDynamicModal = () => {};
+
+  await context.submitWalletTransferPreview();
+
+  assert.equal(request.url, '/api/bot/profiles/alice-bot/wallet/transfer/preview');
+  assert.deepEqual(request.body, { chain: 'mvc', toAddress: 'recipient-address', amount: '0.25' });
+});
+
+test('bot page wallet transfer confirm posts the canonical route body', async () => {
+  const fields = {
+    '[data-wallet-transfer-status]': field(),
+    '[data-act="wallet-transfer-confirm"]': field(),
+  };
+  let request = null;
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: (url, options = {}) => {
+      if (url.includes('/wallet/transfer/confirm')) {
+        request = { url, body: JSON.parse(options.body) };
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: { result: { txid: 'tx-confirmed' } } }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            wallet: {
+              addresses: { doge: 'doge-address' },
+              balances: { doge: { totalSatoshis: 100000000 } },
+            },
+          },
+        }),
+      });
+    },
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state._walletPanel = {
+    addresses: { doge: 'doge-address' },
+    balances: { doge: { totalSatoshis: 300000000 } },
+  };
+  context.state._walletTransfer = {
+    chain: 'doge',
+    toAddress: 'recipient-address',
+    amount: '0.5',
+    preview: { feeSatoshis: 1000 },
+  };
+  context.openDynamicModal = () => {};
+
+  await context.submitWalletTransferConfirm();
+
+  assert.equal(request.url, '/api/bot/profiles/alice-bot/wallet/transfer/confirm');
+  assert.deepEqual(request.body, { chain: 'doge', toAddress: 'recipient-address', amount: '0.5' });
 });
 
 test('bot page ignores stale wallet and backup responses after the sensitive modal closes', async () => {
