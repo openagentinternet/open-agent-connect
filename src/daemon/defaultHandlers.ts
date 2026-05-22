@@ -16,6 +16,7 @@ import {
   setActiveMetabotHome,
   upsertIdentityProfile,
 } from '../core/identity/identityProfiles';
+import type { IdentityProfileRecord } from '../core/identity/identityProfiles';
 import {
   ensureProfileWorkspace,
   resolveIdentityCreateProfileHome,
@@ -127,7 +128,9 @@ import { createLocalMnemonicSigner, executeTransfer } from '../core/signing/loca
 import type { LocalIdentitySecrets, SecretStore } from '../core/secrets/secretStore';
 import {
   confirmWalletTransfer,
+  NATIVE_TRANSFER_UNITS,
   previewWalletTransfer,
+  queryWalletBalances,
 } from '../core/wallet/nativeWallet';
 import type { Signer } from '../core/signing/signer';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
@@ -5765,6 +5768,45 @@ export function createDefaultMetabotDaemonHandlers(input: {
       secretStore: createFileSecretStore(normalizedProfileHomeDir),
       adapters: profileAdapters,
     });
+  }
+
+  async function resolveBotProfileIdentity(slug: string): Promise<
+    | {
+      profile: IdentityProfileRecord;
+      identity: RuntimeIdentityRecord;
+    }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const requestedSlug = normalizeText(slug);
+    const profile = await getMetabotProfile(normalizedSystemHomeDir, requestedSlug);
+    if (!profile) {
+      return {
+        failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug || '<missing>'}`),
+      };
+    }
+    const state = await createRuntimeStateStore(profile.homeDir).readState();
+    if (!state.identity) {
+      return {
+        failure: commandFailed('identity_missing', 'No local MetaBot identity is loaded for the selected MetaBot.'),
+      };
+    }
+    return { profile, identity: state.identity };
+  }
+
+  function buildNativeTransferAmountRaw(chain: string, amount: string): string | MetabotCommandResult<never> {
+    const normalizedChain = normalizeText(chain).toLowerCase();
+    const unit = NATIVE_TRANSFER_UNITS[normalizedChain as keyof typeof NATIVE_TRANSFER_UNITS];
+    if (!unit) {
+      return commandFailed(
+        'invalid_argument',
+        `Unsupported wallet transfer chain: ${normalizedChain || '<missing>'}. Supported chains: ${Object.keys(NATIVE_TRANSFER_UNITS).join(', ')}.`,
+      );
+    }
+    const normalizedAmount = normalizeText(amount);
+    if (!normalizedAmount) {
+      return commandFailed('invalid_argument', 'Wallet transfer amount is required.');
+    }
+    return `${normalizedAmount}${unit}`;
   }
 
   async function resolveActorWriteContext(rawActor: unknown): Promise<
@@ -14746,8 +14788,25 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       getWallet: async ({ slug }) => {
         try {
+          const resolved = await resolveBotProfileIdentity(slug);
+          if ('failure' in resolved) {
+            return resolved.failure;
+          }
           const wallet = await getMetabotWalletInfo(normalizedSystemHomeDir, slug);
-          return commandSuccess({ wallet });
+          const balances = await queryWalletBalances({
+            identity: resolved.identity,
+            adapters,
+            chain: 'all',
+          });
+          if (!balances.ok) {
+            return balances;
+          }
+          return commandSuccess({
+            wallet: {
+              ...wallet,
+              balances: (balances.data as { balances?: unknown }).balances,
+            },
+          });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           if (/not found/i.test(message)) {
@@ -14755,6 +14814,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }
           return commandFailed('metabot_wallet_unavailable', message);
         }
+      },
+      previewWalletTransfer: async ({ slug, chain, toAddress, amount }) => {
+        const resolved = await resolveBotProfileIdentity(slug);
+        if ('failure' in resolved) {
+          return resolved.failure;
+        }
+        const amountRaw = buildNativeTransferAmountRaw(chain, amount);
+        if (typeof amountRaw !== 'string') {
+          return amountRaw;
+        }
+        return previewWalletTransfer({
+          identity: resolved.identity,
+          adapters,
+          toAddress,
+          amountRaw,
+        });
+      },
+      confirmWalletTransfer: async ({ slug, chain, toAddress, amount }) => {
+        const resolved = await resolveBotProfileIdentity(slug);
+        if ('failure' in resolved) {
+          return resolved.failure;
+        }
+        const amountRaw = buildNativeTransferAmountRaw(chain, amount);
+        if (typeof amountRaw !== 'string') {
+          return amountRaw;
+        }
+        return confirmWalletTransfer({
+          identity: resolved.identity,
+          adapters,
+          toAddress,
+          amountRaw,
+          secretStore: createFileSecretStore(resolved.profile.homeDir),
+        });
       },
       getBackup: async ({ slug }) => {
         try {

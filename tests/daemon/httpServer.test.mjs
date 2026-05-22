@@ -46,6 +46,8 @@ async function startServer(options = {}) {
     botCreateProfile: [],
     botUpdateProfile: [],
     botWallet: [],
+    botWalletTransferPreview: [],
+    botWalletTransferConfirm: [],
     botBackup: [],
     botDeleteProfile: [],
     botListRuntimes: [],
@@ -572,8 +574,34 @@ async function startServer(options = {}) {
             addresses: {
               btc: 'btc-address-alice',
               mvc: 'mvc-address-alice',
+              doge: 'doge-address-alice',
+              opcat: 'opcat-address-alice',
+            },
+            balances: {
+              btc: { confirmedSatoshis: 1000, unconfirmedSatoshis: 0, totalSatoshis: 1000 },
+              mvc: { confirmedSatoshis: 2000, unconfirmedSatoshis: 0, totalSatoshis: 2000 },
+              doge: { confirmedSatoshis: 3000, unconfirmedSatoshis: 0, totalSatoshis: 3000 },
+              opcat: { confirmedSatoshis: 4000, unconfirmedSatoshis: 0, totalSatoshis: 4000 },
             },
           },
+        });
+      },
+      previewWalletTransfer: async (input) => {
+        calls.botWalletTransferPreview.push(input);
+        return commandAwaitingConfirmation({
+          chain: input.chain,
+          toAddress: input.toAddress,
+          amount: input.amount,
+          estimatedFeeSatoshis: 392,
+        });
+      },
+      confirmWalletTransfer: async (input) => {
+        calls.botWalletTransferConfirm.push(input);
+        return commandSuccess({
+          txid: 'tx-doge-transfer-1',
+          chain: input.chain,
+          toAddress: input.toAddress,
+          amount: input.amount,
         });
       },
       getBackup: async (input) => {
@@ -1551,6 +1579,62 @@ test('GET /api/bot/profiles/:slug/wallet forwards to the MetaBot wallet handler'
   assert.deepEqual(server.calls.botWallet, [{ slug: 'alice-bot' }]);
   assert.equal(payload.data.wallet.addresses.btc, 'btc-address-alice');
   assert.equal(payload.data.wallet.addresses.mvc, 'mvc-address-alice');
+  assert.equal(payload.data.wallet.addresses.doge, 'doge-address-alice');
+  assert.equal(payload.data.wallet.addresses.opcat, 'opcat-address-alice');
+  assert.equal(payload.data.wallet.balances.btc.totalSatoshis, 1000);
+  assert.equal(payload.data.wallet.balances.mvc.totalSatoshis, 2000);
+  assert.equal(payload.data.wallet.balances.doge.totalSatoshis, 3000);
+  assert.equal(payload.data.wallet.balances.opcat.totalSatoshis, 4000);
+});
+
+test('POST /api/bot/profiles/:slug/wallet/transfer/preview forwards to the MetaBot wallet transfer preview handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/wallet/transfer/preview`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      chain: 'doge',
+      toAddress: 'D-recipient',
+      amount: '0.01',
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botWalletTransferPreview, [{
+    slug: 'alice-bot',
+    chain: 'doge',
+    toAddress: 'D-recipient',
+    amount: '0.01',
+  }]);
+  assert.equal(payload.data.chain, 'doge');
+});
+
+test('POST /api/bot/profiles/:slug/wallet/transfer/confirm forwards to the MetaBot wallet transfer confirm handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/wallet/transfer/confirm`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      chain: 'doge',
+      toAddress: 'D-recipient',
+      amount: '0.01',
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botWalletTransferConfirm, [{
+    slug: 'alice-bot',
+    chain: 'doge',
+    toAddress: 'D-recipient',
+    amount: '0.01',
+  }]);
+  assert.equal(payload.data.txid, 'tx-doge-transfer-1');
 });
 
 test('GET /api/bot/profiles/:slug/backup forwards to the MetaBot backup handler', async (t) => {

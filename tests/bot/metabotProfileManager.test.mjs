@@ -445,6 +445,8 @@ test('getMetabotWalletInfo and getMetabotMnemonicBackup expose selected profile 
     addresses: {
       mvc: 'mvc-secret-address',
       btc: 'btc-secret-address',
+      doge: 'doge-secret-address',
+      opcat: 'opcat-secret-address',
     },
     globalMetaId: 'gm-wallet-bot',
   });
@@ -455,8 +457,10 @@ test('getMetabotWalletInfo and getMetabotMnemonicBackup expose selected profile 
   assert.equal(wallet.slug, created.slug);
   assert.equal(wallet.name, 'Wallet Bot');
   assert.deepEqual(wallet.addresses, {
-    mvc: 'mvc-secret-address',
     btc: 'btc-secret-address',
+    mvc: 'mvc-secret-address',
+    doge: 'doge-secret-address',
+    opcat: 'opcat-secret-address',
   });
   assert.deepEqual(backup.words, FIXTURE_MNEMONIC.split(' '));
 });
