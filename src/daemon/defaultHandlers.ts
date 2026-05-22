@@ -5793,6 +5793,38 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return { profile, identity: state.identity };
   }
 
+  async function resolveBotWalletContext(slug: string): Promise<
+    | {
+      profile: IdentityProfileRecord;
+      identity: RuntimeIdentityRecord;
+      wallet: Awaited<ReturnType<typeof getMetabotWalletInfo>>;
+    }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const resolved = await resolveBotProfileIdentity(slug);
+    if ('failure' in resolved) {
+      return resolved;
+    }
+    try {
+      const wallet = await getMetabotWalletInfo(normalizedSystemHomeDir, resolved.profile.slug);
+      return {
+        profile: resolved.profile,
+        identity: {
+          ...resolved.identity,
+          mvcAddress: wallet.addresses.mvc,
+          addresses: wallet.addresses,
+        },
+        wallet,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/not found/i.test(message)) {
+        return { failure: commandFailed('profile_not_found', message) };
+      }
+      return { failure: commandFailed('metabot_wallet_unavailable', message) };
+    }
+  }
+
   function buildNativeTransferAmountRaw(chain: string, amount: string): string | MetabotCommandResult<never> {
     const normalizedChain = normalizeText(chain).toLowerCase();
     const unit = NATIVE_TRANSFER_UNITS[normalizedChain as keyof typeof NATIVE_TRANSFER_UNITS];
@@ -14788,17 +14820,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       getWallet: async ({ slug }) => {
         try {
-          const resolved = await resolveBotProfileIdentity(slug);
+          const resolved = await resolveBotWalletContext(slug);
           if ('failure' in resolved) {
             return resolved.failure;
           }
-          const wallet = await getMetabotWalletInfo(normalizedSystemHomeDir, slug);
           const balances = await queryWalletBalances({
-            identity: {
-              ...resolved.identity,
-              mvcAddress: wallet.addresses.mvc,
-              addresses: wallet.addresses,
-            },
+            identity: resolved.identity,
             adapters,
             chain: 'all',
           });
@@ -14807,7 +14834,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }
           return commandSuccess({
             wallet: {
-              ...wallet,
+              ...resolved.wallet,
               balances: (balances.data as { balances?: unknown }).balances,
             },
           });
@@ -14820,7 +14847,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
       },
       previewWalletTransfer: async ({ slug, chain, toAddress, amount }) => {
-        const resolved = await resolveBotProfileIdentity(slug);
+        const resolved = await resolveBotWalletContext(slug);
         if ('failure' in resolved) {
           return resolved.failure;
         }
@@ -14836,7 +14863,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
       },
       confirmWalletTransfer: async ({ slug, chain, toAddress, amount }) => {
-        const resolved = await resolveBotProfileIdentity(slug);
+        const resolved = await resolveBotWalletContext(slug);
         if ('failure' in resolved) {
           return resolved.failure;
         }

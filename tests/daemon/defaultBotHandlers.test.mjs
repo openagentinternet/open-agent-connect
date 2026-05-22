@@ -237,6 +237,87 @@ test('default bot getWallet queries balances with displayed wallet addresses', a
   );
 });
 
+test('default bot wallet transfers prepare balances with displayed wallet addresses', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-transfer-wallet-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const bot = await createMetabotProfile(systemHomeDir, { name: 'Transfer Wallet Bot' });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: bot.name,
+    homeDir: bot.homeDir,
+    globalMetaId: 'gm-transfer-wallet-bot',
+    mvcAddress: 'mvc-profile-address',
+  });
+  await createFileSecretStore(bot.homeDir).writeIdentitySecrets({
+    mnemonic: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+    path: "m/44'/10001'/0'/0/0",
+    addresses: {
+      btc: 'btc-secret-address',
+      mvc: 'mvc-secret-address',
+      doge: 'doge-secret-address',
+      opcat: 'opcat-secret-address',
+    },
+    globalMetaId: 'gm-transfer-wallet-bot',
+  });
+  await createRuntimeStateStore(bot.homeDir).writeState({
+    identity: {
+      metabotId: 1,
+      name: bot.name,
+      createdAt: 1776836000000,
+      path: "m/44'/10001'/0'/0/0",
+      publicKey: 'public-key',
+      chatPublicKey: 'chat-public-key',
+      addresses: {
+        btc: 'btc-runtime-stale-address',
+        mvc: 'mvc-runtime-stale-address',
+        doge: 'doge-runtime-stale-address',
+        opcat: 'opcat-runtime-stale-address',
+      },
+      mvcAddress: 'mvc-runtime-stale-address',
+      metaId: 'metaid-transfer-wallet-bot',
+      globalMetaId: 'gm-transfer-wallet-bot',
+    },
+    services: [],
+    traces: [],
+    sellerOrders: [],
+  });
+  const balanceCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    adapters: new Map(['mvc', 'btc', 'doge', 'opcat'].map((chain) => [chain, fakeBalanceAdapter(chain, balanceCalls)])),
+    ...makeChainedCreateOverrides(),
+  });
+
+  const preview = await handlers.bot.previewWalletTransfer({
+    slug: bot.slug,
+    chain: 'doge',
+    toAddress: 'D-recipient',
+    amount: '0.000001',
+  });
+  const confirm = await handlers.bot.confirmWalletTransfer({
+    slug: bot.slug,
+    chain: 'doge',
+    toAddress: 'D-recipient',
+    amount: '0.000001',
+  });
+
+  assert.equal(preview.ok, true);
+  assert.equal(preview.data.fromAddress, 'doge-secret-address');
+  assert.equal(confirm.ok, true);
+  assert.deepEqual(
+    balanceCalls.map((call) => [call.chain, call.address]),
+    [
+      ['doge', 'doge-secret-address'],
+      ['doge', 'doge-secret-address'],
+    ],
+  );
+});
+
 test('default LLM handlers use the active profile when actor selectors are omitted', async (t) => {
   const homeDir = await createProfileHome('metabot-default-llm-handlers-', 'active-bot');
   t.after(async () => {
