@@ -127,15 +127,17 @@ async function prepareMasterHomes(t) {
   const providerHome = providerProfile.homeDir;
   const providerName = providerProfile.displayName;
   const callerName = callerProfile.displayName;
-  t.after(async () => stopDaemon(callerHome));
-  t.after(async () => stopDaemon(providerHome));
-  t.after(async () => rm(callerProfile.systemHome, { recursive: true, force: true }));
-  t.after(async () => rm(providerProfile.systemHome, { recursive: true, force: true }));
+  t.after(async () => {
+    await stopDaemon(callerHome);
+    await stopDaemon(providerHome);
+    await rm(callerProfile.systemHome, { recursive: true, force: true });
+    await rm(providerProfile.systemHome, { recursive: true, force: true });
+  });
 
   const providerIdentity = await runCommand(providerHome, ['identity', 'create', '--name', providerName]);
-  assert.equal(providerIdentity.exitCode, 0);
+  assert.equal(providerIdentity.exitCode, 0, JSON.stringify(providerIdentity.payload));
   const callerIdentity = await runCommand(callerHome, ['identity', 'create', '--name', callerName]);
-  assert.equal(callerIdentity.exitCode, 0);
+  assert.equal(callerIdentity.exitCode, 0, JSON.stringify(callerIdentity.payload));
 
   const publishPayload = await readFile(MASTER_PROVIDER_FIXTURE_PATH, 'utf8');
   const publishFile = path.join(providerHome, 'master-publish.json');
@@ -148,9 +150,6 @@ async function prepareMasterHomes(t) {
   const providerPresenceStore = createProviderPresenceStateStore(providerHome);
   await providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: Date.now(),
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-1',
-    lastHeartbeatTxid: 'heartbeat-tx-master-1',
   });
 
   const providerDaemon = await runCommand(providerHome, ['daemon', 'start']);

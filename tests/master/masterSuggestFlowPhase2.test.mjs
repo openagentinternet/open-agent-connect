@@ -17,6 +17,11 @@ const { createProviderPresenceStateStore } = require('../../dist/core/provider/p
 const { buildMasterHostObservation } = require('../../dist/core/master/masterHostObservation.js');
 const { buildMasterResponseJson } = require('../../dist/core/master/masterMessageSchema.js');
 
+const TEST_SOCKET_PRESENCE_OPTIONS = {
+  socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
+  socketPresenceFailureMode: 'assume_service_providers_online',
+};
+
 const previousInternalAuto = process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
 test.before(() => {
   process.env.METABOT_INTERNAL_ASK_MASTER_AUTO = '1';
@@ -122,9 +127,6 @@ async function createSuggestHarness(options = {}) {
   });
   await providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: Date.now(),
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-1',
-    lastHeartbeatTxid: 'heartbeat-tx-1',
     ...(options.providerPresence ?? {}),
   });
 
@@ -138,6 +140,7 @@ async function createSuggestHarness(options = {}) {
     handlers: createDefaultMetabotDaemonHandlers({
       homeDir,
       getDaemonRecord: () => null,
+      ...TEST_SOCKET_PRESENCE_OPTIONS,
       signer: options.signerOverride,
       masterReplyWaiter: options.masterReplyWaiterOverride,
     }),
@@ -1039,10 +1042,7 @@ test('accept_suggest fails once the suggested master is offline and the suggesti
   assert.equal(suggestion.ok, true);
 
   await harness.providerPresenceStore.write({
-    enabled: true,
-    lastHeartbeatAt: 0,
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-1',
-    lastHeartbeatTxid: 'heartbeat-tx-1',
+    enabled: false,
   });
 
   const acceptResult = await harness.handlers.master.hostAction({

@@ -98,9 +98,9 @@ function createOpenClawBackend(binaryPath, env) {
                 timeoutMs: request.timeout,
                 signal,
                 emitter,
-                jsonStreams: ['stderr'],
+                jsonStreams: ['stdout', 'stderr'],
                 onNonJsonLine(line, stream) {
-                    if (stream === 'stderr')
+                    if (stream === 'stdout' || stream === 'stderr')
                         prettyJsonLines.push(line);
                 },
                 onJson(message) {

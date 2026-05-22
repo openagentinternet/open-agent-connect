@@ -37,6 +37,11 @@ const NETWORK_DIRECTORY_SCOPE_HASH = JSON.stringify({
 });
 const TEST_JSON_READ_RETRIES = 5;
 const TEST_JSON_READ_DELAY_MS = 10;
+const LEGACY_PROVIDER_PRESENCE_KEYS = [
+  ['last', 'Heartbeat', 'At'].join(''),
+  ['last', 'Heartbeat', 'PinId'].join(''),
+  ['last', 'Heartbeat', 'Txid'].join(''),
+];
 
 let testAtomicWriteSequence = 0;
 
@@ -1306,7 +1311,7 @@ test('fresh daemon starts for the same home reuse the home-derived port', async 
   assert.equal(firstPort, String(getDefaultDaemonPort(homeDir)));
 });
 
-test('daemon start writes a provider heartbeat when provider presence is enabled', async (t) => {
+test('daemon start does not write legacy provider presence pins when presence is enabled', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
 
@@ -1317,25 +1322,19 @@ test('daemon start writes a provider heartbeat when provider presence is enabled
   const presenceStore = createProviderPresenceStateStore(homeDir);
   await presenceStore.write({
     enabled: true,
-    lastHeartbeatAt: null,
-    lastHeartbeatPinId: null,
-    lastHeartbeatTxid: null,
   });
 
   const started = await runCommand(homeDir, ['daemon', 'start']);
   assert.equal(started.exitCode, 0);
   assert.equal(started.payload.ok, true);
 
-  let presenceState = await presenceStore.read();
-  for (let attempt = 0; attempt < 30 && !presenceState.lastHeartbeatPinId; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    presenceState = await presenceStore.read();
-  }
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const presenceState = await presenceStore.read();
 
   assert.equal(presenceState.enabled, true);
-  assert.match(presenceState.lastHeartbeatPinId, /^\/protocols\/metabot-heartbeat-pin-/);
-  assert.match(presenceState.lastHeartbeatTxid, /^\/protocols\/metabot-heartbeat-tx-/);
-  assert.equal(Number.isFinite(presenceState.lastHeartbeatAt), true);
+  for (const key of LEGACY_PROVIDER_PRESENCE_KEYS) {
+    assert.equal(Object.hasOwn(presenceState, key), false);
+  }
 });
 
 test('ui open trace returns a local trace inspector url with the requested trace id', async (t) => {
@@ -2265,7 +2264,7 @@ test('skills resolve injects the current cached online remote services context',
   assert.match(resolved.payload.data, /policyMode "confirm_paid_only"/);
 });
 
-test('network bots --online falls back to service directory when socket presence is unavailable', async (t) => {
+test('network bots --online fails strictly when socket presence is unavailable', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   const chainApi = await startFakeChainApiServer();
   t.after(async () => stopDaemon(homeDir));
@@ -2282,12 +2281,9 @@ test('network bots --online falls back to service directory when socket presence
     }
   );
 
-  assert.equal(listed.exitCode, 0);
-  assert.equal(listed.payload.ok, true);
-  assert.equal(listed.payload.data.source, 'service_directory_fallback');
-  assert.equal(listed.payload.data.fallbackUsed, true);
-  assert.equal(Array.isArray(listed.payload.data.bots), true);
-  assert.equal(listed.payload.data.bots.length, 0);
+  assert.equal(listed.exitCode, 1);
+  assert.equal(listed.payload.ok, false);
+  assert.equal(listed.payload.code, 'socket_presence_unavailable');
 });
 
 test('evolution search/import read published artifact metadata + body via chain API and write remote artifact files', async (t) => {
@@ -2859,9 +2855,6 @@ test('master list merges remote debug-master directory seeds and returns provide
   const providerPresenceStore = createProviderPresenceStateStore(providerHome);
   await providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: Date.now(),
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-1',
-    lastHeartbeatTxid: 'heartbeat-tx-master-1',
   });
 
   const providerDaemon = await runCommand(providerHome, ['daemon', 'start']);

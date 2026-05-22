@@ -2071,7 +2071,7 @@ const COMMAND_HELP_SPECS = [
         usage: 'metabot llm <subcommand>',
         subcommands: [
             { name: 'list-runtimes', summary: 'List all discovered LLM runtimes on this machine.' },
-            { name: 'discover', summary: 'Scan PATH for available LLM runtimes (claude, codex, openclaw) and register them.' },
+            { name: 'discover', summary: 'Scan available LLM provider CLIs and register responsive runtimes.' },
             { name: 'bindings', summary: 'List LLM bindings for a MetaBot profile.' },
             { name: 'bind', summary: 'Create or update a binding between a MetaBot and an LLM runtime.' },
             { name: 'unbind', summary: 'Remove a specific LLM binding by id.' },

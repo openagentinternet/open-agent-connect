@@ -5,13 +5,12 @@ exports.resolveCurrentChainMasters = resolveCurrentChainMasters;
 exports.summarizePublishedMaster = summarizePublishedMaster;
 exports.listMasters = listMasters;
 exports.readChainMasterDirectoryWithFallback = readChainMasterDirectoryWithFallback;
-const chainHeartbeatDirectory_1 = require("../discovery/chainHeartbeatDirectory");
+const socketPresenceProjection_1 = require("../discovery/socketPresenceProjection");
 const serviceDirectory_1 = require("../discovery/serviceDirectory");
 const masterTypes_1 = require("./masterTypes");
 const DEFAULT_CHAIN_API_BASE_URL = 'https://manapi.metaid.io';
 const DEFAULT_CHAIN_MASTER_PAGE_SIZE = 200;
 const DEFAULT_CHAIN_MASTER_MAX_PAGES = 20;
-const DEFAULT_HEARTBEAT_FETCH_CONCURRENCY = 6;
 const UNIX_SECONDS_MAX = 10_000_000_000;
 function toSafeString(value) {
     if (typeof value === 'string')
@@ -360,74 +359,6 @@ function summarizePublishedMaster(record) {
         updatedAt: record.updatedAt,
     };
 }
-async function mapWithConcurrency(items, limit, worker) {
-    if (items.length === 0)
-        return [];
-    const results = new Array(items.length);
-    const concurrency = Math.max(1, Math.min(limit, items.length));
-    let nextIndex = 0;
-    await Promise.all(Array.from({ length: concurrency }, async () => {
-        while (true) {
-            const index = nextIndex;
-            nextIndex += 1;
-            if (index >= items.length) {
-                return;
-            }
-            results[index] = await worker(items[index]);
-        }
-    }));
-    return results;
-}
-async function fetchLatestHeartbeat(input) {
-    const url = new URL(`${input.chainApiBaseUrl}/address/pin/list/${encodeURIComponent(input.address)}`);
-    url.searchParams.set('cursor', '0');
-    url.searchParams.set('size', '1');
-    url.searchParams.set('path', '/protocols/metabot-heartbeat');
-    try {
-        const response = await input.fetchImpl(url.toString());
-        if (!response.ok) {
-            return {
-                address: input.address,
-                timestamp: null,
-                source: 'chain',
-                error: `status_${response.status}`,
-            };
-        }
-        const payload = await response.json();
-        if ((0, chainHeartbeatDirectory_1.isChainHeartbeatSemanticMiss)(payload)) {
-            return {
-                address: input.address,
-                timestamp: null,
-                source: 'chain',
-                error: 'semantic_miss',
-            };
-        }
-        return {
-            address: input.address,
-            timestamp: (0, chainHeartbeatDirectory_1.parseHeartbeatTimestamp)(payload),
-            source: 'chain',
-            error: null,
-        };
-    }
-    catch (error) {
-        return {
-            address: input.address,
-            timestamp: null,
-            source: 'chain',
-            error: error instanceof Error ? error.message : String(error),
-        };
-    }
-}
-async function fetchHeartbeatsForMasters(input) {
-    const addresses = [...new Set(input.masters
-            .map((master) => master.providerAddress?.trim())
-            .filter((address) => Boolean(address)))];
-    return mapWithConcurrency(addresses, DEFAULT_HEARTBEAT_FETCH_CONCURRENCY, async (address) => fetchLatestHeartbeat({
-        fetchImpl: input.fetchImpl,
-        chainApiBaseUrl: input.chainApiBaseUrl,
-        address,
-    }));
-}
 function listMasters(input) {
     const host = toSafeString(input.host).toLowerCase();
     const masterKind = toSafeString(input.masterKind).toLowerCase();
@@ -484,6 +415,10 @@ function listMasters(input) {
             online: toSafeBoolean(normalized?.online),
             updatedAt: normalizeTimestampMs(normalized?.updatedAt ?? 0),
             lastSeenSec: Number.isFinite(Number(normalized?.lastSeenSec)) ? Number(normalized?.lastSeenSec) : null,
+            lastSeenAt: Number.isFinite(Number(normalized?.lastSeenAt)) ? Number(normalized?.lastSeenAt) : null,
+            lastSeenAgoSeconds: Number.isFinite(Number(normalized?.lastSeenAgoSeconds)) ? Number(normalized?.lastSeenAgoSeconds) : null,
+            deviceCount: Number.isFinite(Number(normalized?.deviceCount)) ? Number(normalized?.deviceCount) : null,
+            providerName: toSafeString(normalized?.providerName),
             providerDaemonBaseUrl: toSafeString(normalized?.providerDaemonBaseUrl) || null,
             directorySeedLabel: toSafeString(normalized?.directorySeedLabel) || null,
         };
@@ -500,6 +435,9 @@ async function readChainMasterDirectoryWithFallback(options) {
         ? options.chainApiBaseUrl.trim()
         : '';
     const chainApiBaseUrl = (chainApiBaseUrlInput || DEFAULT_CHAIN_API_BASE_URL).replace(/\/$/, '');
+    let source = 'chain';
+    let fallbackUsed = false;
+    let masters;
     try {
         let cursor = null;
         const seenCursors = new Set();
@@ -527,26 +465,23 @@ async function readChainMasterDirectoryWithFallback(options) {
             seenCursors.add(pageData.nextCursor);
             cursor = pageData.nextCursor;
         }
-        const masters = resolveCurrentChainMasters(rows);
-        const heartbeats = await fetchHeartbeatsForMasters({
-            masters,
-            fetchImpl,
-            chainApiBaseUrl,
-        });
-        const decoratedMasters = options.onlineOnly === true
-            ? (0, chainHeartbeatDirectory_1.filterOnlineChainServices)(masters, heartbeats, { now: options.now })
-            : (0, chainHeartbeatDirectory_1.applyHeartbeatOnlineState)(masters, heartbeats, { now: options.now });
-        return {
-            masters: decoratedMasters,
-            source: 'chain',
-            fallbackUsed: false,
-        };
+        masters = resolveCurrentChainMasters(rows);
     }
     catch {
-        return {
-            masters: await options.fetchSeededDirectoryMasters(),
-            source: 'seeded',
-            fallbackUsed: true,
-        };
+        source = 'seeded';
+        fallbackUsed = true;
+        masters = await options.fetchSeededDirectoryMasters();
     }
+    const decoratedMasters = await (0, socketPresenceProjection_1.decorateRecordsWithSocketPresence)(masters, {
+        fetchImpl,
+        socketPresenceApiBaseUrl: options.socketPresenceApiBaseUrl,
+        socketPresenceLimit: options.socketPresenceLimit,
+        socketPresenceFailureMode: options.socketPresenceFailureMode,
+        onlineOnly: options.onlineOnly === true,
+    });
+    return {
+        masters: decoratedMasters,
+        source,
+        fallbackUsed,
+    };
 }

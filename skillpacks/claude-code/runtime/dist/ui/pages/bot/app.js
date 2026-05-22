@@ -29,7 +29,7 @@ function runtimeLabel(r){var name=r.displayName||r.provider||r.id||'-';var bits=
 function shortId(v){v=String(v||'');if(!v)return'-';return v.length>18?v.slice(0,12)+'...'+v.slice(-4):v}
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
 function selectedProfile(){return state.profiles.find(function(p){return p.slug===state.selectedSlug})||null}
-function availableRuntimes(){return state.runtimes.filter(function(r){return (r.health==='healthy'||r.health==='degraded')&&r.provider})}
+function availableRuntimes(){return state.runtimes.filter(function(r){return r.health==='healthy'&&r.provider})}
 function providerHasAvailableRuntime(provider){return availableRuntimes().some(function(r){return r.provider===provider})}
 function profileLlmUnavailable(profile){return !profile||!profile.primaryProvider||!providerHasAvailableRuntime(profile.primaryProvider)}
 function providerDisplayName(provider){var rt=availableRuntimes().find(function(r){return r.provider===provider});return rt?runtimeLabel(rt):(provider||'No provider')}
@@ -68,7 +68,7 @@ function providerPickerMarkup(field,label,selected,allowNone){
     html+='<button type="button" class="provider-option" data-provider-option="'+esc(r.provider)+'" data-provider-value="'+esc(r.provider)+'"'+selectedAttr+'>'+providerIconMarkup(r.provider)+'<span>'+esc(runtimeLabel(r))+'</span></button>';
   });
   if(!rows.length){
-    html+='<div class="provider-empty">No healthy or degraded runtimes found</div>';
+    html+='<div class="provider-empty">No healthy runtimes found</div>';
   }
   html+='</div></div></div>';
   return html;

@@ -46,7 +46,7 @@ function isLlmAuthState(value) {
     return typeof value === 'string' && ['unknown', 'authenticated', 'unauthenticated'].includes(value);
 }
 function isLlmHealth(value) {
-    return typeof value === 'string' && ['healthy', 'degraded', 'unavailable'].includes(value);
+    return typeof value === 'string' && ['healthy', 'detected', 'degraded', 'unavailable'].includes(value);
 }
 function isLlmBindingRole(value) {
     return typeof value === 'string' && ['primary', 'fallback', 'reviewer', 'specialist'].includes(value);
@@ -71,7 +71,10 @@ function normalizeLlmRuntime(value) {
         version: normalizeOptionalString(r.version),
         logoPath: normalizeOptionalString(r.logoPath),
         authState: isLlmAuthState(r.authState) ? r.authState : 'unknown',
-        health: isLlmHealth(r.health) ? r.health : 'healthy',
+        health: isLlmHealth(r.health) ? r.health : 'detected',
+        healthReason: normalizeOptionalString(r.healthReason),
+        healthCheckedAt: normalizeOptionalString(r.healthCheckedAt),
+        unavailableUntil: normalizeOptionalString(r.unavailableUntil),
         capabilities: normalizeStringArray(r.capabilities),
         lastSeenAt: normalizeIsoString(r.lastSeenAt, now),
         baseUrl: normalizeOptionalString(r.baseUrl),

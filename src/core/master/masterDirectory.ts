@@ -1,4 +1,7 @@
-import { applyHeartbeatOnlineState, filterOnlineChainServices, isChainHeartbeatSemanticMiss, parseHeartbeatTimestamp, type ChainHeartbeatEntry } from '../discovery/chainHeartbeatDirectory';
+import {
+  decorateRecordsWithSocketPresence,
+  type SocketPresenceFailureMode,
+} from '../discovery/socketPresenceProjection';
 import { normalizeComparableGlobalMetaId } from '../discovery/serviceDirectory';
 import type { PublishedMasterRecord, MasterDirectoryItem } from './masterTypes';
 import { MASTER_SERVICE_PROTOCOL_PATH } from './masterTypes';
@@ -6,7 +9,6 @@ import { MASTER_SERVICE_PROTOCOL_PATH } from './masterTypes';
 const DEFAULT_CHAIN_API_BASE_URL = 'https://manapi.metaid.io';
 const DEFAULT_CHAIN_MASTER_PAGE_SIZE = 200;
 const DEFAULT_CHAIN_MASTER_MAX_PAGES = 20;
-const DEFAULT_HEARTBEAT_FETCH_CONCURRENCY = 6;
 const UNIX_SECONDS_MAX = 10_000_000_000;
 
 export interface ParsedChainMasterRow {
@@ -49,6 +51,9 @@ export interface ReadChainMasterDirectoryOptions {
   fetchImpl?: typeof fetch;
   now?: () => number;
   onlineOnly?: boolean;
+  socketPresenceApiBaseUrl?: string;
+  socketPresenceLimit?: number;
+  socketPresenceFailureMode?: SocketPresenceFailureMode;
   fetchSeededDirectoryMasters: () => Promise<MasterDirectoryItem[]>;
 }
 
@@ -438,99 +443,6 @@ export function summarizePublishedMaster(record: PublishedMasterRecord): MasterD
   };
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  worker: (item: T) => Promise<R>
-): Promise<R[]> {
-  if (items.length === 0) return [];
-  const results = new Array<R>(items.length);
-  const concurrency = Math.max(1, Math.min(limit, items.length));
-  let nextIndex = 0;
-
-  await Promise.all(
-    Array.from({ length: concurrency }, async () => {
-      while (true) {
-        const index = nextIndex;
-        nextIndex += 1;
-        if (index >= items.length) {
-          return;
-        }
-        results[index] = await worker(items[index]);
-      }
-    })
-  );
-
-  return results;
-}
-
-async function fetchLatestHeartbeat(input: {
-  fetchImpl: typeof fetch;
-  chainApiBaseUrl: string;
-  address: string;
-}): Promise<ChainHeartbeatEntry> {
-  const url = new URL(`${input.chainApiBaseUrl}/address/pin/list/${encodeURIComponent(input.address)}`);
-  url.searchParams.set('cursor', '0');
-  url.searchParams.set('size', '1');
-  url.searchParams.set('path', '/protocols/metabot-heartbeat');
-
-  try {
-    const response = await input.fetchImpl(url.toString());
-    if (!response.ok) {
-      return {
-        address: input.address,
-        timestamp: null,
-        source: 'chain',
-        error: `status_${response.status}`,
-      };
-    }
-    const payload = await response.json() as unknown;
-    if (isChainHeartbeatSemanticMiss(payload)) {
-      return {
-        address: input.address,
-        timestamp: null,
-        source: 'chain',
-        error: 'semantic_miss',
-      };
-    }
-    return {
-      address: input.address,
-      timestamp: parseHeartbeatTimestamp(payload),
-      source: 'chain',
-      error: null,
-    };
-  } catch (error) {
-    return {
-      address: input.address,
-      timestamp: null,
-      source: 'chain',
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-async function fetchHeartbeatsForMasters(input: {
-  masters: MasterDirectoryItem[];
-  fetchImpl: typeof fetch;
-  chainApiBaseUrl: string;
-}): Promise<ChainHeartbeatEntry[]> {
-  const addresses = [...new Set(
-    input.masters
-      .map((master) => master.providerAddress?.trim())
-      .filter((address): address is string => Boolean(address))
-  )];
-
-  return mapWithConcurrency(
-    addresses,
-    DEFAULT_HEARTBEAT_FETCH_CONCURRENCY,
-    async (address) => fetchLatestHeartbeat({
-      fetchImpl: input.fetchImpl,
-      chainApiBaseUrl: input.chainApiBaseUrl,
-      address,
-    })
-  );
-}
-
 export function listMasters(input: {
   entries: Array<Record<string, unknown> | MasterDirectoryItem>;
   onlineOnly?: boolean;
@@ -596,6 +508,10 @@ export function listMasters(input: {
       online: toSafeBoolean(normalized?.online),
       updatedAt: normalizeTimestampMs(normalized?.updatedAt ?? 0),
       lastSeenSec: Number.isFinite(Number(normalized?.lastSeenSec)) ? Number(normalized?.lastSeenSec) : null,
+      lastSeenAt: Number.isFinite(Number(normalized?.lastSeenAt)) ? Number(normalized?.lastSeenAt) : null,
+      lastSeenAgoSeconds: Number.isFinite(Number(normalized?.lastSeenAgoSeconds)) ? Number(normalized?.lastSeenAgoSeconds) : null,
+      deviceCount: Number.isFinite(Number(normalized?.deviceCount)) ? Number(normalized?.deviceCount) : null,
+      providerName: toSafeString(normalized?.providerName),
       providerDaemonBaseUrl: toSafeString(normalized?.providerDaemonBaseUrl) || null,
       directorySeedLabel: toSafeString(normalized?.directorySeedLabel) || null,
     };
@@ -620,6 +536,9 @@ export async function readChainMasterDirectoryWithFallback(
     : '';
   const chainApiBaseUrl = (chainApiBaseUrlInput || DEFAULT_CHAIN_API_BASE_URL).replace(/\/$/, '');
 
+  let source: 'chain' | 'seeded' = 'chain';
+  let fallbackUsed = false;
+  let masters: MasterDirectoryItem[];
   try {
     let cursor: string | null = null;
     const seenCursors = new Set<string>();
@@ -651,26 +570,24 @@ export async function readChainMasterDirectoryWithFallback(
       cursor = pageData.nextCursor;
     }
 
-    const masters = resolveCurrentChainMasters(rows);
-    const heartbeats = await fetchHeartbeatsForMasters({
-      masters,
-      fetchImpl,
-      chainApiBaseUrl,
-    });
-    const decoratedMasters = options.onlineOnly === true
-      ? filterOnlineChainServices(masters, heartbeats, { now: options.now })
-      : applyHeartbeatOnlineState(masters, heartbeats, { now: options.now });
-
-    return {
-      masters: decoratedMasters,
-      source: 'chain',
-      fallbackUsed: false,
-    };
+    masters = resolveCurrentChainMasters(rows);
   } catch {
-    return {
-      masters: await options.fetchSeededDirectoryMasters(),
-      source: 'seeded',
-      fallbackUsed: true,
-    };
+    source = 'seeded';
+    fallbackUsed = true;
+    masters = await options.fetchSeededDirectoryMasters();
   }
+
+  const decoratedMasters = await decorateRecordsWithSocketPresence(masters, {
+    fetchImpl,
+    socketPresenceApiBaseUrl: options.socketPresenceApiBaseUrl,
+    socketPresenceLimit: options.socketPresenceLimit,
+    socketPresenceFailureMode: options.socketPresenceFailureMode,
+    onlineOnly: options.onlineOnly === true,
+  });
+
+  return {
+    masters: decoratedMasters,
+    source,
+    fallbackUsed,
+  };
 }

@@ -1,4 +1,5 @@
-export type SocketPresenceFailureMode = 'throw' | 'assume_service_providers_online';
+import { type SocketPresenceFailureMode } from './socketPresenceProjection';
+export type { SocketPresenceFailureMode } from './socketPresenceProjection';
 export interface ReadChainDirectoryResult {
     services: Array<Record<string, unknown>>;
     source: 'chain' | 'seeded';

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.summarizeResolvedLlmRuntime = summarizeResolvedLlmRuntime;
 exports.createLlmRuntimeResolver = createLlmRuntimeResolver;
+const DEFAULT_UNAVAILABLE_COOLDOWN_MS = 15 * 60 * 1000;
 function bindingRoleRank(role) {
     switch (role) {
         case 'primary':
@@ -114,8 +115,13 @@ function createLlmRuntimeResolver(options) {
         async markBindingUsed(bindingId) {
             await bindingStore.updateLastUsed(bindingId, new Date().toISOString());
         },
-        async markRuntimeUnavailable(runtimeId) {
-            await options.runtimeStore.updateHealth(runtimeId, 'unavailable');
+        async markRuntimeUnavailable(runtimeId, reason) {
+            const now = new Date();
+            await options.runtimeStore.updateHealth(runtimeId, 'unavailable', {
+                reason,
+                healthCheckedAt: now.toISOString(),
+                unavailableUntil: new Date(now.getTime() + DEFAULT_UNAVAILABLE_COOLDOWN_MS).toISOString(),
+            });
         },
     };
 }

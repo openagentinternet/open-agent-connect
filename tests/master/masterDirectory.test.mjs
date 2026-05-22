@@ -23,6 +23,7 @@ test('readChainMasterDirectoryWithFallback returns chain-backed online masters w
   let fallbackCalls = 0;
   const result = await readChainMasterDirectoryWithFallback({
     chainApiBaseUrl: 'https://chain.test',
+    socketPresenceApiBaseUrl: 'https://presence.test',
     now: () => 1_776_000_000_000,
     fetchSeededDirectoryMasters: async () => {
       fallbackCalls += 1;
@@ -66,12 +67,21 @@ test('readChainMasterDirectoryWithFallback returns chain-backed online masters w
           },
         });
       }
-      if (value === 'https://chain.test/address/pin/list/mvc-provider-address?cursor=0&size=1&path=%2Fprotocols%2Fmetabot-heartbeat') {
+      if (value === 'https://presence.test/group-chat/socket/online-users?cursor=0&size=100&withUserInfo=true') {
         return jsonResponse({
+          code: 0,
           data: {
+            total: 1,
+            onlineWindowSeconds: 1200,
             list: [
               {
-                seenTime: 1_776_000_000 - 30,
+                globalMetaId: 'idq1provider',
+                lastSeenAt: 1_776_000_000_000,
+                lastSeenAgoSeconds: 30,
+                deviceCount: 1,
+                userInfo: {
+                  name: 'Provider Bot',
+                },
               },
             ],
           },
@@ -87,6 +97,55 @@ test('readChainMasterDirectoryWithFallback returns chain-backed online masters w
   assert.equal(result.masters.length, 1);
   assert.equal(result.masters[0].displayName, 'Official Debug Master');
   assert.equal(result.masters[0].online, true);
+  assert.equal(result.masters[0].providerName, 'Provider Bot');
+  assert.equal(result.masters[0].lastSeenAgoSeconds, 30);
+});
+
+test('readChainMasterDirectoryWithFallback throws for online masters when socket presence is unavailable', async () => {
+  await assert.rejects(
+    () => readChainMasterDirectoryWithFallback({
+      chainApiBaseUrl: 'https://chain.test',
+      socketPresenceApiBaseUrl: 'https://presence.test',
+      onlineOnly: true,
+      fetchSeededDirectoryMasters: async () => [],
+      fetchImpl: async (url) => {
+        const value = String(url);
+        if (value.startsWith('https://chain.test/pin/path/list?')) {
+          return jsonResponse({
+            data: {
+              list: [
+                {
+                  id: 'master-pin-1',
+                  metaid: 'metaid-provider',
+                  address: 'mvc-provider-address',
+                  timestamp: 1_776_000_000,
+                  status: 0,
+                  operation: 'create',
+                  path: '/protocols/master-service',
+                  contentSummary: JSON.stringify({
+                    serviceName: 'official-debug-master',
+                    displayName: 'Official Debug Master',
+                    description: 'Structured debugging help.',
+                    providerMetaBot: 'idq1provider',
+                    masterKind: 'debug',
+                    hostModes: ['codex'],
+                    price: '0',
+                    currency: 'MVC',
+                  }),
+                },
+              ],
+              nextCursor: null,
+            },
+          });
+        }
+        if (value === 'https://presence.test/group-chat/socket/online-users?cursor=0&size=100&withUserInfo=true') {
+          throw new Error('socket presence unavailable');
+        }
+        throw new Error(`Unexpected URL ${value}`);
+      },
+    }),
+    /socket presence unavailable/,
+  );
 });
 
 test('resolveCurrentChainMasters keeps the latest modify row as the active master state', () => {

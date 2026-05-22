@@ -42,7 +42,6 @@ import {
   createRuntimeStateStore,
   type RuntimeDaemonRecord,
 } from '../core/state/runtimeStateStore';
-import { createProviderHeartbeatLoop } from '../core/provider/providerHeartbeatLoop';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createOnlineServiceCacheStore, DEFAULT_ONLINE_SERVICE_CACHE_SYNC_INTERVAL_MS } from '../core/discovery/onlineServiceCache';
 import { refreshOnlineServiceCacheFromChain } from '../core/discovery/onlineServiceCacheSync';
@@ -136,7 +135,7 @@ import type { CliDependencies, CliRuntimeContext } from './types';
 
 const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
 const DEFAULT_DAEMON_HOST = '127.0.0.1';
-const DEFAULT_DAEMON_START_TIMEOUT_MS = 5_000;
+const DEFAULT_DAEMON_START_TIMEOUT_MS = 15_000;
 const DAEMON_START_POLL_INTERVAL_MS = 100;
 const DAEMON_PREFERRED_PORT_ENV = 'METABOT_DAEMON_PREFERRED_PORT';
 const DEFAULT_DAEMON_PORT_BASE = 24_000;
@@ -3954,6 +3953,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   let refreshA2ASimplemsgListenerAfterIdentityRegistration: () => Promise<void> = async () => {
     pendingA2ASimplemsgRefreshAfterIdentityRegistration = true;
   };
+  let onProviderPresenceChanged: (enabled: boolean) => Promise<void> = async () => {};
 
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
@@ -3989,6 +3989,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     autoReplyConfig: sharedAutoReplyConfig,
     llmExecutor,
     providerRuntimeCanStart: useFakeProviderLlm ? async () => true : undefined,
+    onProviderPresenceChanged: (enabled) => onProviderPresenceChanged(enabled),
     onIdentityProfileRegistered: () => refreshA2ASimplemsgListenerAfterIdentityRegistration(),
   });
 
@@ -4014,21 +4015,6 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
 
   const runtimeStore = createRuntimeStateStore(paths);
   const providerPresenceStore = createProviderPresenceStateStore(paths);
-  const providerHeartbeatLoop = createProviderHeartbeatLoop({
-    signer,
-    presenceStore: providerPresenceStore,
-    getIdentity: async () => {
-      const state = await runtimeStore.readState();
-      if (!state.identity) {
-        return null;
-      }
-
-      return {
-        globalMetaId: state.identity.globalMetaId,
-        mvcAddress: state.identity.mvcAddress,
-      };
-    },
-  });
   daemonRecord = await runtimeStore.writeDaemon({
     ownerId: daemon.ownerId,
     pid: process.pid,
@@ -4038,11 +4024,6 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     startedAt: Date.now(),
     configHash: buildDaemonConfigHash(context.env),
   });
-  const providerPresence = await providerPresenceStore.read();
-  if (providerPresence.enabled) {
-    await providerHeartbeatLoop.start();
-  }
-
   const onlineServiceCacheStore = createOnlineServiceCacheStore(paths);
   const ratingDetailStateStore = createRatingDetailStateStore(paths);
   const refreshOnlineServiceCache = async () => {
@@ -4182,13 +4163,37 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   });
   refreshA2ASimplemsgListenerAfterIdentityRegistration = async () => {
     const currentConfig = await createConfigStore(paths).read().catch(() => daemonConfig);
+    const providerPresence = await providerPresenceStore.read().catch(() => ({ enabled: true }));
     await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
-      enabled: currentConfig.a2a.simplemsgListenerEnabled,
+      enabled: currentConfig.a2a.simplemsgListenerEnabled && providerPresence.enabled,
       listener: simplemsgListener,
       watchdog: simplemsgPresenceWatchdog,
     });
   };
-  if (daemonConfig.a2a.simplemsgListenerEnabled) {
+  onProviderPresenceChanged = async (enabled) => {
+    const currentConfig = await createConfigStore(paths).read().catch(() => daemonConfig);
+    await createConfigStore(paths).set({
+      ...currentConfig,
+      a2a: {
+        ...currentConfig.a2a,
+        simplemsgListenerEnabled: enabled,
+      },
+    });
+    if (!enabled) {
+      simplemsgPresenceWatchdog.stop();
+      simplemsgListener.stop();
+      chatAutoReplyBackfill.stop();
+      return;
+    }
+    await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
+      enabled: true,
+      listener: simplemsgListener,
+      watchdog: simplemsgPresenceWatchdog,
+    });
+    chatAutoReplyBackfill.start();
+  };
+  const providerPresence = await providerPresenceStore.read();
+  if (daemonConfig.a2a.simplemsgListenerEnabled && providerPresence.enabled) {
     await simplemsgListener.start();
     simplemsgPresenceWatchdog.start();
     chatAutoReplyBackfill.start();
@@ -4215,7 +4220,6 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     simplemsgPresenceWatchdog.stop();
     simplemsgListener.stop();
     chatAutoReplyBackfill.stop();
-    providerHeartbeatLoop.stop();
     clearInterval(onlineServiceCacheInterval);
     await runtimeStore.clearDaemon(process.pid);
     await daemon.close();

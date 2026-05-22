@@ -17,6 +17,11 @@ const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateS
 const { createPublishedMasterStateStore } = require('../../dist/core/master/masterPublishedState.js');
 const { buildMasterResponseJson, parseMasterRequest } = require('../../dist/core/master/masterMessageSchema.js');
 
+const TEST_SOCKET_PRESENCE_OPTIONS = {
+  socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
+  socketPresenceFailureMode: 'assume_service_providers_online',
+};
+
 async function createProfileHome(prefix, slug = 'test-profile') {
   const systemHome = await mkdtemp(path.join(os.tmpdir(), prefix));
   const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
@@ -116,15 +121,13 @@ test('manual host-action can preview Ask Master from host-visible context and co
   });
   await providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: Date.now(),
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-2',
-    lastHeartbeatTxid: 'heartbeat-tx-2',
   });
 
   const writes = [];
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     getDaemonRecord: () => null,
+    ...TEST_SOCKET_PRESENCE_OPTIONS,
     signer: {
       async getPrivateChatIdentity() {
         return {
@@ -348,15 +351,13 @@ test('accepted suggestion can preview, confirm, complete, and keep suggest metad
   });
   await providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: Date.now(),
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-3',
-    lastHeartbeatTxid: 'heartbeat-tx-3',
   });
 
   const writes = [];
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     getDaemonRecord: () => null,
+    ...TEST_SOCKET_PRESENCE_OPTIONS,
     signer: {
       async getPrivateChatIdentity() {
         return {
@@ -560,15 +561,13 @@ test('suggest host flow can run through CLI entrypoints before accept, preview, 
   });
   await providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: Date.now(),
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-4',
-    lastHeartbeatTxid: 'heartbeat-tx-4',
   });
 
   const writes = [];
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     getDaemonRecord: () => null,
+    ...TEST_SOCKET_PRESENCE_OPTIONS,
     signer: {
       async getPrivateChatIdentity() {
         return {

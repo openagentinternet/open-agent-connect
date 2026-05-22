@@ -9,22 +9,9 @@ const node_path_1 = __importDefault(require("node:path"));
 const runtimeStateStore_1 = require("../state/runtimeStateStore");
 const paths_1 = require("../state/paths");
 let atomicWriteSequence = 0;
-function normalizeText(value) {
-    return typeof value === 'string' ? value.trim() : '';
-}
-function normalizeNumber(value) {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-        return value;
-    }
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-}
 function createEmptyPresenceState() {
     return {
-        enabled: false,
-        lastHeartbeatAt: null,
-        lastHeartbeatPinId: null,
-        lastHeartbeatTxid: null,
+        enabled: true,
     };
 }
 function normalizeProviderPresenceState(value) {
@@ -33,9 +20,6 @@ function normalizeProviderPresenceState(value) {
     }
     return {
         enabled: value.enabled === true,
-        lastHeartbeatAt: normalizeNumber(value.lastHeartbeatAt),
-        lastHeartbeatPinId: normalizeText(value.lastHeartbeatPinId) || null,
-        lastHeartbeatTxid: normalizeText(value.lastHeartbeatTxid) || null,
     };
 }
 async function readJsonFile(filePath) {

@@ -226,7 +226,7 @@ test('parseMasterResponse accepts the documented structured response envelope, i
     masterKind: 'debug',
     status: 'unavailable',
     summary: '当前 Master 暂不可用。',
-    findings: ['provider heartbeat 不在线'],
+    findings: ['provider socket presence 不在线'],
     recommendations: ['稍后重试'],
     risks: ['不要误判为 schema 错误'],
     confidence: 0.25,
@@ -237,7 +237,7 @@ test('parseMasterResponse accepts the documented structured response envelope, i
   assert.equal(completed.ok, true);
   assert.equal(completed.value.status, 'unavailable');
   assert.equal(completed.value.responder.masterServicePinId, 'master-pin-1');
-  assert.deepEqual(completed.value.structuredData.findings, ['provider heartbeat 不在线']);
+  assert.deepEqual(completed.value.structuredData.findings, ['provider socket presence 不在线']);
   assert.deepEqual(completed.value.structuredData.recommendations, ['稍后重试']);
   assert.equal(completed.value.structuredData.confidence, 0.25);
 });

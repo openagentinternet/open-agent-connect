@@ -1,9 +1,6 @@
 import { type MetabotPaths } from '../state/paths';
 export interface ProviderPresenceState {
     enabled: boolean;
-    lastHeartbeatAt: number | null;
-    lastHeartbeatPinId: string | null;
-    lastHeartbeatTxid: string | null;
 }
 export interface ProviderPresenceStateStore {
     paths: MetabotPaths;

@@ -51,7 +51,6 @@ const postBuzz_1 = require("../core/buzz/postBuzz");
 const bootstrapFlow_1 = require("../core/bootstrap/bootstrapFlow");
 const chainDirectoryReader_1 = require("../core/discovery/chainDirectoryReader");
 const onlineServiceCache_1 = require("../core/discovery/onlineServiceCache");
-const chainHeartbeatDirectory_1 = require("../core/discovery/chainHeartbeatDirectory");
 const socketPresenceDirectory_1 = require("../core/discovery/socketPresenceDirectory");
 const sessionStateStore_1 = require("../core/a2a/sessionStateStore");
 const privateChatStateStore_1 = require("../core/chat/privateChatStateStore");
@@ -1077,17 +1076,77 @@ async function decorateServicesWithSocketPresence(input) {
         return markServicesOfflineForPresenceUnavailable(input.services);
     }
 }
-function isProviderPresenceOnline(input, nowMs = Date.now()) {
-    if (input.enabled !== true || !input.lastHeartbeatPinId || !Number.isFinite(input.lastHeartbeatAt)) {
-        return false;
+function offlineSocketPresenceStatus(input) {
+    return {
+        enabled: input.enabled,
+        source: 'socket_presence',
+        online: false,
+        lastSeenSec: null,
+        lastSeenAt: null,
+        lastSeenAgoSeconds: null,
+        deviceCount: null,
+        providerName: '',
+        error: normalizeText(input.error) || null,
+    };
+}
+async function readSocketPresenceStatusForGlobalMetaId(input) {
+    const enabled = input.enabled === true;
+    const globalMetaId = normalizeComparableGlobalMetaId(input.globalMetaId);
+    if (!enabled || !globalMetaId) {
+        return offlineSocketPresenceStatus({ enabled });
     }
-    return (nowMs - Number(input.lastHeartbeatAt)) <= (chainHeartbeatDirectory_1.HEARTBEAT_ONLINE_WINDOW_SEC * 1000);
+    try {
+        const presence = await (0, socketPresenceDirectory_1.readOnlineMetaBotsFromSocketPresence)({
+            apiBaseUrl: input.socketPresenceApiBaseUrl,
+            limit: MAX_NETWORK_BOT_LIST_LIMIT,
+        });
+        const lastSeenIndex = buildSocketPresenceLastSeenIndex(presence.bots);
+        const entry = lastSeenIndex.get(globalMetaId);
+        if (!entry) {
+            return offlineSocketPresenceStatus({ enabled });
+        }
+        return {
+            enabled,
+            source: 'socket_presence',
+            online: true,
+            lastSeenSec: normalizeEpochSeconds(entry.lastSeenAt),
+            lastSeenAt: entry.lastSeenAt,
+            lastSeenAgoSeconds: entry.lastSeenAgoSeconds,
+            deviceCount: presence.bots.find((bot) => normalizeComparableGlobalMetaId(bot.globalMetaId) === globalMetaId)?.deviceCount ?? null,
+            providerName: entry.name,
+            error: null,
+        };
+    }
+    catch (error) {
+        if (input.socketPresenceFailureMode === 'assume_service_providers_online') {
+            const now = Date.now();
+            return {
+                enabled,
+                source: 'socket_presence',
+                online: true,
+                lastSeenSec: normalizeEpochSeconds(now),
+                lastSeenAt: now,
+                lastSeenAgoSeconds: 0,
+                deviceCount: 1,
+                providerName: '',
+                error: null,
+            };
+        }
+        return offlineSocketPresenceStatus({
+            enabled,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
 }
 function summarizeMaster(record, options = {}) {
     return {
         ...(0, masterDirectory_1.summarizePublishedMaster)(record),
         online: options.online === true,
         lastSeenSec: options.lastSeenSec ?? null,
+        lastSeenAt: options.lastSeenAt ?? null,
+        lastSeenAgoSeconds: options.lastSeenAgoSeconds ?? null,
+        deviceCount: options.deviceCount ?? null,
+        providerName: normalizeText(options.providerName) || '',
         providerDaemonBaseUrl: normalizeText(options.providerDaemonBaseUrl) || null,
         directorySeedLabel: normalizeText(options.directorySeedLabel) || null,
     };
@@ -1351,10 +1410,11 @@ async function hydrateMasterTriggerObservationDirectory(input) {
         masterStateStore: input.masterStateStore,
         directorySeedsPath: input.directorySeedsPath,
         chainApiBaseUrl: input.chainApiBaseUrl,
+        socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+        socketPresenceFailureMode: input.socketPresenceFailureMode,
         onlineOnly: false,
         host: input.observation.hostMode,
-        localProviderOnline: input.localProviderOnline,
-        localLastSeenSec: input.localLastSeenSec,
+        localProviderPresence: input.localProviderPresence,
         providerDaemonBaseUrl: input.providerDaemonBaseUrl,
         providerGlobalMetaId: input.providerGlobalMetaId,
     });
@@ -2996,13 +3056,19 @@ async function listRuntimeDirectoryMasters(input) {
     const localMasters = localMasterState.masters
         .filter((master) => master.available === 1)
         .map((master) => summarizeMaster(master, {
-        online: input.localProviderOnline
+        online: input.localProviderPresence.online
             && normalizeText(master.providerGlobalMetaId) === normalizeText(input.providerGlobalMetaId),
-        lastSeenSec: input.localProviderOnline ? input.localLastSeenSec : null,
+        lastSeenSec: input.localProviderPresence.online ? input.localProviderPresence.lastSeenSec : null,
+        lastSeenAt: input.localProviderPresence.online ? input.localProviderPresence.lastSeenAt : null,
+        lastSeenAgoSeconds: input.localProviderPresence.online ? input.localProviderPresence.lastSeenAgoSeconds : null,
+        deviceCount: input.localProviderPresence.online ? input.localProviderPresence.deviceCount : null,
+        providerName: input.localProviderPresence.providerName,
         providerDaemonBaseUrl: input.providerDaemonBaseUrl || null,
     }));
     const directory = await (0, masterDirectory_1.readChainMasterDirectoryWithFallback)({
         chainApiBaseUrl: input.chainApiBaseUrl,
+        socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+        socketPresenceFailureMode: input.socketPresenceFailureMode,
         onlineOnly: input.onlineOnly,
         fetchSeededDirectoryMasters: async () => fetchSeededDirectoryMasters(input.directorySeedsPath),
     });
@@ -3035,11 +3101,12 @@ async function resolveExplicitMasterTarget(input) {
         masterStateStore: input.masterStateStore,
         directorySeedsPath: input.directorySeedsPath,
         chainApiBaseUrl: input.chainApiBaseUrl,
+        socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+        socketPresenceFailureMode: input.socketPresenceFailureMode,
         onlineOnly: false,
         host: '',
         masterKind: undefined,
-        localProviderOnline: input.localProviderOnline,
-        localLastSeenSec: input.localLastSeenSec,
+        localProviderPresence: input.localProviderPresence,
         providerDaemonBaseUrl: input.providerDaemonBaseUrl,
         providerGlobalMetaId: input.providerGlobalMetaId,
     });
@@ -3058,11 +3125,12 @@ async function resolveSuggestedMasterTarget(input) {
         masterStateStore: input.masterStateStore,
         directorySeedsPath: input.directorySeedsPath,
         chainApiBaseUrl: input.chainApiBaseUrl,
+        socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+        socketPresenceFailureMode: input.socketPresenceFailureMode,
         host: input.host,
         onlineOnly: true,
         providerGlobalMetaId: input.providerGlobalMetaId,
-        localProviderOnline: input.localProviderOnline,
-        localLastSeenSec: input.localLastSeenSec,
+        localProviderPresence: input.localProviderPresence,
         providerDaemonBaseUrl: input.providerDaemonBaseUrl,
     });
     if (explicit.selectedMaster?.online) {
@@ -3073,11 +3141,12 @@ async function resolveSuggestedMasterTarget(input) {
         masterStateStore: input.masterStateStore,
         directorySeedsPath: input.directorySeedsPath,
         chainApiBaseUrl: input.chainApiBaseUrl,
+        socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+        socketPresenceFailureMode: input.socketPresenceFailureMode,
         onlineOnly: true,
         host: normalizeText(input.host) || DEFAULT_MASTER_HOST_MODE,
         masterKind: preferredMasterKind || undefined,
-        localProviderOnline: input.localProviderOnline,
-        localLastSeenSec: input.localLastSeenSec,
+        localProviderPresence: input.localProviderPresence,
         providerDaemonBaseUrl: input.providerDaemonBaseUrl,
         providerGlobalMetaId: input.providerGlobalMetaId,
     });
@@ -4032,6 +4101,18 @@ function createDefaultMetabotDaemonHandlers(input) {
     let masterTriggerMemoryState = (0, masterTriggerEngine_1.createMasterTriggerMemoryState)();
     const masterAutoPrepareCounts = new Map();
     let lastMasterAutoPreparedAt = null;
+    async function readLocalProviderSocketPresence(inputPresence) {
+        const [state, presence] = await Promise.all([
+            inputPresence.runtimeStateStore.readState(),
+            inputPresence.providerPresenceStore.read(),
+        ]);
+        return readSocketPresenceStatusForGlobalMetaId({
+            enabled: presence.enabled,
+            globalMetaId: state.identity?.globalMetaId ?? null,
+            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceFailureMode: input.socketPresenceFailureMode,
+        });
+    }
     function getMasterAutoPrepareCount(traceId) {
         const normalizedTraceId = normalizeText(traceId);
         if (!normalizedTraceId) {
@@ -8550,16 +8631,19 @@ function createDefaultMetabotDaemonHandlers(input) {
                             ...currentState.masters.filter((master) => master.currentPinId !== published.record.currentPinId),
                         ],
                     }));
-                    const presence = await actor.providerPresenceStore.read();
                     const daemon = input.getDaemonRecord();
-                    const online = isProviderPresenceOnline(presence, now);
-                    const lastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
-                        ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
-                        : null;
+                    const localProviderPresence = await readLocalProviderSocketPresence({
+                        runtimeStateStore: actor.runtimeStateStore,
+                        providerPresenceStore: actor.providerPresenceStore,
+                    });
                     return (0, commandResult_1.commandSuccess)({
                         ...summarizeMaster(published.record, {
-                            online,
-                            lastSeenSec,
+                            online: localProviderPresence.online,
+                            lastSeenSec: localProviderPresence.lastSeenSec,
+                            lastSeenAt: localProviderPresence.lastSeenAt,
+                            lastSeenAgoSeconds: localProviderPresence.lastSeenAgoSeconds,
+                            deviceCount: localProviderPresence.deviceCount,
+                            providerName: localProviderPresence.providerName,
                             providerDaemonBaseUrl: daemon?.baseUrl || null,
                         }),
                         txids: published.chainWrite.txids,
@@ -8577,20 +8661,20 @@ function createDefaultMetabotDaemonHandlers(input) {
             list: async ({ online, masterKind }) => {
                 const state = await runtimeStateStore.readState();
                 const daemon = input.getDaemonRecord();
-                const presence = await providerPresenceStore.read();
-                const localProviderOnline = isProviderPresenceOnline(presence);
-                const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
-                    ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
-                    : null;
+                const localProviderPresence = await readLocalProviderSocketPresence({
+                    runtimeStateStore,
+                    providerPresenceStore,
+                });
                 const directory = await listRuntimeDirectoryMasters({
                     masterStateStore,
                     directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
                     chainApiBaseUrl: input.chainApiBaseUrl,
+                    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+                    socketPresenceFailureMode: input.socketPresenceFailureMode,
                     onlineOnly: online === true,
                     host: DEFAULT_MASTER_HOST_MODE,
                     masterKind,
-                    localProviderOnline,
-                    localLastSeenSec,
+                    localProviderPresence,
                     providerDaemonBaseUrl: daemon?.baseUrl || null,
                     providerGlobalMetaId: state.identity?.globalMetaId ?? null,
                 });
@@ -8613,11 +8697,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('ask_master_disabled', 'Ask Master is disabled in the local config.');
                 }
                 const daemon = input.getDaemonRecord();
-                const presence = await providerPresenceStore.read();
-                const localProviderOnline = isProviderPresenceOnline(presence);
-                const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
-                    ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
-                    : null;
+                const localProviderPresence = await readLocalProviderSocketPresence({
+                    runtimeStateStore,
+                    providerPresenceStore,
+                });
                 const hostContext = readObject(request.context) ?? {};
                 const hostMode = normalizeText(hostContext.hostMode) || DEFAULT_MASTER_HOST_MODE;
                 if (actionKind === 'accept_suggest') {
@@ -8642,10 +8725,11 @@ function createDefaultMetabotDaemonHandlers(input) {
                         masterStateStore,
                         directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
                         chainApiBaseUrl: input.chainApiBaseUrl,
+                        socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+                        socketPresenceFailureMode: input.socketPresenceFailureMode,
                         host: suggestion.hostMode,
                         onlineOnly: true,
-                        localProviderOnline,
-                        localLastSeenSec,
+                        localProviderPresence,
                         providerDaemonBaseUrl: daemon?.baseUrl || null,
                         providerGlobalMetaId: identity.globalMetaId,
                     });
@@ -8927,19 +9011,15 @@ function createDefaultMetabotDaemonHandlers(input) {
                     masterStateStore,
                     directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
                     chainApiBaseUrl: input.chainApiBaseUrl,
+                    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+                    socketPresenceFailureMode: input.socketPresenceFailureMode,
                     onlineOnly: false,
                     host: hostMode,
-                    localProviderOnline,
-                    localLastSeenSec,
+                    localProviderPresence,
                     providerDaemonBaseUrl: daemon?.baseUrl || null,
                     providerGlobalMetaId: identity.globalMetaId,
                 });
-                const eligibleMasters = directory.masters.map((entry) => (normalizeText(entry.providerGlobalMetaId) === identity.globalMetaId
-                    ? {
-                        ...entry,
-                        online: true,
-                    }
-                    : entry));
+                const eligibleMasters = directory.masters;
                 let prepared;
                 try {
                     prepared = (0, masterHostAdapter_1.prepareManualAskHostAction)({
@@ -9041,11 +9121,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                     signer: actor.signer,
                 });
                 const daemon = input.getDaemonRecord();
-                const presence = await actor.providerPresenceStore.read();
-                const localProviderOnline = isProviderPresenceOnline(presence);
-                const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
-                    ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
-                    : null;
+                const localProviderPresence = await readLocalProviderSocketPresence({
+                    runtimeStateStore: actor.runtimeStateStore,
+                    providerPresenceStore: actor.providerPresenceStore,
+                });
                 if (rawInput.confirm === true) {
                     const traceId = normalizeText(rawInput.traceId);
                     if (!traceId) {
@@ -9092,9 +9171,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                         masterStateStore: actor.masterStateStore,
                         directorySeedsPath: actor.runtimeStateStore.paths.directorySeedsPath,
                         chainApiBaseUrl: input.chainApiBaseUrl,
+                        socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+                        socketPresenceFailureMode: input.socketPresenceFailureMode,
                         host: normalizeText(pendingAsk.request.caller.host) || DEFAULT_MASTER_HOST_MODE,
-                        localProviderOnline,
-                        localLastSeenSec,
+                        localProviderPresence,
                         providerDaemonBaseUrl: daemon?.baseUrl || null,
                         providerGlobalMetaId: state.identity.globalMetaId,
                     });
@@ -9362,8 +9442,9 @@ function createDefaultMetabotDaemonHandlers(input) {
                     masterStateStore: actor.masterStateStore,
                     directorySeedsPath: actor.runtimeStateStore.paths.directorySeedsPath,
                     chainApiBaseUrl: input.chainApiBaseUrl,
-                    localProviderOnline,
-                    localLastSeenSec,
+                    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+                    socketPresenceFailureMode: input.socketPresenceFailureMode,
+                    localProviderPresence,
                     providerDaemonBaseUrl: daemon?.baseUrl || null,
                     providerGlobalMetaId: state.identity.globalMetaId,
                 });
@@ -9418,11 +9499,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 const config = await configStore.read();
                 const daemon = input.getDaemonRecord();
-                const presence = await providerPresenceStore.read();
-                const localProviderOnline = isProviderPresenceOnline(presence);
-                const localLastSeenSec = Number.isFinite(presence.lastHeartbeatAt)
-                    ? Math.floor(Number(presence.lastHeartbeatAt) / 1000)
-                    : null;
+                const localProviderPresence = await readLocalProviderSocketPresence({
+                    runtimeStateStore,
+                    providerPresenceStore,
+                });
                 const draft = readMasterAskDraft(readObject(rawInput.draft) ?? rawInput);
                 const directoryPresence = readMasterTriggerDirectoryPresence(rawInput);
                 const observation = await hydrateMasterTriggerObservationDirectory({
@@ -9432,8 +9512,9 @@ function createDefaultMetabotDaemonHandlers(input) {
                     masterStateStore,
                     directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
                     chainApiBaseUrl: input.chainApiBaseUrl,
-                    localProviderOnline,
-                    localLastSeenSec,
+                    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+                    socketPresenceFailureMode: input.socketPresenceFailureMode,
+                    localProviderPresence,
                     providerDaemonBaseUrl: daemon?.baseUrl || null,
                     providerGlobalMetaId: state.identity.globalMetaId,
                 });
@@ -9515,9 +9596,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                     masterStateStore,
                     directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
                     chainApiBaseUrl: input.chainApiBaseUrl,
+                    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+                    socketPresenceFailureMode: input.socketPresenceFailureMode,
                     host: observation.hostMode,
-                    localProviderOnline,
-                    localLastSeenSec,
+                    localProviderPresence,
                     providerDaemonBaseUrl: daemon?.baseUrl || null,
                     providerGlobalMetaId: state.identity.globalMetaId,
                 });
@@ -10057,31 +10139,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     });
                 }
                 catch (error) {
-                    try {
-                        const state = await runtimeStateStore.readState();
-                        const directory = await listRuntimeDirectoryServices({
-                            state,
-                            directorySeedsPath: runtimeStateStore.paths.directorySeedsPath,
-                            onlineServiceCacheStore,
-                            ratingDetailStateStore,
-                            resolvePeerChatPublicKey,
-                            chainApiBaseUrl: input.chainApiBaseUrl,
-                            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
-                            socketPresenceFailureMode: input.socketPresenceFailureMode,
-                            onlineOnly: false,
-                        });
-                        const bots = dedupeOnlineBotsFromServices(directory.services, normalizedLimit);
-                        return (0, commandResult_1.commandSuccess)({
-                            source: 'service_directory_fallback',
-                            fallbackUsed: true,
-                            total: bots.length,
-                            onlineWindowSeconds: null,
-                            bots,
-                        });
-                    }
-                    catch {
-                        return (0, commandResult_1.commandFailed)('socket_presence_unavailable', error instanceof Error ? error.message : String(error));
-                    }
+                    return (0, commandResult_1.commandFailed)('socket_presence_unavailable', error instanceof Error ? error.message : String(error));
                 }
             },
             listSources: async () => {
@@ -10139,7 +10197,10 @@ function createDefaultMetabotDaemonHandlers(input) {
             getSummary: async () => {
                 const state = await runtimeStateStore.readState();
                 const masterState = await masterStateStore.read();
-                const presence = await providerPresenceStore.read();
+                const presence = await readLocalProviderSocketPresence({
+                    runtimeStateStore,
+                    providerPresenceStore,
+                });
                 const ratingSnapshot = await readRatingDetailSnapshot({
                     ratingDetailStateStore,
                     chainApiBaseUrl: input.chainApiBaseUrl,
@@ -10214,11 +10275,17 @@ function createDefaultMetabotDaemonHandlers(input) {
                 if (!state.identity) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before changing provider presence.');
                 }
-                const presence = await providerPresenceStore.update((current) => ({
+                const presenceConfig = await providerPresenceStore.update((current) => ({
                     ...current,
                     enabled,
                 }));
                 await input.onProviderPresenceChanged?.(enabled);
+                const presence = await readSocketPresenceStatusForGlobalMetaId({
+                    enabled: presenceConfig.enabled,
+                    globalMetaId: state.identity.globalMetaId,
+                    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+                    socketPresenceFailureMode: input.socketPresenceFailureMode,
+                });
                 return (0, commandResult_1.commandSuccess)({
                     identity: {
                         metabotId: state.identity.metabotId,
@@ -12511,6 +12578,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         globalMetaId: identity.globalMetaId,
                         mvcAddress: identity.mvcAddress,
                     });
+                    await notifyIdentityProfileRegistered();
                     return (0, commandResult_1.commandSuccess)({
                         profile,
                         identity,
