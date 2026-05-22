@@ -263,6 +263,7 @@ export async function confirmWalletTransfer(input: WalletConfirmTransferInput): 
       txid: result.txid,
       explorerUrl: `${prepared.parsed.adapter.explorerBaseUrl}/tx/${result.txid}`,
       amount: formatNativeAmount(prepared.parsed.satoshis, prepared.parsed.currency),
+      amountSatoshis: prepared.parsed.satoshis,
       toAddress: input.toAddress,
     });
   } catch (error) {

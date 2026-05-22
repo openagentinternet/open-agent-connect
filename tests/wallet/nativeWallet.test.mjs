@@ -143,6 +143,7 @@ test('confirmWalletTransfer broadcasts a signed transfer and returns tx metadata
   assert.equal(result.data.txid, 'doge-final-txid');
   assert.equal(result.data.explorerUrl, 'https://explorer.example/doge/tx/doge-final-txid');
   assert.equal(result.data.amount, '0.00000100 DOGE');
+  assert.equal(result.data.amountSatoshis, 100);
   assert.equal(calls.some((call) => call.rawTx === 'doge-signed-raw'), true);
 });
 
