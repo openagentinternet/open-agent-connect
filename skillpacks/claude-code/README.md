@@ -71,4 +71,4 @@ rating closure end to end.
 - Bundled compatibility copy: `runtime/compatibility.json`
 - Bundled shared installer: `runtime/shared-install.sh`
 - Host pack id: `claude-code`
-- Package version: `0.2.17`
+- Package version: `0.2.18`

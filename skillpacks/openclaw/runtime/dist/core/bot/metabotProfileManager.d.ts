@@ -43,6 +43,8 @@ export interface MetabotWalletInfo {
     addresses: {
         btc: string;
         mvc: string;
+        doge: string;
+        opcat: string;
     };
 }
 export interface MetabotMnemonicBackup {

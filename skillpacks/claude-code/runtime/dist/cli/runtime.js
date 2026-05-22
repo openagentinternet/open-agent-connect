@@ -51,6 +51,7 @@ const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const writePin_1 = require("../core/chain/writePin");
 const registry_1 = require("../core/chain/adapters/registry");
+const nativeWallet_1 = require("../core/wallet/nativeWallet");
 const loom_1 = require("../core/loom");
 const daemon_1 = require("../daemon");
 const defaultHandlers_1 = require("../daemon/defaultHandlers");
@@ -235,40 +236,6 @@ async function requireFreshLoomRawState(context, cacheStore) {
     catch (error) {
         return loomRefreshFailure(error);
     }
-}
-/**
- * Parse a transfer amount string like "0.01DOGE", "0.00001BTC", "1SPACE", "10OPCAT".
- * DOGE amounts: unit is DOGE (1 DOGE = 1e8 satoshis).
- * BTC amounts: unit is BTC (1 BTC = 1e8 satoshis).
- * SPACE amounts: unit is SPACE (1 SPACE = 1e8 satoshis).
- * OPCAT amounts: unit is OPCAT (1 OPCAT = 1e8 satoshis).
- */
-function parseTransferAmount(raw, adapters) {
-    const trimmed = raw.trim();
-    const match = trimmed.match(/^([\d.]+)\s*(btc|space|doge|opcat)$/i);
-    if (!match) {
-        const hasUnit = /[a-z]/i.test(trimmed);
-        if (!hasUnit) {
-            throw new Error('Missing currency unit. Append BTC, SPACE, DOGE, or OPCAT to the amount. Example: 0.00001BTC, 1SPACE, 0.01DOGE, or 10OPCAT.');
-        }
-        throw new Error(`Unsupported currency unit in "${raw}". Supported units: BTC, SPACE, DOGE, OPCAT.`);
-    }
-    const amount = parseFloat(match[1]);
-    if (!Number.isFinite(amount) || amount <= 0) {
-        throw new Error(`Invalid amount "${match[1]}". Must be a positive number.`);
-    }
-    const unit = match[2].toUpperCase();
-    const chain = unit === 'BTC' ? 'btc' : unit === 'DOGE' ? 'doge' : unit === 'OPCAT' ? 'opcat' : 'mvc';
-    const adapter = adapters.get(chain);
-    if (!adapter) {
-        throw new Error(`No adapter registered for chain "${chain}".`);
-    }
-    return {
-        chain,
-        currency: unit,
-        satoshis: Math.round(amount * 1e8),
-        adapter,
-    };
 }
 function parseDaemonPort(value) {
     const parsed = Number.parseInt(normalizeEnvText(value), 10);
@@ -1762,82 +1729,21 @@ async function runWalletTransferRuntime(context, input) {
         return (0, commandResult_1.commandFailed)('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
     }
     const adapters = (0, registry_1.createDefaultChainAdapterRegistry)();
-    let parsed;
-    try {
-        parsed = parseTransferAmount(input.amountRaw, adapters);
-    }
-    catch (error) {
-        return (0, commandResult_1.commandFailed)('invalid_argument', error instanceof Error ? error.message : String(error));
-    }
-    const adapter = parsed.adapter;
-    const minSatoshis = adapter.minTransferSatoshis;
-    if (parsed.satoshis < minSatoshis) {
-        return (0, commandResult_1.commandFailed)('invalid_argument', `Amount is below the minimum of ${minSatoshis} satoshis for ${parsed.currency}.`);
-    }
-    const fromAddress = state.identity.addresses[parsed.chain] ?? state.identity.mvcAddress;
-    if (!fromAddress) {
-        return (0, commandResult_1.commandFailed)('identity_address_missing', `Current identity has no address for chain "${parsed.chain}".`);
-    }
-    const feeRate = await adapter.fetchFeeRate();
-    const feePerByte = adapter.feeRateUnit === 'sat/KB' ? feeRate / 1000 : feeRate;
-    const estimatedFeeSatoshis = Math.ceil(392 * feePerByte);
-    const totalRequired = parsed.satoshis + estimatedFeeSatoshis;
-    const balance = await adapter.fetchBalance(fromAddress);
-    if (balance.totalSatoshis < totalRequired) {
-        const balanceDisplay = `${balance.totalSatoshis} sats (${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency})`;
-        const unconfirmedNote = balance.unconfirmedSatoshis > 0
-            ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
-            : '';
-        return (0, commandResult_1.commandFailed)('insufficient_balance', `Total balance ${balanceDisplay}${unconfirmedNote} is below the required ${totalRequired} sats (${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency} + estimated fee ${estimatedFeeSatoshis} sats).`);
-    }
     if (!input.confirm) {
-        const currentBalanceDisplay = `${(balance.totalSatoshis / 1e8).toFixed(8)} ${parsed.currency}`;
-        const unconfirmedNote = balance.unconfirmedSatoshis > 0
-            ? ` (includes ${balance.unconfirmedSatoshis} unconfirmed sats)`
-            : '';
-        return (0, commandResult_1.commandAwaitingConfirmation)({
-            fromAddress,
-            currentBalance: currentBalanceDisplay + unconfirmedNote,
-            currentBalanceSatoshis: balance.totalSatoshis,
+        return (0, nativeWallet_1.previewWalletTransfer)({
+            identity: state.identity,
+            adapters,
             toAddress: input.toAddress,
-            amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
-            amountSatoshis: parsed.satoshis,
-            estimatedFee: `${(estimatedFeeSatoshis / 1e8).toFixed(8)} ${parsed.currency}`,
-            estimatedFeeSatoshis,
-            feeRateSatPerVb: feeRate,
-            currency: parsed.currency,
-            chain: parsed.chain,
+            amountRaw: input.amountRaw,
         });
     }
-    const secretStore = (0, fileSecretStore_1.createFileSecretStore)(homeDir);
-    const secrets = await secretStore.readIdentitySecrets();
-    if (!secrets?.mnemonic) {
-        return (0, commandResult_1.commandFailed)('identity_secrets_missing', 'Identity mnemonic not found in the secret store.');
-    }
-    try {
-        const result = await (0, localMnemonicSigner_1.executeTransfer)(adapter, {
-            mnemonic: secrets.mnemonic,
-            path: secrets.path ?? state.identity.path ?? "m/44'/10001'/0'/0/0",
-            toAddress: input.toAddress,
-            amountSatoshis: parsed.satoshis,
-            feeRate,
-        });
-        const explorerUrl = `${adapter.explorerBaseUrl}/tx/${result.txid}`;
-        return (0, commandResult_1.commandSuccess)({
-            txid: result.txid,
-            explorerUrl,
-            amount: `${(parsed.satoshis / 1e8).toFixed(8)} ${parsed.currency}`,
-            toAddress: input.toAddress,
-        });
-    }
-    catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        const lower = msg.toLowerCase();
-        if (lower.includes('insufficient') || lower.includes('not enough') || lower.includes('余额不足')) {
-            return (0, commandResult_1.commandFailed)('insufficient_balance', `Balance is insufficient: ${msg}`);
-        }
-        return (0, commandResult_1.commandFailed)('transfer_broadcast_failed', `Transfer failed: ${msg}. Verify the recipient address is correct and that you have enough total balance to cover the amount plus fees. If UTXO inputs appear stale, wait a few seconds and retry.`);
-    }
+    return (0, nativeWallet_1.confirmWalletTransfer)({
+        identity: state.identity,
+        adapters,
+        toAddress: input.toAddress,
+        amountRaw: input.amountRaw,
+        secretStore: (0, fileSecretStore_1.createFileSecretStore)(homeDir),
+    });
 }
 function createDefaultCliDependencies(context) {
     return {
@@ -2246,36 +2152,11 @@ function createDefaultCliDependencies(context) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'No local MetaBot identity is loaded for the current active home.');
                 }
                 const adapters = (0, registry_1.createDefaultChainAdapterRegistry)();
-                const allChains = Array.from(adapters.keys());
-                const targetChains = input.chain === 'all'
-                    ? allChains
-                    : [input.chain];
-                // Validate all chains are registered
-                for (const chain of targetChains) {
-                    if (!adapters.has(chain)) {
-                        return (0, commandResult_1.commandFailed)('invalid_flag', `Unsupported --chain value: ${chain}. Supported values: all, ${Array.from(adapters.keys()).join(', ')}.`);
-                    }
-                }
-                try {
-                    const balances = {};
-                    for (const chain of targetChains) {
-                        const adapter = adapters.get(chain);
-                        const address = state.identity.addresses[chain] ?? state.identity.mvcAddress;
-                        if (!address) {
-                            return (0, commandResult_1.commandFailed)('identity_address_missing', `Current identity has no address for chain "${chain}".`);
-                        }
-                        const balance = await adapter.fetchBalance(address);
-                        balances[chain] = balance;
-                    }
-                    return (0, commandResult_1.commandSuccess)({
-                        chain: input.chain,
-                        globalMetaId: state.identity.globalMetaId,
-                        balances,
-                    });
-                }
-                catch (error) {
-                    return (0, commandResult_1.commandFailed)('wallet_balance_query_failed', error instanceof Error ? error.message : String(error));
-                }
+                return (0, nativeWallet_1.queryWalletBalances)({
+                    identity: state.identity,
+                    adapters,
+                    chain: input.chain,
+                });
             },
             transfer: async (input) => {
                 return runWalletTransferRuntime(context, input);

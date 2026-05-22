@@ -256,6 +256,18 @@ export interface MetabotDaemonHttpHandlers {
         getWallet?: (input: {
             slug: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        previewWalletTransfer?: (input: {
+            slug: string;
+            chain: string;
+            toAddress: string;
+            amount: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        confirmWalletTransfer?: (input: {
+            slug: string;
+            chain: string;
+            toAddress: string;
+            amount: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         getBackup?: (input: {
             slug: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
