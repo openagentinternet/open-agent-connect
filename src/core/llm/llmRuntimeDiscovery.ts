@@ -168,6 +168,28 @@ function providerPathEnvNames(provider: LlmProvider, platform: RuntimePlatformDe
   ]);
 }
 
+function providerModelEnvNames(provider: LlmProvider, platform: RuntimePlatformDefinition): string[] {
+  const aliases = new Set<string>();
+  aliases.add(normalizeEnvKey(provider));
+  for (const binaryName of platform.runtime.binaryNames) {
+    aliases.add(normalizeEnvKey(binaryName));
+  }
+  if (provider === 'claude-code') aliases.add('CLAUDE');
+  return [...aliases].flatMap((alias) => [
+    `OAC_${alias}_MODEL`,
+    `METABOT_${alias}_MODEL`,
+    `OPEN_AGENT_CONNECT_${alias}_MODEL`,
+  ]);
+}
+
+function providerModelFromEnv(provider: LlmProvider, platform: RuntimePlatformDefinition, env: NodeJS.ProcessEnv): string | undefined {
+  for (const envName of providerModelEnvNames(provider, platform)) {
+    const model = env[envName]?.trim();
+    if (model) return model;
+  }
+  return undefined;
+}
+
 async function executableCandidatesForProvider(
   provider: LlmProvider,
   platform: RuntimePlatformDefinition,
@@ -300,6 +322,7 @@ function buildDiscoveredRuntime(
     logoPath: platform.logoPath,
     authState,
     health: versionProbe.ok ? 'detected' : 'unavailable',
+    model: providerModelFromEnv(provider, platform, env),
     ...(versionProbe.ok
       ? {}
       : {
@@ -357,6 +380,7 @@ async function defaultRuntimeReadinessProbe(input: {
     timeout: input.timeoutMs,
     semanticInactivityTimeout: Math.min(input.timeoutMs, DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS),
     cwd: input.cwd ?? process.cwd(),
+    model: input.runtime.model,
   }, {
     emit(event: LlmExecutionEvent) {
       if (event.type === 'text') {

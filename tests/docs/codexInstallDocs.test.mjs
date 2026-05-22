@@ -109,6 +109,19 @@ test('unified install guide documents registry-driven bare install and force hos
   assert.match(guide, /oac install --host openclaw/);
   assert.match(guide, /advanced force-bind/i);
   assert.match(guide, /runtime discovery and `\/ui\/bot` logos come from `platformRegistry\.ts`/i);
+  assert.match(guide, /Runtime discovery requires a real CLI executable, not just a desktop app bundle/i);
+  assert.match(guide, /It is `healthy` only after the backend returns non-empty\s+text to a short readiness prompt/i);
+  assert.match(guide, /Primary\/Fallback provider pickers\s+only list `healthy` runtimes/i);
+  assert.match(guide, /`OAC_<PROVIDER>_PATH`/);
+  assert.match(guide, /`METABOT_<PROVIDER>_PATH`/);
+  assert.match(guide, /`OPEN_AGENT_CONNECT_<PROVIDER>_PATH`/);
+  assert.match(guide, /Default model overrides use the same aliases with `_MODEL`/);
+  assert.match(guide, /`OAC_<PROVIDER>_MODEL`/);
+  assert.match(guide, /`METABOT_<PROVIDER>_MODEL`/);
+  assert.match(guide, /`OPEN_AGENT_CONNECT_<PROVIDER>_MODEL`/);
+  assert.match(guide, /`OAC_OPENCODE_PATH`/);
+  assert.match(guide, /`METABOT_KIRO_CLI_PATH`/);
+  assert.match(guide, /`METABOT_OPENCODE_MODEL`/);
 
   assert.doesNotMatch(readme, /oac install --host codex/);
   assert.doesNotMatch(readme, /choose the host explicitly/i);

@@ -224,6 +224,7 @@ test('runtime discovery honors explicit provider path environment overrides outs
     env: {
       PATH: '',
       OAC_OPENCODE_PATH: opencodePath,
+      METABOT_OPENCODE_MODEL: 'opencode-default-model',
     },
     now: () => '2026-05-22T03:00:00.000Z',
     readinessProbe: async () => ({ ok: true, output: 'OK' }),
@@ -233,6 +234,7 @@ test('runtime discovery honors explicit provider path environment overrides outs
   assert.equal(result.runtimes.length, 1);
   assert.equal(result.runtimes[0].provider, 'opencode');
   assert.equal(result.runtimes[0].binaryPath, opencodePath);
+  assert.equal(result.runtimes[0].model, 'opencode-default-model');
   assert.equal(result.runtimes[0].health, 'healthy');
 });
 

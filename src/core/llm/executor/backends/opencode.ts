@@ -3,12 +3,15 @@ import { filterBlockedArgs, type LlmBackend, type LlmBackendFactory } from './ba
 import { addUsage, getString, isRecord, resolveJsonProcessError, runJsonLineProcess, stringifyContent, usageRecordHasTokens } from './jsonProcess';
 
 function buildOpenCodeArgs(request: LlmExecutionRequest): string[] {
-  const args = ['run', '--format', 'json'];
+  const args = ['run', '--format', 'json', '--dangerously-skip-permissions'];
+  if (request.cwd) args.push('--dir', request.cwd);
   if (request.model) args.push('--model', request.model);
   if (request.systemPrompt) args.push('--prompt', request.systemPrompt);
   if (request.resumeSessionId) args.push('--session', request.resumeSessionId);
   args.push(...filterBlockedArgs(request.extraArgs, {
     '--format': { takesValue: true },
+    '--dir': { takesValue: true },
+    '--dangerously-skip-permissions': { takesValue: false },
     '--model': { takesValue: true },
     '--prompt': { takesValue: true },
     '--session': { takesValue: true },
@@ -45,7 +48,7 @@ export function createOpenCodeBackend(binaryPath: string, env?: Record<string, s
         args,
         cwd: request.cwd,
         env,
-        requestEnv: { ...request.env, OPENCODE_PERMISSION: '{"*":"allow"}' },
+        requestEnv: { ...request.env, OPENCODE_PERMISSION: '{"*":"allow"}', ...(request.cwd ? { PWD: request.cwd } : {}) },
         timeoutMs: request.timeout,
         signal,
         emitter,

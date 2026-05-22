@@ -128,6 +128,31 @@ Supported platforms:
 - `trae` - Trae
 - `codebuddy` - CodeBuddy
 
+Runtime discovery requires a real CLI executable, not just a desktop app bundle.
+The daemon first checks explicit path overrides, then the daemon `PATH`, then
+the user's login shell path. A provider is `detected` when its binary is found
+and `--version` works. It is `healthy` only after the backend returns non-empty
+text to a short readiness prompt. `/ui/bot` Primary/Fallback provider pickers
+only list `healthy` runtimes.
+
+Explicit CLI path overrides are available when a provider is installed outside
+the daemon path:
+
+- `OAC_<PROVIDER>_PATH`
+- `METABOT_<PROVIDER>_PATH`
+- `OPEN_AGENT_CONNECT_<PROVIDER>_PATH`
+
+Default model overrides use the same aliases with `_MODEL`:
+
+- `OAC_<PROVIDER>_MODEL`
+- `METABOT_<PROVIDER>_MODEL`
+- `OPEN_AGENT_CONNECT_<PROVIDER>_MODEL`
+
+`<PROVIDER>` is the upper-case provider or binary name with punctuation replaced
+by `_`, for example `OAC_OPENCODE_PATH`, `METABOT_KIRO_CLI_PATH`,
+`OPEN_AGENT_CONNECT_CLAUDE_PATH`, `OAC_CODEBUDDY_PATH`, or
+`METABOT_OPENCODE_MODEL`.
+
 Skills are installed once under `~/.metabot/skills`. Host roots contain skill
 links pointing to `~/.metabot/skills/metabot-*`: symlinks on POSIX platforms and
 directory junctions on Windows. Bare `oac install` binds

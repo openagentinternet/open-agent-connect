@@ -205,6 +205,9 @@ test('registry preserves Claude Code and Codex executor metadata', async () => {
   assert.equal(codebuddy.executor.kind, 'codebuddy-stream-json');
   assert.equal(codebuddy.executor.backendFactoryExport, 'codeBuddyBackendFactory');
   assert.equal(codebuddy.executor.launchCommand, 'codebuddy -p <prompt> --output-format stream-json --dangerously-skip-permissions');
+
+  const opencode = getPlatformDefinition('opencode');
+  assert.equal(opencode.executor.launchCommand, 'opencode run --format json --dangerously-skip-permissions --dir <cwd>');
 });
 
 test('registry backend factory helper covers every managed provider and CLI runtime uses it', async () => {
@@ -231,6 +234,45 @@ test('registry backend factory helper covers every managed provider and CLI runt
   const runtimeSource = await fs.readFile(path.resolve('src/cli/runtime.ts'), 'utf8');
   assert.match(runtimeSource, /createRegistryBackendFactories\(\)/);
   assert.doesNotMatch(runtimeSource, /backends:\s*\{\s*codex:\s*codexBackendFactory,\s*['"]claude-code['"]:\s*claudeBackendFactory,\s*openclaw:\s*openClawBackendFactory,\s*\}/s);
+});
+
+test('LlmExecutor uses the runtime default model when request model is absent', async () => {
+  const base = await createTempDir();
+  let capturedModel = '';
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: path.join(base, 'skills'),
+    backends: {
+      codex: () => ({
+        provider: 'codex',
+        async execute(request) {
+          capturedModel = request.model || '';
+          return {
+            status: 'completed',
+            output: 'ok',
+            durationMs: 1,
+          };
+        },
+      }),
+    },
+  });
+
+  const sessionId = await executor.execute({
+    runtimeId: 'runtime-with-model',
+    runtime: { ...runtime, provider: 'codex', binaryPath: '/bin/codex', model: 'runtime-default-model' },
+    prompt: 'hello',
+  });
+
+  for (let i = 0; i < 20; i += 1) {
+    const session = await executor.getSession(sessionId);
+    if (session?.result) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  const session = await executor.getSession(sessionId);
+  assert.equal(capturedModel, 'runtime-default-model');
+  assert.equal(session.model, 'runtime-default-model');
 });
 
 test('file session manager persists, updates, lists, and deletes session records', async () => {
@@ -1049,7 +1091,7 @@ test('OpenCode backend launches run JSON mode and normalizes tool/usage events',
   const binaryPath = await writeExecutableScript(base, 'fake-opencode.js', `#!/usr/bin/env node
 const fs = require('node:fs');
 fs.writeFileSync(process.env.FAKE_OPENCODE_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
-fs.writeFileSync(process.env.FAKE_OPENCODE_ENV_PATH, JSON.stringify({ cwd: process.cwd(), marker: process.env.OAC_TEST_MARKER || '', permission: process.env.OPENCODE_PERMISSION || '' }));
+fs.writeFileSync(process.env.FAKE_OPENCODE_ENV_PATH, JSON.stringify({ cwd: process.cwd(), pwd: process.env.PWD || '', marker: process.env.OAC_TEST_MARKER || '', permission: process.env.OPENCODE_PERMISSION || '' }));
 function send(message) {
   process.stdout.write(JSON.stringify(message) + '\\n');
 }
@@ -1080,7 +1122,7 @@ send({ type: 'step_finish', sessionID: 'opencode-session-1', part: { tokens: { i
   );
 
   const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
-  assert.deepEqual(args.slice(0, 3), ['run', '--format', 'json']);
+  assert.deepEqual(args.slice(0, 6), ['run', '--format', 'json', '--dangerously-skip-permissions', '--dir', base]);
   assert.ok(args.includes('--model'));
   assert.ok(args.includes('opencode-model'));
   assert.ok(args.includes('--prompt'));
@@ -1092,6 +1134,7 @@ send({ type: 'step_finish', sessionID: 'opencode-session-1', part: { tokens: { i
   assert.equal(args.at(-1), 'hello opencode');
   const envSnapshot = JSON.parse(await fs.readFile(envPath, 'utf8'));
   await assertSameRealpath(envSnapshot.cwd, base);
+  await assertSameRealpath(envSnapshot.pwd, base);
   assert.equal(envSnapshot.marker, 'opencode-env');
   assert.equal(envSnapshot.permission, '{"*":"allow"}');
   assert.equal(result.status, 'completed');

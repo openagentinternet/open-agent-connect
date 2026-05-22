@@ -165,7 +165,7 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
     executor: {
       kind: 'opencode-json',
       backendFactoryExport: 'opencodeBackendFactory',
-      launchCommand: 'opencode run --format json',
+      launchCommand: 'opencode run --format json --dangerously-skip-permissions --dir <cwd>',
       multicaReferencePath: 'agent/opencode.go',
     },
   },
