@@ -1,10 +1,102 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
+const { createDefaultCliDependencies } = require('../../dist/cli/runtime.js');
+const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { commandSuccess, commandAwaitingConfirmation, commandFailed } = require('../../dist/core/contracts/commandResult.js');
+const adapterRegistryModule = require('../../dist/core/chain/adapters/registry.js');
+
+function makeFakeAdapter(chain, calls, overrides = {}) {
+  return {
+    network: chain,
+    explorerBaseUrl: `https://explorer.example/${chain}`,
+    feeRateUnit: overrides.feeRateUnit ?? 'sat/byte',
+    minTransferSatoshis: overrides.minTransferSatoshis ?? 1,
+    deriveAddress: async () => `${chain}-derived`,
+    fetchUtxos: async () => [],
+    fetchBalance: async (address) => {
+      calls.push({ chain, address, operation: 'fetchBalance' });
+      return {
+        chain,
+        address,
+        totalSatoshis: overrides.totalSatoshis ?? 1_000_000_000,
+        confirmedSatoshis: overrides.totalSatoshis ?? 1_000_000_000,
+        unconfirmedSatoshis: 0,
+        utxoCount: 1,
+      };
+    },
+    fetchFeeRate: async () => overrides.feeRate ?? 2,
+    fetchRawTx: async () => 'raw-prev',
+    broadcastTx: async () => `${chain}-txid`,
+    buildTransfer: async () => ({ rawTx: `${chain}-signed`, fee: 100 }),
+    buildInscription: async () => ({ signedRawTxs: [], revealIndices: [], totalCost: 0 }),
+  };
+}
+
+async function withPatchedWalletRuntime(t, options, fn) {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'oac-wallet-runtime-'));
+  t.after(async () => {
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  const homeDir = path.join(tempRoot, '.metabot', 'profiles', 'alice');
+  const managerRoot = path.join(tempRoot, '.metabot', 'manager');
+  await mkdir(managerRoot, { recursive: true });
+  await writeFile(path.join(managerRoot, 'identity-profiles.json'), `${JSON.stringify({
+    profiles: [{
+      name: 'alice',
+      slug: 'alice',
+      aliases: [],
+      homeDir,
+      globalMetaId: 'global-meta-id',
+      mvcAddress: options.mvcAddress ?? 'mvc-address',
+      createdAt: 1,
+      updatedAt: 1,
+    }],
+  }, null, 2)}\n`);
+  await writeFile(path.join(managerRoot, 'active-home.json'), `${JSON.stringify({ homeDir }, null, 2)}\n`);
+
+  const stateStore = createRuntimeStateStore(homeDir);
+  await stateStore.writeState({
+    identity: {
+      metabotId: 1,
+      name: 'alice',
+      createdAt: 1,
+      path: "m/44'/10001'/0'/0/0",
+      publicKey: 'public-key',
+      chatPublicKey: 'chat-public-key',
+      addresses: options.addresses,
+      mvcAddress: options.mvcAddress ?? 'mvc-address',
+      metaId: 'meta-id',
+      globalMetaId: 'global-meta-id',
+    },
+    services: [],
+    traces: [],
+    sellerOrders: [],
+  });
+
+  const originalCreateDefaultChainAdapterRegistry = adapterRegistryModule.createDefaultChainAdapterRegistry;
+  const calls = [];
+  adapterRegistryModule.createDefaultChainAdapterRegistry = () => new Map(
+    ['mvc', 'btc', 'doge', 'opcat'].map((chain) => [chain, makeFakeAdapter(chain, calls)]),
+  );
+  t.after(() => {
+    adapterRegistryModule.createDefaultChainAdapterRegistry = originalCreateDefaultChainAdapterRegistry;
+  });
+
+  const dependencies = createDefaultCliDependencies({
+    cwd: tempRoot,
+    env: { HOME: tempRoot, METABOT_HOME: homeDir, METABOT_ALLOW_UNINDEXED_HOME: '1' },
+  });
+
+  return fn({ dependencies, calls });
+}
 
 test('runCli dispatches `metabot wallet balance` with default chain=all', async () => {
   const calls = [];
@@ -272,6 +364,87 @@ test('runCli dispatches `metabot wallet balance --chain` with dynamic DOGE and O
   }
 
   assert.deepEqual(calls, [{ chain: 'doge' }, { chain: 'opcat' }]);
+});
+
+test('default CLI wallet balance queries DOGE by DOGE address', async (t) => {
+  await withPatchedWalletRuntime(t, {
+    addresses: {
+      mvc: 'mvc-address',
+      btc: 'btc-address',
+      doge: 'doge-address',
+      opcat: 'opcat-address',
+    },
+  }, async ({ dependencies, calls }) => {
+    const result = await dependencies.wallet.balance({ chain: 'doge' });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.data.chain, 'doge');
+    assert.deepEqual(calls, [{ chain: 'doge', address: 'doge-address', operation: 'fetchBalance' }]);
+  });
+});
+
+test('default CLI wallet balance queries OPCAT by OPCAT address', async (t) => {
+  await withPatchedWalletRuntime(t, {
+    addresses: {
+      mvc: 'mvc-address',
+      btc: 'btc-address',
+      doge: 'doge-address',
+      opcat: 'opcat-address',
+    },
+  }, async ({ dependencies, calls }) => {
+    const result = await dependencies.wallet.balance({ chain: 'opcat' });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.data.chain, 'opcat');
+    assert.deepEqual(calls, [{ chain: 'opcat', address: 'opcat-address', operation: 'fetchBalance' }]);
+  });
+});
+
+test('default CLI wallet balance returns identity_address_missing when DOGE address is absent', async (t) => {
+  await withPatchedWalletRuntime(t, {
+    addresses: {
+      mvc: 'mvc-address',
+      btc: 'btc-address',
+      opcat: 'opcat-address',
+    },
+  }, async ({ dependencies, calls }) => {
+    const result = await dependencies.wallet.balance({ chain: 'doge' });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'identity_address_missing');
+    assert.deepEqual(calls, []);
+  });
+});
+
+test('default CLI wallet transfer preview preserves native chain and currency units', async (t) => {
+  await withPatchedWalletRuntime(t, {
+    addresses: {
+      mvc: 'mvc-address',
+      btc: 'btc-address',
+      doge: 'doge-address',
+      opcat: 'opcat-address',
+    },
+  }, async ({ dependencies }) => {
+    const cases = [
+      ['0.000001BTC', 'btc', 'BTC'],
+      ['1SPACE', 'mvc', 'SPACE'],
+      ['0.01DOGE', 'doge', 'DOGE'],
+      ['0.000001OPCAT', 'opcat', 'OPCAT'],
+    ];
+
+    for (const [amountRaw, chain, currency] of cases) {
+      const result = await dependencies.wallet.transfer({
+        toAddress: `${chain}-recipient`,
+        amountRaw,
+        confirm: false,
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.state, 'awaiting_confirmation');
+      assert.equal(result.data.chain, chain);
+      assert.equal(result.data.currency, currency);
+    }
+  });
 });
 
 test('runCli fails `metabot wallet balance` when --chain value is missing', async () => {

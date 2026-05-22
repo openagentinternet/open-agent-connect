@@ -25,6 +25,7 @@ const {
 } = require('../../dist/core/identity/identityProfiles.js');
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretStore.js');
+const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 
 const FIXTURE_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
@@ -445,6 +446,8 @@ test('getMetabotWalletInfo and getMetabotMnemonicBackup expose selected profile 
     addresses: {
       mvc: 'mvc-secret-address',
       btc: 'btc-secret-address',
+      doge: 'doge-secret-address',
+      opcat: 'opcat-secret-address',
     },
     globalMetaId: 'gm-wallet-bot',
   });
@@ -455,10 +458,56 @@ test('getMetabotWalletInfo and getMetabotMnemonicBackup expose selected profile 
   assert.equal(wallet.slug, created.slug);
   assert.equal(wallet.name, 'Wallet Bot');
   assert.deepEqual(wallet.addresses, {
-    mvc: 'mvc-secret-address',
     btc: 'btc-secret-address',
+    mvc: 'mvc-secret-address',
+    doge: 'doge-secret-address',
+    opcat: 'opcat-secret-address',
   });
   assert.deepEqual(backup.words, FIXTURE_MNEMONIC.split(' '));
+});
+
+test('getMetabotWalletInfo prefers runtime MVC address map over legacy secret mvcAddress', async () => {
+  const systemHomeDir = await createSystemHome();
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Runtime MVC Bot' });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: created.name,
+    homeDir: created.homeDir,
+    globalMetaId: 'gm-runtime-mvc-bot',
+    mvcAddress: 'mvc-profile-address',
+  });
+  await createFileSecretStore(created.homeDir).writeIdentitySecrets({
+    mnemonic: FIXTURE_MNEMONIC,
+    path: "m/44'/10001'/0'/0/0",
+    mvcAddress: 'mvc-legacy-secret-address',
+    addresses: {
+      btc: 'btc-secret-address',
+    },
+    globalMetaId: 'gm-runtime-mvc-bot',
+  });
+  await createRuntimeStateStore(created.homeDir).writeState({
+    identity: {
+      metabotId: 1,
+      name: created.name,
+      createdAt: 1776836000000,
+      path: "m/44'/10001'/0'/0/0",
+      publicKey: 'public-key',
+      chatPublicKey: 'chat-public-key',
+      addresses: {
+        mvc: 'mvc-runtime-address',
+      },
+      mvcAddress: 'mvc-runtime-legacy-address',
+      metaId: 'metaid-runtime-mvc-bot',
+      globalMetaId: 'gm-runtime-mvc-bot',
+    },
+    services: [],
+    traces: [],
+    sellerOrders: [],
+  });
+
+  const wallet = await getMetabotWalletInfo(systemHomeDir, created.slug);
+
+  assert.equal(wallet.addresses.mvc, 'mvc-runtime-address');
 });
 
 test('deleteMetabotProfile removes manager records, active profile pointer, profile files, and executor sessions for the slug', async () => {

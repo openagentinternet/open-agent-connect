@@ -61,6 +61,40 @@ export const handleBotRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  const walletTransferPreviewMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/wallet\/transfer\/preview$/);
+  if (walletTransferPreviewMatch && req.method === 'POST') {
+    const slug = normalizeSlug(walletTransferPreviewMatch[1]);
+    const body = await context.readJsonBody();
+    const result = handlers.bot?.previewWalletTransfer
+      ? await handlers.bot.previewWalletTransfer({
+          slug,
+          chain: normalizeName(body.chain),
+          toAddress: normalizeName(body.toAddress),
+          amount: normalizeName(body.amount),
+        })
+      : commandFailed('not_implemented', 'MetaBot wallet transfer preview handler not configured.');
+    const status = result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400;
+    context.sendJson(status, result);
+    return true;
+  }
+
+  const walletTransferConfirmMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/wallet\/transfer\/confirm$/);
+  if (walletTransferConfirmMatch && req.method === 'POST') {
+    const slug = normalizeSlug(walletTransferConfirmMatch[1]);
+    const body = await context.readJsonBody();
+    const result = handlers.bot?.confirmWalletTransfer
+      ? await handlers.bot.confirmWalletTransfer({
+          slug,
+          chain: normalizeName(body.chain),
+          toAddress: normalizeName(body.toAddress),
+          amount: normalizeName(body.amount),
+        })
+      : commandFailed('not_implemented', 'MetaBot wallet transfer confirm handler not configured.');
+    const status = result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400;
+    context.sendJson(status, result);
+    return true;
+  }
+
   const backupMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/backup$/);
   if (backupMatch && req.method === 'GET') {
     const slug = normalizeSlug(backupMatch[1]);

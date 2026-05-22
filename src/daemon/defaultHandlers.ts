@@ -16,6 +16,7 @@ import {
   setActiveMetabotHome,
   upsertIdentityProfile,
 } from '../core/identity/identityProfiles';
+import type { IdentityProfileRecord } from '../core/identity/identityProfiles';
 import {
   ensureProfileWorkspace,
   resolveIdentityCreateProfileHome,
@@ -125,6 +126,12 @@ import {
 } from '../core/chat/privateConversation';
 import { createLocalMnemonicSigner, executeTransfer } from '../core/signing/localMnemonicSigner';
 import type { LocalIdentitySecrets, SecretStore } from '../core/secrets/secretStore';
+import {
+  confirmWalletTransfer,
+  NATIVE_TRANSFER_UNITS,
+  previewWalletTransfer,
+  queryWalletBalances,
+} from '../core/wallet/nativeWallet';
 import type { Signer } from '../core/signing/signer';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
@@ -5874,6 +5881,77 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
+  async function resolveBotProfileIdentity(slug: string): Promise<
+    | {
+      profile: IdentityProfileRecord;
+      identity: RuntimeIdentityRecord;
+    }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const requestedSlug = normalizeText(slug);
+    const profile = await getMetabotProfile(normalizedSystemHomeDir, requestedSlug);
+    if (!profile) {
+      return {
+        failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug || '<missing>'}`),
+      };
+    }
+    const state = await createRuntimeStateStore(profile.homeDir).readState();
+    if (!state.identity) {
+      return {
+        failure: commandFailed('identity_missing', 'No local MetaBot identity is loaded for the selected MetaBot.'),
+      };
+    }
+    return { profile, identity: state.identity };
+  }
+
+  async function resolveBotWalletContext(slug: string): Promise<
+    | {
+      profile: IdentityProfileRecord;
+      identity: RuntimeIdentityRecord;
+      wallet: Awaited<ReturnType<typeof getMetabotWalletInfo>>;
+    }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const resolved = await resolveBotProfileIdentity(slug);
+    if ('failure' in resolved) {
+      return resolved;
+    }
+    try {
+      const wallet = await getMetabotWalletInfo(normalizedSystemHomeDir, resolved.profile.slug);
+      return {
+        profile: resolved.profile,
+        identity: {
+          ...resolved.identity,
+          mvcAddress: wallet.addresses.mvc,
+          addresses: wallet.addresses,
+        },
+        wallet,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/not found/i.test(message)) {
+        return { failure: commandFailed('profile_not_found', message) };
+      }
+      return { failure: commandFailed('metabot_wallet_unavailable', message) };
+    }
+  }
+
+  function buildNativeTransferAmountRaw(chain: string, amount: string): string | MetabotCommandResult<never> {
+    const normalizedChain = normalizeText(chain).toLowerCase();
+    const unit = NATIVE_TRANSFER_UNITS[normalizedChain as keyof typeof NATIVE_TRANSFER_UNITS];
+    if (!unit) {
+      return commandFailed(
+        'invalid_argument',
+        `Unsupported wallet transfer chain: ${normalizedChain || '<missing>'}. Supported chains: ${Object.keys(NATIVE_TRANSFER_UNITS).join(', ')}.`,
+      );
+    }
+    const normalizedAmount = normalizeText(amount);
+    if (!normalizedAmount) {
+      return commandFailed('invalid_argument', 'Wallet transfer amount is required.');
+    }
+    return `${normalizedAmount}${unit}`;
+  }
+
   async function resolveActorWriteContext(rawActor: unknown): Promise<
     | {
       homeDir: string;
@@ -10055,31 +10133,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
-  function parseLoomTransferAmount(raw: string) {
-    const trimmed = raw.trim();
-    const match = trimmed.match(/^([\d.]+)\s*(btc|space|doge|opcat)$/i);
-    if (!match) {
-      throw new Error('Missing or unsupported currency unit. Append BTC, SPACE, DOGE, or OPCAT to the amount.');
-    }
-    const chain = match[2].toUpperCase() === 'BTC'
-      ? 'btc'
-      : match[2].toUpperCase() === 'DOGE'
-        ? 'doge'
-        : match[2].toUpperCase() === 'OPCAT'
-          ? 'opcat'
-          : 'mvc';
-    const adapter = adapters.get(chain as Parameters<typeof adapters.get>[0]);
-    if (!adapter) {
-      throw new Error(`No adapter registered for chain "${chain}".`);
-    }
-    return {
-      chain,
-      currency: match[2].toUpperCase(),
-      satoshis: decimalAmountToSatoshis(match[1]),
-      adapter,
-    };
-  }
-
   async function runLoomWalletTransfer(rawActor: unknown, transferInput: { toAddress: string; amountRaw: string; confirm: boolean }) {
     const actor = await resolveActorWriteContext(rawActor);
     if ('failure' in actor) {
@@ -10089,55 +10142,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
     if (!state.identity) {
       return commandFailed('identity_missing', 'No local MetaBot identity is loaded for the selected MetaBot.');
     }
-    let parsed: ReturnType<typeof parseLoomTransferAmount>;
-    try {
-      parsed = parseLoomTransferAmount(transferInput.amountRaw);
-    } catch (error) {
-      return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
-    }
-    const fromAddress = state.identity.addresses[parsed.chain as keyof typeof state.identity.addresses] ?? state.identity.mvcAddress;
-    if (!fromAddress) {
-      return commandFailed('identity_address_missing', `Current identity has no address for chain "${parsed.chain}".`);
-    }
-    const feeRate = await parsed.adapter.fetchFeeRate();
-    const feePerByte = parsed.adapter.feeRateUnit === 'sat/KB' ? feeRate / 1000 : feeRate;
-    const estimatedFeeSatoshis = Math.ceil(392 * feePerByte);
-    const balance = await parsed.adapter.fetchBalance(fromAddress);
-    if (balance.totalSatoshis < parsed.satoshis + estimatedFeeSatoshis) {
-      return commandFailed('insufficient_balance', `Total balance is below the required ${parsed.satoshis + estimatedFeeSatoshis} sats.`);
-    }
     if (!transferInput.confirm) {
-      return commandAwaitingConfirmation({
-        fromAddress,
-        currentBalanceSatoshis: balance.totalSatoshis,
+      return previewWalletTransfer({
+        identity: state.identity,
+        adapters,
         toAddress: transferInput.toAddress,
-        amountSatoshis: parsed.satoshis,
-        estimatedFeeSatoshis,
-        currency: parsed.currency,
-        chain: parsed.chain,
+        amountRaw: transferInput.amountRaw,
       });
     }
-    const secrets = await createFileSecretStore(actor.homeDir).readIdentitySecrets<LocalIdentitySecrets>();
-    if (!secrets?.mnemonic) {
-      return commandFailed('identity_secrets_missing', 'Identity mnemonic not found in the secret store.');
-    }
-    try {
-      const result = await executeTransfer(parsed.adapter, {
-        mnemonic: secrets.mnemonic,
-        path: secrets.path ?? state.identity.path ?? "m/44'/10001'/0'/0/0",
-        toAddress: transferInput.toAddress,
-        amountSatoshis: parsed.satoshis,
-        feeRate,
-      });
-      return commandSuccess({
-        txid: result.txid,
-        explorerUrl: `${parsed.adapter.explorerBaseUrl}/tx/${result.txid}`,
-        amountSatoshis: parsed.satoshis,
-        toAddress: transferInput.toAddress,
-      });
-    } catch (error) {
-      return commandFailed('transfer_broadcast_failed', error instanceof Error ? error.message : String(error));
-    }
+
+    return confirmWalletTransfer({
+      identity: state.identity,
+      adapters,
+      toAddress: transferInput.toAddress,
+      amountRaw: transferInput.amountRaw,
+      secretStore: createFileSecretStore(actor.homeDir),
+    });
   }
 
   const loomActionHandler = createLoomDaemonActionHandler(createLoomDaemonActionDependencies({
@@ -14896,8 +14916,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       getWallet: async ({ slug }) => {
         try {
-          const wallet = await getMetabotWalletInfo(normalizedSystemHomeDir, slug);
-          return commandSuccess({ wallet });
+          const resolved = await resolveBotWalletContext(slug);
+          if ('failure' in resolved) {
+            return resolved.failure;
+          }
+          const balances = await queryWalletBalances({
+            identity: resolved.identity,
+            adapters,
+            chain: 'all',
+          });
+          if (!balances.ok) {
+            return balances;
+          }
+          return commandSuccess({
+            wallet: {
+              ...resolved.wallet,
+              balances: (balances.data as { balances?: unknown }).balances,
+            },
+          });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           if (/not found/i.test(message)) {
@@ -14905,6 +14941,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }
           return commandFailed('metabot_wallet_unavailable', message);
         }
+      },
+      previewWalletTransfer: async ({ slug, chain, toAddress, amount }) => {
+        const resolved = await resolveBotWalletContext(slug);
+        if ('failure' in resolved) {
+          return resolved.failure;
+        }
+        const amountRaw = buildNativeTransferAmountRaw(chain, amount);
+        if (typeof amountRaw !== 'string') {
+          return amountRaw;
+        }
+        return previewWalletTransfer({
+          identity: resolved.identity,
+          adapters,
+          toAddress,
+          amountRaw,
+        });
+      },
+      confirmWalletTransfer: async ({ slug, chain, toAddress, amount }) => {
+        const resolved = await resolveBotWalletContext(slug);
+        if ('failure' in resolved) {
+          return resolved.failure;
+        }
+        const amountRaw = buildNativeTransferAmountRaw(chain, amount);
+        if (typeof amountRaw !== 'string') {
+          return amountRaw;
+        }
+        return confirmWalletTransfer({
+          identity: resolved.identity,
+          adapters,
+          toAddress,
+          amountRaw,
+          secretStore: createFileSecretStore(resolved.profile.homeDir),
+        });
       },
       getBackup: async ({ slug }) => {
         try {
