@@ -18,6 +18,46 @@ function field(value = '') {
   };
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
+function createBotScriptContext(overrides = {}) {
+  const elements = overrides.elements ?? {};
+  const root = elements['[data-modal-root]'] ?? {
+    innerHTML: '',
+    onclick: null,
+    classList: {
+      add: () => {},
+      remove: () => {},
+    },
+  };
+  elements['[data-modal-root]'] = root;
+  return {
+    document: {
+      querySelector: (selector) => elements[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: overrides.fetch ?? (() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ ok: true, data: {} }),
+    })),
+    navigator: {},
+    setTimeout: () => 0,
+    clearTimeout: () => {},
+    setInterval: () => 0,
+    clearInterval: () => {},
+    ...overrides.globals,
+  };
+}
+
 test('bot page preserves unavailable provider bindings when saving unrelated profile fields', () => {
   const fields = {
     '[data-save-status]': field(),
@@ -190,6 +230,171 @@ test('bot page renders provider pickers with icons and only exposes none for fal
   assert.match(fallbackPicker, /<img src="\/ui\/assets\/platforms\/generic\.svg" alt="" loading="lazy" \/>/);
   assert.doesNotMatch(fallbackPicker, /data-provider-icon="claude-code"/);
   assert.doesNotMatch(fallbackPicker, /data-provider-icon="openclaw"/);
+});
+
+test('bot page runtime modal renders healthy and detected runtimes only', () => {
+  const context = createBotScriptContext();
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.runtimes = [
+    {
+      id: 'runtime-codex',
+      provider: 'codex',
+      displayName: 'Codex',
+      logoPath: '/ui/assets/platforms/codex.svg',
+      binaryPath: '/bin/codex',
+      version: '0.133.1',
+      model: 'gpt-5.5-codex',
+      authState: 'authenticated',
+      health: 'healthy',
+      lastSeenAt: '2026-05-22T06:00:00.000Z',
+      healthCheckedAt: '2026-05-22T06:01:00.000Z',
+    },
+    {
+      id: 'runtime-claude',
+      provider: 'claude-code',
+      displayName: 'Claude Code',
+      logoPath: '/ui/assets/platforms/claude-code.svg',
+      binaryPath: '/bin/claude',
+      version: '2.0.0',
+      authState: 'unknown',
+      health: 'detected',
+      healthReason: 'Readiness probe completed without returning output.',
+      lastSeenAt: '2026-05-22T05:00:00.000Z',
+      healthCheckedAt: '2026-05-22T05:01:00.000Z',
+    },
+    {
+      id: 'runtime-openclaw',
+      provider: 'openclaw',
+      displayName: 'OpenClaw',
+      binaryPath: '/bin/openclaw',
+      health: 'unavailable',
+      healthReason: 'Version probe failed.',
+    },
+  ];
+
+  context.openRuntimeModal();
+
+  const html = context.document.querySelector('[data-modal-root]').innerHTML;
+  assert.match(html, /LLM Providers/);
+  assert.match(html, /Codex/);
+  assert.match(html, /Claude Code/);
+  assert.doesNotMatch(html, /OpenClaw/);
+  assert.match(html, /\/bin\/codex/);
+  assert.match(html, /0\.133\.1/);
+  assert.match(html, /gpt-5\.5-codex/);
+  assert.match(html, /authenticated/);
+  assert.match(html, /Readiness probe completed without returning output\./);
+  assert.match(html, /runtime-health-dot runtime-health-healthy/);
+});
+
+test('bot page runtime Test action updates healthy state and refreshes related views', async () => {
+  const response = deferred();
+  const requests = [];
+  const context = createBotScriptContext({
+    fetch: (url, options) => {
+      requests.push({ url, options });
+      return Promise.resolve({
+        ok: true,
+        json: () => response.promise,
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  let renderStatsCount = 0;
+  let renderListCount = 0;
+  let renderTabCount = 0;
+  context.renderStats = () => { renderStatsCount += 1; };
+  context.renderMetabotList = () => { renderListCount += 1; };
+  context.renderCurrentTab = () => { renderTabCount += 1; };
+  context.state._runtimeModalOpen = true;
+  context.state.runtimes = [
+    {
+      id: 'runtime-codex',
+      provider: 'codex',
+      displayName: 'Codex',
+      binaryPath: '/bin/codex',
+      health: 'detected',
+    },
+  ];
+
+  const promise = context.testRuntime('runtime-codex');
+  assert.equal(requests[0].url, '/api/bot/runtimes/runtime-codex/test');
+  assert.equal(requests[0].options.method, 'POST');
+  assert.match(context.document.querySelector('[data-modal-root]').innerHTML, /Testing\.\.\./);
+  assert.match(context.document.querySelector('[data-modal-root]').innerHTML, /disabled/);
+
+  response.resolve({
+    ok: true,
+    data: {
+      runtime: {
+        id: 'runtime-codex',
+        provider: 'codex',
+        displayName: 'Codex',
+        binaryPath: '/bin/codex',
+        health: 'healthy',
+      },
+      runtimes: [
+        {
+          id: 'runtime-codex',
+          provider: 'codex',
+          displayName: 'Codex',
+          binaryPath: '/bin/codex',
+          health: 'healthy',
+        },
+      ],
+    },
+  });
+  await promise;
+
+  assert.equal(context.state.runtimes[0].health, 'healthy');
+  assert.match(context.document.querySelector('[data-modal-root]').innerHTML, /runtime-health-dot runtime-health-healthy/);
+  assert.equal(renderStatsCount, 1);
+  assert.equal(renderListCount, 1);
+  assert.equal(renderTabCount, 1);
+});
+
+test('bot page runtime Test action keeps readiness failures out of provider pickers', async () => {
+  const context = createBotScriptContext({
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        data: {
+          runtime: {
+            id: 'runtime-codex',
+            provider: 'codex',
+            displayName: 'Codex',
+            binaryPath: '/bin/codex',
+            health: 'detected',
+            healthReason: 'Readiness probe completed without returning output.',
+          },
+        },
+      }),
+    }),
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.renderStats = () => {};
+  context.renderMetabotList = () => {};
+  context.renderCurrentTab = () => {};
+  context.state._runtimeModalOpen = true;
+  context.state.runtimes = [
+    {
+      id: 'runtime-codex',
+      provider: 'codex',
+      displayName: 'Codex',
+      binaryPath: '/bin/codex',
+      health: 'healthy',
+    },
+  ];
+
+  await context.testRuntime('runtime-codex');
+
+  assert.equal(context.state.runtimes[0].health, 'detected');
+  assert.match(context.document.querySelector('[data-modal-root]').innerHTML, /Readiness probe completed without returning output\./);
+  assert.doesNotMatch(context.providerPickerMarkup('primaryProvider', 'Primary Provider', 'codex', false), /data-provider-option="codex"/);
 });
 
 test('bot page marks profiles whose primary LLM is unavailable in the list', () => {

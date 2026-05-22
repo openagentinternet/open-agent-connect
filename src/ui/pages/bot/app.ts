@@ -15,7 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},selectedSlug:'',selectedTab:'info',originalProfile:null,_pendingAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},selectedSlug:'',selectedTab:'info',originalProfile:null,_pendingAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{}};
 
 function api(url,opts){return fetch(url,opts).then(function(r){return r.json().catch(function(){return{ok:false,message:String(r.status)}}).then(function(body){if(!r.ok||body.ok===false){throw new Error(body.message||body.code||String(r.status))}return body})})}
 function fmtTime(t){if(!t)return'-';var d=new Date(t);if(Number.isNaN(d.getTime()))return'-';return d.toLocaleString()}
@@ -39,6 +39,76 @@ function providerIconMarkup(provider){
   var key=String(provider||'generic');
   var path=providerLogoPath(key);
   return '<span class="provider-logo provider-logo-'+esc(key.replace(/[^a-z0-9_-]+/gi,'-'))+'" data-provider-icon="'+esc(key)+'" aria-hidden="true"><img src="'+esc(path)+'" alt="" loading="lazy" /></span>';
+}
+function runtimeIconMarkup(runtime){
+  var key=String((runtime&&runtime.provider)||'generic');
+  var path=(runtime&&runtime.logoPath)||providerLogoPath(key);
+  return '<span class="provider-logo provider-logo-'+esc(key.replace(/[^a-z0-9_-]+/gi,'-'))+'" data-provider-icon="'+esc(key)+'" aria-hidden="true"><img src="'+esc(path)+'" alt="" loading="lazy" /></span>';
+}
+function visibleRuntimeRows(){
+  return state.runtimes.filter(function(r){
+    return r&&(r.health==='healthy'||r.health==='detected');
+  });
+}
+function runtimeHealthMarkup(runtime){
+  var health=runtime&&runtime.health||'detected';
+  var cls=health==='healthy'?'runtime-health-healthy':'runtime-health-detected';
+  return '<span class="runtime-health-dot '+cls+'" aria-hidden="true"></span>';
+}
+function runtimeDetailCell(label,value,isCode,extraClass){
+  var content=value==null||value===''?'-':value;
+  return '<div class="'+esc(extraClass||'')+'"><span>'+esc(label)+'</span>'+(isCode?'<code>'+esc(content)+'</code>':'<strong>'+esc(content)+'</strong>')+'</div>';
+}
+function runtimeDetailMarkup(runtime){
+  return '<div class="runtime-row-meta">'+
+    runtimeDetailCell('Path',runtime.binaryPath,true,'runtime-path')+
+    runtimeDetailCell('Version',runtime.version,false,'')+
+    runtimeDetailCell('Model',runtime.model,false,'')+
+    runtimeDetailCell('Auth',runtime.authState,false,'')+
+    runtimeDetailCell('Last seen',fmtTime(runtime.lastSeenAt),false,'')+
+    runtimeDetailCell('Checked',fmtTime(runtime.healthCheckedAt),false,'')+
+    runtimeDetailCell('Health',runtime.health,false,'')+
+    (runtime.healthReason?runtimeDetailCell('Reason',runtime.healthReason,false,'runtime-reason'):'')+
+  '</div>';
+}
+function runtimeModalBodyMarkup(){
+  var rows=visibleRuntimeRows();
+  var body='<div class="runtime-modal-head">'+
+    '<div><div class="runtime-modal-title">LLM Providers</div><div class="runtime-modal-summary" data-runtime-modal-status>'+esc(rows.length)+' detected provider'+(rows.length===1?'':'s')+' visible. Unavailable providers are hidden from this list.</div></div>'+
+    '<div class="runtime-modal-actions"><button class="btn btn-sm" data-act="refresh-runtime-modal">Refresh</button><button class="icon-btn" data-act="close-runtime-modal" aria-label="Close">x</button></div>'+
+  '</div>';
+  if(!rows.length){
+    return body+'<div class="runtime-empty">No healthy or detected LLM providers were found.</div>';
+  }
+  body+='<div class="runtime-list">'+rows.map(function(runtime){
+    var testing=state._runtimeTestById[runtime.id]==='testing';
+    return '<div class="runtime-row" data-runtime-row="'+esc(runtime.id)+'">'+
+      '<div class="runtime-row-main">'+
+        '<div class="runtime-row-title">'+runtimeHealthMarkup(runtime)+runtimeIconMarkup(runtime)+'<strong>'+esc(runtime.displayName||runtime.provider||runtime.id)+'</strong><code>'+esc(runtime.provider||'-')+'</code></div>'+
+        runtimeDetailMarkup(runtime)+
+      '</div>'+
+      '<div><button class="btn btn-sm" data-act="test-runtime" data-runtime-id="'+esc(runtime.id)+'"'+(testing?' disabled':'')+'>'+(testing?'Testing...':'Test')+'</button></div>'+
+    '</div>';
+  }).join('')+'</div>';
+  return body;
+}
+function closeRuntimeModal(){
+  state._runtimeModalOpen=false;
+  closeDynamicModal();
+}
+function renderRuntimeModal(){
+  if(!state._runtimeModalOpen)return;
+  var root=modalRoot();if(!root)return;
+  root.innerHTML='<div class="modal-box runtime-modal-box">'+runtimeModalBodyMarkup()+'</div>';
+  root.classList.remove('hidden');
+  root.onclick=function(event){if(event.target===root)closeRuntimeModal()};
+  qq('[data-act="close-runtime-modal"]').forEach(function(el){el.addEventListener('click',closeRuntimeModal)});
+  qq('[data-act="refresh-runtime-modal"]').forEach(function(el){el.addEventListener('click',function(){loadRuntimes()})});
+  qq('[data-act="test-runtime"]').forEach(function(el){el.addEventListener('click',function(){testRuntime(this.getAttribute('data-runtime-id')||'')})});
+}
+function openRuntimeModal(){
+  state._runtimeModalOpen=true;
+  renderRuntimeModal();
 }
 function defaultWriteNetwork(){
   var config=state.profileConfigs[state.selectedSlug]||{};
@@ -446,7 +516,7 @@ function switchTab(tab,silent){
 
 function loadStats(){return api('/api/bot/stats').then(function(r){state.stats=r.data||{};renderStats()}).catch(function(){renderStats()})}
 function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];if(!state.selectedSlug&&state.profiles.length)state.selectedSlug=state.profiles[0].slug;if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))state.selectedSlug=state.profiles[0]&&state.profiles[0].slug||'';state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
-function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];renderMetabotList();renderCurrentTab();renderStats()}).catch(function(){state.runtimes=[];renderMetabotList();renderCurrentTab();renderStats()})}
+function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()}).catch(function(){state.runtimes=[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()})}
 function loadSessions(slug){var activeSlug=slug||state.selectedSlug;if(!activeSlug){state.sessions=[];renderHistoryTab();renderStats();return Promise.resolve()}return api('/api/bot/sessions?slug='+encodeURIComponent(activeSlug)+'&limit=50').then(function(r){if(activeSlug!==state.selectedSlug)return;state.sessions=(r.data&&r.data.sessions)||[];renderHistoryTab();renderStats()}).catch(function(){if(activeSlug!==state.selectedSlug)return;state.sessions=[];renderHistoryTab();renderStats()})}
 function loadSelectedProfileConfig(force){
   var slug=state.selectedSlug;
@@ -482,6 +552,37 @@ function saveSettings(){
 function discoverRuntimes(){
   var btn=q('[data-act="discover-runtimes"]');if(btn){btn.disabled=true;btn.textContent='Refreshing...'}
   api('/api/bot/runtimes/discover',{method:'POST'}).then(function(){return loadRuntimes()}).catch(function(error){showToast(error.message||'Runtime refresh failed')}).finally(function(){btn=q('[data-act="discover-runtimes"]');if(btn){btn.disabled=false;btn.textContent='Refresh Runtimes'}})
+}
+function testRuntime(runtimeId){
+  if(!runtimeId)return Promise.resolve();
+  state._runtimeTestById[runtimeId]='testing';
+  renderRuntimeModal();
+  return api('/api/bot/runtimes/'+encodeURIComponent(runtimeId)+'/test',{method:'POST'})
+    .then(function(r){
+      var data=r.data||{};
+      if(Array.isArray(data.runtimes)){
+        state.runtimes=data.runtimes;
+      }else if(data.runtime){
+        var found=false;
+        state.runtimes=state.runtimes.map(function(existing){
+          if(existing.id===data.runtime.id){found=true;return data.runtime}
+          return existing;
+        });
+        if(!found)state.runtimes.push(data.runtime);
+      }
+      renderStats();
+      renderMetabotList();
+      renderCurrentTab();
+      renderRuntimeModal();
+    })
+    .catch(function(error){
+      showToast(error.message||'Runtime test failed');
+      renderRuntimeModal();
+    })
+    .finally(function(){
+      delete state._runtimeTestById[runtimeId];
+      renderRuntimeModal();
+    });
 }
 
 function openAddModal(){
@@ -537,6 +638,7 @@ document.addEventListener('DOMContentLoaded',function(){
   var modal=q('[data-modal="add-metabot"]');if(modal)modal.addEventListener('click',function(event){if(event.target===modal)closeAddModal()});
   var name=q('[data-field="new-name"]');if(name)name.addEventListener('keydown',function(event){if(event.key==='Enter')createMetabot();if(event.key==='Escape')closeAddModal()});
   qq('[data-tab]').forEach(function(el){el.addEventListener('click',function(){switchTab(this.getAttribute('data-tab'))})});
+  var runtimeModal=q('[data-act="open-runtime-modal"]');if(runtimeModal)runtimeModal.addEventListener('click',openRuntimeModal);
   var discover=q('[data-act="discover-runtimes"]');if(discover)discover.addEventListener('click',discoverRuntimes);
   var wallet=q('[data-act="open-wallet"]');if(wallet)wallet.addEventListener('click',openWalletPanel);
   var backup=q('[data-act="open-backup"]');if(backup)backup.addEventListener('click',openBackupPanel);

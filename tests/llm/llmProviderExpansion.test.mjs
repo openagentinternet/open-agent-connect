@@ -16,6 +16,7 @@ const {
 const {
   discoverLlmRuntimes,
   readinessSemanticInactivityTimeoutForProvider,
+  testLlmRuntimeReadiness,
 } = require('../../dist/core/llm/llmRuntimeDiscovery.js');
 const {
   PLATFORM_DEFINITIONS,
@@ -429,4 +430,98 @@ test('runtime discovery keeps scanning when an earlier binary is only detected',
   assert.equal(result.runtimes[0].binaryPath, healthyCodexPath);
   assert.equal(result.runtimes[0].health, 'healthy');
   assert.equal(result.runtimes[0].version, '0.133.1');
+});
+
+function testRuntimeFixture(overrides = {}) {
+  const now = '2026-05-22T05:00:00.000Z';
+  return {
+    id: 'llm_codex_test',
+    provider: 'codex',
+    displayName: 'Codex',
+    binaryPath: overrides.binaryPath ?? '/tmp/codex',
+    version: '0.132.0',
+    logoPath: '/ui/assets/platforms/codex.svg',
+    authState: 'authenticated',
+    health: 'detected',
+    model: 'gpt-5.5-codex',
+    capabilities: ['streaming'],
+    lastSeenAt: now,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
+async function writeVersionProbeBin(rootPrefix, body) {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), rootPrefix));
+  const binDir = path.join(tempRoot, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const codexPath = path.join(binDir, 'codex');
+  await writeFile(codexPath, body, 'utf8');
+  await chmod(codexPath, 0o755);
+  return codexPath;
+}
+
+test('testLlmRuntimeReadiness returns healthy when version and readiness succeed', async () => {
+  const codexPath = await writeVersionProbeBin(
+    'oac-runtime-test-healthy-',
+    '#!/bin/sh\necho "codex-cli 0.133.1"\n',
+  );
+
+  const result = await testLlmRuntimeReadiness(testRuntimeFixture({ binaryPath: codexPath }), {
+    env: { PATH: path.dirname(codexPath) },
+    now: () => '2026-05-22T06:00:00.000Z',
+    readinessProbe: async ({ runtime }) => {
+      assert.equal(runtime.binaryPath, codexPath);
+      assert.equal(runtime.health, 'detected');
+      return { ok: true, output: 'OK' };
+    },
+  });
+
+  assert.equal(result.health, 'healthy');
+  assert.equal(result.healthReason, undefined);
+  assert.equal(result.version, '0.133.1');
+  assert.equal(result.model, 'gpt-5.5-codex');
+  assert.equal(result.lastSeenAt, '2026-05-22T06:00:00.000Z');
+  assert.equal(result.healthCheckedAt, '2026-05-22T06:00:00.000Z');
+});
+
+test('testLlmRuntimeReadiness returns detected when readiness output is empty', async () => {
+  const codexPath = await writeVersionProbeBin(
+    'oac-runtime-test-detected-',
+    '#!/bin/sh\necho "codex-cli 0.133.2"\n',
+  );
+
+  const result = await testLlmRuntimeReadiness(testRuntimeFixture({ binaryPath: codexPath }), {
+    env: { PATH: path.dirname(codexPath) },
+    now: () => '2026-05-22T06:05:00.000Z',
+    readinessProbe: async () => ({ ok: true, output: '   ' }),
+  });
+
+  assert.equal(result.health, 'detected');
+  assert.equal(result.healthReason, 'Readiness probe completed without returning output.');
+  assert.equal(result.version, '0.133.2');
+  assert.equal(result.healthCheckedAt, '2026-05-22T06:05:00.000Z');
+});
+
+test('testLlmRuntimeReadiness returns unavailable when version probing fails', async () => {
+  const codexPath = await writeVersionProbeBin(
+    'oac-runtime-test-unavailable-',
+    '#!/bin/sh\necho "permission denied" >&2\nexit 2\n',
+  );
+  let readinessCalled = false;
+
+  const result = await testLlmRuntimeReadiness(testRuntimeFixture({ binaryPath: codexPath }), {
+    env: { PATH: path.dirname(codexPath) },
+    now: () => '2026-05-22T06:10:00.000Z',
+    readinessProbe: async () => {
+      readinessCalled = true;
+      return { ok: true, output: 'OK' };
+    },
+  });
+
+  assert.equal(result.health, 'unavailable');
+  assert.match(result.healthReason, /permission denied|Version probe exited/);
+  assert.equal(result.healthCheckedAt, '2026-05-22T06:10:00.000Z');
+  assert.equal(readinessCalled, false);
 });

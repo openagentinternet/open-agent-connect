@@ -177,6 +177,124 @@ test('default LLM handlers use the active profile when actor selectors are omitt
   assert.equal(gotPreferred.data.runtimeId, 'runtime-codex');
 });
 
+test('default bot testRuntime reports missing runtime ids', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-runtime-test-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+    testLlmRuntimeReadiness: async (entry) => entry,
+  });
+
+  const result = await handlers.bot.testRuntime({ runtimeId: 'missing-runtime' });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'runtime_not_found');
+  assert.match(result.message, /missing-runtime/);
+});
+
+test('default bot testRuntime updates a runtime to healthy', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-runtime-test-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const runtimeStore = createLlmRuntimeStore(homeDir);
+  await runtimeStore.upsertRuntime(runtime('codex', 'runtime-codex', 'detected'));
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+    testLlmRuntimeReadiness: async (entry) => ({
+      ...entry,
+      version: '0.133.1',
+      health: 'healthy',
+      healthReason: undefined,
+      healthCheckedAt: '2026-05-22T06:00:00.000Z',
+      updatedAt: '2026-05-22T06:00:00.000Z',
+    }),
+  });
+
+  const result = await handlers.bot.testRuntime({ runtimeId: 'runtime-codex' });
+  const stored = await runtimeStore.read();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.runtime.health, 'healthy');
+  assert.equal(result.data.runtime.healthReason, undefined);
+  assert.equal(stored.runtimes[0].health, 'healthy');
+  assert.equal(stored.runtimes[0].version, '0.133.1');
+  assert.equal(result.data.runtimes[0].health, 'healthy');
+});
+
+test('default bot testRuntime updates a runtime to detected on readiness failure', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-runtime-test-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const runtimeStore = createLlmRuntimeStore(homeDir);
+  await runtimeStore.upsertRuntime(runtime('codex', 'runtime-codex', 'healthy'));
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+    testLlmRuntimeReadiness: async (entry) => ({
+      ...entry,
+      health: 'detected',
+      healthReason: 'Readiness probe completed without returning output.',
+      healthCheckedAt: '2026-05-22T06:05:00.000Z',
+      updatedAt: '2026-05-22T06:05:00.000Z',
+    }),
+  });
+
+  const result = await handlers.bot.testRuntime({ runtimeId: 'runtime-codex' });
+  const stored = await runtimeStore.read();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.runtime.health, 'detected');
+  assert.equal(result.data.runtime.healthReason, 'Readiness probe completed without returning output.');
+  assert.equal(stored.runtimes[0].health, 'detected');
+  assert.equal(stored.runtimes[0].healthReason, 'Readiness probe completed without returning output.');
+});
+
+test('default bot testRuntime updates a runtime to unavailable on version failure', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-runtime-test-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const runtimeStore = createLlmRuntimeStore(homeDir);
+  await runtimeStore.upsertRuntime(runtime('codex', 'runtime-codex', 'detected'));
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+    testLlmRuntimeReadiness: async (entry) => ({
+      ...entry,
+      health: 'unavailable',
+      healthReason: 'Version probe failed.',
+      healthCheckedAt: '2026-05-22T06:10:00.000Z',
+      updatedAt: '2026-05-22T06:10:00.000Z',
+    }),
+  });
+
+  const result = await handlers.bot.testRuntime({ runtimeId: 'runtime-codex' });
+  const stored = await runtimeStore.read();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.runtime.health, 'unavailable');
+  assert.equal(stored.runtimes[0].health, 'unavailable');
+  assert.equal(stored.runtimes[0].healthReason, 'Version probe failed.');
+});
+
 test('default bot createProfile rejects missing or duplicate names', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-');
   t.after(async () => {

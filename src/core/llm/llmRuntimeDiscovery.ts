@@ -503,6 +503,101 @@ export async function discoverProvider(
   );
 }
 
+export async function testLlmRuntimeReadiness(
+  runtime: LlmRuntime,
+  options?: {
+    env?: NodeJS.ProcessEnv;
+    readinessProbe?: RuntimeReadinessProbe;
+    readinessTimeoutMs?: number;
+    cwd?: string;
+    now?: () => string;
+  },
+): Promise<LlmRuntime> {
+  const env = options?.env ?? process.env;
+  const now = (options?.now ?? (() => new Date().toISOString()))();
+  const base = {
+    ...runtime,
+    lastSeenAt: now,
+    healthCheckedAt: now,
+    updatedAt: now,
+  };
+
+  if (!runtime.binaryPath) {
+    return {
+      ...base,
+      health: 'unavailable',
+      healthReason: 'Runtime has no binary path.',
+    };
+  }
+  if (runtime.provider === 'custom' || !isRuntimePlatformId(runtime.provider)) {
+    return {
+      ...base,
+      health: 'unavailable',
+      healthReason: `No runtime platform is registered for provider: ${runtime.provider}`,
+    };
+  }
+
+  const platform = getRuntimePlatformDefinition(runtime.provider);
+  const versionProbe = await probeExecutableVersion(
+    runtime.binaryPath,
+    platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'],
+    5_000,
+    env,
+  );
+  const probedRuntime: LlmRuntime = {
+    ...buildDiscoveredRuntime(runtime.provider, platform, runtime.binaryPath, versionProbe, {
+      env,
+      now: () => now,
+      createId: () => runtime.id,
+    }),
+    displayName: runtime.displayName || platform.displayName,
+    logoPath: runtime.logoPath || platform.logoPath,
+    model: runtime.model ?? providerModelFromEnv(runtime.provider, platform, env),
+    capabilities: runtime.capabilities?.length ? [...runtime.capabilities] : [...platform.runtime.capabilities],
+    createdAt: runtime.createdAt ?? now,
+    lastSeenAt: now,
+    healthCheckedAt: now,
+    updatedAt: now,
+  };
+
+  if (!versionProbe.ok) {
+    return {
+      ...probedRuntime,
+      health: 'unavailable',
+      healthReason: versionProbe.message ?? 'Version probe failed.',
+    };
+  }
+
+  const readinessProbe = options?.readinessProbe ?? defaultRuntimeReadinessProbe;
+  const readiness = await readinessProbe({
+    runtime: {
+      ...probedRuntime,
+      health: 'detected',
+      healthReason: undefined,
+    },
+    env,
+    timeoutMs: readinessTimeoutForProvider(runtime.provider, options?.readinessTimeoutMs),
+    cwd: options?.cwd,
+  });
+
+  if (readinessSucceeded(readiness)) {
+    return {
+      ...probedRuntime,
+      health: 'healthy',
+      healthReason: undefined,
+    };
+  }
+
+  return {
+    ...probedRuntime,
+    health: 'detected',
+    healthReason: readiness.message
+      ?? (typeof readiness.output === 'string' && !readiness.output.trim()
+        ? 'Readiness probe completed without returning output.'
+        : 'Readiness probe did not return a usable response.'),
+  };
+}
+
 export async function discoverLlmRuntimes(input?: DiscoveryInput): Promise<DiscoveryResult> {
   const env = input?.env ?? process.env;
   const pathDirs = splitPath(getPathEnv(env));
