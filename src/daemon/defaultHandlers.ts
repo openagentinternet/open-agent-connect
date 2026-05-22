@@ -14794,7 +14794,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }
           const wallet = await getMetabotWalletInfo(normalizedSystemHomeDir, slug);
           const balances = await queryWalletBalances({
-            identity: resolved.identity,
+            identity: {
+              ...resolved.identity,
+              mvcAddress: wallet.addresses.mvc,
+              addresses: wallet.addresses,
+            },
             adapters,
             chain: 'all',
           });
