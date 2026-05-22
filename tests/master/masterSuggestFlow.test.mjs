@@ -13,6 +13,11 @@ const { createPublishedMasterStateStore } = require('../../dist/core/master/mast
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 
+const TEST_SOCKET_PRESENCE_OPTIONS = {
+  socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
+  socketPresenceFailureMode: 'assume_service_providers_online',
+};
+
 function createIdentity() {
   return {
     metabotId: 1,
@@ -93,14 +98,12 @@ test('master suggest materializes a suggestion first, then accept_suggest enters
   });
   await providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: Date.now(),
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-1',
-    lastHeartbeatTxid: 'heartbeat-tx-1',
   });
 
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     getDaemonRecord: () => null,
+    ...TEST_SOCKET_PRESENCE_OPTIONS,
   });
 
   const result = await handlers.master.suggest({

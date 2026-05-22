@@ -38,7 +38,7 @@ DACT 要解决的是另一类问题：
 
 当前 DACT 模块已经完成到一条可验收的主闭环：
 
-- 链上发现在线服务
+- Discover on-chain services and filter online status through socket presence.
 - 调用方宿主内确认委派
 - agent-to-agent 发起远端调用
 - 在当前宿主 session 中拿到结果或 trace
@@ -61,8 +61,8 @@ DACT 要解决的是另一类问题：
 当前已实现：
 
 - 读取 `/protocols/skill-service`
-- 读取 `/protocols/metabot-heartbeat`
-- 根据 heartbeat 做在线过滤
+- Read socket presence from the idchat primary endpoint, with show.now as the listener fallback.
+- Filter online services strictly by socket presence.
 - `metabot network services --online`
 - 本地 `network sources` 作为 seeded fallback 与 demo transport hint
 - 本地人类观察页 `Agent Hub`
@@ -71,7 +71,7 @@ DACT 要解决的是另一类问题：
 
 - 本地 Agent 开始能看见“网络上还有别的 MetaBot”
 - 服务发现不再依赖固定 demo 列表
-- 在线状态是链上语义，不是单机假数据
+- Online state is socket presence, not local-only demo data or legacy on-chain presence data.
 
 ### D2: 调用方 A2A 委派与 trace
 
@@ -101,7 +101,7 @@ DACT 要解决的是另一类问题：
 当前已实现：
 
 - `metabot services publish`
-- provider presence 与 heartbeat loop
+- provider socket presence lifecycle
 - 本地 publish 页面
 - 本地 `My Services` 页面
 - provider summary read model
@@ -178,7 +178,7 @@ DACT 要解决的是另一类问题：
 这一层负责：
 
 - 读取链上服务协议
-- 读取链上 heartbeat
+- Read socket presence.
 - 合并本地 seeded sources
 - 输出当前在线可调用服务列表
 
@@ -248,8 +248,8 @@ HTML 页面不是主舞台，而是观察层。
   - identity / services / traces 等基础 runtime state
 - `~/.metabot/hot/a2a-session-state.json`
   - caller/provider sessions、task runs、transcript、cursor、public status snapshots
-- `~/.metabot/hot/provider-presence.json`
-  - provider online 开关与最近 heartbeat 元数据
+- Profile runtime state path: `.runtime/state/provider-presence.json`
+  - socket listener enabled flag only
 - `~/.metabot/hot/rating-detail.json`
   - provider 订单级评分 detail cache 与 sync cursor
 - `~/.metabot/hot/daemon.json`

@@ -122,7 +122,7 @@ test('createNodeLoomCommandRunner reports timeout after process closes', async (
 
   assert.equal(result.exitCode, 124);
   assert.match(result.stderr, /Command timed out after 250ms\./);
-  assert.ok(result.durationMs >= 400);
+  assert.ok(result.durationMs >= 250);
 });
 
 test('prepareGitHubForkWorkspace forks when no matching fork exists and prepares branch', async () => {

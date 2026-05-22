@@ -37,7 +37,7 @@ export interface LlmRuntimeResolver {
     resolveRuntime(input: ResolveRuntimeInput): Promise<ResolveRuntimeResult>;
     selectMetaBot(input: SelectMetaBotInput): Promise<SelectMetaBotResult | null>;
     markBindingUsed(bindingId: string): Promise<void>;
-    markRuntimeUnavailable(runtimeId: string): Promise<void>;
+    markRuntimeUnavailable(runtimeId: string, reason?: string): Promise<void>;
 }
 export declare function summarizeResolvedLlmRuntime(resolved: ResolveRuntimeResult): ResolvedLlmRuntimeSummary | undefined;
 export declare function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): LlmRuntimeResolver;

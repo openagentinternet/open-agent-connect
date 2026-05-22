@@ -42,12 +42,16 @@ class LlmExecutor {
         if (!request.runtimeId || !request.runtime) {
             throw new Error('runtimeId and runtime are required.');
         }
-        const provider = request.runtime.provider;
+        const effectiveRequest = {
+            ...request,
+            model: request.model ?? request.runtime.model,
+        };
+        const provider = effectiveRequest.runtime.provider;
         const factory = this.backends[provider];
         if (!factory) {
             throw new Error(`No LLM backend registered for provider: ${provider}`);
         }
-        const binaryPath = request.runtime.binaryPath;
+        const binaryPath = effectiveRequest.runtime.binaryPath;
         if (!binaryPath) {
             throw new Error(`Runtime ${request.runtimeId} has no binaryPath.`);
         }
@@ -55,23 +59,23 @@ class LlmExecutor {
         const record = {
             sessionId,
             status: 'starting',
-            runtimeId: request.runtimeId,
+            runtimeId: effectiveRequest.runtimeId,
             provider,
-            metaBotSlug: request.metaBotSlug,
-            prompt: request.prompt,
-            systemPrompt: request.systemPrompt,
-            skills: request.skills,
-            skillSourcePaths: request.skillSourcePaths,
-            model: request.model,
-            cwd: request.cwd,
-            resumeSessionId: request.resumeSessionId,
+            metaBotSlug: effectiveRequest.metaBotSlug,
+            prompt: effectiveRequest.prompt,
+            systemPrompt: effectiveRequest.systemPrompt,
+            skills: effectiveRequest.skills,
+            skillSourcePaths: effectiveRequest.skillSourcePaths,
+            model: effectiveRequest.model,
+            cwd: effectiveRequest.cwd,
+            resumeSessionId: effectiveRequest.resumeSessionId,
             createdAt: nowIso(),
         };
         await this.sessionManager.create(record);
         this.streams.set(sessionId, { events: [], closed: false, waiters: [] });
         const controller = new AbortController();
         this.running.set(sessionId, { controller });
-        void this.runSession(sessionId, request, factory, binaryPath, controller).catch((error) => {
+        void this.runSession(sessionId, effectiveRequest, factory, binaryPath, controller).catch((error) => {
             void this.failSession(sessionId, (0, backend_1.stringifyError)(error));
         });
         return sessionId;

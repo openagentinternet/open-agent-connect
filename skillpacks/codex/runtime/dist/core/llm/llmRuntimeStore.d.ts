@@ -5,7 +5,11 @@ export interface LlmRuntimeStore {
     upsertRuntime(runtime: LlmRuntime): Promise<LlmRuntimesState>;
     removeRuntime(runtimeId: string): Promise<LlmRuntimesState>;
     markSeen(runtimeId: string, now: string): Promise<LlmRuntimesState>;
-    updateHealth(runtimeId: string, health: string): Promise<LlmRuntimesState>;
+    updateHealth(runtimeId: string, health: string, options?: {
+        reason?: string;
+        healthCheckedAt?: string;
+        unavailableUntil?: string;
+    }): Promise<LlmRuntimesState>;
 }
 export declare function createLlmRuntimeStore(homeDirOrPaths: string | {
     llmRuntimesPath: string;

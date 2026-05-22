@@ -5,9 +5,6 @@ import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 
 export interface ProviderPresenceState {
   enabled: boolean;
-  lastHeartbeatAt: number | null;
-  lastHeartbeatPinId: string | null;
-  lastHeartbeatTxid: string | null;
 }
 
 export interface ProviderPresenceStateStore {
@@ -23,24 +20,9 @@ export interface ProviderPresenceStateStore {
 
 let atomicWriteSequence = 0;
 
-function normalizeText(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function normalizeNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function createEmptyPresenceState(): ProviderPresenceState {
   return {
-    enabled: false,
-    lastHeartbeatAt: null,
-    lastHeartbeatPinId: null,
-    lastHeartbeatTxid: null,
+    enabled: true,
   };
 }
 
@@ -51,9 +33,6 @@ function normalizeProviderPresenceState(value: ProviderPresenceState | null | un
 
   return {
     enabled: value.enabled === true,
-    lastHeartbeatAt: normalizeNumber(value.lastHeartbeatAt),
-    lastHeartbeatPinId: normalizeText(value.lastHeartbeatPinId) || null,
-    lastHeartbeatTxid: normalizeText(value.lastHeartbeatTxid) || null,
   };
 }
 

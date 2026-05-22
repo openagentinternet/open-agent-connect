@@ -77,6 +77,10 @@ export interface MasterDirectoryItem {
   online: boolean;
   updatedAt: number;
   lastSeenSec?: number | null;
+  lastSeenAt?: number | null;
+  lastSeenAgoSeconds?: number | null;
+  deviceCount?: number | null;
+  providerName?: string;
   providerDaemonBaseUrl?: string | null;
   directorySeedLabel?: string | null;
 }

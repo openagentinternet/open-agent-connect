@@ -9,14 +9,12 @@ import {
   type ChainServiceDirectoryItem,
 } from './chainServiceDirectory';
 import {
-  readOnlineMetaBotsFromSocketPresence,
-  type OnlineMetaBotDirectoryItem,
-} from './socketPresenceDirectory';
-import { normalizeComparableGlobalMetaId } from './serviceDirectory';
+  decorateRecordsWithSocketPresence,
+  type SocketPresenceFailureMode,
+} from './socketPresenceProjection';
 
 const DEFAULT_CHAIN_API_BASE_URL = 'https://manapi.metaid.io';
-const DEFAULT_SOCKET_PRESENCE_LIMIT = 100;
-export type SocketPresenceFailureMode = 'throw' | 'assume_service_providers_online';
+export type { SocketPresenceFailureMode } from './socketPresenceProjection';
 
 export interface ReadChainDirectoryResult {
   services: Array<Record<string, unknown>>;
@@ -85,128 +83,6 @@ async function fetchServicePages(input: {
   return resolveCurrentChainServices(rows);
 }
 
-function normalizeSocketPresenceLimit(value: number | undefined): number {
-  if (!Number.isFinite(value)) {
-    return DEFAULT_SOCKET_PRESENCE_LIMIT;
-  }
-  return Math.min(DEFAULT_SOCKET_PRESENCE_LIMIT, Math.max(1, Math.floor(value as number)));
-}
-
-function normalizeLastSeenSec(value: unknown): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-    return null;
-  }
-  if (value > 1e12) {
-    return Math.floor(value / 1000);
-  }
-  return Math.floor(value);
-}
-
-function buildOnlineMetaBotIndex(
-  bots: OnlineMetaBotDirectoryItem[],
-): Map<string, OnlineMetaBotDirectoryItem> {
-  const index = new Map<string, OnlineMetaBotDirectoryItem>();
-  for (const bot of bots) {
-    const globalMetaId = normalizeComparableGlobalMetaId(bot.globalMetaId);
-    if (!globalMetaId || index.has(globalMetaId)) {
-      continue;
-    }
-    index.set(globalMetaId, bot);
-  }
-  return index;
-}
-
-function buildSyntheticOnlineBotsFromServices(
-  services: Array<Record<string, unknown>>,
-): OnlineMetaBotDirectoryItem[] {
-  const nowMs = Date.now();
-  const seen = new Set<string>();
-  const bots: OnlineMetaBotDirectoryItem[] = [];
-  for (const service of services) {
-    const globalMetaId = normalizeComparableGlobalMetaId(
-      service.providerGlobalMetaId ?? service.globalMetaId,
-    );
-    if (!globalMetaId || seen.has(globalMetaId)) {
-      continue;
-    }
-    seen.add(globalMetaId);
-    bots.push({
-      globalMetaId,
-      lastSeenAt: nowMs,
-      lastSeenAgoSeconds: 0,
-      deviceCount: 1,
-      online: true,
-      name: '',
-      goal: '',
-    });
-  }
-  return bots;
-}
-
-function decorateServicesWithSocketPresence<T extends object>(input: {
-  services: T[];
-  onlineBots: OnlineMetaBotDirectoryItem[];
-  onlineOnly: boolean;
-}): Array<T & { online: boolean; lastSeenSec: number | null; lastSeenAt: number | null; lastSeenAgoSeconds: number | null; providerName: string }> {
-  const onlineIndex = buildOnlineMetaBotIndex(input.onlineBots);
-  const decorated = input.services.map((service) => {
-    const serviceRecord = service as Record<string, unknown>;
-    const globalMetaId = normalizeComparableGlobalMetaId(
-      serviceRecord.providerGlobalMetaId ?? serviceRecord.globalMetaId,
-    );
-    const onlineBot = globalMetaId ? onlineIndex.get(globalMetaId) : undefined;
-    const lastSeenAt = typeof onlineBot?.lastSeenAt === 'number' && Number.isFinite(onlineBot.lastSeenAt)
-      ? Math.max(0, Math.floor(onlineBot.lastSeenAt))
-      : null;
-    return {
-      ...service,
-      online: Boolean(onlineBot),
-      lastSeenSec: normalizeLastSeenSec(lastSeenAt),
-      lastSeenAt,
-      lastSeenAgoSeconds: typeof onlineBot?.lastSeenAgoSeconds === 'number' ? onlineBot.lastSeenAgoSeconds : null,
-      providerName: onlineBot?.name ?? '',
-    };
-  });
-
-  if (input.onlineOnly) {
-    return decorated.filter((service) => service.online);
-  }
-  return decorated;
-}
-
-async function applySocketPresenceToServices<T extends object>(input: {
-  services: T[];
-  fetchImpl: typeof fetch;
-  socketPresenceApiBaseUrl?: string;
-  socketPresenceLimit: number;
-  socketPresenceFailureMode?: SocketPresenceFailureMode;
-  onlineOnly: boolean;
-}): Promise<Array<T & { online: boolean; lastSeenSec: number | null; lastSeenAt: number | null; lastSeenAgoSeconds: number | null; providerName: string }>> {
-  let onlineBots: OnlineMetaBotDirectoryItem[] = [];
-  try {
-    const onlineDirectory = await readOnlineMetaBotsFromSocketPresence({
-      fetchImpl: input.fetchImpl,
-      apiBaseUrl: input.socketPresenceApiBaseUrl,
-      limit: input.socketPresenceLimit,
-    });
-    onlineBots = onlineDirectory.bots;
-  } catch (error) {
-    if (input.socketPresenceFailureMode === 'assume_service_providers_online') {
-      onlineBots = buildSyntheticOnlineBotsFromServices(
-        input.services.map((service) => ({ ...(service as Record<string, unknown>) })),
-      );
-    } else if (input.onlineOnly) {
-      throw error;
-    }
-  }
-
-  return decorateServicesWithSocketPresence({
-    services: input.services,
-    onlineBots,
-    onlineOnly: input.onlineOnly,
-  });
-}
-
 export async function readChainDirectoryWithFallback(
   options: ReadChainDirectoryOptions
 ): Promise<ReadChainDirectoryResult> {
@@ -218,8 +94,6 @@ export async function readChainDirectoryWithFallback(
   const serviceMaxPages = Number.isFinite(options.serviceMaxPages)
     ? Math.max(1, Math.floor(options.serviceMaxPages as number))
     : DEFAULT_CHAIN_SERVICE_MAX_PAGES;
-  const socketPresenceLimit = normalizeSocketPresenceLimit(options.socketPresenceLimit);
-
   let source: 'chain' | 'seeded' = 'chain';
   let fallbackUsed = false;
   let services: Array<ChainServiceDirectoryItem | Record<string, unknown>>;
@@ -236,14 +110,15 @@ export async function readChainDirectoryWithFallback(
     services = await options.fetchSeededDirectoryServices();
   }
 
-  const decoratedServices = await applySocketPresenceToServices({
-    services: services.map((service) => ({ ...(service as Record<string, unknown>) })),
-    fetchImpl,
-    socketPresenceApiBaseUrl: options.socketPresenceApiBaseUrl,
-    socketPresenceLimit,
-    socketPresenceFailureMode: options.socketPresenceFailureMode,
-    onlineOnly: options.onlineOnly === true,
-  });
+  const decoratedServices = await decorateRecordsWithSocketPresence(
+    services.map((service) => ({ ...(service as Record<string, unknown>) })),
+    {
+      fetchImpl,
+      socketPresenceApiBaseUrl: options.socketPresenceApiBaseUrl,
+      socketPresenceLimit: options.socketPresenceLimit,
+      socketPresenceFailureMode: options.socketPresenceFailureMode,
+      onlineOnly: options.onlineOnly === true,
+    });
 
   return {
     services: decoratedServices,

@@ -208,6 +208,8 @@ async function startProviderServer(options = {}) {
     secretStore: options.secretStore,
     signer: options.signer,
     adapters: options.adapters,
+    socketPresenceApiBaseUrl: options.socketPresenceApiBaseUrl,
+    socketPresenceFailureMode: options.socketPresenceFailureMode,
     onProviderPresenceChanged: async (enabled) => {
       presenceChanges.push(enabled);
     },
@@ -252,7 +254,42 @@ async function startProviderServer(options = {}) {
 }
 
 test('GET /api/provider/summary returns provider presence, services, recent orders, and manual refund queue', async (t) => {
-  const app = await startProviderServer();
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (url, init) => {
+    const requestUrl = String(url);
+    if (requestUrl.startsWith('https://presence.test/group-chat/socket/online-users')) {
+      return new Response(JSON.stringify({
+        code: 0,
+        data: {
+          total: 1,
+          onlineWindowSeconds: 60,
+          list: [
+            {
+              globalMetaId: 'idq1provider',
+              lastSeenAt: 1_775_000_030_000,
+              lastSeenAgoSeconds: 5,
+              deviceCount: 2,
+              userInfo: {
+                name: 'Provider Bot',
+                bio: '{"goal":"Reads cards."}',
+              },
+            },
+          ],
+        },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return originalFetch(url, init);
+  };
+
+  const app = await startProviderServer({
+    socketPresenceApiBaseUrl: 'https://presence.test',
+  });
   t.after(async () => app.close());
 
   await app.runtimeStateStore.writeState({
@@ -262,9 +299,6 @@ test('GET /api/provider/summary returns provider presence, services, recent orde
   });
   await app.providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: 1_775_000_030_000,
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-1',
-    lastHeartbeatTxid: '/protocols/metabot-heartbeat-tx-1',
   });
 
   const response = await fetchJson(app.baseUrl, '/api/provider/summary');
@@ -273,6 +307,10 @@ test('GET /api/provider/summary returns provider presence, services, recent orde
   assert.equal(response.payload.ok, true);
   assert.equal(response.payload.data.identity.globalMetaId, 'idq1provider');
   assert.equal(response.payload.data.presence.enabled, true);
+  assert.equal(response.payload.data.presence.source, 'socket_presence');
+  assert.equal(response.payload.data.presence.online, true);
+  assert.equal(response.payload.data.presence.lastSeenAt, 1_775_000_030_000);
+  assert.equal(response.payload.data.presence.deviceCount, 2);
   assert.equal(response.payload.data.services.length, 1);
   assert.equal(response.payload.data.recentOrders.length, 1);
   assert.equal(response.payload.data.manualActions.length, 1);

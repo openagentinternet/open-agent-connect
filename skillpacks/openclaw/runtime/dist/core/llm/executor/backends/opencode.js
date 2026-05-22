@@ -5,7 +5,9 @@ exports.createOpenCodeBackend = createOpenCodeBackend;
 const backend_1 = require("./backend");
 const jsonProcess_1 = require("./jsonProcess");
 function buildOpenCodeArgs(request) {
-    const args = ['run', '--format', 'json'];
+    const args = ['run', '--format', 'json', '--dangerously-skip-permissions'];
+    if (request.cwd)
+        args.push('--dir', request.cwd);
     if (request.model)
         args.push('--model', request.model);
     if (request.systemPrompt)
@@ -14,6 +16,8 @@ function buildOpenCodeArgs(request) {
         args.push('--session', request.resumeSessionId);
     args.push(...(0, backend_1.filterBlockedArgs)(request.extraArgs, {
         '--format': { takesValue: true },
+        '--dir': { takesValue: true },
+        '--dangerously-skip-permissions': { takesValue: false },
         '--model': { takesValue: true },
         '--prompt': { takesValue: true },
         '--session': { takesValue: true },
@@ -46,7 +50,7 @@ function createOpenCodeBackend(binaryPath, env) {
                 args,
                 cwd: request.cwd,
                 env,
-                requestEnv: { ...request.env, OPENCODE_PERMISSION: '{"*":"allow"}' },
+                requestEnv: { ...request.env, OPENCODE_PERMISSION: '{"*":"allow"}', ...(request.cwd ? { PWD: request.cwd } : {}) },
                 timeoutMs: request.timeout,
                 signal,
                 emitter,

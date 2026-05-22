@@ -41,6 +41,32 @@ async function writeJsonFile(filePath, state) {
     await node_fs_1.promises.writeFile(tmpPath, JSON.stringify(state, null, 2) + '\n', 'utf8');
     await node_fs_1.promises.rename(tmpPath, filePath);
 }
+function isFutureIso(value, nowMs = Date.now()) {
+    if (!value)
+        return false;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) && parsed > nowMs;
+}
+function mergeRuntimeForUpsert(existing, incoming) {
+    if (!existing)
+        return incoming;
+    if (existing.health === 'unavailable'
+        && incoming.health === 'detected'
+        && isFutureIso(existing.unavailableUntil)) {
+        return {
+            ...incoming,
+            health: 'unavailable',
+            healthReason: existing.healthReason,
+            unavailableUntil: existing.unavailableUntil,
+            healthCheckedAt: incoming.healthCheckedAt ?? existing.healthCheckedAt,
+        };
+    }
+    if (incoming.health === 'healthy') {
+        const { healthReason: _healthReason, unavailableUntil: _unavailableUntil, ...rest } = incoming;
+        return rest;
+    }
+    return incoming;
+}
 function createLlmRuntimeStore(homeDirOrPaths) {
     const filePath = resolveRuntimesPath(homeDirOrPaths);
     const store = {
@@ -60,7 +86,7 @@ function createLlmRuntimeStore(homeDirOrPaths) {
             const state = await readJsonFile(filePath);
             const existingIndex = state.runtimes.findIndex((r) => r.id === normalized.id);
             if (existingIndex >= 0) {
-                state.runtimes[existingIndex] = normalized;
+                state.runtimes[existingIndex] = mergeRuntimeForUpsert(state.runtimes[existingIndex], normalized);
             }
             else {
                 state.runtimes.push(normalized);
@@ -87,12 +113,19 @@ function createLlmRuntimeStore(homeDirOrPaths) {
             await writeJsonFile(filePath, state);
             return state;
         },
-        async updateHealth(runtimeId, health) {
+        async updateHealth(runtimeId, health, options = {}) {
             const state = await readJsonFile(filePath);
             const rt = state.runtimes.find((r) => r.id === runtimeId);
             if (rt) {
                 rt.health = health;
-                rt.updatedAt = new Date().toISOString();
+                rt.healthReason = options.reason;
+                rt.healthCheckedAt = options.healthCheckedAt ?? new Date().toISOString();
+                rt.unavailableUntil = options.unavailableUntil;
+                if (rt.health === 'healthy') {
+                    rt.healthReason = undefined;
+                    rt.unavailableUntil = undefined;
+                }
+                rt.updatedAt = rt.healthCheckedAt;
                 state.version += 1;
             }
             await writeJsonFile(filePath, state);

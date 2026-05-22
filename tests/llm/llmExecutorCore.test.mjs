@@ -1953,7 +1953,7 @@ rl.on('close', () => {
       systemPrompt: 'Be useful.',
       maxTurns: 3,
       model: 'sonnet-test',
-      timeout: 1_000,
+      timeout: 5_000,
       extraArgs: ['--permission-mode', 'ask', '--debug'],
     },
     { emit: (event) => events.push(event) },

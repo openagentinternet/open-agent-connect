@@ -27,6 +27,20 @@
         flex: 1;
         min-width: 126px;
       }
+      .stat-link {
+        margin-top: 6px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .stat-link:hover {
+        color: var(--text);
+        text-decoration: underline;
+      }
 
       .bot-workspace {
         flex: 1;
@@ -626,6 +640,123 @@
       .modal-box-wide {
         width: 620px;
       }
+      .runtime-modal-box {
+        width: min(920px, calc(100vw - 40px));
+        max-height: calc(100vh - 96px);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        padding: 0;
+      }
+      .runtime-modal-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .runtime-modal-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .runtime-modal-summary {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .runtime-modal-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .runtime-list {
+        overflow: auto;
+        padding: 6px 0;
+      }
+      .runtime-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .runtime-row:last-child {
+        border-bottom: 0;
+      }
+      .runtime-row-main {
+        min-width: 0;
+      }
+      .runtime-row-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .runtime-row-title strong {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text);
+        font-size: 13px;
+      }
+      .runtime-row-title code {
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 10px;
+      }
+      .runtime-row-meta {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px 14px;
+        margin-top: 10px;
+      }
+      .runtime-row-meta span {
+        display: block;
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+      }
+      .runtime-row-meta strong,
+      .runtime-row-meta code {
+        display: block;
+        margin-top: 2px;
+        color: var(--text);
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 400;
+        overflow-wrap: anywhere;
+      }
+      .runtime-health-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--amber);
+        flex-shrink: 0;
+      }
+      .runtime-health-healthy {
+        background: var(--green);
+        box-shadow: 0 0 0 3px var(--green-dim);
+      }
+      .runtime-health-detected {
+        background: var(--amber);
+        box-shadow: 0 0 0 3px var(--amber-dim);
+      }
+      .runtime-path,
+      .runtime-reason {
+        grid-column: 1 / -1;
+      }
+      .runtime-empty {
+        padding: 22px 18px;
+        color: var(--muted);
+        font-size: 13px;
+      }
       .modal-title-row {
         display: flex;
         align-items: center;
@@ -813,7 +944,18 @@
         }
         .info-form-grid,
         .exec-detail,
+        .runtime-row,
         .mnemonic-grid {
+          grid-template-columns: 1fr;
+        }
+        .runtime-modal-box {
+          width: min(100%, calc(100vw - 24px));
+          max-height: calc(100vh - 48px);
+        }
+        .runtime-modal-head {
+          flex-direction: column;
+        }
+        .runtime-row-meta {
           grid-template-columns: 1fr;
         }
         .info-id-row {
@@ -841,6 +983,7 @@
         <div class="stat-card">
           <div class="stat-label">Runtimes</div>
           <div class="stat-value green" data-stat-runtimes>-</div>
+          <button class="stat-link" data-act="open-runtime-modal" type="button">View providers</button>
         </div>
         <div class="stat-card">
           <div class="stat-label">Executions</div>
@@ -946,6 +1089,7 @@
     </div>
 
     <div class="modal-overlay hidden" data-modal-root role="dialog" aria-modal="true"></div>
+    <div data-runtime-modal-status hidden></div>
     <div class="copy-toast" data-copy-toast role="status" aria-live="polite"></div>
     <script>__PAGE_SCRIPT__</script>
   </body>

@@ -17,6 +17,11 @@ const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateS
 const { createPublishedMasterStateStore } = require('../../dist/core/master/masterPublishedState.js');
 const { buildMasterResponseJson, parseMasterRequest } = require('../../dist/core/master/masterMessageSchema.js');
 
+const TEST_SOCKET_PRESENCE_OPTIONS = {
+  socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
+  socketPresenceFailureMode: 'assume_service_providers_online',
+};
+
 const previousInternalAuto = process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
 test.before(() => {
   process.env.METABOT_INTERNAL_ASK_MASTER_AUTO = '1';
@@ -188,14 +193,12 @@ async function createHarness(options = {}) {
   });
   await providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: Date.now(),
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-auto-e2e',
-    lastHeartbeatTxid: 'heartbeat-tx-auto-e2e',
   });
 
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     getDaemonRecord: () => null,
+    ...TEST_SOCKET_PRESENCE_OPTIONS,
     signer: {
       async getPrivateChatIdentity() {
         return {

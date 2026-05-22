@@ -268,6 +268,10 @@ export interface MetabotDaemonHttpHandlers {
         discoverRuntimes?: (input?: {
             from?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        testRuntime?: (input: {
+            from?: string;
+            runtimeId: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         listSessions?: (input: {
             slug?: string;
             limit: number;

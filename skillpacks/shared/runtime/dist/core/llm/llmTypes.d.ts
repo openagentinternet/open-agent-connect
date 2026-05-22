@@ -1,7 +1,7 @@
 import type { RuntimePlatformId } from '../platform/platformRegistry';
 export type LlmProvider = RuntimePlatformId | 'custom';
 export type LlmAuthState = 'unknown' | 'authenticated' | 'unauthenticated';
-export type LlmHealth = 'healthy' | 'degraded' | 'unavailable';
+export type LlmHealth = 'healthy' | 'detected' | 'degraded' | 'unavailable';
 export type LlmBindingRole = 'primary' | 'fallback' | 'reviewer' | 'specialist';
 export declare const SUPPORTED_LLM_PROVIDERS: LlmProvider[];
 export declare const HOST_BINARY_MAP: Record<string, string>;
@@ -16,6 +16,9 @@ export interface LlmRuntime {
     logoPath?: string;
     authState: LlmAuthState;
     health: LlmHealth;
+    healthReason?: string;
+    healthCheckedAt?: string;
+    unavailableUntil?: string;
     capabilities: string[];
     lastSeenAt: string;
     baseUrl?: string;

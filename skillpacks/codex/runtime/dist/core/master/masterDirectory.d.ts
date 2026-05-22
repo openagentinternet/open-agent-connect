@@ -1,3 +1,4 @@
+import { type SocketPresenceFailureMode } from '../discovery/socketPresenceProjection';
 import type { PublishedMasterRecord, MasterDirectoryItem } from './masterTypes';
 export interface ParsedChainMasterRow {
     pinId: string;
@@ -37,6 +38,9 @@ export interface ReadChainMasterDirectoryOptions {
     fetchImpl?: typeof fetch;
     now?: () => number;
     onlineOnly?: boolean;
+    socketPresenceApiBaseUrl?: string;
+    socketPresenceLimit?: number;
+    socketPresenceFailureMode?: SocketPresenceFailureMode;
     fetchSeededDirectoryMasters: () => Promise<MasterDirectoryItem[]>;
 }
 export declare function parseChainMasterItem(item: Record<string, unknown>): ParsedChainMasterRow | null;

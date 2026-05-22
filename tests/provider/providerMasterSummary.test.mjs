@@ -13,6 +13,11 @@ const { createPublishedMasterStateStore } = require('../../dist/core/master/mast
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 const { createRatingDetailStateStore } = require('../../dist/core/ratings/ratingDetailState.js');
 
+const TEST_SOCKET_PRESENCE_OPTIONS = {
+  socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
+  socketPresenceFailureMode: 'assume_service_providers_online',
+};
+
 function createIdentity() {
   return {
     metabotId: 1,
@@ -112,9 +117,6 @@ test('provider summary projects recent master requests alongside existing provid
   });
   await providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: Date.now(),
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-1',
-    lastHeartbeatTxid: 'heartbeat-tx-1',
   });
   await ratingDetailStateStore.write({
     items: [],
@@ -126,6 +128,7 @@ test('provider summary projects recent master requests alongside existing provid
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:25200' }),
+    ...TEST_SOCKET_PRESENCE_OPTIONS,
   });
 
   const result = await handlers.provider.getSummary();

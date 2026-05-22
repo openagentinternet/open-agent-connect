@@ -1,6 +1,7 @@
 import { type MetabotCommandResult } from '../core/contracts/commandResult';
 import { createRuntimeStateStore, type RuntimeDaemonRecord } from '../core/state/runtimeStateStore';
 import { type MetabotPaths } from '../core/state/paths';
+import { testLlmRuntimeReadiness } from '../core/llm/llmRuntimeDiscovery';
 import type { LlmRuntime } from '../core/llm/llmTypes';
 import type { LlmExecutor } from '../core/llm/executor';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
@@ -126,5 +127,6 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     autoReplyConfig?: PrivateChatAutoReplyConfig;
     llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
     providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
+    testLlmRuntimeReadiness?: typeof testLlmRuntimeReadiness;
 }): MetabotDaemonHttpHandlers;
 export {};

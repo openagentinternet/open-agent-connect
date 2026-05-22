@@ -17,6 +17,11 @@ const { createPublishedMasterStateStore } = require('../../dist/core/master/mast
 const { createPendingMasterAskStateStore } = require('../../dist/core/master/masterPendingAskState.js');
 const { buildMasterResponseJson, parseMasterRequest } = require('../../dist/core/master/masterMessageSchema.js');
 
+const TEST_SOCKET_PRESENCE_OPTIONS = {
+  socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
+  socketPresenceFailureMode: 'assume_service_providers_online',
+};
+
 const previousInternalAuto = process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
 test.before(() => {
   process.env.METABOT_INTERNAL_ASK_MASTER_AUTO = '1';
@@ -200,14 +205,12 @@ test('auto direct send still persists and sends a sanitized payload without secr
   });
   await providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: Date.now(),
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-auto-privacy',
-    lastHeartbeatTxid: 'heartbeat-tx-auto-privacy',
   });
 
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     getDaemonRecord: () => null,
+    ...TEST_SOCKET_PRESENCE_OPTIONS,
     signer: {
       async getPrivateChatIdentity() {
         return {

@@ -18,6 +18,11 @@ const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 const { buildMasterResponseJson } = require('../../dist/core/master/masterMessageSchema.js');
 
+const TEST_SOCKET_PRESENCE_OPTIONS = {
+  socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
+  socketPresenceFailureMode: 'assume_service_providers_online',
+};
+
 const previousInternalAuto = process.env.METABOT_INTERNAL_ASK_MASTER_AUTO;
 test.before(() => {
   process.env.METABOT_INTERNAL_ASK_MASTER_AUTO = '1';
@@ -214,9 +219,6 @@ async function createAutoHarness(options = {}) {
   });
   await providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: Date.now(),
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-auto-feedback',
-    lastHeartbeatTxid: 'heartbeat-tx-auto-feedback',
   });
 
   const defaultSigner = {
@@ -277,6 +279,7 @@ async function createAutoHarness(options = {}) {
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     getDaemonRecord: () => null,
+    ...TEST_SOCKET_PRESENCE_OPTIONS,
     signer: options.signerOverride ?? defaultSigner,
     masterReplyWaiter: options.masterReplyWaiterOverride ?? defaultMasterReplyWaiter,
   });
@@ -362,6 +365,7 @@ test('prepared auto previews do not create persisted cross-trace suppression bef
   const reloadedHandlers = createDefaultMetabotDaemonHandlers({
     homeDir: harness.homeDir,
     getDaemonRecord: () => null,
+    ...TEST_SOCKET_PRESENCE_OPTIONS,
   });
 
   const followUp = await reloadedHandlers.master.suggest(buildSuggestInput('trace-master-auto-feedback-prepared-2'));

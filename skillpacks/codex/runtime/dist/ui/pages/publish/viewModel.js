@@ -26,7 +26,7 @@ function buildPublishPageViewModel(input) {
     const availableRuntimeProviders = new Set(runtimes
         .filter((entry) => {
         const health = normalizeText(entry.health).toLowerCase();
-        return normalizeText(entry.provider) && (health === 'healthy' || health === 'degraded');
+        return normalizeText(entry.provider) && health === 'healthy';
     })
         .map((entry) => normalizeText(entry.provider)));
     const metabots = profiles

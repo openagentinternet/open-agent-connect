@@ -17,6 +17,11 @@ const { createRatingDetailStateStore } = require('../../dist/core/ratings/rating
 const { receivePrivateChat } = require('../../dist/core/chat/privateChat.js');
 const { parseMasterResponse } = require('../../dist/core/master/masterMessageSchema.js');
 
+const TEST_SOCKET_PRESENCE_OPTIONS = {
+  socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
+  socketPresenceFailureMode: 'assume_service_providers_online',
+};
+
 function createIdentity() {
   return {
     metabotId: 1,
@@ -75,9 +80,6 @@ test('default master handlers publish a validated master-service and surface it 
   });
   await providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: Date.now(),
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-1',
-    lastHeartbeatTxid: 'heartbeat-tx-1',
   });
 
   const writes = [];
@@ -85,6 +87,7 @@ test('default master handlers publish a validated master-service and surface it 
     homeDir,
     chainApiBaseUrl: 'https://chain.test',
     getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:25200' }),
+    ...TEST_SOCKET_PRESENCE_OPTIONS,
     signer: {
       async writePin(input) {
         writes.push(input);
@@ -183,9 +186,6 @@ test('default master handlers receive a provider-side master_request and project
   });
   await providerPresenceStore.write({
     enabled: true,
-    lastHeartbeatAt: Date.now(),
-    lastHeartbeatPinId: '/protocols/metabot-heartbeat-pin-1',
-    lastHeartbeatTxid: 'heartbeat-tx-1',
   });
   await ratingDetailStateStore.write({
     items: [],
@@ -197,6 +197,7 @@ test('default master handlers receive a provider-side master_request and project
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:25200' }),
+    ...TEST_SOCKET_PRESENCE_OPTIONS,
   });
 
   const received = await handlers.master.receive({
@@ -309,6 +310,7 @@ test('default master handlers send the generated master_response over simplemsg 
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:25200' }),
+    ...TEST_SOCKET_PRESENCE_OPTIONS,
     signer: {
       async getPrivateChatIdentity() {
         return {
@@ -456,6 +458,7 @@ test('default master handlers regenerate exported trace artifacts when provider 
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:25200' }),
+    ...TEST_SOCKET_PRESENCE_OPTIONS,
     signer: {
       async getPrivateChatIdentity() {
         return {

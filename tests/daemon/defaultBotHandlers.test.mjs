@@ -692,6 +692,33 @@ test('default identity create notifies the daemon after registering the profile'
   assert.equal(registrationCallbackCalls, 1);
 });
 
+test('default bot createProfile notifies the daemon after registering the profile', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-create-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  let registrationCallbackCalls = 0;
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+    onIdentityProfileRegistered: async () => {
+      registrationCallbackCalls += 1;
+    },
+  });
+
+  const result = await handlers.bot.createProfile({
+    name: 'Fresh Socket Bot',
+    creationSource: 'ui',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.name, 'Fresh Socket Bot');
+  assert.equal(registrationCallbackCalls, 1);
+});
+
 test('default identity create prefers the requested Cursor host provider over newer Trae activity', async (t) => {
   const homeDir = await createProfileHome('metabot-default-identity-create-', 'cursor-default-bot');
   t.after(async () => {
