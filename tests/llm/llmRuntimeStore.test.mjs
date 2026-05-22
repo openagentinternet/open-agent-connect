@@ -118,6 +118,59 @@ test('updateHealth updates health field', async () => {
   assert.equal(state.runtimes[0].health, 'unavailable');
 });
 
+test('upsertRuntime preserves quarantined unavailable state when rediscovery only detects a runtime', async () => {
+  const profileRoot = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const store = createLlmRuntimeStore(paths);
+  await store.upsertRuntime({
+    ...sampleRuntime,
+    health: 'unavailable',
+    healthReason: 'LLM runtime completed without returning output.',
+    unavailableUntil: '2099-01-01T00:00:00.000Z',
+  });
+  await store.upsertRuntime({
+    ...sampleRuntime,
+    health: 'detected',
+    version: '2.0.0',
+    healthReason: 'readiness prompt returned no output',
+    healthCheckedAt: '2026-05-22T00:00:00.000Z',
+  });
+
+  const state = await store.read();
+  assert.equal(state.runtimes.length, 1);
+  assert.equal(state.runtimes[0].health, 'unavailable');
+  assert.equal(state.runtimes[0].version, '2.0.0');
+  assert.equal(state.runtimes[0].healthReason, 'LLM runtime completed without returning output.');
+  assert.equal(state.runtimes[0].unavailableUntil, '2099-01-01T00:00:00.000Z');
+  assert.equal(state.runtimes[0].healthCheckedAt, '2026-05-22T00:00:00.000Z');
+});
+
+test('upsertRuntime lets successful readiness clear a quarantined unavailable state', async () => {
+  const profileRoot = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const store = createLlmRuntimeStore(paths);
+  await store.upsertRuntime({
+    ...sampleRuntime,
+    health: 'unavailable',
+    healthReason: 'LLM runtime timed out while running prompt.',
+    unavailableUntil: '2099-01-01T00:00:00.000Z',
+  });
+  await store.upsertRuntime({
+    ...sampleRuntime,
+    health: 'healthy',
+    version: '2.0.0',
+    healthCheckedAt: '2026-05-22T01:00:00.000Z',
+  });
+
+  const state = await store.read();
+  assert.equal(state.runtimes.length, 1);
+  assert.equal(state.runtimes[0].health, 'healthy');
+  assert.equal(state.runtimes[0].version, '2.0.0');
+  assert.equal(state.runtimes[0].healthReason, undefined);
+  assert.equal(state.runtimes[0].unavailableUntil, undefined);
+  assert.equal(state.runtimes[0].healthCheckedAt, '2026-05-22T01:00:00.000Z');
+});
+
 test('malformed JSON is overwritten with clean state', async () => {
   const profileRoot = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);

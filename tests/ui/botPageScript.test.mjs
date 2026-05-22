@@ -183,13 +183,12 @@ test('bot page renders provider pickers with icons and only exposes none for fal
   assert.match(primaryPicker, /data-provider-picker="primaryProvider"/);
   assert.match(primaryPicker, /data-provider-icon="codex"/);
   assert.match(primaryPicker, /<img src="\/ui\/assets\/platforms\/codex\.svg" alt="" loading="lazy" \/>/);
-  assert.match(primaryPicker, /data-provider-icon="claude-code"/);
-  assert.match(primaryPicker, /<img src="\/ui\/assets\/platforms\/claude-code\.svg" alt="" loading="lazy" \/>/);
+  assert.doesNotMatch(primaryPicker, /data-provider-icon="claude-code"/);
   assert.match(primaryPicker, /data-provider-value="codex"[^>]*selected/);
   assert.doesNotMatch(primaryPicker, /data-provider-icon="openclaw"/);
   assert.match(fallbackPicker, /data-provider-option="none"/);
   assert.match(fallbackPicker, /<img src="\/ui\/assets\/platforms\/generic\.svg" alt="" loading="lazy" \/>/);
-  assert.match(fallbackPicker, /data-provider-icon="claude-code"/);
+  assert.doesNotMatch(fallbackPicker, /data-provider-icon="claude-code"/);
   assert.doesNotMatch(fallbackPicker, /data-provider-icon="openclaw"/);
 });
 

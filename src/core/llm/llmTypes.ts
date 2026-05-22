@@ -11,7 +11,7 @@ export type LlmProvider =
   | RuntimePlatformId
   | 'custom';
 export type LlmAuthState = 'unknown' | 'authenticated' | 'unauthenticated';
-export type LlmHealth = 'healthy' | 'degraded' | 'unavailable';
+export type LlmHealth = 'healthy' | 'detected' | 'degraded' | 'unavailable';
 export type LlmBindingRole = 'primary' | 'fallback' | 'reviewer' | 'specialist';
 
 export const SUPPORTED_LLM_PROVIDERS: LlmProvider[] = [...RUNTIME_PLATFORM_IDS];
@@ -31,6 +31,9 @@ export interface LlmRuntime {
   logoPath?: string;
   authState: LlmAuthState;
   health: LlmHealth;
+  healthReason?: string;
+  healthCheckedAt?: string;
+  unavailableUntil?: string;
   capabilities: string[];
   lastSeenAt: string;
   baseUrl?: string;
@@ -105,7 +108,7 @@ function isLlmAuthState(value: unknown): value is LlmAuthState {
 }
 
 function isLlmHealth(value: unknown): value is LlmHealth {
-  return typeof value === 'string' && ['healthy', 'degraded', 'unavailable'].includes(value);
+  return typeof value === 'string' && ['healthy', 'detected', 'degraded', 'unavailable'].includes(value);
 }
 
 export function isLlmBindingRole(value: unknown): value is LlmBindingRole {
@@ -134,7 +137,10 @@ export function normalizeLlmRuntime(value: unknown): LlmRuntime | null {
     version: normalizeOptionalString(r.version),
     logoPath: normalizeOptionalString(r.logoPath),
     authState: isLlmAuthState(r.authState) ? r.authState : 'unknown',
-    health: isLlmHealth(r.health) ? r.health : 'healthy',
+    health: isLlmHealth(r.health) ? r.health : 'detected',
+    healthReason: normalizeOptionalString(r.healthReason),
+    healthCheckedAt: normalizeOptionalString(r.healthCheckedAt),
+    unavailableUntil: normalizeOptionalString(r.unavailableUntil),
     capabilities: normalizeStringArray(r.capabilities),
     lastSeenAt: normalizeIsoString(r.lastSeenAt, now),
     baseUrl: normalizeOptionalString(r.baseUrl),

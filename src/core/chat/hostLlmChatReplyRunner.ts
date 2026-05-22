@@ -166,22 +166,31 @@ async function tryExecute(
       const result = session?.result;
       if (result) {
         if (result.status === 'completed') {
-          return { result: parseRunnerOutput(result.output), bindingId: resolved.bindingId };
+          const parsed = parseRunnerOutput(result.output);
+          if (parsed.state !== 'skip') {
+            return { result: parsed, bindingId: resolved.bindingId };
+          }
+          excludeRuntimeIds.add(resolved.runtime.id);
+          await resolver.markRuntimeUnavailable(
+            resolved.runtime.id,
+            'LLM runtime completed without returning output.',
+          ).catch(() => {});
+          return null;
         }
         excludeRuntimeIds.add(resolved.runtime.id);
-        await resolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
+        await resolver.markRuntimeUnavailable(resolved.runtime.id, result.error || `LLM runtime ended with status ${result.status}.`).catch(() => {});
         return null;
       }
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }
 
     excludeRuntimeIds.add(resolved.runtime.id);
-    await resolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
+    await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => {});
     return null;
   } catch {
     if (!excludeRuntimeIds.has(resolved.runtime.id)) {
       excludeRuntimeIds.add(resolved.runtime.id);
-      await resolver.markRuntimeUnavailable(resolved.runtime.id).catch(() => {});
+      await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime failed while running chat reply.').catch(() => {});
     }
     return null;
   }

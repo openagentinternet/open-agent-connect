@@ -38,7 +38,10 @@ test('LLM runtime discovery marks previously known missing runtimes unavailable'
   const binDir = path.join(systemHome, 'bin');
   await mkdir(binDir, { recursive: true });
   const fakeCodexPath = path.join(binDir, 'codex');
-  await writeFile(fakeCodexPath, '#!/usr/bin/env sh\necho "codex 1.2.3"\n', 'utf8');
+  await writeFile(fakeCodexPath, [
+    '#!/bin/sh',
+    'echo "codex 1.2.3"',
+  ].join('\n'), 'utf8');
   await chmod(fakeCodexPath, 0o755);
 
   const discoveredRuntimeId = `llm_codex_${fakeCodexPath}`;
@@ -51,7 +54,7 @@ test('LLM runtime discovery marks previously known missing runtimes unavailable'
   }));
 
   const originalPath = process.env.PATH;
-  process.env.PATH = [binDir, originalPath].filter(Boolean).join(path.delimiter);
+  process.env.PATH = binDir;
   t.after(() => {
     process.env.PATH = originalPath;
   });
@@ -65,6 +68,6 @@ test('LLM runtime discovery marks previously known missing runtimes unavailable'
 
   assert.equal(result.ok, true);
   const byId = new Map(result.data.runtimes.map((runtime) => [runtime.id, runtime]));
-  assert.equal(byId.get(discoveredRuntimeId).health, 'healthy');
+  assert.equal(byId.get(discoveredRuntimeId).health, 'detected');
   assert.equal(byId.get('llm_codex_missing').health, 'unavailable');
 });

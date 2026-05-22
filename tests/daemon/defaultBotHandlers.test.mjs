@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { access, mkdir } from 'node:fs/promises';
+import { access, chmod, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
@@ -580,6 +580,28 @@ test('default identity create prefers the requested Cursor host provider over ne
     await cleanupProfileHome(homeDir);
   });
   const systemHomeDir = deriveSystemHome(homeDir);
+  const binDir = path.join(systemHomeDir, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const cursorPath = path.join(binDir, 'cursor-agent');
+  const traePath = path.join(binDir, 'trae');
+  await writeFile(cursorPath, [
+    '#!/bin/sh',
+    'if [ "$1" = "--version" ]; then echo "cursor-agent 1.0.0"; exit 0; fi',
+    'echo \'{"type":"text","text":"OK"}\'',
+  ].join('\n'), 'utf8');
+  await writeFile(traePath, [
+    '#!/bin/sh',
+    'if [ "$1" = "--version" ]; then echo "trae 1.0.0"; exit 0; fi',
+    'echo "OK"',
+  ].join('\n'), 'utf8');
+  await chmod(cursorPath, 0o755);
+  await chmod(traePath, 0o755);
+  const originalPath = process.env.PATH;
+  process.env.PATH = binDir;
+  t.after(() => {
+    process.env.PATH = originalPath;
+  });
+
   await createLlmRuntimeStore(homeDir).write({
     version: 1,
     runtimes: [

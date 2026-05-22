@@ -52,7 +52,39 @@ export interface LlmRuntimeStore {
   upsertRuntime(runtime: LlmRuntime): Promise<LlmRuntimesState>;
   removeRuntime(runtimeId: string): Promise<LlmRuntimesState>;
   markSeen(runtimeId: string, now: string): Promise<LlmRuntimesState>;
-  updateHealth(runtimeId: string, health: string): Promise<LlmRuntimesState>;
+  updateHealth(runtimeId: string, health: string, options?: {
+    reason?: string;
+    healthCheckedAt?: string;
+    unavailableUntil?: string;
+  }): Promise<LlmRuntimesState>;
+}
+
+function isFutureIso(value: string | undefined, nowMs = Date.now()): boolean {
+  if (!value) return false;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && parsed > nowMs;
+}
+
+function mergeRuntimeForUpsert(existing: LlmRuntime | undefined, incoming: LlmRuntime): LlmRuntime {
+  if (!existing) return incoming;
+  if (
+    existing.health === 'unavailable'
+    && incoming.health === 'detected'
+    && isFutureIso(existing.unavailableUntil)
+  ) {
+    return {
+      ...incoming,
+      health: 'unavailable',
+      healthReason: existing.healthReason,
+      unavailableUntil: existing.unavailableUntil,
+      healthCheckedAt: incoming.healthCheckedAt ?? existing.healthCheckedAt,
+    };
+  }
+  if (incoming.health === 'healthy') {
+    const { healthReason: _healthReason, unavailableUntil: _unavailableUntil, ...rest } = incoming;
+    return rest;
+  }
+  return incoming;
 }
 
 export function createLlmRuntimeStore(homeDirOrPaths: string | { llmRuntimesPath: string }): LlmRuntimeStore {
@@ -79,7 +111,7 @@ export function createLlmRuntimeStore(homeDirOrPaths: string | { llmRuntimesPath
       const existingIndex = state.runtimes.findIndex((r) => r.id === normalized.id);
 
       if (existingIndex >= 0) {
-        state.runtimes[existingIndex] = normalized;
+        state.runtimes[existingIndex] = mergeRuntimeForUpsert(state.runtimes[existingIndex], normalized);
       } else {
         state.runtimes.push(normalized);
       }
@@ -109,12 +141,19 @@ export function createLlmRuntimeStore(homeDirOrPaths: string | { llmRuntimesPath
       return state;
     },
 
-    async updateHealth(runtimeId, health) {
+    async updateHealth(runtimeId, health, options = {}) {
       const state = await readJsonFile(filePath);
       const rt = state.runtimes.find((r) => r.id === runtimeId);
       if (rt) {
         rt.health = health as LlmRuntime['health'];
-        rt.updatedAt = new Date().toISOString();
+        rt.healthReason = options.reason;
+        rt.healthCheckedAt = options.healthCheckedAt ?? new Date().toISOString();
+        rt.unavailableUntil = options.unavailableUntil;
+        if (rt.health === 'healthy') {
+          rt.healthReason = undefined;
+          rt.unavailableUntil = undefined;
+        }
+        rt.updatedAt = rt.healthCheckedAt;
         state.version += 1;
       }
       await writeJsonFile(filePath, state);

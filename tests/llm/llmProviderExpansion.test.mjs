@@ -135,6 +135,7 @@ test('runtime discovery uses expanded provider metadata and environment auth che
       OPENAI_API_KEY: 'test-openai-key',
     },
     now: () => '2026-05-06T00:00:00.000Z',
+    readinessProbe: async () => ({ ok: true, output: 'OK' }),
   });
 
   assert.equal(result.errors.length, 0);
@@ -197,6 +198,7 @@ test('runtime discovery tries multiple registry binary names in order', async ()
     const runtime = await discoverLlmRuntimes({
       env: { PATH: binDir },
       now: () => '2026-05-06T00:00:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
     });
 
     assert.deepEqual(
@@ -230,6 +232,7 @@ test('runtime discovery ignores a broken PATH shadow when a later binary is heal
   const result = await discoverLlmRuntimes({
     env: { PATH: [brokenBinDir, healthyBinDir].join(path.delimiter) },
     now: () => '2026-05-20T00:00:00.000Z',
+    readinessProbe: async () => ({ ok: true, output: 'OK' }),
   });
 
   assert.equal(result.errors.length, 0);
@@ -263,4 +266,86 @@ test('runtime discovery marks a binary unavailable when version probe exits non-
   assert.equal(result.runtimes[0].binaryPath, codexPath);
   assert.equal(result.runtimes[0].health, 'unavailable');
   assert.equal(result.runtimes[0].version, undefined);
+});
+
+test('runtime discovery marks version-only binaries as detected until readiness succeeds', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-detected-readiness-'));
+  const binDir = path.join(tempRoot, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const codexPath = path.join(binDir, 'codex');
+  await writeFile(codexPath, '#!/bin/sh\necho "codex-cli 0.133.0"\n', 'utf8');
+  await chmod(codexPath, 0o755);
+
+  const result = await discoverLlmRuntimes({
+    env: { PATH: binDir },
+    now: () => '2026-05-22T00:00:00.000Z',
+    readinessProbe: async () => ({ ok: false, message: 'readiness prompt returned no output' }),
+  });
+
+  assert.equal(result.errors.length, 0);
+  assert.equal(result.runtimes.length, 1);
+  assert.equal(result.runtimes[0].provider, 'codex');
+  assert.equal(result.runtimes[0].binaryPath, codexPath);
+  assert.equal(result.runtimes[0].version, '0.133.0');
+  assert.equal(result.runtimes[0].health, 'detected');
+  assert.equal(result.runtimes[0].healthReason, 'readiness prompt returned no output');
+  assert.equal(result.runtimes[0].healthCheckedAt, '2026-05-22T00:00:00.000Z');
+});
+
+test('runtime discovery marks binaries healthy only after readiness returns non-empty output', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-healthy-readiness-'));
+  const binDir = path.join(tempRoot, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const geminiPath = path.join(binDir, 'gemini');
+  await writeFile(geminiPath, '#!/bin/sh\necho "gemini 0.40.1"\n', 'utf8');
+  await chmod(geminiPath, 0o755);
+
+  const result = await discoverLlmRuntimes({
+    env: { PATH: binDir },
+    now: () => '2026-05-22T01:00:00.000Z',
+    readinessProbe: async ({ runtime }) => {
+      assert.equal(runtime.provider, 'gemini');
+      assert.equal(runtime.health, 'detected');
+      return { ok: true, output: 'OK' };
+    },
+  });
+
+  assert.equal(result.errors.length, 0);
+  assert.equal(result.runtimes.length, 1);
+  assert.equal(result.runtimes[0].provider, 'gemini');
+  assert.equal(result.runtimes[0].binaryPath, geminiPath);
+  assert.equal(result.runtimes[0].health, 'healthy');
+  assert.equal(result.runtimes[0].healthReason, undefined);
+  assert.equal(result.runtimes[0].healthCheckedAt, '2026-05-22T01:00:00.000Z');
+});
+
+test('runtime discovery keeps scanning when an earlier binary is only detected', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-readiness-fallback-'));
+  const detectedBinDir = path.join(tempRoot, 'detected-bin');
+  const healthyBinDir = path.join(tempRoot, 'healthy-bin');
+  await mkdir(detectedBinDir, { recursive: true });
+  await mkdir(healthyBinDir, { recursive: true });
+  const detectedCodexPath = path.join(detectedBinDir, 'codex');
+  const healthyCodexPath = path.join(healthyBinDir, 'codex');
+  await writeFile(detectedCodexPath, '#!/bin/sh\necho "codex-cli 0.133.0"\n', 'utf8');
+  await writeFile(healthyCodexPath, '#!/bin/sh\necho "codex-cli 0.133.1"\n', 'utf8');
+  await chmod(detectedCodexPath, 0o755);
+  await chmod(healthyCodexPath, 0o755);
+
+  const result = await discoverLlmRuntimes({
+    env: { PATH: [detectedBinDir, healthyBinDir].join(path.delimiter) },
+    now: () => '2026-05-22T02:00:00.000Z',
+    readinessProbe: async ({ runtime }) => (
+      runtime.binaryPath === healthyCodexPath
+        ? { ok: true, output: 'OK' }
+        : { ok: false, message: 'first binary could not answer' }
+    ),
+  });
+
+  assert.equal(result.errors.length, 0);
+  assert.equal(result.runtimes.length, 1);
+  assert.equal(result.runtimes[0].provider, 'codex');
+  assert.equal(result.runtimes[0].binaryPath, healthyCodexPath);
+  assert.equal(result.runtimes[0].health, 'healthy');
+  assert.equal(result.runtimes[0].version, '0.133.1');
 });

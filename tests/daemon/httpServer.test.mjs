@@ -1761,7 +1761,7 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.ok(html.includes("api('/api/bot/profiles/'+encodeURIComponent"));
   assert.ok(html.includes("'/config'"));
   assert.ok(!html.includes("api('/api/config'"));
-  assert.match(html, /r\.health==='healthy'\|\|r\.health==='degraded'/);
+  assert.match(html, /r\.health==='healthy'&&r\.provider/);
   assert.ok(!html.includes(" / unavailable"));
   assert.match(html, /max-height:\s*220px/);
   assert.match(html, /MetaBot Created On-Chain/);

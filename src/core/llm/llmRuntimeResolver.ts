@@ -49,8 +49,10 @@ export interface LlmRuntimeResolver {
   resolveRuntime(input: ResolveRuntimeInput): Promise<ResolveRuntimeResult>;
   selectMetaBot(input: SelectMetaBotInput): Promise<SelectMetaBotResult | null>;
   markBindingUsed(bindingId: string): Promise<void>;
-  markRuntimeUnavailable(runtimeId: string): Promise<void>;
+  markRuntimeUnavailable(runtimeId: string, reason?: string): Promise<void>;
 }
+
+const DEFAULT_UNAVAILABLE_COOLDOWN_MS = 15 * 60 * 1000;
 
 function bindingRoleRank(role: LlmBindingRole): number {
   switch (role) {
@@ -174,8 +176,13 @@ export function createLlmRuntimeResolver(options: LlmRuntimeResolverOptions): Ll
       await bindingStore.updateLastUsed(bindingId, new Date().toISOString());
     },
 
-    async markRuntimeUnavailable(runtimeId) {
-      await options.runtimeStore.updateHealth(runtimeId, 'unavailable');
+    async markRuntimeUnavailable(runtimeId, reason) {
+      const now = new Date();
+      await options.runtimeStore.updateHealth(runtimeId, 'unavailable', {
+        reason,
+        healthCheckedAt: now.toISOString(),
+        unavailableUntil: new Date(now.getTime() + DEFAULT_UNAVAILABLE_COOLDOWN_MS).toISOString(),
+      });
     },
   };
 }

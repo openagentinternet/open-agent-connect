@@ -300,6 +300,97 @@ test('host LLM chat runner falls back when the injected executor fails', async (
   assert.deepEqual(resolverCalls.markRuntimeUnavailable, ['llm-runtime-1']);
 });
 
+test('host LLM chat runner treats completed empty output as unavailable and tries fallback', async () => {
+  const primaryRuntime = {
+    id: 'llm-runtime-primary',
+    provider: 'trae',
+    displayName: 'Trae',
+    binaryPath: '/bin/trae',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  const fallbackRuntime = {
+    id: 'llm-runtime-fallback',
+    provider: 'cursor',
+    displayName: 'Cursor',
+    binaryPath: '/bin/cursor-agent',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  const resolverCalls = { markRuntimeUnavailable: [], markBindingUsed: [] };
+  const runtimeResolver = {
+    async resolveRuntime(input) {
+      if ((input.excludeRuntimeIds ?? []).includes(primaryRuntime.id)) {
+        return { runtime: fallbackRuntime, bindingId: 'binding-fallback' };
+      }
+      return { runtime: primaryRuntime, bindingId: 'binding-primary' };
+    },
+    async selectMetaBot() {
+      return null;
+    },
+    async markBindingUsed(bindingId) {
+      resolverCalls.markBindingUsed.push(bindingId);
+    },
+    async markRuntimeUnavailable(runtimeId) {
+      resolverCalls.markRuntimeUnavailable.push(runtimeId);
+    },
+  };
+  const executorCalls = [];
+  const llmExecutor = {
+    async execute(request) {
+      executorCalls.push(request);
+      return request.runtimeId === primaryRuntime.id ? 'llm-session-empty' : 'llm-session-fallback';
+    },
+    async getSession(sessionId) {
+      if (sessionId === 'llm-session-empty') {
+        return {
+          sessionId,
+          status: 'completed',
+          result: {
+            status: 'completed',
+            output: '',
+            durationMs: 3,
+          },
+        };
+      }
+      return {
+        sessionId,
+        status: 'completed',
+        result: {
+          status: 'completed',
+          output: 'Fallback reply works.',
+          durationMs: 7,
+        },
+      };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver,
+    llmExecutor,
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+  });
+
+  const result = await runner(makeInput());
+
+  assert.deepEqual(result, { state: 'reply', content: 'Fallback reply works.' });
+  assert.deepEqual(executorCalls.map((request) => request.runtimeId), [
+    primaryRuntime.id,
+    fallbackRuntime.id,
+  ]);
+  assert.deepEqual(resolverCalls.markRuntimeUnavailable, [primaryRuntime.id]);
+  assert.deepEqual(resolverCalls.markBindingUsed, ['binding-fallback']);
+});
+
 test('host LLM chat runner skips unavailable runtimes before executing', async () => {
   const runtime = {
     id: 'llm-runtime-unavailable',

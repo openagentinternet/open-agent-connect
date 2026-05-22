@@ -47,9 +47,9 @@ export async function runLlmPromptWithRuntimeFallback(
   let lastSessionId: string | undefined;
   let lastError = `No healthy LLM runtime is available for MetaBot ${input.metaBotSlug}.`;
   const shouldMarkRuntimeUnavailable = input.markRuntimeUnavailableOnFailure !== false;
-  const markUnavailable = async (runtimeId: string): Promise<void> => {
+  const markUnavailable = async (runtimeId: string, reason?: string): Promise<void> => {
     if (shouldMarkRuntimeUnavailable) {
-      await input.runtimeResolver.markRuntimeUnavailable(runtimeId).catch(() => {});
+      await input.runtimeResolver.markRuntimeUnavailable(runtimeId, reason).catch(() => {});
     }
   };
 
@@ -105,12 +105,12 @@ export async function runLlmPromptWithRuntimeFallback(
                 error: session.result.error,
               };
             }
-            await markUnavailable(runtime.id);
+            await markUnavailable(runtime.id, 'LLM runtime completed without returning output.');
             excludedRuntimeIds.add(runtime.id);
             lastError = 'LLM runtime completed without returning output.';
             break;
           }
-          await markUnavailable(runtime.id);
+          await markUnavailable(runtime.id, resultError(session.result));
           excludedRuntimeIds.add(runtime.id);
           lastError = resultError(session.result);
           break;
@@ -118,14 +118,14 @@ export async function runLlmPromptWithRuntimeFallback(
         await sleep(input.pollIntervalMs);
       }
       if (!excludedRuntimeIds.has(runtime.id)) {
-        await markUnavailable(runtime.id);
+        await markUnavailable(runtime.id, 'LLM runtime timed out while running prompt.');
         excludedRuntimeIds.add(runtime.id);
         lastError = 'LLM runtime timed out while running prompt.';
       }
     } catch (error) {
-      await markUnavailable(runtime.id);
-      excludedRuntimeIds.add(runtime.id);
       lastError = error instanceof Error ? error.message : 'LLM runtime is unavailable.';
+      await markUnavailable(runtime.id, lastError);
+      excludedRuntimeIds.add(runtime.id);
     }
   }
 }
