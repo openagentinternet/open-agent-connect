@@ -555,7 +555,7 @@ export async function getMetabotWalletInfo(systemHomeDir: string, slug: string):
     name: profile.name,
     addresses: {
       btc: normalizeText(secrets?.addresses?.btc) || normalizeText(identity?.addresses?.btc),
-      mvc: normalizeText(secrets?.addresses?.mvc ?? secrets?.mvcAddress) || normalizeText(identity?.addresses?.mvc ?? identity?.mvcAddress) || profile.mvcAddress,
+      mvc: normalizeText(secrets?.addresses?.mvc) || normalizeText(identity?.addresses?.mvc) || normalizeText(secrets?.mvcAddress) || normalizeText(identity?.mvcAddress) || profile.mvcAddress,
       doge: normalizeText(secrets?.addresses?.doge) || normalizeText(identity?.addresses?.doge),
       opcat: normalizeText(secrets?.addresses?.opcat) || normalizeText(identity?.addresses?.opcat),
     },
