@@ -15,6 +15,7 @@ const {
 } = require('../../dist/core/llm/llmTypes.js');
 const {
   discoverLlmRuntimes,
+  readinessSemanticInactivityTimeoutForProvider,
 } = require('../../dist/core/llm/llmRuntimeDiscovery.js');
 const {
   PLATFORM_DEFINITIONS,
@@ -390,6 +391,13 @@ test('runtime discovery gives slow-start providers an extended readiness window'
   assert.equal(result.runtimes[0].provider, 'cursor');
   assert.equal(result.runtimes[0].health, 'healthy');
   assert.equal(observedTimeoutMs, 45_000);
+});
+
+test('runtime discovery uses the full readiness window as semantic inactivity for slow-start providers', () => {
+  assert.equal(readinessSemanticInactivityTimeoutForProvider('codex', 45_000), 45_000);
+  assert.equal(readinessSemanticInactivityTimeoutForProvider('cursor', 45_000), 45_000);
+  assert.equal(readinessSemanticInactivityTimeoutForProvider('claude-code', 45_000), 45_000);
+  assert.equal(readinessSemanticInactivityTimeoutForProvider('openclaw', 30_000), 15_000);
 });
 
 test('runtime discovery keeps scanning when an earlier binary is only detected', async () => {

@@ -347,6 +347,15 @@ function readinessTimeoutForProvider(provider: LlmProvider, override?: number): 
     : DEFAULT_READINESS_TIMEOUT_MS;
 }
 
+export function readinessSemanticInactivityTimeoutForProvider(
+  provider: LlmProvider,
+  readinessTimeoutMs: number,
+): number {
+  return ['codex', 'cursor', 'claude-code'].includes(provider)
+    ? readinessTimeoutMs
+    : Math.min(readinessTimeoutMs, DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS);
+}
+
 async function defaultRuntimeReadinessProbe(input: {
   runtime: LlmRuntime;
   env: NodeJS.ProcessEnv;
@@ -378,7 +387,10 @@ async function defaultRuntimeReadinessProbe(input: {
     runtime: input.runtime,
     prompt: READINESS_PROMPT,
     timeout: input.timeoutMs,
-    semanticInactivityTimeout: Math.min(input.timeoutMs, DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS),
+    semanticInactivityTimeout: readinessSemanticInactivityTimeoutForProvider(
+      input.runtime.provider,
+      input.timeoutMs,
+    ),
     cwd: input.cwd ?? process.cwd(),
     model: input.runtime.model,
   }, {
