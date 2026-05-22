@@ -530,8 +530,58 @@ test('bot page wallet transfer preview renders the direct daemon confirmation sh
 
   await context.submitWalletTransferPreview();
 
-  assert.match(confirmBody, /0\.00000392 DOGE/);
+  assert.match(confirmBody, /0\.00000392 Doge/);
+  assert.doesNotMatch(confirmBody, /0\.00000392 DOGE/);
   assert.match(confirmBody, /D-recipient/);
+});
+
+test('bot page wallet transfer preview normalizes direct OPCAT daemon display units', async () => {
+  const fields = {
+    '[data-field="wallet-transfer-to"]': field('bc1p-recipient'),
+    '[data-field="wallet-transfer-amount"]': field('0.000001'),
+    '[data-wallet-transfer-status]': field(),
+    '[data-act="wallet-transfer-preview"]': field(),
+  };
+  let confirmBody = '';
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        state: 'awaiting_confirmation',
+        data: {
+          fromAddress: 'opcat-address',
+          toAddress: 'bc1p-recipient',
+          amount: '0.00000100 OPCAT',
+          estimatedFee: '0.00000050 OPCAT',
+          chain: 'opcat',
+        },
+      }),
+    }),
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state._walletPanel = {
+    addresses: { opcat: 'opcat-address' },
+    balances: { opcat: { totalSatoshis: 100000000 } },
+  };
+  context.openWalletTransferForm('opcat');
+  context.openDynamicModal = (_title, body) => {
+    confirmBody = body;
+  };
+
+  await context.submitWalletTransferPreview();
+
+  assert.match(confirmBody, /0\.00000100 OPCAT-BTC/);
+  assert.match(confirmBody, /0\.00000050 OPCAT-BTC/);
+  assert.doesNotMatch(confirmBody, /0\.00000100 OPCAT</);
+  assert.doesNotMatch(confirmBody, /0\.00000050 OPCAT</);
 });
 
 test('bot page wallet transfer confirm posts the canonical route body', async () => {
@@ -646,6 +696,8 @@ test('bot page wallet transfer confirm renders the direct daemon success shape',
   await context.submitWalletTransferConfirm();
 
   assert.match(successBody, /tx-real/);
+  assert.match(successBody, /0\.01000000 Doge/);
+  assert.doesNotMatch(successBody, /0\.01000000 DOGE/);
 });
 
 test('bot page wallet transfer preview ignores stale async responses', async () => {

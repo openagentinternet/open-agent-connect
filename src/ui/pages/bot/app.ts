@@ -289,6 +289,16 @@ function formatWalletBalance(balance,chain){
   if(!balance||typeof balance.totalSatoshis!=='number')return'Balance: unavailable';
   return 'Balance: '+(balance.totalSatoshis/100000000).toFixed(8)+' '+walletDisplayUnit(chain);
 }
+function normalizeWalletDisplayAmount(value,chain){
+  var text=String(value==null?'':value);
+  var inputUnit=walletInputUnit(chain);
+  var displayUnit=walletDisplayUnit(chain);
+  if(!text||inputUnit===displayUnit)return text;
+  var suffix=' '+inputUnit;
+  if(text===inputUnit)return displayUnit;
+  if(text.slice(-suffix.length)===suffix)return text.slice(0,-inputUnit.length)+displayUnit;
+  return text;
+}
 function walletChainRowsMarkup(wallet){
   var addresses=wallet&&wallet.addresses||{};
   var balances=wallet&&wallet.balances||{};
@@ -344,8 +354,8 @@ function walletTransferFormMarkup(wallet,chain,status){
 function walletTransferPreviewMarkup(wallet,chain,preview,status){
   var transfer=state._walletTransfer||{};
   var unit=walletDisplayUnit(chain);
-  var fee=preview&&preview.estimatedFee?preview.estimatedFee:(preview&&typeof preview.feeSatoshis==='number'?(preview.feeSatoshis/100000000).toFixed(8)+' '+unit:null);
-  var amount=preview&&preview.amount?preview.amount:((transfer.amount||'-')+' '+unit);
+  var fee=preview&&preview.estimatedFee?normalizeWalletDisplayAmount(preview.estimatedFee,chain):(preview&&typeof preview.feeSatoshis==='number'?(preview.feeSatoshis/100000000).toFixed(8)+' '+unit:null);
+  var amount=preview&&preview.amount?normalizeWalletDisplayAmount(preview.amount,chain):((transfer.amount||'-')+' '+unit);
   return '<div class="modal-body">'+
     '<div class="wallet-confirm-grid">'+
       '<div><span>Chain</span><strong>'+esc(walletChainConfig(chain).label)+'</strong></div>'+
@@ -360,7 +370,7 @@ function walletTransferSuccessMarkup(result){
   var transfer=state._walletTransfer||{};
   var unit=walletDisplayUnit(transfer.chain);
   var txid=result&&result.txid||result&&result.transactionId||'';
-  var amount=result&&result.amount?result.amount:((transfer.amount||'-')+' '+unit);
+  var amount=result&&result.amount?normalizeWalletDisplayAmount(result.amount,transfer.chain):((transfer.amount||'-')+' '+unit);
   return '<div class="modal-body">'+
     '<div class="save-status success">Transfer broadcast: '+esc(amount)+'</div>'+
     '<div class="txid-row"><div><span>Transaction ID</span><code>'+esc(txid||'-')+'</code></div><button class="icon-btn" data-copy-value="'+esc(txid)+'" title="Copy txid" aria-label="Copy txid">⧉</button></div>'+
