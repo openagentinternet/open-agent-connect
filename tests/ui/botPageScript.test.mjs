@@ -532,6 +532,8 @@ test('bot page wallet transfer preview renders the direct daemon confirmation sh
 
   assert.match(confirmBody, /0\.00000392 Doge/);
   assert.doesNotMatch(confirmBody, /0\.00000392 DOGE/);
+  assert.match(confirmBody, /From Address/);
+  assert.match(confirmBody, /doge-address/);
   assert.match(confirmBody, /D-recipient/);
 });
 

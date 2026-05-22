@@ -356,10 +356,12 @@ function walletTransferPreviewMarkup(wallet,chain,preview,status){
   var unit=walletDisplayUnit(chain);
   var fee=preview&&preview.estimatedFee?normalizeWalletDisplayAmount(preview.estimatedFee,chain):(preview&&typeof preview.feeSatoshis==='number'?(preview.feeSatoshis/100000000).toFixed(8)+' '+unit:null);
   var amount=preview&&preview.amount?normalizeWalletDisplayAmount(preview.amount,chain):((transfer.amount||'-')+' '+unit);
+  var fromAddress=preview&&preview.fromAddress||(wallet&&wallet.addresses&&wallet.addresses[chain])||'-';
   return '<div class="modal-body">'+
     '<div class="wallet-confirm-grid">'+
       '<div><span>Chain</span><strong>'+esc(walletChainConfig(chain).label)+'</strong></div>'+
       '<div><span>Amount</span><strong>'+esc(amount)+'</strong></div>'+
+      '<div><span>From Address</span><code>'+esc(fromAddress)+'</code></div>'+
       '<div><span>Recipient</span><code>'+esc(preview&&preview.toAddress||transfer.toAddress||'-')+'</code></div>'+
       '<div><span>Estimated Fee</span><strong>'+esc(fee||'Unavailable')+'</strong></div>'+
     '</div>'+
