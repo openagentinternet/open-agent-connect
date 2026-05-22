@@ -120,9 +120,9 @@ export function createOpenClawBackend(binaryPath: string, env?: Record<string, s
         timeoutMs: request.timeout,
         signal,
         emitter,
-        jsonStreams: ['stderr'],
+        jsonStreams: ['stdout', 'stderr'],
         onNonJsonLine(line, stream) {
-          if (stream === 'stderr') prettyJsonLines.push(line);
+          if (stream === 'stdout' || stream === 'stderr') prettyJsonLines.push(line);
         },
         onJson(message) {
           const type = getString(message.type) ?? getString(message.event) ?? '';

@@ -823,6 +823,41 @@ process.stderr.write(JSON.stringify({
   assert.deepEqual(events.filter((event) => event.type === 'text').map((event) => event.content), ['Pretty OpenClaw']);
 });
 
+test('OpenClaw backend supports pretty-printed legacy result blobs on stdout', async () => {
+  const base = await createTempDir();
+  const binaryPath = await writeExecutableScript(base, 'fake-openclaw-pretty-stdout.js', `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({
+  payloads: [{ text: 'Pretty stdout OpenClaw' }],
+  meta: {
+    agentMeta: {
+      sessionId: 'openclaw-pretty-stdout-session',
+      model: 'pretty-stdout-model',
+      usage: { input: 6, output: 7, cacheRead: 8 }
+    }
+  }
+}, null, 2) + '\\n');
+`);
+  const backend = createOpenClawBackend(binaryPath);
+  const events = [];
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_openclaw',
+      runtime: { ...runtime, provider: 'openclaw', binaryPath },
+      prompt: 'pretty stdout',
+      cwd: base,
+    },
+    { emit: (event) => events.push(event) },
+    new AbortController().signal,
+  );
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.output, 'Pretty stdout OpenClaw');
+  assert.equal(result.providerSessionId, 'openclaw-pretty-stdout-session');
+  assert.equal(result.usage['pretty-stdout-model'].outputTokens, 7);
+  assert.equal(result.usage['pretty-stdout-model'].cacheReadTokens, 8);
+  assert.deepEqual(events.filter((event) => event.type === 'text').map((event) => event.content), ['Pretty stdout OpenClaw']);
+});
+
 test('OpenClaw backend treats lifecycle failure phases as failed', async () => {
   const base = await createTempDir();
   const binaryPath = await writeExecutableScript(base, 'fake-openclaw-lifecycle-fail.js', `#!/usr/bin/env node

@@ -47,6 +47,7 @@ export type RuntimeReadinessProbe = (input: {
 }) => Promise<RuntimeReadinessProbeResult>;
 
 const DEFAULT_READINESS_TIMEOUT_MS = 30_000;
+const SLOW_START_READINESS_TIMEOUT_MS = 45_000;
 const DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS = 15_000;
 const READINESS_PROMPT = 'Reply exactly OK.';
 const LOGIN_SHELL_RESOLVE_TIMEOUT_MS = 3_000;
@@ -316,6 +317,13 @@ function readinessSucceeded(result: RuntimeReadinessProbeResult): boolean {
   return result.ok && typeof result.output === 'string' && result.output.trim().length > 0;
 }
 
+function readinessTimeoutForProvider(provider: LlmProvider, override?: number): number {
+  if (override !== undefined) return override;
+  return ['codex', 'cursor', 'claude-code'].includes(provider)
+    ? SLOW_START_READINESS_TIMEOUT_MS
+    : DEFAULT_READINESS_TIMEOUT_MS;
+}
+
 async function defaultRuntimeReadinessProbe(input: {
   runtime: LlmRuntime;
   env: NodeJS.ProcessEnv;
@@ -397,7 +405,7 @@ export async function discoverProvider(
   let firstDetectedRuntime: LlmRuntime | null = null;
   const env = options?.env ?? process.env;
   const readinessProbe = options?.readinessProbe ?? defaultRuntimeReadinessProbe;
-  const readinessTimeoutMs = options?.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
+  const readinessTimeoutMs = readinessTimeoutForProvider(provider, options?.readinessTimeoutMs);
   for (const binaryName of platform.runtime.binaryNames) {
     const binaryPaths = await executableCandidatesForProvider(
       provider,

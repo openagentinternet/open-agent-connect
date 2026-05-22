@@ -365,7 +365,7 @@ test('runtime discovery marks binaries healthy only after readiness returns non-
   assert.equal(result.runtimes[0].healthCheckedAt, '2026-05-22T01:00:00.000Z');
 });
 
-test('runtime discovery gives readiness probes the full default readiness window', async () => {
+test('runtime discovery gives slow-start providers an extended readiness window', async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-readiness-timeout-'));
   const binDir = path.join(tempRoot, 'bin');
   await mkdir(binDir, { recursive: true });
@@ -387,7 +387,7 @@ test('runtime discovery gives readiness probes the full default readiness window
   assert.equal(result.runtimes.length, 1);
   assert.equal(result.runtimes[0].provider, 'cursor');
   assert.equal(result.runtimes[0].health, 'healthy');
-  assert.equal(observedTimeoutMs, 30_000);
+  assert.equal(observedTimeoutMs, 45_000);
 });
 
 test('runtime discovery keeps scanning when an earlier binary is only detected', async () => {
