@@ -487,6 +487,53 @@ test('bot page wallet transfer preview posts the canonical route body', async ()
   assert.deepEqual(request.body, { chain: 'mvc', toAddress: 'recipient-address', amount: '0.25' });
 });
 
+test('bot page wallet transfer preview renders the direct daemon confirmation shape', async () => {
+  const fields = {
+    '[data-field="wallet-transfer-to"]': field('D-recipient'),
+    '[data-field="wallet-transfer-amount"]': field('0.01'),
+    '[data-wallet-transfer-status]': field(),
+    '[data-act="wallet-transfer-preview"]': field(),
+  };
+  let confirmBody = '';
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        state: 'awaiting_confirmation',
+        data: {
+          fromAddress: 'doge-address',
+          toAddress: 'D-recipient',
+          amount: '0.01000000 DOGE',
+          estimatedFee: '0.00000392 DOGE',
+          chain: 'doge',
+        },
+      }),
+    }),
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state._walletPanel = {
+    addresses: { doge: 'doge-address' },
+    balances: { doge: { totalSatoshis: 300000000 } },
+  };
+  context.openWalletTransferForm('doge');
+  context.openDynamicModal = (_title, body) => {
+    confirmBody = body;
+  };
+
+  await context.submitWalletTransferPreview();
+
+  assert.match(confirmBody, /0\.00000392 DOGE/);
+  assert.match(confirmBody, /D-recipient/);
+});
+
 test('bot page wallet transfer confirm posts the canonical route body', async () => {
   const fields = {
     '[data-wallet-transfer-status]': field(),
@@ -524,12 +571,16 @@ test('bot page wallet transfer confirm posts the canonical route body', async ()
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
   context.state.selectedSlug = 'alice-bot';
+  context.state._sensitiveModalToken = 'wallet-transfer:alice-bot:1';
   context.state._walletPanel = {
     addresses: { doge: 'doge-address' },
     balances: { doge: { totalSatoshis: 300000000 } },
   };
   context.state._walletTransfer = {
+    wallet: context.state._walletPanel,
     chain: 'doge',
+    slug: 'alice-bot',
+    token: 'wallet-transfer:alice-bot:1',
     toAddress: 'recipient-address',
     amount: '0.5',
     preview: { feeSatoshis: 1000 },
@@ -540,6 +591,161 @@ test('bot page wallet transfer confirm posts the canonical route body', async ()
 
   assert.equal(request.url, '/api/bot/profiles/alice-bot/wallet/transfer/confirm');
   assert.deepEqual(request.body, { chain: 'doge', toAddress: 'recipient-address', amount: '0.5' });
+});
+
+test('bot page wallet transfer confirm renders the direct daemon success shape', async () => {
+  const fields = {
+    '[data-wallet-transfer-status]': field(),
+    '[data-act="wallet-transfer-confirm"]': field(),
+  };
+  let successBody = '';
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: (url) => {
+      if (url.includes('/wallet/transfer/confirm')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            state: 'success',
+            data: {
+              txid: 'tx-real',
+              explorerUrl: 'https://example.test/tx/tx-real',
+              amount: '0.01000000 DOGE',
+              toAddress: 'D-recipient',
+            },
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true, data: { wallet: { addresses: {}, balances: {} } } }),
+      });
+    },
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state._sensitiveModalToken = 'wallet-transfer:alice-bot:1';
+  context.state._walletTransfer = {
+    chain: 'doge',
+    slug: 'alice-bot',
+    token: 'wallet-transfer:alice-bot:1',
+    toAddress: 'D-recipient',
+    amount: '0.01',
+    preview: { estimatedFee: '0.00000392 DOGE' },
+  };
+  context.openDynamicModal = (_title, body) => {
+    successBody = body;
+  };
+
+  await context.submitWalletTransferConfirm();
+
+  assert.match(successBody, /tx-real/);
+});
+
+test('bot page wallet transfer preview ignores stale async responses', async () => {
+  const fields = {
+    '[data-field="wallet-transfer-to"]': field('D-recipient'),
+    '[data-field="wallet-transfer-amount"]': field('0.01'),
+    '[data-wallet-transfer-status]': field(),
+    '[data-act="wallet-transfer-preview"]': field(),
+  };
+  let resolveJson;
+  const modalBodies = [];
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => new Promise((resolve) => {
+        resolveJson = resolve;
+      }),
+    }),
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state._walletPanel = {
+    addresses: { doge: 'doge-address' },
+    balances: { doge: { totalSatoshis: 300000000 } },
+  };
+  context.openWalletTransferForm('doge');
+  context.openDynamicModal = (_title, body) => {
+    modalBodies.push(body);
+  };
+
+  const pending = context.submitWalletTransferPreview();
+  await Promise.resolve();
+  context.state.selectedSlug = 'bob-bot';
+  context.state._sensitiveModalToken = 'wallet-transfer:bob-bot:2';
+  resolveJson({
+    ok: true,
+    state: 'awaiting_confirmation',
+    data: {
+      toAddress: 'D-recipient',
+      amount: '0.01000000 DOGE',
+      estimatedFee: '0.00000392 DOGE',
+      chain: 'doge',
+    },
+  });
+  await pending;
+
+  assert.equal(modalBodies.some((body) => /Confirm Transfer/.test(body) || /0\.00000392 DOGE/.test(body)), false);
+  assert.notEqual(context.state._walletTransfer?.preview?.estimatedFee, '0.00000392 DOGE');
+});
+
+test('bot page wallet transfer confirm keeps the captured profile slug', async () => {
+  const fields = {
+    '[data-wallet-transfer-status]': field(),
+    '[data-act="wallet-transfer-confirm"]': field(),
+  };
+  let confirmUrl = '';
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: (url) => {
+      if (url.includes('/wallet/transfer/confirm')) {
+        confirmUrl = url;
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, state: 'success', data: { txid: 'tx-real' } }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true, data: { wallet: { addresses: {}, balances: {} } } }),
+      });
+    },
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'bob-bot';
+  context.state._sensitiveModalToken = 'wallet-transfer:alice-bot:1';
+  context.state._walletTransfer = {
+    chain: 'doge',
+    slug: 'alice-bot',
+    token: 'wallet-transfer:alice-bot:1',
+    toAddress: 'D-recipient',
+    amount: '0.01',
+    preview: { estimatedFee: '0.00000392 DOGE' },
+  };
+  context.openDynamicModal = () => {};
+
+  await context.submitWalletTransferConfirm();
+
+  assert.notEqual(confirmUrl, '/api/bot/profiles/bob-bot/wallet/transfer/confirm');
+  assert.match(confirmUrl || '/ignored', /\/api\/bot\/profiles\/alice-bot\/wallet\/transfer\/confirm|\/ignored/);
 });
 
 test('bot page ignores stale wallet and backup responses after the sensitive modal closes', async () => {

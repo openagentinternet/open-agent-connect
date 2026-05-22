@@ -322,6 +322,10 @@ function walletAmountToSatoshis(amount){
   if(!Number.isSafeInteger(whole))return NaN;
   return whole*100000000+Number(frac);
 }
+function walletRoutePayload(response,nestedKey){
+  var data=response&&response.data;
+  return data&&data[nestedKey]?data[nestedKey]:(data||{});
+}
 function walletTransferFormMarkup(wallet,chain,status){
   var unit=walletDisplayUnit(chain);
   var balance=wallet&&wallet.balances&&wallet.balances[chain];
@@ -340,12 +344,13 @@ function walletTransferFormMarkup(wallet,chain,status){
 function walletTransferPreviewMarkup(wallet,chain,preview,status){
   var transfer=state._walletTransfer||{};
   var unit=walletDisplayUnit(chain);
-  var fee=preview&&typeof preview.feeSatoshis==='number'?(preview.feeSatoshis/100000000).toFixed(8)+' '+unit:null;
+  var fee=preview&&preview.estimatedFee?preview.estimatedFee:(preview&&typeof preview.feeSatoshis==='number'?(preview.feeSatoshis/100000000).toFixed(8)+' '+unit:null);
+  var amount=preview&&preview.amount?preview.amount:((transfer.amount||'-')+' '+unit);
   return '<div class="modal-body">'+
     '<div class="wallet-confirm-grid">'+
       '<div><span>Chain</span><strong>'+esc(walletChainConfig(chain).label)+'</strong></div>'+
-      '<div><span>Amount</span><strong>'+esc(transfer.amount||'-')+' '+esc(unit)+'</strong></div>'+
-      '<div><span>Recipient</span><code>'+esc(transfer.toAddress||'-')+'</code></div>'+
+      '<div><span>Amount</span><strong>'+esc(amount)+'</strong></div>'+
+      '<div><span>Recipient</span><code>'+esc(preview&&preview.toAddress||transfer.toAddress||'-')+'</code></div>'+
       '<div><span>Estimated Fee</span><strong>'+esc(fee||'Unavailable')+'</strong></div>'+
     '</div>'+
     '<div class="save-status '+esc(status&&status.type||'')+'" data-wallet-transfer-status>'+esc(status&&status.text||'')+'</div>'+
@@ -355,14 +360,18 @@ function walletTransferSuccessMarkup(result){
   var transfer=state._walletTransfer||{};
   var unit=walletDisplayUnit(transfer.chain);
   var txid=result&&result.txid||result&&result.transactionId||'';
+  var amount=result&&result.amount?result.amount:((transfer.amount||'-')+' '+unit);
   return '<div class="modal-body">'+
-    '<div class="save-status success">Transfer broadcast: '+esc(transfer.amount||'-')+' '+esc(unit)+'</div>'+
+    '<div class="save-status success">Transfer broadcast: '+esc(amount)+'</div>'+
     '<div class="txid-row"><div><span>Transaction ID</span><code>'+esc(txid||'-')+'</code></div><button class="icon-btn" data-copy-value="'+esc(txid)+'" title="Copy txid" aria-label="Copy txid">⧉</button></div>'+
   '</div><div class="modal-actions"><button class="btn btn-primary" data-act="modal-close">OK</button></div>';
 }
 function openWalletTransferForm(chain,status){
-  state._walletTransfer={chain:chain};
-  openDynamicModal('Transfer '+walletChainConfig(chain).label,walletTransferFormMarkup(state._walletPanel||{},chain,status),{boxClass:'modal-box-wide'});
+  var slug=state.selectedSlug;
+  var token=beginSensitiveModal('wallet-transfer',slug);
+  var wallet=state._walletPanel||{};
+  state._walletTransfer={wallet:wallet,chain:chain,slug:slug,token:token};
+  openDynamicModal('Transfer '+walletChainConfig(chain).label,walletTransferFormMarkup(wallet,chain,status),{boxClass:'modal-box-wide'});
 }
 function setWalletTransferStatus(type,text){
   var status=q('[data-wallet-transfer-status]');
@@ -371,39 +380,51 @@ function setWalletTransferStatus(type,text){
 function submitWalletTransferPreview(){
   var transfer=state._walletTransfer||{};
   var chain=transfer.chain;
+  var slug=transfer.slug||state.selectedSlug;
+  var token=transfer.token;
+  if(!slug||!isSensitiveModalCurrent(token,slug))return Promise.resolve();
   var toAddress=(q('[data-field="wallet-transfer-to"]')||{}).value||'';
   var amount=(q('[data-field="wallet-transfer-amount"]')||{}).value||'';
   toAddress=toAddress.trim();amount=amount.trim();
   var amountSatoshis=walletAmountToSatoshis(amount);
   if(!toAddress){setWalletTransferStatus('error','Recipient is required.');return Promise.resolve()}
   if(!Number.isFinite(amountSatoshis)||amountSatoshis<=0){setWalletTransferStatus('error','Enter a positive '+walletDisplayUnit(chain)+' amount.');return Promise.resolve()}
-  var balanceSatoshis=walletBalanceSatoshis(state._walletPanel,chain);
+  var balanceSatoshis=walletBalanceSatoshis(transfer.wallet||state._walletPanel,chain);
   if(balanceSatoshis!==null&&amountSatoshis>balanceSatoshis){setWalletTransferStatus('error','Amount exceeds available balance: '+(balanceSatoshis/100000000).toFixed(8)+' '+walletDisplayUnit(chain));return Promise.resolve()}
   var btn=q('[data-act="wallet-transfer-preview"]');if(btn)btn.disabled=true;
   setWalletTransferStatus('saving','Preparing transfer preview...');
   var body={chain:chain,toAddress:toAddress,amount:amount};
-  return api('/api/bot/profiles/'+encodeURIComponent(state.selectedSlug)+'/wallet/transfer/preview',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
-    var preview=r.data&&r.data.preview||{};
-    state._walletTransfer={chain:chain,toAddress:toAddress,amount:amount,preview:preview};
-    openDynamicModal('Confirm '+walletChainConfig(chain).label+' Transfer',walletTransferPreviewMarkup(state._walletPanel||{},chain,preview),{boxClass:'modal-box-wide'});
+  return api('/api/bot/profiles/'+encodeURIComponent(slug)+'/wallet/transfer/preview',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
+    if(!isSensitiveModalCurrent(token,slug))return;
+    var preview=walletRoutePayload(r,'preview');
+    state._walletTransfer={wallet:transfer.wallet||state._walletPanel,chain:chain,slug:slug,token:token,toAddress:toAddress,amount:amount,preview:preview};
+    openDynamicModal('Confirm '+walletChainConfig(chain).label+' Transfer',walletTransferPreviewMarkup(transfer.wallet||state._walletPanel||{},chain,preview),{boxClass:'modal-box-wide'});
   }).catch(function(error){
+    if(!isSensitiveModalCurrent(token,slug))return;
     setWalletTransferStatus('error',error.message);
   }).finally(function(){btn=q('[data-act="wallet-transfer-preview"]');if(btn)btn.disabled=false});
 }
 function submitWalletTransferConfirm(){
   var transfer=state._walletTransfer||{};
+  var slug=transfer.slug||state.selectedSlug;
+  var token=transfer.token;
+  if(!slug||!isSensitiveModalCurrent(token,slug))return Promise.resolve();
   var btn=q('[data-act="wallet-transfer-confirm"]');if(btn)btn.disabled=true;
   setWalletTransferStatus('saving','Broadcasting transfer...');
   var body={chain:transfer.chain,toAddress:transfer.toAddress,amount:transfer.amount};
-  return api('/api/bot/profiles/'+encodeURIComponent(state.selectedSlug)+'/wallet/transfer/confirm',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
-    var result=r.data&&r.data.result||{};
-    return api('/api/bot/profiles/'+encodeURIComponent(state.selectedSlug)+'/wallet').then(function(walletResponse){
+  return api('/api/bot/profiles/'+encodeURIComponent(slug)+'/wallet/transfer/confirm',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
+    if(!isSensitiveModalCurrent(token,slug))return;
+    var result=walletRoutePayload(r,'result');
+    return api('/api/bot/profiles/'+encodeURIComponent(slug)+'/wallet').then(function(walletResponse){
+      if(!isSensitiveModalCurrent(token,slug))return;
       state._walletPanel=walletResponse.data&&walletResponse.data.wallet||state._walletPanel;
       openDynamicModal('Transfer Broadcast',walletTransferSuccessMarkup(result),{boxClass:'modal-box-wide'});
     }).catch(function(){
+      if(!isSensitiveModalCurrent(token,slug))return;
       openDynamicModal('Transfer Broadcast',walletTransferSuccessMarkup(result),{boxClass:'modal-box-wide'});
     });
   }).catch(function(error){
+    if(!isSensitiveModalCurrent(token,slug))return;
     setWalletTransferStatus('error',error.message);
   }).finally(function(){btn=q('[data-act="wallet-transfer-confirm"]');if(btn)btn.disabled=false});
 }
