@@ -39,7 +39,7 @@
     "fulfillmentType": "digital_delivery",
     /** Seller-side intake channel for product-order messages. V1 supports simplemsg and logistics. */
     "deliveryEndpoint": "simplemsg",
-    /** Ordered seller-side skills used to process the order. */
+    /** Ordered seller-side skills used to process the order. The first skill is the primary handler. */
     "fulfillmentSkills": [
       "product-order-fulfill",
       "product-order-package"
@@ -102,6 +102,10 @@
   - `fulfillmentSkills` is an ordered list of local skill names. The seller runtime should pass the full `product-order` payload to the first skill by default, and later skills may be used as a seller-defined continuation chain or internal helper steps.
   - If external product copy needs to be loaded later, extend the content model with a new content type rather than introducing `descriptionUri` in V1.
   - The protocol keeps the payload focused on product semantics; purchase, delivery, refund, and review events belong to later protocol families.
+  - `simplemsg` is the existing ECDH/AES private-chat transport used by OAC and skill-service. V1 does not add a second encryption layer or a separate "encrypted simplemsg" concept.
+  - Buyer-side payment confirmation remains the existing wallet/service-payment responsibility. `product-listing` does not define a second buyer-side txid validation step.
+  - Seller-side order lookup should be cache-first: read the local order cache by order pin id or order txid first, fall back to chain pin fetch only on cache miss, and then persist the fetched order locally for later reads.
+  - Virtual-product purchase flows should not request phone, email, shipping address, or similar personal fields during the normal path. If extra non-sensitive options are needed, model them as SKU selection or a future protocol family instead of ad hoc per-order input.
 
 ---
 
