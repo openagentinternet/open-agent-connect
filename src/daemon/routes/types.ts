@@ -94,6 +94,7 @@ export interface MetabotDaemonHttpHandlers {
   products?: {
     listPublishSkills?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    buy?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     listOwned?: (input: {
       from?: string;
       all?: boolean;

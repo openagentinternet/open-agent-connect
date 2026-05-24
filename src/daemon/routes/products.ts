@@ -45,6 +45,20 @@ export const handleProductsRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  if (url.pathname === '/api/products/buy') {
+    if (req.method !== 'POST') {
+      context.sendMethodNotAllowed(['POST']);
+      return true;
+    }
+
+    const input = await context.readJsonBody();
+    const result = handlers.products?.buy
+      ? await handlers.products.buy(input)
+      : commandFailed('not_implemented', 'Product buy handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
   if (url.pathname === '/api/products/owned') {
     if (req.method !== 'GET') {
       context.sendMethodNotAllowed(['GET']);

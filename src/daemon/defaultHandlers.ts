@@ -82,6 +82,7 @@ import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalo
 import { validateServicePublishProviderSkill } from '../core/services/servicePublishValidation';
 import { publishProductListingToChain } from '../core/products/productPublishChain';
 import { listProductDirectory } from '../core/products/productDirectory';
+import { planProductPurchase } from '../core/products/productPurchasePlanner';
 import { createProductStateStore, type OwnedProductListingRecord } from '../core/products/productStateStore';
 import { validateProductListingPayload } from '../core/products/productValidation';
 import type { ProductListingPayload } from '../core/products/productTypes';
@@ -2223,6 +2224,19 @@ function readCallRequest(rawInput: Record<string, unknown>) {
     taskContext: normalizeText(request.taskContext),
     rawRequest,
     serviceQuery,
+    spendCap: readObject(request.spendCap),
+    policyMode: request.policyMode,
+    confirmed: request.confirmed === true || rawInput.confirmed === true,
+  };
+}
+
+function readProductPurchaseRequest(rawInput: Record<string, unknown>) {
+  const request = readObject(rawInput.request) ?? rawInput;
+  return {
+    query: normalizeText(request.query ?? rawInput.query),
+    listingPinId: normalizeText(request.listingPinId),
+    skuId: normalizeText(request.skuId),
+    comment: typeof request.comment === 'string' ? request.comment : undefined,
     spendCap: readObject(request.spendCap),
     policyMode: request.policyMode,
     confirmed: request.confirmed === true || rawInput.confirmed === true,
@@ -12631,6 +12645,64 @@ export function createDefaultMetabotDaemonHandlers(input: {
             error instanceof Error ? error.message : String(error),
           );
         }
+      },
+      buy: async (rawInput) => {
+        const actor = await resolveProductActor(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+
+        const productStateStore = createProductStateStore(actor.profileHomeDir);
+        let directory;
+        try {
+          directory = await listProductDirectory({
+            productStateStore,
+            chainApiBaseUrl: input.chainApiBaseUrl,
+            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceFailureMode: input.socketPresenceFailureMode,
+            cached: true,
+          });
+        } catch (error) {
+          return commandFailed(
+            'product_directory_unavailable',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+
+        const plan = planProductPurchase({
+          request: readProductPurchaseRequest(rawInput),
+          products: directory.products,
+        });
+
+        if (!plan.ok) {
+          return commandFailed(plan.code, plan.message);
+        }
+
+        if (plan.state === 'awaiting_confirmation') {
+          return commandAwaitingConfirmation({
+            product: plan.product,
+            sku: plan.sku,
+            seller: plan.seller,
+            payment: plan.payment,
+            confirmation: {
+              requiresConfirmation: plan.confirmation.requiresConfirmation,
+              policyMode: plan.confirmation.policyMode,
+            },
+            confirmRequest: plan.confirmRequest,
+          });
+        }
+
+        return commandSuccess({
+          product: plan.product,
+          sku: plan.sku,
+          seller: plan.seller,
+          payment: plan.payment,
+          confirmation: {
+            requiresConfirmation: plan.confirmation.requiresConfirmation,
+            policyMode: plan.confirmation.policyMode,
+          },
+          readyForPayment: true,
+        });
       },
       listOwned: async (request) => {
         const selected = await selectProductProfileRecordsForRequest(request);

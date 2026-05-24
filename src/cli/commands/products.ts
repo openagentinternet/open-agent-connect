@@ -79,6 +79,22 @@ export async function runProductsCommand(args: string[], context: CliRuntimeCont
     ));
   }
 
+  if (subcommand === 'buy') {
+    const requestFile = readFlagValue(args, '--request-file');
+    if (!requestFile) {
+      return commandMissingFlag('--request-file');
+    }
+
+    const handler = context.dependencies.products?.buy;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Product buy handler is not configured.');
+    }
+
+    const request = await readJsonFile(context, requestFile);
+    const from = readFromFlag(args);
+    return handler(applyOptionalActor(request, from));
+  }
+
   if (subcommand === 'owned') {
     const ownedSubcommand = args[1];
     const ownedArgs = args.slice(2);

@@ -236,11 +236,12 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   ROOT_COMMAND_HELP,
   {
     commandPath: ['products'],
-    summary: 'Product commerce commands for seller listing publication and local owner inventory.',
+    summary: 'Product commerce commands for seller listing publication, purchase planning, and local owner inventory.',
     usage: 'metabot products <subcommand>',
     subcommands: [
       { name: 'skills', summary: 'List product fulfillment skills from one seller bot primary runtime.' },
       { name: 'publish', summary: 'Publish a product listing payload after validating seller fulfillment skills.' },
+      { name: 'buy', summary: 'Plan or confirm a Product V1 virtual goods purchase from a request file.' },
       { name: 'owned', summary: 'List locally owned product listings.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
@@ -292,6 +293,43 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot products publish --from seller --payload-file listing.json',
       'metabot products publish --from seller --payload-file listing.json --chain opcat',
+    ],
+  },
+  {
+    commandPath: ['products', 'buy'],
+    summary: 'Plan or confirm a Product V1 virtual goods purchase from a request file.',
+    usage: 'metabot products buy [--from <bot-slug>] --request-file <path>',
+    requiredFlags: [
+      { flag: '--request-file', value: '<path>', description: 'Path to a product purchase request JSON file.' },
+    ],
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+    requestShape: {
+      query: 'buy Alice 0.00005 SPACE mobile top-up card',
+      listingPinId: '',
+      skuId: 'space-00005',
+      comment: '',
+      spendCap: {
+        amount: '0.00005',
+        currency: 'SPACE',
+      },
+      policyMode: 'confirm_paid_only',
+      confirmed: false,
+    },
+    successFields: [
+      'product',
+      'sku',
+      'seller',
+      'payment',
+      'confirmation',
+      'confirmRequest',
+    ],
+    failureSemantics: [
+      'Fails before wallet payment when the cached product is offline, unsupported in Product V1, or exceeds the spend cap.',
+      'Product V1 only supports virtual products fulfilled by digital_delivery over simplemsg.',
+      'The CLI only reads the request file and dispatches to the daemon; wallet payment and product-order writes are not performed locally.',
+    ],
+    examples: [
+      'metabot products buy --from bob --request-file request.json',
     ],
   },
   {

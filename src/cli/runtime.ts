@@ -2674,6 +2674,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         return requestJson(context, 'GET', `/api/products/skills${suffix}`);
       },
       publish: async (input) => requestJson(context, 'POST', '/api/products/publish', input),
+      buy: async (input) => requestJson(context, 'POST', '/api/products/buy', input),
       listOwned: async (input) => {
         const query = new URLSearchParams({
           page: String(input.page),

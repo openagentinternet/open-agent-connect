@@ -110,6 +110,48 @@ test('runCli dispatches `metabot products publish --from --payload-file --chain`
   assert.equal(envelope.data.listingPinId, 'listing-pin-1');
 });
 
+test('runCli dispatches `metabot products buy --from --request-file` with purchase request JSON', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-products-buy-'));
+  const requestFile = path.join(tempDir, 'request.json');
+  const request = {
+    query: 'buy Alice 0.00005 SPACE mobile top-up card',
+    listingPinId: '',
+    skuId: 'space-00005',
+    comment: '',
+    spendCap: {
+      amount: '0.00005',
+      currency: 'SPACE',
+    },
+    policyMode: 'confirm_paid_only',
+    confirmed: false,
+  };
+  await writeFile(requestFile, JSON.stringify(request), 'utf8');
+
+  const calls = [];
+  const exitCode = await runCli([
+    'products',
+    'buy',
+    '--from',
+    'bob',
+    '--request-file',
+    requestFile,
+  ], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      products: {
+        buy: async (input) => {
+          calls.push(input);
+          return commandSuccess({ accepted: true });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ from: 'bob', ...request }]);
+});
+
 test('runCli fails `metabot products publish` when --payload-file is missing', async () => {
   const stdout = [];
   const calls = [];
