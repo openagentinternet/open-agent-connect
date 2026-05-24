@@ -86,6 +86,40 @@ test('preserves all fulfillment skills in a valid product listing', () => {
   assert.deepEqual(result.value.fulfillment.fulfillmentSkills, ['S1', 'S2']);
 });
 
+test('preserves accepted listing protocol strings exactly', () => {
+  const payload = validListing({
+    name: '  mobile top-up card  ',
+    title: '  Mobile Top-Up Card Pack  ',
+    description: '\n\n## What is included\n\nTwo virtual card options.\n\n',
+    fulfillment: {
+      ...validListing().fulfillment,
+      fulfillmentSkills: ['S1', 'SellerSkill-01'],
+      deliverableDescription: '  Card number delivered as typed.  ',
+    },
+    skus: [
+      {
+        ...validListing().skus[0],
+        name: '  Small Top-Up Card  ',
+        description: '\nSmall card details with trailing whitespace.  \n',
+      },
+    ],
+  });
+
+  const result = validateProductListingPayload(payload);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.value.name, payload.name);
+  assert.equal(result.value.title, payload.title);
+  assert.equal(result.value.description, payload.description);
+  assert.equal(result.value.skus[0].name, payload.skus[0].name);
+  assert.equal(result.value.skus[0].description, payload.skus[0].description);
+  assert.deepEqual(result.value.fulfillment.fulfillmentSkills, ['S1', 'SellerSkill-01']);
+  assert.equal(
+    result.value.fulfillment.deliverableDescription,
+    payload.fulfillment.deliverableDescription,
+  );
+});
+
 test('returns stable validation codes for invalid product-listing payloads', () => {
   const cases = [
     ['invalid_product_type', { productType: 'service' }],
@@ -128,6 +162,15 @@ test('returns stable validation codes for invalid product-listing payloads', () 
         },
       },
     ],
+    [
+      'invalid_fulfillment_skill',
+      {
+        fulfillment: {
+          ...validListing().fulfillment,
+          fulfillmentSkills: [' S1 '],
+        },
+      },
+    ],
   ];
 
   for (const [expectedCode, overrides] of cases) {
@@ -138,7 +181,9 @@ test('returns stable validation codes for invalid product-listing payloads', () 
 });
 
 test('validates product-order payloads and defaults settlementKind to native', () => {
-  const result = validateProductOrderPayload(validOrder({ comment: 'Please send to the default account.' }));
+  const result = validateProductOrderPayload(
+    validOrder({ comment: 'Please send to the default account.' }),
+  );
 
   assert.equal(result.ok, true);
   assert.equal(result.value.listingPinId, 'listing_pinid_i0');
@@ -146,6 +191,80 @@ test('validates product-order payloads and defaults settlementKind to native', (
   assert.equal(result.value.paymentTxid, 'a'.repeat(64));
   assert.equal(result.value.settlementKind, 'native');
   assert.equal(result.value.comment, 'Please send to the default account.');
+});
+
+test('preserves accepted product-order protocol strings exactly', () => {
+  const payload = validOrder({
+    paymentTxid: 'A'.repeat(64),
+    comment: '\nPlease keep this buyer note spacing.  \n',
+  });
+
+  const result = validateProductOrderPayload(payload);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.value.listingPinId, payload.listingPinId);
+  assert.equal(result.value.skuId, payload.skuId);
+  assert.equal(result.value.paymentTxid, payload.paymentTxid);
+  assert.equal(result.value.comment, payload.comment);
+});
+
+test('rejects surrounding whitespace on product identifiers and enums', () => {
+  const listingCases = [
+    ['invalid_product_type', { productType: ' virtual ' }],
+    ['invalid_cover_image_uri', { coverImage: ' metafile://cover_pinid.jpg ' }],
+    ['invalid_gallery_image_uri', { galleryImages: [' metafile://gallery_1.png '] }],
+    [
+      'invalid_description_content_type',
+      {
+        descriptionContentType: ' text/markdown ',
+      },
+    ],
+    [
+      'invalid_fulfillment_type',
+      {
+        fulfillment: {
+          ...validListing().fulfillment,
+          fulfillmentType: ' digital_delivery ',
+        },
+      },
+    ],
+    [
+      'unsupported_fulfillment_endpoint',
+      {
+        fulfillment: {
+          ...validListing().fulfillment,
+          deliveryEndpoint: ' simplemsg ',
+        },
+      },
+    ],
+    ['invalid_sku', { skus: [{ ...validListing().skus[0], skuId: ' sku1 ' }] }],
+    ['invalid_gallery_image_uri', { skus: [{ ...validListing().skus[0], image: ' metafile://sku_1.png ' }] }],
+    [
+      'invalid_description_content_type',
+      {
+        skus: [{ ...validListing().skus[0], descriptionContentType: ' text/markdown ' }],
+      },
+    ],
+  ];
+
+  for (const [expectedCode, overrides] of listingCases) {
+    const result = validateProductListingPayload(validListing(overrides));
+    assert.equal(result.ok, false, expectedCode);
+    assert.equal(result.code, expectedCode);
+  }
+
+  const orderCases = [
+    ['missing_listing_pin_id', { listingPinId: ' listing_pinid_i0 ' }],
+    ['missing_sku_id', { skuId: ' sku2 ' }],
+    ['invalid_payment_txid', { paymentTxid: ` ${'a'.repeat(64)} ` }],
+    ['unsupported_settlement_kind', { settlementKind: ' native ' }],
+  ];
+
+  for (const [expectedCode, overrides] of orderCases) {
+    const result = validateProductOrderPayload(validOrder(overrides));
+    assert.equal(result.ok, false, expectedCode);
+    assert.equal(result.code, expectedCode);
+  }
 });
 
 test('accepts an explicit native settlementKind in product-order payloads', () => {
@@ -160,6 +279,9 @@ test('rejects invalid product-order payloads', () => {
     ['missing_listing_pin_id', { listingPinId: '' }],
     ['missing_sku_id', { skuId: '' }],
     ['invalid_payment_txid', { paymentTxid: '' }],
+    ['invalid_payment_txid', { paymentTxid: 'a'.repeat(63) }],
+    ['invalid_payment_txid', { paymentTxid: `${'a'.repeat(63)}z` }],
+    ['invalid_payment_txid', { paymentTxid: `${'a'.repeat(64)}i0` }],
     ['unsupported_settlement_kind', { settlementKind: 'mrc20' }],
     ['invalid_comment', { comment: { text: 'not plain text' } }],
   ];

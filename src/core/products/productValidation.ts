@@ -54,6 +54,7 @@ const DELIVERY_ENDPOINTS = new Set<ProductDeliveryEndpoint>(['simplemsg', 'logis
 const DESCRIPTION_CONTENT_TYPES = new Set(['text/markdown', 'text/html']);
 const SETTLEMENT_KINDS = new Set<ProductSettlementKind>(['native']);
 const DECIMAL_AMOUNT_PATTERN = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
+const PAYMENT_TXID_PATTERN = /^[0-9a-fA-F]{64}$/;
 
 function failure(code: ProductValidationFailureCode, message: string): ProductValidationFailure {
   return { ok: false, code, message };
@@ -63,33 +64,49 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function normalizeString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
+function asString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
 }
 
 function isNonEmptyString(value: unknown): value is string {
-  return normalizeString(value).length > 0;
+  return typeof value === 'string' && value.length > 0;
+}
+
+function isNonEmptyText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function hasSurroundingWhitespace(value: string): boolean {
+  return value.trim() !== value;
 }
 
 function isMetafileUri(value: unknown): value is string {
-  const uri = normalizeString(value);
-  return uri.startsWith('metafile://') && uri.length > 'metafile://'.length;
+  if (typeof value !== 'string' || hasSurroundingWhitespace(value)) {
+    return false;
+  }
+  return value.startsWith('metafile://') && value.length > 'metafile://'.length;
 }
 
 function isSupportedDescriptionContentType(value: unknown): value is string {
-  return DESCRIPTION_CONTENT_TYPES.has(normalizeString(value));
+  return (
+    typeof value === 'string' &&
+    !hasSurroundingWhitespace(value) &&
+    DESCRIPTION_CONTENT_TYPES.has(value)
+  );
 }
 
 function isPositiveDecimalString(value: unknown): value is string {
-  const amount = normalizeString(value);
-  if (!DECIMAL_AMOUNT_PATTERN.test(amount)) {
+  if (typeof value !== 'string' || hasSurroundingWhitespace(value)) {
     return false;
   }
-  return /[1-9]/.test(amount.replace('.', ''));
+  if (!DECIMAL_AMOUNT_PATTERN.test(value)) {
+    return false;
+  }
+  return /[1-9]/.test(value.replace('.', ''));
 }
 
 export function normalizeProductCurrency(value: unknown): string {
-  return normalizeString(value).toUpperCase();
+  return typeof value === 'string' ? value.trim().toUpperCase() : '';
 }
 
 function validatePrice(value: unknown): ProductValidationResult<{ amount: string; currency: string }> {
@@ -105,7 +122,7 @@ function validatePrice(value: unknown): ProductValidationResult<{ amount: string
   return {
     ok: true,
     value: {
-      amount: normalizeString(value.amount),
+      amount: value.amount,
       currency,
     },
   };
@@ -116,7 +133,11 @@ function validateSku(value: unknown): ProductValidationResult<ProductSku> {
     return failure('invalid_sku', 'SKU must be an object.');
   }
 
-  if (!isNonEmptyString(value.skuId) || !isNonEmptyString(value.name)) {
+  if (
+    !isNonEmptyString(value.skuId) ||
+    hasSurroundingWhitespace(value.skuId) ||
+    !isNonEmptyText(value.name)
+  ) {
     return failure('invalid_sku', 'SKU requires skuId and name.');
   }
 
@@ -131,7 +152,7 @@ function validateSku(value: unknown): ProductValidationResult<ProductSku> {
     );
   }
 
-  if (!isNonEmptyString(value.description)) {
+  if (!isNonEmptyText(value.description)) {
     return failure('invalid_description', 'SKU description must be a non-empty string.');
   }
 
@@ -148,11 +169,11 @@ function validateSku(value: unknown): ProductValidationResult<ProductSku> {
   return {
     ok: true,
     value: {
-      skuId: normalizeString(value.skuId),
-      name: normalizeString(value.name),
-      image: normalizeString(value.image),
-      descriptionContentType: normalizeString(value.descriptionContentType),
-      description: normalizeString(value.description),
+      skuId: value.skuId,
+      name: value.name,
+      image: value.image,
+      descriptionContentType: value.descriptionContentType,
+      description: value.description,
       price: price.value,
       initialStock,
     },
@@ -164,16 +185,24 @@ function validateFulfillment(value: unknown): ProductValidationResult<ProductFul
     return failure('invalid_product_payload', 'fulfillment must be an object.');
   }
 
-  const fulfillmentType = normalizeString(value.fulfillmentType);
-  if (!FULFILLMENT_TYPES.has(fulfillmentType as ProductFulfillmentType)) {
+  const fulfillmentType = asString(value.fulfillmentType);
+  if (
+    fulfillmentType === null ||
+    hasSurroundingWhitespace(fulfillmentType) ||
+    !FULFILLMENT_TYPES.has(fulfillmentType as ProductFulfillmentType)
+  ) {
     return failure(
       'invalid_fulfillment_type',
       'fulfillment.fulfillmentType must be digital_delivery or physical_shipping.',
     );
   }
 
-  const deliveryEndpoint = normalizeString(value.deliveryEndpoint);
-  if (!DELIVERY_ENDPOINTS.has(deliveryEndpoint as ProductDeliveryEndpoint)) {
+  const deliveryEndpoint = asString(value.deliveryEndpoint);
+  if (
+    deliveryEndpoint === null ||
+    hasSurroundingWhitespace(deliveryEndpoint) ||
+    !DELIVERY_ENDPOINTS.has(deliveryEndpoint as ProductDeliveryEndpoint)
+  ) {
     return failure(
       'unsupported_fulfillment_endpoint',
       'fulfillment.deliveryEndpoint must be simplemsg or logistics.',
@@ -187,15 +216,20 @@ function validateFulfillment(value: unknown): ProductValidationResult<ProductFul
     );
   }
 
-  const fulfillmentSkills = value.fulfillmentSkills.map((skill) => normalizeString(skill));
-  if (fulfillmentSkills.some((skill) => !skill)) {
+  const fulfillmentSkills = value.fulfillmentSkills;
+  if (
+    fulfillmentSkills.some(
+      (skill) => typeof skill !== 'string' || skill.length === 0 || hasSurroundingWhitespace(skill),
+    )
+  ) {
     return failure('invalid_fulfillment_skill', 'fulfillmentSkills must be non-empty strings.');
   }
+  const validatedFulfillmentSkills = fulfillmentSkills as string[];
 
   const fulfillment: ProductFulfillment = {
     fulfillmentType: fulfillmentType as ProductFulfillmentType,
     deliveryEndpoint: deliveryEndpoint as ProductDeliveryEndpoint,
-    fulfillmentSkills,
+    fulfillmentSkills: [...validatedFulfillmentSkills],
   };
 
   const estimatedDeliverySeconds = value.estimatedDeliverySeconds;
@@ -220,7 +254,7 @@ function validateFulfillment(value: unknown): ProductValidationResult<ProductFul
         'fulfillment.deliverableDescription must be a string.',
       );
     }
-    fulfillment.deliverableDescription = value.deliverableDescription.trim();
+    fulfillment.deliverableDescription = value.deliverableDescription;
   }
 
   return { ok: true, value: fulfillment };
@@ -233,16 +267,20 @@ export function validateProductListingPayload(
     return failure('invalid_product_payload', 'Product listing payload must be an object.');
   }
 
-  if (!isNonEmptyString(input.name)) {
+  if (!isNonEmptyText(input.name)) {
     return failure('invalid_product_name', 'name must be a non-empty string.');
   }
 
-  if (!isNonEmptyString(input.title)) {
+  if (!isNonEmptyText(input.title)) {
     return failure('invalid_product_title', 'title must be a non-empty string.');
   }
 
-  const productType = normalizeString(input.productType);
-  if (!PRODUCT_TYPES.has(productType as ProductType)) {
+  const productType = asString(input.productType);
+  if (
+    productType === null ||
+    hasSurroundingWhitespace(productType) ||
+    !PRODUCT_TYPES.has(productType as ProductType)
+  ) {
     return failure('invalid_product_type', 'productType must be virtual or physical.');
   }
 
@@ -265,7 +303,7 @@ export function validateProductListingPayload(
     );
   }
 
-  if (!isNonEmptyString(input.description)) {
+  if (!isNonEmptyText(input.description)) {
     return failure('invalid_description', 'description must be a non-empty string.');
   }
 
@@ -293,18 +331,18 @@ export function validateProductListingPayload(
   }
 
   const value: ProductListingPayload = {
-    name: normalizeString(input.name),
-    title: normalizeString(input.title),
+    name: input.name,
+    title: input.title,
     productType: productType as ProductType,
-    coverImage: normalizeString(input.coverImage),
-    descriptionContentType: normalizeString(input.descriptionContentType),
-    description: normalizeString(input.description),
+    coverImage: input.coverImage,
+    descriptionContentType: input.descriptionContentType,
+    description: input.description,
     fulfillment: fulfillment.value,
     skus,
   };
 
   if (galleryImages !== undefined) {
-    value.galleryImages = galleryImages.map((uri) => normalizeString(uri));
+    value.galleryImages = galleryImages as string[];
   }
 
   return { ok: true, value };
@@ -317,36 +355,40 @@ export function validateProductOrderPayload(
     return failure('invalid_product_payload', 'Product order payload must be an object.');
   }
 
-  if (!isNonEmptyString(input.listingPinId)) {
+  if (!isNonEmptyString(input.listingPinId) || hasSurroundingWhitespace(input.listingPinId)) {
     return failure('missing_listing_pin_id', 'listingPinId is required.');
   }
 
-  if (!isNonEmptyString(input.skuId)) {
+  if (!isNonEmptyString(input.skuId) || hasSurroundingWhitespace(input.skuId)) {
     return failure('missing_sku_id', 'skuId is required.');
   }
 
-  if (!isNonEmptyString(input.paymentTxid)) {
-    return failure('invalid_payment_txid', 'paymentTxid must be a non-empty chain txid string.');
+  if (typeof input.paymentTxid !== 'string' || !PAYMENT_TXID_PATTERN.test(input.paymentTxid)) {
+    return failure('invalid_payment_txid', 'paymentTxid must be a 64-character hex txid.');
   }
 
   const settlementKind =
-    input.settlementKind === undefined ? 'native' : normalizeString(input.settlementKind);
-  if (!SETTLEMENT_KINDS.has(settlementKind as ProductSettlementKind)) {
+    input.settlementKind === undefined ? 'native' : asString(input.settlementKind);
+  if (
+    settlementKind === null ||
+    hasSurroundingWhitespace(settlementKind) ||
+    !SETTLEMENT_KINDS.has(settlementKind as ProductSettlementKind)
+  ) {
     return failure('unsupported_settlement_kind', 'settlementKind must be native.');
   }
 
   const value: ProductOrderPayload = {
-    listingPinId: normalizeString(input.listingPinId),
-    skuId: normalizeString(input.skuId),
+    listingPinId: input.listingPinId,
+    skuId: input.skuId,
     settlementKind: settlementKind as ProductSettlementKind,
-    paymentTxid: normalizeString(input.paymentTxid),
+    paymentTxid: input.paymentTxid,
   };
 
   if (input.comment !== undefined) {
     if (typeof input.comment !== 'string') {
       return failure('invalid_comment', 'comment must be plain text.');
     }
-    value.comment = input.comment.trim();
+    value.comment = input.comment;
   }
 
   return { ok: true, value };
