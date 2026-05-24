@@ -235,6 +235,15 @@ export function createPrivateChatAutoReplyOrchestrator(
         ? await deps.strategyStore.getStrategy(conversation.strategyId)
         : null;
       const maxIdleMs = strategy?.maxIdleMs ?? DEFAULT_MAX_IDLE_MS;
+      const shouldReopenClosedConversation = conversation.state === 'closed'
+        && now - conversation.updatedAt > maxIdleMs;
+      if (shouldReopenClosedConversation) {
+        conversation = {
+          ...conversation,
+          state: 'active',
+          turnCount: 0,
+        };
+      }
       if (conversation.state !== 'closed' && await shouldResetIdleTurnCount({
         stateStore: deps.stateStore,
         conversationId: conversation.conversationId,
