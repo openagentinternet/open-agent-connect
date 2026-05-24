@@ -73,6 +73,38 @@ function fetchChainRows(rows, calls) {
   };
 }
 
+function fetchSocketPresenceRows(rows, calls = []) {
+  return async (url) => {
+    calls.push(String(url));
+    if (String(url).includes('/pin/path/list')) {
+      throw new Error('cached mode should not fetch chain product rows');
+    }
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          code: 0,
+          data: {
+            total: rows.length,
+            onlineWindowSeconds: 120,
+            list: rows.map((row) => ({
+              globalMetaId: row.globalMetaId,
+              lastSeenAt: row.lastSeenAt ?? 1770000000000,
+              lastSeenAgoSeconds: row.lastSeenAgoSeconds ?? 3,
+              deviceCount: row.deviceCount ?? 1,
+              userInfo: {
+                name: row.name ?? '',
+                bio: row.goal ? JSON.stringify({ goal: row.goal }) : '',
+              },
+            })),
+          },
+        };
+      },
+    };
+  };
+}
+
 test('product directory excludes offline sellers when onlineOnly is true and includes online sellers', async () => {
   const homeDir = await createProfileHome('oac-product-directory-');
   const store = createProductStateStore(homeDir);
@@ -115,6 +147,9 @@ test('product directory excludes offline sellers when onlineOnly is true and inc
   assert.equal(result.products[0].sellerName, 'Online Seller');
   assert.equal(result.products[0].online, true);
   assert.equal(result.products[0].lastSeenAgoSeconds, 4);
+  assert.deepEqual(result.products[0].skus, result.products[0].payload.skus);
+  assert.equal(result.products[0].fulfillment.deliveryEndpoint, 'simplemsg');
+  assert.equal(result.products[0].fulfillment.fulfillmentType, 'digital_delivery');
 });
 
 test('product directory query searches listing, SKU, seller, and currency fields', async () => {
@@ -224,6 +259,17 @@ test('product directory keeps seller and online decoration out of protocol paylo
     productStateStore: store,
     cached: true,
     onlineOnly: true,
+    onlineBots: [
+      {
+        globalMetaId: 'gm-decoration-seller',
+        name: 'Decoration Seller',
+        online: true,
+        lastSeenAt: 1770000000000,
+        lastSeenAgoSeconds: 1,
+        deviceCount: 1,
+        goal: '',
+      },
+    ],
   });
 
   const product = result.products[0];
@@ -233,6 +279,62 @@ test('product directory keeps seller and online decoration out of protocol paylo
   assert.equal(product.payload.sellerGlobalMetaId, undefined);
   assert.equal(product.payload.sellerName, undefined);
   assert.equal(product.payload.online, undefined);
+});
+
+test('cached online product directory excludes stale cached online sellers missing from current presence', async () => {
+  const homeDir = await createProfileHome('oac-product-directory-stale-online-');
+  const store = createProductStateStore(homeDir);
+  const calls = [];
+
+  await store.upsertDirectoryItem({
+    listingPinId: 'listing-stale-online',
+    payload: listing({ title: 'Stale Online Listing' }),
+    sellerGlobalMetaId: 'gm-stale-online-seller',
+    sellerName: 'Stale Online Seller',
+    online: true,
+    cachedAt: 1770000000000,
+  });
+
+  const result = await listProductDirectory({
+    productStateStore: store,
+    cached: true,
+    onlineOnly: true,
+    fetchImpl: fetchSocketPresenceRows([], calls),
+  });
+
+  assert.deepEqual(result.products, []);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /\/group-chat\/socket\/online-users/);
+});
+
+test('cached online product directory includes stale cached offline sellers present in current presence', async () => {
+  const homeDir = await createProfileHome('oac-product-directory-current-online-');
+  const store = createProductStateStore(homeDir);
+  const calls = [];
+
+  await store.upsertDirectoryItem({
+    listingPinId: 'listing-current-online',
+    payload: listing({ title: 'Current Online Listing' }),
+    sellerGlobalMetaId: 'gm-current-online-seller',
+    sellerName: 'Current Online Seller',
+    online: false,
+    cachedAt: 1770000000000,
+  });
+
+  const result = await listProductDirectory({
+    productStateStore: store,
+    cached: true,
+    onlineOnly: true,
+    fetchImpl: fetchSocketPresenceRows([
+      { globalMetaId: 'gm-current-online-seller', name: 'Current Online Seller', lastSeenAgoSeconds: 2 },
+    ], calls),
+  });
+
+  assert.deepEqual(result.products.map((item) => item.listingPinId), ['listing-current-online']);
+  assert.equal(result.products[0].online, true);
+  assert.equal(result.products[0].lastSeenAgoSeconds, 2);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /\/group-chat\/socket\/online-users/);
 });
 
 test('product directory result exposes only the public envelope fields', async () => {

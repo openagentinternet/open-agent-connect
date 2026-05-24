@@ -23,6 +23,8 @@ export interface ProductDirectoryProduct {
   title: string;
   productType: ProductListingPayload['productType'];
   skuCount: number;
+  skus: ProductListingPayload['skus'];
+  fulfillment: Pick<ProductListingPayload['fulfillment'], 'fulfillmentType' | 'deliveryEndpoint'> & Partial<ProductListingPayload['fulfillment']>;
   payload: ProductListingPayload;
   sellerGlobalMetaId: string | null;
   sellerName: string | null;
@@ -198,6 +200,8 @@ function fromCacheRecord(record: ProductDirectoryCacheRecord): ProductDirectoryP
     title: record.title,
     productType: record.productType,
     skuCount: record.skuCount,
+    skus: record.payload.skus,
+    fulfillment: record.payload.fulfillment,
     payload: record.payload,
     sellerGlobalMetaId: record.sellerGlobalMetaId,
     sellerName: record.sellerName,
@@ -213,6 +217,8 @@ function fromChainRow(row: ChainProductRow): ProductDirectoryProduct {
     title: row.payload.title,
     productType: row.payload.productType,
     skuCount: row.payload.skus.length,
+    skus: row.payload.skus,
+    fulfillment: row.payload.fulfillment,
     payload: row.payload,
     sellerGlobalMetaId: row.sellerGlobalMetaId,
     sellerName: row.sellerName,
@@ -273,7 +279,7 @@ async function decorateProducts(
     });
   }
 
-  if (options.cached === true) {
+  if (options.cached === true && options.onlineOnly !== true) {
     return products;
   }
 
