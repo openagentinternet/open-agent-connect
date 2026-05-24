@@ -6,6 +6,7 @@ import { ensureRuntimeLayout } from '../state/runtimeStateStore';
 import type {
   ProductListingPayload,
   ProductOrderState,
+  ProductSku,
 } from './productTypes';
 
 const PRODUCT_STATE_SCHEMA_VERSION = 1;
@@ -38,6 +39,12 @@ export interface ProductDirectoryCacheRecord {
   cachedAt: number;
 }
 
+export interface ProductDeliverySummary {
+  result: string | null;
+  deliveryPinId: string | null;
+  deliveredAt: number | null;
+}
+
 export interface ProductBuyerOrderRecord {
   role: 'buyer';
   productOrderPinId: string | null;
@@ -46,6 +53,7 @@ export interface ProductBuyerOrderRecord {
   paymentTxid: string | null;
   orderTxid: string | null;
   sellerGlobalMetaId: string | null;
+  deliverySummary: ProductDeliverySummary | null;
   state: ProductOrderState;
   localUpdatedAt: number;
 }
@@ -59,6 +67,11 @@ export interface ProductSellerOrderRecord {
   orderTxid: string | null;
   buyerGlobalMetaId: string | null;
   fulfillmentSkills: string[];
+  paymentVerified: boolean | null;
+  selectedSku: ProductSku | null;
+  fulfillmentState: ProductOrderState | null;
+  deliveryPinId: string | null;
+  failureReason: string | null;
   state: ProductOrderState;
   localUpdatedAt: number;
 }
@@ -114,6 +127,7 @@ export interface UpsertBuyerOrderInput {
   paymentTxid?: string | null;
   orderTxid?: string | null;
   sellerGlobalMetaId?: string | null;
+  deliverySummary?: ProductDeliverySummary | null;
   state?: ProductOrderState;
   localUpdatedAt?: number;
 }
@@ -126,6 +140,11 @@ export interface UpsertSellerOrderInput {
   orderTxid?: string | null;
   buyerGlobalMetaId?: string | null;
   fulfillmentSkills?: string[];
+  paymentVerified?: boolean | null;
+  selectedSku?: ProductSku | null;
+  fulfillmentState?: ProductOrderState | null;
+  deliveryPinId?: string | null;
+  failureReason?: string | null;
   state?: ProductOrderState;
   localUpdatedAt?: number;
 }
@@ -159,9 +178,18 @@ function normalizeNullableText(value: unknown): string | null {
   return normalized || null;
 }
 
+function normalizeNullableBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+
 function normalizeNumber(value: unknown, fallback: number): number {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.trunc(numeric) : fallback;
+}
+
+function normalizeNullableNumber(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.trunc(numeric) : null;
 }
 
 function listingSummary(payload: ProductListingPayload) {
@@ -206,6 +234,27 @@ function normalizeDirectoryItem(value: unknown): ProductDirectoryCacheRecord | n
   };
 }
 
+function normalizeDeliverySummary(value: unknown): ProductDeliverySummary | null {
+  if (!value || typeof value !== 'object') return null;
+  const source = value as Partial<ProductDeliverySummary>;
+  const result = normalizeNullableText(source.result);
+  const deliveryPinId = normalizeNullableText(source.deliveryPinId);
+  const deliveredAt = normalizeNullableNumber(source.deliveredAt);
+  if (!result && !deliveryPinId && deliveredAt === null) return null;
+  return {
+    result,
+    deliveryPinId,
+    deliveredAt,
+  };
+}
+
+function normalizeSelectedSku(value: unknown): ProductSku | null {
+  if (!value || typeof value !== 'object') return null;
+  const source = value as Partial<ProductSku>;
+  if (!normalizeText(source.skuId)) return null;
+  return source as ProductSku;
+}
+
 function normalizeBuyerOrder(value: unknown): ProductBuyerOrderRecord | null {
   if (!value || typeof value !== 'object') return null;
   const source = value as Partial<ProductBuyerOrderRecord>;
@@ -218,6 +267,7 @@ function normalizeBuyerOrder(value: unknown): ProductBuyerOrderRecord | null {
     paymentTxid: normalizeNullableText(source.paymentTxid),
     orderTxid: normalizeNullableText(source.orderTxid),
     sellerGlobalMetaId: normalizeNullableText(source.sellerGlobalMetaId),
+    deliverySummary: normalizeDeliverySummary(source.deliverySummary),
     state: source.state || 'created',
     localUpdatedAt: normalizeNumber(source.localUpdatedAt, 0),
   };
@@ -245,6 +295,11 @@ function normalizeSellerOrder(value: unknown): ProductSellerOrderRecord | null {
     fulfillmentSkills: Array.isArray(source.fulfillmentSkills)
       ? source.fulfillmentSkills.filter((skill): skill is string => typeof skill === 'string')
       : [],
+    paymentVerified: normalizeNullableBoolean(source.paymentVerified),
+    selectedSku: normalizeSelectedSku(source.selectedSku),
+    fulfillmentState: source.fulfillmentState || null,
+    deliveryPinId: normalizeNullableText(source.deliveryPinId),
+    failureReason: normalizeNullableText(source.failureReason),
     state: source.state || 'created',
     localUpdatedAt: normalizeNumber(source.localUpdatedAt, 0),
   };
@@ -382,6 +437,7 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
         paymentTxid: normalizeNullableText(input.paymentTxid),
         orderTxid: normalizeNullableText(input.orderTxid),
         sellerGlobalMetaId: normalizeNullableText(input.sellerGlobalMetaId),
+        deliverySummary: normalizeDeliverySummary(input.deliverySummary),
         state: input.state || 'created',
         localUpdatedAt: input.localUpdatedAt ?? Date.now(),
       };
@@ -408,6 +464,11 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
         orderTxid: normalizeNullableText(input.orderTxid),
         buyerGlobalMetaId: normalizeNullableText(input.buyerGlobalMetaId),
         fulfillmentSkills: [...(input.fulfillmentSkills || [])],
+        paymentVerified: normalizeNullableBoolean(input.paymentVerified),
+        selectedSku: normalizeSelectedSku(input.selectedSku),
+        fulfillmentState: input.fulfillmentState || null,
+        deliveryPinId: normalizeNullableText(input.deliveryPinId),
+        failureReason: normalizeNullableText(input.failureReason),
         state: input.state || 'created',
         localUpdatedAt: input.localUpdatedAt ?? Date.now(),
       };

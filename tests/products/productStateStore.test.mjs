@@ -117,6 +117,11 @@ test('product state store persists buyer and seller orders with cache-first look
     paymentTxid: 'buyer-payment-txid',
     orderTxid: 'buyer-order-txid',
     sellerGlobalMetaId: 'seller-global-metaid',
+    deliverySummary: {
+      result: 'Top-up card: 1234-5678',
+      deliveryPinId: 'delivery-pin-id',
+      deliveredAt: 1770000002000,
+    },
     state: 'paid',
     localUpdatedAt: 1770000000000,
   });
@@ -128,6 +133,11 @@ test('product state store persists buyer and seller orders with cache-first look
     orderTxid: 'seller-order-txid',
     buyerGlobalMetaId: 'buyer-global-metaid',
     fulfillmentSkills: ['S1'],
+    paymentVerified: true,
+    selectedSku: listingPayload().skus[0],
+    fulfillmentState: 'delivered',
+    deliveryPinId: 'seller-delivery-pin-id',
+    failureReason: 'prior transient fulfillment error',
     state: 'received',
     localUpdatedAt: 1770000001000,
   });
@@ -144,4 +154,25 @@ test('product state store persists buyer and seller orders with cache-first look
   assert.equal((await store.findOrderByPaymentTxid('seller-payment-txid')).item.role, 'seller');
   assert.equal((await store.findOrderByOrderTxid('buyer-order-txid')).item.role, 'buyer');
   assert.equal((await store.findOrderByOrderTxid('seller-order-txid')).item.role, 'seller');
+
+  const reloaded = await createProductStateStore(profileRoot).readState();
+  assert.deepEqual(reloaded.buyerOrders[0].deliverySummary, {
+    result: 'Top-up card: 1234-5678',
+    deliveryPinId: 'delivery-pin-id',
+    deliveredAt: 1770000002000,
+  });
+  assert.equal(reloaded.sellerOrders[0].paymentVerified, true);
+  assert.equal(reloaded.sellerOrders[0].selectedSku.skuId, 'sku2');
+  assert.equal(reloaded.sellerOrders[0].fulfillmentState, 'delivered');
+  assert.equal(reloaded.sellerOrders[0].deliveryPinId, 'seller-delivery-pin-id');
+  assert.equal(reloaded.sellerOrders[0].failureReason, 'prior transient fulfillment error');
+
+  const buyerLookup = await store.findOrderByProductOrderPinId('buyer-product-order-pin-id');
+  assert.equal(buyerLookup.item.deliverySummary.result, 'Top-up card: 1234-5678');
+  const sellerLookup = await store.findOrderByProductOrderPinId('seller-product-order-pin-id');
+  assert.equal(sellerLookup.item.paymentVerified, true);
+  assert.equal(sellerLookup.item.selectedSku.skuId, 'sku2');
+  assert.equal(sellerLookup.item.fulfillmentState, 'delivered');
+  assert.equal(sellerLookup.item.deliveryPinId, 'seller-delivery-pin-id');
+  assert.equal(sellerLookup.item.failureReason, 'prior transient fulfillment error');
 });
