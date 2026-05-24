@@ -11,6 +11,10 @@ import type {
 import { validateProductListingPayload } from './productValidation';
 
 const PRODUCT_STATE_SCHEMA_VERSION = 1;
+const LOCKFILE_BASE_DELAY_MS = 25;
+const LOCKFILE_MAX_ATTEMPTS = 200;
+const LOCKFILE_STALE_WITH_PID_MS = 5 * 60 * 1000;
+const LOCKFILE_STALE_WITHOUT_PID_MS = 30_000;
 
 export interface OwnedProductListingRecord {
   listingPinId: string;
@@ -358,9 +362,113 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
 
 async function writeJsonFileAtomically(filePath: string, value: unknown): Promise<void> {
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  await fs.rename(tempPath, filePath);
+  let handle: fs.FileHandle | null = null;
+  try {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    handle = await fs.open(tempPath, 'w');
+    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await fs.rename(tempPath, filePath);
+    try {
+      const directoryHandle = await fs.open(path.dirname(filePath), 'r');
+      try {
+        await directoryHandle.sync();
+      } finally {
+        await directoryHandle.close();
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EINVAL' && code !== 'EPERM' && code !== 'ENOTSUP' && code !== 'EBADF') {
+        throw error;
+      }
+    }
+  } catch (error) {
+    if (handle) {
+      await handle.close();
+    }
+    await fs.rm(tempPath, { force: true });
+    throw error;
+  }
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code !== 'ESRCH';
+  }
+}
+
+async function readLockInfo(filePath: string): Promise<{ pid?: number; acquiredAt?: number } | null> {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    const parsed = JSON.parse(raw) as { pid?: unknown; acquiredAt?: unknown };
+    return {
+      pid: typeof parsed.pid === 'number' ? parsed.pid : undefined,
+      acquiredAt: typeof parsed.acquiredAt === 'number' ? parsed.acquiredAt : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function withLock<T>(lockPath: string, operation: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; attempt < LOCKFILE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const handle = await fs.open(lockPath, 'wx');
+      try {
+        await handle.writeFile(`${JSON.stringify({ pid: process.pid, acquiredAt: Date.now() })}\n`, 'utf8');
+        return await operation();
+      } finally {
+        await handle.close();
+        try {
+          await fs.rm(lockPath, { force: true });
+        } catch {
+          // Best effort cleanup; stale lock recovery handles leftover lock files later.
+        }
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST') {
+        throw error;
+      }
+      try {
+        const lockInfo = await readLockInfo(lockPath);
+        const stat = await fs.stat(lockPath);
+        const lockPid = typeof lockInfo?.pid === 'number' ? lockInfo.pid : null;
+        const acquiredAt =
+          typeof lockInfo?.acquiredAt === 'number' ? lockInfo.acquiredAt : stat.mtimeMs;
+        const ownerAlive = lockPid ? isProcessAlive(lockPid) : false;
+        if (lockPid && !ownerAlive) {
+          await fs.rm(lockPath, { force: true });
+          continue;
+        }
+        const staleThreshold = lockPid ? LOCKFILE_STALE_WITH_PID_MS : LOCKFILE_STALE_WITHOUT_PID_MS;
+        const stale = Date.now() - acquiredAt > staleThreshold;
+        if (!lockPid && stale) {
+          await fs.rm(lockPath, { force: true });
+          continue;
+        }
+      } catch {
+        // Another writer may have released the lock between stat/remove attempts.
+      }
+      await sleep(Math.min(LOCKFILE_BASE_DELAY_MS * (attempt + 1), 250));
+    }
+  }
+  throw new Error(`Timed out acquiring product-state lock: ${lockPath}`);
 }
 
 function upsertBy<T>(items: T[], predicate: (item: T) => boolean, next: T): T[] {
@@ -376,11 +484,31 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
     typeof homeDirOrPaths === 'string' ? resolveMetabotPaths(homeDirOrPaths) : homeDirOrPaths;
   const productsRoot = path.join(paths.runtimeRoot, 'products');
   const productStatePath = path.join(productsRoot, 'products-state.json');
+  const lockPath = `${productStatePath}.lock`;
+  let pendingWrite = Promise.resolve();
 
   const ensureLayout = async (): Promise<MetabotPaths> => {
     await ensureRuntimeLayout(paths);
     await fs.mkdir(productsRoot, { recursive: true });
     return paths;
+  };
+
+  const runExclusive = async <T>(operation: () => Promise<T>): Promise<T> => {
+    const next = pendingWrite.then(
+      async () => {
+        await ensureLayout();
+        return withLock(lockPath, operation);
+      },
+      async () => {
+        await ensureLayout();
+        return withLock(lockPath, operation);
+      },
+    );
+    pendingWrite = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
   };
 
   const store: ProductStateStore = {
@@ -393,18 +521,22 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
       return normalizeState(await readJsonFile<ProductState>(productStatePath));
     },
     async writeState(nextState) {
-      await ensureLayout();
-      const normalized = normalizeState(nextState);
-      await writeJsonFileAtomically(productStatePath, normalized);
-      return normalized;
+      return runExclusive(async () => {
+        await ensureLayout();
+        const normalized = normalizeState(nextState);
+        await writeJsonFileAtomically(productStatePath, normalized);
+        return normalized;
+      });
     },
     async updateState(updater) {
-      await ensureLayout();
-      const current = normalizeState(await readJsonFile<ProductState>(productStatePath));
-      const next = await updater(current);
-      const normalized = normalizeState(next);
-      await writeJsonFileAtomically(productStatePath, normalized);
-      return normalized;
+      return runExclusive(async () => {
+        await ensureLayout();
+        const current = normalizeState(await readJsonFile<ProductState>(productStatePath));
+        const next = await updater(current);
+        const normalized = normalizeState(next);
+        await writeJsonFileAtomically(productStatePath, normalized);
+        return normalized;
+      });
     },
     async upsertOwnedListing(input) {
       const listingPinId = requireText(input.listingPinId, 'listingPinId');

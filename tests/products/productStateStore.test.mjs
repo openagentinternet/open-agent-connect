@@ -45,6 +45,12 @@ function listingPayload(title = 'Mobile Top-Up Card Pack') {
   };
 }
 
+async function sleep(ms) {
+  await new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
+
 test('product state store persists owned listings in the profile runtime products directory', async () => {
   const profileRoot = await createTempProfileRoot();
   const store = createProductStateStore(profileRoot);
@@ -273,4 +279,62 @@ test('product state store rejects blank required identifiers before upserting', 
   assert.deepEqual(state.directoryCache, []);
   assert.deepEqual(state.buyerOrders, []);
   assert.deepEqual(state.sellerOrders, []);
+});
+
+test('product state store serializes concurrent independent state updates', async () => {
+  const profileRoot = await createTempProfileRoot();
+  const store = createProductStateStore(profileRoot);
+
+  await Promise.all([
+    store.updateState(async state => {
+      await sleep(25);
+      return {
+        ...state,
+        ownedListings: [
+          ...state.ownedListings,
+          {
+            listingPinId: 'concurrent-listing-pin-id',
+            localMetabotSlug: 'alice',
+            name: 'mobile top-up card',
+            title: 'Concurrent Listing',
+            productType: 'virtual',
+            skuCount: 1,
+            fulfillmentSkills: ['S1'],
+            payload: listingPayload('Concurrent Listing'),
+            available: true,
+            revokedAt: null,
+            localUpdatedAt: 1770000003000,
+          },
+        ],
+      };
+    }),
+    store.updateState(async state => {
+      await sleep(25);
+      return {
+        ...state,
+        buyerOrders: [
+          ...state.buyerOrders,
+          {
+            role: 'buyer',
+            productOrderPinId: 'concurrent-product-order-pin-id',
+            listingPinId: 'concurrent-listing-pin-id',
+            skuId: 'sku2',
+            paymentTxid: 'concurrent-payment-txid',
+            orderTxid: 'concurrent-order-txid',
+            sellerGlobalMetaId: 'seller-global-metaid',
+            deliverySummary: null,
+            state: 'paid',
+            localUpdatedAt: 1770000004000,
+          },
+        ],
+      };
+    }),
+  ]);
+
+  const state = await store.readState();
+
+  assert.equal(state.ownedListings.length, 1);
+  assert.equal(state.ownedListings[0].listingPinId, 'concurrent-listing-pin-id');
+  assert.equal(state.buyerOrders.length, 1);
+  assert.equal(state.buyerOrders[0].productOrderPinId, 'concurrent-product-order-pin-id');
 });
