@@ -2533,6 +2533,23 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const suffix = query.size ? `?${query.toString()}` : '';
         return requestJson(context, 'GET', `/api/network/bots${suffix}`);
       },
+      listProducts: async (input) => {
+        const query = new URLSearchParams();
+        if (input.online !== undefined) {
+          query.set('online', input.online ? 'true' : 'false');
+        }
+        if (input.cached === true) {
+          query.set('cached', 'true');
+        }
+        if (typeof input.query === 'string' && input.query.trim()) {
+          query.set('query', input.query.trim());
+        }
+        if (typeof input.limit === 'number' && Number.isFinite(input.limit)) {
+          query.set('limit', String(Math.max(1, Math.floor(input.limit))));
+        }
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/network/products${suffix}`);
+      },
       listSources: async () => requestJson(context, 'GET', '/api/network/sources'),
       addSource: async (input) => requestJson(context, 'POST', '/api/network/sources', input),
       removeSource: async (input) => requestJson(context, 'DELETE', '/api/network/sources', input),

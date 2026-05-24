@@ -119,6 +119,63 @@ export async function runNetworkCommand(args: string[], context: CliRuntimeConte
     return result;
   }
 
+  if (args[0] === 'products') {
+    const handler = context.dependencies.network?.listProducts;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Network products handler is not configured.');
+    }
+
+    const parsedLimit = parseLimitFlag(args);
+    if (parsedLimit.error) {
+      return parsedLimit.error;
+    }
+    const query = readFlagValue(args, '--query') ?? readFlagValue(args, '--search') ?? undefined;
+    const request: { online?: boolean; cached?: boolean; query?: string; limit?: number } = {};
+    if (hasFlag(args, '--online')) {
+      request.online = true;
+    }
+    if (hasFlag(args, '--cached')) {
+      request.cached = true;
+    }
+    if (query) {
+      request.query = query;
+    }
+    if (parsedLimit.limit !== undefined) {
+      request.limit = parsedLimit.limit;
+    }
+
+    const result = await handler(request);
+
+    if (shouldRenderTable && result.ok && result.state === 'success') {
+      const data = result.data as { products?: Array<Record<string, unknown>> };
+      const products = Array.isArray(data?.products) ? data.products : [];
+      const truncate = (s: string, max: number) => s.length > max ? s.slice(0, max) + '...' : s;
+      const rows = ['| # | product | seller | SKUs/price | online |', '|---|---------|--------|------------|--------|'];
+      for (let i = 0; i < products.length; i++) {
+        const product = products[i];
+        const payload = product['payload'] && typeof product['payload'] === 'object'
+          ? product['payload'] as { skus?: Array<{ price?: { amount?: string; currency?: string } }> }
+          : {};
+        const skus = Array.isArray(payload.skus) ? payload.skus : [];
+        const firstPrice = skus[0]?.price;
+        const price = firstPrice?.amount
+          ? `${firstPrice.amount}${firstPrice.currency ? ` ${firstPrice.currency}` : ''}`
+          : `${typeof product['skuCount'] === 'number' ? product['skuCount'] : skus.length} SKUs`;
+        const sellerName = String(product['sellerName'] || '');
+        const sellerGmid = String(product['sellerGlobalMetaId'] || '');
+        const seller = sellerName ? `${truncate(sellerName, 20)}(${truncate(sellerGmid, 20)})` : truncate(sellerGmid, 30);
+        const online = product['online'] === true ? '🟢' : '-';
+        rows.push(`| ${i + 1} | ${truncate(String(product['title'] || product['name'] || ''), 30)} | ${seller} | ${price} | ${online} |`);
+      }
+      context.stdout.write(rows.join('\n') + '\n');
+      const rendered = commandSuccess(data) as MetabotCommandResult<unknown> & { __rawStdoutHandled?: boolean };
+      rendered.__rawStdoutHandled = true;
+      return rendered;
+    }
+
+    return result;
+  }
+
   if (args[0] !== 'sources') {
     return commandUnknownSubcommand(`network ${args.join(' ')}`.trim());
   }

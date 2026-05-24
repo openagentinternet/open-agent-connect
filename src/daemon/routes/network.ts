@@ -61,6 +61,25 @@ export const handleNetworkRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  if (url.pathname === '/api/network/products') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+
+    const query = url.searchParams.get('query') ?? url.searchParams.get('q') ?? url.searchParams.get('search') ?? undefined;
+    const result = handlers.network?.listProducts
+      ? await handlers.network.listProducts({
+          online: parseBoolean(url.searchParams.get('online')),
+          cached: parseBoolean(url.searchParams.get('cached')),
+          query,
+          limit: parseLimit(url.searchParams.get('limit')),
+        })
+      : commandFailed('not_implemented', 'Network products handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
   if (url.pathname !== '/api/network/sources') {
     return false;
   }

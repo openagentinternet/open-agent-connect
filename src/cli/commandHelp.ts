@@ -1358,6 +1358,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     subcommands: [
       { name: 'services', summary: 'List MetaBot services from chain discovery and local fallbacks.' },
       { name: 'bots', summary: 'List online MetaBots from socket presence with service-directory fallback.' },
+      { name: 'products', summary: 'List product listings from chain discovery and local product cache.' },
       { name: 'sources', summary: 'Manage local seeded directory sources.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
@@ -1381,6 +1382,34 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot network services --online',
+    ],
+  },
+  {
+    commandPath: ['network', 'products'],
+    summary: 'List product commerce listings discovered from MetaWeb and optional local product cache.',
+    usage: 'metabot network products [--online] [--cached] [--query <text>] [--search <text>] [--limit <n>]',
+    optionalFlags: [
+      { flag: '--online', description: 'Return only product listings whose sellers currently appear in socket presence.' },
+      { flag: '--cached', description: 'Search only the local product directory cache without refreshing chain data.' },
+      { flag: '--query', value: '<text>', description: 'Search by product name, title, description, SKU text, seller name, or price currency.' },
+      { flag: '--search', value: '<text>', description: 'Alias for --query.' },
+      { flag: '--limit', value: '<n>', description: 'Maximum rows to return. Supported range: 1-100. Default: 20.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'products',
+      'total',
+      'source',
+      'onlineOnly',
+      'cacheUpdatedAt',
+    ],
+    failureSemantics: [
+      'Fails when --limit is outside 1-100.',
+      'Chain refresh failures fall back to local product cache when cached listings exist.',
+    ],
+    examples: [
+      'metabot network products --online --query "mobile top-up" --limit 5',
+      'metabot network products --cached --search SPACE',
     ],
   },
   {

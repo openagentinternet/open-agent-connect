@@ -97,6 +97,42 @@ test('runCli prints products help with publish, skills, and owned list commands'
   assert.match(ownedStdout.join(''), /^Usage:\s+metabot products owned list \[--from <bot-slug> \| --all\] \[--page <n>\] \[--page-size <n>\] \[--refresh\]/m);
 });
 
+test('runCli prints network help with products directory command', async () => {
+  const groupStdout = [];
+  const groupExitCode = await runCli(['network', '--help'], {
+    stdout: { write: (chunk) => { groupStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(groupExitCode, 0);
+  const groupOutput = groupStdout.join('');
+  assert.match(groupOutput, /^Usage:\s+metabot network <subcommand>/m);
+  assert.match(groupOutput, /services\s+List MetaBot services from chain discovery and local fallbacks\./);
+  assert.match(groupOutput, /products\s+List product listings from chain discovery and local product cache\./);
+
+  const jsonStdout = [];
+  const jsonExitCode = await runCli(['network', '--help', '--json'], {
+    stdout: { write: (chunk) => { jsonStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(jsonExitCode, 0);
+  const jsonOutput = JSON.parse(jsonStdout.join(''));
+  assert.ok(jsonOutput.subcommands.some((entry) => entry.name === 'products'));
+
+  const productsStdout = [];
+  const productsExitCode = await runCli(['network', 'products', '--help'], {
+    stdout: { write: (chunk) => { productsStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(productsExitCode, 0);
+  const productsOutput = productsStdout.join('');
+  assert.match(productsOutput, /^Usage:\s+metabot network products \[--online\] \[--cached\] \[--query <text>\] \[--search <text>\] \[--limit <n>\]/m);
+  assert.match(productsOutput, /--online\s+Return only product listings whose sellers currently appear in socket presence\./);
+  assert.match(productsOutput, /--search <text>\s+Alias for --query\./);
+});
+
 test('runCli prints loom group help for validation and export commands', async () => {
   const stdout = [];
 

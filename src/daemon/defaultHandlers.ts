@@ -81,6 +81,7 @@ import {
 import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
 import { validateServicePublishProviderSkill } from '../core/services/servicePublishValidation';
 import { publishProductListingToChain } from '../core/products/productPublishChain';
+import { listProductDirectory } from '../core/products/productDirectory';
 import { createProductStateStore, type OwnedProductListingRecord } from '../core/products/productStateStore';
 import { validateProductListingPayload } from '../core/products/productValidation';
 import type { ProductListingPayload } from '../core/products/productTypes';
@@ -12371,6 +12372,35 @@ export function createDefaultMetabotDaemonHandlers(input: {
         } catch (error) {
           return commandFailed(
             'socket_presence_unavailable',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      },
+      listProducts: async ({ online, cached, query, limit }) => {
+        const productStateStore = createProductStateStore(input.homeDir);
+        try {
+          const directory = await listProductDirectory({
+            productStateStore,
+            chainApiBaseUrl: input.chainApiBaseUrl,
+            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceFailureMode: input.socketPresenceFailureMode,
+            onlineOnly: online === true,
+            cached: cached === true,
+            query,
+            limit,
+          });
+
+          return commandSuccess({
+            products: directory.products,
+            total: directory.total,
+            source: directory.source,
+            onlineOnly: directory.onlineOnly,
+            cacheUpdatedAt: directory.cacheUpdatedAt,
+            fallbackUsed: directory.fallbackUsed,
+          });
+        } catch (error) {
+          return commandFailed(
+            'product_directory_unavailable',
             error instanceof Error ? error.message : String(error)
           );
         }
