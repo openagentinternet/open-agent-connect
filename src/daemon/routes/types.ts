@@ -90,6 +90,17 @@ export interface MetabotDaemonHttpHandlers {
       localProfileSlug?: string | null;
     }) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  products?: {
+    listPublishSkills?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    listOwned?: (input: {
+      from?: string;
+      all?: boolean;
+      page: number;
+      pageSize: number;
+      refresh: boolean;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     privateConversation?: (input: {

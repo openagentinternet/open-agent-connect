@@ -23,6 +23,7 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^\s+config\s+/m);
   assert.match(output, /^\s+wallet\s+/m);
   assert.match(output, /^\s+services\s+/m);
+  assert.match(output, /^\s+products\s+/m);
   assert.match(output, /^\s+provider\s+/m);
   assert.match(output, /^\s+host\s+/m);
   assert.match(output, /^\s+trace\s+/m);
@@ -48,7 +49,52 @@ test('runCli prints machine-readable top-level help for `metabot --help --json`'
   assert.ok(output.subcommands.some((entry) => entry.name === 'bot'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'host'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'provider'));
+  assert.ok(output.subcommands.some((entry) => entry.name === 'products'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'loom'));
+});
+
+test('runCli prints products help with publish, skills, and owned list commands', async () => {
+  const groupStdout = [];
+  const groupExitCode = await runCli(['products', '--help'], {
+    stdout: { write: (chunk) => { groupStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(groupExitCode, 0);
+  const groupOutput = groupStdout.join('');
+  assert.match(groupOutput, /^Usage:\s+metabot products <subcommand>/m);
+  assert.match(groupOutput, /skills\s+List product fulfillment skills from one seller bot primary runtime\./);
+  assert.match(groupOutput, /publish\s+Publish a product listing payload after validating seller fulfillment skills\./);
+  assert.match(groupOutput, /owned\s+List locally owned product listings\./);
+
+  const publishStdout = [];
+  const publishExitCode = await runCli(['products', 'publish', '--help'], {
+    stdout: { write: (chunk) => { publishStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(publishExitCode, 0);
+  const publishOutput = publishStdout.join('');
+  assert.match(publishOutput, /^Usage:\s+metabot products publish \[--from <bot-slug>\] --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(publishOutput, /all fulfillment\.fulfillmentSkills must exist in the seller bot primary runtime/i);
+
+  const skillsStdout = [];
+  const skillsExitCode = await runCli(['products', 'skills', '--help'], {
+    stdout: { write: (chunk) => { skillsStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(skillsExitCode, 0);
+  assert.match(skillsStdout.join(''), /^Usage:\s+metabot products skills \[--from <bot-slug>\]/m);
+
+  const ownedStdout = [];
+  const ownedExitCode = await runCli(['products', 'owned', 'list', '--help'], {
+    stdout: { write: (chunk) => { ownedStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(ownedExitCode, 0);
+  assert.match(ownedStdout.join(''), /^Usage:\s+metabot products owned list \[--from <bot-slug> \| --all\] \[--page <n>\] \[--page-size <n>\] \[--refresh\]/m);
 });
 
 test('runCli prints loom group help for validation and export commands', async () => {

@@ -211,6 +211,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'network', summary: 'Inspect the MetaWeb yellow-pages directory and local source seeds.' },
     { name: 'master', summary: 'Publish, discover, ask, and inspect Ask Master flows.' },
     { name: 'services', summary: 'Publish, call, and rate remote MetaBot services.' },
+    { name: 'products', summary: 'Publish and inspect seller-owned product listings.' },
     { name: 'provider', summary: 'Inspect local provider orders and settle seller-side refunds.' },
     { name: 'chat', summary: 'Send encrypted private MetaWeb messages to another MetaBot.' },
     { name: 'host', summary: 'Project shared MetaBot skills into one host-native skills root.' },
@@ -233,6 +234,94 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
 
 const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   ROOT_COMMAND_HELP,
+  {
+    commandPath: ['products'],
+    summary: 'Product commerce commands for seller listing publication and local owner inventory.',
+    usage: 'metabot products <subcommand>',
+    subcommands: [
+      { name: 'skills', summary: 'List product fulfillment skills from one seller bot primary runtime.' },
+      { name: 'publish', summary: 'Publish a product listing payload after validating seller fulfillment skills.' },
+      { name: 'owned', summary: 'List locally owned product listings.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['products', 'skills'],
+    summary: 'List skills from one seller bot primary runtime for product fulfillment.',
+    usage: 'metabot products skills [--from <bot-slug>]',
+    successFields: [
+      'metaBotSlug',
+      'identity',
+      'runtime',
+      'platform',
+      'skills',
+      'rootDiagnostics',
+    ],
+    failureSemantics: [
+      'Fails before chain writes when no identity exists, the primary runtime is missing, or the primary runtime is unavailable.',
+      'Fallback runtime skills are intentionally excluded from this list.',
+    ],
+    examples: [
+      'metabot products skills',
+      'metabot products skills --from alice',
+    ],
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['products', 'publish'],
+    summary: 'Publish a product-listing protocol payload after seller fulfillment skill validation.',
+    usage: 'metabot products publish [--from <bot-slug>] --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
+    requiredFlags: [
+      { flag: '--payload-file', value: '<path>', description: 'Path to a product-listing JSON payload.' },
+    ],
+    optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+    successFields: [
+      'listingPinId',
+      'txids',
+      'title',
+      'productType',
+      'skuCount',
+      'fulfillmentSkills',
+      'network',
+    ],
+    failureSemantics: [
+      'Fails when product-listing payload validation fails, no local identity exists, or the chain write is rejected.',
+      'All fulfillment.fulfillmentSkills must exist in the seller bot primary runtime before any chain write.',
+      'Protocol payloads never include seller identity, payment address, timestamps, shipping policy, review policy, or MRC20 fields.',
+    ],
+    examples: [
+      'metabot products publish --from seller --payload-file listing.json',
+      'metabot products publish --from seller --payload-file listing.json --chain opcat',
+    ],
+  },
+  {
+    commandPath: ['products', 'owned'],
+    summary: 'Owner-side product listing commands.',
+    usage: 'metabot products owned <subcommand>',
+    subcommands: [
+      { name: 'list', summary: 'List product listings owned by the active, selected, or all local MetaBots.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['products', 'owned', 'list'],
+    summary: 'List product listings owned by the active, selected, or all local MetaBots.',
+    usage: 'metabot products owned list [--from <bot-slug> | --all] [--page <n>] [--page-size <n>] [--refresh]',
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--all', description: 'Aggregate owned listings across all local MetaBot profiles.' },
+      { flag: '--page', value: '<n>', description: 'Page number. Defaults to 1.' },
+      { flag: '--page-size', value: '<n>', description: 'Page size. Defaults to 20.' },
+      { flag: '--refresh', description: 'Reload local product state before rendering the owner view.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['items', 'page', 'pageSize', 'total', 'totalPages'],
+    examples: [
+      'metabot products owned list',
+      'metabot products owned list --from alice',
+      'metabot products owned list --all --refresh',
+    ],
+  },
   {
     commandPath: ['loom'],
     summary: 'Loom commands for validating protocol payloads, delegated task workflows, raw cache sync, and task inspection.',

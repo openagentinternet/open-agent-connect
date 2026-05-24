@@ -80,6 +80,10 @@ import {
 } from '../core/services/myServices';
 import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
 import { validateServicePublishProviderSkill } from '../core/services/servicePublishValidation';
+import { publishProductListingToChain } from '../core/products/productPublishChain';
+import { createProductStateStore, type OwnedProductListingRecord } from '../core/products/productStateStore';
+import { validateProductListingPayload } from '../core/products/productValidation';
+import type { ProductListingPayload } from '../core/products/productTypes';
 import { createProviderServiceRunner } from '../core/a2a/provider/providerServiceRunner';
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
 import {
@@ -10232,6 +10236,170 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
   }));
 
+  async function resolveProductActor(rawFrom: unknown): Promise<{
+    requestedSlug: string;
+    metaBotSlug: string;
+    profileHomeDir: string;
+    runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+    state: RuntimeState;
+    signer: Signer;
+  } | { failure: MetabotCommandResult<never> }> {
+    const requestedSlug = normalizeText(rawFrom);
+    const selectedProfile = requestedSlug
+      ? await getMetabotProfile(normalizedSystemHomeDir, requestedSlug)
+      : null;
+    if (requestedSlug && !selectedProfile) {
+      return {
+        failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`),
+      };
+    }
+
+    const profileHomeDir = path.resolve(selectedProfile?.homeDir ?? input.homeDir);
+    const profileRuntimeStateStore = profileHomeDir === path.resolve(input.homeDir)
+      ? runtimeStateStore
+      : createRuntimeStateStore(profileHomeDir);
+    const state = await profileRuntimeStateStore.readState();
+    if (!state.identity) {
+      return {
+        failure: commandFailed('identity_missing', 'Create a local MetaBot identity before using product seller commands.'),
+      };
+    }
+
+    return {
+      requestedSlug,
+      metaBotSlug: selectedProfile?.slug ?? path.basename(profileHomeDir),
+      profileHomeDir,
+      runtimeStateStore: profileRuntimeStateStore,
+      state,
+      signer: createSignerForProfileHome(profileHomeDir),
+    };
+  }
+
+  async function listProductPublishSkillsForActor(rawFrom: unknown): Promise<MetabotCommandResult<unknown>> {
+    const actor = await resolveProductActor(rawFrom);
+    if ('failure' in actor) {
+      return actor.failure;
+    }
+
+    const catalog = createPlatformSkillCatalog({
+      runtimeStore: actor.profileHomeDir === path.resolve(input.homeDir)
+        ? llmRuntimeStore
+        : createLlmRuntimeStore(actor.profileHomeDir),
+      bindingStore: actor.profileHomeDir === path.resolve(input.homeDir)
+        ? llmBindingStore
+        : createLlmBindingStore(actor.profileHomeDir),
+      systemHomeDir: actor.runtimeStateStore.paths.systemHomeDir,
+      projectRoot: actor.runtimeStateStore.paths.profileRoot,
+      env: process.env,
+    });
+    const result = await catalog.listPrimaryRuntimeSkills({ metaBotSlug: actor.metaBotSlug });
+    if (!result.ok) {
+      return commandFailed(result.code, result.message);
+    }
+
+    return commandSuccess({
+      metaBotSlug: actor.metaBotSlug,
+      identity: {
+        metabotId: actor.state.identity!.metabotId,
+        name: actor.state.identity!.name,
+        globalMetaId: actor.state.identity!.globalMetaId,
+        mvcAddress: actor.state.identity!.mvcAddress,
+        addresses: actor.state.identity!.addresses,
+      },
+      runtime: {
+        id: result.runtime.id,
+        provider: result.runtime.provider,
+        displayName: result.runtime.displayName,
+        health: result.runtime.health,
+        version: result.runtime.version,
+        logoPath: result.runtime.logoPath,
+      },
+      platform: result.platform,
+      skills: result.skills,
+      rootDiagnostics: result.rootDiagnostics,
+    });
+  }
+
+  async function validateProductFulfillmentSkills(inputValidation: {
+    payload: ProductListingPayload;
+    actor: Exclude<Awaited<ReturnType<typeof resolveProductActor>>, { failure: MetabotCommandResult<never> }>;
+  }): Promise<MetabotCommandResult<never> | null> {
+    const uniqueSkills = [...new Set(inputValidation.payload.fulfillment.fulfillmentSkills)];
+    for (const fulfillmentSkill of uniqueSkills) {
+      const validation = await validateServicePublishProviderSkill({
+        metaBotSlug: inputValidation.actor.metaBotSlug,
+        providerSkill: fulfillmentSkill,
+        runtimeStore: inputValidation.actor.profileHomeDir === path.resolve(input.homeDir)
+          ? llmRuntimeStore
+          : createLlmRuntimeStore(inputValidation.actor.profileHomeDir),
+        bindingStore: inputValidation.actor.profileHomeDir === path.resolve(input.homeDir)
+          ? llmBindingStore
+          : createLlmBindingStore(inputValidation.actor.profileHomeDir),
+        systemHomeDir: inputValidation.actor.runtimeStateStore.paths.systemHomeDir,
+        projectRoot: inputValidation.actor.runtimeStateStore.paths.profileRoot,
+        env: process.env,
+      });
+      if (!validation.ok) {
+        return commandFailed(validation.code, validation.message);
+      }
+    }
+    return null;
+  }
+
+  function summarizeOwnedProductListing(record: OwnedProductListingRecord) {
+    return {
+      listingPinId: record.listingPinId,
+      title: record.title,
+      name: record.name,
+      productType: record.productType,
+      skuCount: record.skuCount,
+      fulfillmentSkills: [...record.fulfillmentSkills],
+      available: record.available,
+      revokedAt: record.revokedAt,
+      localUpdatedAt: record.localUpdatedAt,
+    };
+  }
+
+  async function listProductProfileRecords(): Promise<Array<{
+    slug: string;
+    name: string;
+    homeDir: string;
+  }>> {
+    return listMyServicesProfileRecords();
+  }
+
+  async function selectProductProfileRecordsForRequest(
+    request: { from?: unknown; all?: unknown },
+  ): Promise<{
+    profiles: Array<{ slug: string; name: string; homeDir: string }>;
+    failure?: MetabotCommandResult<never>;
+  }> {
+    const profiles = await listProductProfileRecords();
+    const requestedFrom = normalizeText(request.from);
+    if (requestedFrom) {
+      const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedFrom);
+      if (!selectedProfile) {
+        return {
+          profiles: [],
+          failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedFrom}`),
+        };
+      }
+      const selectedHomeDir = path.resolve(selectedProfile.homeDir);
+      return {
+        profiles: profiles.filter((profile) => path.resolve(profile.homeDir) === selectedHomeDir),
+      };
+    }
+
+    if (request.all === true) {
+      return { profiles };
+    }
+
+    const activeHomeDir = path.resolve(input.homeDir);
+    return {
+      profiles: profiles.filter((profile) => path.resolve(profile.homeDir) === activeHomeDir),
+    };
+  }
+
   return {
     config: {
       get: async () => commandSuccess(await configStore.read()),
@@ -12383,6 +12551,82 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return scoped.provider.settleRefund({ from, orderId, paymentTxid });
         }
         return settleProviderSellerRefund({ orderId, paymentTxid });
+      },
+    },
+    products: {
+      listPublishSkills: async (request = {}) => listProductPublishSkillsForActor(request.from),
+      publish: async (rawInput) => {
+        const actor = await resolveProductActor(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+
+        const validation = validateProductListingPayload(rawInput);
+        if (!validation.ok) {
+          return commandFailed(validation.code, validation.message);
+        }
+        const payload = validation.value;
+
+        const fulfillmentSkillValidation = await validateProductFulfillmentSkills({ payload, actor });
+        if (fulfillmentSkillValidation) {
+          return fulfillmentSkillValidation;
+        }
+
+        try {
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.profileHomeDir);
+          const published = await publishProductListingToChain({
+            signer: actor.signer,
+            payload,
+            network,
+          });
+          const listingPinId = normalizeText(published.chainWrite.pinId);
+          await createProductStateStore(actor.profileHomeDir).upsertOwnedListing({
+            listingPinId,
+            localMetabotSlug: actor.metaBotSlug,
+            payload: published.payload as ProductListingPayload,
+            available: true,
+          });
+
+          return commandSuccess({
+            listingPinId,
+            txids: published.chainWrite.txids,
+            title: payload.title,
+            productType: payload.productType,
+            skuCount: payload.skus.length,
+            fulfillmentSkills: [...payload.fulfillment.fulfillmentSkills],
+            network: published.chainWrite.network,
+          });
+        } catch (error) {
+          return commandFailed(
+            'product_publish_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+      listOwned: async (request) => {
+        const selected = await selectProductProfileRecordsForRequest(request);
+        if (selected.failure) {
+          return selected.failure;
+        }
+
+        const page = normalizeMyServicesPage(request.page, 1);
+        const pageSize = normalizeMyServicesPage(request.pageSize, 20);
+        const rows: Array<ReturnType<typeof summarizeOwnedProductListing>> = [];
+        for (const profile of selected.profiles) {
+          const state = await createProductStateStore(profile.homeDir).readState();
+          rows.push(...state.ownedListings.map(summarizeOwnedProductListing));
+        }
+        rows.sort((left, right) => right.localUpdatedAt - left.localUpdatedAt);
+        const total = rows.length;
+        const offset = (page - 1) * pageSize;
+
+        return commandSuccess({
+          items: rows.slice(offset, offset + pageSize),
+          page,
+          pageSize,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / pageSize)),
+        });
       },
     },
     services: {

@@ -2647,6 +2647,29 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         return requestJson(context, 'GET', `/api/services/orders/inspect${suffix}`);
       },
     },
+    products: {
+      listPublishSkills: async (input = {}) => {
+        const query = new URLSearchParams();
+        if (input.from) {
+          query.set('from', input.from);
+        }
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/products/skills${suffix}`);
+      },
+      publish: async (input) => requestJson(context, 'POST', '/api/products/publish', input),
+      listOwned: async (input) => {
+        const query = new URLSearchParams({
+          page: String(input.page),
+          pageSize: String(input.pageSize),
+          refresh: input.refresh ? 'true' : 'false',
+          all: input.all ? 'true' : 'false',
+        });
+        if (input.from) {
+          query.set('from', input.from);
+        }
+        return requestJson(context, 'GET', `/api/products/owned?${query.toString()}`);
+      },
+    },
     provider: {
       inspectOrder: async (input) => {
         const query = new URLSearchParams();
@@ -3700,6 +3723,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
       listServices: networkListServices,
     },
     services: { ...defaults.services, ...provided.services },
+    products: { ...defaults.products, ...provided.products },
     provider: { ...defaults.provider, ...provided.provider },
     chat: { ...defaults.chat, ...provided.chat },
     file: { ...defaults.file, ...provided.file },

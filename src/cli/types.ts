@@ -86,6 +86,17 @@ export interface CliDependencies {
     call?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     rate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  products?: {
+    listPublishSkills?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    listOwned?: (input: {
+      from?: string;
+      all: boolean;
+      page: number;
+      pageSize: number;
+      refresh: boolean;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   provider?: {
     inspectOrder?: (input: { from?: string; orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     settleRefund?: (input: { from?: string; orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;

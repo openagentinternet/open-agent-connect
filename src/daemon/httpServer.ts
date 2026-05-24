@@ -12,6 +12,7 @@ import { handleLoomRoutes } from './routes/loom';
 import { handleMasterRoutes } from './routes/master';
 import { handleNetworkRoutes } from './routes/network';
 import { handleProviderRoutes } from './routes/provider';
+import { handleProductsRoutes } from './routes/products';
 import { handleServicesRoutes } from './routes/services';
 import { handleTraceRoutes } from './routes/trace';
 import { handleUiRoutes } from './routes/ui';
@@ -33,6 +34,7 @@ const ROUTES: RouteHandler[] = [
   handleMasterRoutes,
   handleNetworkRoutes,
   handleProviderRoutes,
+  handleProductsRoutes,
   handleServicesRoutes,
   handleTraceRoutes,
   handleUiRoutes,
