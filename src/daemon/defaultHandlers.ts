@@ -12396,7 +12396,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
             source: directory.source,
             onlineOnly: directory.onlineOnly,
             cacheUpdatedAt: directory.cacheUpdatedAt,
-            fallbackUsed: directory.fallbackUsed,
           });
         } catch (error) {
           return commandFailed(

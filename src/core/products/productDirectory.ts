@@ -40,7 +40,6 @@ export interface ProductDirectoryResult {
   source: 'cache' | 'chain';
   onlineOnly: boolean;
   cacheUpdatedAt: number | null;
-  fallbackUsed: boolean;
 }
 
 export interface ListProductDirectoryOptions {
@@ -228,12 +227,9 @@ function searchableText(product: ProductDirectoryProduct): string {
     product.title,
     product.payload.description,
     product.sellerName,
-    product.sellerGlobalMetaId,
     ...product.payload.skus.flatMap((sku) => [
-      sku.skuId,
       sku.name,
       sku.description,
-      sku.price.amount,
       sku.price.currency,
     ]),
   ].filter(Boolean).join(' ').toLowerCase();
@@ -322,7 +318,6 @@ export async function listProductDirectory(
 ): Promise<ProductDirectoryResult> {
   const onlineOnly = options.onlineOnly === true;
   let source: 'cache' | 'chain' = options.cached === true ? 'cache' : 'chain';
-  let fallbackUsed = false;
   let products: ProductDirectoryProduct[];
 
   if (options.cached === true) {
@@ -353,7 +348,6 @@ export async function listProductDirectory(
       }
       products = cachedProducts;
       source = 'cache';
-      fallbackUsed = true;
     }
   }
 
@@ -376,6 +370,5 @@ export async function listProductDirectory(
     source,
     onlineOnly,
     cacheUpdatedAt: cacheUpdatedAt(products),
-    fallbackUsed,
   };
 }

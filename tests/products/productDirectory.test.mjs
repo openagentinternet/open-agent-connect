@@ -164,6 +164,49 @@ test('product directory query searches listing, SKU, seller, and currency fields
   }
 });
 
+test('product directory query excludes protocol and identifier-only fields', async () => {
+  const homeDir = await createProfileHome('oac-product-directory-query-exclusions-');
+  const store = createProductStateStore(homeDir);
+  const payload = listing({
+    name: 'recharge-card',
+    title: 'Phone Credit',
+    description: 'Delivered by chat.',
+    skus: [
+      {
+        skuId: 'sku-secret-token',
+        name: 'Phone credit pack',
+        image: 'metafile://sku.png',
+        descriptionContentType: 'text/markdown',
+        description: 'Works for prepaid numbers.',
+        price: { amount: '987654321', currency: 'SPACE' },
+        initialStock: 20,
+      },
+    ],
+  });
+
+  await store.upsertDirectoryItem({
+    listingPinId: 'listing-query-exclusions',
+    payload,
+    sellerGlobalMetaId: 'gm-secret-seller',
+    sellerName: 'Recharge Market',
+    online: true,
+    cachedAt: 1770000000000,
+  });
+
+  for (const query of [
+    'gm-secret-seller',
+    'sku-secret-token',
+    '987654321',
+  ]) {
+    const result = await listProductDirectory({
+      productStateStore: store,
+      cached: true,
+      query,
+    });
+    assert.deepEqual(result.products, [], `query did not match excluded field ${query}`);
+  }
+});
+
 test('product directory keeps seller and online decoration out of protocol payload', async () => {
   const homeDir = await createProfileHome('oac-product-directory-payload-');
   const store = createProductStateStore(homeDir);
@@ -190,6 +233,34 @@ test('product directory keeps seller and online decoration out of protocol paylo
   assert.equal(product.payload.sellerGlobalMetaId, undefined);
   assert.equal(product.payload.sellerName, undefined);
   assert.equal(product.payload.online, undefined);
+});
+
+test('product directory result exposes only the public envelope fields', async () => {
+  const homeDir = await createProfileHome('oac-product-directory-envelope-');
+  const store = createProductStateStore(homeDir);
+
+  await store.upsertDirectoryItem({
+    listingPinId: 'listing-envelope',
+    payload: listing(),
+    sellerGlobalMetaId: 'gm-envelope-seller',
+    sellerName: 'Envelope Seller',
+    online: true,
+    cachedAt: 1770000000000,
+  });
+
+  const result = await listProductDirectory({
+    productStateStore: store,
+    cached: true,
+  });
+
+  assert.deepEqual(Object.keys(result).sort(), [
+    'cacheUpdatedAt',
+    'onlineOnly',
+    'products',
+    'source',
+    'total',
+  ]);
+  assert.equal(result.fallbackUsed, undefined);
 });
 
 test('cached product directory uses local cache without forcing chain refresh', async () => {
