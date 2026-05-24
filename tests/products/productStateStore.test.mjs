@@ -134,6 +134,34 @@ test('product state store skips malformed persisted listing payloads without cra
   assert.deepEqual(state.directoryCache, []);
 });
 
+test('product state store rejects invalid listing payloads before upserting listings', async () => {
+  const profileRoot = await createTempProfileRoot();
+  const store = createProductStateStore(profileRoot);
+  const invalidListing = {
+    ...listingPayload('Invalid Listing'),
+    skus: [],
+  };
+
+  await assert.rejects(
+    () => store.upsertOwnedListing({
+      listingPinId: 'invalid-owned-listing-pin-id',
+      payload: invalidListing,
+    }),
+    /Invalid product listing payload/,
+  );
+  await assert.rejects(
+    () => store.upsertDirectoryItem({
+      listingPinId: 'invalid-directory-listing-pin-id',
+      payload: invalidListing,
+    }),
+    /Invalid product listing payload/,
+  );
+
+  const state = await store.readState();
+  assert.deepEqual(state.ownedListings, []);
+  assert.deepEqual(state.directoryCache, []);
+});
+
 test('product state store persists buyer and seller orders with cache-first lookups', async () => {
   const profileRoot = await createTempProfileRoot();
   const store = createProductStateStore(profileRoot);
@@ -337,4 +365,20 @@ test('product state store serializes concurrent independent state updates', asyn
   assert.equal(state.ownedListings[0].listingPinId, 'concurrent-listing-pin-id');
   assert.equal(state.buyerOrders.length, 1);
   assert.equal(state.buyerOrders[0].productOrderPinId, 'concurrent-product-order-pin-id');
+});
+
+test('product state store keeps its lock file under the profile locks directory', async () => {
+  const profileRoot = await createTempProfileRoot();
+  const store = createProductStateStore(profileRoot);
+
+  await store.updateState(async state => {
+    const lockPath = path.join(store.paths.locksRoot, 'product-state.lock');
+    await fs.access(lockPath);
+    return state;
+  });
+
+  await assert.rejects(
+    () => fs.access(`${store.productStatePath}.lock`),
+    { code: 'ENOENT' },
+  );
 });

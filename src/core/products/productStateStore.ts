@@ -212,6 +212,14 @@ function normalizeListingPayload(value: unknown): ProductListingPayload | null {
   return result.ok ? result.value : null;
 }
 
+function requireListingPayload(value: unknown): ProductListingPayload {
+  const result = validateProductListingPayload(value);
+  if (!result.ok) {
+    throw new Error(`Invalid product listing payload: ${result.code}`);
+  }
+  return result.value;
+}
+
 function requireText(value: unknown, fieldName: string): string {
   const normalized = normalizeText(value);
   if (!normalized) {
@@ -484,7 +492,7 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
     typeof homeDirOrPaths === 'string' ? resolveMetabotPaths(homeDirOrPaths) : homeDirOrPaths;
   const productsRoot = path.join(paths.runtimeRoot, 'products');
   const productStatePath = path.join(productsRoot, 'products-state.json');
-  const lockPath = `${productStatePath}.lock`;
+  const lockPath = path.join(paths.locksRoot, 'product-state.lock');
   let pendingWrite = Promise.resolve();
 
   const ensureLayout = async (): Promise<MetabotPaths> => {
@@ -540,11 +548,12 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
     },
     async upsertOwnedListing(input) {
       const listingPinId = requireText(input.listingPinId, 'listingPinId');
+      const payload = requireListingPayload(input.payload);
       const record: OwnedProductListingRecord = {
         listingPinId,
         localMetabotSlug: normalizeNullableText(input.localMetabotSlug),
-        ...listingSummary(input.payload),
-        payload: input.payload,
+        ...listingSummary(payload),
+        payload,
         available: input.available !== false,
         revokedAt: input.revokedAt ?? null,
         localUpdatedAt: input.localUpdatedAt ?? Date.now(),
@@ -561,10 +570,11 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
     },
     async upsertDirectoryItem(input) {
       const listingPinId = requireText(input.listingPinId, 'listingPinId');
+      const payload = requireListingPayload(input.payload);
       const record: ProductDirectoryCacheRecord = {
         listingPinId,
-        ...listingSummary(input.payload),
-        payload: input.payload,
+        ...listingSummary(payload),
+        payload,
         sellerGlobalMetaId: normalizeNullableText(input.sellerGlobalMetaId),
         sellerName: normalizeNullableText(input.sellerName),
         online: input.online === true,
