@@ -6,7 +6,7 @@
 
 ## 1. product-listing
 
-- **Intro**: A protocol for a MetaBot or user to publish a product listing. It describes the product itself, its sellable SKUs, listing images, description content, and delivery mode.
+- **Intro**: A protocol for a MetaBot or user to publish a product listing. It describes the product itself, its sellable SKUs, listing images, description content, and fulfillment policy.
 - **Path**: `/protocols/product-listing`
 - **Version**: `1.0.0`
 - **Content-Type**: `application/json`
@@ -33,8 +33,22 @@
   "descriptionContentType": "text/markdown",
   /** Inline description content. */
   "description": "## What's included\n\n...",
-  /** Delivery mode. V1 supports simplemsg for virtual goods and logistics for physical goods. */
-  "deliveryType": "simplemsg",
+  /** Fulfillment policy for seller-side order processing. */
+  "fulfillment": {
+    /** Fulfillment mode. V1 supports digital_delivery and physical_shipping. */
+    "fulfillmentType": "digital_delivery",
+    /** Seller-side intake channel for product-order messages. V1 supports simplemsg and logistics. */
+    "deliveryEndpoint": "simplemsg",
+    /** Ordered seller-side skills used to process the order. */
+    "fulfillmentSkills": [
+      "product-order-fulfill",
+      "product-order-package"
+    ],
+    /** Estimated delivery time in seconds. */
+    "estimatedDeliverySeconds": 300,
+    /** Buyer-facing description of what will be delivered after payment verification. */
+    "deliverableDescription": "A ZIP file or metafile link will be sent after payment verification."
+  },
 
   /** Sellable product variants. */
   "skus": [
@@ -64,10 +78,11 @@
 - **State notes**: A product listing is identified by the pin that published it. Later updates should publish new pins, and the latest visible chain record defines the current listing state, consistent with other MetaID listing-style protocols.
 
 - **Validation notes**:
-  - `name`, `title`, `productType`, `coverImage`, `descriptionContentType`, `description`, `deliveryType`, and `skus` are required.
+  - `name`, `title`, `productType`, `coverImage`, `descriptionContentType`, `description`, `fulfillment`, and `skus` are required.
   - `skus` must contain at least one item.
   - `skuId` values must be unique within a listing.
   - `coverImage`, `galleryImages[]`, and `skus[].image` must use `metafile://...` URIs, optionally with an extension suffix such as `.jpg` or `.png`.
+  - `fulfillment.fulfillmentSkills` must contain at least one local skill name from the seller's active runtime.
   - `initialStock` must be a positive integer.
   - Sellers may use a large finite value such as `99999999` when they want practical headroom.
 
@@ -82,8 +97,9 @@
   - timestamps such as `createdAt` or `updatedAt`.
 
 - **Compatibility notes**:
-  - `virtual` listings should work first with `deliveryType: "simplemsg"`.
+  - `virtual` listings should work first with `fulfillment.fulfillmentType: "digital_delivery"` and `fulfillment.deliveryEndpoint: "simplemsg"`.
   - `physical` listings can share the same payload shape, but logistics execution details are intentionally deferred.
+  - `fulfillmentSkills` is an ordered list of local skill names. The seller runtime should pass the full `product-order` payload to the first skill by default, and later skills may be used as a seller-defined continuation chain or internal helper steps.
   - If external product copy needs to be loaded later, extend the content model with a new content type rather than introducing `descriptionUri` in V1.
   - The protocol keeps the payload focused on product semantics; purchase, delivery, refund, and review events belong to later protocol families.
 
