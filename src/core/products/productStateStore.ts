@@ -8,6 +8,7 @@ import type {
   ProductOrderState,
   ProductSku,
 } from './productTypes';
+import { validateProductListingPayload } from './productValidation';
 
 const PRODUCT_STATE_SCHEMA_VERSION = 1;
 
@@ -202,16 +203,31 @@ function listingSummary(payload: ProductListingPayload) {
   };
 }
 
+function normalizeListingPayload(value: unknown): ProductListingPayload | null {
+  const result = validateProductListingPayload(value);
+  return result.ok ? result.value : null;
+}
+
+function requireText(value: unknown, fieldName: string): string {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    throw new Error(`${fieldName} is required.`);
+  }
+  return normalized;
+}
+
 function normalizeOwnedListing(value: unknown): OwnedProductListingRecord | null {
   if (!value || typeof value !== 'object') return null;
   const source = value as Partial<OwnedProductListingRecord>;
-  if (!source.payload || !normalizeText(source.listingPinId)) return null;
-  const summary = listingSummary(source.payload);
+  const listingPinId = normalizeText(source.listingPinId);
+  const payload = normalizeListingPayload(source.payload);
+  if (!listingPinId || !payload) return null;
+  const summary = listingSummary(payload);
   return {
-    listingPinId: normalizeText(source.listingPinId),
+    listingPinId,
     localMetabotSlug: normalizeNullableText(source.localMetabotSlug),
     ...summary,
-    payload: source.payload,
+    payload,
     available: source.available !== false,
     revokedAt: source.revokedAt === null ? null : normalizeNumber(source.revokedAt, 0) || null,
     localUpdatedAt: normalizeNumber(source.localUpdatedAt, 0),
@@ -221,12 +237,14 @@ function normalizeOwnedListing(value: unknown): OwnedProductListingRecord | null
 function normalizeDirectoryItem(value: unknown): ProductDirectoryCacheRecord | null {
   if (!value || typeof value !== 'object') return null;
   const source = value as Partial<ProductDirectoryCacheRecord>;
-  if (!source.payload || !normalizeText(source.listingPinId)) return null;
-  const summary = listingSummary(source.payload);
+  const listingPinId = normalizeText(source.listingPinId);
+  const payload = normalizeListingPayload(source.payload);
+  if (!listingPinId || !payload) return null;
+  const summary = listingSummary(payload);
   return {
-    listingPinId: normalizeText(source.listingPinId),
+    listingPinId,
     ...summary,
-    payload: source.payload,
+    payload,
     sellerGlobalMetaId: normalizeNullableText(source.sellerGlobalMetaId),
     sellerName: normalizeNullableText(source.sellerName),
     online: source.online === true,
@@ -389,8 +407,9 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
       return normalized;
     },
     async upsertOwnedListing(input) {
+      const listingPinId = requireText(input.listingPinId, 'listingPinId');
       const record: OwnedProductListingRecord = {
-        listingPinId: normalizeText(input.listingPinId),
+        listingPinId,
         localMetabotSlug: normalizeNullableText(input.localMetabotSlug),
         ...listingSummary(input.payload),
         payload: input.payload,
@@ -409,8 +428,9 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
       return record;
     },
     async upsertDirectoryItem(input) {
+      const listingPinId = requireText(input.listingPinId, 'listingPinId');
       const record: ProductDirectoryCacheRecord = {
-        listingPinId: normalizeText(input.listingPinId),
+        listingPinId,
         ...listingSummary(input.payload),
         payload: input.payload,
         sellerGlobalMetaId: normalizeNullableText(input.sellerGlobalMetaId),
@@ -429,11 +449,13 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
       return record;
     },
     async upsertBuyerOrder(input) {
+      const listingPinId = requireText(input.listingPinId, 'listingPinId');
+      const skuId = requireText(input.skuId, 'skuId');
       const record: ProductBuyerOrderRecord = {
         role: 'buyer',
         productOrderPinId: normalizeNullableText(input.productOrderPinId),
-        listingPinId: normalizeText(input.listingPinId),
-        skuId: normalizeText(input.skuId),
+        listingPinId,
+        skuId,
         paymentTxid: normalizeNullableText(input.paymentTxid),
         orderTxid: normalizeNullableText(input.orderTxid),
         sellerGlobalMetaId: normalizeNullableText(input.sellerGlobalMetaId),
@@ -455,12 +477,16 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
       return record;
     },
     async upsertSellerOrder(input) {
+      const productOrderPinId = requireText(input.productOrderPinId, 'productOrderPinId');
+      const listingPinId = requireText(input.listingPinId, 'listingPinId');
+      const skuId = requireText(input.skuId, 'skuId');
+      const paymentTxid = requireText(input.paymentTxid, 'paymentTxid');
       const record: ProductSellerOrderRecord = {
         role: 'seller',
-        productOrderPinId: normalizeText(input.productOrderPinId),
-        listingPinId: normalizeText(input.listingPinId),
-        skuId: normalizeText(input.skuId),
-        paymentTxid: normalizeText(input.paymentTxid),
+        productOrderPinId,
+        listingPinId,
+        skuId,
+        paymentTxid,
         orderTxid: normalizeNullableText(input.orderTxid),
         buyerGlobalMetaId: normalizeNullableText(input.buyerGlobalMetaId),
         fulfillmentSkills: [...(input.fulfillmentSkills || [])],

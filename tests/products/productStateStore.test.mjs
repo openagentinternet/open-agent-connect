@@ -106,6 +106,28 @@ test('product state store upserts product directory cache entries and looks up l
   assert.equal(found.item.title, 'New title');
 });
 
+test('product state store skips malformed persisted listing payloads without crashing', async () => {
+  const profileRoot = await createTempProfileRoot();
+  const store = createProductStateStore(profileRoot);
+  await store.ensureLayout();
+  await fs.writeFile(
+    store.productStatePath,
+    `${JSON.stringify({
+      version: 1,
+      ownedListings: [{ listingPinId: 'owned-bad', payload: {} }],
+      directoryCache: [{ listingPinId: 'directory-bad', payload: {} }],
+      buyerOrders: [],
+      sellerOrders: [],
+    }, null, 2)}\n`,
+    'utf8',
+  );
+
+  const state = await store.readState();
+
+  assert.deepEqual(state.ownedListings, []);
+  assert.deepEqual(state.directoryCache, []);
+});
+
 test('product state store persists buyer and seller orders with cache-first lookups', async () => {
   const profileRoot = await createTempProfileRoot();
   const store = createProductStateStore(profileRoot);
@@ -175,4 +197,80 @@ test('product state store persists buyer and seller orders with cache-first look
   assert.equal(sellerLookup.item.fulfillmentState, 'delivered');
   assert.equal(sellerLookup.item.deliveryPinId, 'seller-delivery-pin-id');
   assert.equal(sellerLookup.item.failureReason, 'prior transient fulfillment error');
+});
+
+test('product state store rejects blank required identifiers before upserting', async () => {
+  const profileRoot = await createTempProfileRoot();
+  const store = createProductStateStore(profileRoot);
+
+  await assert.rejects(
+    () => store.upsertOwnedListing({
+      listingPinId: ' ',
+      payload: listingPayload(),
+    }),
+    /listingPinId is required/,
+  );
+  await assert.rejects(
+    () => store.upsertDirectoryItem({
+      listingPinId: ' ',
+      payload: listingPayload(),
+    }),
+    /listingPinId is required/,
+  );
+  await assert.rejects(
+    () => store.upsertBuyerOrder({
+      listingPinId: ' ',
+      skuId: 'sku2',
+    }),
+    /listingPinId is required/,
+  );
+  await assert.rejects(
+    () => store.upsertBuyerOrder({
+      listingPinId: 'listing-pin-id',
+      skuId: ' ',
+    }),
+    /skuId is required/,
+  );
+  await assert.rejects(
+    () => store.upsertSellerOrder({
+      productOrderPinId: ' ',
+      listingPinId: 'listing-pin-id',
+      skuId: 'sku2',
+      paymentTxid: 'seller-payment-txid',
+    }),
+    /productOrderPinId is required/,
+  );
+  await assert.rejects(
+    () => store.upsertSellerOrder({
+      productOrderPinId: 'product-order-pin-id',
+      listingPinId: ' ',
+      skuId: 'sku2',
+      paymentTxid: 'seller-payment-txid',
+    }),
+    /listingPinId is required/,
+  );
+  await assert.rejects(
+    () => store.upsertSellerOrder({
+      productOrderPinId: 'product-order-pin-id',
+      listingPinId: 'listing-pin-id',
+      skuId: ' ',
+      paymentTxid: 'seller-payment-txid',
+    }),
+    /skuId is required/,
+  );
+  await assert.rejects(
+    () => store.upsertSellerOrder({
+      productOrderPinId: 'product-order-pin-id',
+      listingPinId: 'listing-pin-id',
+      skuId: 'sku2',
+      paymentTxid: ' ',
+    }),
+    /paymentTxid is required/,
+  );
+
+  const state = await store.readState();
+  assert.deepEqual(state.ownedListings, []);
+  assert.deepEqual(state.directoryCache, []);
+  assert.deepEqual(state.buyerOrders, []);
+  assert.deepEqual(state.sellerOrders, []);
 });
