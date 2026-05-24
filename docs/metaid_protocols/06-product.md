@@ -1,6 +1,6 @@
 # MetaID Protocols: Product Commerce
 
-**Scope**: Product listing and commerce protocol family on MetaWeb. The payloads stay product-centric; pin identity, ownership, timestamps, and chain history remain in the MetaID record model.
+**Scope**: Product listing, order, and commerce protocol family on MetaWeb. The payloads stay product-centric; pin identity, ownership, timestamps, and chain history remain in the MetaID record model.
 
 ---
 
@@ -109,12 +109,58 @@
 
 ---
 
-## 2. Reserved future protocol families
+## 2. product-order
+
+- **Intro**: A protocol for a buyer MetaBot or user to record one completed product purchase against a referenced listing and SKU. It is the minimal on-chain purchase fact; seller-side fulfillment, delivery, and review happen elsewhere.
+- **Path**: `/protocols/product-order`
+- **Version**: `1.0.0`
+- **Content-Type**: `application/json`
+- **Payload Schema**:
+
+```json5
+{
+  /** PINID of the product-listing being purchased. */
+  "listingPinId": "xxxxxxxx...i0",
+  /** SKU key within the referenced product-listing. */
+  "skuId": "standard-pack",
+  /** Optional settlement kind. V1 paid orders use native. */
+  "settlementKind": "native",
+  /** Payment txid for the completed purchase. */
+  "paymentTxid": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  /** Optional buyer note attached to the order. */
+  "comment": "Please send the license to the default account."
+}
+```
+
+- **State notes**: A product order is identified by the pin that published it. The payload is an immutable purchase snapshot, so corrections should be published as a new pin rather than mutating the old one.
+
+- **Validation notes**:
+  - `listingPinId`, `skuId`, and `paymentTxid` are required for the normal paid purchase flow.
+  - `paymentTxid` must be a non-empty chain txid string.
+  - `settlementKind` is optional and defaults to `native`.
+  - `comment` is optional plain text.
+
+- **Explicit exclusions**:
+  - listing price, currency, payment chain, payment address, or other payment snapshot fields;
+  - seller identity fields;
+  - buyer identity fields such as phone, email, shipping address, or contact details;
+  - delivery status, fulfillment status, review status, or refund status;
+  - `orderReference`;
+  - `NeedsRating`-style rating triggers.
+
+- **Compatibility notes**:
+  - The seller resolves `listingPinId` and `skuId` against the referenced `product-listing`, then verifies `paymentTxid` against the seller payment address and the SKU price stored in that listing.
+  - The seller should cache the fetched order locally by order pin id, and only fall back to chain pin fetch on cache miss.
+  - `simplemsg` remains the transport used to hand the order pin id to the seller, but the order payload itself stays on chain.
+  - Post-delivery review is asynchronous and belongs to `product-review`, not to this protocol.
+  - The buyer and seller do not need a `NeedsRating` stage in v1.
+
+---
+
+## 3. Reserved future protocol families
 
 The following product-related protocols are intentionally left for later design and should not be assumed by V1:
 
-- `product-order`
-- `product-delivery`
 - `product-review`
 - `product-shipping-policy`
 - `product-return-policy`
