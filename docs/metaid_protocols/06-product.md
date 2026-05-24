@@ -39,7 +39,7 @@
     "fulfillmentType": "digital_delivery",
     /** Seller-side intake channel for product-order messages. V1 supports simplemsg and logistics. */
     "deliveryEndpoint": "simplemsg",
-    /** Ordered seller-side skills used to process the order. The first skill is the primary handler. */
+    /** Ordered seller-side skills made available to the fulfillment round. */
     "fulfillmentSkills": [
       "product-order-fulfill",
       "product-order-package"
@@ -99,7 +99,7 @@
 - **Compatibility notes**:
   - `virtual` listings should work first with `fulfillment.fulfillmentType: "digital_delivery"` and `fulfillment.deliveryEndpoint: "simplemsg"`.
   - `physical` listings can share the same payload shape, but logistics execution details are intentionally deferred.
-  - `fulfillmentSkills` is an ordered list of local skill names. The seller runtime should pass the full `product-order` payload to the first skill by default, and later skills may be used as a seller-defined continuation chain or internal helper steps.
+  - `fulfillmentSkills` is an ordered list of local skill names used by the seller-side fulfillment round. The runtime must make every listed skill available to that fulfillment conversation and must not silently select only the first item.
   - If external product copy needs to be loaded later, extend the content model with a new content type rather than introducing `descriptionUri` in V1.
   - The protocol keeps the payload focused on product semantics; purchase, delivery, refund, and review events belong to later protocol families.
   - `simplemsg` is the existing ECDH/AES private-chat transport used by OAC and skill-service. V1 does not add a second encryption layer or a separate "encrypted simplemsg" concept.
