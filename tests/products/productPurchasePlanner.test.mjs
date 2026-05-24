@@ -236,6 +236,36 @@ test('planProductPurchase returns confirmation metadata for the first paid uncon
   });
 });
 
+test('planProductPurchase normalizes non-secret fields in the confirmation request', () => {
+  const result = planProductPurchase({
+    request: purchaseRequest({
+      query: '  buy Alice 0.00005 SPACE mobile top-up card  ',
+      comment: '  deliver after 6pm  ',
+      spendCap: {
+        amount: ' 0.00005 ',
+        currency: ' space ',
+      },
+      confirmed: false,
+    }),
+    products: [product()],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'awaiting_confirmation');
+  assert.deepEqual(result.confirmRequest.request, {
+    query: 'buy Alice 0.00005 SPACE mobile top-up card',
+    listingPinId: 'listing-space-card',
+    skuId: 'space-00005',
+    comment: 'deliver after 6pm',
+    spendCap: {
+      amount: '0.00005',
+      currency: 'SPACE',
+    },
+    policyMode: 'confirm_paid_only',
+    confirmed: true,
+  });
+});
+
 test('planProductPurchase returns a payment-ready plan for confirmed requests', () => {
   const result = planProductPurchase({
     request: purchaseRequest({ confirmed: true }),

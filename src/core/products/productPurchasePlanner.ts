@@ -137,6 +137,14 @@ function buildPlanBase(input: {
   };
 }
 
+function normalizeConfirmSpendCap(value: ProductPurchasePlannerRequest['spendCap']): SpendCap | null {
+  if (!value) return null;
+  const amount = normalizeText(value.amount);
+  const currency = normalizeSpendCurrency(value.currency);
+  if (!amount || !currency) return null;
+  return { amount, currency };
+}
+
 function buildConfirmRequest(input: {
   request: ProductPurchasePlannerRequest;
   product: ProductDirectoryProduct;
@@ -145,13 +153,14 @@ function buildConfirmRequest(input: {
 }) {
   const query = normalizeText(input.request.query);
   const comment = normalizeText(input.request.comment);
+  const spendCap = normalizeConfirmSpendCap(input.request.spendCap);
   return {
     request: {
       ...(query ? { query } : {}),
       listingPinId: input.product.listingPinId,
       skuId: input.sku.skuId,
-      ...(comment || input.request.comment === '' ? { comment: input.request.comment ?? '' } : {}),
-      ...(input.request.spendCap ? { spendCap: input.request.spendCap } : {}),
+      ...(comment || input.request.comment === '' ? { comment } : {}),
+      ...(spendCap ? { spendCap } : {}),
       policyMode: input.confirmation.policyMode,
       confirmed: true as const,
     },
