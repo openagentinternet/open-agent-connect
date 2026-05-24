@@ -8,8 +8,9 @@ function parseLimitFlag(args: string[]): { limit?: number; error?: MetabotComman
     return {};
   }
 
-  const parsed = Number.parseInt(rawLimit.trim(), 10);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+  const normalizedLimit = rawLimit.trim();
+  const parsed = Number.parseInt(normalizedLimit, 10);
+  if (!/^\d+$/.test(normalizedLimit) || !Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
     return {
       error: commandFailed(
         'invalid_flag',

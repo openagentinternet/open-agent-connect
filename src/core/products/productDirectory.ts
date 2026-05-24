@@ -268,9 +268,15 @@ async function decorateProducts(
       onlineBots: options.onlineBots,
       onlineOnly: false,
     }).map((product) => {
-      const { providerGlobalMetaId: _providerGlobalMetaId, providerName, ...rest } = product as ProductDirectoryProduct & {
+      const {
+        providerGlobalMetaId: _providerGlobalMetaId,
+        providerName,
+        lastSeenSec: _lastSeenSec,
+        ...rest
+      } = product as ProductDirectoryProduct & {
         providerGlobalMetaId?: string | null;
         providerName?: string;
+        lastSeenSec?: number | null;
       };
       return {
         ...rest,
@@ -293,12 +299,18 @@ async function decorateProducts(
       socketPresenceApiBaseUrl: options.socketPresenceApiBaseUrl,
       socketPresenceLimit: options.socketPresenceLimit,
       socketPresenceFailureMode: options.socketPresenceFailureMode,
-      onlineOnly: false,
+      onlineOnly: options.onlineOnly === true,
     },
   ).then((decorated) => decorated.map((product) => {
-    const { providerGlobalMetaId: _providerGlobalMetaId, providerName, ...rest } = product as ProductDirectoryProduct & {
+    const {
+      providerGlobalMetaId: _providerGlobalMetaId,
+      providerName,
+      lastSeenSec: _lastSeenSec,
+      ...rest
+    } = product as ProductDirectoryProduct & {
       providerGlobalMetaId?: string | null;
       providerName?: string;
+      lastSeenSec?: number | null;
     };
     return {
       ...rest,
@@ -324,14 +336,25 @@ export async function listProductDirectory(
 ): Promise<ProductDirectoryResult> {
   const onlineOnly = options.onlineOnly === true;
   let source: 'cache' | 'chain' = options.cached === true ? 'cache' : 'chain';
-  let products: ProductDirectoryProduct[];
+  let products: ProductDirectoryProduct[] = [];
 
   if (options.cached === true) {
     products = await readCachedProducts(options.productStateStore);
   } else {
+    let decorated: ProductDirectoryProduct[] | null = null;
     try {
       const chainRows = await fetchChainProductRows(options);
-      const decorated = await decorateProducts(chainRows.map(fromChainRow), options);
+      decorated = await decorateProducts(chainRows.map(fromChainRow), options);
+    } catch (error) {
+      const cachedProducts = await readCachedProducts(options.productStateStore);
+      if (cachedProducts.length === 0) {
+        throw error;
+      }
+      products = cachedProducts;
+      source = 'cache';
+    }
+
+    if (decorated) {
       const cached = [];
       for (const product of decorated) {
         cached.push(await options.productStateStore.upsertDirectoryItem({
@@ -347,13 +370,6 @@ export async function listProductDirectory(
         const decoratedProduct = decorated.find((item) => item.listingPinId === product.listingPinId);
         return decoratedProduct ? { ...product, ...decoratedProduct, cachedAt: product.cachedAt } : product;
       });
-    } catch (error) {
-      const cachedProducts = await readCachedProducts(options.productStateStore);
-      if (cachedProducts.length === 0) {
-        throw error;
-      }
-      products = cachedProducts;
-      source = 'cache';
     }
   }
 

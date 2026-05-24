@@ -57,3 +57,28 @@ test('GET /api/network/products forwards query filters to network.listProducts',
   assert.equal(payload.ok, true);
   assert.equal(payload.data.products[0].listingPinId, 'listing-mobile-top-up');
 });
+
+test('GET /api/network/products rejects invalid limit values', async (t) => {
+  const calls = [];
+  const app = await startServer({
+    network: {
+      listProducts: async (input) => {
+        calls.push(input);
+        return commandSuccess({ products: [], total: 0, source: 'cache', onlineOnly: false, cacheUpdatedAt: null });
+      },
+    },
+  });
+  t.after(async () => app.close());
+
+  const response = await fetch(`${app.baseUrl}/api/network/products?limit=5abc`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(payload, {
+    ok: false,
+    state: 'failed',
+    code: 'invalid_flag',
+    message: 'Unsupported --limit value: 5abc. Supported range: 1-100.',
+  });
+});

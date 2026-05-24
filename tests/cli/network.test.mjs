@@ -274,6 +274,28 @@ test('runCli rejects `metabot network products --limit` when value is not a posi
   });
 });
 
+test('runCli rejects `metabot network products --limit` when value has trailing text', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['network', 'products', '--limit', '5abc'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      network: {
+        listProducts: async () => commandSuccess({ products: [] }),
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(JSON.parse(stdout.join('').trim()), {
+    ok: false,
+    state: 'failed',
+    code: 'invalid_flag',
+    message: 'Unsupported --limit value: 5abc. Supported range: 1-100.',
+  });
+});
+
 test('runCli dispatches `metabot network sources add --base-url --label` with parsed source input', async () => {
   const stdout = [];
   const calls = [];

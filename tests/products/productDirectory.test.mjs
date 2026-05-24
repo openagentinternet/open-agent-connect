@@ -105,6 +105,21 @@ function fetchSocketPresenceRows(rows, calls = []) {
   };
 }
 
+function fetchChainRowsThenPresenceFailure(rows) {
+  return async (url) => {
+    if (String(url).includes('/pin/path/list')) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { code: 0, data: { list: rows, nextCursor: null } };
+        },
+      };
+    }
+    throw new Error('socket presence unavailable');
+  };
+}
+
 test('product directory excludes offline sellers when onlineOnly is true and includes online sellers', async () => {
   const homeDir = await createProfileHome('oac-product-directory-');
   const store = createProductStateStore(homeDir);
@@ -150,6 +165,28 @@ test('product directory excludes offline sellers when onlineOnly is true and inc
   assert.deepEqual(result.products[0].skus, result.products[0].payload.skus);
   assert.equal(result.products[0].fulfillment.deliveryEndpoint, 'simplemsg');
   assert.equal(result.products[0].fulfillment.fulfillmentType, 'digital_delivery');
+  assert.equal(Object.hasOwn(result.products[0], 'lastSeenSec'), false);
+});
+
+test('online product directory rejects when current socket presence is unavailable', async () => {
+  const homeDir = await createProfileHome('oac-product-directory-presence-failure-');
+  const store = createProductStateStore(homeDir);
+
+  await assert.rejects(
+    () => listProductDirectory({
+      productStateStore: store,
+      onlineOnly: true,
+      fetchImpl: fetchChainRowsThenPresenceFailure([
+        chainRow({
+          id: 'listing-presence-failure',
+          sellerGlobalMetaId: 'gm-presence-failure-seller',
+          sellerName: 'Presence Failure Seller',
+          payload: listing({ title: 'Presence Failure Listing' }),
+        }),
+      ]),
+    }),
+    /socket presence unavailable/,
+  );
 });
 
 test('product directory query searches listing, SKU, seller, and currency fields', async () => {
@@ -405,6 +442,49 @@ test('fallback cache product directory includes stale cached offline sellers pre
   assert.deepEqual(result.products.map((item) => item.listingPinId), ['listing-fallback-current-online']);
   assert.equal(result.products[0].online, true);
   assert.equal(result.products[0].lastSeenAgoSeconds, 2);
+});
+
+test('product directory does not fall back to stale cache when local directory persistence fails', async () => {
+  const homeDir = await createProfileHome('oac-product-directory-upsert-failure-');
+  const store = createProductStateStore(homeDir);
+
+  await store.upsertDirectoryItem({
+    listingPinId: 'listing-stale-cache',
+    payload: listing({ title: 'Stale Cache Listing' }),
+    sellerGlobalMetaId: 'gm-stale-cache-seller',
+    sellerName: 'Stale Cache Seller',
+    online: true,
+    cachedAt: 1770000000000,
+  });
+  store.upsertDirectoryItem = async () => {
+    throw new Error('local product directory write failed');
+  };
+
+  await assert.rejects(
+    () => listProductDirectory({
+      productStateStore: store,
+      fetchImpl: fetchChainRows([
+        chainRow({
+          id: 'listing-fresh-chain',
+          sellerGlobalMetaId: 'gm-fresh-chain-seller',
+          sellerName: 'Fresh Chain Seller',
+          payload: listing({ title: 'Fresh Chain Listing' }),
+        }),
+      ], []),
+      onlineBots: [
+        {
+          globalMetaId: 'gm-fresh-chain-seller',
+          name: 'Fresh Chain Seller',
+          online: true,
+          lastSeenAt: 1770000000000,
+          lastSeenAgoSeconds: 1,
+          deviceCount: 1,
+          goal: '',
+        },
+      ],
+    }),
+    /local product directory write failed/,
+  );
 });
 
 test('product directory result exposes only the public envelope fields', async () => {
