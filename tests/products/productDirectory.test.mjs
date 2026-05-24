@@ -337,6 +337,76 @@ test('cached online product directory includes stale cached offline sellers pres
   assert.match(calls[0], /\/group-chat\/socket\/online-users/);
 });
 
+test('fallback cache product directory excludes stale cached online sellers missing from current presence', async () => {
+  const homeDir = await createProfileHome('oac-product-directory-fallback-stale-online-');
+  const store = createProductStateStore(homeDir);
+  let chainFetchCount = 0;
+
+  await store.upsertDirectoryItem({
+    listingPinId: 'listing-fallback-stale-online',
+    payload: listing({ title: 'Fallback Stale Online Listing' }),
+    sellerGlobalMetaId: 'gm-fallback-stale-online-seller',
+    sellerName: 'Fallback Stale Online Seller',
+    online: true,
+    cachedAt: 1770000000000,
+  });
+
+  const result = await listProductDirectory({
+    productStateStore: store,
+    onlineOnly: true,
+    onlineBots: [],
+    fetchImpl: async () => {
+      chainFetchCount += 1;
+      throw new Error('chain unavailable');
+    },
+  });
+
+  assert.equal(chainFetchCount, 1);
+  assert.equal(result.source, 'cache');
+  assert.deepEqual(result.products, []);
+});
+
+test('fallback cache product directory includes stale cached offline sellers present in current presence', async () => {
+  const homeDir = await createProfileHome('oac-product-directory-fallback-current-online-');
+  const store = createProductStateStore(homeDir);
+  let chainFetchCount = 0;
+
+  await store.upsertDirectoryItem({
+    listingPinId: 'listing-fallback-current-online',
+    payload: listing({ title: 'Fallback Current Online Listing' }),
+    sellerGlobalMetaId: 'gm-fallback-current-online-seller',
+    sellerName: 'Fallback Current Online Seller',
+    online: false,
+    cachedAt: 1770000000000,
+  });
+
+  const result = await listProductDirectory({
+    productStateStore: store,
+    onlineOnly: true,
+    onlineBots: [
+      {
+        globalMetaId: 'gm-fallback-current-online-seller',
+        name: 'Fallback Current Online Seller',
+        online: true,
+        lastSeenAt: 1770000000000,
+        lastSeenAgoSeconds: 2,
+        deviceCount: 1,
+        goal: '',
+      },
+    ],
+    fetchImpl: async () => {
+      chainFetchCount += 1;
+      throw new Error('chain unavailable');
+    },
+  });
+
+  assert.equal(chainFetchCount, 1);
+  assert.equal(result.source, 'cache');
+  assert.deepEqual(result.products.map((item) => item.listingPinId), ['listing-fallback-current-online']);
+  assert.equal(result.products[0].online, true);
+  assert.equal(result.products[0].lastSeenAgoSeconds, 2);
+});
+
 test('product directory result exposes only the public envelope fields', async () => {
   const homeDir = await createProfileHome('oac-product-directory-envelope-');
   const store = createProductStateStore(homeDir);

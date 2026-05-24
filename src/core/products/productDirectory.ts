@@ -357,8 +357,8 @@ export async function listProductDirectory(
     }
   }
 
-  const decoratedProducts = options.cached === true
-    ? await decorateProducts(products, options)
+  const decoratedProducts = source === 'cache'
+    ? await decorateProducts(products, { ...options, cached: true })
     : products;
   const filteredProducts = projectProductDirectory({
     products: decoratedProducts,
