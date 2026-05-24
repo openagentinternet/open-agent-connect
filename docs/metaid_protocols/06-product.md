@@ -152,8 +152,8 @@
   - The seller resolves `listingPinId` and `skuId` against the referenced `product-listing`, then verifies `paymentTxid` against the seller payment address and the SKU price stored in that listing.
   - The seller should cache the fetched order locally by order pin id, and only fall back to chain pin fetch on cache miss.
   - `simplemsg` remains the transport used to hand the order pin id to the seller, but the order payload itself stays on chain.
-  - Post-delivery review is asynchronous and belongs to `product-review`, not to this protocol.
-  - The buyer and seller do not need a `NeedsRating` stage in v1.
+  - Post-delivery review is asynchronous and belongs to `product-review`, which carries the score.
+  - Virtual goods may still use the existing `NeedsRating` simplemsg prompt after delivery; physical goods should not require a seller-initiated `NeedsRating` step in v1.
 
 ---
 
