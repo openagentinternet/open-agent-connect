@@ -18,6 +18,7 @@ const DEFAULT_MAX_TURNS = 30;
 const DEFAULT_MAX_IDLE_MS = 300_000;
 const DEFAULT_RECENT_MESSAGES_LIMIT = 60;
 const CLOSE_CONVERSATION_SIGNAL = 'Bye';
+const CLOSE_CONVERSATION_FINAL_LINE_PATTERN = /^(?:bye|goodbye)[.!。！]?$/iu;
 const MAX_REPLIES_PER_MINUTE = 10;
 const MAX_REPLIES_PER_HOUR = 100;
 
@@ -97,7 +98,7 @@ function findFinalNonEmptyLineIndex(lines: string[]): number {
 function hasFinalByeLine(value: string): boolean {
   const lines = value.split(/\r?\n/u);
   const finalIndex = findFinalNonEmptyLineIndex(lines);
-  return finalIndex >= 0 && lines[finalIndex].trim().toLowerCase() === CLOSE_CONVERSATION_SIGNAL.toLowerCase();
+  return finalIndex >= 0 && CLOSE_CONVERSATION_FINAL_LINE_PATTERN.test(lines[finalIndex].trim());
 }
 
 function ensureFinalByeLine(value: string): string {
@@ -215,7 +216,7 @@ export function createPrivateChatAutoReplyOrchestrator(
       // ---- Shared: conversation lifecycle & message storage ----
 
       let conversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId);
-      if (!conversation || conversation.state === 'closed') {
+      if (!conversation) {
         conversation = {
           conversationId,
           peerGlobalMetaId,
@@ -234,7 +235,16 @@ export function createPrivateChatAutoReplyOrchestrator(
         ? await deps.strategyStore.getStrategy(conversation.strategyId)
         : null;
       const maxIdleMs = strategy?.maxIdleMs ?? DEFAULT_MAX_IDLE_MS;
-      if (await shouldResetIdleTurnCount({
+      const shouldReopenClosedConversation = conversation.state === 'closed'
+        && now - conversation.updatedAt > maxIdleMs;
+      if (shouldReopenClosedConversation) {
+        conversation = {
+          ...conversation,
+          state: 'active',
+          turnCount: 0,
+        };
+      }
+      if (conversation.state !== 'closed' && await shouldResetIdleTurnCount({
         stateStore: deps.stateStore,
         conversationId: conversation.conversationId,
         inboundTimestamp,
@@ -285,6 +295,11 @@ export function createPrivateChatAutoReplyOrchestrator(
           raw: message.rawMessage,
         },
       });
+
+      if (conversation.state === 'closed') {
+        await deps.stateStore.upsertConversation(conversation);
+        return;
+      }
 
       // ---- Order-protocol path: record-only, no turn counting, no reply ----
 

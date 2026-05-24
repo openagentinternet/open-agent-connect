@@ -472,6 +472,101 @@ test('auto-reply closes on inbound Bye final line without using legacy close ext
   assert.equal(conversation.turnCount, 1);
 });
 
+test('auto-reply records inbound messages for closed conversations without reopening or replying', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'closed',
+    turnCount: 30,
+    lastDirection: 'outbound',
+    createdAt: now - 1_000_000,
+    updatedAt: now - 1_000,
+  });
+
+  await harness.handleInbound({
+    content: 'Are you still there?',
+    messagePinId: 'incoming-pin-after-closed',
+  });
+
+  assert.equal(harness.runnerInputs.length, 0);
+  assert.equal(harness.writes.length, 0);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'closed');
+  assert.equal(conversation.turnCount, 30);
+  assert.equal(conversation.lastDirection, 'inbound');
+
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.ok(messages.find((message) => message.messagePinId === 'incoming-pin-after-closed'));
+});
+
+test('auto-reply reopens closed conversations after the idle window elapses', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'closed',
+    turnCount: 30,
+    lastDirection: 'outbound',
+    createdAt: now - 1_000_000,
+    updatedAt: now - 300_001,
+  });
+
+  await withImmediateTimers(() => harness.handleInbound({
+    content: 'New topic after the cooldown window.',
+    messagePinId: 'incoming-pin-after-closed-cooldown',
+  }));
+
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.writes.length, 1);
+  assert.equal(harness.runnerInputs[0].conversation.turnCount, 1);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'active');
+  assert.equal(conversation.turnCount, 1);
+});
+
+test('auto-reply treats final Goodbye with punctuation as an inbound close signal', async () => {
+  const harness = await createAutoReplyHarness();
+
+  await harness.handleInbound({
+    content: 'All set for now.\nGoodbye.',
+    messagePinId: 'incoming-pin-goodbye',
+  });
+
+  assert.equal(harness.runnerInputs.length, 0);
+  assert.equal(harness.writes.length, 0);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'closed');
+  assert.equal(conversation.turnCount, 1);
+});
+
+test('auto-reply treats final Bye with emphatic or CJK punctuation as an inbound close signal', async () => {
+  const harness = await createAutoReplyHarness();
+
+  await harness.handleInbound({
+    content: '下次再聊\nBye！',
+    messagePinId: 'incoming-pin-bye-cjk-punctuation',
+  });
+
+  assert.equal(harness.runnerInputs.length, 0);
+  assert.equal(harness.writes.length, 0);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'closed');
+  assert.equal(conversation.turnCount, 1);
+});
+
 test('auto-reply does not treat extensions.conversationSignal closing as the close signal', async () => {
   const harness = await createAutoReplyHarness();
 
