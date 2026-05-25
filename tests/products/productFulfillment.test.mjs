@@ -669,13 +669,17 @@ test('fulfillProductOrderForSeller returns duplicate success for already deliver
   assert.equal(result.data.deliveryPinId, 'existing-delivery-pin');
   assert.equal(result.data.result, 'Card code: EXISTING-123456');
   assert.equal(result.data.orderTxid, ORDER_TXID);
+  assert.equal(result.duplicate, true);
+  assert.equal(result.delivered, true);
+  assert.equal(result.pending, false);
+  assert.equal(result.data.fulfillmentState, 'delivered');
   assert.equal(result.data.ratingMessagePinId, null);
   assert.deepEqual(harness.paymentVerifierCalls, []);
   assert.deepEqual(harness.runnerCalls, []);
   assert.deepEqual(harness.sent, []);
 });
 
-test('fulfillProductOrderForSeller serializes concurrent replay fulfillment through seller order claim', async () => {
+test('fulfillProductOrderForSeller returns pending duplicate immediately while the original fulfillment continues', async () => {
   const store = createProductStateStore(await createTempProfileRoot());
   await store.upsertOwnedListing({
     listingPinId: LISTING_PIN_ID,
@@ -687,6 +691,10 @@ test('fulfillProductOrderForSeller serializes concurrent replay fulfillment thro
   const paymentVerifierCalls = [];
   const runnerCalls = [];
   const sent = [];
+  let releaseRunner;
+  const runnerGate = new Promise((resolve) => {
+    releaseRunner = resolve;
+  });
   const input = {
     productOrderPinId: PRODUCT_ORDER_PIN_ID,
     orderTxid: ORDER_TXID,
@@ -714,9 +722,7 @@ test('fulfillProductOrderForSeller serializes concurrent replay fulfillment thro
     },
     fulfillmentRunner: async (roundInput) => {
       runnerCalls.push(roundInput);
-      await new Promise(resolve => {
-        setTimeout(resolve, 50);
-      });
+      await runnerGate;
       return {
         state: 'completed',
         responseText: 'Card code: TOPUP-CONCURRENT',
@@ -736,27 +742,45 @@ test('fulfillProductOrderForSeller serializes concurrent replay fulfillment thro
     now: () => 1_770_000_000_000,
   };
 
-  const results = await Promise.all([
-    fulfillProductOrderForSeller(input),
-    fulfillProductOrderForSeller({
-      ...input,
-      orderTxid: REPLAY_ORDER_TXID,
-    }),
-  ]);
+  const originalPromise = fulfillProductOrderForSeller(input);
+  while (paymentVerifierCalls.length === 0) {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5);
+    });
+  }
 
-  assert.equal(results[0].ok, true, JSON.stringify(results[0]));
-  assert.equal(results[1].ok, true, JSON.stringify(results[1]));
-  assert.equal(results[0].data.deliveryPinId, 'delivery-pin-concurrent');
-  assert.equal(results[1].data.deliveryPinId, 'delivery-pin-concurrent');
-  const claimedOrderTxid = results[0].data.orderTxid;
-  assert.equal(results[1].data.orderTxid, claimedOrderTxid);
-  assert.ok([ORDER_TXID, REPLAY_ORDER_TXID].includes(claimedOrderTxid));
+  const replay = await fulfillProductOrderForSeller({
+    ...input,
+    orderTxid: REPLAY_ORDER_TXID,
+  });
+
+  assert.equal(replay.ok, true, JSON.stringify(replay));
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.delivered, false);
+  assert.equal(replay.pending, true);
+  assert.equal(replay.data.fulfillmentState, 'fulfilling');
+  assert.equal(replay.data.deliveryPinId, null);
+  assert.equal(replay.data.orderTxid, ORDER_TXID);
+  assert.equal(replay.data.result, '');
   assert.equal(paymentVerifierCalls.length, 1);
   assert.equal(runnerCalls.length, 1);
-  assert.equal(sent.filter(entry => entry.content.startsWith(`[DELIVERY:${claimedOrderTxid}]`)).length, 1);
-  assert.equal(sent.filter(entry => entry.content.startsWith(`[NeedsRating:${claimedOrderTxid}]`)).length, 1);
-  assert.equal(sent.filter(entry => entry.content.startsWith(`[DELIVERY:${claimedOrderTxid === ORDER_TXID ? REPLAY_ORDER_TXID : ORDER_TXID}]`)).length, 0);
-  assert.equal(sent.filter(entry => entry.content.startsWith(`[NeedsRating:${claimedOrderTxid === ORDER_TXID ? REPLAY_ORDER_TXID : ORDER_TXID}]`)).length, 0);
+  assert.equal(sent.length, 0);
+
+  releaseRunner();
+  const original = await originalPromise;
+  assert.equal(original.ok, true, JSON.stringify(original));
+  assert.equal(original.duplicate, false);
+  assert.equal(original.delivered, true);
+  assert.equal(original.pending, false);
+  assert.equal(original.data.deliveryPinId, 'delivery-pin-concurrent');
+  assert.equal(original.data.orderTxid, ORDER_TXID);
+  assert.equal(original.data.fulfillmentState, 'delivered');
+  assert.equal(paymentVerifierCalls.length, 1);
+  assert.equal(runnerCalls.length, 1);
+  assert.equal(sent.filter(entry => entry.content.startsWith(`[DELIVERY:${ORDER_TXID}]`)).length, 1);
+  assert.equal(sent.filter(entry => entry.content.startsWith(`[NeedsRating:${ORDER_TXID}]`)).length, 1);
+  assert.equal(sent.filter(entry => entry.content.startsWith(`[DELIVERY:${REPLAY_ORDER_TXID}]`)).length, 0);
+  assert.equal(sent.filter(entry => entry.content.startsWith(`[NeedsRating:${REPLAY_ORDER_TXID}]`)).length, 0);
 });
 
 test('fulfillProductOrderForSeller rejects invalid order txid before sending delivery', async () => {

@@ -9232,7 +9232,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }
     return commandSuccess({
       handled: true,
-      delivered: true,
+      duplicate: fulfillment.duplicate,
+      delivered: fulfillment.delivered,
+      pending: fulfillment.pending,
       protocol: 'product-order',
       ...fulfillment.data,
     });

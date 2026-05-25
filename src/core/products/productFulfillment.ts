@@ -245,6 +245,9 @@ export interface FulfillProductOrderForSellerInput extends ResolveSellerProductO
 
 export interface FulfillProductOrderForSellerSuccess {
   ok: true;
+  duplicate: boolean;
+  delivered: boolean;
+  pending: boolean;
   data: {
     productOrderPinId: string;
     listingPinId: string;
@@ -254,6 +257,7 @@ export interface FulfillProductOrderForSellerSuccess {
     result: string;
     deliveryPinId: string | null;
     ratingMessagePinId: string | null;
+    fulfillmentState: 'fulfilling' | 'delivered';
   };
 }
 
@@ -504,12 +508,18 @@ function sellerOrderSuccessFromRecord(input: {
   record: ProductSellerOrderRecord;
   resolved: ResolvedSellerProductOrder;
   orderTxid: string;
+  duplicate: boolean;
+  delivered: boolean;
+  pending: boolean;
 }): FulfillProductOrderForSellerSuccess {
   const deliveryPinId = normalizeNullableText(
     input.record.deliverySummary?.deliveryPinId ?? input.record.deliveryPinId,
   );
   return {
     ok: true,
+    duplicate: input.duplicate,
+    delivered: input.delivered,
+    pending: input.pending,
     data: {
       productOrderPinId: input.resolved.order.pinId,
       listingPinId: input.resolved.order.payload.listingPinId,
@@ -517,44 +527,25 @@ function sellerOrderSuccessFromRecord(input: {
       paymentTxid: input.resolved.order.payload.paymentTxid,
       orderTxid: normalizeNullableText(input.record.orderTxid) || input.orderTxid,
       result: normalizeText(input.record.deliverySummary?.result),
-      deliveryPinId,
+      deliveryPinId: input.pending ? null : deliveryPinId,
       ratingMessagePinId: null,
+      fulfillmentState: input.pending ? 'fulfilling' : 'delivered',
     },
   };
 }
 
-async function waitForSellerOrderTerminal(input: {
-  store: ResolveSellerProductOrderInput['productStateStore'];
-  productOrderPinId: string;
-  paymentTxid: string;
+function sellerOrderDuplicatePendingSuccess(input: {
+  record: ProductSellerOrderRecord;
   resolved: ResolvedSellerProductOrder;
-}): Promise<FulfillProductOrderForSellerResult> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    await new Promise(resolve => {
-      setTimeout(resolve, Math.min(10 + attempt, 50));
-    });
-    const lookup = await input.store.findSellerOrderByProductOrderPinId(input.productOrderPinId);
-    const record = lookup?.item;
-    if (!record || record.paymentTxid !== input.paymentTxid) {
-      continue;
-    }
-    if (record.state === 'delivered' && (record.deliveryPinId || record.deliverySummary?.deliveryPinId)) {
-      return sellerOrderSuccessFromRecord({
-        record,
-        resolved: input.resolved,
-        orderTxid: record.orderTxid || '',
-      });
-    }
-    if (record.state === 'failed') {
-      return failure(
-        normalizeNullableText(record.failureReason) === 'product_payment_invalid'
-          ? 'product_payment_invalid'
-          : 'product_fulfillment_failed',
-        record.failureReason || 'Product fulfillment failed.',
-      );
-    }
-  }
-  return failure('product_fulfillment_failed', 'Timed out waiting for duplicate product fulfillment to finish.');
+}): FulfillProductOrderForSellerSuccess {
+  return sellerOrderSuccessFromRecord({
+    record: input.record,
+    resolved: input.resolved,
+    orderTxid: input.record.orderTxid || '',
+    duplicate: true,
+    delivered: false,
+    pending: true,
+  });
 }
 
 function runnerExecute(
@@ -768,13 +759,14 @@ export async function fulfillProductOrderForSeller(
       record: claim.record,
       resolved,
       orderTxid,
+      duplicate: true,
+      delivered: true,
+      pending: false,
     });
   }
   if (claim.status === 'in_progress') {
-    return waitForSellerOrderTerminal({
-      store: input.productStateStore,
-      productOrderPinId: resolved.order.pinId,
-      paymentTxid: resolved.order.payload.paymentTxid,
+    return sellerOrderDuplicatePendingSuccess({
+      record: claim.record,
       resolved,
     });
   }
@@ -965,6 +957,9 @@ export async function fulfillProductOrderForSeller(
 
   return {
     ok: true,
+    duplicate: false,
+    delivered: true,
+    pending: false,
     data: {
       productOrderPinId: resolved.order.pinId,
       listingPinId: resolved.order.payload.listingPinId,
@@ -974,6 +969,7 @@ export async function fulfillProductOrderForSeller(
       result: responseText,
       deliveryPinId,
       ratingMessagePinId,
+      fulfillmentState: 'delivered',
     },
   };
 }
