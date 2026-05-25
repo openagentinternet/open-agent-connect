@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
@@ -33,6 +34,44 @@ async function startServer(handlers) {
       });
     },
   };
+}
+
+async function startEmptySocketPresenceServer(t) {
+  const server = createServer((request, response) => {
+    if (request.url?.startsWith('/group-chat/socket/online-users')) {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({
+        code: 0,
+        data: {
+          total: 0,
+          list: [],
+          onlineWindowSeconds: 60,
+        },
+      }));
+      return;
+    }
+    response.writeHead(404, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ code: 404 }));
+  });
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Expected TCP server address');
+  }
+  return `http://127.0.0.1:${address.port}`;
 }
 
 async function fetchJson(baseUrl, routePath, options = {}) {
@@ -103,12 +142,13 @@ async function startProductExecutionServer(t, options = {}) {
   const homeDir = await createProfileHome('metabot-product-route-buy-', 'buyer-bot');
   t.after(async () => cleanupProfileHome(homeDir));
   const identity = buyerIdentity();
+  const productStateStore = createProductStateStore(homeDir);
   await createRuntimeStateStore(homeDir).writeState({
     identity,
     services: [],
     traces: [],
   });
-  await createProductStateStore(homeDir).upsertDirectoryItem({
+  await productStateStore.upsertDirectoryItem({
     listingPinId: 'listing-space-card',
     payload: routeListingPayload(options.payload ?? {}),
     sellerGlobalMetaId: 'seller-global-metaid',
@@ -123,8 +163,8 @@ async function startProductExecutionServer(t, options = {}) {
     homeDir,
     systemHomeDir: deriveSystemHome(homeDir),
     chainApiBaseUrl: 'http://127.0.0.1:9',
-    socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
-    socketPresenceFailureMode: 'assume_service_providers_online',
+    socketPresenceApiBaseUrl: options.socketPresenceApiBaseUrl ?? 'http://127.0.0.1:9',
+    socketPresenceFailureMode: options.socketPresenceFailureMode ?? 'assume_service_providers_online',
     getDaemonRecord: () => ({
       ownerId: 'test',
       pid: 1,
@@ -187,7 +227,7 @@ async function startProductExecutionServer(t, options = {}) {
   });
   const app = await startServer(handlers);
   t.after(async () => app.close());
-  return { ...app, calls };
+  return { ...app, calls, productStateStore };
 }
 
 test('/api/products routes forward requests to product handlers', async (t) => {
@@ -385,6 +425,11 @@ test('/api/products/buy returns stable failure when product-order write fails af
   assert.equal(response.payload.ok, false);
   assert.equal(response.payload.code, 'product_order_publish_failed');
   assert.deepEqual(app.calls.map(([name]) => name), ['payment', 'product-order']);
+  const state = await app.productStateStore.readState();
+  assert.equal(state.buyerOrders.length, 1);
+  assert.equal(state.buyerOrders[0].productOrderPinId, null);
+  assert.equal(state.buyerOrders[0].paymentTxid, 'payment-txid-1');
+  assert.equal(state.buyerOrders[0].state, 'failed');
 });
 
 test('/api/products/buy returns stable failure when simplemsg dispatch fails after payment and product-order write', async (t) => {
@@ -401,4 +446,22 @@ test('/api/products/buy returns stable failure when simplemsg dispatch fails aft
   assert.equal(response.payload.ok, false);
   assert.equal(response.payload.code, 'product_order_dispatch_failed');
   assert.deepEqual(app.calls.map(([name]) => name), ['payment', 'product-order', 'simplemsg']);
+});
+
+test('/api/products/buy confirmed=true refreshes stale cached-online presence before payment', async (t) => {
+  const socketPresenceApiBaseUrl = await startEmptySocketPresenceServer(t);
+  const app = await startProductExecutionServer(t, {
+    socketPresenceApiBaseUrl,
+    socketPresenceFailureMode: 'throw',
+  });
+
+  const response = await fetchJson(app.baseUrl, '/api/products/buy', {
+    method: 'POST',
+    body: { listingPinId: 'listing-space-card', skuId: 'space-00005', confirmed: true },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.ok, false);
+  assert.equal(response.payload.code, 'cached_product_match_not_found');
+  assert.deepEqual(app.calls, []);
 });

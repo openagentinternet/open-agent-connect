@@ -12776,12 +12776,37 @@ export function createDefaultMetabotDaemonHandlers(input: {
           });
         }
 
-        const selectedProduct = directory.products.find((product) => (
-          normalizeText(product.listingPinId) === normalizeText(plan.product.listingPinId)
+        let executionDirectory = directory;
+        try {
+          executionDirectory = await listProductDirectory({
+            productStateStore,
+            chainApiBaseUrl: input.chainApiBaseUrl,
+            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceFailureMode: input.socketPresenceFailureMode,
+            cached: true,
+            onlineOnly: true,
+          });
+        } catch (error) {
+          return commandFailed(
+            'product_directory_unavailable',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+
+        const executionPlan = planProductPurchase({
+          request: purchaseRequest,
+          products: executionDirectory.products,
+        });
+        if (!executionPlan.ok) {
+          return commandFailed(executionPlan.code, executionPlan.message);
+        }
+
+        const selectedProduct = executionDirectory.products.find((product) => (
+          normalizeText(product.listingPinId) === normalizeText(executionPlan.product.listingPinId)
         ));
         const traceId = buildProductOrderTraceId({
-          sellerGlobalMetaId: plan.seller.globalMetaId,
-          listingPinId: plan.product.listingPinId,
+          sellerGlobalMetaId: executionPlan.seller.globalMetaId,
+          listingPinId: executionPlan.product.listingPinId,
         });
         const sessionId = `session-${traceId}`;
         const localUiUrl = buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
@@ -12853,7 +12878,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         const execution = await executeProductPurchase({
           request: purchaseRequest,
-          products: directory.products,
+          products: executionDirectory.products,
           buyerIdentity: {
             globalMetaId: actor.state.identity!.globalMetaId,
             name: actor.state.identity!.name,
@@ -12874,8 +12899,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         return commandSuccess({
           confirmation: {
-            requiresConfirmation: plan.confirmation.requiresConfirmation,
-            policyMode: plan.confirmation.policyMode,
+            requiresConfirmation: executionPlan.confirmation.requiresConfirmation,
+            policyMode: executionPlan.confirmation.policyMode,
           },
           ...execution.data,
         });

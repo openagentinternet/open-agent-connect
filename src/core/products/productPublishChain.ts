@@ -170,9 +170,14 @@ function buildProductTraceId(input: {
   return `trace-product-${seller}-${listing}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function normalizeErrorCodePrefix(message: string): string {
+  const prefix = normalizeText(message.split(':', 1)[0]);
+  return /^[a-z][a-z0-9_]*$/u.test(prefix) ? prefix : '';
+}
+
 function failureFromError(error: unknown, fallbackCode: string): ExecuteProductPurchaseResult {
   const message = error instanceof Error ? error.message : String(error);
-  const code = normalizeText(message.split(':', 1)[0]) || fallbackCode;
+  const code = normalizeErrorCodePrefix(message) || fallbackCode;
   return {
     ok: false,
     code,
@@ -411,6 +416,17 @@ export async function executeProductPurchase(
       network: normalizeText(input.network) || paymentChain,
     });
   } catch (error) {
+    await input.productStateStore.upsertBuyerOrder({
+      productOrderPinId: null,
+      listingPinId: orderPayload.listingPinId,
+      skuId: orderPayload.skuId,
+      paymentTxid,
+      sellerGlobalMetaId,
+      buyerGlobalMetaId: input.buyerIdentity.globalMetaId,
+      traceId,
+      sessionId,
+      state: 'failed',
+    });
     return stableFailureFromError(error, 'product_order_publish_failed');
   }
 

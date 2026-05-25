@@ -397,6 +397,20 @@ test('executeProductPurchase does not publish product-order when payment fails',
   assert.deepEqual(harness.persisted, []);
 });
 
+test('executeProductPurchase uses stable payment failure code for arbitrary wallet errors', async () => {
+  const harness = createExecutionHarness({
+    paymentError: new Error('network timeout'),
+  });
+
+  const result = await executeProductPurchase(harness.input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'product_payment_failed');
+  assert.equal(result.message, 'network timeout');
+  assert.deepEqual(harness.calls.map(([name]) => name), ['payment']);
+  assert.deepEqual(harness.persisted, []);
+});
+
 test('executeProductPurchase rejects BTC SKU without seller BTC address before payment', async () => {
   const btcSku = {
     skuId: 'btc-00001',
@@ -478,6 +492,16 @@ test('executeProductPurchase returns stable product-order publish failure code f
   assert.equal(result.code, 'product_order_publish_failed');
   assert.equal(result.message, 'network timeout');
   assert.deepEqual(harness.calls.map(([name]) => name), ['payment', 'product-order']);
+  assert.equal(harness.persisted.length, 1);
+  assert.equal(harness.persisted[0].productOrderPinId, null);
+  assert.equal(harness.persisted[0].listingPinId, 'listing-pin-id');
+  assert.equal(harness.persisted[0].skuId, 'space-00005');
+  assert.equal(harness.persisted[0].paymentTxid, 'payment-txid-1');
+  assert.equal(harness.persisted[0].sellerGlobalMetaId, 'seller-global-metaid');
+  assert.equal(harness.persisted[0].buyerGlobalMetaId, 'buyer-global-metaid');
+  assert.equal(harness.persisted[0].traceId, 'trace-product-order-1');
+  assert.equal(harness.persisted[0].sessionId, 'session-product-order-1');
+  assert.equal(harness.persisted[0].state, 'failed');
 });
 
 test('executeProductPurchase returns stable simplemsg dispatch failure code for arbitrary sender errors', async () => {
