@@ -34,7 +34,7 @@ const ORDER_TXID = 'b'.repeat(64);
 const PRODUCT_ORDER_PIN_ID = 'product-order-pin-1';
 const LISTING_PIN_ID = 'listing-pin-1';
 const SKU_ID = 'space-00005';
-const PAYMENT_TXID = 'payment-txid-1';
+const PAYMENT_TXID = 'c'.repeat(64);
 const BASE_TIME = 1_777_000_000_000;
 
 async function createProfileFixture(name, slug, globalMetaId) {
@@ -99,6 +99,13 @@ async function seedBuyerOrder(productStateStore, overrides = {}) {
     skuId: overrides.skuId ?? SKU_ID,
     paymentTxid: overrides.paymentTxid ?? PAYMENT_TXID,
     orderTxid: overrides.orderTxid ?? ORDER_TXID,
+    productOrderPayload: overrides.productOrderPayload ?? {
+      listingPinId: LISTING_PIN_ID,
+      skuId: SKU_ID,
+      settlementKind: 'native',
+      paymentTxid: PAYMENT_TXID,
+      comment: 'keep raw product order after delivery',
+    },
     sellerGlobalMetaId: overrides.sellerGlobalMetaId ?? ALICE_GLOBAL_META_ID,
     buyerGlobalMetaId: overrides.buyerGlobalMetaId ?? BOB_GLOBAL_META_ID,
     state: overrides.state ?? 'notified',
@@ -231,6 +238,13 @@ test('buyer receives product delivery into cache, A2A transcript, and trace proj
   assert.equal(handled.data.handled, true);
   assert.equal(handled.data.protocol, 'product-order');
   assert.equal(buyerOrder.state, 'delivered');
+  assert.deepEqual(buyerOrder.productOrderPayload, {
+    listingPinId: LISTING_PIN_ID,
+    skuId: SKU_ID,
+    settlementKind: 'native',
+    paymentTxid: PAYMENT_TXID,
+    comment: 'keep raw product order after delivery',
+  });
   assert.equal(buyerOrder.deliverySummary.result, 'Top-up card: XXXX-XXXX');
   assert.equal(buyerOrder.deliverySummary.deliveryPinId, 'delivery-pin-1');
   assert.equal(buyerOrder.deliverySummary.deliveredAt, BASE_TIME + 500);

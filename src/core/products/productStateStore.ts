@@ -231,6 +231,10 @@ function normalizeNullableText(value: unknown): string | null {
   return normalized || null;
 }
 
+function hasOwnProperty(source: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(source, key);
+}
+
 function normalizeNullableBoolean(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null;
 }
@@ -656,33 +660,74 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
     async upsertBuyerOrder(input) {
       const listingPinId = requireText(input.listingPinId, 'listingPinId');
       const skuId = requireText(input.skuId, 'skuId');
-      const record: ProductBuyerOrderRecord = {
-        role: 'buyer',
-        productOrderPinId: normalizeNullableText(input.productOrderPinId),
-        listingPinId,
-        skuId,
-        paymentTxid: normalizeNullableText(input.paymentTxid),
-        productOrderPayload: normalizeProductOrderPayload(input.productOrderPayload),
-        orderTxid: normalizeNullableText(input.orderTxid),
-        sellerGlobalMetaId: normalizeNullableText(input.sellerGlobalMetaId),
-        buyerGlobalMetaId: normalizeNullableText(input.buyerGlobalMetaId),
-        traceId: normalizeNullableText(input.traceId),
-        sessionId: normalizeNullableText(input.sessionId),
-        deliverySummary: normalizeDeliverySummary(input.deliverySummary),
-        state: input.state || 'created',
-        localUpdatedAt: input.localUpdatedAt ?? Date.now(),
-      };
-      await this.updateState(state => ({
-        ...state,
-        buyerOrders: upsertBy(
-          state.buyerOrders,
-          item =>
-            Boolean(record.productOrderPinId && item.productOrderPinId === record.productOrderPinId) ||
-            Boolean(record.paymentTxid && item.paymentTxid === record.paymentTxid) ||
-            Boolean(record.orderTxid && item.orderTxid === record.orderTxid),
-          record,
-        ),
-      }));
+      const productOrderPinId = normalizeNullableText(input.productOrderPinId);
+      const paymentTxid = normalizeNullableText(input.paymentTxid);
+      const orderTxid = normalizeNullableText(input.orderTxid);
+      let record: ProductBuyerOrderRecord | null = null;
+      await this.updateState(state => {
+        const existing = state.buyerOrders.find(item =>
+          Boolean(productOrderPinId && item.productOrderPinId === productOrderPinId) ||
+          Boolean(paymentTxid && item.paymentTxid === paymentTxid) ||
+          Boolean(orderTxid && item.orderTxid === orderTxid),
+        ) ?? null;
+        const nextRecord: ProductBuyerOrderRecord = {
+          role: 'buyer',
+          productOrderPinId: normalizeNullableText(
+            hasOwnProperty(input, 'productOrderPinId')
+              ? input.productOrderPinId
+              : existing?.productOrderPinId,
+          ),
+          listingPinId,
+          skuId,
+          paymentTxid: normalizeNullableText(
+            hasOwnProperty(input, 'paymentTxid') ? input.paymentTxid : existing?.paymentTxid,
+          ),
+          productOrderPayload: normalizeProductOrderPayload(
+            hasOwnProperty(input, 'productOrderPayload')
+              ? input.productOrderPayload
+              : existing?.productOrderPayload,
+          ),
+          orderTxid: normalizeNullableText(
+            hasOwnProperty(input, 'orderTxid') ? input.orderTxid : existing?.orderTxid,
+          ),
+          sellerGlobalMetaId: normalizeNullableText(
+            hasOwnProperty(input, 'sellerGlobalMetaId')
+              ? input.sellerGlobalMetaId
+              : existing?.sellerGlobalMetaId,
+          ),
+          buyerGlobalMetaId: normalizeNullableText(
+            hasOwnProperty(input, 'buyerGlobalMetaId')
+              ? input.buyerGlobalMetaId
+              : existing?.buyerGlobalMetaId,
+          ),
+          traceId: normalizeNullableText(
+            hasOwnProperty(input, 'traceId') ? input.traceId : existing?.traceId,
+          ),
+          sessionId: normalizeNullableText(
+            hasOwnProperty(input, 'sessionId') ? input.sessionId : existing?.sessionId,
+          ),
+          deliverySummary: normalizeDeliverySummary(
+            hasOwnProperty(input, 'deliverySummary') ? input.deliverySummary : existing?.deliverySummary,
+          ),
+          state: input.state || existing?.state || 'created',
+          localUpdatedAt: input.localUpdatedAt ?? Date.now(),
+        };
+        record = nextRecord;
+        return {
+          ...state,
+          buyerOrders: upsertBy(
+            state.buyerOrders,
+            item =>
+              Boolean(nextRecord.productOrderPinId && item.productOrderPinId === nextRecord.productOrderPinId) ||
+              Boolean(nextRecord.paymentTxid && item.paymentTxid === nextRecord.paymentTxid) ||
+              Boolean(nextRecord.orderTxid && item.orderTxid === nextRecord.orderTxid),
+            nextRecord,
+          ),
+        };
+      });
+      if (!record) {
+        throw new Error('Buyer order upsert did not produce a record.');
+      }
       return record;
     },
     async upsertSellerOrder(input) {

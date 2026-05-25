@@ -276,6 +276,59 @@ test('product state store persists buyer and seller orders with cache-first look
   assert.equal(sellerLookup.item.failureReason, 'prior transient fulfillment error');
 });
 
+test('product state store preserves buyer order payload when partial updates omit it', async () => {
+  const profileRoot = await createTempProfileRoot();
+  const store = createProductStateStore(profileRoot);
+  const paymentTxid = '9'.repeat(64);
+  const productOrderPayload = {
+    listingPinId: 'listing-pin-id',
+    skuId: 'sku2',
+    settlementKind: 'native',
+    paymentTxid,
+    comment: 'Buyer raw order must survive delivery projection.',
+  };
+
+  await store.upsertBuyerOrder({
+    productOrderPinId: 'buyer-product-order-pin-id',
+    listingPinId: 'listing-pin-id',
+    skuId: 'sku2',
+    paymentTxid,
+    productOrderPayload,
+    orderTxid: 'buyer-order-txid',
+    sellerGlobalMetaId: 'seller-global-metaid',
+    buyerGlobalMetaId: 'buyer-global-metaid',
+    traceId: 'trace-id',
+    sessionId: 'session-id',
+    state: 'paid',
+    localUpdatedAt: 1770000000000,
+  });
+
+  await store.upsertBuyerOrder({
+    productOrderPinId: 'buyer-product-order-pin-id',
+    listingPinId: 'listing-pin-id',
+    skuId: 'sku2',
+    paymentTxid,
+    orderTxid: 'buyer-order-txid',
+    deliverySummary: {
+      result: 'Top-up card: 1234-5678',
+      deliveryPinId: 'delivery-pin-id',
+      deliveredAt: 1770000002000,
+    },
+    state: 'delivered',
+    localUpdatedAt: 1770000002000,
+  });
+
+  const lookup = await store.findOrderByProductOrderPinId('buyer-product-order-pin-id');
+  assert.equal(lookup.source, 'buyerOrders');
+  assert.deepEqual(lookup.item.productOrderPayload, productOrderPayload);
+  assert.equal(lookup.item.sellerGlobalMetaId, 'seller-global-metaid');
+  assert.equal(lookup.item.buyerGlobalMetaId, 'buyer-global-metaid');
+  assert.equal(lookup.item.traceId, 'trace-id');
+  assert.equal(lookup.item.sessionId, 'session-id');
+  assert.equal(lookup.item.state, 'delivered');
+  assert.equal(lookup.item.deliverySummary.result, 'Top-up card: 1234-5678');
+});
+
 test('product state store can look up seller order cache when buyer cache has the same product-order pin', async () => {
   const profileRoot = await createTempProfileRoot();
   const store = createProductStateStore(profileRoot);
