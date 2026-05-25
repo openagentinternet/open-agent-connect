@@ -432,6 +432,17 @@ export async function executeProductPurchase(
 
   const productOrderPinId = normalizeText(published.chainWrite.pinId);
   if (!productOrderPinId) {
+    await input.productStateStore.upsertBuyerOrder({
+      productOrderPinId: null,
+      listingPinId: orderPayload.listingPinId,
+      skuId: orderPayload.skuId,
+      paymentTxid,
+      sellerGlobalMetaId,
+      buyerGlobalMetaId: input.buyerIdentity.globalMetaId,
+      traceId,
+      sessionId,
+      state: 'failed',
+    });
     return {
       ok: false,
       code: 'product_order_pin_missing',

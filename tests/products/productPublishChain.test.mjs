@@ -184,7 +184,7 @@ function createExecutionHarness(options = {}) {
             payload: orderInput.payload,
             chainWrite: {
               txids: ['product-order-write-txid-1'],
-              pinId: 'product-order-pin-1',
+              pinId: options.omitProductOrderPinId ? '' : 'product-order-pin-1',
               totalCost: 1,
               network: orderInput.network,
               operation: 'create',
@@ -491,6 +491,29 @@ test('executeProductPurchase returns stable product-order publish failure code f
   assert.equal(result.ok, false);
   assert.equal(result.code, 'product_order_publish_failed');
   assert.equal(result.message, 'network timeout');
+  assert.deepEqual(harness.calls.map(([name]) => name), ['payment', 'product-order']);
+  assert.equal(harness.persisted.length, 1);
+  assert.equal(harness.persisted[0].productOrderPinId, null);
+  assert.equal(harness.persisted[0].listingPinId, 'listing-pin-id');
+  assert.equal(harness.persisted[0].skuId, 'space-00005');
+  assert.equal(harness.persisted[0].paymentTxid, 'payment-txid-1');
+  assert.equal(harness.persisted[0].sellerGlobalMetaId, 'seller-global-metaid');
+  assert.equal(harness.persisted[0].buyerGlobalMetaId, 'buyer-global-metaid');
+  assert.equal(harness.persisted[0].traceId, 'trace-product-order-1');
+  assert.equal(harness.persisted[0].sessionId, 'session-product-order-1');
+  assert.equal(harness.persisted[0].state, 'failed');
+});
+
+test('executeProductPurchase persists failed buyer state when product-order pin id is missing after payment', async () => {
+  const harness = createExecutionHarness({
+    omitProductOrderPinId: true,
+  });
+
+  const result = await executeProductPurchase(harness.input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'product_order_pin_missing');
+  assert.equal(result.message, 'Product-order chain writer did not return a product-order pin id.');
   assert.deepEqual(harness.calls.map(([name]) => name), ['payment', 'product-order']);
   assert.equal(harness.persisted.length, 1);
   assert.equal(harness.persisted[0].productOrderPinId, null);
