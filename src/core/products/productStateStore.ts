@@ -5,10 +5,11 @@ import { resolveMetabotPaths } from '../state/paths';
 import { ensureRuntimeLayout } from '../state/runtimeStateStore';
 import type {
   ProductListingPayload,
+  ProductOrderPayload,
   ProductOrderState,
   ProductSku,
 } from './productTypes';
-import { validateProductListingPayload } from './productValidation';
+import { validateProductListingPayload, validateProductOrderPayload } from './productValidation';
 
 const PRODUCT_STATE_SCHEMA_VERSION = 1;
 const LOCKFILE_BASE_DELAY_MS = 25;
@@ -74,6 +75,7 @@ export interface ProductSellerOrderRecord {
   listingPinId: string;
   skuId: string;
   paymentTxid: string;
+  productOrderPayload: ProductOrderPayload | null;
   orderTxid: string | null;
   buyerGlobalMetaId: string | null;
   fulfillmentSkills: string[];
@@ -152,6 +154,7 @@ export interface UpsertSellerOrderInput {
   listingPinId: string;
   skuId: string;
   paymentTxid: string;
+  productOrderPayload?: ProductOrderPayload | null;
   orderTxid?: string | null;
   buyerGlobalMetaId?: string | null;
   fulfillmentSkills?: string[];
@@ -219,6 +222,11 @@ function listingSummary(payload: ProductListingPayload) {
 
 function normalizeListingPayload(value: unknown): ProductListingPayload | null {
   const result = validateProductListingPayload(value);
+  return result.ok ? result.value : null;
+}
+
+function normalizeProductOrderPayload(value: unknown): ProductOrderPayload | null {
+  const result = validateProductOrderPayload(value);
   return result.ok ? result.value : null;
 }
 
@@ -335,6 +343,7 @@ function normalizeSellerOrder(value: unknown): ProductSellerOrderRecord | null {
     listingPinId: normalizeText(source.listingPinId),
     skuId: normalizeText(source.skuId),
     paymentTxid: normalizeText(source.paymentTxid),
+    productOrderPayload: normalizeProductOrderPayload(source.productOrderPayload),
     orderTxid: normalizeNullableText(source.orderTxid),
     buyerGlobalMetaId: normalizeNullableText(source.buyerGlobalMetaId),
     fulfillmentSkills: Array.isArray(source.fulfillmentSkills)
@@ -649,6 +658,7 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
         listingPinId,
         skuId,
         paymentTxid,
+        productOrderPayload: normalizeProductOrderPayload(input.productOrderPayload),
         orderTxid: normalizeNullableText(input.orderTxid),
         buyerGlobalMetaId: normalizeNullableText(input.buyerGlobalMetaId),
         fulfillmentSkills: [...(input.fulfillmentSkills || [])],

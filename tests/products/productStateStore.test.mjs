@@ -165,6 +165,7 @@ test('product state store rejects invalid listing payloads before upserting list
 test('product state store persists buyer and seller orders with cache-first lookups', async () => {
   const profileRoot = await createTempProfileRoot();
   const store = createProductStateStore(profileRoot);
+  const sellerPaymentTxid = 'c'.repeat(64);
 
   await store.upsertBuyerOrder({
     productOrderPinId: 'buyer-product-order-pin-id',
@@ -185,7 +186,14 @@ test('product state store persists buyer and seller orders with cache-first look
     productOrderPinId: 'seller-product-order-pin-id',
     listingPinId: 'listing-pin-id',
     skuId: 'sku2',
-    paymentTxid: 'seller-payment-txid',
+    paymentTxid: sellerPaymentTxid,
+    productOrderPayload: {
+      listingPinId: 'listing-pin-id',
+      skuId: 'sku2',
+      settlementKind: 'native',
+      paymentTxid: sellerPaymentTxid,
+      comment: 'Please deliver to my default account.',
+    },
     orderTxid: 'seller-order-txid',
     buyerGlobalMetaId: 'buyer-global-metaid',
     fulfillmentSkills: ['S1'],
@@ -207,7 +215,7 @@ test('product state store persists buyer and seller orders with cache-first look
     'sellerOrders',
   );
   assert.equal((await store.findOrderByPaymentTxid('buyer-payment-txid')).item.role, 'buyer');
-  assert.equal((await store.findOrderByPaymentTxid('seller-payment-txid')).item.role, 'seller');
+  assert.equal((await store.findOrderByPaymentTxid(sellerPaymentTxid)).item.role, 'seller');
   assert.equal((await store.findOrderByOrderTxid('buyer-order-txid')).item.role, 'buyer');
   assert.equal((await store.findOrderByOrderTxid('seller-order-txid')).item.role, 'seller');
 
@@ -218,6 +226,13 @@ test('product state store persists buyer and seller orders with cache-first look
     deliveredAt: 1770000002000,
   });
   assert.equal(reloaded.sellerOrders[0].paymentVerified, true);
+  assert.deepEqual(reloaded.sellerOrders[0].productOrderPayload, {
+    listingPinId: 'listing-pin-id',
+    skuId: 'sku2',
+    settlementKind: 'native',
+    paymentTxid: sellerPaymentTxid,
+    comment: 'Please deliver to my default account.',
+  });
   assert.equal(reloaded.sellerOrders[0].selectedSku.skuId, 'sku2');
   assert.equal(reloaded.sellerOrders[0].fulfillmentState, 'delivered');
   assert.equal(reloaded.sellerOrders[0].deliveryPinId, 'seller-delivery-pin-id');
@@ -227,6 +242,7 @@ test('product state store persists buyer and seller orders with cache-first look
   assert.equal(buyerLookup.item.deliverySummary.result, 'Top-up card: 1234-5678');
   const sellerLookup = await store.findOrderByProductOrderPinId('seller-product-order-pin-id');
   assert.equal(sellerLookup.item.paymentVerified, true);
+  assert.equal(sellerLookup.item.productOrderPayload.paymentTxid, sellerPaymentTxid);
   assert.equal(sellerLookup.item.selectedSku.skuId, 'sku2');
   assert.equal(sellerLookup.item.fulfillmentState, 'delivered');
   assert.equal(sellerLookup.item.deliveryPinId, 'seller-delivery-pin-id');

@@ -89,6 +89,13 @@ import {
   type ProductSimplemsgSender,
 } from '../core/products/productPublishChain';
 import { listProductDirectory, type ProductDirectoryProduct } from '../core/products/productDirectory';
+import {
+  createProductServicePaymentVerifier,
+  fulfillProductOrderForSeller,
+  type ProductChainPin,
+  type ProductFulfillmentRoundInput,
+  type ProductFulfillmentRoundResult,
+} from '../core/products/productFulfillment';
 import { planProductPurchase } from '../core/products/productPurchasePlanner';
 import { createProductStateStore, type OwnedProductListingRecord } from '../core/products/productStateStore';
 import { validateProductListingPayload } from '../core/products/productValidation';
@@ -1624,6 +1631,42 @@ async function fetchProtocolPinDetail(inputFetch: {
     pinId,
     path: normalizeText(data.path) || normalizeText(root.path) || null,
     content: selectProtocolPinContent(payload),
+  };
+}
+
+async function fetchProductProtocolPinDetail(inputFetch: {
+  pinId: string;
+  chainApiBaseUrl?: string;
+}): Promise<ProductChainPin | null> {
+  const pinId = normalizeText(inputFetch.pinId);
+  if (!pinId) {
+    return null;
+  }
+  const response = await fetch(`${normalizeChainApiBaseUrl(inputFetch.chainApiBaseUrl)}/pin/${encodeURIComponent(pinId)}`);
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`product_pin_fetch_failed: Chain API returned HTTP ${response.status}.`);
+  }
+  const payload = await response.json() as unknown;
+  const root = readObject(payload) ?? {};
+  const data = readObject(root.data) ?? {};
+  return {
+    ...root,
+    ...data,
+    pinId: normalizeText(data.id) || normalizeText(data.pinId) || normalizeText(root.id) || pinId,
+    path: normalizeText(data.path) || normalizeText(root.path) || null,
+    content: selectProtocolPinContent(payload),
+    contentSummary: data.contentSummary ?? root.contentSummary,
+    globalMetaId: normalizeText(data.globalMetaId) || normalizeText(root.globalMetaId) || null,
+    creatorGlobalMetaId: normalizeText(data.creatorGlobalMetaId) || normalizeText(data.createGlobalMetaId) || normalizeText(root.creatorGlobalMetaId) || null,
+    createGlobalMetaId: normalizeText(data.createGlobalMetaId) || normalizeText(root.createGlobalMetaId) || null,
+    createMetaId: normalizeText(data.createMetaId) || normalizeText(root.createMetaId) || null,
+    createAddress: normalizeText(data.createAddress) || normalizeText(root.createAddress) || null,
+    creatorAddress: normalizeText(data.creatorAddress) || normalizeText(root.creatorAddress) || null,
+    mvcAddress: normalizeText(data.mvcAddress) || normalizeText(root.mvcAddress) || null,
+    timestamp: normalizeText(data.timestamp) || normalizeText(root.timestamp) || null,
   };
 }
 
@@ -9001,6 +9044,200 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
+  function readInboundProductOrderRequest(content: string): { productOrderPinId: string } | null {
+    const rawRequest = extractOrderRawRequest(content);
+    if (!rawRequest && !/\[PRODUCT_ORDER\]/iu.test(content)) {
+      return null;
+    }
+    let parsed: Record<string, unknown> | null = null;
+    if (rawRequest) {
+      try {
+        const value = JSON.parse(rawRequest) as unknown;
+        parsed = value && typeof value === 'object' && !Array.isArray(value)
+          ? value as Record<string, unknown>
+          : null;
+      } catch {
+        parsed = null;
+      }
+    }
+    if (parsed && normalizeText(parsed.protocol) !== 'product-order') {
+      return null;
+    }
+    const productOrderPinId = normalizeText(parsed?.productOrderPinId)
+      || normalizeText(extractOrderLineValue(content, 'product-order pin id'))
+      || normalizeText(extractOrderLineValue(content, 'productOrderPinId'));
+    if (!productOrderPinId && (parsed || /\[PRODUCT_ORDER\]/iu.test(content))) {
+      return { productOrderPinId: '' };
+    }
+    return productOrderPinId ? { productOrderPinId } : null;
+  }
+
+  async function runProductFulfillmentRound(
+    round: ProductFulfillmentRoundInput,
+  ): Promise<ProductFulfillmentRoundResult> {
+    if (!input.llmExecutor) {
+      return {
+        state: 'failed',
+        code: 'llm_runtime_unavailable',
+        message: 'LLM executor is not configured for product fulfillment.',
+      };
+    }
+    const metaBotSlug = path.basename(input.homeDir);
+    const runtimeResolver = createLlmRuntimeResolver({
+      runtimeStore: llmRuntimeStore,
+      bindingStore: llmBindingStore,
+      getPreferredRuntimeId: async () => null,
+    });
+    const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
+    if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
+      return {
+        state: 'failed',
+        code: 'llm_runtime_unavailable',
+        message: `No healthy LLM runtime is available for MetaBot ${metaBotSlug}.`,
+      };
+    }
+    const systemPrompt = [
+      'You are the seller-side product fulfillment executor for an already-paid inbound product order.',
+      'Fulfill only the product order described in the runtime context.',
+      'Use the available local fulfillment skills as needed. Do not delegate to a remote service or ask the buyer to run commands.',
+      'Return only the buyer-facing delivery result.',
+    ].join('\n');
+    const prompt = [
+      'Product fulfillment runtime context:',
+      JSON.stringify(round.context, null, 2),
+    ].join('\n');
+    const sessionTimeoutMs = 120_000;
+    const sessionId = await input.llmExecutor.execute({
+      runtimeId: resolved.runtime.id,
+      runtime: resolved.runtime,
+      prompt,
+      systemPrompt,
+      cwd: runtimeStateStore.paths.profileRoot,
+      skills: round.fulfillmentSkills,
+      metaBotSlug,
+      timeout: sessionTimeoutMs,
+    });
+    const deadline = Date.now() + sessionTimeoutMs;
+    while (Date.now() <= deadline) {
+      const session = await input.llmExecutor.getSession(sessionId);
+      if (session?.result) {
+        if (session.result.status === 'completed' && normalizeText(session.result.output)) {
+          if (resolved.bindingId) {
+            runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => {});
+          }
+          return {
+            state: 'completed',
+            responseText: session.result.output,
+            metadata: {
+              runtimeId: resolved.runtime.id,
+              sessionId,
+              fulfillmentSkills: round.fulfillmentSkills,
+            },
+          };
+        }
+        return {
+          state: 'failed',
+          code: session.result.status === 'completed' ? 'product_fulfillment_empty' : 'product_fulfillment_runtime_failed',
+          message: session.result.error || 'Product fulfillment runtime did not complete successfully.',
+          metadata: {
+            runtimeId: resolved.runtime.id,
+            sessionId,
+          },
+        };
+      }
+      await sleep(500);
+    }
+    return {
+      state: 'failed',
+      code: 'product_fulfillment_timeout',
+      message: 'Product fulfillment runtime timed out.',
+      metadata: {
+        runtimeId: resolved.runtime.id,
+        sessionId,
+      },
+    };
+  }
+
+  async function handleInboundProductOrderMessage(inputMessage: {
+    fromGlobalMetaId: string;
+    content: string;
+    messagePinId?: string | null;
+    timestamp?: number | null;
+  }): Promise<MetabotCommandResult<Record<string, unknown>>> {
+    const state = await runtimeStateStore.readState();
+    if (!state.identity) {
+      return commandFailed('identity_missing', 'Create a local MetaBot identity before fulfilling product orders.');
+    }
+    const request = readInboundProductOrderRequest(inputMessage.content);
+    if (!request) {
+      return commandSuccess({ handled: false });
+    }
+    if (!request.productOrderPinId) {
+      return commandFailed('invalid_product_order_protocol', 'Inbound product ORDER is missing productOrderPinId.');
+    }
+    const productStateStore = createProductStateStore(input.homeDir);
+    const orderTxid = normalizeOrderProtocolReference(inputMessage.messagePinId)
+      || normalizeText(inputMessage.messagePinId)
+      || request.productOrderPinId;
+    const fulfillment = await fulfillProductOrderForSeller({
+      productOrderPinId: request.productOrderPinId,
+      orderTxid,
+      buyer: {
+        globalMetaId: inputMessage.fromGlobalMetaId,
+      },
+      orderA2AMetadata: {
+        messagePinId: inputMessage.messagePinId ?? null,
+        timestamp: inputMessage.timestamp ?? null,
+        rawContent: inputMessage.content,
+      },
+      localSeller: {
+        globalMetaId: state.identity.globalMetaId,
+        name: state.identity.name,
+        mvcAddress: state.identity.mvcAddress,
+        addresses: state.identity.addresses,
+        chatPublicKey: state.identity.chatPublicKey,
+      },
+      productStateStore,
+      chainFetcher: {
+        fetchProductOrderPin: (productOrderPinId) => fetchProductProtocolPinDetail({
+          pinId: productOrderPinId,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+        }),
+        fetchProductListingPin: (listingPinId) => fetchProductProtocolPinDetail({
+          pinId: listingPinId,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+        }),
+      },
+      paymentVerifier: createProductServicePaymentVerifier({ adapters }),
+      fulfillmentRunner: {
+        execute: runProductFulfillmentRound,
+      },
+      deliverySender: {
+        async send(messageInput) {
+          const peerChatPublicKey = await resolvePeerChatPublicKey(messageInput.toGlobalMetaId) ?? '';
+          if (!peerChatPublicKey) {
+            throw new Error('peer_chat_public_key_missing: Remote product buyer has no published chat public key on chain.');
+          }
+          return sendProviderOrderPrivateMessage({
+            toGlobalMetaId: messageInput.toGlobalMetaId,
+            peerChatPublicKey,
+            content: messageInput.content,
+          });
+        },
+      },
+      now: () => Date.now(),
+    });
+    if (!fulfillment.ok) {
+      return commandFailed(fulfillment.code, fulfillment.message, fulfillment.data ? { data: fulfillment.data } : undefined);
+    }
+    return commandSuccess({
+      handled: true,
+      delivered: true,
+      protocol: 'product-order',
+      ...fulfillment.data,
+    });
+  }
+
   async function handleInboundOrderProtocolMessage(inputMessage: {
     fromGlobalMetaId: string;
     content: string;
@@ -9026,6 +9263,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
     const content = normalizeText(inputMessage.content);
     if (/^\[ORDER\]/iu.test(content)) {
+      const productOrderRequest = readInboundProductOrderRequest(content);
+      if (productOrderRequest) {
+        return handleInboundProductOrderMessage(inputMessage);
+      }
       const orderTxid = normalizeOrderProtocolReference(inputMessage.messagePinId)
         || normalizeOrderProtocolReference(extractOrderLineValue(content, 'order id'))
         || '';
