@@ -165,13 +165,21 @@ test('product state store rejects invalid listing payloads before upserting list
 test('product state store persists buyer and seller orders with cache-first lookups', async () => {
   const profileRoot = await createTempProfileRoot();
   const store = createProductStateStore(profileRoot);
+  const buyerPaymentTxid = 'b'.repeat(64);
   const sellerPaymentTxid = 'c'.repeat(64);
 
   await store.upsertBuyerOrder({
     productOrderPinId: 'buyer-product-order-pin-id',
     listingPinId: 'listing-pin-id',
     skuId: 'sku2',
-    paymentTxid: 'buyer-payment-txid',
+    paymentTxid: buyerPaymentTxid,
+    productOrderPayload: {
+      listingPinId: 'listing-pin-id',
+      skuId: 'sku2',
+      settlementKind: 'native',
+      paymentTxid: buyerPaymentTxid,
+      comment: 'Buyer comment must survive inspection.',
+    },
     orderTxid: 'buyer-order-txid',
     sellerGlobalMetaId: 'seller-global-metaid',
     deliverySummary: {
@@ -219,7 +227,7 @@ test('product state store persists buyer and seller orders with cache-first look
     (await store.findOrderByProductOrderPinId('seller-product-order-pin-id')).source,
     'sellerOrders',
   );
-  assert.equal((await store.findOrderByPaymentTxid('buyer-payment-txid')).item.role, 'buyer');
+  assert.equal((await store.findOrderByPaymentTxid(buyerPaymentTxid)).item.role, 'buyer');
   assert.equal((await store.findOrderByPaymentTxid(sellerPaymentTxid)).item.role, 'seller');
   assert.equal((await store.findOrderByOrderTxid('buyer-order-txid')).item.role, 'buyer');
   assert.equal((await store.findOrderByOrderTxid('seller-order-txid')).item.role, 'seller');
@@ -229,6 +237,13 @@ test('product state store persists buyer and seller orders with cache-first look
     result: 'Top-up card: 1234-5678',
     deliveryPinId: 'delivery-pin-id',
     deliveredAt: 1770000002000,
+  });
+  assert.deepEqual(reloaded.buyerOrders[0].productOrderPayload, {
+    listingPinId: 'listing-pin-id',
+    skuId: 'sku2',
+    settlementKind: 'native',
+    paymentTxid: buyerPaymentTxid,
+    comment: 'Buyer comment must survive inspection.',
   });
   assert.equal(reloaded.sellerOrders[0].paymentVerified, true);
   assert.deepEqual(reloaded.sellerOrders[0].productOrderPayload, {
@@ -250,6 +265,7 @@ test('product state store persists buyer and seller orders with cache-first look
 
   const buyerLookup = await store.findOrderByProductOrderPinId('buyer-product-order-pin-id');
   assert.equal(buyerLookup.item.deliverySummary.result, 'Top-up card: 1234-5678');
+  assert.equal(buyerLookup.item.productOrderPayload.comment, 'Buyer comment must survive inspection.');
   const sellerLookup = await store.findOrderByProductOrderPinId('seller-product-order-pin-id');
   assert.equal(sellerLookup.item.paymentVerified, true);
   assert.equal(sellerLookup.item.productOrderPayload.paymentTxid, sellerPaymentTxid);

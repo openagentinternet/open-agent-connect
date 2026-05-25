@@ -59,6 +59,7 @@ export interface ProductBuyerOrderRecord {
   listingPinId: string;
   skuId: string;
   paymentTxid: string | null;
+  productOrderPayload: ProductOrderPayload | null;
   orderTxid: string | null;
   sellerGlobalMetaId: string | null;
   buyerGlobalMetaId: string | null;
@@ -144,6 +145,7 @@ export interface UpsertBuyerOrderInput {
   listingPinId: string;
   skuId: string;
   paymentTxid?: string | null;
+  productOrderPayload?: ProductOrderPayload | null;
   orderTxid?: string | null;
   sellerGlobalMetaId?: string | null;
   buyerGlobalMetaId?: string | null;
@@ -348,6 +350,7 @@ function normalizeBuyerOrder(value: unknown): ProductBuyerOrderRecord | null {
     listingPinId: normalizeText(source.listingPinId),
     skuId: normalizeText(source.skuId),
     paymentTxid: normalizeNullableText(source.paymentTxid),
+    productOrderPayload: normalizeProductOrderPayload(source.productOrderPayload),
     orderTxid: normalizeNullableText(source.orderTxid),
     sellerGlobalMetaId: normalizeNullableText(source.sellerGlobalMetaId),
     buyerGlobalMetaId: normalizeNullableText(source.buyerGlobalMetaId),
@@ -659,6 +662,7 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
         listingPinId,
         skuId,
         paymentTxid: normalizeNullableText(input.paymentTxid),
+        productOrderPayload: normalizeProductOrderPayload(input.productOrderPayload),
         orderTxid: normalizeNullableText(input.orderTxid),
         sellerGlobalMetaId: normalizeNullableText(input.sellerGlobalMetaId),
         buyerGlobalMetaId: normalizeNullableText(input.buyerGlobalMetaId),

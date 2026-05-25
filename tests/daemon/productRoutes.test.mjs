@@ -183,7 +183,7 @@ async function startProductExecutionServer(t, options = {}) {
         calls.push(['payment', input]);
         if (options.paymentError) throw options.paymentError;
         return {
-          paymentTxid: 'payment-txid-1',
+          paymentTxid: options.paymentTxid ?? 'payment-txid-1',
           paymentAmount: input.amount,
           paymentCurrency: input.currency,
           paymentChain: input.paymentChain,
@@ -407,6 +407,36 @@ test('/api/products/buy confirmed=true executes payment, product-order publish, 
   assert.equal(response.payload.data.paymentTxid, 'payment-txid-1');
   assert.equal(response.payload.data.orderTxid, 'simplemsg-order-txid-1');
   assert.match(response.payload.data.localUiUrl, /\/ui\/trace\?traceId=/);
+});
+
+test('/api/products/orders/inspect returns the buyer cached public product-order payload including comment', async (t) => {
+  const paymentTxid = 'd'.repeat(64);
+  const app = await startProductExecutionServer(t, { paymentTxid });
+
+  const buy = await fetchJson(app.baseUrl, '/api/products/buy', {
+    method: 'POST',
+    body: {
+      listingPinId: 'listing-space-card',
+      skuId: 'space-00005',
+      policyMode: 'confirm_paid_only',
+      confirmed: true,
+      comment: 'Please deliver this card to the backup account.',
+      spendCap: { amount: '0.00005', currency: 'SPACE' },
+    },
+  });
+  const inspect = await fetchJson(app.baseUrl, '/api/products/orders/inspect?productOrderPinId=product-order-pin-1');
+
+  assert.equal(buy.status, 200);
+  assert.equal(buy.payload.ok, true);
+  assert.equal(inspect.status, 200);
+  assert.equal(inspect.payload.ok, true);
+  assert.deepEqual(inspect.payload.data.raw.productOrder, {
+    listingPinId: 'listing-space-card',
+    skuId: 'space-00005',
+    settlementKind: 'native',
+    paymentTxid,
+    comment: 'Please deliver this card to the backup account.',
+  });
 });
 
 test('/api/products/buy returns stable failure when payment fails', async (t) => {

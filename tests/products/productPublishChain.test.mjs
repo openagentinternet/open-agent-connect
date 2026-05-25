@@ -382,6 +382,13 @@ test('executeProductPurchase pays before product-order publish and notifies sell
   assert.equal(harness.persisted[0].traceId, 'trace-product-order-1');
   assert.equal(harness.persisted[0].sessionId, 'session-product-order-1');
   assert.equal(harness.persisted[0].state, 'notified');
+  assert.deepEqual(harness.persisted[0].productOrderPayload, {
+    listingPinId: 'listing-pin-id',
+    skuId: 'space-00005',
+    settlementKind: 'native',
+    paymentTxid: 'payment-txid-1',
+    comment: 'Please deliver to my default account.',
+  });
 });
 
 test('executeProductPurchase does not publish product-order when payment fails', async () => {
@@ -502,6 +509,13 @@ test('executeProductPurchase returns stable product-order publish failure code f
   assert.equal(harness.persisted[0].traceId, 'trace-product-order-1');
   assert.equal(harness.persisted[0].sessionId, 'session-product-order-1');
   assert.equal(harness.persisted[0].state, 'failed');
+  assert.deepEqual(harness.persisted[0].productOrderPayload, {
+    listingPinId: 'listing-pin-id',
+    skuId: 'space-00005',
+    settlementKind: 'native',
+    paymentTxid: 'payment-txid-1',
+    comment: 'Please deliver to my default account.',
+  });
 });
 
 test('executeProductPurchase persists failed buyer state when product-order pin id is missing after payment', async () => {
@@ -525,6 +539,13 @@ test('executeProductPurchase persists failed buyer state when product-order pin 
   assert.equal(harness.persisted[0].traceId, 'trace-product-order-1');
   assert.equal(harness.persisted[0].sessionId, 'session-product-order-1');
   assert.equal(harness.persisted[0].state, 'failed');
+  assert.deepEqual(harness.persisted[0].productOrderPayload, {
+    listingPinId: 'listing-pin-id',
+    skuId: 'space-00005',
+    settlementKind: 'native',
+    paymentTxid: 'payment-txid-1',
+    comment: 'Please deliver to my default account.',
+  });
 });
 
 test('executeProductPurchase returns stable simplemsg dispatch failure code for arbitrary sender errors', async () => {
@@ -540,6 +561,13 @@ test('executeProductPurchase returns stable simplemsg dispatch failure code for 
   assert.deepEqual(harness.calls.map(([name]) => name), ['payment', 'product-order', 'simplemsg']);
   assert.equal(harness.persisted.length, 1);
   assert.equal(harness.persisted[0].state, 'failed');
+  assert.deepEqual(harness.persisted[0].productOrderPayload, {
+    listingPinId: 'listing-pin-id',
+    skuId: 'space-00005',
+    settlementKind: 'native',
+    paymentTxid: 'payment-txid-1',
+    comment: 'Please deliver to my default account.',
+  });
 });
 
 test('executeProductPurchase does not pay when planner rejects an offline product', async () => {

@@ -421,6 +421,7 @@ export async function executeProductPurchase(
       listingPinId: orderPayload.listingPinId,
       skuId: orderPayload.skuId,
       paymentTxid,
+      productOrderPayload: orderPayload,
       sellerGlobalMetaId,
       buyerGlobalMetaId: input.buyerIdentity.globalMetaId,
       traceId,
@@ -430,6 +431,10 @@ export async function executeProductPurchase(
     return stableFailureFromError(error, 'product_order_publish_failed');
   }
 
+  const publishedPayloadValidation = validateProductOrderPayload(published.payload);
+  const persistedProductOrderPayload = publishedPayloadValidation.ok
+    ? publishedPayloadValidation.value
+    : orderPayload;
   const productOrderPinId = normalizeText(published.chainWrite.pinId);
   if (!productOrderPinId) {
     await input.productStateStore.upsertBuyerOrder({
@@ -437,6 +442,7 @@ export async function executeProductPurchase(
       listingPinId: orderPayload.listingPinId,
       skuId: orderPayload.skuId,
       paymentTxid,
+      productOrderPayload: persistedProductOrderPayload,
       sellerGlobalMetaId,
       buyerGlobalMetaId: input.buyerIdentity.globalMetaId,
       traceId,
@@ -474,6 +480,7 @@ export async function executeProductPurchase(
       listingPinId: orderPayload.listingPinId,
       skuId: orderPayload.skuId,
       paymentTxid,
+      productOrderPayload: persistedProductOrderPayload,
       sellerGlobalMetaId,
       buyerGlobalMetaId: input.buyerIdentity.globalMetaId,
       traceId,
@@ -490,6 +497,7 @@ export async function executeProductPurchase(
       listingPinId: orderPayload.listingPinId,
       skuId: orderPayload.skuId,
       paymentTxid,
+      productOrderPayload: persistedProductOrderPayload,
       sellerGlobalMetaId,
       buyerGlobalMetaId: input.buyerIdentity.globalMetaId,
       traceId,
@@ -508,6 +516,7 @@ export async function executeProductPurchase(
     listingPinId: orderPayload.listingPinId,
     skuId: orderPayload.skuId,
     paymentTxid,
+    productOrderPayload: persistedProductOrderPayload,
     orderTxid,
     sellerGlobalMetaId,
     buyerGlobalMetaId: input.buyerIdentity.globalMetaId,

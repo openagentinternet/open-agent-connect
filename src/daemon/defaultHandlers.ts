@@ -10765,15 +10765,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
     if (record.role === 'seller' && record.productOrderPayload) {
       return record.productOrderPayload;
     }
-    if (!record.paymentTxid) {
-      return null;
+    if (record.role === 'buyer' && record.productOrderPayload) {
+      return record.productOrderPayload;
     }
-    return {
-      listingPinId: record.listingPinId,
-      skuId: record.skuId,
-      settlementKind: 'native',
-      paymentTxid: record.paymentTxid,
-    };
+    return null;
   }
 
   function buildProductOrderInspection(inputOrder: {
