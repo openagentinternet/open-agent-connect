@@ -313,6 +313,34 @@ Expected result:
 - fulfillment skills include `S1`
 - final state is delivered or completed after the delivery message is sent
 
+## Verification
+
+Task 10 controller/subagent verification for this documentation round:
+
+```bash
+npm run build
+```
+
+Result: passed.
+
+```bash
+node --test tests/products/*.test.mjs tests/cli/products.test.mjs tests/cli/network.test.mjs tests/daemon/productRoutes.test.mjs
+```
+
+Result: 120 passed.
+
+```bash
+node --test tests/a2a/productOrderFlow.test.mjs tests/a2a/simplemsgClassifier.test.mjs tests/a2a/traceProjectionUnifiedStore.test.mjs
+```
+
+Result: 34 passed.
+
+```bash
+node --test tests/a2a/*.test.mjs tests/payments/servicePayment.test.mjs tests/services/servicePublishValidation.test.mjs
+```
+
+Result: 128 passed.
+
 ## Smoke Evidence
 
 Record only this non-secret evidence in the acceptance report:
@@ -324,7 +352,6 @@ payment txid: <payment-txid>
 order txid: <simplemsg-order-txid>
 delivery pin id: <delivery-pin-id>
 local trace URL: <local-trace-url>
-S1 deliverable marker: SMOKE-SKU2-CARD-0001
 ```
 
 For this documentation task, the real-daemon smoke was not run because the task
