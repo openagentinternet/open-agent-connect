@@ -130,6 +130,36 @@ function createFakeProductStateStore(seed = {}) {
       state.upsertedSellerOrders.push(record);
       return record;
     },
+    async claimSellerOrderFulfillment(input) {
+      const existing = state.orders.get(input.productOrderPinId);
+      const matches = existing &&
+        existing.orderTxid === input.orderTxid &&
+        existing.paymentTxid === input.paymentTxid;
+      if (
+        matches &&
+        existing.state === 'delivered' &&
+        (existing.deliveryPinId || existing.deliverySummary?.deliveryPinId)
+      ) {
+        return { status: 'duplicate_delivered', record: existing };
+      }
+      if (matches && existing.state === 'fulfilling') {
+        return { status: 'in_progress', record: existing };
+      }
+      const record = {
+        role: 'seller',
+        ...existing,
+        ...input,
+        paymentVerified: null,
+        fulfillmentState: 'fulfilling',
+        deliveryPinId: null,
+        deliverySummary: null,
+        failureReason: null,
+        state: 'fulfilling',
+      };
+      state.orders.set(input.productOrderPinId, record);
+      state.upsertedSellerOrders.push(record);
+      return { status: 'claimed', record };
+    },
     async upsertOwnedListing(input) {
       const record = {
         source: 'ownedListings',
@@ -231,7 +261,13 @@ function cachedSellerOrder(overrides = {}) {
     orderTxid: ORDER_TXID,
     buyerGlobalMetaId: BUYER_GLOBAL_META_ID,
     state: 'created',
+    fulfillmentState: 'created',
     fulfillmentSkills: [],
+    paymentVerified: null,
+    selectedSku: null,
+    deliveryPinId: null,
+    deliverySummary: null,
+    failureReason: null,
     ...overrides,
   };
 }
@@ -511,8 +547,12 @@ test('fulfillProductOrderForSeller passes every fulfillment skill and product-or
   assert.deepEqual(harness.runnerCalls[0].fulfillmentSkills, ['deliver-topup-card', 'audit-stock']);
   assert.deepEqual(harness.runnerCalls[0].context.fulfillmentSkills, ['deliver-topup-card', 'audit-stock']);
   assert.equal(harness.runnerCalls[0].context.productOrder.pinId, PRODUCT_ORDER_PIN_ID);
+  assert.equal(harness.runnerCalls[0].context.productOrder.pin.pinId, PRODUCT_ORDER_PIN_ID);
+  assert.equal(harness.runnerCalls[0].context.productOrder.pin.path, '/protocols/product-order');
   assert.deepEqual(harness.runnerCalls[0].context.productOrder.payload, productOrder());
   assert.equal(harness.runnerCalls[0].context.productListing.pinId, LISTING_PIN_ID);
+  assert.equal(harness.runnerCalls[0].context.productListing.pin.pinId, LISTING_PIN_ID);
+  assert.equal(harness.runnerCalls[0].context.productListing.pin.path, '/protocols/product-listing');
   assert.equal(harness.runnerCalls[0].context.selectedSku.skuId, 'sku2');
   assert.equal(harness.runnerCalls[0].context.buyer.globalMetaId, BUYER_GLOBAL_META_ID);
   assert.equal(harness.runnerCalls[0].context.orderA2AMetadata.messagePinId, `${ORDER_TXID}i0`);
@@ -546,8 +586,166 @@ test('fulfillProductOrderForSeller sends delivery and persists delivered seller 
   assert.equal(persisted.state, 'delivered');
   assert.equal(persisted.fulfillmentState, 'delivered');
   assert.equal(persisted.deliveryPinId, 'delivery-pin-1');
+  assert.deepEqual(persisted.deliverySummary, {
+    result: 'Card code: TOPUP-123456',
+    deliveryPinId: 'delivery-pin-1',
+    deliveredAt: 1_770_000_000_000,
+  });
   assert.equal(persisted.failureReason, null);
   assert.deepEqual(persisted.fulfillmentSkills, ['deliver-topup-card', 'audit-stock']);
+});
+
+test('fulfillProductOrderForSeller rejects inbound buyer mismatch before side effects', async () => {
+  const harness = createFulfillmentHarness({
+    store: {
+      orders: [cachedSellerOrder()],
+      listings: [cachedOwnedListing()],
+    },
+  });
+  harness.input.buyer.globalMetaId = 'idq1attacker';
+
+  const result = await fulfillProductOrderForSeller(harness.input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'product_buyer_mismatch');
+  assert.deepEqual(harness.paymentVerifierCalls, []);
+  assert.deepEqual(harness.runnerCalls, []);
+  assert.deepEqual(harness.sent, []);
+  assert.equal(harness.store.state.upsertedSellerOrders.length, 0);
+});
+
+test('fulfillProductOrderForSeller rejects unsupported V1 fulfillment before side effects', async () => {
+  const unsupportedListing = productListing({
+    productType: 'physical',
+    fulfillment: {
+      fulfillmentType: 'physical_shipping',
+      deliveryEndpoint: 'logistics',
+      fulfillmentSkills: ['ship-physical-goods'],
+      deliverableDescription: 'Physical shipping is not supported by product V1 seller fulfillment.',
+    },
+  });
+  const harness = createFulfillmentHarness({
+    store: {
+      orders: [cachedSellerOrder()],
+      listings: [cachedOwnedListing(unsupportedListing)],
+    },
+  });
+
+  const result = await fulfillProductOrderForSeller(harness.input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'product_unsupported_fulfillment');
+  assert.deepEqual(harness.paymentVerifierCalls, []);
+  assert.deepEqual(harness.runnerCalls, []);
+  assert.deepEqual(harness.sent, []);
+  assert.equal(harness.store.state.upsertedSellerOrders.length, 0);
+});
+
+test('fulfillProductOrderForSeller returns duplicate success for already delivered seller order without side effects', async () => {
+  const harness = createFulfillmentHarness({
+    store: {
+      orders: [
+        cachedSellerOrder({
+          state: 'delivered',
+          fulfillmentState: 'delivered',
+          paymentVerified: true,
+          deliveryPinId: 'existing-delivery-pin',
+          deliverySummary: {
+            result: 'Card code: EXISTING-123456',
+            deliveryPinId: 'existing-delivery-pin',
+            deliveredAt: 1_770_000_000_000,
+          },
+        }),
+      ],
+      listings: [cachedOwnedListing()],
+    },
+  });
+
+  const result = await fulfillProductOrderForSeller(harness.input);
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.deliveryPinId, 'existing-delivery-pin');
+  assert.equal(result.data.result, 'Card code: EXISTING-123456');
+  assert.equal(result.data.ratingMessagePinId, null);
+  assert.deepEqual(harness.paymentVerifierCalls, []);
+  assert.deepEqual(harness.runnerCalls, []);
+  assert.deepEqual(harness.sent, []);
+});
+
+test('fulfillProductOrderForSeller serializes concurrent duplicate fulfillment through seller order claim', async () => {
+  const store = createProductStateStore(await createTempProfileRoot());
+  await store.upsertOwnedListing({
+    listingPinId: LISTING_PIN_ID,
+    payload: productListing(),
+    available: true,
+  });
+  await store.upsertSellerOrder(cachedSellerOrder());
+  const chainFetcher = createChainFetcher();
+  const paymentVerifierCalls = [];
+  const runnerCalls = [];
+  const sent = [];
+  const input = {
+    productOrderPinId: PRODUCT_ORDER_PIN_ID,
+    orderTxid: ORDER_TXID,
+    buyer: {
+      globalMetaId: BUYER_GLOBAL_META_ID,
+      chatPublicKey: 'buyer-chat-public-key',
+    },
+    localSeller: localSeller(),
+    productStateStore: store,
+    chainFetcher,
+    paymentVerifier: async (verificationInput) => {
+      paymentVerifierCalls.push(verificationInput);
+      return {
+        verified: true,
+        paymentTxid: verificationInput.paymentTxid,
+        paymentChain: verificationInput.paymentChain,
+        settlementKind: verificationInput.settlementKind,
+        paymentAddress: verificationInput.paymentAddress,
+        amount: verificationInput.amount,
+        currency: verificationInput.currency,
+        amountSatoshis: 5_000,
+        matchedOutputIndex: 0,
+        failureKind: null,
+      };
+    },
+    fulfillmentRunner: async (roundInput) => {
+      runnerCalls.push(roundInput);
+      await new Promise(resolve => {
+        setTimeout(resolve, 50);
+      });
+      return {
+        state: 'completed',
+        responseText: 'Card code: TOPUP-CONCURRENT',
+      };
+    },
+    deliverySender: {
+      async send(sendInput) {
+        sent.push(sendInput);
+        await new Promise(resolve => {
+          setTimeout(resolve, 25);
+        });
+        return {
+          pinId: sendInput.content.startsWith('[DELIVERY:') ? 'delivery-pin-concurrent' : 'rating-pin-concurrent',
+        };
+      },
+    },
+    now: () => 1_770_000_000_000,
+  };
+
+  const results = await Promise.all([
+    fulfillProductOrderForSeller(input),
+    fulfillProductOrderForSeller(input),
+  ]);
+
+  assert.equal(results[0].ok, true, JSON.stringify(results[0]));
+  assert.equal(results[1].ok, true, JSON.stringify(results[1]));
+  assert.equal(results[0].data.deliveryPinId, 'delivery-pin-concurrent');
+  assert.equal(results[1].data.deliveryPinId, 'delivery-pin-concurrent');
+  assert.equal(paymentVerifierCalls.length, 1);
+  assert.equal(runnerCalls.length, 1);
+  assert.equal(sent.filter(entry => entry.content.startsWith('[DELIVERY:')).length, 1);
+  assert.equal(sent.filter(entry => entry.content.startsWith('[NeedsRating:')).length, 1);
 });
 
 test('fulfillProductOrderForSeller rejects invalid order txid before sending delivery', async () => {

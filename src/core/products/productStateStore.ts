@@ -83,6 +83,7 @@ export interface ProductSellerOrderRecord {
   selectedSku: ProductSku | null;
   fulfillmentState: ProductOrderState | null;
   deliveryPinId: string | null;
+  deliverySummary: ProductDeliverySummary | null;
   failureReason: string | null;
   state: ProductOrderState;
   localUpdatedAt: number;
@@ -108,6 +109,7 @@ export interface ProductStateStore {
   upsertDirectoryItem(input: UpsertDirectoryItemInput): Promise<ProductDirectoryCacheRecord>;
   upsertBuyerOrder(input: UpsertBuyerOrderInput): Promise<ProductBuyerOrderRecord>;
   upsertSellerOrder(input: UpsertSellerOrderInput): Promise<ProductSellerOrderRecord>;
+  claimSellerOrderFulfillment(input: ClaimSellerOrderFulfillmentInput): Promise<ClaimSellerOrderFulfillmentResult>;
   findListingByPinId(listingPinId: string): Promise<ProductListingLookup | null>;
   findOrderByProductOrderPinId(productOrderPinId: string): Promise<ProductOrderLookup | null>;
   findSellerOrderByProductOrderPinId(productOrderPinId: string): Promise<ProductSellerOrderLookup | null>;
@@ -163,10 +165,29 @@ export interface UpsertSellerOrderInput {
   selectedSku?: ProductSku | null;
   fulfillmentState?: ProductOrderState | null;
   deliveryPinId?: string | null;
+  deliverySummary?: ProductDeliverySummary | null;
   failureReason?: string | null;
   state?: ProductOrderState;
   localUpdatedAt?: number;
 }
+
+export interface ClaimSellerOrderFulfillmentInput {
+  productOrderPinId: string;
+  listingPinId: string;
+  skuId: string;
+  paymentTxid: string;
+  productOrderPayload?: ProductOrderPayload | null;
+  orderTxid: string;
+  buyerGlobalMetaId?: string | null;
+  fulfillmentSkills?: string[];
+  selectedSku?: ProductSku | null;
+  localUpdatedAt?: number;
+}
+
+export type ClaimSellerOrderFulfillmentResult =
+  | { status: 'claimed'; record: ProductSellerOrderRecord }
+  | { status: 'duplicate_delivered'; record: ProductSellerOrderRecord }
+  | { status: 'in_progress'; record: ProductSellerOrderRecord };
 
 export type ProductListingLookup =
   | { source: 'ownedListings'; item: OwnedProductListingRecord }
@@ -356,6 +377,7 @@ function normalizeSellerOrder(value: unknown): ProductSellerOrderRecord | null {
     selectedSku: normalizeSelectedSku(source.selectedSku),
     fulfillmentState: source.fulfillmentState || null,
     deliveryPinId: normalizeNullableText(source.deliveryPinId),
+    deliverySummary: normalizeDeliverySummary(source.deliverySummary),
     failureReason: normalizeNullableText(source.failureReason),
     state: source.state || 'created',
     localUpdatedAt: normalizeNumber(source.localUpdatedAt, 0),
@@ -669,6 +691,7 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
         selectedSku: normalizeSelectedSku(input.selectedSku),
         fulfillmentState: input.fulfillmentState || null,
         deliveryPinId: normalizeNullableText(input.deliveryPinId),
+        deliverySummary: normalizeDeliverySummary(input.deliverySummary),
         failureReason: normalizeNullableText(input.failureReason),
         state: input.state || 'created',
         localUpdatedAt: input.localUpdatedAt ?? Date.now(),
@@ -685,6 +708,65 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
         ),
       }));
       return record;
+    },
+    async claimSellerOrderFulfillment(input) {
+      const productOrderPinId = requireText(input.productOrderPinId, 'productOrderPinId');
+      const listingPinId = requireText(input.listingPinId, 'listingPinId');
+      const skuId = requireText(input.skuId, 'skuId');
+      const paymentTxid = requireText(input.paymentTxid, 'paymentTxid');
+      const orderTxid = requireText(input.orderTxid, 'orderTxid');
+      let result: ClaimSellerOrderFulfillmentResult | null = null;
+      await this.updateState(state => {
+        const existing = state.sellerOrders.find(item => item.productOrderPinId === productOrderPinId) ?? null;
+        const sameOrder =
+          Boolean(existing) &&
+          existing?.orderTxid === orderTxid &&
+          existing?.paymentTxid === paymentTxid;
+        if (
+          sameOrder &&
+          existing?.state === 'delivered' &&
+          (existing.deliveryPinId || existing.deliverySummary?.deliveryPinId)
+        ) {
+          result = { status: 'duplicate_delivered', record: existing };
+          return state;
+        }
+        if (sameOrder && existing?.state === 'fulfilling') {
+          result = { status: 'in_progress', record: existing };
+          return state;
+        }
+        const record: ProductSellerOrderRecord = {
+          role: 'seller',
+          productOrderPinId,
+          listingPinId,
+          skuId,
+          paymentTxid,
+          productOrderPayload: normalizeProductOrderPayload(input.productOrderPayload),
+          orderTxid: normalizeNullableText(orderTxid),
+          buyerGlobalMetaId: normalizeNullableText(input.buyerGlobalMetaId),
+          fulfillmentSkills: [...(input.fulfillmentSkills || [])],
+          paymentVerified: null,
+          selectedSku: normalizeSelectedSku(input.selectedSku),
+          fulfillmentState: 'fulfilling',
+          deliveryPinId: null,
+          deliverySummary: null,
+          failureReason: null,
+          state: 'fulfilling',
+          localUpdatedAt: input.localUpdatedAt ?? Date.now(),
+        };
+        result = { status: 'claimed', record };
+        return {
+          ...state,
+          sellerOrders: upsertBy(
+            state.sellerOrders,
+            item => item.productOrderPinId === record.productOrderPinId,
+            record,
+          ),
+        };
+      });
+      if (!result) {
+        throw new Error('Seller order fulfillment claim did not produce a result.');
+      }
+      return result;
     },
     async findListingByPinId(listingPinId) {
       const normalized = normalizeText(listingPinId);

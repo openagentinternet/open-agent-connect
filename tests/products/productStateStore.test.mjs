@@ -201,6 +201,11 @@ test('product state store persists buyer and seller orders with cache-first look
     selectedSku: listingPayload().skus[0],
     fulfillmentState: 'delivered',
     deliveryPinId: 'seller-delivery-pin-id',
+    deliverySummary: {
+      result: 'Top-up card: seller-1234',
+      deliveryPinId: 'seller-delivery-pin-id',
+      deliveredAt: 1770000003000,
+    },
     failureReason: 'prior transient fulfillment error',
     state: 'received',
     localUpdatedAt: 1770000001000,
@@ -236,6 +241,11 @@ test('product state store persists buyer and seller orders with cache-first look
   assert.equal(reloaded.sellerOrders[0].selectedSku.skuId, 'sku2');
   assert.equal(reloaded.sellerOrders[0].fulfillmentState, 'delivered');
   assert.equal(reloaded.sellerOrders[0].deliveryPinId, 'seller-delivery-pin-id');
+  assert.deepEqual(reloaded.sellerOrders[0].deliverySummary, {
+    result: 'Top-up card: seller-1234',
+    deliveryPinId: 'seller-delivery-pin-id',
+    deliveredAt: 1770000003000,
+  });
   assert.equal(reloaded.sellerOrders[0].failureReason, 'prior transient fulfillment error');
 
   const buyerLookup = await store.findOrderByProductOrderPinId('buyer-product-order-pin-id');
@@ -246,6 +256,7 @@ test('product state store persists buyer and seller orders with cache-first look
   assert.equal(sellerLookup.item.selectedSku.skuId, 'sku2');
   assert.equal(sellerLookup.item.fulfillmentState, 'delivered');
   assert.equal(sellerLookup.item.deliveryPinId, 'seller-delivery-pin-id');
+  assert.equal(sellerLookup.item.deliverySummary.result, 'Top-up card: seller-1234');
   assert.equal(sellerLookup.item.failureReason, 'prior transient fulfillment error');
 });
 
@@ -284,6 +295,82 @@ test('product state store can look up seller order cache when buyer cache has th
   assert.equal(sellerLookup.source, 'sellerOrders');
   assert.equal(sellerLookup.item.listingPinId, 'seller-listing-pin-id');
   assert.equal(sellerLookup.item.productOrderPayload.paymentTxid, sellerPaymentTxid);
+});
+
+test('product state store claims seller fulfillment and detects duplicate delivered orders', async () => {
+  const profileRoot = await createTempProfileRoot();
+  const store = createProductStateStore(profileRoot);
+  const paymentTxid = 'e'.repeat(64);
+  const orderTxid = 'f'.repeat(64);
+  const productOrderPayload = {
+    listingPinId: 'listing-pin-id',
+    skuId: 'sku2',
+    settlementKind: 'native',
+    paymentTxid,
+  };
+
+  const firstClaim = await store.claimSellerOrderFulfillment({
+    productOrderPinId: 'product-order-pin-id',
+    listingPinId: 'listing-pin-id',
+    skuId: 'sku2',
+    paymentTxid,
+    productOrderPayload,
+    orderTxid,
+    buyerGlobalMetaId: 'buyer-global-metaid',
+    fulfillmentSkills: ['S1', 'S2'],
+    selectedSku: listingPayload().skus[0],
+    localUpdatedAt: 1770000004000,
+  });
+
+  assert.equal(firstClaim.status, 'claimed');
+  assert.equal(firstClaim.record.state, 'fulfilling');
+  assert.equal(firstClaim.record.paymentVerified, null);
+
+  const inProgress = await store.claimSellerOrderFulfillment({
+    productOrderPinId: 'product-order-pin-id',
+    listingPinId: 'listing-pin-id',
+    skuId: 'sku2',
+    paymentTxid,
+    productOrderPayload,
+    orderTxid,
+  });
+
+  assert.equal(inProgress.status, 'in_progress');
+
+  await store.upsertSellerOrder({
+    productOrderPinId: 'product-order-pin-id',
+    listingPinId: 'listing-pin-id',
+    skuId: 'sku2',
+    paymentTxid,
+    productOrderPayload,
+    orderTxid,
+    buyerGlobalMetaId: 'buyer-global-metaid',
+    fulfillmentSkills: ['S1', 'S2'],
+    paymentVerified: true,
+    selectedSku: listingPayload().skus[0],
+    fulfillmentState: 'delivered',
+    deliveryPinId: 'delivery-pin-id',
+    deliverySummary: {
+      result: 'Delivered result',
+      deliveryPinId: 'delivery-pin-id',
+      deliveredAt: 1770000005000,
+    },
+    state: 'delivered',
+    localUpdatedAt: 1770000005000,
+  });
+
+  const duplicate = await store.claimSellerOrderFulfillment({
+    productOrderPinId: 'product-order-pin-id',
+    listingPinId: 'listing-pin-id',
+    skuId: 'sku2',
+    paymentTxid,
+    productOrderPayload,
+    orderTxid,
+  });
+
+  assert.equal(duplicate.status, 'duplicate_delivered');
+  assert.equal(duplicate.record.deliverySummary.result, 'Delivered result');
+  assert.equal(duplicate.record.deliveryPinId, 'delivery-pin-id');
 });
 
 test('product state store rejects blank required identifiers before upserting', async () => {

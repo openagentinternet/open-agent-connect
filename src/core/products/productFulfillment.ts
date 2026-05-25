@@ -34,6 +34,8 @@ export type ProductFulfillmentFailureCode =
   | 'invalid_product_listing_protocol'
   | 'product_listing_not_owned'
   | 'product_sku_not_found'
+  | 'product_buyer_mismatch'
+  | 'product_unsupported_fulfillment'
   | 'product_payment_invalid'
   | 'product_fulfillment_failed';
 
@@ -93,18 +95,24 @@ export interface ProductFulfillmentChainFetcher {
   fetchProductListingPin(listingPinId: string): Promise<ProductChainPin | null>;
 }
 
+type ResolveSellerProductStateStore = Pick<ProductStateStore,
+  | 'findSellerOrderByProductOrderPinId'
+  | 'findListingByPinId'
+  | 'upsertSellerOrder'
+  | 'upsertOwnedListing'
+  | 'upsertDirectoryItem'
+>;
+
+type FulfillSellerProductStateStore = ResolveSellerProductStateStore & Pick<ProductStateStore,
+  | 'claimSellerOrderFulfillment'
+>;
+
 export interface ResolveSellerProductOrderInput {
   productOrderPinId: string;
   orderTxid?: string | null;
   buyer?: ProductFulfillmentBuyerIdentity | null;
   localSeller: ProductSellerIdentity;
-  productStateStore: Pick<ProductStateStore,
-    | 'findSellerOrderByProductOrderPinId'
-    | 'findListingByPinId'
-    | 'upsertSellerOrder'
-    | 'upsertOwnedListing'
-    | 'upsertDirectoryItem'
-  >;
+  productStateStore: ResolveSellerProductStateStore;
   chainFetcher: ProductFulfillmentChainFetcher;
   now?: () => number;
 }
@@ -112,6 +120,7 @@ export interface ResolveSellerProductOrderInput {
 export interface ResolvedProductOrderReference {
   source: 'cache' | 'chain';
   pinId: string;
+  pin: ProductFulfillmentPinMetadata;
   payload: ProductOrderPayload;
   buyerGlobalMetaId: string | null;
   orderTxid: string | null;
@@ -121,6 +130,7 @@ export interface ResolvedProductOrderReference {
 export interface ResolvedProductListingReference {
   source: 'cache' | 'chain';
   pinId: string;
+  pin: ProductFulfillmentPinMetadata;
   payload: ProductListingPayload;
   sellerGlobalMetaId: string | null;
   sellerMvcAddress: string | null;
@@ -154,6 +164,7 @@ export type ProductPaymentVerifier = (
 export interface ProductFulfillmentRuntimeContext {
   productOrder: {
     pinId: string;
+    pin: ProductFulfillmentPinMetadata;
     payload: ProductOrderPayload;
     metadata: {
       buyerGlobalMetaId: string | null;
@@ -163,6 +174,7 @@ export interface ProductFulfillmentRuntimeContext {
   };
   productListing: {
     pinId: string;
+    pin: ProductFulfillmentPinMetadata;
     payload: ProductListingPayload;
     metadata: {
       sellerGlobalMetaId: string | null;
@@ -221,6 +233,7 @@ export interface ProductDeliverySender {
 }
 
 export interface FulfillProductOrderForSellerInput extends ResolveSellerProductOrderInput {
+  productStateStore: FulfillSellerProductStateStore;
   orderTxid: string;
   buyer: ProductFulfillmentBuyerIdentity;
   orderA2AMetadata?: ProductOrderA2AMetadata | null;
@@ -248,6 +261,14 @@ export type FulfillProductOrderForSellerResult =
   | FulfillProductOrderForSellerSuccess
   | ProductFulfillmentFailure;
 
+export interface ProductFulfillmentPinMetadata {
+  pinId: string;
+  path: string;
+  creatorGlobalMetaId: string | null;
+  creatorAddress: string | null;
+  timestamp: number | null;
+}
+
 function normalizeText(value: unknown): string {
   if (typeof value === 'string') return value.trim();
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
@@ -262,6 +283,11 @@ function normalizeNullableText(value: unknown): string | null {
 function normalizeOrderTxid(value: unknown): string | null {
   const normalized = normalizeText(value).toLowerCase();
   return /^[0-9a-f]{64}$/u.test(normalized) ? normalized : null;
+}
+
+function normalizeNullableNumber(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.trunc(numeric) : null;
 }
 
 function now(input?: { now?: () => number }): number {
@@ -298,6 +324,36 @@ function readPinCreatorAddress(pin: ProductChainPin): string | null {
   return normalizeNullableText(pin.createAddress ?? pin.creatorAddress ?? pin.mvcAddress);
 }
 
+function readPinTimestamp(pin: ProductChainPin): number | null {
+  return normalizeNullableNumber(pin.timestamp ?? pin.updatedAt);
+}
+
+function pinMetadata(input: {
+  pinId: string;
+  path: string;
+  creatorGlobalMetaId?: string | null;
+  creatorAddress?: string | null;
+  timestamp?: number | null;
+}): ProductFulfillmentPinMetadata {
+  return {
+    pinId: input.pinId,
+    path: input.path,
+    creatorGlobalMetaId: normalizeNullableText(input.creatorGlobalMetaId),
+    creatorAddress: normalizeNullableText(input.creatorAddress),
+    timestamp: input.timestamp ?? null,
+  };
+}
+
+function chainPinMetadata(pin: ProductChainPin, pinId: string, path: string): ProductFulfillmentPinMetadata {
+  return pinMetadata({
+    pinId,
+    path,
+    creatorGlobalMetaId: readPinCreatorGlobalMetaId(pin),
+    creatorAddress: readPinCreatorAddress(pin),
+    timestamp: readPinTimestamp(pin),
+  });
+}
+
 function parseContentPayload(value: unknown): unknown {
   if (typeof value !== 'string') {
     return value;
@@ -318,7 +374,7 @@ function readChainPayload(pin: ProductChainPin): unknown {
 function validateOrderPin(
   pin: ProductChainPin | null,
   productOrderPinId: string,
-): { ok: true; pinId: string; payload: ProductOrderPayload; buyerGlobalMetaId: string | null } | ProductFulfillmentFailure {
+): { ok: true; pinId: string; pin: ProductFulfillmentPinMetadata; payload: ProductOrderPayload; buyerGlobalMetaId: string | null } | ProductFulfillmentFailure {
   if (!pin) {
     return failure('product_order_not_found', `Product-order pin was not found: ${productOrderPinId}`);
   }
@@ -329,9 +385,11 @@ function validateOrderPin(
   if (!validation.ok) {
     return failure('invalid_product_order_protocol', validation.message, { validationCode: validation.code });
   }
+  const pinId = readPinId(pin, productOrderPinId);
   return {
     ok: true,
-    pinId: readPinId(pin, productOrderPinId),
+    pinId,
+    pin: chainPinMetadata(pin, pinId, PRODUCT_ORDER_PROTOCOL_PATH),
     payload: validation.value,
     buyerGlobalMetaId: readPinCreatorGlobalMetaId(pin),
   };
@@ -340,7 +398,7 @@ function validateOrderPin(
 function validateListingPin(
   pin: ProductChainPin | null,
   listingPinId: string,
-): { ok: true; pinId: string; payload: ProductListingPayload; sellerGlobalMetaId: string | null; sellerMvcAddress: string | null } | ProductFulfillmentFailure {
+): { ok: true; pinId: string; pin: ProductFulfillmentPinMetadata; payload: ProductListingPayload; sellerGlobalMetaId: string | null; sellerMvcAddress: string | null } | ProductFulfillmentFailure {
   if (!pin) {
     return failure('product_listing_not_found', `Product listing pin was not found: ${listingPinId}`);
   }
@@ -351,9 +409,11 @@ function validateListingPin(
   if (!validation.ok) {
     return failure('invalid_product_listing_protocol', validation.message, { validationCode: validation.code });
   }
+  const pinId = readPinId(pin, listingPinId);
   return {
     ok: true,
-    pinId: readPinId(pin, listingPinId),
+    pinId,
+    pin: chainPinMetadata(pin, pinId, PRODUCT_LISTING_PROTOCOL_PATH),
     payload: validation.value,
     sellerGlobalMetaId: readPinCreatorGlobalMetaId(pin),
     sellerMvcAddress: readPinCreatorAddress(pin),
@@ -390,6 +450,12 @@ function readCachedListing(input: {
   return {
     source: 'cache',
     pinId: lookup.item.listingPinId,
+    pin: pinMetadata({
+      pinId: lookup.item.listingPinId,
+      path: PRODUCT_LISTING_PROTOCOL_PATH,
+      creatorGlobalMetaId: sellerGlobalMetaId,
+      creatorAddress: sellerMvcAddress,
+    }),
     payload,
     sellerGlobalMetaId,
     sellerMvcAddress,
@@ -428,6 +494,70 @@ function resolveSellerPaymentAddress(input: {
   return normalizeText(input.seller.addresses?.mvc) || normalizeText(input.seller.mvcAddress);
 }
 
+function isSupportedV1Fulfillment(payload: ProductListingPayload): boolean {
+  return payload.productType === 'virtual' &&
+    payload.fulfillment.fulfillmentType === 'digital_delivery' &&
+    payload.fulfillment.deliveryEndpoint === 'simplemsg';
+}
+
+function sellerOrderSuccessFromRecord(input: {
+  record: ProductSellerOrderRecord;
+  resolved: ResolvedSellerProductOrder;
+  orderTxid: string;
+}): FulfillProductOrderForSellerSuccess {
+  const deliveryPinId = normalizeNullableText(
+    input.record.deliverySummary?.deliveryPinId ?? input.record.deliveryPinId,
+  );
+  return {
+    ok: true,
+    data: {
+      productOrderPinId: input.resolved.order.pinId,
+      listingPinId: input.resolved.order.payload.listingPinId,
+      skuId: input.resolved.order.payload.skuId,
+      paymentTxid: input.resolved.order.payload.paymentTxid,
+      orderTxid: input.orderTxid,
+      result: normalizeText(input.record.deliverySummary?.result),
+      deliveryPinId,
+      ratingMessagePinId: null,
+    },
+  };
+}
+
+async function waitForSellerOrderTerminal(input: {
+  store: ResolveSellerProductOrderInput['productStateStore'];
+  productOrderPinId: string;
+  orderTxid: string;
+  paymentTxid: string;
+  resolved: ResolvedSellerProductOrder;
+}): Promise<FulfillProductOrderForSellerResult> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    await new Promise(resolve => {
+      setTimeout(resolve, Math.min(10 + attempt, 50));
+    });
+    const lookup = await input.store.findSellerOrderByProductOrderPinId(input.productOrderPinId);
+    const record = lookup?.item;
+    if (!record || record.orderTxid !== input.orderTxid || record.paymentTxid !== input.paymentTxid) {
+      continue;
+    }
+    if (record.state === 'delivered' && (record.deliveryPinId || record.deliverySummary?.deliveryPinId)) {
+      return sellerOrderSuccessFromRecord({
+        record,
+        resolved: input.resolved,
+        orderTxid: input.orderTxid,
+      });
+    }
+    if (record.state === 'failed') {
+      return failure(
+        normalizeNullableText(record.failureReason) === 'product_payment_invalid'
+          ? 'product_payment_invalid'
+          : 'product_fulfillment_failed',
+        record.failureReason || 'Product fulfillment failed.',
+      );
+    }
+  }
+  return failure('product_fulfillment_failed', 'Timed out waiting for duplicate product fulfillment to finish.');
+}
+
 function runnerExecute(
   runner: FulfillProductOrderForSellerInput['fulfillmentRunner'],
   input: ProductFulfillmentRoundInput,
@@ -444,6 +574,7 @@ async function persistSellerOrder(input: {
   paymentVerified: boolean | null;
   fulfillmentState: ProductSellerOrderRecord['fulfillmentState'];
   deliveryPinId?: string | null;
+  deliverySummary?: ProductSellerOrderRecord['deliverySummary'];
   failureReason?: string | null;
   state: ProductSellerOrderRecord['state'];
   now: number;
@@ -460,6 +591,7 @@ async function persistSellerOrder(input: {
     selectedSku: input.resolved.selectedSku,
     fulfillmentState: input.fulfillmentState,
     deliveryPinId: input.deliveryPinId ?? null,
+    deliverySummary: input.deliverySummary ?? null,
     failureReason: input.failureReason ?? null,
     state: input.state,
     localUpdatedAt: input.now,
@@ -494,6 +626,11 @@ export async function resolveProductOrderForSeller(
     order = {
       source: 'cache',
       pinId: cachedOrderLookup.item.productOrderPinId,
+      pin: pinMetadata({
+        pinId: cachedOrderLookup.item.productOrderPinId,
+        path: PRODUCT_ORDER_PROTOCOL_PATH,
+        creatorGlobalMetaId: normalizeNullableText(cachedOrderLookup.item.buyerGlobalMetaId) || buyerGlobalMetaId,
+      }),
       payload: readCachedOrderPayload(cachedOrderLookup.item),
       buyerGlobalMetaId: normalizeNullableText(cachedOrderLookup.item.buyerGlobalMetaId) || buyerGlobalMetaId,
       orderTxid: normalizeNullableText(cachedOrderLookup.item.orderTxid) || orderTxid,
@@ -510,6 +647,7 @@ export async function resolveProductOrderForSeller(
     order = {
       source: 'chain',
       pinId: chainOrder.pinId,
+      pin: chainOrder.pin,
       payload: chainOrder.payload,
       buyerGlobalMetaId: chainOrder.buyerGlobalMetaId || buyerGlobalMetaId,
       orderTxid,
@@ -544,6 +682,7 @@ export async function resolveProductOrderForSeller(
     listing = {
       source: 'chain',
       pinId: chainListing.pinId,
+      pin: chainListing.pin,
       payload: chainListing.payload,
       sellerGlobalMetaId: chainListing.sellerGlobalMetaId,
       sellerMvcAddress: chainListing.sellerMvcAddress,
@@ -599,6 +738,49 @@ export async function fulfillProductOrderForSeller(
   }
 
   const fulfillmentSkills = [...resolved.listing.payload.fulfillment.fulfillmentSkills];
+  const inboundBuyerGlobalMetaId = normalizeNullableText(input.buyer.globalMetaId);
+  const resolvedBuyerGlobalMetaId = normalizeNullableText(resolved.order.buyerGlobalMetaId);
+  if (
+    inboundBuyerGlobalMetaId &&
+    resolvedBuyerGlobalMetaId &&
+    inboundBuyerGlobalMetaId !== resolvedBuyerGlobalMetaId
+  ) {
+    return failure('product_buyer_mismatch', 'Inbound product-order buyer does not match the product-order pin creator.');
+  }
+
+  if (!isSupportedV1Fulfillment(resolved.listing.payload)) {
+    return failure('product_unsupported_fulfillment', 'Product V1 seller fulfillment only supports virtual digital_delivery over simplemsg.');
+  }
+
+  const claim = await input.productStateStore.claimSellerOrderFulfillment({
+    productOrderPinId: resolved.order.pinId,
+    listingPinId: resolved.order.payload.listingPinId,
+    skuId: resolved.order.payload.skuId,
+    paymentTxid: resolved.order.payload.paymentTxid,
+    productOrderPayload: resolved.order.payload,
+    orderTxid,
+    buyerGlobalMetaId: inboundBuyerGlobalMetaId || resolvedBuyerGlobalMetaId,
+    fulfillmentSkills,
+    selectedSku: resolved.selectedSku,
+    localUpdatedAt: now(input),
+  });
+  if (claim.status === 'duplicate_delivered') {
+    return sellerOrderSuccessFromRecord({
+      record: claim.record,
+      resolved,
+      orderTxid,
+    });
+  }
+  if (claim.status === 'in_progress') {
+    return waitForSellerOrderTerminal({
+      store: input.productStateStore,
+      productOrderPinId: resolved.order.pinId,
+      orderTxid,
+      paymentTxid: resolved.order.payload.paymentTxid,
+      resolved,
+    });
+  }
+
   const paymentChain = resolvePaymentChain(resolved.selectedSku.price.currency);
   const paymentAddress = resolveSellerPaymentAddress({
     seller: input.localSeller,
@@ -645,6 +827,7 @@ export async function fulfillProductOrderForSeller(
   const context: ProductFulfillmentRuntimeContext = {
     productOrder: {
       pinId: resolved.order.pinId,
+      pin: resolved.order.pin,
       payload: resolved.order.payload,
       metadata: {
         buyerGlobalMetaId: resolved.order.buyerGlobalMetaId,
@@ -654,6 +837,7 @@ export async function fulfillProductOrderForSeller(
     },
     productListing: {
       pinId: resolved.listing.pinId,
+      pin: resolved.listing.pin,
       payload: resolved.listing.payload,
       metadata: {
         sellerGlobalMetaId: resolved.listing.sellerGlobalMetaId || normalizeNullableText(input.localSeller.globalMetaId),
@@ -771,6 +955,11 @@ export async function fulfillProductOrderForSeller(
     paymentVerified: true,
     fulfillmentState: 'delivered',
     deliveryPinId,
+    deliverySummary: {
+      result: responseText,
+      deliveryPinId,
+      deliveredAt,
+    },
     failureReason: null,
     state: 'delivered',
     now: deliveredAt,
