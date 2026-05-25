@@ -9307,14 +9307,36 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const needsRating = parseNeedsRatingMessage(content);
     const productDelivery = delivery ? parseProductDeliveryMessage(content) : null;
     if (productDelivery) {
-      const runtimeState = await runtimeStateStore.readState();
       const productStateStore = createProductStateStore(input.homeDir);
-      const existingLookup = await productStateStore.findOrderByProductOrderPinId(productDelivery.productOrderPinId)
-        ?? await productStateStore.findOrderByPaymentTxid(productDelivery.paymentTxid)
-        ?? (delivery?.orderTxid ? await productStateStore.findOrderByOrderTxid(delivery.orderTxid) : null);
-      const existingBuyerOrder = existingLookup?.source === 'buyerOrders' ? existingLookup.item : null;
-      const orderTxid = normalizeOrderProtocolReference(delivery?.orderTxid)
-        || normalizeText(existingBuyerOrder?.orderTxid)
+      const orderTxidFromDelivery = normalizeOrderProtocolReference(delivery?.orderTxid);
+      const productOrderLookup = await productStateStore.findOrderByProductOrderPinId(productDelivery.productOrderPinId);
+      const paymentLookup = await productStateStore.findOrderByPaymentTxid(productDelivery.paymentTxid);
+      const orderLookup = orderTxidFromDelivery
+        ? await productStateStore.findOrderByOrderTxid(orderTxidFromDelivery)
+        : null;
+      const existingBuyerOrder = [productOrderLookup, paymentLookup, orderLookup]
+        .find((entry) => entry?.source === 'buyerOrders')?.item ?? null;
+      const cachedOrderTxid = normalizeOrderProtocolReference(existingBuyerOrder?.orderTxid);
+      const cachedSellerGlobalMetaId = normalizeText(existingBuyerOrder?.sellerGlobalMetaId);
+      const deliveryMatchesCachedOrder = Boolean(
+        existingBuyerOrder
+        && normalizeText(existingBuyerOrder.productOrderPinId) === productDelivery.productOrderPinId
+        && normalizeText(existingBuyerOrder.listingPinId) === productDelivery.listingPinId
+        && normalizeText(existingBuyerOrder.skuId) === productDelivery.skuId
+        && normalizeText(existingBuyerOrder.paymentTxid) === productDelivery.paymentTxid
+        && (!cachedOrderTxid || !orderTxidFromDelivery || cachedOrderTxid === orderTxidFromDelivery)
+        && (!cachedSellerGlobalMetaId || cachedSellerGlobalMetaId === normalizeText(inputMessage.fromGlobalMetaId))
+      );
+      if (!deliveryMatchesCachedOrder || !existingBuyerOrder) {
+        return commandSuccess({
+          handled: false,
+          rated: false,
+          protocol: 'product-order',
+        });
+      }
+      const runtimeState = await runtimeStateStore.readState();
+      const orderTxid = orderTxidFromDelivery
+        || cachedOrderTxid
         || null;
       await productStateStore.upsertBuyerOrder({
         productOrderPinId: productDelivery.productOrderPinId,
@@ -9322,12 +9344,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
         skuId: productDelivery.skuId,
         paymentTxid: productDelivery.paymentTxid,
         orderTxid,
-        sellerGlobalMetaId: normalizeText(existingBuyerOrder?.sellerGlobalMetaId) || inputMessage.fromGlobalMetaId,
-        buyerGlobalMetaId: normalizeText(existingBuyerOrder?.buyerGlobalMetaId)
+        sellerGlobalMetaId: cachedSellerGlobalMetaId || inputMessage.fromGlobalMetaId,
+        buyerGlobalMetaId: normalizeText(existingBuyerOrder.buyerGlobalMetaId)
           || normalizeText(runtimeState.identity?.globalMetaId)
           || null,
-        traceId: normalizeText(existingBuyerOrder?.traceId) || null,
-        sessionId: normalizeText(existingBuyerOrder?.sessionId) || null,
+        traceId: normalizeText(existingBuyerOrder.traceId) || null,
+        sessionId: normalizeText(existingBuyerOrder.sessionId) || null,
         deliverySummary: {
           result: productDelivery.result,
           deliveryPinId: normalizeText(inputMessage.messagePinId) || null,

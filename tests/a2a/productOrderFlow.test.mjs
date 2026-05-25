@@ -28,6 +28,7 @@ const {
 
 const ALICE_GLOBAL_META_ID = 'idq1aliceproduct000000000000000000000';
 const BOB_GLOBAL_META_ID = 'idq1bobproduct00000000000000000000000';
+const MALLORY_GLOBAL_META_ID = 'idq1malloryproduct000000000000000000';
 const ORDER_TXID = 'b'.repeat(64);
 const PRODUCT_ORDER_PIN_ID = 'product-order-pin-1';
 const LISTING_PIN_ID = 'listing-pin-1';
@@ -65,14 +66,52 @@ function productOrderContent() {
 }
 
 function productDeliveryContent() {
+  return buildProductDeliveryContent();
+}
+
+function buildProductDeliveryContent(overrides = {}, orderTxid = ORDER_TXID) {
   return buildDeliveryMessage({
-    productOrderPinId: PRODUCT_ORDER_PIN_ID,
-    listingPinId: LISTING_PIN_ID,
-    skuId: SKU_ID,
-    paymentTxid: PAYMENT_TXID,
+    productOrderPinId: overrides.productOrderPinId ?? PRODUCT_ORDER_PIN_ID,
+    listingPinId: overrides.listingPinId ?? LISTING_PIN_ID,
+    skuId: overrides.skuId ?? SKU_ID,
+    paymentTxid: overrides.paymentTxid ?? PAYMENT_TXID,
     result: 'Top-up card: XXXX-XXXX',
     deliveredAt: BASE_TIME + 500,
-  }, ORDER_TXID);
+  }, orderTxid);
+}
+
+async function createBobDeliveryHandlerFixture() {
+  const bob = await createProfileFixture('Bob', 'bob', BOB_GLOBAL_META_ID);
+  const productStateStore = createProductStateStore(bob.homeDir);
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: bob.homeDir,
+    systemHomeDir: bob.systemHomeDir,
+    getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
+  });
+  return { bob, productStateStore, handlers };
+}
+
+async function seedBuyerOrder(productStateStore, overrides = {}) {
+  return productStateStore.upsertBuyerOrder({
+    productOrderPinId: overrides.productOrderPinId ?? PRODUCT_ORDER_PIN_ID,
+    listingPinId: overrides.listingPinId ?? LISTING_PIN_ID,
+    skuId: overrides.skuId ?? SKU_ID,
+    paymentTxid: overrides.paymentTxid ?? PAYMENT_TXID,
+    orderTxid: overrides.orderTxid ?? ORDER_TXID,
+    sellerGlobalMetaId: overrides.sellerGlobalMetaId ?? ALICE_GLOBAL_META_ID,
+    buyerGlobalMetaId: overrides.buyerGlobalMetaId ?? BOB_GLOBAL_META_ID,
+    state: overrides.state ?? 'notified',
+    localUpdatedAt: overrides.localUpdatedAt ?? BASE_TIME,
+  });
+}
+
+async function handleProductDelivery(handlers, overrides = {}) {
+  return handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: overrides.fromGlobalMetaId ?? ALICE_GLOBAL_META_ID,
+    content: overrides.content ?? productDeliveryContent(),
+    messagePinId: overrides.messagePinId ?? 'delivery-pin-1',
+    timestamp: overrides.timestamp ?? BASE_TIME + 600,
+  });
 }
 
 test('A2A dispatcher routes product orders to order handling before generic private chat', async () => {
@@ -101,17 +140,7 @@ test('A2A dispatcher routes product orders to order handling before generic priv
 test('buyer receives product delivery into cache, A2A transcript, and trace projection', async () => {
   const bob = await createProfileFixture('Bob', 'bob', BOB_GLOBAL_META_ID);
   const productStateStore = createProductStateStore(bob.homeDir);
-  await productStateStore.upsertBuyerOrder({
-    productOrderPinId: PRODUCT_ORDER_PIN_ID,
-    listingPinId: LISTING_PIN_ID,
-    skuId: SKU_ID,
-    paymentTxid: PAYMENT_TXID,
-    orderTxid: ORDER_TXID,
-    sellerGlobalMetaId: ALICE_GLOBAL_META_ID,
-    buyerGlobalMetaId: BOB_GLOBAL_META_ID,
-    state: 'notified',
-    localUpdatedAt: BASE_TIME,
-  });
+  await seedBuyerOrder(productStateStore);
 
   await persistA2AConversationMessage({
     homeDir: bob.homeDir,
@@ -217,4 +246,69 @@ test('buyer receives product delivery into cache, A2A transcript, and trace proj
   assert.equal(delivery.metadata.skuId, SKU_ID);
   assert.equal(delivery.metadata.paymentTxid, PAYMENT_TXID);
   assert.equal(delivery.metadata.deliveredAt, BASE_TIME + 500);
+});
+
+test('buyer product delivery is ignored when no cached buyer order exists', async () => {
+  const { productStateStore, handlers } = await createBobDeliveryHandlerFixture();
+
+  const handled = await handleProductDelivery(handlers);
+  const productState = await productStateStore.readState();
+
+  assert.equal(handled.ok, true);
+  assert.equal(handled.data.handled, false);
+  assert.equal(productState.buyerOrders.length, 0);
+});
+
+test('buyer product delivery is ignored when sender is not the cached seller', async () => {
+  const { productStateStore, handlers } = await createBobDeliveryHandlerFixture();
+  await seedBuyerOrder(productStateStore);
+
+  const handled = await handleProductDelivery(handlers, {
+    fromGlobalMetaId: MALLORY_GLOBAL_META_ID,
+  });
+  const productState = await productStateStore.readState();
+  const [buyerOrder] = productState.buyerOrders;
+
+  assert.equal(handled.ok, true);
+  assert.equal(handled.data.handled, false);
+  assert.equal(buyerOrder.state, 'notified');
+  assert.equal(buyerOrder.deliverySummary, null);
+});
+
+test('buyer product delivery is ignored when only a seller-side order matches', async () => {
+  const { productStateStore, handlers } = await createBobDeliveryHandlerFixture();
+  await productStateStore.upsertSellerOrder({
+    productOrderPinId: PRODUCT_ORDER_PIN_ID,
+    listingPinId: LISTING_PIN_ID,
+    skuId: SKU_ID,
+    paymentTxid: PAYMENT_TXID,
+    orderTxid: ORDER_TXID,
+    buyerGlobalMetaId: BOB_GLOBAL_META_ID,
+    state: 'fulfilling',
+    localUpdatedAt: BASE_TIME,
+  });
+
+  const handled = await handleProductDelivery(handlers);
+  const productState = await productStateStore.readState();
+
+  assert.equal(handled.ok, true);
+  assert.equal(handled.data.handled, false);
+  assert.equal(productState.buyerOrders.length, 0);
+  assert.equal(productState.sellerOrders[0].state, 'fulfilling');
+});
+
+test('buyer product delivery is ignored when delivery metadata does not match cached buyer order', async () => {
+  const { productStateStore, handlers } = await createBobDeliveryHandlerFixture();
+  await seedBuyerOrder(productStateStore);
+
+  const handled = await handleProductDelivery(handlers, {
+    content: buildProductDeliveryContent({ listingPinId: 'listing-pin-other' }),
+  });
+  const productState = await productStateStore.readState();
+  const [buyerOrder] = productState.buyerOrders;
+
+  assert.equal(handled.ok, true);
+  assert.equal(handled.data.handled, false);
+  assert.equal(buyerOrder.state, 'notified');
+  assert.equal(buyerOrder.deliverySummary, null);
 });

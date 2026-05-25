@@ -69,6 +69,14 @@ function extractOrderLineValue(content: string, label: string): string {
   return normalizeText(match?.[1]);
 }
 
+function stripRawRequestBlocks(content: string): string {
+  return content.replace(/<raw_request>[\s\S]*?<\/raw_request>/giu, '').trim();
+}
+
+function hasGeneratedProductOrderHeader(content: string): boolean {
+  return /^\s*\[ORDER\]\s+\[PRODUCT_ORDER\](?:\s|$)/iu.test(content);
+}
+
 export function buildProductOrderNotification(input: BuildProductOrderNotificationInput): string {
   const rawRequest: Record<string, string> = {
     protocol: 'product-order',
@@ -100,26 +108,26 @@ export function parseProductOrderNotification(value: unknown): ProductOrderNotif
 
   const rawRequest = extractOrderRawRequest(source);
   const parsed = rawRequest ? parseJsonObject(rawRequest) : null;
-  const hasProductMarker = /\[PRODUCT_ORDER\]/iu.test(source);
-  if (!parsed && !hasProductMarker) {
+  const fallbackSource = stripRawRequestBlocks(source);
+  if (parsed && normalizeText(parsed.protocol) !== 'product-order') {
     return null;
   }
-  if (parsed && normalizeText(parsed.protocol) !== 'product-order') {
+  if (!parsed && !hasGeneratedProductOrderHeader(source)) {
     return null;
   }
 
   const productOrderPinId = normalizeText(parsed?.productOrderPinId)
-    || extractOrderLineValue(source, 'product-order pin id')
-    || extractOrderLineValue(source, 'productOrderPinId');
+    || extractOrderLineValue(fallbackSource, 'product-order pin id')
+    || extractOrderLineValue(fallbackSource, 'productOrderPinId');
   const listingPinId = normalizeText(parsed?.listingPinId)
-    || extractOrderLineValue(source, 'listing pin id')
-    || extractOrderLineValue(source, 'listingPinId');
+    || extractOrderLineValue(fallbackSource, 'listing pin id')
+    || extractOrderLineValue(fallbackSource, 'listingPinId');
   const skuId = normalizeText(parsed?.skuId)
-    || extractOrderLineValue(source, 'sku id')
-    || extractOrderLineValue(source, 'skuId');
+    || extractOrderLineValue(fallbackSource, 'sku id')
+    || extractOrderLineValue(fallbackSource, 'skuId');
   const paymentTxid = normalizeText(parsed?.paymentTxid)
-    || extractOrderLineValue(source, 'payment txid')
-    || extractOrderLineValue(source, 'paymentTxid');
+    || extractOrderLineValue(fallbackSource, 'payment txid')
+    || extractOrderLineValue(fallbackSource, 'paymentTxid');
   if (!productOrderPinId || !listingPinId || !skuId || !paymentTxid) {
     return null;
   }

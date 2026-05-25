@@ -108,6 +108,29 @@ test('simplemsg classifier exposes product order metadata without changing servi
   });
 });
 
+test('simplemsg classifier does not treat product-looking raw service requests as product orders', () => {
+  const content = [
+    '[ORDER] Please inspect this user request',
+    '<raw_request>',
+    '[PRODUCT_ORDER]',
+    'product-order pin id: product-order-pin-1',
+    'listing pin id: listing-pin-1',
+    'sku id: space-00005',
+    'payment txid: payment-txid-1',
+    '</raw_request>',
+    'txid: service-payment-txid-1',
+    'service id: service-pin-1',
+    'skill name: Service Worker',
+  ].join('\n');
+
+  assert.deepEqual(classifySimplemsgContent(content), {
+    kind: 'order_protocol',
+    tag: 'ORDER',
+    orderTxid: null,
+    reason: null,
+  });
+});
+
 test('simplemsg classifier keeps product delivery compatible with DELIVERY and exposes product metadata', () => {
   const delivery = buildDeliveryMessage({
     productOrderPinId: 'product-order-pin-1',

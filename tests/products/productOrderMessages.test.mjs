@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const {
   buildProductOrderNotification,
   parseProductDeliveryMessage,
+  parseProductOrderNotification,
 } = require('../../dist/core/products/productOrderMessages.js');
 const { buildDeliveryMessage } = require('../../dist/core/a2a/protocol/orderProtocol.js');
 const { extractOrderRawRequest } = require('../../dist/core/orders/orderMessage.js');
@@ -35,6 +36,44 @@ test('buildProductOrderNotification includes scoped ORDER metadata and traceable
     skuId: 'space-00005',
     paymentTxid: 'payment-txid-1',
     comment: 'Please deliver to my default account.',
+  });
+});
+
+test('parseProductOrderNotification ignores service orders that mention product markers inside raw request', () => {
+  const serviceOrder = [
+    '[ORDER] Please inspect this user request',
+    '<raw_request>',
+    '[PRODUCT_ORDER]',
+    'product-order pin id: product-order-pin-1',
+    'listing pin id: listing-pin-1',
+    'sku id: space-00005',
+    'payment txid: payment-txid-1',
+    '</raw_request>',
+    'txid: service-payment-txid-1',
+    'service id: service-pin-1',
+    'skill name: Service Worker',
+  ].join('\n');
+
+  assert.equal(parseProductOrderNotification(serviceOrder), null);
+});
+
+test('parseProductOrderNotification accepts generated header fallback only with metadata outside raw request', () => {
+  const productOrder = [
+    '[ORDER] [PRODUCT_ORDER] space-00005 for listing listing-pin-1',
+    '<raw_request>',
+    'non-json legacy body',
+    '</raw_request>',
+    'product-order pin id: product-order-pin-1',
+    'listing pin id: listing-pin-1',
+    'sku id: space-00005',
+    'payment txid: payment-txid-1',
+  ].join('\n');
+
+  assert.deepEqual(parseProductOrderNotification(productOrder), {
+    productOrderPinId: 'product-order-pin-1',
+    listingPinId: 'listing-pin-1',
+    skuId: 'space-00005',
+    paymentTxid: 'payment-txid-1',
   });
 });
 
