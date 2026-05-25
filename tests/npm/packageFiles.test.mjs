@@ -25,6 +25,8 @@ const EXPECTED_NPM_SKILLS = [
 const NON_DISTRIBUTED_SKILLS = [
   'new-api-vendor-skill',
 ];
+const OFFICIAL_SKILL_PREFIX = 'metabot-';
+const PACKAGE_SKILL_FILE_PATTERN = /^SKILLs\/([^/]+)\/SKILL\.md$/;
 
 async function readPackDryRun() {
   const { stdout } = await execFile('npm', ['pack', '--dry-run', '--json'], {
@@ -57,6 +59,18 @@ function assertExcludesSegment(paths, segment) {
   }
 }
 
+function extractPackagedSkillName(filePath) {
+  return filePath.match(PACKAGE_SKILL_FILE_PATTERN)?.[1] ?? null;
+}
+
+function assertOfficialSkillName(skillName, source) {
+  assert.equal(
+    skillName.startsWith(OFFICIAL_SKILL_PREFIX),
+    true,
+    `expected ${source} skill ${skillName} to use the ${OFFICIAL_SKILL_PREFIX} prefix`,
+  );
+}
+
 test('npm package includes runtime install inputs and excludes generated/development-only artifacts', async () => {
   const packageJson = JSON.parse(await readFile(path.join(REPO_ROOT, 'package.json'), 'utf8'));
   assert.equal(
@@ -64,6 +78,12 @@ test('npm package includes runtime install inputs and excludes generated/develop
     false,
     'npm package should use an explicit skill allowlist',
   );
+  for (const filePath of packageJson.files) {
+    const skillName = extractPackagedSkillName(filePath);
+    if (skillName) {
+      assertOfficialSkillName(skillName, 'package.json files');
+    }
+  }
 
   for (const skillName of EXPECTED_NPM_SKILLS) {
     assert.equal(
@@ -75,6 +95,12 @@ test('npm package includes runtime install inputs and excludes generated/develop
 
   const pack = await readPackDryRun();
   const paths = pathsFromPack(pack);
+  for (const filePath of paths) {
+    const skillName = extractPackagedSkillName(filePath);
+    if (skillName) {
+      assertOfficialSkillName(skillName, 'npm pack');
+    }
+  }
 
   assertIncludes(paths, 'dist/cli/main.js');
   assertIncludes(paths, 'dist/oac/main.js');
