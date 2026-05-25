@@ -152,6 +152,46 @@ test('runCli dispatches `metabot products buy --from --request-file` with purcha
   assert.deepEqual(calls, [{ from: 'bob', ...request }]);
 });
 
+test('runCli prints confirmed product buy execution fields from the handler envelope', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-products-buy-confirmed-'));
+  const requestFile = path.join(tempDir, 'request.json');
+  await writeFile(requestFile, JSON.stringify({
+    listingPinId: 'listing-space-card',
+    skuId: 'space-00005',
+    confirmed: true,
+  }), 'utf8');
+
+  const stdout = [];
+  const exitCode = await runCli([
+    'products',
+    'buy',
+    '--request-file',
+    requestFile,
+  ], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      products: {
+        buy: async () => commandSuccess({
+          traceId: 'trace-product-order-1',
+          productOrderPinId: 'product-order-pin-1',
+          paymentTxid: 'payment-txid-1',
+          orderTxid: 'simplemsg-order-txid-1',
+          localUiUrl: 'http://127.0.0.1:25200/ui/trace?traceId=trace-product-order-1',
+        }),
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  const envelope = JSON.parse(stdout.join('').trim());
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.data.productOrderPinId, 'product-order-pin-1');
+  assert.equal(envelope.data.paymentTxid, 'payment-txid-1');
+  assert.equal(envelope.data.orderTxid, 'simplemsg-order-txid-1');
+  assert.equal(envelope.data.localUiUrl, 'http://127.0.0.1:25200/ui/trace?traceId=trace-product-order-1');
+});
+
 test('runCli fails `metabot products publish` when --payload-file is missing', async () => {
   const stdout = [];
   const calls = [];

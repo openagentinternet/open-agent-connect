@@ -40,6 +40,8 @@ export interface ProductDirectoryCacheRecord {
   payload: ProductListingPayload;
   sellerGlobalMetaId: string | null;
   sellerName: string | null;
+  sellerMvcAddress: string | null;
+  sellerChatPublicKey: string | null;
   online: boolean;
   cachedAt: number;
 }
@@ -58,6 +60,9 @@ export interface ProductBuyerOrderRecord {
   paymentTxid: string | null;
   orderTxid: string | null;
   sellerGlobalMetaId: string | null;
+  buyerGlobalMetaId: string | null;
+  traceId: string | null;
+  sessionId: string | null;
   deliverySummary: ProductDeliverySummary | null;
   state: ProductOrderState;
   localUpdatedAt: number;
@@ -121,6 +126,8 @@ export interface UpsertDirectoryItemInput {
   payload: ProductListingPayload;
   sellerGlobalMetaId?: string | null;
   sellerName?: string | null;
+  sellerMvcAddress?: string | null;
+  sellerChatPublicKey?: string | null;
   online?: boolean;
   cachedAt?: number;
 }
@@ -132,6 +139,9 @@ export interface UpsertBuyerOrderInput {
   paymentTxid?: string | null;
   orderTxid?: string | null;
   sellerGlobalMetaId?: string | null;
+  buyerGlobalMetaId?: string | null;
+  traceId?: string | null;
+  sessionId?: string | null;
   deliverySummary?: ProductDeliverySummary | null;
   state?: ProductOrderState;
   localUpdatedAt?: number;
@@ -259,6 +269,8 @@ function normalizeDirectoryItem(value: unknown): ProductDirectoryCacheRecord | n
     payload,
     sellerGlobalMetaId: normalizeNullableText(source.sellerGlobalMetaId),
     sellerName: normalizeNullableText(source.sellerName),
+    sellerMvcAddress: normalizeNullableText(source.sellerMvcAddress),
+    sellerChatPublicKey: normalizeNullableText(source.sellerChatPublicKey),
     online: source.online === true,
     cachedAt: normalizeNumber(source.cachedAt, 0),
   };
@@ -297,6 +309,9 @@ function normalizeBuyerOrder(value: unknown): ProductBuyerOrderRecord | null {
     paymentTxid: normalizeNullableText(source.paymentTxid),
     orderTxid: normalizeNullableText(source.orderTxid),
     sellerGlobalMetaId: normalizeNullableText(source.sellerGlobalMetaId),
+    buyerGlobalMetaId: normalizeNullableText(source.buyerGlobalMetaId),
+    traceId: normalizeNullableText(source.traceId),
+    sessionId: normalizeNullableText(source.sessionId),
     deliverySummary: normalizeDeliverySummary(source.deliverySummary),
     state: source.state || 'created',
     localUpdatedAt: normalizeNumber(source.localUpdatedAt, 0),
@@ -577,6 +592,8 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
         payload,
         sellerGlobalMetaId: normalizeNullableText(input.sellerGlobalMetaId),
         sellerName: normalizeNullableText(input.sellerName),
+        sellerMvcAddress: normalizeNullableText(input.sellerMvcAddress),
+        sellerChatPublicKey: normalizeNullableText(input.sellerChatPublicKey),
         online: input.online === true,
         cachedAt: input.cachedAt ?? Date.now(),
       };
@@ -601,6 +618,9 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
         paymentTxid: normalizeNullableText(input.paymentTxid),
         orderTxid: normalizeNullableText(input.orderTxid),
         sellerGlobalMetaId: normalizeNullableText(input.sellerGlobalMetaId),
+        buyerGlobalMetaId: normalizeNullableText(input.buyerGlobalMetaId),
+        traceId: normalizeNullableText(input.traceId),
+        sessionId: normalizeNullableText(input.sessionId),
         deliverySummary: normalizeDeliverySummary(input.deliverySummary),
         state: input.state || 'created',
         localUpdatedAt: input.localUpdatedAt ?? Date.now(),

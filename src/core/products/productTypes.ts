@@ -96,6 +96,9 @@ export interface ProductBuyerOrder {
   paymentTxid?: string;
   orderTxid?: string;
   sellerMetaId?: string;
+  buyerMetaId?: string;
+  traceId?: string;
+  sessionId?: string;
   deliverySummary?: string;
   failureReason?: string;
   createdAt: string;

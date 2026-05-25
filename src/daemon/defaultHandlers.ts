@@ -80,8 +80,15 @@ import {
 } from '../core/services/myServices';
 import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
 import { validateServicePublishProviderSkill } from '../core/services/servicePublishValidation';
-import { publishProductListingToChain } from '../core/products/productPublishChain';
-import { listProductDirectory } from '../core/products/productDirectory';
+import {
+  executeProductPurchase,
+  publishProductListingToChain,
+  publishProductOrderToChain,
+  type ProductPaymentExecutor,
+  type ProductOrderPublisher,
+  type ProductSimplemsgSender,
+} from '../core/products/productPublishChain';
+import { listProductDirectory, type ProductDirectoryProduct } from '../core/products/productDirectory';
 import { planProductPurchase } from '../core/products/productPurchasePlanner';
 import { createProductStateStore, type OwnedProductListingRecord } from '../core/products/productStateStore';
 import { validateProductListingPayload } from '../core/products/productValidation';
@@ -5221,6 +5228,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
   callerReplyWaiter?: MetaWebServiceReplyWaiter;
   masterReplyWaiter?: MetaWebMasterReplyWaiter;
   servicePaymentExecutor?: ServicePaymentExecutor;
+  productPaymentExecutor?: ProductPaymentExecutor;
+  productOrderPublisher?: ProductOrderPublisher;
+  productSimplemsgSender?: ProductSimplemsgSender;
   ratingFollowupRetryDelaysMs?: number[];
   a2aConversationPersister?: A2AConversationMessagePersister;
   buyerRatingReplyRunner?: ChatReplyRunner;
@@ -5338,6 +5348,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
     secretStore,
     adapters: adapters ?? new Map(),
   });
+  const productPaymentExecutor: ProductPaymentExecutor = input.productPaymentExecutor ?? {
+    async execute(paymentInput) {
+      return servicePaymentExecutor.execute({
+        servicePinId: paymentInput.listingPinId,
+        providerGlobalMetaId: paymentInput.sellerGlobalMetaId,
+        paymentAddress: paymentInput.toAddress,
+        amount: paymentInput.amount,
+        currency: paymentInput.currency,
+        paymentChain: paymentInput.paymentChain,
+        settlementKind: paymentInput.settlementKind,
+      });
+    },
+  };
   async function executeSellerRefundTransfer(inputRefund: RefundTransferInput) {
     const chain = normalizeText(inputRefund.paymentChain).toLowerCase();
     const adapter = adapters.get(chain as Parameters<typeof adapters.get>[0]);
@@ -10375,6 +10398,52 @@ export function createDefaultMetabotDaemonHandlers(input: {
     };
   }
 
+  function buildProductOrderTraceId(inputTrace: {
+    sellerGlobalMetaId?: string | null;
+    listingPinId?: string | null;
+  }): string {
+    const sellerPart = sanitizeServiceSegment(normalizeText(inputTrace.sellerGlobalMetaId).slice(0, 16)) || 'seller';
+    const listingPart = sanitizeServiceSegment(normalizeText(inputTrace.listingPinId).slice(0, 16)) || 'listing';
+    const suffix = createHash('sha256')
+      .update(`${Date.now()}:${Math.random()}:${sellerPart}:${listingPart}`)
+      .digest('hex')
+      .slice(0, 8);
+    return `trace-product-${sellerPart}-${listingPart}-${suffix}`;
+  }
+
+  async function resolveProductSellerIdentity(product: ProductDirectoryProduct) {
+    const sellerGlobalMetaId = normalizeText(product.sellerGlobalMetaId);
+    let profile: IdentityProfileRecord | null = null;
+    if (sellerGlobalMetaId) {
+      const profiles = await listIdentityProfiles(normalizedSystemHomeDir);
+      profile = profiles.find((entry: IdentityProfileRecord) => normalizeText(entry.globalMetaId) === sellerGlobalMetaId) ?? null;
+    }
+
+    let runtimeIdentity: RuntimeIdentityRecord | null = null;
+    if (profile) {
+      try {
+        runtimeIdentity = (await createRuntimeStateStore(profile.homeDir).readState()).identity;
+      } catch {
+        runtimeIdentity = null;
+      }
+    }
+
+    const mvcAddress = normalizeText(product.sellerMvcAddress)
+      || normalizeText(runtimeIdentity?.addresses?.mvc)
+      || normalizeText(runtimeIdentity?.mvcAddress)
+      || normalizeText(profile?.mvcAddress);
+    return {
+      globalMetaId: sellerGlobalMetaId || normalizeText(runtimeIdentity?.globalMetaId) || normalizeText(profile?.globalMetaId),
+      name: normalizeText(product.sellerName) || normalizeText(runtimeIdentity?.name) || normalizeText(profile?.name),
+      mvcAddress,
+      addresses: {
+        mvc: mvcAddress,
+        btc: normalizeText(runtimeIdentity?.addresses?.btc),
+      },
+      chatPublicKey: normalizeText(product.sellerChatPublicKey) || normalizeText(runtimeIdentity?.chatPublicKey),
+    };
+  }
+
   async function listProductProfileRecords(): Promise<Array<{
     slug: string;
     name: string;
@@ -12669,8 +12738,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           );
         }
 
+        const purchaseRequest = readProductPurchaseRequest(rawInput);
         const plan = planProductPurchase({
-          request: readProductPurchaseRequest(rawInput),
+          request: purchaseRequest,
           products: directory.products,
         });
 
@@ -12692,16 +12762,122 @@ export function createDefaultMetabotDaemonHandlers(input: {
           });
         }
 
+        if (purchaseRequest.confirmed !== true) {
+          return commandSuccess({
+            product: plan.product,
+            sku: plan.sku,
+            seller: plan.seller,
+            payment: plan.payment,
+            confirmation: {
+              requiresConfirmation: plan.confirmation.requiresConfirmation,
+              policyMode: plan.confirmation.policyMode,
+            },
+            readyForPayment: true,
+          });
+        }
+
+        const selectedProduct = directory.products.find((product) => (
+          normalizeText(product.listingPinId) === normalizeText(plan.product.listingPinId)
+        ));
+        const traceId = buildProductOrderTraceId({
+          sellerGlobalMetaId: plan.seller.globalMetaId,
+          listingPinId: plan.product.listingPinId,
+        });
+        const sessionId = `session-${traceId}`;
+        const localUiUrl = buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
+          traceId,
+          sessionId,
+        });
+        const productOrderPublisher: ProductOrderPublisher = input.productOrderPublisher ?? {
+          async publish(orderInput) {
+            return publishProductOrderToChain({
+              signer: actor.signer,
+              payload: orderInput.payload,
+              network: orderInput.network,
+            });
+          },
+        };
+        const productSimplemsgSender: ProductSimplemsgSender = input.productSimplemsgSender ?? {
+          async send(messageInput) {
+            if (!selectedProduct) {
+              throw new Error('product_not_found: Product listing was not found for simplemsg dispatch.');
+            }
+            const privateChatIdentity = await actor.signer.getPrivateChatIdentity();
+            const sellerIdentity = await resolveProductSellerIdentity(selectedProduct);
+            let peerChatPublicKey = normalizeText(sellerIdentity.chatPublicKey);
+            if (!peerChatPublicKey && normalizeText(messageInput.toGlobalMetaId) === normalizeText(actor.state.identity!.globalMetaId)) {
+              peerChatPublicKey = normalizeText(actor.state.identity!.chatPublicKey);
+            }
+            if (!peerChatPublicKey) {
+              peerChatPublicKey = await resolvePeerChatPublicKey(messageInput.toGlobalMetaId) ?? '';
+            }
+            if (!peerChatPublicKey) {
+              throw new Error('peer_chat_public_key_missing: Remote product seller has no published chat public key on chain.');
+            }
+            const outbound = sendPrivateChat({
+              fromIdentity: {
+                globalMetaId: privateChatIdentity.globalMetaId,
+                privateKeyHex: privateChatIdentity.privateKeyHex,
+              },
+              toGlobalMetaId: messageInput.toGlobalMetaId,
+              peerChatPublicKey,
+              content: messageInput.content,
+            });
+            const write = await writePinRetryingMempoolConflict({
+              signer: actor.signer,
+              retryDelaysMs: DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS,
+              request: {
+                operation: 'create',
+                path: outbound.path,
+                encryption: outbound.encryption,
+                version: outbound.version,
+                contentType: outbound.contentType,
+                payload: outbound.payload,
+                encoding: 'utf-8',
+                network: 'mvc',
+              },
+            });
+            const txids = Array.isArray(write.txids)
+              ? write.txids.map((entry) => normalizeText(entry)).filter(Boolean)
+              : [];
+            return {
+              orderTxid: normalizeOrderProtocolReference(txids[0])
+                || normalizeOrderProtocolReference(write.pinId)
+                || txids[0]
+                || normalizeText(write.pinId),
+              txids,
+              pinId: write.pinId,
+            };
+          },
+        };
+
+        const execution = await executeProductPurchase({
+          request: purchaseRequest,
+          products: directory.products,
+          buyerIdentity: {
+            globalMetaId: actor.state.identity!.globalMetaId,
+            name: actor.state.identity!.name,
+          },
+          resolveSellerIdentity: async ({ product }) => resolveProductSellerIdentity(product),
+          paymentExecutor: productPaymentExecutor,
+          productOrderPublisher,
+          simplemsgSender: productSimplemsgSender,
+          productStateStore,
+          traceId,
+          sessionId,
+          localUiUrl,
+        });
+
+        if (!execution.ok) {
+          return commandFailed(execution.code, execution.message, execution.data ? { data: execution.data } : undefined);
+        }
+
         return commandSuccess({
-          product: plan.product,
-          sku: plan.sku,
-          seller: plan.seller,
-          payment: plan.payment,
           confirmation: {
             requiresConfirmation: plan.confirmation.requiresConfirmation,
             policyMode: plan.confirmation.policyMode,
           },
-          readyForPayment: true,
+          ...execution.data,
         });
       },
       listOwned: async (request) => {

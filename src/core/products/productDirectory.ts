@@ -28,6 +28,8 @@ export interface ProductDirectoryProduct {
   payload: ProductListingPayload;
   sellerGlobalMetaId: string | null;
   sellerName: string | null;
+  sellerMvcAddress?: string | null;
+  sellerChatPublicKey?: string | null;
   online: boolean;
   lastSeenAt?: number | null;
   lastSeenAgoSeconds?: number | null;
@@ -65,6 +67,8 @@ interface ChainProductRow {
   payload: ProductListingPayload;
   sellerGlobalMetaId: string | null;
   sellerName: string | null;
+  sellerMvcAddress: string | null;
+  sellerChatPublicKey: string | null;
   updatedAt: number;
 }
 
@@ -146,6 +150,21 @@ function parseChainProductRow(row: Record<string, unknown>): ChainProductRow | n
           ? (row.userInfo as Record<string, unknown>).name
           : undefined)
     ),
+    sellerMvcAddress: normalizeNullableText(
+      row.createAddress
+        ?? row.creatorAddress
+        ?? row.ownerAddress
+        ?? row.address
+        ?? row.mvcAddress
+    ),
+    sellerChatPublicKey: normalizeNullableText(
+      row.chatPublicKey
+        ?? row.chatpubkey
+        ?? row.chat_public_key
+        ?? (row.userInfo && typeof row.userInfo === 'object'
+          ? (row.userInfo as Record<string, unknown>).chatPublicKey
+          : undefined)
+    ),
     updatedAt: normalizeTimestampMs(row.timestamp ?? row.updatedAt ?? row.createdAt) || Date.now(),
   };
 }
@@ -205,6 +224,8 @@ function fromCacheRecord(record: ProductDirectoryCacheRecord): ProductDirectoryP
     payload: record.payload,
     sellerGlobalMetaId: record.sellerGlobalMetaId,
     sellerName: record.sellerName,
+    sellerMvcAddress: record.sellerMvcAddress,
+    sellerChatPublicKey: record.sellerChatPublicKey,
     online: record.online,
     cachedAt: record.cachedAt,
   };
@@ -222,6 +243,8 @@ function fromChainRow(row: ChainProductRow): ProductDirectoryProduct {
     payload: row.payload,
     sellerGlobalMetaId: row.sellerGlobalMetaId,
     sellerName: row.sellerName,
+    sellerMvcAddress: row.sellerMvcAddress,
+    sellerChatPublicKey: row.sellerChatPublicKey,
     online: false,
     updatedAt: row.updatedAt,
   };
@@ -362,6 +385,8 @@ export async function listProductDirectory(
           payload: product.payload,
           sellerGlobalMetaId: product.sellerGlobalMetaId,
           sellerName: product.sellerName,
+          sellerMvcAddress: product.sellerMvcAddress,
+          sellerChatPublicKey: product.sellerChatPublicKey,
           online: product.online,
           cachedAt: Date.now(),
         }));
