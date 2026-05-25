@@ -15,6 +15,7 @@ const {
 } = require('../../dist/core/products/productFulfillment.js');
 
 const ORDER_TXID = '1'.repeat(64);
+const REPLAY_ORDER_TXID = '2'.repeat(64);
 const PAYMENT_TXID = 'a'.repeat(64);
 const PRODUCT_ORDER_PIN_ID = 'product-order-pin-1';
 const LISTING_PIN_ID = 'listing-pin-1';
@@ -132,9 +133,7 @@ function createFakeProductStateStore(seed = {}) {
     },
     async claimSellerOrderFulfillment(input) {
       const existing = state.orders.get(input.productOrderPinId);
-      const matches = existing &&
-        existing.orderTxid === input.orderTxid &&
-        existing.paymentTxid === input.paymentTxid;
+      const matches = existing && existing.paymentTxid === input.paymentTxid;
       if (
         matches &&
         existing.state === 'delivered' &&
@@ -155,6 +154,7 @@ function createFakeProductStateStore(seed = {}) {
         deliverySummary: null,
         failureReason: null,
         state: 'fulfilling',
+        orderTxid: existing?.orderTxid ?? input.orderTxid,
       };
       state.orders.set(input.productOrderPinId, record);
       state.upsertedSellerOrders.push(record);
@@ -646,6 +646,7 @@ test('fulfillProductOrderForSeller returns duplicate success for already deliver
     store: {
       orders: [
         cachedSellerOrder({
+          orderTxid: ORDER_TXID,
           state: 'delivered',
           fulfillmentState: 'delivered',
           paymentVerified: true,
@@ -660,19 +661,21 @@ test('fulfillProductOrderForSeller returns duplicate success for already deliver
       listings: [cachedOwnedListing()],
     },
   });
+  harness.input.orderTxid = REPLAY_ORDER_TXID;
 
   const result = await fulfillProductOrderForSeller(harness.input);
 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.data.deliveryPinId, 'existing-delivery-pin');
   assert.equal(result.data.result, 'Card code: EXISTING-123456');
+  assert.equal(result.data.orderTxid, ORDER_TXID);
   assert.equal(result.data.ratingMessagePinId, null);
   assert.deepEqual(harness.paymentVerifierCalls, []);
   assert.deepEqual(harness.runnerCalls, []);
   assert.deepEqual(harness.sent, []);
 });
 
-test('fulfillProductOrderForSeller serializes concurrent duplicate fulfillment through seller order claim', async () => {
+test('fulfillProductOrderForSeller serializes concurrent replay fulfillment through seller order claim', async () => {
   const store = createProductStateStore(await createTempProfileRoot());
   await store.upsertOwnedListing({
     listingPinId: LISTING_PIN_ID,
@@ -735,13 +738,18 @@ test('fulfillProductOrderForSeller serializes concurrent duplicate fulfillment t
 
   const results = await Promise.all([
     fulfillProductOrderForSeller(input),
-    fulfillProductOrderForSeller(input),
+    fulfillProductOrderForSeller({
+      ...input,
+      orderTxid: REPLAY_ORDER_TXID,
+    }),
   ]);
 
   assert.equal(results[0].ok, true, JSON.stringify(results[0]));
   assert.equal(results[1].ok, true, JSON.stringify(results[1]));
   assert.equal(results[0].data.deliveryPinId, 'delivery-pin-concurrent');
   assert.equal(results[1].data.deliveryPinId, 'delivery-pin-concurrent');
+  assert.equal(results[0].data.orderTxid, ORDER_TXID);
+  assert.equal(results[1].data.orderTxid, ORDER_TXID);
   assert.equal(paymentVerifierCalls.length, 1);
   assert.equal(runnerCalls.length, 1);
   assert.equal(sent.filter(entry => entry.content.startsWith('[DELIVERY:')).length, 1);

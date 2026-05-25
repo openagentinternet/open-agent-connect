@@ -515,7 +515,7 @@ function sellerOrderSuccessFromRecord(input: {
       listingPinId: input.resolved.order.payload.listingPinId,
       skuId: input.resolved.order.payload.skuId,
       paymentTxid: input.resolved.order.payload.paymentTxid,
-      orderTxid: input.orderTxid,
+      orderTxid: normalizeNullableText(input.record.orderTxid) || input.orderTxid,
       result: normalizeText(input.record.deliverySummary?.result),
       deliveryPinId,
       ratingMessagePinId: null,
@@ -526,7 +526,6 @@ function sellerOrderSuccessFromRecord(input: {
 async function waitForSellerOrderTerminal(input: {
   store: ResolveSellerProductOrderInput['productStateStore'];
   productOrderPinId: string;
-  orderTxid: string;
   paymentTxid: string;
   resolved: ResolvedSellerProductOrder;
 }): Promise<FulfillProductOrderForSellerResult> {
@@ -536,14 +535,14 @@ async function waitForSellerOrderTerminal(input: {
     });
     const lookup = await input.store.findSellerOrderByProductOrderPinId(input.productOrderPinId);
     const record = lookup?.item;
-    if (!record || record.orderTxid !== input.orderTxid || record.paymentTxid !== input.paymentTxid) {
+    if (!record || record.paymentTxid !== input.paymentTxid) {
       continue;
     }
     if (record.state === 'delivered' && (record.deliveryPinId || record.deliverySummary?.deliveryPinId)) {
       return sellerOrderSuccessFromRecord({
         record,
         resolved: input.resolved,
-        orderTxid: input.orderTxid,
+        orderTxid: record.orderTxid || '',
       });
     }
     if (record.state === 'failed') {
@@ -775,7 +774,6 @@ export async function fulfillProductOrderForSeller(
     return waitForSellerOrderTerminal({
       store: input.productStateStore,
       productOrderPinId: resolved.order.pinId,
-      orderTxid,
       paymentTxid: resolved.order.payload.paymentTxid,
       resolved,
     });

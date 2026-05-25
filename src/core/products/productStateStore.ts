@@ -718,19 +718,16 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
       let result: ClaimSellerOrderFulfillmentResult | null = null;
       await this.updateState(state => {
         const existing = state.sellerOrders.find(item => item.productOrderPinId === productOrderPinId) ?? null;
-        const sameOrder =
-          Boolean(existing) &&
-          existing?.orderTxid === orderTxid &&
-          existing?.paymentTxid === paymentTxid;
+        const samePurchase = Boolean(existing) && existing?.paymentTxid === paymentTxid;
         if (
-          sameOrder &&
+          samePurchase &&
           existing?.state === 'delivered' &&
           (existing.deliveryPinId || existing.deliverySummary?.deliveryPinId)
         ) {
           result = { status: 'duplicate_delivered', record: existing };
           return state;
         }
-        if (sameOrder && existing?.state === 'fulfilling') {
+        if (samePurchase && existing?.state === 'fulfilling') {
           result = { status: 'in_progress', record: existing };
           return state;
         }
@@ -741,7 +738,7 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
           skuId,
           paymentTxid,
           productOrderPayload: normalizeProductOrderPayload(input.productOrderPayload),
-          orderTxid: normalizeNullableText(orderTxid),
+          orderTxid: normalizeNullableText(existing?.orderTxid ?? orderTxid),
           buyerGlobalMetaId: normalizeNullableText(input.buyerGlobalMetaId),
           fulfillmentSkills: [...(input.fulfillmentSkills || [])],
           paymentVerified: null,

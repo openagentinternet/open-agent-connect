@@ -302,6 +302,7 @@ test('product state store claims seller fulfillment and detects duplicate delive
   const store = createProductStateStore(profileRoot);
   const paymentTxid = 'e'.repeat(64);
   const orderTxid = 'f'.repeat(64);
+  const replayOrderTxid = '0'.repeat(64);
   const productOrderPayload = {
     listingPinId: 'listing-pin-id',
     skuId: 'sku2',
@@ -325,6 +326,7 @@ test('product state store claims seller fulfillment and detects duplicate delive
   assert.equal(firstClaim.status, 'claimed');
   assert.equal(firstClaim.record.state, 'fulfilling');
   assert.equal(firstClaim.record.paymentVerified, null);
+  assert.equal(firstClaim.record.orderTxid, orderTxid);
 
   const inProgress = await store.claimSellerOrderFulfillment({
     productOrderPinId: 'product-order-pin-id',
@@ -332,7 +334,7 @@ test('product state store claims seller fulfillment and detects duplicate delive
     skuId: 'sku2',
     paymentTxid,
     productOrderPayload,
-    orderTxid,
+    orderTxid: replayOrderTxid,
   });
 
   assert.equal(inProgress.status, 'in_progress');
@@ -365,12 +367,13 @@ test('product state store claims seller fulfillment and detects duplicate delive
     skuId: 'sku2',
     paymentTxid,
     productOrderPayload,
-    orderTxid,
+    orderTxid: replayOrderTxid,
   });
 
   assert.equal(duplicate.status, 'duplicate_delivered');
   assert.equal(duplicate.record.deliverySummary.result, 'Delivered result');
   assert.equal(duplicate.record.deliveryPinId, 'delivery-pin-id');
+  assert.equal(duplicate.record.orderTxid, orderTxid);
 });
 
 test('product state store rejects blank required identifiers before upserting', async () => {
