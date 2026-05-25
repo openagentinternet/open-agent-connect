@@ -156,7 +156,7 @@ function createExecutionHarness(options = {}) {
         globalMetaId: 'buyer-global-metaid',
         name: 'Buyer Bot',
       },
-      resolveSellerIdentity: async ({ product }) => ({
+      resolveSellerIdentity: async ({ product }) => options.sellerIdentity ?? ({
         globalMetaId: product.sellerGlobalMetaId,
         name: product.sellerName,
         mvcAddress: product.sellerMvcAddress,
@@ -179,6 +179,7 @@ function createExecutionHarness(options = {}) {
       productOrderPublisher: {
         async publish(orderInput) {
           calls.push(['product-order', orderInput]);
+          if (options.productOrderError) throw options.productOrderError;
           return {
             payload: orderInput.payload,
             chainWrite: {
@@ -199,6 +200,7 @@ function createExecutionHarness(options = {}) {
       simplemsgSender: {
         async send(messageInput) {
           calls.push(['simplemsg', messageInput]);
+          if (options.simplemsgError) throw options.simplemsgError;
           return {
             orderTxid: 'simplemsg-order-txid-1',
             txids: ['simplemsg-order-txid-1'],
@@ -393,6 +395,104 @@ test('executeProductPurchase does not publish product-order when payment fails',
   assert.equal(result.code, 'insufficient_balance');
   assert.deepEqual(harness.calls.map(([name]) => name), ['payment']);
   assert.deepEqual(harness.persisted, []);
+});
+
+test('executeProductPurchase rejects BTC SKU without seller BTC address before payment', async () => {
+  const btcSku = {
+    skuId: 'btc-00001',
+    name: 'BTC Top-Up Card',
+    image: 'metafile://sku_btc.png',
+    descriptionContentType: 'text/markdown',
+    description: 'BTC mobile top-up card.',
+    price: { amount: '0.00001', currency: 'BTC' },
+    initialStock: 100,
+  };
+  const harness = createExecutionHarness({
+    product: {
+      skus: [btcSku],
+      payload: productListing({ skus: [btcSku] }),
+    },
+    sellerIdentity: {
+      globalMetaId: 'seller-global-metaid',
+      name: 'Seller Bot',
+      mvcAddress: 'seller-derived-mvc-address',
+      addresses: { mvc: 'seller-derived-mvc-address' },
+      chatPublicKey: 'seller-chat-public-key',
+    },
+  });
+  harness.input.request.skuId = 'btc-00001';
+
+  const result = await executeProductPurchase(harness.input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'product_seller_payment_address_missing');
+  assert.deepEqual(harness.calls, []);
+  assert.deepEqual(harness.persisted, []);
+});
+
+test('executeProductPurchase pays BTC SKU to seller BTC address', async () => {
+  const btcSku = {
+    skuId: 'btc-00001',
+    name: 'BTC Top-Up Card',
+    image: 'metafile://sku_btc.png',
+    descriptionContentType: 'text/markdown',
+    description: 'BTC mobile top-up card.',
+    price: { amount: '0.00001', currency: 'BTC' },
+    initialStock: 100,
+  };
+  const harness = createExecutionHarness({
+    product: {
+      skus: [btcSku],
+      payload: productListing({ skus: [btcSku] }),
+    },
+    sellerIdentity: {
+      globalMetaId: 'seller-global-metaid',
+      name: 'Seller Bot',
+      mvcAddress: 'seller-derived-mvc-address',
+      addresses: {
+        mvc: 'seller-derived-mvc-address',
+        btc: 'seller-derived-btc-address',
+      },
+      chatPublicKey: 'seller-chat-public-key',
+    },
+  });
+  harness.input.request.skuId = 'btc-00001';
+
+  const result = await executeProductPurchase(harness.input);
+
+  assert.equal(result.ok, true);
+  assert.equal(harness.calls[0][0], 'payment');
+  assert.equal(harness.calls[0][1].toAddress, 'seller-derived-btc-address');
+  assert.equal(harness.calls[0][1].currency, 'BTC');
+  assert.equal(harness.calls[0][1].paymentChain, 'btc');
+});
+
+test('executeProductPurchase returns stable product-order publish failure code for arbitrary writer errors', async () => {
+  const harness = createExecutionHarness({
+    productOrderError: new Error('network timeout'),
+  });
+
+  const result = await executeProductPurchase(harness.input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'product_order_publish_failed');
+  assert.equal(result.message, 'network timeout');
+  assert.deepEqual(harness.calls.map(([name]) => name), ['payment', 'product-order']);
+});
+
+test('executeProductPurchase returns stable simplemsg dispatch failure code for arbitrary sender errors', async () => {
+  const harness = createExecutionHarness({
+    simplemsgError: new Error('network timeout'),
+  });
+
+  const result = await executeProductPurchase(harness.input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'product_order_dispatch_failed');
+  assert.equal(result.message, 'network timeout');
+  assert.deepEqual(harness.calls.map(([name]) => name), ['payment', 'product-order', 'simplemsg']);
+  assert.equal(harness.persisted.length, 1);
+  assert.equal(harness.persisted[0].state, 'failed');
 });
 
 test('executeProductPurchase does not pay when planner rejects an offline product', async () => {

@@ -180,6 +180,15 @@ function failureFromError(error: unknown, fallbackCode: string): ExecuteProductP
   };
 }
 
+function stableFailureFromError(error: unknown, code: string): ExecuteProductPurchaseResult {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    ok: false,
+    code,
+    message,
+  };
+}
+
 function selectPlannedProduct(input: {
   products: ProductDirectoryProduct[];
   plan: Extract<ProductPurchasePlannerResult, { ok: true }>;
@@ -195,7 +204,7 @@ function resolveSellerPaymentAddress(input: {
   const identity = input.sellerIdentity;
   if (!identity) return '';
   if (input.paymentChain === 'btc') {
-    return normalizeText(identity.addresses?.btc) || normalizeText(identity.mvcAddress) || normalizeText(identity.addresses?.mvc);
+    return normalizeText(identity.addresses?.btc);
   }
   return normalizeText(identity.addresses?.mvc) || normalizeText(identity.mvcAddress);
 }
@@ -402,7 +411,7 @@ export async function executeProductPurchase(
       network: normalizeText(input.network) || paymentChain,
     });
   } catch (error) {
-    return failureFromError(error, 'product_order_publish_failed');
+    return stableFailureFromError(error, 'product_order_publish_failed');
   }
 
   const productOrderPinId = normalizeText(published.chainWrite.pinId);
@@ -444,7 +453,7 @@ export async function executeProductPurchase(
       sessionId,
       state: 'failed',
     });
-    return failureFromError(error, 'product_order_dispatch_failed');
+    return stableFailureFromError(error, 'product_order_dispatch_failed');
   }
 
   const orderTxid = resolveOrderTxid(sent);

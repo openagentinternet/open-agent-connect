@@ -373,7 +373,7 @@ test('/api/products/buy returns stable failure when payment fails', async (t) =>
 
 test('/api/products/buy returns stable failure when product-order write fails after payment', async (t) => {
   const app = await startProductExecutionServer(t, {
-    productOrderError: new Error('product_order_publish_failed: product-order write rejected'),
+    productOrderError: new Error('network timeout'),
   });
 
   const response = await fetchJson(app.baseUrl, '/api/products/buy', {
@@ -389,7 +389,7 @@ test('/api/products/buy returns stable failure when product-order write fails af
 
 test('/api/products/buy returns stable failure when simplemsg dispatch fails after payment and product-order write', async (t) => {
   const app = await startProductExecutionServer(t, {
-    simplemsgError: new Error('product_order_dispatch_failed: simplemsg broadcast rejected'),
+    simplemsgError: new Error('network timeout'),
   });
 
   const response = await fetchJson(app.baseUrl, '/api/products/buy', {
