@@ -748,12 +748,15 @@ test('fulfillProductOrderForSeller serializes concurrent replay fulfillment thro
   assert.equal(results[1].ok, true, JSON.stringify(results[1]));
   assert.equal(results[0].data.deliveryPinId, 'delivery-pin-concurrent');
   assert.equal(results[1].data.deliveryPinId, 'delivery-pin-concurrent');
-  assert.equal(results[0].data.orderTxid, ORDER_TXID);
-  assert.equal(results[1].data.orderTxid, ORDER_TXID);
+  const claimedOrderTxid = results[0].data.orderTxid;
+  assert.equal(results[1].data.orderTxid, claimedOrderTxid);
+  assert.ok([ORDER_TXID, REPLAY_ORDER_TXID].includes(claimedOrderTxid));
   assert.equal(paymentVerifierCalls.length, 1);
   assert.equal(runnerCalls.length, 1);
-  assert.equal(sent.filter(entry => entry.content.startsWith('[DELIVERY:')).length, 1);
-  assert.equal(sent.filter(entry => entry.content.startsWith('[NeedsRating:')).length, 1);
+  assert.equal(sent.filter(entry => entry.content.startsWith(`[DELIVERY:${claimedOrderTxid}]`)).length, 1);
+  assert.equal(sent.filter(entry => entry.content.startsWith(`[NeedsRating:${claimedOrderTxid}]`)).length, 1);
+  assert.equal(sent.filter(entry => entry.content.startsWith(`[DELIVERY:${claimedOrderTxid === ORDER_TXID ? REPLAY_ORDER_TXID : ORDER_TXID}]`)).length, 0);
+  assert.equal(sent.filter(entry => entry.content.startsWith(`[NeedsRating:${claimedOrderTxid === ORDER_TXID ? REPLAY_ORDER_TXID : ORDER_TXID}]`)).length, 0);
 });
 
 test('fulfillProductOrderForSeller rejects invalid order txid before sending delivery', async () => {
