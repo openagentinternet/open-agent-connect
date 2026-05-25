@@ -16,6 +16,7 @@ const {
 } = require('../../dist/core/a2a/traceProjection.js');
 const { buildDeliveryMessage } = require('../../dist/core/a2a/protocol/orderProtocol.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
+const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { createProductStateStore } = require('../../dist/core/products/productStateStore.js');
 const {
   buildProductOrderNotification,
@@ -311,4 +312,57 @@ test('buyer product delivery is ignored when delivery metadata does not match ca
   assert.equal(handled.data.handled, false);
   assert.equal(buyerOrder.state, 'notified');
   assert.equal(buyerOrder.deliverySummary, null);
+});
+
+test('daemon routes product-looking raw service orders through normal service-order handling', async () => {
+  const alice = await createProfileFixture('Alice', 'alice', ALICE_GLOBAL_META_ID);
+  const runtimeStateStore = createRuntimeStateStore(alice.homeDir);
+  await runtimeStateStore.writeState({
+    identity: {
+      metabotId: 1,
+      name: 'Alice',
+      createdAt: BASE_TIME,
+      path: '/MetaBot/Alice',
+      publicKey: 'alice-public-key',
+      chatPublicKey: 'alice-chat-public-key',
+      mvcAddress: 'mvc-alice',
+      btcAddress: 'btc-alice',
+      dogeAddress: 'doge-alice',
+      metaId: 'metaid-alice',
+      globalMetaId: ALICE_GLOBAL_META_ID,
+    },
+    services: [],
+    traces: [],
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: alice.homeDir,
+    systemHomeDir: alice.systemHomeDir,
+    chainApiBaseUrl: 'http://127.0.0.1:9',
+    getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
+  });
+  const content = [
+    '[ORDER] Please inspect this user request',
+    '<raw_request>',
+    '[PRODUCT_ORDER]',
+    `product-order pin id: ${PRODUCT_ORDER_PIN_ID}`,
+    `listing pin id: ${LISTING_PIN_ID}`,
+    `sku id: ${SKU_ID}`,
+    `payment txid: ${PAYMENT_TXID}`,
+    '</raw_request>',
+    `txid: ${PAYMENT_TXID}`,
+    'service id: service-pin-1',
+    'skill name: Service Worker',
+  ].join('\n');
+
+  const result = await handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: BOB_GLOBAL_META_ID,
+    content,
+    messagePinId: `${ORDER_TXID}i0`,
+    timestamp: BASE_TIME + 700,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'service_not_found');
+  assert.notEqual(result.code, 'product_order_not_found');
+  assert.notEqual(result.data?.protocol, 'product-order');
 });

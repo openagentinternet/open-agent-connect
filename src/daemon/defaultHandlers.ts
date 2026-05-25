@@ -96,7 +96,10 @@ import {
   type ProductFulfillmentRoundInput,
   type ProductFulfillmentRoundResult,
 } from '../core/products/productFulfillment';
-import { parseProductDeliveryMessage } from '../core/products/productOrderMessages';
+import {
+  parseProductDeliveryMessage,
+  parseProductOrderNotification,
+} from '../core/products/productOrderMessages';
 import { planProductPurchase } from '../core/products/productPurchasePlanner';
 import { createProductStateStore, type OwnedProductListingRecord } from '../core/products/productStateStore';
 import { validateProductListingPayload } from '../core/products/productValidation';
@@ -9046,31 +9049,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   }
 
   function readInboundProductOrderRequest(content: string): { productOrderPinId: string } | null {
-    const rawRequest = extractOrderRawRequest(content);
-    if (!rawRequest && !/\[PRODUCT_ORDER\]/iu.test(content)) {
-      return null;
-    }
-    let parsed: Record<string, unknown> | null = null;
-    if (rawRequest) {
-      try {
-        const value = JSON.parse(rawRequest) as unknown;
-        parsed = value && typeof value === 'object' && !Array.isArray(value)
-          ? value as Record<string, unknown>
-          : null;
-      } catch {
-        parsed = null;
-      }
-    }
-    if (parsed && normalizeText(parsed.protocol) !== 'product-order') {
-      return null;
-    }
-    const productOrderPinId = normalizeText(parsed?.productOrderPinId)
-      || normalizeText(extractOrderLineValue(content, 'product-order pin id'))
-      || normalizeText(extractOrderLineValue(content, 'productOrderPinId'));
-    if (!productOrderPinId && (parsed || /\[PRODUCT_ORDER\]/iu.test(content))) {
-      return { productOrderPinId: '' };
-    }
-    return productOrderPinId ? { productOrderPinId } : null;
+    const request = parseProductOrderNotification(content);
+    return request ? { productOrderPinId: request.productOrderPinId } : null;
   }
 
   async function runProductFulfillmentRound(
