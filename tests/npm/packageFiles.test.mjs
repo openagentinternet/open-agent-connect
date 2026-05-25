@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
@@ -7,6 +8,25 @@ import { promisify } from 'node:util';
 const execFile = promisify(execFileCallback);
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const MAX_PACKED_SIZE_BYTES = 20 * 1024 * 1024;
+const EXPECTED_NPM_SKILLS = [
+  'metabot-ask-master',
+  'metabot-call-remote-service',
+  'metabot-chat-privatechat',
+  'metabot-help',
+  'metabot-identity-manage',
+  'metabot-loom-wish2task',
+  'metabot-network-manage',
+  'metabot-omni-reader',
+  'metabot-post-buzz',
+  'metabot-post-skillservice',
+  'metabot-upload-file',
+  'metabot-wallet-manage',
+];
+const NON_DISTRIBUTED_SKILLS = [
+  'new-api-vendor-skill',
+];
+const OFFICIAL_SKILL_PREFIX = 'metabot-';
+const PACKAGE_SKILL_FILE_PATTERN = /^SKILLs\/([^/]+)\/SKILL\.md$/;
 
 async function readPackDryRun() {
   const { stdout } = await execFile('npm', ['pack', '--dry-run', '--json'], {
@@ -39,14 +59,54 @@ function assertExcludesSegment(paths, segment) {
   }
 }
 
+function extractPackagedSkillName(filePath) {
+  return filePath.match(PACKAGE_SKILL_FILE_PATTERN)?.[1] ?? null;
+}
+
+function assertOfficialSkillName(skillName, source) {
+  assert.equal(
+    skillName.startsWith(OFFICIAL_SKILL_PREFIX),
+    true,
+    `expected ${source} skill ${skillName} to use the ${OFFICIAL_SKILL_PREFIX} prefix`,
+  );
+}
+
 test('npm package includes runtime install inputs and excludes generated/development-only artifacts', async () => {
+  const packageJson = JSON.parse(await readFile(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+  assert.equal(
+    packageJson.files.includes('SKILLs/*/SKILL.md'),
+    false,
+    'npm package should use an explicit skill allowlist',
+  );
+  for (const filePath of packageJson.files) {
+    const skillName = extractPackagedSkillName(filePath);
+    if (skillName) {
+      assertOfficialSkillName(skillName, 'package.json files');
+    }
+  }
+
+  for (const skillName of EXPECTED_NPM_SKILLS) {
+    assert.equal(
+      packageJson.files.includes(`SKILLs/${skillName}/SKILL.md`),
+      true,
+      `expected package.json files to include ${skillName}`,
+    );
+  }
+
   const pack = await readPackDryRun();
   const paths = pathsFromPack(pack);
+  for (const filePath of paths) {
+    const skillName = extractPackagedSkillName(filePath);
+    if (skillName) {
+      assertOfficialSkillName(skillName, 'npm pack');
+    }
+  }
 
   assertIncludes(paths, 'dist/cli/main.js');
   assertIncludes(paths, 'dist/oac/main.js');
-  assertIncludes(paths, 'SKILLs/metabot-ask-master/SKILL.md');
-  assertIncludes(paths, 'SKILLs/metabot-help/SKILL.md');
+  for (const skillName of EXPECTED_NPM_SKILLS) {
+    assertIncludes(paths, `SKILLs/${skillName}/SKILL.md`);
+  }
   assertIncludes(paths, 'skillpacks/common/templates/system-routing.md');
   assertIncludes(paths, 'scripts/oac-dev-mode.sh');
   assertIncludes(paths, 'docs/install/open-agent-connect.md');
@@ -62,6 +122,9 @@ test('npm package includes runtime install inputs and excludes generated/develop
   assertExcludesPrefix(paths, 'skillpacks/openclaw/runtime/node_modules/');
   assertExcludesPrefix(paths, '.github/');
   assertExcludesSegment(paths, '/evals/');
+  for (const skillName of NON_DISTRIBUTED_SKILLS) {
+    assertExcludesPrefix(paths, `SKILLs/${skillName}/`);
+  }
 
   assert.ok(
     pack.size < MAX_PACKED_SIZE_BYTES,
