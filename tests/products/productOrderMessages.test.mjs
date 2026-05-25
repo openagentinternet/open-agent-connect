@@ -7,6 +7,7 @@ const {
   buildProductOrderNotification,
   parseProductDeliveryMessage,
 } = require('../../dist/core/products/productOrderMessages.js');
+const { buildDeliveryMessage } = require('../../dist/core/a2a/protocol/orderProtocol.js');
 const { extractOrderRawRequest } = require('../../dist/core/orders/orderMessage.js');
 
 test('buildProductOrderNotification includes scoped ORDER metadata and traceable raw content', () => {
@@ -48,6 +49,26 @@ test('parseProductDeliveryMessage accepts product delivery JSON', () => {
   }));
 
   assert.deepEqual(delivery, {
+    productOrderPinId: 'product-order-pin-1',
+    listingPinId: 'listing-pin-1',
+    skuId: 'space-00005',
+    paymentTxid: 'payment-txid-1',
+    result: 'Top-up card: XXXX-XXXX',
+    deliveredAt: 1770000000000,
+  });
+});
+
+test('parseProductDeliveryMessage accepts tagged DELIVERY product payloads', () => {
+  const message = buildDeliveryMessage({
+    productOrderPinId: 'product-order-pin-1',
+    listingPinId: 'listing-pin-1',
+    skuId: 'space-00005',
+    paymentTxid: 'payment-txid-1',
+    result: 'Top-up card: XXXX-XXXX',
+    deliveredAt: 1770000000000,
+  }, 'a'.repeat(64));
+
+  assert.deepEqual(parseProductDeliveryMessage(message), {
     productOrderPinId: 'product-order-pin-1',
     listingPinId: 'listing-pin-1',
     skuId: 'space-00005',

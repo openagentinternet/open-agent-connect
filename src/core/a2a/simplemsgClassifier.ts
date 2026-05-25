@@ -1,9 +1,22 @@
+import {
+  parseProductDeliveryMessage,
+  parseProductOrderNotification,
+} from '../products/productOrderMessages';
+
 export type SimplemsgOrderProtocolTag =
   | 'ORDER'
   | 'ORDER_STATUS'
   | 'DELIVERY'
   | 'NeedsRating'
   | 'ORDER_END';
+
+export interface SimplemsgProductMetadata {
+  productOrderPinId: string;
+  listingPinId: string;
+  skuId: string;
+  paymentTxid: string;
+  deliveredAt?: number;
+}
 
 export type SimplemsgClassification =
   | { kind: 'private_chat' }
@@ -12,6 +25,8 @@ export type SimplemsgClassification =
       tag: SimplemsgOrderProtocolTag;
       orderTxid: string | null;
       reason: string | null;
+      orderKind?: 'product_order';
+      product?: SimplemsgProductMetadata;
     };
 
 const ORDER_TXID_RE = /^[0-9a-f]{64}$/i;
@@ -38,6 +53,50 @@ function normalizeProtocolTag(value: unknown): SimplemsgOrderProtocolTag | null 
   return null;
 }
 
+function readProductMetadata(
+  tag: SimplemsgOrderProtocolTag,
+  content: string,
+): SimplemsgProductMetadata | null {
+  if (tag === 'ORDER') {
+    return parseProductOrderNotification(content);
+  }
+  if (tag === 'DELIVERY') {
+    const delivery = parseProductDeliveryMessage(content);
+    return delivery
+      ? {
+        productOrderPinId: delivery.productOrderPinId,
+        listingPinId: delivery.listingPinId,
+        skuId: delivery.skuId,
+        paymentTxid: delivery.paymentTxid,
+        deliveredAt: delivery.deliveredAt,
+      }
+      : null;
+  }
+  return null;
+}
+
+function classifyOrderProtocol(input: {
+  tag: SimplemsgOrderProtocolTag;
+  orderTxid: string | null;
+  reason: string | null;
+  content: string;
+}): SimplemsgClassification {
+  const product = readProductMetadata(input.tag, input.content);
+  const base = {
+    kind: 'order_protocol' as const,
+    tag: input.tag,
+    orderTxid: input.orderTxid,
+    reason: input.reason,
+  };
+  return product
+    ? {
+      ...base,
+      orderKind: 'product_order',
+      product,
+    }
+    : base;
+}
+
 export function classifySimplemsgContent(content: unknown): SimplemsgClassification {
   const text = normalizeText(content);
   if (!text) {
@@ -50,22 +109,22 @@ export function classifySimplemsgContent(content: unknown): SimplemsgClassificat
     if (!tag) {
       return { kind: 'private_chat' };
     }
-    return {
-      kind: 'order_protocol',
+    return classifyOrderProtocol({
       tag,
       orderTxid: normalizeOrderTxid(match[2]),
       reason: tag === 'ORDER_END' ? normalizeText(match[3]) || null : null,
-    };
+      content: text,
+    });
   }
 
   const legacyOrderEndMatch = text.match(LEGACY_ORDER_END_RE);
   if (legacyOrderEndMatch) {
-    return {
-      kind: 'order_protocol',
+    return classifyOrderProtocol({
       tag: 'ORDER_END',
       orderTxid: null,
       reason: normalizeText(legacyOrderEndMatch[2]) || null,
-    };
+      content: text,
+    });
   }
 
   return { kind: 'private_chat' };

@@ -1,7 +1,9 @@
 import {
   buildOrderRawRequestBlock,
+  extractOrderRawRequest,
   ORDER_PREFIX,
 } from '../orders/orderMessage';
+import { parseDeliveryMessage } from '../a2a/protocol/orderProtocol';
 
 export interface BuildProductOrderNotificationInput {
   productOrderPinId: string;
@@ -18,6 +20,13 @@ export interface ProductDeliveryMessage {
   paymentTxid: string;
   result: string;
   deliveredAt: number;
+}
+
+export interface ProductOrderNotificationMessage {
+  productOrderPinId: string;
+  listingPinId: string;
+  skuId: string;
+  paymentTxid: string;
 }
 
 function normalizeText(value: unknown): string {
@@ -38,6 +47,26 @@ function normalizeFiniteTimestamp(value: unknown): number | null {
     return null;
   }
   return Math.trunc(numeric);
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractOrderLineValue(content: string, label: string): string {
+  const match = content.match(new RegExp(`^\\s*${escapeRegex(label)}\\s*:\\s*(.+?)\\s*$`, 'imu'));
+  return normalizeText(match?.[1]);
 }
 
 export function buildProductOrderNotification(input: BuildProductOrderNotificationInput): string {
@@ -63,19 +92,54 @@ export function buildProductOrderNotification(input: BuildProductOrderNotificati
   ].join('\n');
 }
 
+export function parseProductOrderNotification(value: unknown): ProductOrderNotificationMessage | null {
+  const source = normalizeText(value);
+  if (!source) {
+    return null;
+  }
+
+  const rawRequest = extractOrderRawRequest(source);
+  const parsed = rawRequest ? parseJsonObject(rawRequest) : null;
+  const hasProductMarker = /\[PRODUCT_ORDER\]/iu.test(source);
+  if (!parsed && !hasProductMarker) {
+    return null;
+  }
+  if (parsed && normalizeText(parsed.protocol) !== 'product-order') {
+    return null;
+  }
+
+  const productOrderPinId = normalizeText(parsed?.productOrderPinId)
+    || extractOrderLineValue(source, 'product-order pin id')
+    || extractOrderLineValue(source, 'productOrderPinId');
+  const listingPinId = normalizeText(parsed?.listingPinId)
+    || extractOrderLineValue(source, 'listing pin id')
+    || extractOrderLineValue(source, 'listingPinId');
+  const skuId = normalizeText(parsed?.skuId)
+    || extractOrderLineValue(source, 'sku id')
+    || extractOrderLineValue(source, 'skuId');
+  const paymentTxid = normalizeText(parsed?.paymentTxid)
+    || extractOrderLineValue(source, 'payment txid')
+    || extractOrderLineValue(source, 'paymentTxid');
+  if (!productOrderPinId || !listingPinId || !skuId || !paymentTxid) {
+    return null;
+  }
+
+  return {
+    productOrderPinId,
+    listingPinId,
+    skuId,
+    paymentTxid,
+  };
+}
+
 export function parseProductDeliveryMessage(value: unknown): ProductDeliveryMessage | null {
   const source = normalizeText(value);
   if (!source) {
     return null;
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(source) as unknown;
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  const parsed = parseDeliveryMessage(source) ?? parseJsonObject(source);
+  if (!parsed) {
     return null;
   }
 

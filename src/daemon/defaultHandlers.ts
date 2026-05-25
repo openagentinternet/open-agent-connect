@@ -96,6 +96,7 @@ import {
   type ProductFulfillmentRoundInput,
   type ProductFulfillmentRoundResult,
 } from '../core/products/productFulfillment';
+import { parseProductDeliveryMessage } from '../core/products/productOrderMessages';
 import { planProductPurchase } from '../core/products/productPurchasePlanner';
 import { createProductStateStore, type OwnedProductListingRecord } from '../core/products/productStateStore';
 import { validateProductListingPayload } from '../core/products/productValidation';
@@ -9304,6 +9305,53 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }
     const delivery = parseDeliveryMessage(content);
     const needsRating = parseNeedsRatingMessage(content);
+    const productDelivery = delivery ? parseProductDeliveryMessage(content) : null;
+    if (productDelivery) {
+      const runtimeState = await runtimeStateStore.readState();
+      const productStateStore = createProductStateStore(input.homeDir);
+      const existingLookup = await productStateStore.findOrderByProductOrderPinId(productDelivery.productOrderPinId)
+        ?? await productStateStore.findOrderByPaymentTxid(productDelivery.paymentTxid)
+        ?? (delivery?.orderTxid ? await productStateStore.findOrderByOrderTxid(delivery.orderTxid) : null);
+      const existingBuyerOrder = existingLookup?.source === 'buyerOrders' ? existingLookup.item : null;
+      const orderTxid = normalizeOrderProtocolReference(delivery?.orderTxid)
+        || normalizeText(existingBuyerOrder?.orderTxid)
+        || null;
+      await productStateStore.upsertBuyerOrder({
+        productOrderPinId: productDelivery.productOrderPinId,
+        listingPinId: productDelivery.listingPinId,
+        skuId: productDelivery.skuId,
+        paymentTxid: productDelivery.paymentTxid,
+        orderTxid,
+        sellerGlobalMetaId: normalizeText(existingBuyerOrder?.sellerGlobalMetaId) || inputMessage.fromGlobalMetaId,
+        buyerGlobalMetaId: normalizeText(existingBuyerOrder?.buyerGlobalMetaId)
+          || normalizeText(runtimeState.identity?.globalMetaId)
+          || null,
+        traceId: normalizeText(existingBuyerOrder?.traceId) || null,
+        sessionId: normalizeText(existingBuyerOrder?.sessionId) || null,
+        deliverySummary: {
+          result: productDelivery.result,
+          deliveryPinId: normalizeText(inputMessage.messagePinId) || null,
+          deliveredAt: productDelivery.deliveredAt,
+        },
+        state: 'delivered',
+        localUpdatedAt: Number.isFinite(inputMessage.timestamp)
+          ? Math.trunc(Number(inputMessage.timestamp))
+          : Date.now(),
+      });
+      return commandSuccess({
+        handled: true,
+        rated: false,
+        protocol: 'product-order',
+        orderTxid,
+        productOrderPinId: productDelivery.productOrderPinId,
+        listingPinId: productDelivery.listingPinId,
+        skuId: productDelivery.skuId,
+        paymentTxid: productDelivery.paymentTxid,
+        deliveryPinId: normalizeText(inputMessage.messagePinId) || null,
+        result: productDelivery.result,
+        deliveredAt: productDelivery.deliveredAt,
+      });
+    }
     if (!delivery && !needsRating) {
       return commandSuccess({ handled: false, rated: false });
     }
