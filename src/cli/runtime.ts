@@ -2687,6 +2687,41 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
         return requestJson(context, 'GET', `/api/products/owned?${query.toString()}`);
       },
+      listOrders: async (input) => {
+        const query = new URLSearchParams({
+          page: String(input.page),
+          pageSize: String(input.pageSize),
+          all: input.all ? 'true' : 'false',
+          role: input.role,
+        });
+        if (input.from) {
+          query.set('from', input.from);
+        }
+        if (input.state) {
+          query.set('state', input.state);
+        }
+        return requestJson(context, 'GET', `/api/products/orders?${query.toString()}`);
+      },
+      inspectOrder: async (input) => {
+        const query = new URLSearchParams();
+        if (input.orderId) {
+          query.set('orderId', input.orderId);
+        }
+        if (input.productOrderPinId) {
+          query.set('productOrderPinId', input.productOrderPinId);
+        }
+        if (input.paymentTxid) {
+          query.set('paymentTxid', input.paymentTxid);
+        }
+        if (input.orderTxid) {
+          query.set('orderTxid', input.orderTxid);
+        }
+        if (input.from) {
+          query.set('from', input.from);
+        }
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/products/orders/inspect${suffix}`);
+      },
     },
     provider: {
       inspectOrder: async (input) => {

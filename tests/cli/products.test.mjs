@@ -302,3 +302,135 @@ test('runCli dispatches `metabot products owned list --all` for aggregate owner 
     refresh: false,
   }]);
 });
+
+test('runCli dispatches `metabot products orders list` with actor, role, state, and paging filters', async () => {
+  const calls = [];
+  const exitCode = await runCli([
+    'products',
+    'orders',
+    'list',
+    '--from',
+    'bob',
+    '--role',
+    'buyer',
+    '--state',
+    'delivered',
+    '--page',
+    '2',
+    '--page-size',
+    '10',
+  ], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      products: {
+        listOrders: async (input) => {
+          calls.push(input);
+          return commandSuccess({ items: [] });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    from: 'bob',
+    all: false,
+    role: 'buyer',
+    state: 'delivered',
+    page: 2,
+    pageSize: 10,
+  }]);
+});
+
+test('runCli dispatches `metabot products orders list --all --role all` for aggregate order view', async () => {
+  const calls = [];
+  const exitCode = await runCli(['products', 'orders', 'list', '--all', '--role', 'all'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      products: {
+        listOrders: async (input) => {
+          calls.push(input);
+          return commandSuccess({ items: [] });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    all: true,
+    role: 'all',
+    page: 1,
+    pageSize: 20,
+  }]);
+});
+
+test('runCli dispatches `metabot products orders inspect` with each supported selector', async () => {
+  const calls = [];
+  const dependencies = {
+    products: {
+      inspectOrder: async (input) => {
+        calls.push(input);
+        return commandSuccess({ selector: input });
+      },
+    },
+  };
+  const options = {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  };
+
+  assert.equal(await runCli(['products', 'orders', 'inspect', '--from', 'bob', '--order-id', 'order-1'], options), 0);
+  assert.equal(await runCli(['products', 'orders', 'inspect', '--product-order-pin-id', 'product-order-pin-1'], options), 0);
+  assert.equal(await runCli(['products', 'orders', 'inspect', '--payment-txid', 'payment-txid-1'], options), 0);
+  assert.equal(await runCli(['products', 'orders', 'inspect', '--order-txid', 'order-txid-1'], options), 0);
+
+  assert.deepEqual(calls, [
+    { from: 'bob', orderId: 'order-1' },
+    { productOrderPinId: 'product-order-pin-1' },
+    { paymentTxid: 'payment-txid-1' },
+    { orderTxid: 'order-txid-1' },
+  ]);
+});
+
+test('runCli requires exactly one `metabot products orders inspect` selector', async () => {
+  const calls = [];
+  const dependencies = {
+    products: {
+      inspectOrder: async (input) => {
+        calls.push(input);
+        return commandSuccess({ selector: input });
+      },
+    },
+  };
+
+  const missingStdout = [];
+  const missingExitCode = await runCli(['products', 'orders', 'inspect'], {
+    stdout: { write: (chunk) => { missingStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies,
+  });
+  const ambiguousStdout = [];
+  const ambiguousExitCode = await runCli([
+    'products',
+    'orders',
+    'inspect',
+    '--order-id',
+    'order-1',
+    '--payment-txid',
+    'payment-txid-1',
+  ], {
+    stdout: { write: (chunk) => { ambiguousStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies,
+  });
+
+  assert.equal(missingExitCode, 1);
+  assert.equal(ambiguousExitCode, 1);
+  assert.deepEqual(calls, []);
+  assert.equal(JSON.parse(missingStdout.join('').trim()).code, 'missing_product_order_selector');
+  assert.equal(JSON.parse(ambiguousStdout.join('').trim()).code, 'ambiguous_product_order_selector');
+});

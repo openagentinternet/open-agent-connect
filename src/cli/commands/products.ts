@@ -43,6 +43,75 @@ function readOwnedListInput(args: string[]): {
   };
 }
 
+function readProductOrderRole(args: string[]): 'buyer' | 'seller' | 'all' {
+  const role = readFlagValue(args, '--role')?.trim().toLowerCase();
+  return role === 'seller' || role === 'all' ? role : 'buyer';
+}
+
+function readProductOrderListInput(args: string[]): {
+  from?: string;
+  all: boolean;
+  role: 'buyer' | 'seller' | 'all';
+  state?: string;
+  page: number;
+  pageSize: number;
+} {
+  const from = readFromFlag(args);
+  const state = readFlagValue(args, '--state')?.trim();
+  return {
+    ...(from ? { from } : {}),
+    all: hasFlag(args, '--all'),
+    role: readProductOrderRole(args),
+    ...(state ? { state } : {}),
+    page: readPositiveIntegerFlag(args, '--page', 1),
+    pageSize: readPositiveIntegerFlag(args, '--page-size', 20),
+  };
+}
+
+function readProductOrderSelector(args: string[]): {
+  ok: true;
+  selector: {
+    orderId?: string;
+    productOrderPinId?: string;
+    paymentTxid?: string;
+    orderTxid?: string;
+  };
+} | {
+  ok: false;
+  result: MetabotCommandResult<unknown>;
+} {
+  const selectors = [
+    ['orderId', readFlagValue(args, '--order-id')],
+    ['productOrderPinId', readFlagValue(args, '--product-order-pin-id')],
+    ['paymentTxid', readFlagValue(args, '--payment-txid')],
+    ['orderTxid', readFlagValue(args, '--order-txid')],
+  ] as const;
+  const selected = selectors.filter(([, value]) => typeof value === 'string' && value.trim() && !value.startsWith('--'));
+  if (selected.length === 0) {
+    return {
+      ok: false,
+      result: commandFailed(
+        'missing_product_order_selector',
+        'Provide exactly one product order selector: --order-id, --product-order-pin-id, --payment-txid, or --order-txid.',
+      ),
+    };
+  }
+  if (selected.length > 1) {
+    return {
+      ok: false,
+      result: commandFailed(
+        'ambiguous_product_order_selector',
+        'Use only one product order selector: --order-id, --product-order-pin-id, --payment-txid, or --order-txid.',
+      ),
+    };
+  }
+  const [key, value] = selected[0];
+  return {
+    ok: true,
+    selector: { [key]: value!.trim() },
+  };
+}
+
 export async function runProductsCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   const subcommand = args[0];
 
@@ -108,6 +177,37 @@ export async function runProductsCommand(args: string[], context: CliRuntimeCont
     }
 
     return commandUnknownSubcommand(`products owned ${ownedArgs.join(' ')}`.trim());
+  }
+
+  if (subcommand === 'orders') {
+    const ordersSubcommand = args[1];
+    const ordersArgs = args.slice(2);
+
+    if (ordersSubcommand === 'list') {
+      const handler = context.dependencies.products?.listOrders;
+      if (!handler) {
+        return commandFailed('not_implemented', 'Product orders list handler is not configured.');
+      }
+      return handler(readProductOrderListInput(ordersArgs));
+    }
+
+    if (ordersSubcommand === 'inspect') {
+      const selector = readProductOrderSelector(ordersArgs);
+      if (!selector.ok) {
+        return selector.result;
+      }
+      const handler = context.dependencies.products?.inspectOrder;
+      if (!handler) {
+        return commandFailed('not_implemented', 'Product order inspection handler is not configured.');
+      }
+      const from = readFromFlag(ordersArgs);
+      return handler({
+        ...(from ? { from } : {}),
+        ...selector.selector,
+      });
+    }
+
+    return commandUnknownSubcommand(`products orders ${ordersArgs.join(' ')}`.trim());
   }
 
   return commandUnknownSubcommand(`products ${args.join(' ')}`.trim());

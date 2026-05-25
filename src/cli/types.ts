@@ -98,6 +98,21 @@ export interface CliDependencies {
       pageSize: number;
       refresh: boolean;
     }) => Awaitable<MetabotCommandResult<unknown>>;
+    listOrders?: (input: {
+      from?: string;
+      all: boolean;
+      role: 'buyer' | 'seller' | 'all';
+      state?: string;
+      page: number;
+      pageSize: number;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    inspectOrder?: (input: {
+      from?: string;
+      orderId?: string;
+      productOrderPinId?: string;
+      paymentTxid?: string;
+      orderTxid?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   provider?: {
     inspectOrder?: (input: { from?: string; orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;

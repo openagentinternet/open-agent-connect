@@ -246,6 +246,14 @@ test('/api/products routes forward requests to product handlers', async (t) => {
         calls.push(['owned', input]);
         return commandSuccess({ items: [], page: input.page, pageSize: input.pageSize });
       },
+      listOrders: async (input) => {
+        calls.push(['orders', input]);
+        return commandSuccess({ items: [], page: input.page, pageSize: input.pageSize });
+      },
+      inspectOrder: async (input) => {
+        calls.push(['inspect-order', input]);
+        return commandSuccess({ orderId: input.orderId });
+      },
     },
   });
   t.after(async () => app.close());
@@ -256,14 +264,20 @@ test('/api/products routes forward requests to product handlers', async (t) => {
     body: { name: 'digital-guide', network: 'mvc' },
   });
   const owned = await fetchJson(app.baseUrl, '/api/products/owned?from=alice&page=2&pageSize=10&refresh=true');
+  const orders = await fetchJson(app.baseUrl, '/api/products/orders?from=bob&role=buyer&state=delivered&page=2&pageSize=10');
+  const orderInspect = await fetchJson(app.baseUrl, '/api/products/orders/inspect?from=bob&orderId=order-1');
 
   assert.equal(skills.status, 200);
   assert.equal(publish.status, 200);
   assert.equal(owned.status, 200);
+  assert.equal(orders.status, 200);
+  assert.equal(orderInspect.status, 200);
   assert.deepEqual(calls, [
     ['skills', { from: 'alice' }],
     ['publish', { name: 'digital-guide', network: 'mvc' }],
     ['owned', { from: 'alice', page: 2, pageSize: 10, refresh: true }],
+    ['orders', { from: 'bob', all: false, role: 'buyer', state: 'delivered', page: 2, pageSize: 10 }],
+    ['inspect-order', { from: 'bob', orderId: 'order-1' }],
   ]);
 });
 

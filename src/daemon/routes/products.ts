@@ -78,5 +78,44 @@ export const handleProductsRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  if (url.pathname === '/api/products/orders') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+
+    const result = handlers.products?.listOrders
+      ? await handlers.products.listOrders({
+          ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from')!.trim() } : {}),
+          all: readBoolean(url.searchParams.get('all')),
+          role: url.searchParams.get('role')?.trim() || 'buyer',
+          ...(url.searchParams.get('state')?.trim() ? { state: url.searchParams.get('state')!.trim() } : {}),
+          page: readPositiveInteger(url.searchParams.get('page'), 1),
+          pageSize: readPositiveInteger(url.searchParams.get('pageSize'), 20),
+        })
+      : commandFailed('not_implemented', 'Product orders list handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
+  if (url.pathname === '/api/products/orders/inspect') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+
+    const result = handlers.products?.inspectOrder
+      ? await handlers.products.inspectOrder({
+          ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from')!.trim() } : {}),
+          ...(url.searchParams.get('orderId')?.trim() ? { orderId: url.searchParams.get('orderId')!.trim() } : {}),
+          ...(url.searchParams.get('productOrderPinId')?.trim() ? { productOrderPinId: url.searchParams.get('productOrderPinId')!.trim() } : {}),
+          ...(url.searchParams.get('paymentTxid')?.trim() ? { paymentTxid: url.searchParams.get('paymentTxid')!.trim() } : {}),
+          ...(url.searchParams.get('orderTxid')?.trim() ? { orderTxid: url.searchParams.get('orderTxid')!.trim() } : {}),
+        })
+      : commandFailed('not_implemented', 'Product order inspection handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
   return false;
 };

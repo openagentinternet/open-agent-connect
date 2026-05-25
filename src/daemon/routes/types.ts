@@ -102,6 +102,21 @@ export interface MetabotDaemonHttpHandlers {
       pageSize: number;
       refresh: boolean;
     }) => Awaitable<MetabotCommandResult<unknown>>;
+    listOrders?: (input: {
+      from?: string;
+      all?: boolean;
+      role?: string;
+      state?: string;
+      page: number;
+      pageSize: number;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    inspectOrder?: (input: {
+      from?: string;
+      orderId?: string;
+      productOrderPinId?: string;
+      paymentTxid?: string;
+      orderTxid?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

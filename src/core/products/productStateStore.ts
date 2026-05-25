@@ -111,6 +111,8 @@ export interface ProductStateStore {
   upsertSellerOrder(input: UpsertSellerOrderInput): Promise<ProductSellerOrderRecord>;
   claimSellerOrderFulfillment(input: ClaimSellerOrderFulfillmentInput): Promise<ClaimSellerOrderFulfillmentResult>;
   findListingByPinId(listingPinId: string): Promise<ProductListingLookup | null>;
+  listOrders(): Promise<ProductOrderLookup[]>;
+  findOrderByOrderId(orderId: string): Promise<ProductOrderLookup | null>;
   findOrderByProductOrderPinId(productOrderPinId: string): Promise<ProductOrderLookup | null>;
   findSellerOrderByProductOrderPinId(productOrderPinId: string): Promise<ProductSellerOrderLookup | null>;
   findOrderByPaymentTxid(paymentTxid: string): Promise<ProductOrderLookup | null>;
@@ -198,6 +200,13 @@ export type ProductOrderLookup =
   | { source: 'sellerOrders'; item: ProductSellerOrderRecord };
 
 export type ProductSellerOrderLookup = { source: 'sellerOrders'; item: ProductSellerOrderRecord };
+
+export function getProductOrderRecordId(record: ProductBuyerOrderRecord | ProductSellerOrderRecord): string {
+  return normalizeText(record.productOrderPinId)
+    || normalizeText(record.orderTxid)
+    || normalizeText(record.paymentTxid)
+    || `${record.role}:${record.listingPinId}:${record.skuId}:${record.localUpdatedAt}`;
+}
 
 function emptyState(): ProductState {
   return {
@@ -772,6 +781,18 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
       if (owned) return { source: 'ownedListings', item: owned };
       const cached = state.directoryCache.find(item => item.listingPinId === normalized);
       return cached ? { source: 'directoryCache', item: cached } : null;
+    },
+    async listOrders() {
+      const state = await this.readState();
+      return [
+        ...state.buyerOrders.map(item => ({ source: 'buyerOrders' as const, item })),
+        ...state.sellerOrders.map(item => ({ source: 'sellerOrders' as const, item })),
+      ];
+    },
+    async findOrderByOrderId(orderId) {
+      const normalized = normalizeText(orderId);
+      const orders = await this.listOrders();
+      return orders.find(order => getProductOrderRecordId(order.item) === normalized) ?? null;
     },
     async findOrderByProductOrderPinId(productOrderPinId) {
       const normalized = normalizeText(productOrderPinId);

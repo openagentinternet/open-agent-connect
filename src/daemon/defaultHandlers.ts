@@ -101,9 +101,18 @@ import {
   parseProductOrderNotification,
 } from '../core/products/productOrderMessages';
 import { planProductPurchase } from '../core/products/productPurchasePlanner';
-import { createProductStateStore, type OwnedProductListingRecord } from '../core/products/productStateStore';
+import {
+  createProductStateStore,
+  getProductOrderRecordId,
+  type OwnedProductListingRecord,
+  type ProductBuyerOrderRecord,
+  type ProductListingLookup,
+  type ProductOrderLookup,
+  type ProductSellerOrderRecord,
+  type ProductState,
+} from '../core/products/productStateStore';
 import { validateProductListingPayload } from '../core/products/productValidation';
-import type { ProductListingPayload } from '../core/products/productTypes';
+import type { ProductListingPayload, ProductOrderPayload, ProductSku } from '../core/products/productTypes';
 import { createProviderServiceRunner } from '../core/a2a/provider/providerServiceRunner';
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
 import {
@@ -10691,6 +10700,315 @@ export function createDefaultMetabotDaemonHandlers(input: {
     };
   }
 
+  function readProductListingFromState(state: ProductState, listingPinId: string): ProductListingLookup | null {
+    const normalizedListingPinId = normalizeText(listingPinId);
+    const owned = state.ownedListings.find(item => item.listingPinId === normalizedListingPinId);
+    if (owned) {
+      return { source: 'ownedListings', item: owned };
+    }
+    const cached = state.directoryCache.find(item => item.listingPinId === normalizedListingPinId);
+    return cached ? { source: 'directoryCache', item: cached } : null;
+  }
+
+  function summarizeProductOrderRow(inputOrder: {
+    lookup: ProductOrderLookup;
+    listing: ProductListingLookup | null;
+    localIdentity: RuntimeIdentityRecord | null;
+  }) {
+    const record = inputOrder.lookup.item;
+    const listingPayload = inputOrder.listing?.item.payload ?? null;
+    const sku = listingPayload?.skus.find(item => item.skuId === record.skuId) ?? null;
+    const sellerGlobalMetaId = inputOrder.lookup.source === 'sellerOrders'
+      ? normalizeText(inputOrder.localIdentity?.globalMetaId)
+      : record.role === 'buyer'
+        ? normalizeText(record.sellerGlobalMetaId)
+        : '';
+    const buyerGlobalMetaId = inputOrder.lookup.source === 'buyerOrders'
+      ? normalizeText(inputOrder.localIdentity?.globalMetaId)
+      : normalizeText(record.buyerGlobalMetaId);
+    return {
+      orderId: getProductOrderRecordId(record),
+      role: record.role,
+      state: record.state,
+      productOrderPinId: record.productOrderPinId,
+      listingPinId: record.listingPinId,
+      skuId: record.skuId,
+      title: listingPayload?.title ?? null,
+      seller: {
+        globalMetaId: sellerGlobalMetaId || null,
+        name: inputOrder.lookup.source === 'sellerOrders'
+          ? normalizeText(inputOrder.localIdentity?.name) || null
+          : inputOrder.listing?.source === 'directoryCache'
+            ? normalizeText(inputOrder.listing.item.sellerName) || null
+            : null,
+      },
+      buyer: {
+        globalMetaId: buyerGlobalMetaId || null,
+        name: inputOrder.lookup.source === 'buyerOrders'
+          ? normalizeText(inputOrder.localIdentity?.name) || null
+          : null,
+      },
+      paymentTxid: record.paymentTxid,
+      orderTxid: record.orderTxid,
+      delivery: record.deliverySummary,
+      traceId: record.role === 'buyer' ? record.traceId : null,
+      updatedAt: record.localUpdatedAt,
+      sku: sku ? {
+        skuId: sku.skuId,
+        name: sku.name,
+        price: sku.price,
+      } : null,
+    };
+  }
+
+  function productOrderPayloadFromRecord(record: ProductBuyerOrderRecord | ProductSellerOrderRecord): ProductOrderPayload | null {
+    if (record.role === 'seller' && record.productOrderPayload) {
+      return record.productOrderPayload;
+    }
+    if (!record.paymentTxid) {
+      return null;
+    }
+    return {
+      listingPinId: record.listingPinId,
+      skuId: record.skuId,
+      settlementKind: 'native',
+      paymentTxid: record.paymentTxid,
+    };
+  }
+
+  function buildProductOrderInspection(inputOrder: {
+    lookup: ProductOrderLookup;
+    listing: ProductListingLookup | null;
+    localIdentity: RuntimeIdentityRecord | null;
+  }) {
+    const record = inputOrder.lookup.item;
+    const listingPayload = inputOrder.listing?.item.payload ?? null;
+    const selectedSku: ProductSku | null = listingPayload?.skus.find(item => item.skuId === record.skuId)
+      ?? (record.role === 'seller' ? record.selectedSku : null)
+      ?? null;
+    const orderPayload = productOrderPayloadFromRecord(record);
+    const row = summarizeProductOrderRow(inputOrder);
+    const traceId = record.role === 'buyer' ? record.traceId : null;
+    const sessionId = record.role === 'buyer' ? record.sessionId : null;
+    const localUiUrl = traceId
+      ? buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
+          traceId,
+          ...(sessionId ? { sessionId } : {}),
+        })
+      : null;
+    return {
+      order: row,
+      product: listingPayload ? {
+        listingPinId: record.listingPinId,
+        name: listingPayload.name,
+        title: listingPayload.title,
+        productType: listingPayload.productType,
+        coverImage: listingPayload.coverImage,
+      } : {
+        listingPinId: record.listingPinId,
+        name: null,
+        title: null,
+        productType: null,
+        coverImage: null,
+      },
+      sku: selectedSku ? {
+        skuId: selectedSku.skuId,
+        name: selectedSku.name,
+        image: selectedSku.image,
+        descriptionContentType: selectedSku.descriptionContentType,
+        description: selectedSku.description,
+        price: selectedSku.price,
+        initialStock: selectedSku.initialStock,
+      } : null,
+      buyer: row.buyer,
+      seller: row.seller,
+      payment: {
+        paymentTxid: record.paymentTxid,
+        settlementKind: orderPayload?.settlementKind ?? 'native',
+        amount: selectedSku?.price.amount ?? null,
+        currency: selectedSku?.price.currency ?? null,
+        verified: record.role === 'seller' ? record.paymentVerified : null,
+      },
+      fulfillment: {
+        fulfillmentType: listingPayload?.fulfillment.fulfillmentType ?? null,
+        deliveryEndpoint: listingPayload?.fulfillment.deliveryEndpoint ?? null,
+        fulfillmentSkills: record.role === 'seller' && record.fulfillmentSkills.length > 0
+          ? [...record.fulfillmentSkills]
+          : [...(listingPayload?.fulfillment.fulfillmentSkills ?? [])],
+        state: record.role === 'seller' ? record.fulfillmentState : record.state,
+        failureReason: record.role === 'seller' ? record.failureReason : null,
+      },
+      delivery: {
+        summary: record.deliverySummary,
+        deliveryPinId: record.role === 'seller' ? record.deliveryPinId : record.deliverySummary?.deliveryPinId ?? null,
+      },
+      trace: {
+        traceId,
+        sessionId,
+        localUiUrl,
+      },
+      raw: {
+        productListing: listingPayload,
+        productOrder: orderPayload,
+      },
+    };
+  }
+
+  async function listLocalProductOrders(request: {
+    from?: unknown;
+    all?: unknown;
+    role?: unknown;
+    state?: unknown;
+    page?: unknown;
+    pageSize?: unknown;
+  }): Promise<MetabotCommandResult<unknown>> {
+    const selected = await selectProductProfileRecordsForRequest(request);
+    if (selected.failure) {
+      return selected.failure;
+    }
+
+    const requestedRole = normalizeText(request.role).toLowerCase();
+    const role = requestedRole === 'seller' || requestedRole === 'all' ? requestedRole : 'buyer';
+    const requestedState = normalizeText(request.state).toLowerCase();
+    const page = normalizeMyServicesPage(request.page, 1);
+    const pageSize = normalizeMyServicesPage(request.pageSize, 20);
+    const rows: Array<ReturnType<typeof summarizeProductOrderRow>> = [];
+
+    for (const profile of selected.profiles) {
+      const productStore = createProductStateStore(profile.homeDir);
+      const [productState, runtimeState] = await Promise.all([
+        productStore.readState(),
+        createRuntimeStateStore(profile.homeDir).readState(),
+      ]);
+      for (const order of await productStore.listOrders()) {
+        if (role !== 'all' && order.item.role !== role) {
+          continue;
+        }
+        if (requestedState && normalizeText(order.item.state).toLowerCase() !== requestedState) {
+          continue;
+        }
+        rows.push(summarizeProductOrderRow({
+          lookup: order,
+          listing: readProductListingFromState(productState, order.item.listingPinId),
+          localIdentity: runtimeState.identity,
+        }));
+      }
+    }
+
+    rows.sort((left, right) => right.updatedAt - left.updatedAt);
+    const total = rows.length;
+    const offset = (page - 1) * pageSize;
+    return commandSuccess({
+      items: rows.slice(offset, offset + pageSize),
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  }
+
+  function readProductOrderInspectSelector(request: {
+    orderId?: unknown;
+    productOrderPinId?: unknown;
+    paymentTxid?: unknown;
+    orderTxid?: unknown;
+  }): {
+    ok: true;
+    key: 'orderId' | 'productOrderPinId' | 'paymentTxid' | 'orderTxid';
+    value: string;
+  } | {
+    ok: false;
+    result: MetabotCommandResult<never>;
+  } {
+    const selectors = [
+      ['orderId', normalizeText(request.orderId)],
+      ['productOrderPinId', normalizeText(request.productOrderPinId)],
+      ['paymentTxid', normalizeText(request.paymentTxid)],
+      ['orderTxid', normalizeText(request.orderTxid)],
+    ] as const;
+    const selected = selectors.filter(([, value]) => value);
+    if (selected.length === 0) {
+      return {
+        ok: false,
+        result: commandFailed(
+          'missing_product_order_selector',
+          'Provide exactly one product order selector: orderId, productOrderPinId, paymentTxid, or orderTxid.',
+        ),
+      };
+    }
+    if (selected.length > 1) {
+      return {
+        ok: false,
+        result: commandFailed(
+          'ambiguous_product_order_selector',
+          'Use only one product order selector: orderId, productOrderPinId, paymentTxid, or orderTxid.',
+        ),
+      };
+    }
+    const [key, value] = selected[0];
+    return { ok: true, key, value };
+  }
+
+  async function inspectLocalProductOrder(request: {
+    from?: unknown;
+    orderId?: unknown;
+    productOrderPinId?: unknown;
+    paymentTxid?: unknown;
+    orderTxid?: unknown;
+  }): Promise<MetabotCommandResult<unknown>> {
+    const selector = readProductOrderInspectSelector(request);
+    if (!selector.ok) {
+      return selector.result;
+    }
+    const selected = await selectProductProfileRecordsForRequest(request);
+    if (selected.failure) {
+      return selected.failure;
+    }
+
+    const matches: Array<{
+      lookup: ProductOrderLookup;
+      productState: ProductState;
+      localIdentity: RuntimeIdentityRecord | null;
+    }> = [];
+    for (const profile of selected.profiles) {
+      const productStore = createProductStateStore(profile.homeDir);
+      const [productState, runtimeState] = await Promise.all([
+        productStore.readState(),
+        createRuntimeStateStore(profile.homeDir).readState(),
+      ]);
+      const lookup = selector.key === 'orderId'
+        ? await productStore.findOrderByOrderId(selector.value)
+        : selector.key === 'productOrderPinId'
+          ? await productStore.findOrderByProductOrderPinId(selector.value)
+          : selector.key === 'paymentTxid'
+            ? await productStore.findOrderByPaymentTxid(selector.value)
+            : await productStore.findOrderByOrderTxid(selector.value);
+      if (lookup) {
+        matches.push({ lookup, productState, localIdentity: runtimeState.identity });
+      }
+    }
+
+    if (matches.length === 0) {
+      return commandFailed(
+        'product_order_not_found',
+        'Product order was not found in the local cache. Chain fallback for uncached product-order pins is not implemented in this inspection path.',
+      );
+    }
+    if (matches.length > 1) {
+      return commandFailed(
+        'ambiguous_product_order_selector',
+        `Product order selector matched ${matches.length} local orders. Use a more specific selector.`,
+      );
+    }
+
+    const match = matches[0];
+    return commandSuccess(buildProductOrderInspection({
+      lookup: match.lookup,
+      listing: readProductListingFromState(match.productState, match.lookup.item.listingPinId),
+      localIdentity: match.localIdentity,
+    }));
+  }
+
   function buildProductOrderTraceId(inputTrace: {
     sellerGlobalMetaId?: string | null;
     listingPinId?: string | null;
@@ -13223,6 +13541,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
           totalPages: Math.max(1, Math.ceil(total / pageSize)),
         });
       },
+      listOrders: async (request) => listLocalProductOrders(request),
+      inspectOrder: async (request) => inspectLocalProductOrder(request),
     },
     services: {
       listMyServices: async (request) => {
