@@ -313,6 +313,14 @@ Expected result:
 - fulfillment skills include `S1`
 - final state is delivered or completed after the delivery message is sent
 
+After fulfillment completes, record the delivery pin id from either inspect
+output. Prefer `data.delivery.deliveryPinId`; if the implementation returns the
+same value under a delivery summary, use that equivalent delivery summary field.
+
+```bash
+DELIVERY_PIN_ID="<delivery-pin-id>"
+```
+
 ## Verification
 
 Task 10 controller/subagent verification for this documentation round:
