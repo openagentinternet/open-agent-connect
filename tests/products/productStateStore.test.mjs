@@ -249,6 +249,43 @@ test('product state store persists buyer and seller orders with cache-first look
   assert.equal(sellerLookup.item.failureReason, 'prior transient fulfillment error');
 });
 
+test('product state store can look up seller order cache when buyer cache has the same product-order pin', async () => {
+  const profileRoot = await createTempProfileRoot();
+  const store = createProductStateStore(profileRoot);
+  const sharedProductOrderPinId = 'shared-product-order-pin-id';
+  const sellerPaymentTxid = 'd'.repeat(64);
+
+  await store.upsertBuyerOrder({
+    productOrderPinId: sharedProductOrderPinId,
+    listingPinId: 'buyer-listing-pin-id',
+    skuId: 'buyer-sku',
+    paymentTxid: 'buyer-payment-txid',
+    orderTxid: 'buyer-order-txid',
+    state: 'notified',
+  });
+  await store.upsertSellerOrder({
+    productOrderPinId: sharedProductOrderPinId,
+    listingPinId: 'seller-listing-pin-id',
+    skuId: 'seller-sku',
+    paymentTxid: sellerPaymentTxid,
+    productOrderPayload: {
+      listingPinId: 'seller-listing-pin-id',
+      skuId: 'seller-sku',
+      settlementKind: 'native',
+      paymentTxid: sellerPaymentTxid,
+    },
+    state: 'created',
+  });
+
+  const genericLookup = await store.findOrderByProductOrderPinId(sharedProductOrderPinId);
+  assert.equal(genericLookup.source, 'buyerOrders');
+
+  const sellerLookup = await store.findSellerOrderByProductOrderPinId(sharedProductOrderPinId);
+  assert.equal(sellerLookup.source, 'sellerOrders');
+  assert.equal(sellerLookup.item.listingPinId, 'seller-listing-pin-id');
+  assert.equal(sellerLookup.item.productOrderPayload.paymentTxid, sellerPaymentTxid);
+});
+
 test('product state store rejects blank required identifiers before upserting', async () => {
   const profileRoot = await createTempProfileRoot();
   const store = createProductStateStore(profileRoot);

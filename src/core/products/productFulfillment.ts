@@ -99,7 +99,7 @@ export interface ResolveSellerProductOrderInput {
   buyer?: ProductFulfillmentBuyerIdentity | null;
   localSeller: ProductSellerIdentity;
   productStateStore: Pick<ProductStateStore,
-    | 'findOrderByProductOrderPinId'
+    | 'findSellerOrderByProductOrderPinId'
     | 'findListingByPinId'
     | 'upsertSellerOrder'
     | 'upsertOwnedListing'
@@ -257,6 +257,11 @@ function normalizeText(value: unknown): string {
 function normalizeNullableText(value: unknown): string | null {
   const normalized = normalizeText(value);
   return normalized || null;
+}
+
+function normalizeOrderTxid(value: unknown): string | null {
+  const normalized = normalizeText(value).toLowerCase();
+  return /^[0-9a-f]{64}$/u.test(normalized) ? normalized : null;
 }
 
 function now(input?: { now?: () => number }): number {
@@ -482,7 +487,7 @@ export async function resolveProductOrderForSeller(
   const productOrderPinId = normalizeText(input.productOrderPinId);
   const orderTxid = normalizeNullableText(input.orderTxid);
   const buyerGlobalMetaId = normalizeNullableText(input.buyer?.globalMetaId);
-  const cachedOrderLookup = await input.productStateStore.findOrderByProductOrderPinId(productOrderPinId);
+  const cachedOrderLookup = await input.productStateStore.findSellerOrderByProductOrderPinId(productOrderPinId);
   let order: ResolvedProductOrderReference;
 
   if (cachedOrderLookup?.source === 'sellerOrders') {
@@ -583,6 +588,11 @@ export async function resolveProductOrderForSeller(
 export async function fulfillProductOrderForSeller(
   input: FulfillProductOrderForSellerInput,
 ): Promise<FulfillProductOrderForSellerResult> {
+  const orderTxid = normalizeOrderTxid(input.orderTxid);
+  if (!orderTxid) {
+    return failure('invalid_product_order_protocol', 'Product fulfillment requires a normalized 64-hex order txid before delivery.');
+  }
+
   const resolved = await resolveProductOrderForSeller(input);
   if (!resolved.ok) {
     return resolved;
@@ -607,7 +617,7 @@ export async function fulfillProductOrderForSeller(
       store: input.productStateStore,
       resolved,
       buyerGlobalMetaId: normalizeNullableText(input.buyer.globalMetaId) || resolved.order.buyerGlobalMetaId,
-      orderTxid: input.orderTxid,
+      orderTxid,
       fulfillmentSkills,
       paymentVerified: false,
       fulfillmentState: 'failed',
@@ -624,7 +634,7 @@ export async function fulfillProductOrderForSeller(
     store: input.productStateStore,
     resolved,
     buyerGlobalMetaId: normalizeNullableText(input.buyer.globalMetaId) || resolved.order.buyerGlobalMetaId,
-    orderTxid: input.orderTxid,
+    orderTxid,
     fulfillmentSkills,
     paymentVerified: true,
     fulfillmentState: 'fulfilling',
@@ -638,7 +648,7 @@ export async function fulfillProductOrderForSeller(
       payload: resolved.order.payload,
       metadata: {
         buyerGlobalMetaId: resolved.order.buyerGlobalMetaId,
-        orderTxid: input.orderTxid,
+        orderTxid,
         source: resolved.order.source,
       },
     },
@@ -670,7 +680,7 @@ export async function fulfillProductOrderForSeller(
       store: input.productStateStore,
       resolved,
       buyerGlobalMetaId: normalizeNullableText(input.buyer.globalMetaId) || resolved.order.buyerGlobalMetaId,
-      orderTxid: input.orderTxid,
+      orderTxid,
       fulfillmentSkills,
       paymentVerified: true,
       fulfillmentState: 'failed',
@@ -689,7 +699,7 @@ export async function fulfillProductOrderForSeller(
       store: input.productStateStore,
       resolved,
       buyerGlobalMetaId: normalizeNullableText(input.buyer.globalMetaId) || resolved.order.buyerGlobalMetaId,
-      orderTxid: input.orderTxid,
+      orderTxid,
       fulfillmentSkills,
       paymentVerified: true,
       fulfillmentState: 'failed',
@@ -709,12 +719,12 @@ export async function fulfillProductOrderForSeller(
     paymentTxid: resolved.order.payload.paymentTxid,
     result: responseText,
     deliveredAt,
-  }, input.orderTxid);
+  }, orderTxid);
   let deliveryWrite: ProductDeliverySendResult;
   try {
     deliveryWrite = await input.deliverySender.send({
       toGlobalMetaId: normalizeText(input.buyer.globalMetaId),
-      orderTxid: input.orderTxid,
+      orderTxid,
       productOrderPinId: resolved.order.pinId,
       content: deliveryContent,
     });
@@ -724,7 +734,7 @@ export async function fulfillProductOrderForSeller(
       store: input.productStateStore,
       resolved,
       buyerGlobalMetaId: normalizeNullableText(input.buyer.globalMetaId) || resolved.order.buyerGlobalMetaId,
-      orderTxid: input.orderTxid,
+      orderTxid,
       fulfillmentSkills,
       paymentVerified: true,
       fulfillmentState: 'failed',
@@ -741,9 +751,9 @@ export async function fulfillProductOrderForSeller(
     try {
       ratingWrite = await input.deliverySender.send({
         toGlobalMetaId: normalizeText(input.buyer.globalMetaId),
-        orderTxid: input.orderTxid,
+        orderTxid,
         productOrderPinId: resolved.order.pinId,
-        content: buildNeedsRatingMessage(input.orderTxid, 'Please rate this product delivery when ready.'),
+        content: buildNeedsRatingMessage(orderTxid, 'Please rate this product delivery when ready.'),
       });
     } catch {
       ratingWrite = null;
@@ -756,7 +766,7 @@ export async function fulfillProductOrderForSeller(
     store: input.productStateStore,
     resolved,
     buyerGlobalMetaId: normalizeNullableText(input.buyer.globalMetaId) || resolved.order.buyerGlobalMetaId,
-    orderTxid: input.orderTxid,
+    orderTxid,
     fulfillmentSkills,
     paymentVerified: true,
     fulfillmentState: 'delivered',
@@ -773,7 +783,7 @@ export async function fulfillProductOrderForSeller(
       listingPinId: resolved.order.payload.listingPinId,
       skuId: resolved.order.payload.skuId,
       paymentTxid: resolved.order.payload.paymentTxid,
-      orderTxid: input.orderTxid,
+      orderTxid,
       result: responseText,
       deliveryPinId,
       ratingMessagePinId,

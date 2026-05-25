@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
+const {
+  createProductStateStore,
+} = require('../../dist/core/products/productStateStore.js');
 const {
   fulfillProductOrderForSeller,
   resolveProductOrderForSeller,
@@ -15,6 +21,11 @@ const LISTING_PIN_ID = 'listing-pin-1';
 const SELLER_GLOBAL_META_ID = 'idq1seller';
 const BUYER_GLOBAL_META_ID = 'idq1buyer';
 const SELLER_MVC_ADDRESS = 'seller-mvc-address';
+
+async function createTempProfileRoot() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oac-product-fulfillment-'));
+  return path.join(root, '.metabot', 'profiles', 'seller');
+}
 
 function productListing(overrides = {}) {
   return {
@@ -94,6 +105,10 @@ function createFakeProductStateStore(seed = {}) {
   return {
     state,
     async findOrderByProductOrderPinId(productOrderPinId) {
+      const item = state.orders.get(productOrderPinId);
+      return item ? { source: 'sellerOrders', item } : null;
+    },
+    async findSellerOrderByProductOrderPinId(productOrderPinId) {
       const item = state.orders.get(productOrderPinId);
       return item ? { source: 'sellerOrders', item } : null;
     },
@@ -184,6 +199,21 @@ function localSeller(overrides = {}) {
       mvc: SELLER_MVC_ADDRESS,
       btc: 'seller-btc-address',
     },
+    ...overrides,
+  };
+}
+
+function cachedBuyerOrder(overrides = {}) {
+  return {
+    role: 'buyer',
+    productOrderPinId: PRODUCT_ORDER_PIN_ID,
+    listingPinId: LISTING_PIN_ID,
+    skuId: 'sku2',
+    paymentTxid: 'b'.repeat(64),
+    orderTxid: '2'.repeat(64),
+    sellerGlobalMetaId: SELLER_GLOBAL_META_ID,
+    buyerGlobalMetaId: BUYER_GLOBAL_META_ID,
+    state: 'notified',
     ...overrides,
   };
 }
@@ -303,6 +333,36 @@ test('resolveProductOrderForSeller uses cached product-order before fetching cha
 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.order.source, 'cache');
+  assert.deepEqual(chainFetcher.calls, []);
+});
+
+test('resolveProductOrderForSeller uses seller cache when buyer cache has the same product-order pin', async () => {
+  const store = createProductStateStore(await createTempProfileRoot());
+  const sellerOrderPayload = productOrder({ comment: 'seller cache payload' });
+  await store.upsertOwnedListing({
+    listingPinId: LISTING_PIN_ID,
+    payload: productListing(),
+    available: true,
+  });
+  await store.upsertBuyerOrder(cachedBuyerOrder());
+  await store.upsertSellerOrder({
+    ...cachedSellerOrder(),
+    productOrderPayload: sellerOrderPayload,
+  });
+  const chainFetcher = createChainFetcher();
+
+  const result = await resolveProductOrderForSeller({
+    productOrderPinId: PRODUCT_ORDER_PIN_ID,
+    orderTxid: ORDER_TXID,
+    buyer: { globalMetaId: BUYER_GLOBAL_META_ID },
+    localSeller: localSeller(),
+    productStateStore: store,
+    chainFetcher,
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.order.source, 'cache');
+  assert.deepEqual(result.order.payload, sellerOrderPayload);
   assert.deepEqual(chainFetcher.calls, []);
 });
 
@@ -488,6 +548,22 @@ test('fulfillProductOrderForSeller sends delivery and persists delivered seller 
   assert.equal(persisted.deliveryPinId, 'delivery-pin-1');
   assert.equal(persisted.failureReason, null);
   assert.deepEqual(persisted.fulfillmentSkills, ['deliver-topup-card', 'audit-stock']);
+});
+
+test('fulfillProductOrderForSeller rejects invalid order txid before sending delivery', async () => {
+  const harness = createFulfillmentHarness({
+    store: {
+      orders: [cachedSellerOrder()],
+      listings: [cachedOwnedListing()],
+    },
+  });
+  harness.input.orderTxid = 'not-a-valid-order-txid';
+
+  const result = await fulfillProductOrderForSeller(harness.input);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_product_order_protocol');
+  assert.deepEqual(harness.sent, []);
 });
 
 test('resolveProductOrderForSeller returns product_order_not_found for missing chain product-order pin', async () => {

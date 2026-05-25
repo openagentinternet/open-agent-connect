@@ -110,6 +110,7 @@ export interface ProductStateStore {
   upsertSellerOrder(input: UpsertSellerOrderInput): Promise<ProductSellerOrderRecord>;
   findListingByPinId(listingPinId: string): Promise<ProductListingLookup | null>;
   findOrderByProductOrderPinId(productOrderPinId: string): Promise<ProductOrderLookup | null>;
+  findSellerOrderByProductOrderPinId(productOrderPinId: string): Promise<ProductSellerOrderLookup | null>;
   findOrderByPaymentTxid(paymentTxid: string): Promise<ProductOrderLookup | null>;
   findOrderByOrderTxid(orderTxid: string): Promise<ProductOrderLookup | null>;
 }
@@ -174,6 +175,8 @@ export type ProductListingLookup =
 export type ProductOrderLookup =
   | { source: 'buyerOrders'; item: ProductBuyerOrderRecord }
   | { source: 'sellerOrders'; item: ProductSellerOrderRecord };
+
+export type ProductSellerOrderLookup = { source: 'sellerOrders'; item: ProductSellerOrderRecord };
 
 function emptyState(): ProductState {
   return {
@@ -696,6 +699,12 @@ export function createProductStateStore(homeDirOrPaths: string | MetabotPaths): 
       const state = await this.readState();
       const buyer = state.buyerOrders.find(item => item.productOrderPinId === normalized);
       if (buyer) return { source: 'buyerOrders', item: buyer };
+      const seller = state.sellerOrders.find(item => item.productOrderPinId === normalized);
+      return seller ? { source: 'sellerOrders', item: seller } : null;
+    },
+    async findSellerOrderByProductOrderPinId(productOrderPinId) {
+      const normalized = normalizeText(productOrderPinId);
+      const state = await this.readState();
       const seller = state.sellerOrders.find(item => item.productOrderPinId === normalized);
       return seller ? { source: 'sellerOrders', item: seller } : null;
     },
