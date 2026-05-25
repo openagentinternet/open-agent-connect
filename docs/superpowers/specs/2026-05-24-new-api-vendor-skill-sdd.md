@@ -28,7 +28,7 @@ The product goal is a skill-first token gateway. Buyers should not need to visit
 - Both V1 acceptance SKUs are free OAC services with `price: "0"` so the test focuses on service discovery, order routing, provider execution, and automatic delivery.
 - Both SKU services use the same `providerSkill`: `new-api-vendor-skill`.
 - The skill must be backend-agnostic through a `VendorBackend` contract. V1 ships a mock backend first; the real `new-api` adapter is a later switch behind the same contract.
-- The mock API envelope and token fields should mirror `new-api` closely enough that the real adapter can replace the mock adapter without changing buyer-facing delivery shape.
+- The mock API envelope and token fields should mirror `new-api` closely enough that the real adapter can replace the mock adapter. The buyer-facing delivery should be natural-language text, not a raw JSON envelope.
 - Do not rely on `skillDocument` for SKU metadata in V1. Current OAC publishing writes `skillDocument: ""` into service payloads.
 - Do not require OAC buyers to use a website or provider dashboard during the acceptance flow.
 
@@ -38,7 +38,7 @@ The product goal is a skill-first token gateway. Buyers should not need to visit
 - Support two V1 order actions:
   - issue a new mock OpenAgentKey API key;
   - renew an existing mock OpenAgentKey API key.
-- Deliver results as machine-readable text containing the API base URL, key or masked key, quota, expiry, and SKU/order metadata.
+- Deliver results as natural-language text containing the API base URL, full key, quota, expiry, and SKU/order metadata.
 - Persist enough mock state for a renewal call to find the key created by a prior purchase call.
 - Keep the mock and real backend adapter boundaries explicit.
 - Provide an acceptance flow using one seller Bot and one buyer Bot.
@@ -88,7 +88,7 @@ flowchart TD
   E --> F["OAC provider runner injects providerSkill"]
   F --> G["new-api-vendor-skill parses serviceName and buyer request"]
   G --> H["VendorBackend mock adapter issues or renews key"]
-  H --> I["Skill returns one JSON deliverable"]
+  H --> I["Skill returns one natural-language deliverable"]
   I --> J["OAC sends DELIVERY to buyer"]
 ```
 
@@ -178,7 +178,9 @@ Do not assume OAC packaging installs this skill automatically. Current OAC insta
   - `issue_key`: create and deliver a new key;
   - `renew_key`: renew the provided key.
 - Use the local `scripts/vendor-backend.mjs` helper for deterministic behavior.
-- Return exactly one plain-text JSON object as the final answer. Do not use Markdown fences.
+- Return exactly one natural-language plain-text message as the final answer. Do not use JSON or Markdown fences.
+- Include the buyer's full API key in clear text in the final message. The simplemsg transport already handles message encryption.
+- Include action, key, token id, order id, service name, base URL, quota, and expiry as labeled lines so both humans and MetaBots can copy the virtual product details.
 - Never include internal logs, command output, wallet details, admin credentials, cookies, service ids, trace ids, or troubleshooting notes in the buyer deliverable.
 - Never ask the buyer to visit a website.
 - Ask for no clarification during acceptance if all required fields are present.
@@ -187,8 +189,8 @@ The helper script should expose at least these commands:
 
 ```bash
 node scripts/vendor-backend.mjs list-skus --format json
-node scripts/vendor-backend.mjs issue --service-name openagentkey-mock-starter-key --buyer-global-metaid <id> --order-id <id> --format delivery-json
-node scripts/vendor-backend.mjs renew --service-name openagentkey-mock-starter-renewal --key <api-key> --buyer-global-metaid <id> --order-id <id> --format delivery-json
+node scripts/vendor-backend.mjs issue --service-name openagentkey-mock-starter-key --buyer-global-metaid <id> --order-id <id> --format delivery-text
+node scripts/vendor-backend.mjs renew --service-name openagentkey-mock-starter-renewal --key <api-key> --buyer-global-metaid <id> --order-id <id> --format delivery-text
 node scripts/vendor-backend.mjs usage --key <api-key> --format json
 ```
 
@@ -324,7 +326,7 @@ Example config:
 }
 ```
 
-Successful issue result must use a `new-api`-like envelope:
+The internal `delivery-json` helper mode should keep a `new-api`-like envelope for tests and adapter validation:
 
 ```json
 {
@@ -369,7 +371,7 @@ Successful issue result must use a `new-api`-like envelope:
 }
 ```
 
-Successful renewal result should keep the same token id and masked key, increase `expired_time`, and optionally add quota according to the renewal SKU.
+Successful renewal result should keep the same token id and full key, increase `expired_time`, and optionally add quota according to the renewal SKU.
 
 Errors must use:
 
@@ -448,7 +450,7 @@ Recommended mock state shape:
 ## Security Rules
 
 - Never print `NEW_API_ADMIN_TOKEN`, cookies, service-account credentials, mnemonic data, wallet details, or full internal HTTP headers.
-- Return the full API key only in the purchase delivery. Renewal responses should prefer `maskedKey` unless the backend deliberately supports re-revealing keys.
+- Return the buyer's full API key in clear text in purchase and renewal deliveries.
 - Store real backend credentials only in environment variables or a local secret mechanism, never in the skill repo.
 - The mock backend may store raw mock keys locally for acceptance, but the real adapter should minimize raw key persistence.
 - The final buyer deliverable must not include shell logs or stack traces.
@@ -558,9 +560,9 @@ If the call returns a `traceId` before completion, continue with the existing tr
 
 Acceptance requirement: the buyer receives a delivery result containing:
 
-- `"success": true`
-- `"action": "issue_key"`
-- `"baseUrl": "https://openagentkey.com/v1"`
+- a natural-language purchase completion message;
+- `Action: issue_key`
+- `Base URL: https://openagentkey.com/v1`
 - a full mock key beginning with `sk-mock-`
 - quota and expiry fields
 
@@ -589,10 +591,10 @@ metabot services call --from <buyer-bot> --request-file renewal-request.json
 
 Acceptance requirement: the buyer receives a delivery result containing:
 
-- `"success": true`
-- `"action": "renew_key"`
-- the same token id or same masked key as the purchase result
-- a later `expired_time` than the purchase result
+- a natural-language renewal completion message;
+- `Action: renew_key`
+- the same token id or same full key as the purchase result
+- a later expiry than the purchase result
 - updated usage/quota fields
 
 ### 5. Seller Verification
@@ -610,7 +612,7 @@ Acceptance requirement:
 - renewal order reaches `completed` or `rating_pending`;
 - no manual website login was required;
 - no seller manual fulfillment step was required;
-- delivery payloads match the mock/new-api-compatible envelope.
+- delivery messages are natural-language simplemsg deliverables with the full buyer key in clear text.
 
 ## Future Extensions
 
