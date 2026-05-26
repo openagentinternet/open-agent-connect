@@ -120,7 +120,14 @@
         flex-wrap: wrap;
         gap: 4px;
       }
+      .metaapps-row-state,
+      .metaapps-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
       .metaapps-tags span,
+      .metaapps-row-state span,
       .metaapps-version {
         border: 1px solid var(--border2);
         border-radius: 999px;
@@ -180,6 +187,29 @@
         color: var(--text);
         font: 12px var(--mono);
         margin: 0;
+        overflow-wrap: anywhere;
+      }
+      .metaapps-history {
+        border-top: 1px solid var(--border);
+        margin-top: 18px;
+        padding-top: 14px;
+      }
+      .metaapps-history h3 {
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 650;
+        margin-bottom: 8px;
+      }
+      .metaapps-history ol {
+        color: var(--muted);
+        display: grid;
+        font: 11px var(--mono);
+        gap: 6px;
+        list-style-position: inside;
+        margin: 0;
+        padding: 0;
+      }
+      .metaapps-history li {
         overflow-wrap: anywhere;
       }
       .metaapps-empty,

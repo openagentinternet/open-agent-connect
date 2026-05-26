@@ -64,16 +64,32 @@ function buildMetaAppsPageScript(): string {
     }
   }
 
+  function isMetaAppsGalleryUrl(rawValue) {
+    const value = safeUrl(rawValue);
+    if (!value) return false;
+    try {
+      const parsed = new URL(value, window.location.origin);
+      return parsed.pathname === '/ui/metaapps' || parsed.pathname.startsWith('/ui/metaapps/');
+    } catch {
+      return false;
+    }
+  }
+
+  function nonGalleryUrl(rawValue) {
+    const value = safeUrl(rawValue);
+    return value && !isMetaAppsGalleryUrl(value) ? value : '';
+  }
+
+  function isMetaAppPinId(value) {
+    return /^[0-9a-f]{64}i0$/i.test(String(value ?? '').trim());
+  }
+
   function apiUrl(refresh) {
     const apiParams = new URLSearchParams();
-    for (const key of ['pinId', 'firstPinId', 'mine', 'from']) {
-      const value = queryParams.get(key);
-      if (value) apiParams.set(key, value);
+    for (const [key, value] of new URLSearchParams(window.location.search).entries()) {
+      if (value) apiParams.append(key, value);
     }
-    if (refresh) {
-      const refreshParams = apiParams;
-      refreshParams.set('refresh', 'true');
-    }
+    if (refresh) apiParams.set('refresh', 'true');
     const query = apiParams.toString();
     return query ? '/api/metaapps?' + query : '/api/metaapps';
   }
@@ -85,11 +101,108 @@ function buildMetaAppsPageScript(): string {
   }
 
   function label(record) {
+    if (!record || typeof record !== 'object') return 'Untitled MetaApp';
     return record.title || record.appName || record.pinId || 'Untitled MetaApp';
   }
 
+  function textValue(value) {
+    if (value === null || value === undefined || value === '') return '';
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    return '';
+  }
+
+  function flagValue(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value === 1 ? true : value === 0 ? false : null;
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim().toLowerCase();
+    if (['true', 'yes', '1', 'latest', 'current'].includes(normalized)) return true;
+    if (['false', 'no', '0', 'previous', 'outdated', 'disabled'].includes(normalized)) return false;
+    return null;
+  }
+
+  function statusLabel(record) {
+    if (!record || typeof record !== 'object') return '';
+    if (flagValue(record.disabled) === true) return 'Disabled';
+    if (flagValue(record.enabled) === false) return 'Disabled';
+    return textValue(record.status);
+  }
+
+  function latestLabel(record) {
+    if (!record || typeof record !== 'object') return '';
+    const latest = flagValue(record.latest);
+    const isLatest = flagValue(record.isLatest);
+    if (latest === true || isLatest === true) return 'Latest';
+    if (latest === false || isLatest === false) return 'Previous version';
+    const latestText = textValue(record.latest);
+    if (latestText) return 'Latest ' + latestText;
+    const latestRecord = record.latest && typeof record.latest === 'object' ? record.latest : null;
+    const latestRecordVersion = latestRecord ? textValue(latestRecord.version || latestRecord.pinId || latestRecord.id) : '';
+    if (latestRecordVersion) return 'Latest ' + latestRecordVersion;
+    const latestVersion = textValue(record.latestVersion || record.latest_version || record.currentVersion || record.current_version);
+    return latestVersion ? 'Latest ' + latestVersion : '';
+  }
+
+  function stateLabels(record) {
+    return [statusLabel(record), latestLabel(record)].filter(Boolean);
+  }
+
+  function versionHistory(record) {
+    if (!record || typeof record !== 'object') return [];
+    const candidates = [
+      record.versionHistory,
+      record.version_history,
+      record.history,
+      record.versions,
+      record.indexerHistory,
+      record.raw?.versionHistory,
+      record.raw?.version_history,
+      record.raw?.history,
+      record.raw?.versions,
+      record.raw?.indexerHistory,
+      record.raw?.indexer?.versionHistory,
+      record.raw?.indexer?.history,
+      record.raw?.data?.versionHistory,
+      record.raw?.data?.history,
+      record.indexer?.versionHistory,
+      record.indexer?.history,
+      record.indexerRaw?.versionHistory,
+      record.indexerRaw?.history,
+      record.metadata?.versionHistory,
+      record.metadata?.history,
+    ];
+    for (const candidate of candidates) {
+      if (Array.isArray(candidate)) return candidate.filter(Boolean);
+    }
+    return [];
+  }
+
+  function historyEntryLabel(entry, index) {
+    if (!entry || typeof entry !== 'object') {
+      return textValue(entry) || 'Version ' + (index + 1);
+    }
+    const version = textValue(entry.version || entry.appVersion || entry.versionLabel || entry.name) || 'Version ' + (index + 1);
+    const pin = textValue(entry.pinId || entry.metaappPinId || entry.pin || entry.id);
+    const labels = [statusLabel(entry), latestLabel(entry)].filter(Boolean).join(' - ');
+    return [version, pin, labels].filter(Boolean).join(' - ');
+  }
+
+  function renderVersionHistory(record) {
+    const entries = versionHistory(record).slice(0, 8);
+    if (!entries.length) return '';
+    return '<section class="metaapps-history" data-metaapps-history>'
+      + '<h3>Version history</h3>'
+      + '<ol>' + entries.map((entry, index) => '<li>' + escapeHtml(historyEntryLabel(entry, index)) + '</li>').join('') + '</ol>'
+      + '</section>';
+  }
+
   function primaryRunUrl(record) {
-    return safeUrl(record.runUrl) || safeUrl(record.localUiUrl) || safeUrl(record.metawebUrl);
+    return safeUrl(record.runUrl) || safeUrl(record.metawebUrl) || nonGalleryUrl(record.localUiUrl);
+  }
+
+  function openUrl(record) {
+    return safeUrl(record.metawebUrl) || safeUrl(record.runUrl) || nonGalleryUrl(record.localUiUrl);
   }
 
   function downloadUrl(record) {
@@ -124,9 +237,11 @@ function buildMetaAppsPageScript(): string {
     elements.list.innerHTML = records.map((record) => {
       const active = record.pinId === selectedPinId ? ' aria-current="true"' : '';
       const tags = Array.isArray(record.tags) ? record.tags.slice(0, 4) : [];
+      const states = stateLabels(record);
       return '<button type="button" class="metaapps-row" data-metaapps-pin="' + escapeHtml(record.pinId) + '"' + active + '>'
         + '<span class="metaapps-row-title">' + escapeHtml(label(record)) + '</span>'
         + '<span class="metaapps-row-meta">' + escapeHtml(record.version || 'v?') + ' - ' + escapeHtml(record.network || 'network?') + ' - ' + escapeHtml(record.source || 'source?') + '</span>'
+        + (states.length ? '<span class="metaapps-row-state">' + states.map((state) => '<span>' + escapeHtml(state) + '</span>').join('') + '</span>' : '')
         + (tags.length ? '<span class="metaapps-tags">' + tags.map((tag) => '<span>' + escapeHtml(tag) + '</span>').join('') + '</span>' : '')
         + '</button>';
     }).join('');
@@ -148,13 +263,22 @@ function buildMetaAppsPageScript(): string {
     }
     selectedPinId = record.pinId;
     const run = primaryRunUrl(record);
+    const open = openUrl(record);
+    const localDetail = nonGalleryUrl(record.localUiUrl);
     const download = downloadUrl(record);
-    const safeShareTarget = safeUrl(record.metawebUrl) || safeUrl(record.localUiUrl);
-    const commentCommand = record.pinId ? 'metabot metaapp comment --pin-id ' + record.pinId + ' --comment ""' : '';
+    const safeShareTarget = safeUrl(record.metawebUrl) || localDetail;
+    const validPinId = isMetaAppPinId(record.pinId) ? String(record.pinId).trim() : '';
+    const commentCommand = validPinId ? 'metabot metaapp comment --pin-id ' + validPinId + ' --comment ""' : '';
+    const status = statusLabel(record);
+    const latest = latestLabel(record);
+    const badges = [record.operation || 'metaapp', status, latest].filter(Boolean);
     const fields = [
       ['Pin', record.pinId],
       ['First pin', record.firstPinId],
       ['Version', record.version],
+      ['Status', status],
+      ['Latest', latest],
+      ['Latest version', record.latestVersion || record.latest_version],
       ['Runtime', record.runtime],
       ['Owner', record.ownerGlobalMetaId],
       ['Updated', formatDate(record.updatedAt)],
@@ -162,18 +286,20 @@ function buildMetaAppsPageScript(): string {
     ];
     elements.detail.innerHTML = '<header class="metaapps-detail-head">'
       + '<div><span class="metaapps-kicker">Selected</span><h2>' + escapeHtml(label(record)) + '</h2></div>'
-      + '<span class="metaapps-version">' + escapeHtml(record.operation || 'metaapp') + '</span>'
+      + '<div class="metaapps-badges">' + badges.map((badge) => '<span class="metaapps-version">' + escapeHtml(badge) + '</span>').join('') + '</div>'
       + '</header>'
       + (record.intro || record.prompt ? '<p class="metaapps-summary">' + escapeHtml(record.intro || record.prompt) + '</p>' : '')
       + '<div class="metaapps-actions">'
-      + actionLink(record.localUiUrl || record.metawebUrl, 'Open')
+      + actionLink(open, 'Open')
       + actionLink(run, 'Run')
+      + (localDetail && localDetail !== open && localDetail !== run ? actionLink(localDetail, 'Local detail') : '')
       + actionLink(download, 'Download')
       + (record.pinId ? '<button type="button" class="metaapps-action" data-metaapps-copy="' + escapeHtml(record.pinId) + '">Copy pin</button>' : '')
       + (safeShareTarget ? '<button type="button" class="metaapps-action" data-metaapps-share="' + escapeHtml(safeShareTarget) + '">Share</button>' : '')
-      + (commentCommand ? '<button type="button" class="metaapps-action" data-metaapps-copy="' + escapeHtml(commentCommand) + '">Comment</button>' : '')
+      + (commentCommand ? '<button type="button" class="metaapps-action" data-metaapps-copy="' + escapeHtml(commentCommand) + '">Copy comment command</button>' : '')
       + '</div>'
-      + '<dl class="metaapps-fields">' + fields.map(([name, value]) => '<div><dt>' + escapeHtml(name) + '</dt><dd>' + escapeHtml(value || 'Unknown') + '</dd></div>').join('') + '</dl>';
+      + '<dl class="metaapps-fields">' + fields.map(([name, value]) => '<div><dt>' + escapeHtml(name) + '</dt><dd>' + escapeHtml(value || 'Unknown') + '</dd></div>').join('') + '</dl>'
+      + renderVersionHistory(record);
   }
 
   async function load(refresh = false) {
