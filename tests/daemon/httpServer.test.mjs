@@ -2545,6 +2545,20 @@ test('GET /ui/loom renders the built-in Loom board and includes Loom in navigati
   assert.doesNotMatch(html, /\/api\/services\/rate/);
 });
 
+test('GET /ui/metaapps serves the built-in MetaApps placeholder page', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/metaapps`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /MetaApps/);
+  assert.match(html, /data-metaapps-shell/);
+  assert.match(html, /href="\/ui\/metaapps"/);
+});
+
 test('GET /ui/buzz serves the bundled Buzz MetaApp entry from the daemon server', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());

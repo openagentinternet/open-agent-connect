@@ -54,6 +54,20 @@ async function writePreviewAssetResponse(context: RouteContext, result: { body: 
   context.res.end(body);
 }
 
+function previewAssetFailureStatus(result: MetabotCommandResult<unknown>): number {
+  switch (result.code) {
+    case 'preview_asset_not_found':
+    case 'preview_session_not_found':
+      return 404;
+    case 'preview_session_expired':
+      return 410;
+    case 'invalid_preview_asset_path':
+      return 400;
+    default:
+      return 500;
+  }
+}
+
 export const handleMetaAppRoutes = async (context: RouteContext): Promise<boolean> => {
   const { req, url, handlers } = context;
 
@@ -70,7 +84,7 @@ export const handleMetaAppRoutes = async (context: RouteContext): Promise<boolea
       : commandFailed('not_implemented', 'MetaApp preview asset handler is not configured.');
 
     if (isCommandResult(result)) {
-      context.sendJson(200, result);
+      context.sendJson(result.ok ? 200 : previewAssetFailureStatus(result), result);
       return true;
     }
 

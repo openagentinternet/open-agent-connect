@@ -108,6 +108,29 @@ test('GET /api/metaapp/preview-assets/<previewId>/index.html forwards the asset 
   assert.equal(response.headers.get('content-type'), 'text/html; charset=utf-8');
 });
 
+test('GET /api/metaapp/preview-assets/<previewId>/missing.html maps failed asset results to non-success responses', async (t) => {
+  const server = await startServer({
+    metaapp: {
+      previewAsset: async () => ({
+        ok: false,
+        state: 'failed',
+        code: 'preview_asset_not_found',
+        message: 'Preview asset was not found.',
+      }),
+    },
+  });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/metaapp/preview-assets/metaapp-preview-1/missing.html`);
+  const body = await response.text();
+
+  assert.equal(response.status, 404);
+  assert.match(response.headers.get('content-type') ?? '', /application\/json/i);
+  assert.doesNotMatch(body, /<!doctype html>/i);
+  assert.doesNotMatch(body, /<title>MetaApp<\/title>/i);
+  assert.match(body, /preview_asset_not_found/);
+});
+
 for (const [method, pathname, key] of [
   ['POST', '/api/metaapp/publish', 'publish'],
   ['POST', '/api/metaapp/update', 'update'],

@@ -8,6 +8,7 @@ import { buildRefundPageDefinition } from '../../ui/pages/refund/app';
 import { buildTracePageDefinition } from '../../ui/pages/trace/app';
 import { buildBotPageDefinition } from '../../ui/pages/bot/app';
 import { buildLoomPageDefinition } from '../../ui/pages/loom/app';
+import { buildMetaAppsPageDefinition } from '../../ui/pages/metaapps/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
 import type { MetabotUiPageName, RouteHandler } from './types';
 import { handleBundledMetaAppRoutes } from './uiMetaApps';
@@ -31,6 +32,7 @@ const PAGE_BUILDERS: Record<MetabotUiPageName, () => LocalUiPageDefinition> = {
   'chat-viewer': buildChatViewerPageDefinition,
   'bot': buildBotPageDefinition,
   'loom': buildLoomPageDefinition,
+  'metaapps': buildMetaAppsPageDefinition,
 };
 
 const NAV_ITEMS: Array<{ page: MetabotUiPageName; label: string }> = [
@@ -41,6 +43,7 @@ const NAV_ITEMS: Array<{ page: MetabotUiPageName; label: string }> = [
   { page: 'trace', label: 'Trace' },
   { page: 'refund', label: 'Refund' },
   { page: 'loom', label: 'Loom' },
+  { page: 'metaapps', label: 'MetaApps' },
 ];
 
 const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>();

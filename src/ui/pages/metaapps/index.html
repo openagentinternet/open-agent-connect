@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
+    <style>
+      .content:has(.metaapps-shell) {
+        max-width: none;
+        padding: 0;
+      }
+      .metaapps-shell {
+        min-height: calc(100vh - 52px);
+        background: var(--bg);
+      }
+      @supports (min-height: 100svh) {
+        .metaapps-shell { min-height: calc(100svh - 52px); }
+      }
+      .metaapps-header {
+        min-height: 82px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 20px;
+      }
+      .metaapps-kicker {
+        display: block;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        margin-bottom: 5px;
+      }
+      .metaapps-header h1 {
+        color: var(--text);
+        font-size: 22px;
+        font-weight: 650;
+        line-height: 1.2;
+      }
+      .metaapps-placeholder {
+        max-width: 720px;
+        margin: 24px 20px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        padding: 18px;
+      }
+      .metaapps-placeholder h2 {
+        color: var(--text);
+        font-size: 15px;
+        font-weight: 650;
+        line-height: 1.25;
+        margin-bottom: 8px;
+      }
+      .metaapps-placeholder p {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
+        <div class="topbar-sep"></div>
+        <span class="topbar-title">MetaApps</span>
+        <div class="topbar-spacer"></div>
+        <nav class="topbar-nav">__PAGE_NAV__</nav>
+      </header>
+
+      <main class="content">
+        __PAGE_CONTENT__
+      </main>
+    </div>
+    <script>
+      __PAGE_SCRIPT__
+    </script>
+  </body>
+</html>

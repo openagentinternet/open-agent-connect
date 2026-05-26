@@ -10378,8 +10378,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
           );
           return result;
         } catch (error) {
+          const errorCode = error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string'
+            ? (error as { code: string }).code
+            : 'metaapp_preview_failed';
           return commandFailed(
-            'metaapp_preview_failed',
+            errorCode,
             error instanceof Error ? error.message : String(error),
           );
         }
