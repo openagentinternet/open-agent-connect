@@ -56,7 +56,7 @@ Important existing OAC files:
 Relevant reference code:
 
 - `/Users/tusm/Documents/MetaID_Projects/IDBots/IDBots/SKILLs/metabot-upload-largefile/SKILL.md`
-  - product semantics: direct upload at or below 2 MiB, chunked upload above 2 MiB, hard cap at 20 MiB, large chunking currently MVC-only.
+  - reference semantics: direct upload at or below 2 MiB, chunked upload above 2 MiB, historical IDBots hard cap at 20 MiB, and large chunking currently MVC-only. OAC's target hard cap is 50 MiB; do not implement the historical 20 MiB cap in OAC.
 - `/Users/tusm/Documents/MetaID_Projects/IDBots/IDBots/SKILLs/metabot-upload-largefile/scripts/upload-largefile.js`
   - script delegates to IDBots local RPC; do not copy this directly because OAC should use its own CLI/daemon boundary.
 - `src/ui/metaapps/buzz/idframework/commands/PostBuzzCommand.js`
@@ -121,7 +121,7 @@ For direct small-file uploads, preserve the existing fields from `uploadLocalFil
 ### Limits
 
 - `DIRECT_UPLOAD_MAX_BYTES`: `2 * 1024 * 1024`.
-- `LARGE_UPLOAD_MAX_BYTES`: `20 * 1024 * 1024`.
+- `LARGE_UPLOAD_MAX_BYTES`: `50 * 1024 * 1024`.
 - Files at or below `DIRECT_UPLOAD_MAX_BYTES` use existing direct upload.
 - Files above `DIRECT_UPLOAD_MAX_BYTES` use production large/chunked upload.
 - Files above `LARGE_UPLOAD_MAX_BYTES` fail before any chain or network write.
@@ -424,7 +424,7 @@ Create `src/core/files/uploadLargeFile.ts`:
 import type { Signer } from '../signing/signer';
 
 export const DIRECT_UPLOAD_MAX_BYTES = 2 * 1024 * 1024;
-export const LARGE_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+export const LARGE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 
 export type UploadLargeFileMode = 'direct' | 'chunked';
 
@@ -591,7 +591,7 @@ Acceptance owner must inspect:
 - no fake pin id is generated;
 - final success requires a real API response field chosen in Task 1;
 - error paths are deterministic and typed;
-- files above the hard cap do not open network requests.
+- files above the 50 MiB hard cap do not open network requests.
 
 - [ ] **Step 7: Commit**
 
@@ -823,7 +823,7 @@ Required sections:
 - request JSON shape;
 - success envelope and fields;
 - direct vs large thresholds;
-- hard cap;
+- 50 MiB hard cap;
 - DOGE exclusion;
 - note that large/chunked upload is MVC-only unless current implementation supports more;
 - privacy rule: never read large local files into agent context;
@@ -981,7 +981,7 @@ Acceptance checklist:
 
 - Existing `file upload` behavior remains compatible.
 - New `file upload-large` has stable JSON output.
-- Large files cannot bypass the hard cap.
+- Large files cannot bypass the 50 MiB hard cap.
 - DOGE is rejected before upload.
 - Production large/chunked success cannot be faked.
 - New skill is packaged in npm files and skillpacks.

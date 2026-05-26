@@ -221,7 +221,7 @@ Required behavior:
 
 - direct upload for files at or below the small-file threshold;
 - chunked upload for files above that threshold;
-- a clear hard cap for product safety;
+- a clear 50 MiB hard cap for product safety;
 - deterministic content type and extension inference;
 - consistent `metafile://<pinId><ext>` return value;
 - upload result verification through accelerated and canonical file-indexer URLs;

@@ -274,7 +274,7 @@ Assert:
 
 - files at or below the small threshold delegate to the existing direct upload behavior;
 - files above the small threshold use a chunked upload dependency;
-- files above the hard cap fail before any chain write;
+- files above the 50 MiB hard cap fail before any chain write;
 - DOGE remains unsupported for file upload;
 - returned JSON includes `pinId`, `metafileUri`, `fileName`, `contentType`, `bytes`, `network`, `txids`, and verification status;
 - upload result does not include local path in caller-visible metadata.
@@ -428,7 +428,7 @@ Create the skill docs in English. Include:
 
 - when to use the skill;
 - direct upload vs chunked upload threshold;
-- hard cap;
+- 50 MiB hard cap;
 - JSON command;
 - expected JSON output;
 - failure handling;
