@@ -1,6 +1,8 @@
 import type { LocalUiPageDefinition } from '../types';
+import { buildProductCommercePageViewModelRuntimeSource } from './viewModel';
 
 export function buildProductsPageDefinition(): LocalUiPageDefinition {
+  const buildProductCommercePageViewModelSource = buildProductCommercePageViewModelRuntimeSource();
   return {
     page: 'products',
     title: 'Products',
@@ -52,7 +54,10 @@ export function buildProductsPageDefinition(): LocalUiPageDefinition {
         </section>
       </section>
     `,
-    script: buildProductsPageScript(),
+    script: `(() => {
+  ${buildProductCommercePageViewModelSource}
+  ${buildProductsPageScript()}
+})();`,
   };
 }
 
