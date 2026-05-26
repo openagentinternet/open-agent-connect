@@ -43,7 +43,7 @@ const EXPECTED_TRACE_WATCH_LINE = '$HOME/.metabot/bin/metabot trace watch --from
 const EXPECTED_TRACE_GET_LINE = '$HOME/.metabot/bin/metabot trace get --from <bot-slug> --trace-id trace-123';
 const EXPECTED_TRACE_UI_LINE = '$HOME/.metabot/bin/metabot ui open --page trace --from <bot-slug> --trace-id trace-123';
 const BARE_METABOT_COMMAND_PATTERN =
-  /(?<![\w.$/~-])metabot\s+(?:services|trace|network|identity|doctor|wallet|chat|ui|buzz|file|master|skills|config|chain|llm|evolution)\b/;
+  /(?<![\w.$/~-])metabot\s+(?:services|trace|network|identity|doctor|wallet|chat|ui|buzz|file|master|skills|config|chain|llm|evolution|metaapp)\b/;
 
 function escapeForRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
