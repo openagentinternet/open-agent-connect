@@ -556,11 +556,11 @@ test('runCli supports `metabot evolution publish --skill --variant-id` for a ver
 
   assert.equal(result.exitCode, 0);
   assert.equal(result.payload.ok, true);
-  assert.match(result.payload.data.pinId, /^\/protocols\/metabot-evolution-artifact-v1-pin-/);
+  assert.match(result.payload.data.pinId, /^[0-9a-f]{64}i0$/i);
   assert.deepEqual(result.payload.data.txids, ['/protocols/metabot-evolution-artifact-v1-tx-2']);
   assert.equal(result.payload.data.skillName, artifact.skillName);
   assert.equal(result.payload.data.variantId, artifact.variantId);
-  assert.match(result.payload.data.artifactUri, /^metafile:\/\/\/file-pin-1\.json$/);
+  assert.match(result.payload.data.artifactUri, /^metafile:\/\/[0-9a-f]{64}i0\.json$/i);
   assert.equal(result.payload.data.scopeHash, artifact.metadata.scopeHash);
   assert.equal(result.payload.data.publisherGlobalMetaId, identity.globalMetaId);
   assert.equal(typeof result.payload.data.publishedAt, 'number');

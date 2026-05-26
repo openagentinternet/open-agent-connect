@@ -1490,9 +1490,22 @@ function createTestChainWriteSigner(baseSigner: Signer): Signer {
       const request = normalizeChainWriteRequest(rawInput);
       const identity = await baseSigner.getIdentity();
       writeCount += 1;
+      const pinDigest = createHash('sha256').update(JSON.stringify({
+        writeCount,
+        operation: request.operation,
+        path: request.path,
+        encryption: request.encryption,
+        version: request.version,
+        contentType: request.contentType,
+        payload: request.payload,
+        encoding: request.encoding,
+        network: request.network,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      })).digest('hex');
       return {
         txids: [`${request.path || 'metaid'}-tx-${writeCount}`],
-        pinId: `${request.path || 'metaid'}-pin-${writeCount}`,
+        pinId: `${pinDigest}i0`,
         totalCost: 1,
         network: request.network,
         operation: request.operation,
