@@ -722,6 +722,8 @@ export function buildProductsPageScript(): string {
       renderSellPreview();
       return;
     }
+    const sellerSlug = state.sell.sellerSlug;
+    const requestSequence = ++sellEntrySequence;
     setStatus('Loading seller skills', 'busy');
     state.sell.skillError = null;
     state.sell.skills = [];
@@ -729,11 +731,17 @@ export function buildProductsPageScript(): string {
     renderSkillList();
     renderSellPreview();
     try {
-      const envelope = await loadJson('/api/products/skills?from=' + encodeURIComponent(state.sell.sellerSlug));
+      const envelope = await loadJson('/api/products/skills?from=' + encodeURIComponent(sellerSlug));
+      if (requestSequence !== sellEntrySequence || state.sell.sellerSlug !== sellerSlug) {
+        return;
+      }
       state.sell.skills = readArrayValue(envelope.data && (envelope.data.skills || envelope.data.catalog));
-      state.sell.skillsLoadedFor = state.sell.sellerSlug;
+      state.sell.skillsLoadedFor = sellerSlug;
       setStatus('Seller skills loaded', 'ready');
     } catch (error) {
+      if (requestSequence !== sellEntrySequence || state.sell.sellerSlug !== sellerSlug) {
+        return;
+      }
       state.sell.skillError = {
         code: error && error.code ? error.code : 'products_skills_failed',
         message: error instanceof Error ? error.message : String(error),

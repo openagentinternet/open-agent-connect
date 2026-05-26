@@ -225,6 +225,8 @@ async function runProductsScript(options = {}) {
     return panel;
   });
   const fetchCalls = [];
+  const skillResponseReleases = [];
+  const skillResponseCounts = new Map();
   const productsPayload = options.products || [product()];
 
   const context = {
@@ -288,6 +290,22 @@ async function runProductsScript(options = {}) {
         };
       }
       if (String(url).startsWith('/api/products/skills')) {
+        const sellerSlug = new URL(String(url), 'http://127.0.0.1').searchParams.get('from') || '';
+        const currentCount = skillResponseCounts.get(sellerSlug) || 0;
+        skillResponseCounts.set(sellerSlug, currentCount + 1);
+        const scriptedResponses = options.skillResponses && options.skillResponses[sellerSlug] ? options.skillResponses[sellerSlug] : [];
+        const scriptedResponse = scriptedResponses[currentCount];
+        if (scriptedResponse && scriptedResponse.defer) {
+          let release;
+          const jsonPromise = new Promise((resolve) => {
+            release = () => resolve(scriptedResponse.response);
+          });
+          skillResponseReleases.push(release);
+          return {
+            ok: true,
+            json: async () => jsonPromise,
+          };
+        }
         if (options.skillsFail) {
           return {
             ok: true,
@@ -299,10 +317,12 @@ async function runProductsScript(options = {}) {
           json: async () => ({
             ok: true,
             data: {
-              skills: options.skills || [
+              skills: scriptedResponse && scriptedResponse.response && scriptedResponse.response.data
+                ? scriptedResponse.response.data.skills
+                : (options.skills || [
                 { name: 'deliver-code', title: 'Deliver Code' },
                 { name: 'notify-buyer', title: 'Notify Buyer' },
-              ],
+              ]),
             },
           }),
         };
@@ -385,7 +405,7 @@ async function runProductsScript(options = {}) {
     () => elements['[data-products-list]'].innerHTML.includes('Mobile Top-up') || elements['[data-products-error]'].textContent,
     'initial products render',
   );
-  return { elements, fetchCalls, tabs, panels };
+  return { elements, fetchCalls, tabs, panels, skillResponseReleases };
 }
 
 function fillListingForm(elements, overrides = {}) {
@@ -412,7 +432,7 @@ async function openSellTab(options = {}) {
   const callsBeforeSell = result.fetchCalls.length;
   await sellTab.listeners.get('click')({ preventDefault() {} });
   await waitFor(
-    () => result.fetchCalls.slice(callsBeforeSell).some((call) => call.url === '/api/products/skills?from=alice') ||
+    () => result.elements['[data-products-sell-skills]'].innerHTML.includes('deliver-code') ||
       result.elements['[data-products-sell-error]'].textContent.includes('products_skills_failed'),
     'seller skills load',
   );
@@ -624,6 +644,63 @@ test('products sell tab loads seller profiles, loads selected seller skills, and
 
   const payload = JSON.parse(elements['[data-products-listing-preview-json]'].textContent);
   assert.deepEqual(payload.fulfillment.fulfillmentSkills, ['deliver-code', 'notify-buyer']);
+});
+
+test('products sell ignores stale seller skills when responses return out of order', async () => {
+  const { elements, tabs, fetchCalls, skillResponseReleases } = await runProductsScript({
+    skillResponses: {
+      alice: [
+        {
+          defer: true,
+          response: {
+            ok: true,
+            data: { skills: [{ name: 'alice-skill', title: 'Alice Skill' }] },
+          },
+        },
+      ],
+      bob: [
+        {
+          response: {
+            ok: true,
+            data: { skills: [{ name: 'bob-skill', title: 'Bob Skill' }] },
+          },
+        },
+      ],
+    },
+    profiles: [
+      profile({ slug: 'alice', name: 'Alice Seller' }),
+      profile({ slug: 'bob', name: 'Bob Seller' }),
+      profile({ slug: 'buyer-bot', name: 'Buyer Bot' }),
+    ],
+  });
+
+  const sellTab = tabs.find((tab) => tab.dataset.productsTab === 'sell');
+  await sellTab.listeners.get('click')({ preventDefault() {} });
+  await waitFor(
+    () => fetchCalls.some((call) => call.url === '/api/products/skills?from=alice'),
+    'alice skills request issued',
+  );
+  await waitFor(
+    () => elements['[data-products-seller]'].children.length > 1,
+    'seller select ready',
+  );
+
+  const sellerSelect = elements['[data-products-seller]'];
+  sellerSelect.value = 'bob';
+  await sellerSelect.listeners.get('change')();
+  await waitFor(
+    () => elements['[data-products-sell-skills]'].innerHTML.includes('Bob Skill'),
+    'bob skills render',
+  );
+  assert.match(elements['[data-products-sell-skills]'].innerHTML, /Bob Skill/);
+  assert.doesNotMatch(elements['[data-products-sell-skills]'].innerHTML, /Alice Skill/);
+
+  assert.equal(skillResponseReleases.length, 1);
+  skillResponseReleases[0]();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.match(elements['[data-products-sell-skills]'].innerHTML, /Bob Skill/);
+  assert.doesNotMatch(elements['[data-products-sell-skills]'].innerHTML, /Alice Skill/);
 });
 
 test('products sell tab disables publish controls and shows code/message when skill loading fails', async () => {
