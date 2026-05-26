@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import vm from 'node:vm';
 
 const require = createRequire(import.meta.url);
 const { createHttpServer } = require('../../dist/daemon/httpServer.js');
@@ -859,6 +860,85 @@ async function startServer(options = {}) {
       });
     },
   };
+}
+
+function createFakeMetaAppsElement() {
+  return {
+    dataset: {},
+    disabled: false,
+    innerHTML: '',
+    textContent: '',
+    addEventListener() {},
+  };
+}
+
+function extractInlineMetaAppsScript(html) {
+  const match = html.match(/<script>\s*([\s\S]*?)\s*<\/script>\s*<\/body>/);
+  assert.ok(match, 'expected the served MetaApps page to include an inline script');
+  return match[1];
+}
+
+async function renderMetaAppsGalleryScript(html, { records, search = '' }) {
+  const script = extractInlineMetaAppsScript(html);
+  const elements = {
+    list: createFakeMetaAppsElement(),
+    detail: createFakeMetaAppsElement(),
+    refresh: createFakeMetaAppsElement(),
+    status: createFakeMetaAppsElement(),
+  };
+  const selectors = new Map([
+    ['[data-metaapps-list]', elements.list],
+    ['[data-metaapps-detail]', elements.detail],
+    ['[data-metaapps-refresh]', elements.refresh],
+    ['[data-metaapps-status]', elements.status],
+  ]);
+  const fetchCalls = [];
+  let jsonRead;
+  const jsonReadPromise = new Promise((resolve) => {
+    jsonRead = resolve;
+  });
+  const context = {
+    URL,
+    URLSearchParams,
+    document: {
+      querySelector(selector) {
+        return selectors.get(selector) ?? null;
+      },
+    },
+    fetch: async (url) => {
+      fetchCalls.push(String(url));
+      return {
+        ok: true,
+        json: async () => {
+          jsonRead();
+          return { ok: true, data: { records } };
+        },
+      };
+    },
+    navigator: {},
+    window: {
+      location: {
+        origin: 'http://127.0.0.1:24885',
+        search,
+      },
+    },
+  };
+
+  vm.runInNewContext(script, context, { timeout: 1000 });
+  await jsonReadPromise;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  return {
+    detailHtml: elements.detail.innerHTML,
+    fetchCalls,
+    listHtml: elements.list.innerHTML,
+    statusText: elements.status.textContent,
+  };
+}
+
+function readMetaAppsActionLinks(detailHtml) {
+  return [...detailHtml.matchAll(/<a class="metaapps-action" href="([^"]+)"[^>]*>([^<]+)<\/a>/g)]
+    .map((match) => ({ href: match[1], label: match[2] }));
 }
 
 test('GET /api/daemon/status returns the daemon status envelope', async (t) => {
@@ -2596,6 +2676,59 @@ test('GET /ui/metaapps serves the built-in MetaApps gallery shell', async (t) =>
   assert.doesNotMatch(html, /\/api\/chain/);
   assert.doesNotMatch(html, /\/api\/metaapp\/share/);
   assert.doesNotMatch(html, /\/api\/metaapp\/comment/);
+});
+
+test('GET /ui/metaapps gallery script filters gallery-loop links and unsafe comment commands', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/metaapps`);
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  const validPinId = `${'a'.repeat(64)}i0`;
+  const galleryUrl = `/ui/metaapps?pinId=${validPinId}`;
+  const metawebUrl = 'https://metaweb.example/metaapps/valid';
+
+  const validRender = await renderMetaAppsGalleryScript(html, {
+    search: `?pinId=${validPinId}&from=alice&unknown=kept&empty=`,
+    records: [
+      {
+        pinId: validPinId,
+        title: 'Valid MetaApp',
+        localUiUrl: galleryUrl,
+        metawebUrl,
+        version: '1.0.0',
+      },
+    ],
+  });
+
+  assert.deepEqual(validRender.fetchCalls, [
+    `/api/metaapps?pinId=${validPinId}&from=alice&unknown=kept`,
+  ]);
+  const actionLinks = readMetaAppsActionLinks(validRender.detailHtml);
+  assert.equal(actionLinks.find((link) => link.label === 'Open')?.href, metawebUrl);
+  assert.equal(actionLinks.find((link) => link.label === 'Run')?.href, metawebUrl);
+  assert.ok(actionLinks.every((link) => link.href !== galleryUrl));
+  assert.doesNotMatch(validRender.detailHtml, /href="\/ui\/metaapps\?pinId=/);
+  assert.match(validRender.detailHtml, /Copy comment command/);
+  assert.match(
+    validRender.detailHtml,
+    new RegExp(`metabot metaapp comment --pin-id ${validPinId} --comment &quot;&quot;`),
+  );
+
+  const invalidRender = await renderMetaAppsGalleryScript(html, {
+    records: [
+      {
+        pinId: 'bad-pin; touch /tmp/metaapps-owned',
+        title: 'Untrusted MetaApp',
+        localUiUrl: '/ui/metaapps?pinId=bad-pin',
+        metawebUrl: 'https://metaweb.example/metaapps/untrusted',
+      },
+    ],
+  });
+
+  assert.doesNotMatch(invalidRender.detailHtml, /Copy comment command/);
+  assert.doesNotMatch(invalidRender.detailHtml, /metabot metaapp comment --pin-id/);
 });
 
 test('GET /ui/buzz serves the bundled Buzz MetaApp entry from the daemon server', async (t) => {
