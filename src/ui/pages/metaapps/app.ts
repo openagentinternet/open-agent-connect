@@ -52,6 +52,18 @@ function buildMetaAppsPageScript(): string {
     }[char]));
   }
 
+  function safeUrl(rawValue) {
+    const value = String(rawValue ?? '').trim();
+    if (!value) return '';
+    if (value.startsWith('/') && !value.startsWith('//')) return value;
+    try {
+      const allowed = new URL(value);
+      return allowed.protocol === 'http:' || allowed.protocol === 'https:' ? allowed.href : '';
+    } catch {
+      return '';
+    }
+  }
+
   function apiUrl(refresh) {
     const apiParams = new URLSearchParams();
     for (const key of ['pinId', 'firstPinId', 'mine', 'from']) {
@@ -77,13 +89,13 @@ function buildMetaAppsPageScript(): string {
   }
 
   function primaryRunUrl(record) {
-    return record.runUrl || record.localUiUrl || record.metawebUrl || '';
+    return safeUrl(record.runUrl) || safeUrl(record.localUiUrl) || safeUrl(record.metawebUrl);
   }
 
   function downloadUrl(record) {
-    if (record.downloadUrl) return record.downloadUrl;
-    if (typeof record.code === 'string' && /^https?:\\/\\//i.test(record.code)) return record.code;
-    if (typeof record.content === 'string' && /^https?:\\/\\//i.test(record.content)) return record.content;
+    if (record.downloadUrl) return safeUrl(record.downloadUrl);
+    if (typeof record.code === 'string') return safeUrl(record.code);
+    if (typeof record.content === 'string') return safeUrl(record.content);
     return '';
   }
 
@@ -121,8 +133,9 @@ function buildMetaAppsPageScript(): string {
   }
 
   function actionLink(href, labelText) {
-    return href
-      ? '<a class="metaapps-action" href="' + escapeHtml(href) + '" target="_blank" rel="noreferrer">' + escapeHtml(labelText) + '</a>'
+    const safeHref = safeUrl(href);
+    return safeHref
+      ? '<a class="metaapps-action" href="' + escapeHtml(safeHref) + '" target="_blank" rel="noreferrer">' + escapeHtml(labelText) + '</a>'
       : '';
   }
 
@@ -136,7 +149,7 @@ function buildMetaAppsPageScript(): string {
     selectedPinId = record.pinId;
     const run = primaryRunUrl(record);
     const download = downloadUrl(record);
-    const shareTarget = record.metawebUrl || record.localUiUrl || record.pinId || '';
+    const safeShareTarget = safeUrl(record.metawebUrl) || safeUrl(record.localUiUrl);
     const commentCommand = record.pinId ? 'metabot metaapp comment --pin-id ' + record.pinId + ' --comment ""' : '';
     const fields = [
       ['Pin', record.pinId],
@@ -157,7 +170,7 @@ function buildMetaAppsPageScript(): string {
       + actionLink(run, 'Run')
       + actionLink(download, 'Download')
       + (record.pinId ? '<button type="button" class="metaapps-action" data-metaapps-copy="' + escapeHtml(record.pinId) + '">Copy pin</button>' : '')
-      + (shareTarget ? '<button type="button" class="metaapps-action" data-metaapps-share="' + escapeHtml(shareTarget) + '">Share</button>' : '')
+      + (safeShareTarget ? '<button type="button" class="metaapps-action" data-metaapps-share="' + escapeHtml(safeShareTarget) + '">Share</button>' : '')
       + (commentCommand ? '<button type="button" class="metaapps-action" data-metaapps-copy="' + escapeHtml(commentCommand) + '">Comment</button>' : '')
       + '</div>'
       + '<dl class="metaapps-fields">' + fields.map(([name, value]) => '<div><dt>' + escapeHtml(name) + '</dt><dd>' + escapeHtml(value || 'Unknown') + '</dd></div>').join('') + '</dl>';

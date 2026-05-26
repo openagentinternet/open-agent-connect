@@ -2563,6 +2563,12 @@ test('GET /ui/metaapps serves the built-in MetaApps gallery shell', async (t) =>
   assert.match(html, /\/api\/metaapps/);
   assert.match(html, /refreshParams\.set\('refresh', 'true'\)/);
   assert.match(html, /new URLSearchParams\(window\.location\.search\)/);
+  assert.match(html, /function safeUrl/);
+  assert.match(html, /allowed\.protocol === 'http:' \|\| allowed\.protocol === 'https:'/);
+  assert.match(html, /value\.startsWith\('\/'\) && !value\.startsWith\('\/\/'\)/);
+  assert.match(html, /const safeHref = safeUrl\(href\)/);
+  assert.doesNotMatch(html, /href="' \+ escapeHtml\(href\)/);
+  assert.doesNotMatch(html, /data-metaapps-share="' \+ escapeHtml\(shareTarget\)/);
   assert.match(html, /href="\/ui\/metaapps"/);
   assert.doesNotMatch(html, /\/api\/wallet/);
   assert.doesNotMatch(html, /\/api\/chain/);

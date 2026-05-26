@@ -2319,10 +2319,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['ui', 'open'],
-    summary: 'Open one local MetaBot runtime HTML page such as hub, bot, buzz, chat, publish, my-services, trace, or refund.',
+    summary: 'Open one local MetaBot runtime HTML page such as hub, bot, buzz, chat, metaapps, publish, my-services, trace, or refund.',
     usage: 'metabot ui open --page <page> [--from <bot-slug>] [--trace-id <trace-id>] [--session-id <session-id>] [--service-id <service-pin-id>]',
     requiredFlags: [
-      { flag: '--page', value: '<page>', description: 'Built-in page name: hub, bot, buzz, chat, chat-viewer, publish, my-services, trace, or refund.' },
+      { flag: '--page', value: '<page>', description: 'Built-in page name: hub, bot, buzz, chat, chat-viewer, metaapps, publish, my-services, trace, or refund.' },
     ],
     optionalFlags: [
       FROM_BOT_FLAG,
@@ -2342,6 +2342,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot ui open --page hub',
       'metabot ui open --page buzz',
       'metabot ui open --page chat',
+      'metabot ui open --page metaapps',
       'metabot ui open --page trace --from alice --trace-id trace-123',
       'metabot ui open --page publish --from alice',
       'metabot ui open --page my-services --service-id <service-pin-id>',
