@@ -135,7 +135,8 @@
         letter-spacing: 0;
       }
       .products-field input,
-      .products-field select {
+      .products-field select,
+      .products-field textarea {
         width: 100%;
         min-height: 34px;
         border: 1px solid var(--border2);
@@ -144,6 +145,10 @@
         color: var(--text);
         font: inherit;
         padding: 6px 9px;
+      }
+      .products-field textarea {
+        min-height: 78px;
+        resize: vertical;
       }
       .products-secondary-button,
       .products-primary-button,
@@ -172,7 +177,8 @@
       .products-primary-button:disabled,
       .products-sku-table button:disabled,
       .products-field input:disabled,
-      .products-field select:disabled {
+      .products-field select:disabled,
+      .products-field textarea:disabled {
         cursor: not-allowed;
         opacity: .58;
       }
@@ -338,6 +344,93 @@
         gap: 10px;
         min-height: 36px;
       }
+      .products-sell-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(300px, .52fr);
+        gap: 18px;
+        align-items: start;
+      }
+      .products-sell-form,
+      .products-sell-preview {
+        min-width: 0;
+      }
+      .products-form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      .products-field-wide {
+        grid-column: 1 / -1;
+      }
+      .products-skill-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        min-height: 36px;
+        margin-bottom: 14px;
+      }
+      .products-skill-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-height: 32px;
+        border: 1px solid var(--border2);
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        font-size: 12px;
+        padding: 5px 9px;
+      }
+      .products-skill-chip:has(input:checked) {
+        border-color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+      }
+      .products-sku-editor {
+        display: grid;
+        gap: 12px;
+      }
+      .products-sku-editor-row {
+        border-top: 1px solid var(--border);
+        padding-top: 12px;
+      }
+      .products-sku-editor-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .products-sku-editor-head h4 {
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .products-preview-code {
+        min-height: 320px;
+        max-height: 520px;
+        overflow: auto;
+        border: 1px solid var(--border2);
+        border-radius: var(--radius-sm);
+        background: var(--bg);
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.45;
+        padding: 10px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .products-publish-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 10px;
+      }
+      .products-publish-actions span {
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
       .products-modal-backdrop {
         position: fixed;
         inset: 0;
@@ -427,8 +520,13 @@
         }
         .products-marketplace-toolbar,
         .products-marketplace-grid,
-        .products-spend-row {
+        .products-spend-row,
+        .products-sell-layout,
+        .products-form-grid {
           grid-template-columns: 1fr;
+        }
+        .products-field-wide {
+          grid-column: auto;
         }
         .products-row {
           grid-template-columns: 1fr;
@@ -439,7 +537,8 @@
         .products-facts {
           grid-template-columns: 1fr;
         }
-        .products-purchase-actions {
+        .products-purchase-actions,
+        .products-publish-actions {
           align-items: flex-start;
           flex-direction: column;
         }

@@ -83,9 +83,91 @@ export function buildProductsPageDefinition(): LocalUiPageDefinition {
           <section id="sell" class="products-panel" data-products-panel="sell" role="tabpanel" aria-labelledby="products-tab-sell" hidden>
             <div class="products-panel-header">
               <h2>Sell</h2>
-              <span>Publisher</span>
+              <span>/protocols/product-listing</span>
             </div>
-            <p>Prepare seller listings and validate fulfillment skills before publication.</p>
+            <div class="products-sell-layout">
+              <section class="products-sell-form" aria-label="Product listing form">
+                <div class="products-form-grid">
+                  <label class="products-field">
+                    <span>Seller actor</span>
+                    <select data-products-seller></select>
+                  </label>
+                  <label class="products-field">
+                    <span>Publish network</span>
+                    <select data-products-network>
+                      <option value="mvc">mvc</option>
+                      <option value="btc">btc</option>
+                      <option value="doge">doge</option>
+                      <option value="opcat">opcat</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="products-error" data-products-sell-error role="alert" aria-live="polite"></div>
+                <div class="products-region-heading">
+                  <h3>Fulfillment skills</h3>
+                  <span>Returned catalog only</span>
+                </div>
+                <div class="products-skill-list" data-products-sell-skills></div>
+                <div class="products-region-heading">
+                  <h3>Listing fields</h3>
+                  <span>Product V1 virtual goods</span>
+                </div>
+                <div class="products-form-grid">
+                  <label class="products-field">
+                    <span>Name</span>
+                    <input data-products-listing-name type="text" autocomplete="off" placeholder="mobile-credit" />
+                  </label>
+                  <label class="products-field">
+                    <span>Title</span>
+                    <input data-products-listing-title type="text" autocomplete="off" placeholder="Mobile Credit" />
+                  </label>
+                  <label class="products-field products-field-wide">
+                    <span>Cover image URI</span>
+                    <input data-products-cover-image type="text" autocomplete="off" placeholder="metafile://..." />
+                  </label>
+                  <label class="products-field products-field-wide">
+                    <span>Gallery image URIs</span>
+                    <textarea data-products-gallery-images rows="3" placeholder="metafile://..."></textarea>
+                  </label>
+                  <label class="products-field">
+                    <span>Description type</span>
+                    <select data-products-description-content-type>
+                      <option value="text/markdown">text/markdown</option>
+                      <option value="text/html">text/html</option>
+                    </select>
+                  </label>
+                  <label class="products-field">
+                    <span>Estimated delivery seconds</span>
+                    <input data-products-estimated-delivery-seconds type="text" inputmode="numeric" placeholder="60" />
+                  </label>
+                  <label class="products-field products-field-wide">
+                    <span>Description</span>
+                    <textarea data-products-description rows="5" placeholder="Markdown description"></textarea>
+                  </label>
+                  <label class="products-field products-field-wide">
+                    <span>Deliverable description</span>
+                    <input data-products-deliverable-description type="text" autocomplete="off" placeholder="Activation code sent by simplemsg" />
+                  </label>
+                </div>
+                <div class="products-region-heading">
+                  <h3>SKUs</h3>
+                  <button class="products-secondary-button" type="button" data-products-add-sku>Add SKU</button>
+                </div>
+                <div class="products-sku-editor" data-products-sku-list></div>
+              </section>
+              <aside class="products-sell-preview" aria-label="Publish preview">
+                <div class="products-region-heading">
+                  <h3>JSON preview</h3>
+                  <span>Exact payload</span>
+                </div>
+                <pre class="products-preview-code" data-products-listing-preview-json></pre>
+                <div class="products-publish-actions">
+                  <button class="products-primary-button" type="button" data-products-publish>Review publish</button>
+                  <span data-products-publish-reason></span>
+                </div>
+                <div class="products-success-block" data-products-publish-success></div>
+              </aside>
+            </div>
           </section>
 
           <section id="orders" class="products-panel" data-products-panel="orders" role="tabpanel" aria-labelledby="products-tab-orders" hidden>
@@ -112,6 +194,25 @@ export function buildProductsPageDefinition(): LocalUiPageDefinition {
             </details>
             <div class="products-confirmation-actions">
               <button class="products-primary-button products-danger-button" type="button" data-products-confirm>Confirm and pay</button>
+            </div>
+          </section>
+        </div>
+        <div class="products-modal-backdrop" data-products-publish-confirmation-modal hidden>
+          <section class="products-confirmation" role="dialog" aria-modal="true" aria-labelledby="products-publish-confirmation-title">
+            <div class="products-confirmation-head">
+              <div>
+                <p class="products-eyebrow">Publish confirmation</p>
+                <h2 id="products-publish-confirmation-title">Confirm listing publish</h2>
+              </div>
+              <button class="products-secondary-button" type="button" data-products-cancel-publish>Cancel</button>
+            </div>
+            <div data-products-publish-confirmation-summary></div>
+            <details class="products-json-preview" open>
+              <summary>JSON payload</summary>
+              <pre data-products-publish-confirmation-json></pre>
+            </details>
+            <div class="products-confirmation-actions">
+              <button class="products-primary-button products-danger-button" type="button" data-products-confirm-publish>Publish listing</button>
             </div>
           </section>
         </div>
@@ -145,6 +246,29 @@ export function buildProductsPageScript(): string {
       successSelection: null,
       error: null,
     },
+    sell: {
+      sellerSlug: '',
+      skills: [],
+      selectedSkills: [],
+      skillsLoadedFor: '',
+      skillError: null,
+      previewPayload: null,
+      previewError: null,
+      publishOpen: false,
+      publishBusy: false,
+      publishSuccess: null,
+      form: {
+        skus: [{
+          skuId: 'sku-5',
+          name: '5 SPACE credit',
+          image: 'metafile://sku-five',
+          descriptionContentType: 'text/markdown',
+          description: 'Small top-up.',
+          price: { amount: '5', currency: 'SPACE' },
+          initialStock: '10',
+        }],
+      },
+    },
   };
   const elements = {
     status: document.querySelector('[data-products-status]'),
@@ -164,6 +288,29 @@ export function buildProductsPageScript(): string {
     confirm: document.querySelector('[data-products-confirm]'),
     cancelConfirmation: document.querySelector('[data-products-cancel-confirmation]'),
     error: document.querySelector('[data-products-error]'),
+    seller: document.querySelector('[data-products-seller]'),
+    sellSkills: document.querySelector('[data-products-sell-skills]'),
+    sellError: document.querySelector('[data-products-sell-error]'),
+    listingName: document.querySelector('[data-products-listing-name]'),
+    listingTitle: document.querySelector('[data-products-listing-title]'),
+    coverImage: document.querySelector('[data-products-cover-image]'),
+    galleryImages: document.querySelector('[data-products-gallery-images]'),
+    descriptionContentType: document.querySelector('[data-products-description-content-type]'),
+    description: document.querySelector('[data-products-description]'),
+    estimatedDeliverySeconds: document.querySelector('[data-products-estimated-delivery-seconds]'),
+    deliverableDescription: document.querySelector('[data-products-deliverable-description]'),
+    skuList: document.querySelector('[data-products-sku-list]'),
+    addSku: document.querySelector('[data-products-add-sku]'),
+    network: document.querySelector('[data-products-network]'),
+    listingPreviewJson: document.querySelector('[data-products-listing-preview-json]'),
+    publish: document.querySelector('[data-products-publish]'),
+    publishReason: document.querySelector('[data-products-publish-reason]'),
+    publishConfirmationModal: document.querySelector('[data-products-publish-confirmation-modal]'),
+    publishConfirmationSummary: document.querySelector('[data-products-publish-confirmation-summary]'),
+    publishConfirmationJson: document.querySelector('[data-products-publish-confirmation-json]'),
+    confirmPublish: document.querySelector('[data-products-confirm-publish]'),
+    cancelPublish: document.querySelector('[data-products-cancel-publish]'),
+    publishSuccess: document.querySelector('[data-products-publish-success]'),
   };
   const tabs = Array.from(document.querySelectorAll('[data-products-tab]'));
   const panels = Array.from(document.querySelectorAll('[data-products-panel]'));
@@ -331,6 +478,317 @@ export function buildProductsPageScript(): string {
     } else {
       state.buyerSlug = '';
       elements.buyer.value = '';
+    }
+  };
+  const skillName = (skill) => normalizeText(skill && (skill.name || skill.id || skill.slug || skill));
+  const skillLabel = (skill) => normalizeText(skill && (skill.title || skill.displayName || skill.name || skill.id || skill.slug || skill));
+  const sellerLabel = () => {
+    const profile = state.profiles.find((item) => normalizeText(item.slug) === state.sell.sellerSlug);
+    return normalizeText(profile && (profile.name || profile.displayName || profile.slug)) || state.sell.sellerSlug;
+  };
+  const renderSellerSelect = () => {
+    if (!elements.seller) return;
+    const previous = state.sell.sellerSlug || elements.seller.value;
+    elements.seller.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = state.profiles.length ? 'Select seller' : 'No local MetaBot profiles';
+    elements.seller.appendChild(placeholder);
+    state.profiles.forEach((profile) => {
+      const option = document.createElement('option');
+      option.value = normalizeText(profile.slug);
+      option.textContent = normalizeText(profile.name || profile.displayName || profile.slug) || option.value;
+      elements.seller.appendChild(option);
+    });
+    if (previous && state.profiles.some((profile) => normalizeText(profile.slug) === previous)) {
+      state.sell.sellerSlug = previous;
+      elements.seller.value = previous;
+    } else if (state.profiles.length > 0) {
+      state.sell.sellerSlug = normalizeText(state.profiles[0].slug);
+      elements.seller.value = state.sell.sellerSlug;
+    } else {
+      state.sell.sellerSlug = '';
+      elements.seller.value = '';
+    }
+  };
+  const readGalleryImages = () => normalizeText(elements.galleryImages && elements.galleryImages.value)
+    .split(/[\\n,]+/u)
+    .map((item) => normalizeText(item))
+    .filter(Boolean);
+  const readSellForm = () => ({
+    name: elements.listingName ? elements.listingName.value : '',
+    title: elements.listingTitle ? elements.listingTitle.value : '',
+    coverImage: elements.coverImage ? elements.coverImage.value : '',
+    galleryImages: readGalleryImages(),
+    descriptionContentType: elements.descriptionContentType ? elements.descriptionContentType.value : 'text/markdown',
+    description: elements.description ? elements.description.value : '',
+    fulfillmentSkills: state.sell.selectedSkills,
+    fulfillmentType: 'digital_delivery',
+    deliveryEndpoint: 'simplemsg',
+    estimatedDeliverySeconds: elements.estimatedDeliverySeconds ? elements.estimatedDeliverySeconds.value : '',
+    deliverableDescription: elements.deliverableDescription ? elements.deliverableDescription.value : '',
+    skus: state.sell.form.skus,
+  });
+  const updateSkuFromDom = () => {
+    if (!elements.skuList) return;
+    const next = state.sell.form.skus.map((sku) => ({
+      ...sku,
+      price: { ...readObjectValue(sku.price) },
+    }));
+    elements.skuList.querySelectorAll('[data-product-sell-sku-field]').forEach((field) => {
+      const index = Number(field.getAttribute('data-sku-index'));
+      const key = field.getAttribute('data-product-sell-sku-field');
+      if (!Number.isInteger(index) || !next[index] || !key) return;
+      if (key === 'priceAmount') next[index].price.amount = field.value;
+      else if (key === 'priceCurrency') next[index].price.currency = field.value;
+      else next[index][key] = field.value;
+    });
+    state.sell.form.skus = next;
+  };
+  const renderSkuEditor = () => {
+    if (!elements.skuList) return;
+    elements.skuList.innerHTML = state.sell.form.skus.map((sku, index) => {
+      const price = readObjectValue(sku.price);
+      const field = (name, label, value, extra) => (
+        '<label class="products-field">' +
+          '<span>' + escapeHtml(label) + '</span>' +
+          '<input data-product-sell-sku-field="' + escapeHtml(name) + '" data-sku-index="' + index + '" type="text" value="' + escapeHtml(value) + '"' + (extra || '') + ' />' +
+        '</label>'
+      );
+      return [
+        '<section class="products-sku-editor-row">',
+          '<div class="products-sku-editor-head"><h4>SKU ' + String(index + 1) + '</h4>',
+            state.sell.form.skus.length > 1 ? '<button class="products-secondary-button" type="button" data-product-sell-sku-remove="' + index + '">Remove</button>' : '',
+          '</div>',
+          '<div class="products-form-grid">',
+            field('skuId', 'SKU id', sku.skuId || ''),
+            field('name', 'Name', sku.name || ''),
+            field('image', 'Image URI', sku.image || ''),
+            '<label class="products-field"><span>Description type</span><select data-product-sell-sku-field="descriptionContentType" data-sku-index="' + index + '" value="' + escapeHtml(sku.descriptionContentType || 'text/markdown') + '"><option value="text/markdown"' + (sku.descriptionContentType === 'text/html' ? '' : ' selected') + '>text/markdown</option><option value="text/html"' + (sku.descriptionContentType === 'text/html' ? ' selected' : '') + '>text/html</option></select></label>',
+            field('priceAmount', 'Price amount', price.amount || '', ' inputmode="decimal"'),
+            field('priceCurrency', 'Price currency', price.currency || ''),
+            field('initialStock', 'Stock', sku.initialStock || '', ' inputmode="numeric"'),
+            '<label class="products-field products-field-wide"><span>Description</span><textarea data-product-sell-sku-field="description" data-sku-index="' + index + '" rows="3" value="' + escapeHtml(sku.description || '') + '">' + escapeHtml(sku.description || '') + '</textarea></label>',
+          '</div>',
+        '</section>',
+      ].join('');
+    }).join('');
+    elements.skuList.querySelectorAll('[data-product-sell-sku-field]').forEach((field) => {
+      field.addEventListener('input', () => {
+        updateSkuFromDom();
+        renderSellPreview();
+      });
+      field.addEventListener('change', () => {
+        updateSkuFromDom();
+        renderSellPreview();
+      });
+    });
+    elements.skuList.querySelectorAll('[data-product-sell-sku-remove]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const index = Number(button.getAttribute('data-product-sell-sku-remove'));
+        if (Number.isInteger(index) && state.sell.form.skus.length > 1) {
+          state.sell.form.skus.splice(index, 1);
+          renderSkuEditor();
+          renderSellPreview();
+        }
+      });
+    });
+  };
+  const renderSkillList = () => {
+    if (!elements.sellSkills) return;
+    const skills = readArrayValue(state.sell.skills).map((skill) => ({ name: skillName(skill), label: skillLabel(skill) })).filter((skill) => skill.name);
+    if (state.sell.skillError) {
+      elements.sellSkills.innerHTML = '<p class="products-empty">Fulfillment skills are unavailable.</p>';
+    } else if (!state.sell.sellerSlug) {
+      elements.sellSkills.innerHTML = '<p class="products-empty">Select a seller actor to load skills.</p>';
+    } else if (!skills.length) {
+      elements.sellSkills.innerHTML = '<p class="products-empty">No fulfillment skills returned for this seller.</p>';
+    } else {
+      elements.sellSkills.innerHTML = skills.map((skill) => (
+        '<label class="products-skill-chip">' +
+          '<input type="checkbox" data-product-sell-skill="' + escapeHtml(skill.name) + '" value="' + escapeHtml(skill.name) + '"' + (state.sell.selectedSkills.includes(skill.name) ? ' checked' : '') + ' />' +
+          '<span>' + escapeHtml(skill.label || skill.name) + '</span>' +
+        '</label>'
+      )).join('');
+    }
+    elements.sellSkills.querySelectorAll('[data-product-sell-skill]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const name = input.getAttribute('data-product-sell-skill');
+        if (!name) return;
+        if (input.checked && !state.sell.selectedSkills.includes(name)) {
+          state.sell.selectedSkills.push(name);
+        } else if (!input.checked) {
+          state.sell.selectedSkills = state.sell.selectedSkills.filter((item) => item !== name);
+        }
+        renderSellPreview();
+      });
+    });
+  };
+  const sellSkillNames = () => readArrayValue(state.sell.skills).map(skillName).filter(Boolean);
+  const renderSellError = () => {
+    if (!elements.sellError) return;
+    const errors = [state.sell.skillError, state.sell.previewError].filter(Boolean);
+    elements.sellError.textContent = errors.map((error) => [error.code, error.message].filter(Boolean).join(': ')).join(' | ');
+    elements.sellError.hidden = errors.length === 0;
+  };
+  const renderSellPreview = () => {
+    updateSkuFromDom();
+    state.sell.previewError = null;
+    state.sell.previewPayload = null;
+    try {
+      if (!state.sell.skillError) {
+        const model = buildProductCommercePageViewModel({
+          skillCatalog: sellSkillNames(),
+          listingForm: readSellForm(),
+        });
+        state.sell.previewPayload = model.listingPreviewPayload;
+      }
+    } catch (error) {
+      state.sell.previewError = {
+        code: 'product_listing_invalid',
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+    if (elements.listingPreviewJson) {
+      elements.listingPreviewJson.textContent = state.sell.previewPayload
+        ? JSON.stringify(state.sell.previewPayload, null, 2)
+        : '';
+    }
+    renderSellError();
+    renderPublishControls();
+    renderPublishModal();
+  };
+  const renderPublishControls = () => {
+    const reason = state.sell.skillError
+      ? 'Fulfillment skills must load before publishing.'
+      : state.sell.previewError
+        ? state.sell.previewError.message
+        : !state.sell.previewPayload
+          ? 'Complete required listing fields.'
+          : 'Review required before publish.';
+    if (elements.publish) {
+      elements.publish.disabled = Boolean(state.sell.skillError || state.sell.previewError || !state.sell.previewPayload || state.sell.publishBusy);
+    }
+    if (elements.publishReason) {
+      elements.publishReason.textContent = reason;
+    }
+  };
+  const renderPublishModal = () => {
+    if (!elements.publishConfirmationModal) return;
+    elements.publishConfirmationModal.hidden = !state.sell.publishOpen;
+    const payload = readObjectValue(state.sell.previewPayload);
+    const fulfillment = readObjectValue(payload.fulfillment);
+    const skuCount = readArrayValue(payload.skus).length;
+    if (elements.publishConfirmationJson) {
+      elements.publishConfirmationJson.textContent = state.sell.previewPayload ? JSON.stringify(state.sell.previewPayload, null, 2) : '';
+    }
+    if (elements.publishConfirmationSummary) {
+      elements.publishConfirmationSummary.innerHTML = renderFacts([
+        { label: 'Seller actor', value: sellerLabel() },
+        { label: 'Network', value: elements.network ? elements.network.value : 'mvc' },
+        { label: 'Listing title', value: payload.title },
+        { label: 'SKU count', value: skuCount + ' SKU' + (skuCount === 1 ? '' : 's') },
+        { label: 'Fulfillment skills', value: readArrayValue(fulfillment.fulfillmentSkills).join(', ') },
+        { label: 'Protocol path', value: '/protocols/product-listing' },
+      ]);
+    }
+    if (elements.confirmPublish) {
+      elements.confirmPublish.disabled = state.sell.publishBusy;
+      elements.confirmPublish.textContent = state.sell.publishBusy ? 'Publishing...' : 'Publish listing';
+    }
+    if (elements.cancelPublish) elements.cancelPublish.disabled = state.sell.publishBusy;
+  };
+  const renderPublishSuccess = () => {
+    if (!elements.publishSuccess) return;
+    const data = readObjectValue(state.sell.publishSuccess && state.sell.publishSuccess.data);
+    if (!state.sell.publishSuccess) {
+      elements.publishSuccess.innerHTML = '';
+      return;
+    }
+    elements.publishSuccess.innerHTML = [
+      '<h3>Listing published</h3>',
+      renderFacts([
+        { label: 'Listing pin id', value: data.listingPinId || data.pinId },
+        { label: 'Txids', value: readArrayValue(data.txids || data.txIds).join(', ') || normalizeText(data.txid) },
+      ]),
+    ].join('');
+  };
+  const loadSellerSkills = async () => {
+    if (!state.sell.sellerSlug) {
+      state.sell.skills = [];
+      state.sell.selectedSkills = [];
+      state.sell.skillsLoadedFor = '';
+      renderSkillList();
+      renderSellPreview();
+      return;
+    }
+    setStatus('Loading seller skills', 'busy');
+    state.sell.skillError = null;
+    state.sell.skills = [];
+    state.sell.selectedSkills = [];
+    renderSkillList();
+    renderSellPreview();
+    try {
+      const envelope = await loadJson('/api/products/skills?from=' + encodeURIComponent(state.sell.sellerSlug));
+      state.sell.skills = readArrayValue(envelope.data && (envelope.data.skills || envelope.data.catalog));
+      state.sell.skillsLoadedFor = state.sell.sellerSlug;
+      setStatus('Seller skills loaded', 'ready');
+    } catch (error) {
+      state.sell.skillError = {
+        code: error && error.code ? error.code : 'products_skills_failed',
+        message: error instanceof Error ? error.message : String(error),
+      };
+      setStatus('Seller skills failed', 'error');
+    } finally {
+      renderSkillList();
+      renderSellPreview();
+    }
+  };
+  const ensureSellSkillsLoaded = () => {
+    renderSellerSelect();
+    if (state.sell.sellerSlug && state.sell.skillsLoadedFor !== state.sell.sellerSlug && !state.sell.skillError) {
+      loadSellerSkills();
+    } else {
+      renderSkillList();
+      renderSellPreview();
+    }
+  };
+  const openPublishModal = () => {
+    renderSellPreview();
+    if (!state.sell.previewPayload || state.sell.previewError || state.sell.skillError) return;
+    state.sell.publishOpen = true;
+    renderPublishModal();
+    if (elements.confirmPublish) elements.confirmPublish.focus();
+  };
+  const closePublishModal = () => {
+    if (state.sell.publishBusy) return;
+    state.sell.publishOpen = false;
+    renderPublishModal();
+  };
+  const confirmPublish = async () => {
+    if (!state.sell.publishOpen || state.sell.publishBusy || !state.sell.previewPayload) return;
+    state.sell.publishBusy = true;
+    renderPublishModal();
+    try {
+      const envelope = await postJson('/api/products/publish', {
+        from: state.sell.sellerSlug,
+        network: elements.network ? elements.network.value : 'mvc',
+        payload: state.sell.previewPayload,
+      });
+      state.sell.publishSuccess = envelope;
+      state.sell.publishOpen = false;
+      setStatus('Listing published', 'ready');
+    } catch (error) {
+      state.sell.previewError = {
+        code: error && error.code ? error.code : 'product_publish_failed',
+        message: error instanceof Error ? error.message : String(error),
+      };
+      setStatus('Publish failed', 'error');
+    } finally {
+      state.sell.publishBusy = false;
+      renderPublishModal();
+      renderSellPreview();
+      renderPublishSuccess();
     }
   };
   const buildModel = (options) => buildProductCommercePageViewModel({
@@ -595,6 +1053,7 @@ export function buildProductsPageScript(): string {
   const render = () => {
     syncSelectedDefaults();
     renderBuyerSelect();
+    renderSellerSelect();
     renderError();
     let model;
     try {
@@ -609,6 +1068,10 @@ export function buildProductsPageScript(): string {
     renderSkus(model);
     renderPurchaseControls();
     renderConfirmationModal();
+    renderSkillList();
+    renderSkuEditor();
+    renderSellPreview();
+    renderPublishSuccess();
     if (elements.refresh) elements.refresh.disabled = state.busy;
     if (elements.query) elements.query.disabled = state.busy;
   };
@@ -679,6 +1142,7 @@ export function buildProductsPageScript(): string {
       panel.setAttribute('role', 'tabpanel');
       if (panelName) panel.setAttribute('aria-labelledby', tabIdForName(panelName));
     });
+    if (nextName === 'sell') ensureSellSkillsLoaded();
   };
 
   const navigateTo = (name, options) => {
@@ -689,9 +1153,7 @@ export function buildProductsPageScript(): string {
       return;
     }
     window.location.hash = nextName;
-    if (options && options.focus) {
-      activate(nextName, options);
-    }
+    activate(nextName, options);
   };
 
   tabs.forEach((tab) => {
@@ -764,6 +1226,49 @@ export function buildProductsPageScript(): string {
       render();
     });
   }
+  if (elements.seller) {
+    elements.seller.addEventListener('change', () => {
+      state.sell.sellerSlug = normalizeText(elements.seller.value);
+      state.sell.skillsLoadedFor = '';
+      state.sell.skillError = null;
+      state.sell.publishSuccess = null;
+      loadSellerSkills();
+    });
+  }
+  [
+    elements.listingName,
+    elements.listingTitle,
+    elements.coverImage,
+    elements.galleryImages,
+    elements.descriptionContentType,
+    elements.description,
+    elements.estimatedDeliverySeconds,
+    elements.deliverableDescription,
+    elements.network,
+  ].forEach((input) => {
+    if (input) {
+      input.addEventListener('input', renderSellPreview);
+      input.addEventListener('change', renderSellPreview);
+    }
+  });
+  if (elements.addSku) {
+    elements.addSku.addEventListener('click', () => {
+      state.sell.form.skus.push({
+        skuId: '',
+        name: '',
+        image: '',
+        descriptionContentType: 'text/markdown',
+        description: '',
+        price: { amount: '', currency: 'SPACE' },
+        initialStock: '',
+      });
+      renderSkuEditor();
+      renderSellPreview();
+    });
+  }
+  if (elements.publish) elements.publish.addEventListener('click', openPublishModal);
+  if (elements.confirmPublish) elements.confirmPublish.addEventListener('click', confirmPublish);
+  if (elements.cancelPublish) elements.cancelPublish.addEventListener('click', closePublishModal);
   [elements.spendCap, elements.comment].forEach((input) => {
     if (input) input.addEventListener('input', () => {
       syncPurchaseOutcomeToSelection();

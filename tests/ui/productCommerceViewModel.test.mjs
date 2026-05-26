@@ -397,3 +397,150 @@ test('buildProductCommercePageViewModelRuntimeSource executes in a vm context an
   assert.equal(model.listingPreviewPayload.fulfillment.fulfillmentType, 'digital_delivery');
   assert.equal(model.listingPreviewPayload.skus[0].initialStock, 5);
 });
+
+test('buildProductCommercePageViewModel builds Product V1 listing payload with multiple selected fulfillment skills and SKUs', () => {
+  const model = buildProductCommercePageViewModel({
+    skillCatalog: ['deliver-code', 'notify-buyer', 'ignore-me'],
+    listingForm: {
+      name: 'mobile-credit',
+      title: 'Mobile Credit',
+      coverImage: 'metafile://cover-pin',
+      galleryImages: ['metafile://gallery-a', 'metafile://gallery-b'],
+      descriptionContentType: 'text/markdown',
+      description: 'Digital mobile credit.',
+      fulfillmentSkills: ['deliver-code', 'notify-buyer'],
+      fulfillmentType: 'physical_shipping',
+      deliveryEndpoint: 'logistics',
+      estimatedDeliverySeconds: '60',
+      deliverableDescription: 'Activation code sent by simplemsg.',
+      skus: [
+        {
+          skuId: 'sku-5',
+          name: '5 SPACE credit',
+          image: 'metafile://sku-five',
+          descriptionContentType: 'text/markdown',
+          description: 'Small top-up.',
+          price: { amount: '5', currency: 'space' },
+          initialStock: '10',
+        },
+        {
+          skuId: 'sku-10',
+          name: '10 SPACE credit',
+          image: 'metafile://sku-ten',
+          descriptionContentType: 'text/html',
+          description: '<p>Larger top-up.</p>',
+          price: { amount: '10', currency: 'SPACE' },
+          initialStock: 3,
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(model.listingPreviewPayload, {
+    name: 'mobile-credit',
+    title: 'Mobile Credit',
+    productType: 'virtual',
+    coverImage: 'metafile://cover-pin',
+    galleryImages: ['metafile://gallery-a', 'metafile://gallery-b'],
+    descriptionContentType: 'text/markdown',
+    description: 'Digital mobile credit.',
+    fulfillment: {
+      fulfillmentType: 'digital_delivery',
+      deliveryEndpoint: 'simplemsg',
+      fulfillmentSkills: ['deliver-code', 'notify-buyer'],
+      estimatedDeliverySeconds: 60,
+      deliverableDescription: 'Activation code sent by simplemsg.',
+    },
+    skus: [
+      {
+        skuId: 'sku-5',
+        name: '5 SPACE credit',
+        image: 'metafile://sku-five',
+        descriptionContentType: 'text/markdown',
+        description: 'Small top-up.',
+        price: { amount: '5', currency: 'SPACE' },
+        initialStock: 10,
+      },
+      {
+        skuId: 'sku-10',
+        name: '10 SPACE credit',
+        image: 'metafile://sku-ten',
+        descriptionContentType: 'text/html',
+        description: '<p>Larger top-up.</p>',
+        price: { amount: '10', currency: 'SPACE' },
+        initialStock: 3,
+      },
+    ],
+  });
+});
+
+test('buildProductCommercePageViewModel enforces listing form validation and excludes non-Product-V1 fields', () => {
+  const baseListingForm = {
+    name: 'mobile-credit',
+    title: 'Mobile Credit',
+    coverImage: 'metafile://cover-pin',
+    galleryImages: ['metafile://gallery-a'],
+    descriptionContentType: 'text/markdown',
+    description: 'Digital mobile credit.',
+    fulfillmentSkills: ['deliver-code'],
+    fulfillmentType: 'digital_delivery',
+    deliveryEndpoint: 'simplemsg',
+    skus: [
+      {
+        skuId: 'sku-5',
+        name: '5 SPACE credit',
+        image: 'metafile://sku-five',
+        descriptionContentType: 'text/markdown',
+        description: 'Small top-up.',
+        price: { amount: '5', currency: 'SPACE' },
+        initialStock: '10',
+        sellerPaymentAddress: 'forbidden',
+        shippingPolicy: 'forbidden',
+        reviewPolicy: 'forbidden',
+        mrc20: { tick: 'BAD' },
+      },
+    ],
+    sellerGlobalMetaId: 'forbidden',
+    paymentAddress: 'forbidden',
+    createdAt: 123,
+    shipping: { method: 'forbidden' },
+    review: { enabled: true },
+    mrc20: { tick: 'BAD' },
+  };
+  const build = (override) => buildProductCommercePageViewModel({
+    skillCatalog: ['deliver-code'],
+    listingForm: { ...baseListingForm, ...override },
+  });
+
+  for (const field of ['name', 'title', 'description']) {
+    assert.throws(() => build({ [field]: '' }), new RegExp(field));
+  }
+  assert.throws(() => build({ coverImage: 'https://example.com/cover.png' }), /coverImage.*metafile/i);
+  assert.throws(() => build({ galleryImages: ['metafile://gallery-a', 'https://example.com/bad.png'] }), /galleryImages.*metafile/i);
+  assert.throws(() => build({ descriptionContentType: 'application/json' }), /descriptionContentType.*text\/markdown.*text\/html/i);
+  assert.throws(() => build({ skus: [] }), /skus.*at least one SKU/i);
+  assert.throws(() => build({ skus: [{ ...baseListingForm.skus[0], price: { amount: '', currency: 'SPACE' } }] }), /price.*amount.*currency/i);
+  assert.throws(() => build({ skus: [{ ...baseListingForm.skus[0], price: { amount: '5', currency: '' } }] }), /price.*amount.*currency/i);
+  assert.throws(() => build({ skus: [{ ...baseListingForm.skus[0], image: 'https://example.com/sku.png' }] }), /SKU image.*metafile/i);
+  assert.throws(() => build({ skus: [{ ...baseListingForm.skus[0], initialStock: 'Infinity' }] }), /stock/i);
+  assert.throws(() => build({ skus: [{ ...baseListingForm.skus[0], initialStock: '0' }] }), /stock/i);
+
+  const payload = build({
+    productType: 'physical',
+    fulfillmentType: 'physical_shipping',
+    deliveryEndpoint: 'logistics',
+  }).listingPreviewPayload;
+  assert.equal(payload.productType, 'virtual');
+  assert.equal(payload.fulfillment.fulfillmentType, 'digital_delivery');
+  assert.equal(payload.fulfillment.deliveryEndpoint, 'simplemsg');
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'sellerGlobalMetaId'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'paymentAddress'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'createdAt'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'shipping'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'review'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'mrc20'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.skus[0], 'sellerPaymentAddress'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.skus[0], 'shippingPolicy'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.skus[0], 'reviewPolicy'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.skus[0], 'mrc20'), false);
+});

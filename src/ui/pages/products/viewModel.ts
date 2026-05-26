@@ -59,6 +59,7 @@ export interface ProductCommerceListingFormInput {
   priceAmount?: unknown;
   priceCurrency?: unknown;
   initialStock?: unknown;
+  skus?: unknown;
 }
 
 export interface ProductCommercePurchaseSelectionInput {
@@ -349,6 +350,24 @@ function assertPositiveIntegerStock(value: unknown): number {
   return normalized;
 }
 
+function readListingFormSkus(form: ProductCommerceListingFormInput): unknown[] {
+  if (Array.isArray(form.skus)) {
+    return form.skus;
+  }
+  return [{
+    skuId: form.skuId,
+    name: form.skuName,
+    image: form.skuImage,
+    descriptionContentType: form.skuDescriptionContentType,
+    description: form.skuDescription,
+    price: {
+      amount: form.priceAmount,
+      currency: form.priceCurrency,
+    },
+    initialStock: form.initialStock,
+  }];
+}
+
 function assertKnownFulfillmentSkills(selectedSkills: unknown, catalog: string[]): string[] {
   const skills = readArray(selectedSkills).map((skill) => normalizeText(skill)).filter(Boolean);
   if (skills.length === 0) {
@@ -432,6 +451,18 @@ function buildProductListingPreviewPayload(
   form: ProductCommerceListingFormInput,
   skillCatalog: string[],
 ): ProductListingPayload {
+  if (!normalizeText(form.name)) {
+    throw new Error('name must be a non-empty string.');
+  }
+  if (!normalizeText(form.title)) {
+    throw new Error('title must be a non-empty string.');
+  }
+  if (!isSupportedDescriptionContentType(form.descriptionContentType)) {
+    throw new Error('descriptionContentType must be text/markdown or text/html.');
+  }
+  if (!normalizeText(form.description)) {
+    throw new Error('description must be a non-empty string.');
+  }
   const coverImage = normalizeMetafileUri(form.coverImage);
   if (!coverImage) {
     throw new Error('coverImage must be a metafile URI.');
@@ -443,11 +474,31 @@ function buildProductListingPreviewPayload(
     throw new Error('galleryImages must contain only metafile URIs.');
   }
 
-  const skuImage = normalizeMetafileUri(form.skuImage);
-  if (!skuImage) {
-    throw new Error('SKU image must be a metafile URI.');
-  }
   const selectedSkills = assertKnownFulfillmentSkills(form.fulfillmentSkills, skillCatalog);
+  const formSkus = readListingFormSkus(form);
+  if (formSkus.length === 0) {
+    throw new Error('skus must contain at least one SKU.');
+  }
+  const skus = formSkus.map((item) => {
+    const sku = readObject(item);
+    const price = readObject(sku.price);
+    const skuImage = normalizeMetafileUri(sku.image);
+    if (!skuImage) {
+      throw new Error('SKU image must be a metafile URI.');
+    }
+    return {
+      skuId: normalizeText(sku.skuId),
+      name: normalizeText(sku.name),
+      image: skuImage,
+      descriptionContentType: normalizeText(sku.descriptionContentType),
+      description: normalizeText(sku.description),
+      price: {
+        amount: normalizeText(price.amount),
+        currency: normalizeText(price.currency).toUpperCase(),
+      },
+      initialStock: assertPositiveIntegerStock(sku.initialStock),
+    };
+  });
 
   const payload: ProductListingPayload = {
     name: normalizeText(form.name),
@@ -461,20 +512,7 @@ function buildProductListingPreviewPayload(
       deliveryEndpoint: 'simplemsg',
       fulfillmentSkills: selectedSkills,
     },
-    skus: [
-      {
-        skuId: normalizeText(form.skuId),
-        name: normalizeText(form.skuName),
-        image: skuImage,
-        descriptionContentType: normalizeText(form.skuDescriptionContentType),
-        description: normalizeText(form.skuDescription),
-        price: {
-          amount: normalizeText(form.priceAmount),
-          currency: normalizeText(form.priceCurrency).toUpperCase(),
-        },
-        initialStock: assertPositiveIntegerStock(form.initialStock),
-      },
-    ],
+    skus,
   };
 
   if (normalizedGalleryImages.length > 0) {
@@ -580,6 +618,7 @@ export function buildProductCommercePageViewModelRuntimeSource(): string {
     validateProductListingPayload,
     readSkillCatalog,
     assertPositiveIntegerStock,
+    readListingFormSkus,
     assertKnownFulfillmentSkills,
     buildProductSkuViewModel,
     buildProductDirectoryRowViewModel,

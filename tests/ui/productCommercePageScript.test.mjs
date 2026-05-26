@@ -21,6 +21,7 @@ class FakeElement {
     this.value = value;
     this.dataset = {};
     this.disabled = false;
+    this.checked = false;
     this.hidden = false;
     this.listeners = new Map();
     this.attrs = {};
@@ -40,6 +41,7 @@ class FakeElement {
       for (const attrMatch of attrs.matchAll(/\s([a-zA-Z0-9_-]+)(?:="([^"]*)")?/gu)) {
         node.attrs[attrMatch[1]] = decodeHtmlAttribute(attrMatch[2] || '');
         if (attrMatch[1] === 'disabled') node.disabled = true;
+        if (attrMatch[1] === 'checked') node.checked = true;
         if (attrMatch[1] === 'value') node.value = node.attrs[attrMatch[1]];
         if (attrMatch[1].startsWith('data-')) {
           const key = attrMatch[1]
@@ -92,6 +94,15 @@ class FakeElement {
     }
     if (selector === '[data-product-purchase-control]') {
       return this.nodes.filter((node) => node.attrs['data-product-purchase-control'] !== undefined);
+    }
+    if (selector === '[data-product-sell-skill]') {
+      return this.nodes.filter((node) => node.attrs['data-product-sell-skill'] !== undefined);
+    }
+    if (selector === '[data-product-sell-sku-remove]') {
+      return this.nodes.filter((node) => node.attrs['data-product-sell-sku-remove'] !== undefined);
+    }
+    if (selector === '[data-product-sell-sku-field]') {
+      return this.nodes.filter((node) => node.attrs['data-product-sell-sku-field'] !== undefined);
     }
     return [];
   }
@@ -177,6 +188,29 @@ async function runProductsScript(options = {}) {
     '[data-products-confirm]': new FakeElement(),
     '[data-products-cancel-confirmation]': new FakeElement(),
     '[data-products-error]': new FakeElement(),
+    '[data-products-seller]': new FakeElement(options.seller || ''),
+    '[data-products-sell-skills]': new FakeElement(),
+    '[data-products-sell-error]': new FakeElement(),
+    '[data-products-listing-name]': new FakeElement(),
+    '[data-products-listing-title]': new FakeElement(),
+    '[data-products-cover-image]': new FakeElement(),
+    '[data-products-gallery-images]': new FakeElement(),
+    '[data-products-description-content-type]': new FakeElement('text/markdown'),
+    '[data-products-description]': new FakeElement(),
+    '[data-products-estimated-delivery-seconds]': new FakeElement(),
+    '[data-products-deliverable-description]': new FakeElement(),
+    '[data-products-sku-list]': new FakeElement(),
+    '[data-products-add-sku]': new FakeElement(),
+    '[data-products-network]': new FakeElement(options.network || 'mvc'),
+    '[data-products-listing-preview-json]': new FakeElement(),
+    '[data-products-publish]': new FakeElement(),
+    '[data-products-publish-reason]': new FakeElement(),
+    '[data-products-publish-confirmation-modal]': new FakeElement(),
+    '[data-products-publish-confirmation-summary]': new FakeElement(),
+    '[data-products-publish-confirmation-json]': new FakeElement(),
+    '[data-products-confirm-publish]': new FakeElement(),
+    '[data-products-cancel-publish]': new FakeElement(),
+    '[data-products-publish-success]': new FakeElement(),
   };
   const tabs = ['marketplace', 'sell', 'orders'].map((name) => {
     const tab = new FakeElement();
@@ -253,6 +287,41 @@ async function runProductsScript(options = {}) {
           json: async () => ({ ok: true, data: { products: productsPayload, total: productsPayload.length } }),
         };
       }
+      if (String(url).startsWith('/api/products/skills')) {
+        if (options.skillsFail) {
+          return {
+            ok: true,
+            json: async () => ({ ok: false, code: 'products_skills_failed', message: 'Skill catalog exploded.' }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            data: {
+              skills: options.skills || [
+                { name: 'deliver-code', title: 'Deliver Code' },
+                { name: 'notify-buyer', title: 'Notify Buyer' },
+              ],
+            },
+          }),
+        };
+      }
+      if (String(url) === '/api/products/publish') {
+        const body = requestOptions && requestOptions.body ? JSON.parse(String(requestOptions.body)) : {};
+        return {
+          ok: true,
+          json: async () => options.publishResponse || {
+            ok: true,
+            state: 'success',
+            data: {
+              listingPinId: 'listing-pin-published',
+              txids: ['listing-txid-1', 'listing-txid-2'],
+              echo: body,
+            },
+          },
+        };
+      }
       if (String(url) === '/api/products/buy') {
         const body = requestOptions && requestOptions.body ? JSON.parse(String(requestOptions.body)) : {};
         if (body.confirmed === true) {
@@ -316,7 +385,37 @@ async function runProductsScript(options = {}) {
     () => elements['[data-products-list]'].innerHTML.includes('Mobile Top-up') || elements['[data-products-error]'].textContent,
     'initial products render',
   );
-  return { elements, fetchCalls };
+  return { elements, fetchCalls, tabs, panels };
+}
+
+function fillListingForm(elements, overrides = {}) {
+  elements['[data-products-listing-name]'].value = overrides.name ?? 'mobile-credit';
+  elements['[data-products-listing-title]'].value = overrides.title ?? 'Mobile Credit';
+  elements['[data-products-cover-image]'].value = overrides.coverImage ?? 'metafile://cover-pin';
+  elements['[data-products-gallery-images]'].value = overrides.galleryImages ?? 'metafile://gallery-a\nmetafile://gallery-b';
+  elements['[data-products-description-content-type]'].value = overrides.descriptionContentType ?? 'text/markdown';
+  elements['[data-products-description]'].value = overrides.description ?? 'Digital mobile credit.';
+  elements['[data-products-estimated-delivery-seconds]'].value = overrides.estimatedDeliverySeconds ?? '60';
+  elements['[data-products-deliverable-description]'].value = overrides.deliverableDescription ?? 'Activation code sent by simplemsg.';
+  elements['[data-products-network]'].value = overrides.network ?? 'mvc';
+}
+
+async function openSellTab(options = {}) {
+  const result = await runProductsScript({
+    ...options,
+    profiles: options.profiles || [
+      profile({ slug: 'alice', name: 'Alice Seller' }),
+      profile({ slug: 'buyer-bot', name: 'Buyer Bot' }),
+    ],
+  });
+  const sellTab = result.tabs.find((tab) => tab.dataset.productsTab === 'sell');
+  await sellTab.listeners.get('click')({ preventDefault() {} });
+  await waitFor(
+    () => result.elements['[data-products-sell-skills]'].innerHTML.includes('deliver-code') ||
+      result.elements['[data-products-sell-error]'].textContent.includes('products_skills_failed'),
+    'seller skills load',
+  );
+  return result;
 }
 
 test('products marketplace script loads profiles and online marketplace rows by default', async () => {
@@ -498,4 +597,151 @@ test('products marketplace fetch failure renders command envelope code and messa
 
   assert.match(elements['[data-products-error]'].textContent, /network_products_failed/);
   assert.match(elements['[data-products-error]'].textContent, /Directory exploded/);
+});
+
+test('products sell tab loads seller profiles, loads selected seller skills, and allows multiple returned skills', async () => {
+  const { elements, fetchCalls } = await openSellTab();
+
+  assert.equal(fetchCalls[0].url, '/api/bot/profiles');
+  assert.ok(fetchCalls.some((call) => call.url === '/api/products/skills?from=alice'));
+  assert.match(elements['[data-products-sell-skills]'].innerHTML, /deliver-code/);
+  assert.match(elements['[data-products-sell-skills]'].innerHTML, /notify-buyer/);
+  assert.doesNotMatch(elements['[data-products-sell-skills]'].innerHTML, /not-returned/);
+
+  const skills = elements['[data-products-sell-skills]'].querySelectorAll('[data-product-sell-skill]');
+  assert.equal(skills.length, 2);
+  skills[0].checked = true;
+  await skills[0].listeners.get('change')();
+  skills[1].checked = true;
+  await skills[1].listeners.get('change')();
+
+  fillListingForm(elements);
+  await elements['[data-products-listing-title]'].listeners.get('input')();
+
+  const payload = JSON.parse(elements['[data-products-listing-preview-json]'].textContent);
+  assert.deepEqual(payload.fulfillment.fulfillmentSkills, ['deliver-code', 'notify-buyer']);
+});
+
+test('products sell tab disables publish controls and shows code/message when skill loading fails', async () => {
+  const { elements } = await openSellTab({ skillsFail: true });
+
+  assert.equal(elements['[data-products-publish]'].disabled, true);
+  assert.match(elements['[data-products-sell-error]'].textContent, /products_skills_failed/);
+  assert.match(elements['[data-products-sell-error]'].textContent, /Skill catalog exploded/);
+});
+
+test('products sell publish preview renders exact Product V1 JSON payload', async () => {
+  const { elements } = await openSellTab();
+
+  const skills = elements['[data-products-sell-skills]'].querySelectorAll('[data-product-sell-skill]');
+  skills[0].checked = true;
+  await skills[0].listeners.get('change')();
+  skills[1].checked = true;
+  await skills[1].listeners.get('change')();
+  fillListingForm(elements);
+  await elements['[data-products-add-sku]'].listeners.get('click')();
+  const skuFields = elements['[data-products-sku-list]'].querySelectorAll('[data-product-sell-sku-field]');
+  const secondSku = Object.fromEntries(
+    skuFields
+      .filter((field) => field.attrs['data-sku-index'] === '1')
+      .map((field) => [field.attrs['data-product-sell-sku-field'], field]),
+  );
+  secondSku.skuId.value = 'sku-10';
+  secondSku.name.value = '10 SPACE credit';
+  secondSku.image.value = 'metafile://sku-ten';
+  secondSku.description.value = 'Larger top-up.';
+  secondSku.priceAmount.value = '10';
+  secondSku.priceCurrency.value = 'SPACE';
+  secondSku.initialStock.value = '3';
+  await secondSku.skuId.listeners.get('input')();
+
+  const payload = JSON.parse(elements['[data-products-listing-preview-json]'].textContent);
+  assert.deepEqual(payload, {
+    name: 'mobile-credit',
+    title: 'Mobile Credit',
+    productType: 'virtual',
+    coverImage: 'metafile://cover-pin',
+    galleryImages: ['metafile://gallery-a', 'metafile://gallery-b'],
+    descriptionContentType: 'text/markdown',
+    description: 'Digital mobile credit.',
+    fulfillment: {
+      fulfillmentType: 'digital_delivery',
+      deliveryEndpoint: 'simplemsg',
+      fulfillmentSkills: ['deliver-code', 'notify-buyer'],
+      estimatedDeliverySeconds: 60,
+      deliverableDescription: 'Activation code sent by simplemsg.',
+    },
+    skus: [
+      {
+        skuId: 'sku-5',
+        name: '5 SPACE credit',
+        image: 'metafile://sku-five',
+        descriptionContentType: 'text/markdown',
+        description: 'Small top-up.',
+        price: { amount: '5', currency: 'SPACE' },
+        initialStock: 10,
+      },
+      {
+        skuId: 'sku-10',
+        name: '10 SPACE credit',
+        image: 'metafile://sku-ten',
+        descriptionContentType: 'text/markdown',
+        description: 'Larger top-up.',
+        price: { amount: '10', currency: 'SPACE' },
+        initialStock: 3,
+      },
+    ],
+  });
+});
+
+test('products sell publish confirmation posts previewed payload and shows listing pin and txids', async () => {
+  const { elements, fetchCalls } = await openSellTab();
+
+  const skills = elements['[data-products-sell-skills]'].querySelectorAll('[data-product-sell-skill]');
+  skills[0].checked = true;
+  await skills[0].listeners.get('change')();
+  fillListingForm(elements);
+  await elements['[data-products-listing-name]'].listeners.get('input')();
+
+  await elements['[data-products-publish]'].listeners.get('click')();
+  assert.equal(elements['[data-products-publish-confirmation-modal]'].hidden, false);
+  assert.match(elements['[data-products-publish-confirmation-summary]'].innerHTML, /Alice Seller/);
+  assert.match(elements['[data-products-publish-confirmation-summary]'].innerHTML, /mvc/);
+  assert.match(elements['[data-products-publish-confirmation-summary]'].innerHTML, /1 SKU/);
+  assert.match(elements['[data-products-publish-confirmation-summary]'].innerHTML, /deliver-code/);
+  assert.match(elements['[data-products-publish-confirmation-summary]'].innerHTML, /\/protocols\/product-listing/);
+
+  const previewedPayload = JSON.parse(elements['[data-products-publish-confirmation-json]'].textContent);
+  await elements['[data-products-confirm-publish]'].listeners.get('click')();
+  await waitFor(
+    () => elements['[data-products-publish-success]'].innerHTML.includes('listing-pin-published'),
+    'publish success render',
+  );
+
+  const publishCall = fetchCalls.find((call) => call.url === '/api/products/publish');
+  assert.ok(publishCall);
+  assert.deepEqual(JSON.parse(publishCall.options.body), {
+    from: 'alice',
+    network: 'mvc',
+    payload: previewedPayload,
+  });
+  assert.match(elements['[data-products-publish-success]'].innerHTML, /listing-pin-published/);
+  assert.match(elements['[data-products-publish-success]'].innerHTML, /listing-txid-1/);
+  assert.match(elements['[data-products-publish-success]'].innerHTML, /listing-txid-2/);
+});
+
+test('products sell publish cancellation does not post', async () => {
+  const { elements, fetchCalls } = await openSellTab();
+
+  const [skill] = elements['[data-products-sell-skills]'].querySelectorAll('[data-product-sell-skill]');
+  skill.checked = true;
+  await skill.listeners.get('change')();
+  fillListingForm(elements);
+  await elements['[data-products-listing-title]'].listeners.get('input')();
+
+  await elements['[data-products-publish]'].listeners.get('click')();
+  await elements['[data-products-cancel-publish]'].listeners.get('click')();
+
+  assert.equal(elements['[data-products-publish-confirmation-modal]'].hidden, true);
+  assert.equal(fetchCalls.some((call) => call.url === '/api/products/publish'), false);
 });
