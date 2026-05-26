@@ -1089,12 +1089,13 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['metaapp', 'preview'],
     summary: 'Inspect a project directory, derive a draft MetaApp manifest, and start a local preview without chain writes.',
-    usage: 'metabot metaapp preview --project-dir <path> [--open]',
+    usage: 'metabot metaapp preview --project-dir <path> [--manifest-file <path>] [--open]',
     requiredFlags: [
       { flag: '--project-dir', value: '<path>', description: 'Project directory to inspect and preview.' },
     ],
     requestShape: {
       projectDir: 'browser-runnable project directory',
+      manifestFile: 'optional manifest override file',
       open: 'open the local preview when true',
     },
     successFields: [
@@ -1109,9 +1110,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot metaapp preview --project-dir ./dist-site',
+      'metabot metaapp preview --project-dir ./dist-site --manifest-file metaapp.json',
       'metabot metaapp preview --project-dir ./dist-site --open',
     ],
     optionalFlags: [
+      { flag: '--manifest-file', value: '<path>', description: 'Optional user-edited manifest override file.' },
       { flag: '--open', description: 'Open the generated local preview URL when the handler supports it.' },
       HELP_JSON_FLAG,
     ],

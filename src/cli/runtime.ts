@@ -3689,6 +3689,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
   return {
     config: { ...defaults.config, ...provided.config },
     buzz: { ...defaults.buzz, ...provided.buzz },
+    metaapp: { ...defaults.metaapp, ...provided.metaapp },
     chain: { ...defaults.chain, ...provided.chain },
     daemon: { ...defaults.daemon, ...provided.daemon },
     doctor: { ...defaults.doctor, ...provided.doctor },

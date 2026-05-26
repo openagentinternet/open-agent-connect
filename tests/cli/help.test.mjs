@@ -159,6 +159,22 @@ test('runCli prints metaapp share and comment help with write-chain behavior', a
   assert.match(commentOutput, /paycomment/i);
 });
 
+test('runCli prints metaapp preview help with manifest-file override', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['metaapp', 'preview', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot metaapp preview --project-dir <path> \[--manifest-file <path>\] \[--open\]/m);
+  assert.match(output, /--manifest-file <path>/);
+  assert.match(output, /manifest override file/i);
+  assert.match(output, /metabot metaapp preview --project-dir \.\/dist-site --manifest-file metaapp\.json/);
+});
+
 test('runCli prints loom group help for validation and export commands', async () => {
   const stdout = [];
 

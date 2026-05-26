@@ -181,6 +181,28 @@ test('runCli rejects conflicting metaapp view selectors', async () => {
   }
 });
 
+test('runCli rejects metaapp view selector flags with missing values', async () => {
+  for (const args of [
+    ['metaapp', 'view', '--pin-id', '--from', 'alice'],
+    ['metaapp', 'view', '--first-pin-id'],
+  ]) {
+    const calls = [];
+    const { exitCode, envelope } = await runMetaAppCli(args, {
+      metaapp: {
+        view: async (input) => {
+          calls.push(input);
+          return commandSuccess({ localUiUrl: 'http://127.0.0.1:4827/ui/metaapps' });
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.deepEqual(calls, []);
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.code, 'invalid_flag');
+  }
+});
+
 test('runCli dispatches `metabot metaapp comment` with parsed comment inputs', async () => {
   const calls = [];
   const exitCode = await runCli([

@@ -61,14 +61,7 @@ function writeResolvedVersion(
 
 export async function runCli(argv: string[], cliContext: CliContext = {}): Promise<number> {
   const context = createCliRuntimeContext(cliContext);
-  const providedDependencies = context.dependencies;
   context.dependencies = mergeCliDependencies(context);
-  if (providedDependencies.metaapp) {
-    context.dependencies.metaapp = {
-      ...context.dependencies.metaapp,
-      ...providedDependencies.metaapp,
-    };
-  }
 
   const [command, ...rest] = argv;
   let result: MetabotCommandResult<unknown>;

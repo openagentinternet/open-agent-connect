@@ -26,6 +26,20 @@ function readOptionalFlag(args: string[], flag: string): string | undefined {
   return value && !value.startsWith('--') ? value : undefined;
 }
 
+function readOptionalValueFlag(args: string[], flag: string): {
+  ok: true;
+  value?: string;
+} | { ok: false; result: MetabotCommandResult<never> } {
+  if (!args.includes(flag)) {
+    return { ok: true };
+  }
+  const value = readFlagValue(args, flag);
+  if (!value || value.startsWith('--')) {
+    return { ok: false, result: commandInvalidFlag(`${flag} requires a value.`) };
+  }
+  return { ok: true, value };
+}
+
 function commandNotImplemented(command: string): MetabotCommandResult<never> {
   return commandFailed('not_implemented', `MetaApp ${command} handler is not configured.`);
 }
@@ -143,8 +157,17 @@ export async function runMetaAppCommand(args: string[], context: CliRuntimeConte
   }
 
   if (subcommand === 'view') {
-    const pinId = readOptionalFlag(args, '--pin-id');
-    const firstPinId = readOptionalFlag(args, '--first-pin-id');
+    const pinIdInput = readOptionalValueFlag(args, '--pin-id');
+    if (!pinIdInput.ok) {
+      return pinIdInput.result;
+    }
+    const firstPinIdInput = readOptionalValueFlag(args, '--first-pin-id');
+    if (!firstPinIdInput.ok) {
+      return firstPinIdInput.result;
+    }
+
+    const pinId = pinIdInput.value;
+    const firstPinId = firstPinIdInput.value;
     const mine = hasFlag(args, '--mine');
 
     if (pinId && firstPinId) {
