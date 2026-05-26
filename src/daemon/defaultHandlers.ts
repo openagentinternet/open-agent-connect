@@ -135,6 +135,19 @@ import {
 import type { Signer } from '../core/signing/signer';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
+import { createMetaAppPreviewSessionRegistry } from '../core/metaapp/previewSessions';
+import { createMetaAppIndexerClient } from '../core/metaapp/indexerClient';
+import { createMetaAppLocalCacheStore } from '../core/metaapp/localCache';
+import {
+  commentMetaApp,
+  previewMetaAppProject,
+  publishMetaApp,
+  shareMetaApp,
+  updateMetaApp,
+  type ChainLikeResult,
+  type UploadLikeResult,
+} from '../core/metaapp/publish';
+import type { MetaAppGalleryRecord, MetaAppIndexerError } from '../core/metaapp/types';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
 import { readChainDirectoryWithFallback } from '../core/discovery/chainDirectoryReader';
 import {
@@ -1334,6 +1347,12 @@ function buildDaemonLocalUiUrl(
     }
   }
   return url.toString();
+}
+
+function buildMetaAppPreviewAssetUrl(previewId: string, assetPath: string): string {
+  const previewSegments = encodeURIComponent(previewId);
+  const normalizedAssetPath = assetPath.split('/').filter(Boolean).map((segment) => encodeURIComponent(segment)).join('/');
+  return `/api/metaapp/preview-assets/${previewSegments}/${normalizedAssetPath}`;
 }
 
 function summarizeService(record: ReturnType<typeof buildPublishedService>['record']) {
@@ -10160,6 +10179,80 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
+  const metaAppPreviewSessions = createMetaAppPreviewSessionRegistry();
+
+  async function readMetaAppRecordForUpdate(actorHomeDir: string, targetPinId: string): Promise<MetaAppGalleryRecord | null> {
+    const indexer = createMetaAppIndexerClient();
+    const cache = createMetaAppLocalCacheStore(actorHomeDir);
+    const indexed = await indexer.getByPinId(targetPinId).catch(() => null);
+    if (indexed?.ok && indexed.data) {
+      return indexed.data;
+    }
+
+    const localRecords = await cache.listMerged().catch(() => [] as MetaAppGalleryRecord[]);
+    return localRecords.find((record: MetaAppGalleryRecord) => record.pinId === targetPinId) ?? null;
+  }
+
+  async function listMetaAppsForActor(actor: {
+    homeDir: string;
+    runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  }, rawInput: Record<string, unknown>): Promise<MetabotCommandResult<Record<string, unknown>>> {
+    const cache = createMetaAppLocalCacheStore(actor.homeDir);
+    const indexer = createMetaAppIndexerClient();
+    const state = await actor.runtimeStateStore.readState();
+    const mine = rawInput.mine === true;
+    const refresh = rawInput.refresh === true;
+    const mineGlobalMetaId = mine ? (normalizeText(state.identity?.globalMetaId) || '__missing__') : null;
+    const pinId = typeof rawInput.pinId === 'string' ? rawInput.pinId.trim() : '';
+    const firstPinId = typeof rawInput.firstPinId === 'string' ? rawInput.firstPinId.trim() : '';
+    let indexerRefreshError: MetaAppIndexerError | null = null;
+
+    if (refresh) {
+      const listResult = await indexer.list({
+        ...(mine && state.identity?.globalMetaId
+          ? { creatorGlobalMetaId: state.identity.globalMetaId }
+          : {}),
+      });
+      if (listResult.ok) {
+        await cache.writeIndexer({
+          version: 1,
+          records: listResult.data,
+          updatedAt: listResult.fetchedAt,
+        });
+      } else {
+        indexerRefreshError = listResult.error;
+      }
+    }
+
+    const merged = await cache.listMerged();
+    const records = merged.filter((record: MetaAppGalleryRecord) => {
+      if (mineGlobalMetaId && record.ownerGlobalMetaId !== mineGlobalMetaId) {
+        return false;
+      }
+      if (pinId && record.pinId !== pinId) {
+        return false;
+      }
+      if (firstPinId && record.firstPinId !== firstPinId) {
+        return false;
+      }
+      return true;
+    });
+
+    return commandSuccess({
+      from: typeof rawInput.from === 'string' ? rawInput.from : undefined,
+      mine,
+      refresh,
+      pinId: pinId || undefined,
+      firstPinId: firstPinId || undefined,
+      records,
+      indexerRefreshError: indexerRefreshError ? {
+        code: indexerRefreshError.code,
+        message: indexerRefreshError.message,
+        ...(typeof indexerRefreshError.status === 'number' ? { status: indexerRefreshError.status } : {}),
+      } : null,
+    });
+  }
+
   const loomActionHandler = createLoomDaemonActionHandler(createLoomDaemonActionDependencies({
     resolveActor: resolveLoomActor,
     resolveTaskState: async (actor, taskPinId, options) => {
@@ -10262,6 +10355,287 @@ export function createDefaultMetabotDaemonHandlers(input: {
             error instanceof Error ? error.message : String(error)
           );
         }
+      },
+    },
+    metaapp: {
+      preview: async (rawInput) => {
+        try {
+          const result = await previewMetaAppProject(
+            {
+              projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
+              manifestFile: typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile : undefined,
+              open: rawInput.open === true,
+            },
+            {
+              createPreviewSession: ({ artifactDir, indexFile }) => {
+                const session = metaAppPreviewSessions.create({ artifactDir, indexFile });
+                return {
+                  previewId: session.previewId,
+                  localPreviewUrl: buildMetaAppPreviewAssetUrl(session.previewId, indexFile),
+                };
+              },
+            },
+          );
+          return result;
+        } catch (error) {
+          return commandFailed(
+            'metaapp_preview_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+      previewAsset: async (rawInput) => {
+        try {
+          const asset = await metaAppPreviewSessions.resolveAsset({
+            previewId: typeof rawInput.previewId === 'string' ? rawInput.previewId : '',
+            assetPath: typeof rawInput.assetPath === 'string' ? rawInput.assetPath : undefined,
+          });
+          return {
+            body: asset.body,
+            contentType: asset.contentType,
+          };
+        } catch (error) {
+          return commandFailed(
+            'metaapp_preview_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+      publish: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before uploading files.');
+        }
+
+        const cache = createMetaAppLocalCacheStore(actor.homeDir);
+        try {
+          const result = await publishMetaApp(
+            {
+              projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
+              manifestFile: typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile : undefined,
+              confirm: rawInput.confirm === true,
+              network: typeof rawInput.network === 'string' ? rawInput.network : undefined,
+            },
+            {
+              uploadFile: async (uploadInput) => {
+                const network = await resolveFileUploadNetworkForHome(uploadInput.network, actor.homeDir);
+                const uploaded = await uploadLocalFileToChain({
+                  filePath: uploadInput.filePath,
+                  contentType: uploadInput.contentType,
+                  network,
+                  signer: actor.signer,
+                });
+                return uploaded as unknown as UploadLikeResult;
+              },
+              writeChain: async (writeInput) => {
+                const network = await resolveFileUploadNetworkForHome(writeInput.network, actor.homeDir);
+                const written = await actor.signer.writePin({
+                  operation: typeof writeInput.operation === 'string' ? writeInput.operation : undefined,
+                  path: typeof writeInput.path === 'string' ? writeInput.path : undefined,
+                  contentType: typeof writeInput.contentType === 'string' ? writeInput.contentType : undefined,
+                  payload: typeof writeInput.payload === 'string' ? writeInput.payload : undefined,
+                  network,
+                });
+                return written as unknown as ChainLikeResult;
+              },
+              upsertLocal: async (record) => {
+                await cache.upsertLocal(record);
+              },
+              createPreviewSession: ({ artifactDir, indexFile }) => {
+                const session = metaAppPreviewSessions.create({ artifactDir, indexFile });
+                return {
+                  previewId: session.previewId,
+                  localPreviewUrl: buildMetaAppPreviewAssetUrl(session.previewId, indexFile),
+                };
+              },
+              readExistingMetaApp: async (pinId) => readMetaAppRecordForUpdate(actor.homeDir, pinId),
+              now: Date.now,
+            },
+          );
+
+          if (result.ok && result.data && typeof result.data === 'object') {
+            const data = result.data as Record<string, unknown>;
+            const pinId = typeof data.pinId === 'string' ? data.pinId : '';
+            if (pinId) {
+              const localUiUrl = buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/metaapps', { pinId }) ?? '/ui/metaapps';
+              return commandSuccess({
+                ...data,
+                localUiUrl,
+              });
+            }
+          }
+          return result;
+        } catch (error) {
+          return commandFailed(
+            'metaapp_publish_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+      update: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before uploading files.');
+        }
+
+        const cache = createMetaAppLocalCacheStore(actor.homeDir);
+        try {
+          const result = await updateMetaApp(
+            {
+              projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
+              manifestFile: typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile : undefined,
+              confirm: rawInput.confirm === true,
+              network: typeof rawInput.network === 'string' ? rawInput.network : undefined,
+              targetPinId: typeof rawInput.targetPinId === 'string' ? rawInput.targetPinId : '',
+            },
+            {
+              uploadFile: async (uploadInput) => {
+                const network = await resolveFileUploadNetworkForHome(uploadInput.network, actor.homeDir);
+                const uploaded = await uploadLocalFileToChain({
+                  filePath: uploadInput.filePath,
+                  contentType: uploadInput.contentType,
+                  network,
+                  signer: actor.signer,
+                });
+                return uploaded as unknown as UploadLikeResult;
+              },
+              writeChain: async (writeInput) => {
+                const network = await resolveFileUploadNetworkForHome(writeInput.network, actor.homeDir);
+                const written = await actor.signer.writePin({
+                  operation: typeof writeInput.operation === 'string' ? writeInput.operation : undefined,
+                  path: typeof writeInput.path === 'string' ? writeInput.path : undefined,
+                  contentType: typeof writeInput.contentType === 'string' ? writeInput.contentType : undefined,
+                  payload: typeof writeInput.payload === 'string' ? writeInput.payload : undefined,
+                  network,
+                });
+                return written as unknown as ChainLikeResult;
+              },
+              upsertLocal: async (record) => {
+                await cache.upsertLocal(record);
+              },
+              createPreviewSession: ({ artifactDir, indexFile }) => {
+                const session = metaAppPreviewSessions.create({ artifactDir, indexFile });
+                return {
+                  previewId: session.previewId,
+                  localPreviewUrl: buildMetaAppPreviewAssetUrl(session.previewId, indexFile),
+                };
+              },
+              readExistingMetaApp: async (pinId) => readMetaAppRecordForUpdate(actor.homeDir, pinId),
+              now: Date.now,
+            },
+          );
+
+          if (result.ok && result.data && typeof result.data === 'object') {
+            const data = result.data as Record<string, unknown>;
+            const pinId = typeof data.pinId === 'string' ? data.pinId : '';
+            if (pinId) {
+              const localUiUrl = buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/metaapps', { pinId }) ?? '/ui/metaapps';
+              return commandSuccess({
+                ...data,
+                localUiUrl,
+              });
+            }
+          }
+          return result;
+        } catch (error) {
+          return commandFailed(
+            'metaapp_update_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+      share: async (rawInput) => {
+        try {
+          const share = await shareMetaApp({
+            pinId: typeof rawInput.pinId === 'string' ? rawInput.pinId : '',
+          });
+          if (rawInput.announce !== true) {
+            return share;
+          }
+
+          const actor = await resolveActorWriteContext(rawInput.from);
+          if ('failure' in actor) {
+            return actor.failure;
+          }
+          const state = await actor.runtimeStateStore.readState();
+          if (!state.identity) {
+            return commandFailed('identity_missing', 'Create a local MetaBot identity before posting buzz.');
+          }
+
+          const shareData = share.ok && share.data && typeof share.data === 'object'
+            ? share.data as Record<string, unknown>
+            : {};
+          const bundlePinId = typeof shareData.pinId === 'string' ? shareData.pinId : '';
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const announcement = await postBuzzToChain({
+            content: typeof shareData.suggestedBuzz === 'string' && shareData.suggestedBuzz.trim()
+              ? shareData.suggestedBuzz
+              : `I published a MetaApp: ${typeof shareData.metawebUrl === 'string' ? shareData.metawebUrl : ''}`,
+            contentType: 'text/plain;utf-8',
+            quotePin: bundlePinId,
+            network,
+            signer: actor.signer,
+          });
+          return commandSuccess({
+            ...shareData,
+            announcement,
+          });
+        } catch (error) {
+          return commandFailed(
+            'metaapp_share_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+      comment: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before writing comments.');
+        }
+
+        try {
+          const result = await commentMetaApp(
+            {
+              pinId: typeof rawInput.pinId === 'string' ? rawInput.pinId : '',
+              comment: typeof rawInput.comment === 'string' ? rawInput.comment : '',
+              network: await resolveWriteNetworkForHome(rawInput.network, actor.homeDir),
+            },
+            {
+              writeChain: async (writeInput) => actor.signer.writePin({
+                operation: typeof writeInput.operation === 'string' ? writeInput.operation : undefined,
+                path: typeof writeInput.path === 'string' ? writeInput.path : undefined,
+                contentType: typeof writeInput.contentType === 'string' ? writeInput.contentType : undefined,
+                payload: typeof writeInput.payload === 'string' ? writeInput.payload : undefined,
+                network: await resolveWriteNetworkForHome(rawInput.network, actor.homeDir),
+              }) as unknown as Promise<ChainLikeResult>,
+            },
+          );
+          return result;
+        } catch (error) {
+          return commandFailed(
+            'metaapp_comment_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+      list: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        return listMetaAppsForActor(actor, rawInput);
       },
     },
     buzz: {
