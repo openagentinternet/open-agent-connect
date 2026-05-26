@@ -96,6 +96,25 @@ export function buildProductsPageDefinition(): LocalUiPageDefinition {
             <p>Inspect buyer and seller order state from the local Product Commerce cache.</p>
           </section>
         </section>
+        <div class="products-modal-backdrop" data-products-confirmation-modal hidden>
+          <section class="products-confirmation" role="dialog" aria-modal="true" aria-labelledby="products-confirmation-title">
+            <div class="products-confirmation-head">
+              <div>
+                <p class="products-eyebrow">Purchase confirmation</p>
+                <h2 id="products-confirmation-title">Confirm payment</h2>
+              </div>
+              <button class="products-secondary-button" type="button" data-products-cancel-confirmation>Cancel</button>
+            </div>
+            <div data-products-confirmation-summary></div>
+            <details class="products-json-preview">
+              <summary>JSON preview</summary>
+              <pre data-products-confirmation-json></pre>
+            </details>
+            <div class="products-confirmation-actions">
+              <button class="products-primary-button products-danger-button" type="button" data-products-confirm>Confirm and pay</button>
+            </div>
+          </section>
+        </div>
       </section>
     `,
     script: `(() => {
@@ -116,6 +135,14 @@ export function buildProductsPageScript(): string {
     buyerSlug: '',
     query: '',
     busy: false,
+    purchase: {
+      open: false,
+      busy: false,
+      previewEnvelope: null,
+      confirmRequest: null,
+      success: null,
+      error: null,
+    },
   };
   const elements = {
     status: document.querySelector('[data-products-status]'),
@@ -129,6 +156,11 @@ export function buildProductsPageScript(): string {
     comment: document.querySelector('[data-products-comment]'),
     preview: document.querySelector('[data-products-preview]'),
     purchaseReason: document.querySelector('[data-products-purchase-reason]'),
+    confirmationModal: document.querySelector('[data-products-confirmation-modal]'),
+    confirmationSummary: document.querySelector('[data-products-confirmation-summary]'),
+    confirmationJson: document.querySelector('[data-products-confirmation-json]'),
+    confirm: document.querySelector('[data-products-confirm]'),
+    cancelConfirmation: document.querySelector('[data-products-cancel-confirmation]'),
     error: document.querySelector('[data-products-error]'),
   };
   const tabs = Array.from(document.querySelectorAll('[data-products-tab]'));
@@ -178,6 +210,21 @@ export function buildProductsPageScript(): string {
   };
   const loadJson = async (url) => {
     const response = await fetch(url, { cache: 'no-store' });
+    const payload = await response.json();
+    if (!payload || payload.ok !== true) {
+      const error = new Error(payload && payload.message ? payload.message : 'Request failed.');
+      error.code = payload && payload.code ? payload.code : 'request_failed';
+      error.payload = payload;
+      throw error;
+    }
+    return payload;
+  };
+  const postJson = async (url, body) => {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
     const payload = await response.json();
     if (!payload || payload.ok !== true) {
       const error = new Error(payload && payload.message ? payload.message : 'Request failed.');
@@ -252,11 +299,167 @@ export function buildProductsPageScript(): string {
       elements.buyer.value = '';
     }
   };
-  const buildModel = () => buildProductCommercePageViewModel({
+  const buildModel = (options) => buildProductCommercePageViewModel({
     products: productList(),
     selectedListing: selectedProduct() || {},
     selectedSku: { skus: selectedSkus() },
+    ...(options && options.purchaseSelection ? { purchaseSelection: options.purchaseSelection } : {}),
   });
+  const selectedBuyerLabel = () => {
+    const profile = state.profiles.find((item) => normalizeText(item.slug) === state.buyerSlug);
+    return normalizeText(profile && (profile.name || profile.displayName || profile.slug)) || state.buyerSlug;
+  };
+  const buildPreviewRequest = () => {
+    const model = buildModel({
+      purchaseSelection: {
+        listingPinId: state.selectedListingPinId,
+        skuId: state.selectedSkuId,
+        spendCap: elements.spendCap ? elements.spendCap.value : '',
+        comment: elements.comment ? elements.comment.value : '',
+      },
+    });
+    if (!model.purchasePreviewRequest) {
+      throw new Error('Purchase preview request could not be built.');
+    }
+    return {
+      from: state.buyerSlug,
+      ...model.purchasePreviewRequest,
+    };
+  };
+  const buildCliCommand = () => {
+    return 'metabot products buy --from ' + state.buyerSlug + ' --request-file purchase-request.json --json';
+  };
+  const renderFacts = (items) => (
+    '<dl class="products-confirmation-facts">' +
+      items.map((item) => (
+        '<div><dt>' + escapeHtml(item.label) + '</dt><dd>' + escapeHtml(item.value || 'Not provided') + '</dd></div>'
+      )).join('') +
+    '</dl>'
+  );
+  const renderConfirmationModal = () => {
+    if (!elements.confirmationModal) return;
+    elements.confirmationModal.hidden = !state.purchase.open;
+    const previewData = readObjectValue(state.purchase.previewEnvelope && state.purchase.previewEnvelope.data);
+    const successData = readObjectValue(state.purchase.success && state.purchase.success.data);
+    const product = readObjectValue(previewData.product);
+    const sku = readObjectValue(previewData.sku);
+    const payment = readObjectValue(previewData.payment);
+    const seller = readObjectValue(previewData.seller);
+    const confirmRequest = readObjectValue(state.purchase.confirmRequest);
+    if (elements.confirmationJson) {
+      const jsonSource = state.purchase.success || state.purchase.confirmRequest || state.purchase.previewEnvelope || {};
+      elements.confirmationJson.textContent = JSON.stringify(jsonSource, null, 2);
+    }
+    if (elements.confirmationSummary) {
+      if (state.purchase.success) {
+        elements.confirmationSummary.innerHTML = [
+          '<div class="products-success-block">',
+            '<h3>Purchase submitted</h3>',
+            renderFacts([
+              { label: 'Product-order pin id', value: successData.productOrderPinId },
+              { label: 'Payment txid', value: successData.paymentTxid },
+              { label: 'Order txid', value: successData.orderTxid },
+              { label: 'Trace id', value: successData.traceId },
+              { label: 'Local UI', value: successData.localUiUrl },
+            ]),
+          '</div>',
+        ].join('');
+      } else {
+        elements.confirmationSummary.innerHTML = [
+          renderFacts([
+            { label: 'Buyer actor', value: selectedBuyerLabel() },
+            { label: 'Listing pin id', value: normalizeText(product.listingPinId || confirmRequest.listingPinId || state.selectedListingPinId) },
+            { label: 'SKU id', value: normalizeText(sku.skuId || confirmRequest.skuId || state.selectedSkuId) },
+            { label: 'Amount', value: normalizeText(payment.amount || readObjectValue(confirmRequest.spendCap).amount || (elements.spendCap && elements.spendCap.value)) },
+            { label: 'Currency', value: normalizeText(payment.currency || readObjectValue(confirmRequest.spendCap).currency) },
+            { label: 'Seller', value: normalizeText(seller.name || seller.globalMetaId) },
+            { label: 'CLI equivalent', value: buildCliCommand() },
+          ]),
+          state.purchase.error ? '<p class="products-blocked">' + escapeHtml(state.purchase.error) + '</p>' : '',
+        ].join('');
+      }
+    }
+    if (elements.confirm) {
+      elements.confirm.hidden = Boolean(state.purchase.success);
+      elements.confirm.disabled = state.purchase.busy;
+      elements.confirm.textContent = state.purchase.busy ? 'Paying...' : 'Confirm and pay';
+    }
+    if (elements.cancelConfirmation) {
+      elements.cancelConfirmation.disabled = state.purchase.busy;
+      elements.cancelConfirmation.textContent = state.purchase.success ? 'Close' : 'Cancel';
+    }
+  };
+  const openConfirmationModal = (previewEnvelope) => {
+    const data = readObjectValue(previewEnvelope && previewEnvelope.data);
+    const confirmRequest = readObjectValue(readObjectValue(data.confirmRequest).request);
+    state.purchase = {
+      open: true,
+      busy: false,
+      previewEnvelope,
+      confirmRequest,
+      success: null,
+      error: null,
+    };
+    renderConfirmationModal();
+    if (elements.confirm && !elements.confirm.hidden) elements.confirm.focus();
+  };
+  const closeConfirmationModal = () => {
+    if (state.purchase.busy) return;
+    state.purchase.open = false;
+    renderConfirmationModal();
+  };
+  const previewPurchase = async () => {
+    const reason = disabledReason();
+    if (reason || state.busy || state.purchase.busy || state.purchase.open) {
+      renderPurchaseControls();
+      return;
+    }
+    state.busy = true;
+    setStatus('Previewing purchase', 'busy');
+    renderPurchaseControls();
+    try {
+      const envelope = await postJson('/api/products/buy', buildPreviewRequest());
+      if (envelope.state !== 'awaiting_confirmation') {
+        throw new Error('Purchase preview did not return an awaiting_confirmation envelope.');
+      }
+      openConfirmationModal(envelope);
+      setStatus('Purchase awaits confirmation', 'ready');
+    } catch (error) {
+      state.marketplaceError = {
+        code: error && error.code ? error.code : 'product_purchase_preview_failed',
+        message: error instanceof Error ? error.message : String(error),
+      };
+      setStatus('Purchase preview failed', 'error');
+      renderError();
+    } finally {
+      state.busy = false;
+      renderPurchaseControls();
+      if (elements.refresh) elements.refresh.disabled = false;
+      if (elements.query) elements.query.disabled = false;
+    }
+  };
+  const confirmPurchase = async () => {
+    if (!state.purchase.open || state.purchase.busy || state.purchase.success) return;
+    state.purchase.busy = true;
+    state.purchase.error = null;
+    renderConfirmationModal();
+    try {
+      const request = readObjectValue(state.purchase.confirmRequest);
+      const envelope = await postJson('/api/products/buy', {
+        from: state.buyerSlug,
+        ...request,
+        confirmed: true,
+      });
+      state.purchase.success = envelope;
+      setStatus('Purchase submitted', 'ready');
+    } catch (error) {
+      state.purchase.error = error instanceof Error ? error.message : String(error);
+      setStatus('Purchase failed', 'error');
+    } finally {
+      state.purchase.busy = false;
+      renderConfirmationModal();
+    }
+  };
   const renderList = (model) => {
     if (!elements.list) return;
     if (!model.productRows.length) {
@@ -336,13 +539,12 @@ export function buildProductsPageScript(): string {
   };
   const renderPurchaseControls = () => {
     const reason = disabledReason();
-    const previewUnavailableReason = 'Preview purchase is not wired yet.';
     if (elements.preview) {
-      elements.preview.disabled = true;
+      elements.preview.disabled = Boolean(reason || state.busy || state.purchase.busy || state.purchase.open);
       elements.preview.setAttribute('data-product-purchase-control', 'preview');
     }
     if (elements.purchaseReason) {
-      elements.purchaseReason.textContent = reason || previewUnavailableReason;
+      elements.purchaseReason.textContent = reason || 'Preview required before payment.';
     }
   };
   const render = () => {
@@ -492,6 +694,20 @@ export function buildProductsPageScript(): string {
       loadMarketplace();
     });
   }
+  if (elements.preview) {
+    elements.preview.addEventListener('click', previewPurchase);
+  }
+  if (elements.confirm) {
+    elements.confirm.addEventListener('click', confirmPurchase);
+  }
+  if (elements.cancelConfirmation) {
+    elements.cancelConfirmation.addEventListener('click', closeConfirmationModal);
+  }
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && state.purchase.open && !state.purchase.busy) {
+      closeConfirmationModal();
+    }
+  });
   if (elements.buyer) {
     elements.buyer.addEventListener('change', () => {
       state.buyerSlug = normalizeText(elements.buyer.value);

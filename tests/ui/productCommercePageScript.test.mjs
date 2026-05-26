@@ -26,6 +26,7 @@ class FakeElement {
     this.attrs = {};
     this.nodes = [];
     this.children = [];
+    this.focused = false;
   }
 
   set innerHTML(value) {
@@ -76,6 +77,10 @@ class FakeElement {
     this.children.push(child);
     if (child.tagName === 'OPTION' && !this.value) this.value = child.value;
     return child;
+  }
+
+  focus() {
+    this.focused = true;
   }
 
   querySelectorAll(selector) {
@@ -166,6 +171,11 @@ async function runProductsScript(options = {}) {
     '[data-products-comment]': new FakeElement(options.comment || ''),
     '[data-products-preview]': new FakeElement(),
     '[data-products-purchase-reason]': new FakeElement(),
+    '[data-products-confirmation-modal]': new FakeElement(),
+    '[data-products-confirmation-summary]': new FakeElement(),
+    '[data-products-confirmation-json]': new FakeElement(),
+    '[data-products-confirm]': new FakeElement(),
+    '[data-products-cancel-confirmation]': new FakeElement(),
     '[data-products-error]': new FakeElement(),
   };
   const tabs = ['marketplace', 'sell', 'orders'].map((name) => {
@@ -237,6 +247,60 @@ async function runProductsScript(options = {}) {
           json: async () => ({ ok: true, data: { products: productsPayload, total: productsPayload.length } }),
         };
       }
+      if (String(url) === '/api/products/buy') {
+        const body = requestOptions && requestOptions.body ? JSON.parse(String(requestOptions.body)) : {};
+        if (body.confirmed === true) {
+          return {
+            ok: true,
+            json: async () => options.confirmResponse || {
+              ok: true,
+              state: 'success',
+              data: {
+                productOrderPinId: 'product-order-pin-1',
+                paymentTxid: 'payment-txid-1',
+                orderTxid: 'order-txid-1',
+                traceId: 'trace-product-order-1',
+                localUiUrl: 'http://127.0.0.1:25200/ui/trace?traceId=trace-product-order-1',
+              },
+            },
+          };
+        }
+        return {
+          ok: true,
+          json: async () => options.previewResponse || {
+            ok: true,
+            state: 'awaiting_confirmation',
+            data: {
+              product: {
+                listingPinId: 'listing-mobile-top-up',
+                title: 'Mobile Top-up',
+              },
+              sku: {
+                skuId: 'sku-5',
+                name: '5 SPACE credit',
+              },
+              payment: {
+                amount: '5',
+                currency: 'SPACE',
+              },
+              seller: {
+                globalMetaId: 'gm-seller',
+                name: 'Carrier Seller',
+              },
+              confirmRequest: {
+                request: {
+                  listingPinId: 'listing-mobile-top-up',
+                  skuId: 'sku-5',
+                  spendCap: { amount: '5', currency: 'SPACE' },
+                  comment: 'send after 6pm',
+                  policyMode: 'confirm_paid_only',
+                  confirmed: true,
+                },
+              },
+            },
+          },
+        };
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     },
   };
@@ -273,15 +337,114 @@ test('products marketplace query reloads online products with encoded query', as
   assert.ok(fetchCalls.some((call) => call.url === '/api/network/products?online=true&query=mobile%20top-up&limit=20'));
 });
 
-test('products marketplace keeps purchase preview disabled until the preview step is wired', async () => {
+test('products marketplace enables purchase preview when buyer, SKU, and spend cap are valid', async () => {
   const { elements } = await runProductsScript({
     buyer: 'buyer-bot',
     spendCap: '5',
   });
 
   assert.match(elements['[data-products-detail]'].innerHTML, /Mobile Top-up/);
-  assert.equal(elements['[data-products-preview]'].disabled, true);
-  assert.match(elements['[data-products-purchase-reason]'].textContent, /preview purchase is not wired|next step/i);
+  assert.equal(elements['[data-products-preview]'].disabled, false);
+  assert.match(elements['[data-products-purchase-reason]'].textContent, /preview required before payment/i);
+});
+
+test('products marketplace preview posts unconfirmed request and opens confirmation modal without payment ids', async () => {
+  const { elements, fetchCalls } = await runProductsScript({
+    buyer: 'buyer-bot',
+    spendCap: '5',
+    comment: 'send after 6pm',
+  });
+
+  await elements['[data-products-preview]'].listeners.get('click')();
+  await waitFor(
+    () => elements['[data-products-confirmation-modal]'].hidden === false,
+    'confirmation modal open',
+  );
+
+  const buyCall = fetchCalls.find((call) => call.url === '/api/products/buy');
+  assert.ok(buyCall);
+  assert.deepEqual(JSON.parse(buyCall.options.body), {
+    from: 'buyer-bot',
+    confirmed: false,
+    listingPinId: 'listing-mobile-top-up',
+    skuId: 'sku-5',
+    spendCap: '5',
+    comment: 'send after 6pm',
+  });
+  assert.match(elements['[data-products-confirmation-summary]'].innerHTML, /Buyer Bot/);
+  assert.match(elements['[data-products-confirmation-summary]'].innerHTML, /listing-mobile-top-up/);
+  assert.match(elements['[data-products-confirmation-summary]'].innerHTML, /sku-5/);
+  assert.match(elements['[data-products-confirmation-summary]'].innerHTML, /5/);
+  assert.match(elements['[data-products-confirmation-summary]'].innerHTML, /SPACE/);
+  assert.match(elements['[data-products-confirmation-summary]'].innerHTML, /Carrier Seller|gm-seller/);
+  assert.match(elements['[data-products-confirmation-summary]'].innerHTML, /metabot products buy --from buyer-bot --request-file/);
+  assert.doesNotMatch(elements['[data-products-confirmation-summary]'].innerHTML, /payment-txid-1|product-order-pin-1/);
+  assert.equal(elements['[data-products-confirm]'].focused, true);
+});
+
+test('products marketplace confirm posts returned request, shows success, and never repeats on refresh', async () => {
+  const { elements, fetchCalls } = await runProductsScript({
+    buyer: 'buyer-bot',
+    spendCap: '5',
+    comment: 'send after 6pm',
+  });
+
+  await elements['[data-products-preview]'].listeners.get('click')();
+  await waitFor(
+    () => elements['[data-products-confirmation-modal]'].hidden === false,
+    'confirmation modal open',
+  );
+
+  const confirmPromise = elements['[data-products-confirm]'].listeners.get('click')();
+  assert.equal(elements['[data-products-confirm]'].disabled, true);
+  await confirmPromise;
+  await waitFor(
+    () => elements['[data-products-confirmation-summary]'].innerHTML.includes('product-order-pin-1'),
+    'purchase success render',
+  );
+
+  const buyCalls = fetchCalls.filter((call) => call.url === '/api/products/buy');
+  assert.equal(buyCalls.length, 2);
+  assert.deepEqual(JSON.parse(buyCalls[1].options.body), {
+    from: 'buyer-bot',
+    listingPinId: 'listing-mobile-top-up',
+    skuId: 'sku-5',
+    spendCap: { amount: '5', currency: 'SPACE' },
+    comment: 'send after 6pm',
+    policyMode: 'confirm_paid_only',
+    confirmed: true,
+  });
+  assert.match(elements['[data-products-confirmation-summary]'].innerHTML, /product-order-pin-1/);
+  assert.match(elements['[data-products-confirmation-summary]'].innerHTML, /payment-txid-1/);
+  assert.match(elements['[data-products-confirmation-summary]'].innerHTML, /order-txid-1/);
+  assert.match(elements['[data-products-confirmation-summary]'].innerHTML, /trace-product-order-1/);
+  assert.match(elements['[data-products-confirmation-summary]'].innerHTML, /http:\/\/127\.0\.0\.1:25200\/ui\/trace\?traceId=trace-product-order-1/);
+  assert.equal(elements['[data-products-confirm]'].hidden, true);
+
+  await elements['[data-products-refresh]'].listeners.get('click')();
+  await waitFor(
+    () => fetchCalls.filter((call) => call.url.startsWith('/api/network/products')).length >= 2,
+    'marketplace refresh',
+  );
+  assert.equal(fetchCalls.filter((call) => call.url === '/api/products/buy').length, 2);
+});
+
+test('products marketplace cancellation closes confirmation modal without confirmed post', async () => {
+  const { elements, fetchCalls } = await runProductsScript({
+    buyer: 'buyer-bot',
+    spendCap: '5',
+  });
+
+  await elements['[data-products-preview]'].listeners.get('click')();
+  await waitFor(
+    () => elements['[data-products-confirmation-modal]'].hidden === false,
+    'confirmation modal open',
+  );
+
+  await elements['[data-products-cancel-confirmation]'].listeners.get('click')();
+
+  assert.equal(elements['[data-products-confirmation-modal]'].hidden, true);
+  assert.equal(fetchCalls.filter((call) => call.url === '/api/products/buy').length, 1);
 });
 
 test('products marketplace selection renders detail, SKU choices, and disabled offline purchase controls', async () => {

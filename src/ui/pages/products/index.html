@@ -163,6 +163,11 @@
         border-color: var(--accent);
         color: #fff;
       }
+      .products-danger-button {
+        background: var(--red);
+        border-color: var(--red);
+        color: #fff;
+      }
       .products-secondary-button:disabled,
       .products-primary-button:disabled,
       .products-sku-table button:disabled,
@@ -333,6 +338,81 @@
         gap: 10px;
         min-height: 36px;
       }
+      .products-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 20px;
+        background: color-mix(in srgb, var(--bg) 68%, transparent);
+        backdrop-filter: blur(6px);
+        z-index: 40;
+      }
+      .products-confirmation {
+        width: min(720px, 100%);
+        border: 1px solid var(--border2);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        display: grid;
+        gap: 14px;
+        padding: 16px;
+      }
+      .products-confirmation-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .products-confirmation-head h2 {
+        font-size: 18px;
+        line-height: 1.2;
+        font-weight: 600;
+      }
+      .products-confirmation-facts {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px 14px;
+      }
+      .products-confirmation-facts div {
+        min-width: 0;
+      }
+      .products-confirmation-facts dt {
+        color: var(--dim);
+      }
+      .products-confirmation-facts dd {
+        color: var(--text);
+        overflow-wrap: anywhere;
+        font-size: 12px;
+      }
+      .products-json-preview {
+        border-top: 1px solid var(--border);
+        padding-top: 8px;
+      }
+      .products-json-preview summary {
+        color: var(--muted);
+        cursor: pointer;
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0;
+        margin-bottom: 8px;
+      }
+      .products-json-preview pre {
+        max-height: 220px;
+        overflow: auto;
+        border: 1px solid var(--border2);
+        border-radius: var(--radius-sm);
+        background: var(--bg);
+        color: var(--muted);
+        font-size: 11px;
+        padding: 10px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .products-confirmation-actions {
+        display: flex;
+        justify-content: flex-end;
+      }
       .products-empty {
         color: var(--muted);
         font-size: 13px;
@@ -362,6 +442,9 @@
         .products-purchase-actions {
           align-items: flex-start;
           flex-direction: column;
+        }
+        .products-confirmation-facts {
+          grid-template-columns: 1fr;
         }
       }
     </style>
