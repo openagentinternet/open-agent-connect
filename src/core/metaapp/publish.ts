@@ -63,10 +63,10 @@ export interface BuzzLikeResult {
 }
 
 export interface MetaAppPublishDependencies {
-  uploadFile?: (input: { filePath: string; contentType?: string; network?: string }) => Promise<UploadLikeResult>;
-  writeChain?: (input: Record<string, unknown>) => Promise<ChainLikeResult>;
+  uploadFile: (input: { filePath: string; contentType?: string; network?: string }) => Promise<UploadLikeResult>;
+  writeChain: (input: Record<string, unknown>) => Promise<ChainLikeResult>;
+  upsertLocal: (record: MetaAppGalleryRecord) => Promise<unknown>;
   postBuzz?: (input: Record<string, unknown>) => Promise<BuzzLikeResult>;
-  upsertLocal?: (record: MetaAppGalleryRecord) => Promise<unknown>;
   createPreviewSession?: (input: { artifactDir: string; indexFile: string }) => {
     previewId: string;
     localPreviewUrl: string;
@@ -75,6 +75,21 @@ export interface MetaAppPublishDependencies {
   now?: () => number;
   makeTempDir?: () => Promise<string>;
 }
+
+export type MetaAppPreviewDependencies = Partial<Pick<
+  MetaAppPublishDependencies,
+  'createPreviewSession'
+>>;
+
+export type MetaAppAnnounceDependencies = Partial<Pick<
+  MetaAppPublishDependencies,
+  'postBuzz'
+>>;
+
+export type MetaAppCommentDependencies = Partial<Pick<
+  MetaAppPublishDependencies,
+  'writeChain'
+>>;
 
 export interface MetaAppProjectInput {
   cwd?: string;
@@ -262,7 +277,7 @@ async function inspectAndDraft(input: MetaAppProjectInput): Promise<{
 
 function createPreviewData(
   input: MetaAppProjectInput,
-  deps: MetaAppPublishDependencies,
+  deps: MetaAppPreviewDependencies,
   plan: MetaAppPreviewPlan,
   manifest: MetaAppManifestInput,
 ): Record<string, unknown> {
@@ -435,7 +450,7 @@ async function writePublishedMetaApp(input: {
 
 export async function previewMetaAppProject(
   input: MetaAppProjectInput,
-  deps: MetaAppPublishDependencies = {},
+  deps: MetaAppPreviewDependencies = {},
 ): Promise<MetabotCommandResult<Record<string, unknown>> & { localUiUrl?: string }> {
   const { plan, manifest } = await inspectAndDraft(input);
   if (plan.manualAction || !plan.artifactDir) {
@@ -524,14 +539,14 @@ export async function updateMetaApp(
 
 export async function shareMetaApp(
   input: { pinId: string },
-  _deps?: MetaAppPublishDependencies,
+  _deps?: unknown,
 ): Promise<MetabotCommandResult<Record<string, unknown>>> {
   return commandSuccess(buildMetaAppShareBundle(input.pinId));
 }
 
 export async function announceMetaAppShare(
   input: { pinId: string; message?: string; network?: string },
-  deps: MetaAppPublishDependencies,
+  deps: MetaAppAnnounceDependencies,
 ): Promise<MetabotCommandResult<Record<string, unknown>>> {
   const share = buildMetaAppShareBundle(input.pinId);
   if (!deps.postBuzz) {
@@ -559,7 +574,7 @@ export async function announceMetaAppShare(
 
 export async function commentMetaApp(
   input: { pinId: string; comment: string; network?: string },
-  deps: MetaAppPublishDependencies,
+  deps: MetaAppCommentDependencies,
 ): Promise<MetabotCommandResult<Record<string, unknown>>> {
   if (!deps.writeChain) {
     return commandFailed('metaapp_comment_failed', 'MetaApp comment requires a chain write dependency.');
