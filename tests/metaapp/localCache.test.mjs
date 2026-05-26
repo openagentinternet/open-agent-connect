@@ -70,6 +70,22 @@ test('missing cache files read as empty versioned states', async () => {
   });
 });
 
+test('writing and reading an empty cache state preserves updatedAt null', async () => {
+  const store = createMetaAppLocalCacheStore(await makeProfileRoot('empty-null-updated-at'));
+
+  await store.writeLocal({
+    version: 1,
+    records: [],
+    updatedAt: null,
+  });
+
+  assert.deepEqual(await store.readLocal(), {
+    version: 1,
+    records: [],
+    updatedAt: null,
+  });
+});
+
 test('malformed cache records are dropped without crashing', async () => {
   const store = createMetaAppLocalCacheStore(await makeProfileRoot('malformed'));
   await mkdir(path.dirname(store.localCachePath), { recursive: true });
@@ -88,6 +104,28 @@ test('malformed cache records are dropped without crashing', async () => {
   assert.equal(state.version, 1);
   assert.equal(state.updatedAt, 123);
   assert.deepEqual(state.records.map((item) => item.pinId), ['valid-pin']);
+});
+
+test('malformed cache records with null updatedAt are dropped without coercing to zero', async () => {
+  const store = createMetaAppLocalCacheStore(await makeProfileRoot('null-record-updated-at'));
+  await mkdir(path.dirname(store.localCachePath), { recursive: true });
+  await writeFile(store.localCachePath, `${JSON.stringify({
+    version: 1,
+    updatedAt: null,
+    records: [
+      { ...record('null-updated-at'), updatedAt: null },
+      { ...record('empty-updated-at'), updatedAt: '' },
+      { ...record('boolean-updated-at'), updatedAt: false },
+      { ...record('array-updated-at'), updatedAt: [] },
+      record('valid-updated-at', { updatedAt: 456 }),
+    ],
+  })}\n`, 'utf8');
+
+  const state = await store.readLocal();
+
+  assert.equal(state.updatedAt, null);
+  assert.deepEqual(state.records.map((item) => item.pinId), ['valid-updated-at']);
+  assert.equal(state.records[0].updatedAt, 456);
 });
 
 test('local records are upserted by pinId and written with a trailing newline', async () => {

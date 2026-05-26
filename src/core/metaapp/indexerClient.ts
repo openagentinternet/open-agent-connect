@@ -8,6 +8,7 @@ import type {
 
 const DEFAULT_METAAPP_INDEXER_BASE_URL = 'https://metaweb.world';
 const INDEXER_BASE_URL_ENV = 'METABOT_METAAPP_INDEXER_BASE_URL';
+const MAX_METAAPP_INDEXER_PAGE_SIZE = 100;
 
 type FetchResponse = {
   ok: boolean;
@@ -99,6 +100,22 @@ function normalizeTimestamp(value: unknown, fallback: number): number {
     }
   }
   return fallback;
+}
+
+function normalizeLimit(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return Math.min(MAX_METAAPP_INDEXER_PAGE_SIZE, Math.max(1, Math.trunc(value)));
+}
+
+function appendSizeQuery(route: string, limit: unknown): string {
+  const normalizedLimit = normalizeLimit(limit);
+  if (normalizedLimit === null) {
+    return route;
+  }
+  const params = new URLSearchParams({ size: String(normalizedLimit) });
+  return `${route}?${params.toString()}`;
 }
 
 function readObject(value: unknown): Record<string, unknown> | null {
@@ -312,9 +329,10 @@ export function createMetaAppIndexerClient(input: CreateMetaAppIndexerClientInpu
     baseUrl,
     async list(listInput) {
       const creatorGlobalMetaId = normalizeText(listInput?.creatorGlobalMetaId);
-      const route = creatorGlobalMetaId
+      const routePath = creatorGlobalMetaId
         ? `/api/v1/metaapps/creator/${encodeURIComponent(creatorGlobalMetaId)}`
         : '/api/v1/metaapps';
+      const route = appendSizeQuery(routePath, listInput?.limit);
       return requestList(`${baseUrl}${route}`, 'apps');
     },
     async getByPinId(pinId) {

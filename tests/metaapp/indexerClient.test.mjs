@@ -62,6 +62,18 @@ test('list fetch reads the official metaapps route', async () => {
   assert.deepEqual(calls, ['https://indexer.example/api/v1/metaapps']);
 });
 
+test('list fetch sends bounded size when limit is supplied', async () => {
+  const calls = [];
+  const client = createMetaAppIndexerClient({
+    baseUrl: 'https://indexer.example/',
+    fetch: makeFetch({ code: 0, data: { apps: [] } }, calls),
+  });
+
+  await client.list({ limit: 50 });
+
+  assert.deepEqual(calls, ['https://indexer.example/api/v1/metaapps?size=50']);
+});
+
 test('pin fetch reads the official pin detail route', async () => {
   const calls = [];
   const client = createMetaAppIndexerClient({
@@ -96,6 +108,36 @@ test('creator fetch reads the official creator route', async () => {
   await client.list({ creatorGlobalMetaId: 'creator-meta-id' });
 
   assert.deepEqual(calls, ['https://indexer.example/api/v1/metaapps/creator/creator-meta-id']);
+});
+
+test('creator list fetch sends bounded size when limit is supplied', async () => {
+  const calls = [];
+  const client = createMetaAppIndexerClient({
+    baseUrl: 'https://indexer.example/',
+    fetch: makeFetch({ code: 0, data: { apps: [] } }, calls),
+  });
+
+  await client.list({ creatorGlobalMetaId: 'creator-meta-id', limit: 50 });
+
+  assert.deepEqual(calls, ['https://indexer.example/api/v1/metaapps/creator/creator-meta-id?size=50']);
+});
+
+test('list fetch ignores invalid non-positive and non-finite limits', async () => {
+  const calls = [];
+  const client = createMetaAppIndexerClient({
+    baseUrl: 'https://indexer.example/',
+    fetch: makeFetch({ code: 0, data: { apps: [] } }, calls),
+  });
+
+  await client.list({ limit: 0 });
+  await client.list({ limit: Number.POSITIVE_INFINITY });
+  await client.list({ limit: Number.NaN });
+
+  assert.deepEqual(calls, [
+    'https://indexer.example/api/v1/metaapps',
+    'https://indexer.example/api/v1/metaapps',
+    'https://indexer.example/api/v1/metaapps',
+  ]);
 });
 
 test('normalizer maps official records into MetaAppGalleryRecord', async () => {
