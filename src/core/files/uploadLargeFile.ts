@@ -54,6 +54,49 @@ function normalizePositiveBytes(value: unknown, fallback: number): number {
   return Number.isFinite(normalized) && normalized >= 0 ? normalized : fallback;
 }
 
+async function statUploadFile(resolvedPath: string): Promise<import('node:fs').Stats> {
+  try {
+    const stat = await fs.stat(resolvedPath);
+    if (!stat.isFile()) {
+      throw new Error(`Large file upload requires a regular file named "${path.basename(resolvedPath)}".`);
+    }
+    return stat;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('regular file')) {
+      throw error;
+    }
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (code === 'ENOENT') {
+      throw new Error(`File not found for upload: "${path.basename(resolvedPath)}".`);
+    }
+    throw new Error(`Unable to access file for upload: "${path.basename(resolvedPath)}".`);
+  }
+}
+
+function requireProviderString(value: unknown, fieldName: string): string {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    throw new Error(`Large file uploader returned an invalid ${fieldName}.`);
+  }
+  return normalized;
+}
+
+function requireProviderTxids(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error('Large file uploader returned invalid txids.');
+  }
+
+  return value.map((txid) => requireProviderString(txid, 'txid'));
+}
+
+function requireProviderTotalCost(value: unknown): number {
+  const totalCost = Number(value);
+  if (!Number.isFinite(totalCost) || totalCost < 0) {
+    throw new Error('Large file uploader returned an invalid totalCost.');
+  }
+  return totalCost;
+}
+
 async function maybeVerify(
   input: {
     pinId: string;
@@ -100,10 +143,7 @@ export async function uploadLargeFileToChain(input: {
   }
 
   const resolvedPath = path.resolve(filePath);
-  const stat = await fs.stat(resolvedPath);
-  if (!stat.isFile()) {
-    throw new Error(`Large file upload requires a regular file: ${resolvedPath}`);
-  }
+  const stat = await statUploadFile(resolvedPath);
 
   const network = normalizeText(input.network) || 'mvc';
   if (network.toLowerCase() === 'doge') {
@@ -160,16 +200,16 @@ export async function uploadLargeFileToChain(input: {
     signer: input.signer,
   });
   const result = withCanonicalUrls({
-    pinId: largeResult.pinId,
-    txids: largeResult.txids,
-    totalCost: largeResult.totalCost,
-    network: largeResult.network,
-    fileName: largeResult.fileName,
-    contentType: largeResult.contentType,
-    bytes: largeResult.bytes,
-    extension: largeResult.extension,
-    metafileUri: largeResult.metafileUri,
-    globalMetaId: largeResult.globalMetaId,
+    pinId: requireProviderString(largeResult.pinId, 'pinId'),
+    txids: requireProviderTxids(largeResult.txids),
+    totalCost: requireProviderTotalCost(largeResult.totalCost),
+    network,
+    fileName: path.basename(resolvedPath),
+    contentType,
+    bytes: stat.size,
+    extension,
+    metafileUri: requireProviderString(largeResult.metafileUri, 'metafileUri'),
+    globalMetaId: requireProviderString(largeResult.globalMetaId, 'globalMetaId'),
     uploadMode: 'chunked' as const,
   });
   const verification = await maybeVerify({

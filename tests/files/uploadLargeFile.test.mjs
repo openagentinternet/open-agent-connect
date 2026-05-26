@@ -55,10 +55,11 @@ test('uploadLargeFileToChain requires a file path', async () => {
 test('uploadLargeFileToChain fails missing files before any upload dependency is called', async () => {
   const directCalls = [];
   const largeCalls = [];
+  const missingPath = path.join(os.tmpdir(), `missing-${Date.now()}.png`);
 
   await assert.rejects(
     () => uploadLargeFileToChain({
-      filePath: path.join(os.tmpdir(), `missing-${Date.now()}.png`),
+      filePath: missingPath,
       signer: fakeSigner(directCalls),
       largeUploader: {
         upload: async (input) => {
@@ -67,11 +68,34 @@ test('uploadLargeFileToChain fails missing files before any upload dependency is
         },
       },
     }),
-    /no such file|ENOENT/i,
+    (error) => {
+      assert.match(error.message, /File not found/i);
+      assert.doesNotMatch(error.message, new RegExp(missingPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      return true;
+    },
   );
 
   assert.equal(directCalls.length, 0);
   assert.equal(largeCalls.length, 0);
+});
+
+test('uploadLargeFileToChain rejects non-regular files without exposing absolute paths', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-large-upload-dir-'));
+  const directCalls = [];
+
+  await assert.rejects(
+    () => uploadLargeFileToChain({
+      filePath: tempDir,
+      signer: fakeSigner(directCalls),
+    }),
+    (error) => {
+      assert.match(error.message, /regular file/i);
+      assert.doesNotMatch(error.message, new RegExp(tempDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      return true;
+    },
+  );
+
+  assert.equal(directCalls.length, 0);
 });
 
 test('uploadLargeFileToChain uses direct upload at exactly DIRECT_UPLOAD_MAX_BYTES', async () => {
@@ -174,14 +198,89 @@ test('uploadLargeFileToChain calls the injected large uploader for files above D
   });
 });
 
+test('uploadLargeFileToChain uses orchestrator-owned metadata in large upload results', async () => {
+  const { filePath } = await tempFile('source.md', 16);
+
+  const result = await uploadLargeFileToChain({
+    filePath,
+    contentType: 'text/x-explicit',
+    directMaxBytes: 8,
+    hardMaxBytes: 64,
+    network: 'mvc',
+    signer: fakeSigner(),
+    largeUploader: {
+      upload: async () => ({
+        pinId: 'large-pin-metadata',
+        txids: ['large-tx-metadata'],
+        totalCost: 7,
+        network: 'btc',
+        fileName: 'provider-secret-path.bin',
+        contentType: 'application/provider-secret',
+        bytes: 123456,
+        extension: '.secret',
+        metafileUri: 'metafile://large-pin-metadata.secret',
+        previewUrl: 'file:///tmp/provider/preview',
+        downloadUrl: 'file:///tmp/provider/download',
+        globalMetaId: 'gm-large-metadata',
+        uploadMode: 'chunked',
+      }),
+    },
+  });
+
+  assert.equal(result.network, 'mvc');
+  assert.equal(result.fileName, 'source.md');
+  assert.equal(result.contentType, 'text/x-explicit');
+  assert.equal(result.bytes, 16);
+  assert.equal(result.extension, '.md');
+  assert.equal(result.pinId, 'large-pin-metadata');
+  assert.equal(result.metafileUri, 'metafile://large-pin-metadata.secret');
+  assert.equal(result.globalMetaId, 'gm-large-metadata');
+  assert.equal(result.previewUrl, 'https://file.metaid.io/metafile-indexer/api/v1/files/content/large-pin-metadata');
+  assert.equal(result.downloadUrl, 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/large-pin-metadata');
+  assert.equal('filePath' in result, false);
+});
+
+test('uploadLargeFileToChain rejects invalid provider-owned large upload fields', async () => {
+  const { filePath } = await tempFile('invalid-provider.bin', 16);
+
+  await assert.rejects(
+    () => uploadLargeFileToChain({
+      filePath,
+      directMaxBytes: 8,
+      hardMaxBytes: 64,
+      signer: fakeSigner(),
+      largeUploader: {
+        upload: async () => ({
+          pinId: '  ',
+          txids: ['large-tx-invalid'],
+          totalCost: 7,
+          network: 'mvc',
+          fileName: 'invalid-provider.bin',
+          contentType: 'application/octet-stream',
+          bytes: 16,
+          extension: '.bin',
+          metafileUri: 'metafile://invalid-provider.bin',
+          previewUrl: '',
+          downloadUrl: '',
+          globalMetaId: 'gm-large-invalid',
+          uploadMode: 'chunked',
+        }),
+      },
+    }),
+    /pinId/i,
+  );
+});
+
 test('uploadLargeFileToChain fails above LARGE_UPLOAD_MAX_BYTES before upload', async () => {
-  const { filePath } = await tempFile('too-large.bin', LARGE_UPLOAD_MAX_BYTES + 1);
+  const { filePath } = await tempFile('too-large.bin', 9);
   const directCalls = [];
   const largeCalls = [];
 
   await assert.rejects(
     () => uploadLargeFileToChain({
       filePath,
+      directMaxBytes: 4,
+      hardMaxBytes: 8,
       signer: fakeSigner(directCalls),
       largeUploader: {
         upload: async (input) => {
@@ -190,7 +289,7 @@ test('uploadLargeFileToChain fails above LARGE_UPLOAD_MAX_BYTES before upload', 
         },
       },
     }),
-    new RegExp(String(LARGE_UPLOAD_MAX_BYTES)),
+    /8 bytes/,
   );
 
   assert.equal(directCalls.length, 0);
