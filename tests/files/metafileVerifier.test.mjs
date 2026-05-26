@@ -112,6 +112,64 @@ test('verifyMetafileAvailability falls back to GET when HEAD is method-not-allow
   });
 });
 
+test('verifyMetafileAvailability does not fall back to GET for HEAD 404 or 500', async () => {
+  for (const status of [404, 500]) {
+    const calls = [];
+    const result = await verifyMetafileAvailability({
+      pinId: 'abc123i0',
+      attempts: 1,
+      delayMs: 0,
+      fetchImpl: async (url, init) => {
+        calls.push({ url, method: init?.method ?? 'GET' });
+        if (url.includes('/accelerate/')) {
+          return { ok: false, status };
+        }
+        return { ok: true, status: 200 };
+      },
+    });
+
+    assert.deepEqual(calls, [
+      {
+        url: 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/abc123i0',
+        method: 'HEAD',
+      },
+      {
+        url: 'https://file.metaid.io/metafile-indexer/api/v1/files/content/abc123i0',
+        method: 'HEAD',
+      },
+    ]);
+    assert.equal(result.ok, true);
+    assert.equal(result.url, 'https://file.metaid.io/metafile-indexer/api/v1/files/content/abc123i0');
+    assert.equal(result.attempts, 1);
+  }
+});
+
+test('verifyMetafileAvailability releases the GET body after checking status', async () => {
+  let bodyCanceled = 0;
+  const result = await verifyMetafileAvailability({
+    pinId: 'abc123i0',
+    attempts: 1,
+    delayMs: 0,
+    fetchImpl: async (url, init) => {
+      if (init?.method === 'HEAD') {
+        return { ok: false, status: 405 };
+      }
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          cancel: async () => {
+            bodyCanceled += 1;
+          },
+        },
+      };
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(bodyCanceled, 1);
+});
+
 test('verifyMetafileAvailability honors a positive retry delay', async () => {
   const callTimes = [];
   const startedAt = Date.now();

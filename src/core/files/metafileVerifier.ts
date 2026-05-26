@@ -18,6 +18,10 @@ export interface VerifyMetafileAvailabilityResult {
 interface FetchResponseLike {
   ok: boolean;
   status?: number;
+  body?: {
+    cancel?: () => Promise<unknown> | unknown;
+    releaseLock?: () => void;
+  } | null;
 }
 
 const DEFAULT_ATTEMPTS = 3;
@@ -42,7 +46,29 @@ function normalizeError(error: unknown): string {
 }
 
 function isBodySafeFallback(response: FetchResponseLike): boolean {
-  return response.status === 403 || response.status === 405 || !response.ok;
+  return response.status === 403 || response.status === 405;
+}
+
+async function releaseResponseBody(response: FetchResponseLike | null | undefined): Promise<void> {
+  const body = response?.body;
+  if (!body) {
+    return;
+  }
+
+  try {
+    if (typeof body.cancel === 'function') {
+      await body.cancel();
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  try {
+    body.releaseLock?.();
+  } catch {
+    // Ignore cleanup failures.
+  }
 }
 
 async function probeUrl(
@@ -51,18 +77,22 @@ async function probeUrl(
 ): Promise<{ ok: boolean; error?: string }> {
   const headResponse = (await fetchImpl(url, { method: 'HEAD' })) as FetchResponseLike;
   if (headResponse?.ok) {
+    await releaseResponseBody(headResponse);
     return { ok: true };
   }
 
   if (!isBodySafeFallback(headResponse)) {
+    await releaseResponseBody(headResponse);
     return { ok: false, error: `HEAD ${headResponse?.status ?? 'unavailable'}` };
   }
 
   const getResponse = (await fetchImpl(url, { method: 'GET' })) as FetchResponseLike;
   if (getResponse?.ok) {
+    await releaseResponseBody(getResponse);
     return { ok: true };
   }
 
+  await releaseResponseBody(getResponse);
   return { ok: false, error: `GET ${getResponse?.status ?? 'unavailable'}` };
 }
 
