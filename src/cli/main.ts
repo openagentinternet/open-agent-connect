@@ -24,6 +24,7 @@ import { runWalletCommand } from './commands/wallet';
 import { runSystemCommand } from './commands/system';
 import { runLlmCommand } from './commands/llm';
 import { runLoomCommand } from './commands/loom';
+import { runMetaAppCommand } from './commands/metaapp';
 import { commandUnknownSubcommand } from './commands/helpers';
 import { helpRequested, writeResolvedHelp } from './commandHelp';
 import { createCliRuntimeContext, type CliContext } from './types';
@@ -60,7 +61,14 @@ function writeResolvedVersion(
 
 export async function runCli(argv: string[], cliContext: CliContext = {}): Promise<number> {
   const context = createCliRuntimeContext(cliContext);
+  const providedDependencies = context.dependencies;
   context.dependencies = mergeCliDependencies(context);
+  if (providedDependencies.metaapp) {
+    context.dependencies.metaapp = {
+      ...context.dependencies.metaapp,
+      ...providedDependencies.metaapp,
+    };
+  }
 
   const [command, ...rest] = argv;
   let result: MetabotCommandResult<unknown>;
@@ -137,6 +145,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'loom':
           result = await runLoomCommand(rest, context);
+          break;
+        case 'metaapp':
+          result = await runMetaAppCommand(rest, context);
           break;
         case undefined:
           result = commandFailed('missing_command', 'No command provided.');

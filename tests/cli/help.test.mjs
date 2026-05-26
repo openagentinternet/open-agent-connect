@@ -28,6 +28,7 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^\s+trace\s+/m);
   assert.match(output, /^\s+system\s+/m);
   assert.match(output, /^\s+loom\s+/m);
+  assert.match(output, /^\s+metaapp\s+/m);
   assert.equal(output.includes('"ok"'), false);
 });
 
@@ -49,6 +50,113 @@ test('runCli prints machine-readable top-level help for `metabot --help --json`'
   assert.ok(output.subcommands.some((entry) => entry.name === 'host'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'provider'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'loom'));
+  assert.ok(output.subcommands.some((entry) => entry.name === 'metaapp'));
+});
+
+test('runCli prints metaapp group help with all leaf commands', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['metaapp', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot metaapp <subcommand>/m);
+  for (const command of ['preview', 'publish', 'update', 'share', 'view', 'comment']) {
+    assert.match(output, new RegExp(`\\s+${command}\\s+`));
+  }
+});
+
+test('runCli prints metaapp leaf command text help', async () => {
+  for (const command of ['preview', 'publish', 'update', 'share', 'view', 'comment']) {
+    const stdout = [];
+
+    const exitCode = await runCli(['metaapp', command, '--help'], {
+      stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+      stderr: { write: () => true },
+    });
+
+    assert.equal(exitCode, 0);
+    const output = stdout.join('');
+    assert.match(output, new RegExp(`^Usage:\\s+metabot metaapp ${command}`, 'm'));
+    assert.match(output, /^Summary:\s+/m);
+    assert.equal(output.includes('"ok"'), false);
+  }
+});
+
+test('runCli prints machine-readable metaapp publish help', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['metaapp', 'publish', '--help', '--json'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = JSON.parse(stdout.join(''));
+  assert.deepEqual(output.commandPath, ['metaapp', 'publish']);
+  assert.equal(output.command, 'metabot metaapp publish');
+});
+
+test('runCli prints machine-readable help for every metaapp leaf command', async () => {
+  for (const command of ['preview', 'publish', 'update', 'share', 'view', 'comment']) {
+    const stdout = [];
+
+    const exitCode = await runCli(['metaapp', command, '--help', '--json'], {
+      stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+      stderr: { write: () => true },
+    });
+
+    assert.equal(exitCode, 0);
+    const output = JSON.parse(stdout.join(''));
+    assert.deepEqual(output.commandPath, ['metaapp', command]);
+    assert.equal(output.command, `metabot metaapp ${command}`);
+    assert.ok(output.optionalFlags.some((entry) => entry.flag === '--json'));
+  }
+});
+
+test('runCli prints metaapp publish and update help with actor, file-upload chain, and confirmation flags', async () => {
+  for (const command of ['publish', 'update']) {
+    const stdout = [];
+
+    const exitCode = await runCli(['metaapp', command, '--help'], {
+      stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+      stderr: { write: () => true },
+    });
+
+    assert.equal(exitCode, 0);
+    const output = stdout.join('');
+    assert.match(output, /--from <bot-slug>/);
+    assert.match(output, /--chain <mvc\|btc\|opcat>/);
+    assert.match(output, /--confirm/);
+    assert.match(output, /DOGE is not supported for file upload/i);
+  }
+});
+
+test('runCli prints metaapp share and comment help with write-chain behavior', async () => {
+  const shareStdout = [];
+  const shareExitCode = await runCli(['metaapp', 'share', '--help'], {
+    stdout: { write: (chunk) => { shareStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(shareExitCode, 0);
+  const shareOutput = shareStdout.join('');
+  assert.match(shareOutput, /--chain <mvc\|btc\|doge\|opcat>/);
+  assert.match(shareOutput, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
+  assert.match(shareOutput, /ignored unless --announce/i);
+
+  const commentStdout = [];
+  const commentExitCode = await runCli(['metaapp', 'comment', '--help'], {
+    stdout: { write: (chunk) => { commentStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(commentExitCode, 0);
+  const commentOutput = commentStdout.join('');
+  assert.match(commentOutput, /--chain <mvc\|btc\|doge\|opcat>/);
+  assert.match(commentOutput, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
+  assert.match(commentOutput, /paycomment/i);
 });
 
 test('runCli prints loom group help for validation and export commands', async () => {
