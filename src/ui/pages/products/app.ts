@@ -744,14 +744,32 @@ export function buildProductsPageScript(): string {
       renderSellPreview();
     }
   };
-  const ensureSellSkillsLoaded = () => {
-    renderSellerSelect();
-    if (state.sell.sellerSlug && state.sell.skillsLoadedFor !== state.sell.sellerSlug && !state.sell.skillError) {
-      loadSellerSkills();
-    } else {
+  let sellEntrySequence = 0;
+  const enterSellTab = async () => {
+    const sequence = ++sellEntrySequence;
+    setStatus('Loading seller profiles', 'busy');
+    try {
+      await loadProfiles();
+      state.profileError = null;
+    } catch (error) {
+      if (sequence !== sellEntrySequence) return;
+      state.profiles = [];
+      state.profileError = {
+        code: error && error.code ? error.code : 'metabot_profiles_failed',
+        message: error instanceof Error ? error.message : String(error),
+      };
+      state.sell.skillError = state.profileError;
+      setStatus('Seller profiles failed', 'error');
+      renderSellerSelect();
       renderSkillList();
       renderSellPreview();
+      return;
     }
+    if (sequence !== sellEntrySequence) return;
+    renderSellerSelect();
+    state.sell.skillError = null;
+    state.sell.skillsLoadedFor = '';
+    await loadSellerSkills();
   };
   const openPublishModal = () => {
     renderSellPreview();
@@ -1142,7 +1160,7 @@ export function buildProductsPageScript(): string {
       panel.setAttribute('role', 'tabpanel');
       if (panelName) panel.setAttribute('aria-labelledby', tabIdForName(panelName));
     });
-    if (nextName === 'sell') ensureSellSkillsLoaded();
+    if (nextName === 'sell') enterSellTab();
   };
 
   const navigateTo = (name, options) => {

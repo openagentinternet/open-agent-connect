@@ -409,12 +409,14 @@ async function openSellTab(options = {}) {
     ],
   });
   const sellTab = result.tabs.find((tab) => tab.dataset.productsTab === 'sell');
+  const callsBeforeSell = result.fetchCalls.length;
   await sellTab.listeners.get('click')({ preventDefault() {} });
   await waitFor(
-    () => result.elements['[data-products-sell-skills]'].innerHTML.includes('deliver-code') ||
+    () => result.fetchCalls.slice(callsBeforeSell).some((call) => call.url === '/api/products/skills?from=alice') ||
       result.elements['[data-products-sell-error]'].textContent.includes('products_skills_failed'),
     'seller skills load',
   );
+  result.callsBeforeSell = callsBeforeSell;
   return result;
 }
 
@@ -600,10 +602,12 @@ test('products marketplace fetch failure renders command envelope code and messa
 });
 
 test('products sell tab loads seller profiles, loads selected seller skills, and allows multiple returned skills', async () => {
-  const { elements, fetchCalls } = await openSellTab();
+  const { elements, fetchCalls, callsBeforeSell } = await openSellTab();
+  const sellCalls = fetchCalls.slice(callsBeforeSell);
 
   assert.equal(fetchCalls[0].url, '/api/bot/profiles');
-  assert.ok(fetchCalls.some((call) => call.url === '/api/products/skills?from=alice'));
+  assert.equal(sellCalls[0].url, '/api/bot/profiles');
+  assert.equal(sellCalls[1].url, '/api/products/skills?from=alice');
   assert.match(elements['[data-products-sell-skills]'].innerHTML, /deliver-code/);
   assert.match(elements['[data-products-sell-skills]'].innerHTML, /notify-buyer/);
   assert.doesNotMatch(elements['[data-products-sell-skills]'].innerHTML, /not-returned/);
