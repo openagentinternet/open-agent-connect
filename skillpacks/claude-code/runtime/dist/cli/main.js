@@ -10,6 +10,7 @@ const identity_1 = require("./commands/identity");
 const master_1 = require("./commands/master");
 const network_1 = require("./commands/network");
 const provider_1 = require("./commands/provider");
+const products_1 = require("./commands/products");
 const services_1 = require("./commands/services");
 const buzz_1 = require("./commands/buzz");
 const bot_1 = require("./commands/bot");
@@ -92,6 +93,9 @@ async function runCli(argv, cliContext = {}) {
                     break;
                 case 'provider':
                     result = await (0, provider_1.runProviderCommand)(rest, context);
+                    break;
+                case 'products':
+                    result = await (0, products_1.runProductsCommand)(rest, context);
                     break;
                 case 'services':
                     result = await (0, services_1.runServicesCommand)(rest, context);

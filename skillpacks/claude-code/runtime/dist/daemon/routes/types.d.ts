@@ -58,6 +58,12 @@ export interface MetabotDaemonHttpHandlers {
             online?: boolean;
             limit?: number;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        listProducts?: (input: {
+            online?: boolean;
+            cached?: boolean;
+            query?: string;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         listSources?: () => Awaitable<MetabotCommandResult<unknown>>;
         addSource?: (input: {
             baseUrl: string;
@@ -142,6 +148,35 @@ export interface MetabotDaemonHttpHandlers {
             messagePinId?: string | null;
             timestamp?: number | null;
             localProfileSlug?: string | null;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    products?: {
+        listPublishSkills?: (input?: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        buy?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        listOwned?: (input: {
+            from?: string;
+            all?: boolean;
+            page: number;
+            pageSize: number;
+            refresh: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        listOrders?: (input: {
+            from?: string;
+            all?: boolean;
+            role?: string;
+            state?: string;
+            page: number;
+            pageSize: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        inspectOrder?: (input: {
+            from?: string;
+            orderId?: string;
+            productOrderPinId?: string;
+            paymentTxid?: string;
+            orderTxid?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     chat?: {

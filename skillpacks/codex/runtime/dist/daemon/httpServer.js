@@ -18,6 +18,7 @@ const loom_1 = require("./routes/loom");
 const master_1 = require("./routes/master");
 const network_1 = require("./routes/network");
 const provider_1 = require("./routes/provider");
+const products_1 = require("./routes/products");
 const services_1 = require("./routes/services");
 const trace_1 = require("./routes/trace");
 const ui_1 = require("./routes/ui");
@@ -36,6 +37,7 @@ const ROUTES = [
     master_1.handleMasterRoutes,
     network_1.handleNetworkRoutes,
     provider_1.handleProviderRoutes,
+    products_1.handleProductsRoutes,
     services_1.handleServicesRoutes,
     trace_1.handleTraceRoutes,
     ui_1.handleUiRoutes,
