@@ -13,6 +13,7 @@ const SUPPORTED_UI_PAGES = new Set([
   'trace',
   'refund',
   'loom',
+  'metaapps',
 ]);
 
 export async function runUiCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {

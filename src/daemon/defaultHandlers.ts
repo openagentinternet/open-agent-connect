@@ -1355,6 +1355,20 @@ function buildMetaAppPreviewAssetUrl(previewId: string, assetPath: string): stri
   return `/api/metaapp/preview-assets/${previewSegments}/${normalizedAssetPath}`;
 }
 
+function metaAppPreviewAssetErrorCode(error: unknown): string {
+  const code = error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : '';
+  return [
+    'preview_asset_not_found',
+    'preview_session_not_found',
+    'preview_session_expired',
+    'invalid_preview_asset_path',
+  ].includes(code)
+    ? code
+    : 'metaapp_preview_failed';
+}
+
 function summarizeService(record: ReturnType<typeof buildPublishedService>['record']) {
   const chainPinIds = [...new Set([
     ...(Array.isArray(record.chainPinIds) ? record.chainPinIds : []),
@@ -10399,7 +10413,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           };
         } catch (error) {
           return commandFailed(
-            'metaapp_preview_failed',
+            metaAppPreviewAssetErrorCode(error),
             error instanceof Error ? error.message : String(error),
           );
         }

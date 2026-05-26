@@ -2545,18 +2545,29 @@ test('GET /ui/loom renders the built-in Loom board and includes Loom in navigati
   assert.doesNotMatch(html, /\/api\/services\/rate/);
 });
 
-test('GET /ui/metaapps serves the built-in MetaApps placeholder page', async (t) => {
+test('GET /ui/metaapps serves the built-in MetaApps gallery shell', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/ui/metaapps`);
+  const response = await fetch(`${server.baseUrl}/ui/metaapps?pinId=pin-1i0&from=alice`);
   const html = await response.text();
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /\/ui\/shared\.css/);
   assert.match(html, /MetaApps/);
   assert.match(html, /data-metaapps-shell/);
+  assert.match(html, /data-metaapps-list/);
+  assert.match(html, /data-metaapps-refresh/);
+  assert.match(html, /data-metaapps-detail/);
+  assert.match(html, /\/api\/metaapps/);
+  assert.match(html, /refreshParams\.set\('refresh', 'true'\)/);
+  assert.match(html, /new URLSearchParams\(window\.location\.search\)/);
   assert.match(html, /href="\/ui\/metaapps"/);
+  assert.doesNotMatch(html, /\/api\/wallet/);
+  assert.doesNotMatch(html, /\/api\/chain/);
+  assert.doesNotMatch(html, /\/api\/metaapp\/share/);
+  assert.doesNotMatch(html, /\/api\/metaapp\/comment/);
 });
 
 test('GET /ui/buzz serves the bundled Buzz MetaApp entry from the daemon server', async (t) => {
