@@ -112,6 +112,42 @@ test('verifyMetafileAvailability falls back to GET when HEAD is method-not-allow
   });
 });
 
+test('verifyMetafileAvailability honors a positive retry delay', async () => {
+  const callTimes = [];
+  const startedAt = Date.now();
+  const result = await verifyMetafileAvailability({
+    pinId: 'abc123i0',
+    attempts: 2,
+    delayMs: 60,
+    fetchImpl: async () => {
+      callTimes.push(Date.now());
+      throw new Error('network down');
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.attempts, 2);
+  assert.ok(callTimes.length >= 6);
+  assert.ok(callTimes[3] - callTimes[0] >= 40);
+  assert.ok(Date.now() - startedAt >= 40);
+});
+
+test('verifyMetafileAvailability uses the default small attempt count', async () => {
+  let fetchCalls = 0;
+  const result = await verifyMetafileAvailability({
+    pinId: 'abc123i0',
+    delayMs: 0,
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      throw new Error('network down');
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.attempts, 3);
+  assert.ok(fetchCalls >= 3);
+});
+
 test('verifyMetafileAvailability returns bounded retry failures with the last error', async () => {
   let attempts = 0;
   const result = await verifyMetafileAvailability({
