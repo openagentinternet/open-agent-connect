@@ -1,11 +1,5 @@
-import { validateProductListingPayload } from '../../../core/products/productValidation';
-import type {
-  ProductDirectoryProduct,
-} from '../../../core/products/productDirectory';
 import type {
   ProductListingPayload,
-  ProductOrderState,
-  ProductPrice,
   ProductSku,
 } from '../../../core/products/productTypes';
 
@@ -100,6 +94,10 @@ function readArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function normalizeText(value: unknown): string {
   if (typeof value === 'string') return value.trim();
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
@@ -192,6 +190,150 @@ function normalizeMetafileUri(value: unknown): string {
 function mediaPreviewUriFromMetafileUri(value: unknown): string {
   const ref = extractMetafileRef(value);
   return ref ? `/api/file/avatar?ref=${encodeURIComponent(ref)}` : '';
+}
+
+function isMetafilePayloadUri(value: unknown): boolean {
+  return isMetafileUri(value);
+}
+
+function isSupportedDescriptionContentType(value: unknown): boolean {
+  const normalized = normalizeText(value);
+  return normalized === 'text/markdown' || normalized === 'text/html';
+}
+
+function isPositiveDecimalString(value: unknown): boolean {
+  const normalized = normalizeText(value);
+  if (!normalized || /^\s/u.test(normalized) || /\s$/u.test(normalized)) return false;
+  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/u.test(normalized)) return false;
+  return /[1-9]/u.test(normalized.replace('.', ''));
+}
+
+function validateProductListingPayload(input: unknown): { ok: true; value: ProductListingPayload } | { ok: false; message: string } {
+  if (!isRecord(input)) {
+    return { ok: false, message: 'Product listing payload must be an object.' };
+  }
+
+  if (!normalizeText(input.name)) {
+    return { ok: false, message: 'name must be a non-empty string.' };
+  }
+  if (!normalizeText(input.title)) {
+    return { ok: false, message: 'title must be a non-empty string.' };
+  }
+  if (!['virtual', 'physical'].includes(normalizeText(input.productType))) {
+    return { ok: false, message: 'productType must be virtual or physical.' };
+  }
+  if (!isMetafilePayloadUri(input.coverImage)) {
+    return { ok: false, message: 'coverImage must be a metafile URI.' };
+  }
+  if (
+    input.galleryImages !== undefined &&
+    (!Array.isArray(input.galleryImages) || input.galleryImages.some((uri) => !isMetafilePayloadUri(uri)))
+  ) {
+    return { ok: false, message: 'galleryImages must contain only metafile URIs.' };
+  }
+  if (!isSupportedDescriptionContentType(input.descriptionContentType)) {
+    return { ok: false, message: 'descriptionContentType must be text/markdown or text/html.' };
+  }
+  if (!normalizeText(input.description)) {
+    return { ok: false, message: 'description must be a non-empty string.' };
+  }
+  if (!isRecord(input.fulfillment)) {
+    return { ok: false, message: 'fulfillment must be an object.' };
+  }
+  if (!['digital_delivery', 'physical_shipping'].includes(normalizeText(input.fulfillment.fulfillmentType))) {
+    return { ok: false, message: 'fulfillment.fulfillmentType must be digital_delivery or physical_shipping.' };
+  }
+  if (!['simplemsg', 'logistics'].includes(normalizeText(input.fulfillment.deliveryEndpoint))) {
+    return { ok: false, message: 'fulfillment.deliveryEndpoint must be simplemsg or logistics.' };
+  }
+  if (!Array.isArray(input.fulfillment.fulfillmentSkills) || input.fulfillment.fulfillmentSkills.length === 0) {
+    return { ok: false, message: 'fulfillment.fulfillmentSkills must contain at least one skill name.' };
+  }
+  if (
+    input.fulfillment.fulfillmentSkills.some((skill: unknown) => typeof skill !== 'string' || skill.length === 0 || skill.trim() !== skill)
+  ) {
+    return { ok: false, message: 'fulfillmentSkills must be non-empty strings.' };
+  }
+  if (!Array.isArray(input.skus) || input.skus.length === 0) {
+    return { ok: false, message: 'skus must contain at least one SKU.' };
+  }
+
+  const skuIds = new Set<string>();
+  const skus: ProductSku[] = [];
+  for (const item of input.skus) {
+    if (!isRecord(item)) {
+      return { ok: false, message: 'SKU must be an object.' };
+    }
+    const skuItem = item as Record<string, unknown>;
+    const skuId = normalizeText(skuItem.skuId);
+    const skuName = normalizeText(skuItem.name);
+    const skuImage = skuItem.image;
+    const skuDescriptionContentType = skuItem.descriptionContentType;
+    const skuDescription = skuItem.description;
+    const skuPrice = skuItem.price;
+    if (!skuId || !skuName) {
+      return { ok: false, message: 'SKU requires skuId and name.' };
+    }
+    if (!isMetafilePayloadUri(skuImage)) {
+      return { ok: false, message: 'SKU image must be a metafile URI.' };
+    }
+    if (!isSupportedDescriptionContentType(skuDescriptionContentType)) {
+      return { ok: false, message: 'SKU descriptionContentType must be text/markdown or text/html.' };
+    }
+    if (!normalizeText(skuDescription)) {
+      return { ok: false, message: 'SKU description must be a non-empty string.' };
+    }
+    if (!isRecord(skuPrice) || !isPositiveDecimalString(skuPrice.amount) || !normalizeText(skuPrice.currency)) {
+      return { ok: false, message: 'SKU price must have positive amount and currency.' };
+    }
+    const initialStock = normalizeInteger(skuItem.initialStock);
+    if (initialStock === null || initialStock <= 0) {
+      return { ok: false, message: 'SKU initialStock must be a positive integer.' };
+    }
+    if (skuIds.has(skuId)) {
+      return { ok: false, message: 'SKU IDs must be unique within a listing.' };
+    }
+    skuIds.add(skuId);
+    skus.push({
+      skuId,
+      name: skuName,
+      image: skuImage as string,
+      descriptionContentType: skuDescriptionContentType as string,
+      description: skuDescription as string,
+      price: {
+        amount: normalizeText(skuPrice.amount),
+        currency: normalizeText(skuPrice.currency).toUpperCase(),
+      },
+      initialStock,
+    });
+  }
+
+  const payload: ProductListingPayload = {
+    name: normalizeText(input.name),
+    title: normalizeText(input.title),
+    productType: normalizeText(input.productType) as ProductListingPayload['productType'],
+    coverImage: normalizeText(input.coverImage),
+    descriptionContentType: normalizeText(input.descriptionContentType),
+    description: normalizeText(input.description),
+    fulfillment: {
+      fulfillmentType: normalizeText(input.fulfillment.fulfillmentType) as ProductListingPayload['fulfillment']['fulfillmentType'],
+      deliveryEndpoint: normalizeText(input.fulfillment.deliveryEndpoint) as ProductListingPayload['fulfillment']['deliveryEndpoint'],
+      fulfillmentSkills: [...input.fulfillment.fulfillmentSkills],
+    },
+    skus,
+  };
+
+  if (Array.isArray(input.galleryImages) && input.galleryImages.length > 0) {
+    payload.galleryImages = input.galleryImages.map((uri) => normalizeText(uri));
+  }
+  if (input.fulfillment.estimatedDeliverySeconds !== undefined) {
+    payload.fulfillment.estimatedDeliverySeconds = normalizeInteger(input.fulfillment.estimatedDeliverySeconds) ?? undefined;
+  }
+  if (normalizeText(input.fulfillment.deliverableDescription)) {
+    payload.fulfillment.deliverableDescription = normalizeText(input.fulfillment.deliverableDescription);
+  }
+
+  return { ok: true, value: payload };
 }
 
 function readSkillCatalog(input: unknown): string[] {
@@ -422,6 +564,7 @@ export function buildProductCommercePageViewModelRuntimeSource(): string {
   return [
     readObject,
     readArray,
+    isRecord,
     normalizeText,
     normalizeInteger,
     formatPrice,
@@ -431,6 +574,10 @@ export function buildProductCommercePageViewModelRuntimeSource(): string {
     extractMetafileRef,
     normalizeMetafileUri,
     mediaPreviewUriFromMetafileUri,
+    isMetafilePayloadUri,
+    isSupportedDescriptionContentType,
+    isPositiveDecimalString,
+    validateProductListingPayload,
     readSkillCatalog,
     assertPositiveIntegerStock,
     assertKnownFulfillmentSkills,

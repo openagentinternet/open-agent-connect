@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import vm from 'node:vm';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
@@ -37,22 +38,45 @@ test('buildProductCommercePageViewModel renders product rows with seller, stock,
 });
 
 test('buildProductCommercePageViewModel disables unsupported physical and logistics products for purchase', () => {
-  const model = buildProductCommercePageViewModel({
+  const physicalModel = buildProductCommercePageViewModel({
     products: [
       {
         listingPinId: 'listing-pin-physical',
         title: 'Paper Manual',
         sellerName: 'Alice Bot',
         productType: 'physical',
-        fulfillmentType: 'shipping',
+        fulfillment: {
+          fulfillmentType: 'physical_shipping',
+          deliveryEndpoint: 'logistics',
+        },
         online: true,
         skus: [{ skuId: 'sku-physical', price: { amount: '0.5', currency: 'SPACE' } }],
       },
     ],
   });
 
-  assert.equal(model.productRows[0].canPurchase, false);
-  assert.match(model.productRows[0].blockedReason, /physical/i);
+  assert.equal(physicalModel.productRows[0].canPurchase, false);
+  assert.match(physicalModel.productRows[0].blockedReason, /physical/i);
+
+  const logisticsModel = buildProductCommercePageViewModel({
+    products: [
+      {
+        listingPinId: 'listing-pin-logistics',
+        title: 'Courier Bundle',
+        sellerName: 'Alice Bot',
+        productType: 'virtual',
+        fulfillment: {
+          fulfillmentType: 'digital_delivery',
+          deliveryEndpoint: 'logistics',
+        },
+        online: true,
+        skus: [{ skuId: 'sku-logistics', price: { amount: '0.5', currency: 'SPACE' } }],
+      },
+    ],
+  });
+
+  assert.equal(logisticsModel.productRows[0].canPurchase, false);
+  assert.match(logisticsModel.productRows[0].blockedReason, /simplemsg/i);
 });
 
 test('buildProductCommercePageViewModel builds purchase preview and listing payload projections', () => {
@@ -193,6 +217,48 @@ test('buildProductCommercePageViewModel rejects invalid SKU stock and accepts la
       skuDescription: 'Fast',
       priceAmount: '0.005',
       priceCurrency: 'SPACE',
+      initialStock: '-1',
+    },
+  }), /stock/i);
+  assert.throws(() => buildProductCommercePageViewModel({
+    listingForm: {
+      name: 'signal-pack',
+      title: 'Signal Pack',
+      coverImage: 'metafile://cover-pin-1',
+      galleryImages: ['metafile://gallery-pin-1'],
+      descriptionContentType: 'text/markdown',
+      description: 'Read me',
+      fulfillmentSkills: ['skill-a'],
+      fulfillmentType: 'digital_delivery',
+      deliveryEndpoint: 'simplemsg',
+      skuId: 'sku-premium',
+      skuName: 'Premium',
+      skuImage: 'metafile://sku-pin-1',
+      skuDescriptionContentType: 'text/markdown',
+      skuDescription: 'Fast',
+      priceAmount: '0.005',
+      priceCurrency: 'SPACE',
+      initialStock: '',
+    },
+  }), /stock/i);
+  assert.throws(() => buildProductCommercePageViewModel({
+    listingForm: {
+      name: 'signal-pack',
+      title: 'Signal Pack',
+      coverImage: 'metafile://cover-pin-1',
+      galleryImages: ['metafile://gallery-pin-1'],
+      descriptionContentType: 'text/markdown',
+      description: 'Read me',
+      fulfillmentSkills: ['skill-a'],
+      fulfillmentType: 'digital_delivery',
+      deliveryEndpoint: 'simplemsg',
+      skuId: 'sku-premium',
+      skuName: 'Premium',
+      skuImage: 'metafile://sku-pin-1',
+      skuDescriptionContentType: 'text/markdown',
+      skuDescription: 'Fast',
+      priceAmount: '0.005',
+      priceCurrency: 'SPACE',
       initialStock: '1.5',
     },
   }), /stock/i);
@@ -241,4 +307,49 @@ test('buildProductCommercePageViewModelRuntimeSource produces browser-compatible
   const source = buildProductCommercePageViewModelRuntimeSource();
   assert.match(source, /buildProductCommercePageViewModel/);
   assert.match(source, /normalizeMetafileUri/);
+});
+
+test('buildProductCommercePageViewModelRuntimeSource executes in a vm context and builds a listing preview payload', () => {
+  const source = buildProductCommercePageViewModelRuntimeSource();
+  const sandbox = {
+    Array,
+    Date,
+    Error,
+    JSON,
+    Math,
+    Number,
+    Object,
+    Set,
+    String,
+    URL,
+    decodeURIComponent,
+    encodeURIComponent,
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(`${source}\nthis.buildProductCommercePageViewModel = buildProductCommercePageViewModel;`, sandbox);
+  const model = sandbox.buildProductCommercePageViewModel({
+    skillCatalog: ['skill-a', 'skill-b'],
+    listingForm: {
+      name: 'signal-pack',
+      title: 'Signal Pack',
+      coverImage: 'metafile://cover-pin-1',
+      galleryImages: ['metafile://gallery-pin-1'],
+      descriptionContentType: 'text/markdown',
+      description: 'Read me',
+      fulfillmentSkills: ['skill-a'],
+      fulfillmentType: 'digital_delivery',
+      deliveryEndpoint: 'simplemsg',
+      skuId: 'sku-premium',
+      skuName: 'Premium',
+      skuImage: 'metafile://sku-pin-1',
+      skuDescriptionContentType: 'text/markdown',
+      skuDescription: 'Fast',
+      priceAmount: '0.005',
+      priceCurrency: 'SPACE',
+      initialStock: '5',
+    },
+  });
+
+  assert.equal(model.listingPreviewPayload.fulfillment.fulfillmentType, 'digital_delivery');
+  assert.equal(model.listingPreviewPayload.skus[0].initialStock, 5);
 });
