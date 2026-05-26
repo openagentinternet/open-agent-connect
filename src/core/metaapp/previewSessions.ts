@@ -55,6 +55,26 @@ function assertInsideArtifactDir(artifactDir: string, filePath: string): void {
   }
 }
 
+async function assertRealPathInsideArtifactDir(artifactDir: string, filePath: string): Promise<string> {
+  let realArtifactDir: string;
+  let realFilePath: string;
+  try {
+    [realArtifactDir, realFilePath] = await Promise.all([
+      fs.realpath(artifactDir),
+      fs.realpath(filePath),
+    ]);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'EISDIR') {
+      throw new MetaAppPreviewSessionError('preview_asset_not_found', 'Preview asset was not found.');
+    }
+    throw error;
+  }
+
+  assertInsideArtifactDir(realArtifactDir, realFilePath);
+  return realFilePath;
+}
+
 function getSession(
   sessions: Map<string, MetaAppPreviewSession>,
   previewId: string,
@@ -110,10 +130,11 @@ export function createMetaAppPreviewSessionRegistry(input?: {
       const assetPath = normalizeRelativeAssetPath(assetInput.assetPath, session.indexFile);
       const filePath = path.resolve(session.artifactDir, assetPath);
       assertInsideArtifactDir(session.artifactDir, filePath);
+      const realFilePath = await assertRealPathInsideArtifactDir(session.artifactDir, filePath);
 
       let body: Buffer;
       try {
-        body = await fs.readFile(filePath);
+        body = await fs.readFile(realFilePath);
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         if (code === 'ENOENT' || code === 'EISDIR') {

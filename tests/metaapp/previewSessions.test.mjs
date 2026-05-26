@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -68,6 +68,30 @@ test('preview asset resolution serves files only from the selected artifact dire
   assert.equal(asset.body.toString('utf8'), 'body { color: black; }');
   await rejectsWithCode(
     () => registry.resolveAsset({ previewId: session.previewId, assetPath: '../secret.txt' }),
+    'invalid_preview_asset_path',
+  );
+});
+
+test('preview asset resolution rejects symlinks that resolve outside the artifact directory', async (t) => {
+  const artifactDir = await makeArtifactDir('symlink-escape');
+  const outsideDir = await makeArtifactDir('symlink-outside');
+  const outsideFile = await writeArtifactFile(outsideDir, 'secret.txt', 'do not serve through symlink');
+  await writeArtifactFile(artifactDir, 'index.html', '<h1>Safe</h1>');
+  try {
+    await symlink(outsideFile, path.join(artifactDir, 'linked-secret.txt'));
+  } catch (error) {
+    if (['EACCES', 'EPERM', 'ENOTSUP'].includes(error.code)) {
+      t.skip(`symlink creation is not supported in this environment: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+
+  const registry = createMetaAppPreviewSessionRegistry();
+  const session = registry.create({ artifactDir, indexFile: 'index.html' });
+
+  await rejectsWithCode(
+    () => registry.resolveAsset({ previewId: session.previewId, assetPath: 'linked-secret.txt' }),
     'invalid_preview_asset_path',
   );
 });

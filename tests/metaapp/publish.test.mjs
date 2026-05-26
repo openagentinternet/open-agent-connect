@@ -323,6 +323,86 @@ test('chain write failure returns metaapp_publish_failed and preserves upload ev
   assert.deepEqual(deps.calls.map((call) => call.type), ['upload', 'write']);
 });
 
+test('publishMetaApp without local cache dependency fails before upload or write', async () => {
+  const projectDir = await makeProject('missing-cache-publish');
+  const deps = createDeps({ upsertLocal: undefined });
+
+  const result = await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'metaapp_cache_unavailable');
+  assert.deepEqual(deps.calls, []);
+});
+
+test('updateMetaApp without local cache dependency fails before upload or write', async () => {
+  const projectDir = await makeProject('missing-cache-update');
+  const deps = createDeps({ upsertLocal: undefined });
+
+  const result = await updateMetaApp({
+    projectDir,
+    targetPinId: UPDATE_TARGET_PIN,
+    confirm: true,
+  }, deps);
+
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'metaapp_cache_unavailable');
+  assert.deepEqual(deps.calls, []);
+});
+
+test('publishMetaApp returns success with warning when local cache upsert fails after write', async () => {
+  const projectDir = await makeProject('cache-warning-publish');
+  const deps = createDeps({
+    async upsertLocal(record) {
+      deps.calls.push({ type: 'upsert', input: record });
+      throw new Error('cache disk full');
+    },
+  });
+
+  const result = await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  assert.equal(result.state, 'success');
+  assert.equal(result.data.pinId, CREATE_PIN);
+  assert.equal(result.data.chainWrite.pinId, CREATE_PIN);
+  assert.equal(result.data.upload.metafileUri, 'metafile://upload-pin.zip');
+  assert.equal(result.data.record.pinId, CREATE_PIN);
+  assert.deepEqual(deps.calls.map((call) => call.type), ['upload', 'write', 'upsert']);
+  assert.deepEqual(result.data.warnings, [
+    {
+      code: 'metaapp_local_cache_upsert_failed',
+      message: 'Unable to update local MetaApp cache: cache disk full',
+    },
+  ]);
+});
+
+test('updateMetaApp returns success with warning when local cache upsert fails after write', async () => {
+  const projectDir = await makeProject('cache-warning-update');
+  const deps = createDeps({
+    async upsertLocal(record) {
+      deps.calls.push({ type: 'upsert', input: record });
+      throw new Error('cache locked');
+    },
+  });
+
+  const result = await updateMetaApp({
+    projectDir,
+    targetPinId: UPDATE_TARGET_PIN,
+    confirm: true,
+  }, deps);
+
+  assert.equal(result.state, 'success');
+  assert.equal(result.data.pinId, UPDATE_PIN);
+  assert.equal(result.data.firstPinId, UPDATE_TARGET_PIN);
+  assert.equal(result.data.chainWrite.pinId, UPDATE_PIN);
+  assert.equal(result.data.record.pinId, UPDATE_PIN);
+  assert.deepEqual(deps.calls.map((call) => call.type), ['upload', 'write', 'upsert']);
+  assert.deepEqual(result.data.warnings, [
+    {
+      code: 'metaapp_local_cache_upsert_failed',
+      message: 'Unable to update local MetaApp cache: cache locked',
+    },
+  ]);
+});
+
 test('shareMetaApp returns a pinId and canonical MetaWeb URL without writing', async () => {
   const deps = createDeps();
 

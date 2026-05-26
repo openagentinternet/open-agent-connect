@@ -344,6 +344,9 @@ async function writePublishedMetaApp(input: {
   if (!input.deps.writeChain) {
     return commandFailed('metaapp_publish_failed', 'MetaApp publish requires a chain write dependency.');
   }
+  if (!input.deps.upsertLocal) {
+    return commandFailed('metaapp_cache_unavailable', 'MetaApp publish requires a local cache dependency before writing on-chain.');
+  }
 
   const archive = await makeArchive({
     deps: input.deps,
@@ -407,8 +410,14 @@ async function writePublishedMetaApp(input: {
     now,
   });
 
-  if (input.deps.upsertLocal) {
+  const warnings = [...input.warnings];
+  try {
     await input.deps.upsertLocal(record);
+  } catch (error) {
+    warnings.push({
+      code: 'metaapp_local_cache_upsert_failed',
+      message: `Unable to update local MetaApp cache: ${errorMessage(error)}`,
+    });
   }
 
   return commandSuccess({
@@ -420,7 +429,7 @@ async function writePublishedMetaApp(input: {
     upload,
     chainWrite,
     record,
-    warnings: input.warnings,
+    warnings,
   });
 }
 
