@@ -14,6 +14,7 @@ const SUPPORTED_UI_PAGES = new Set([
     'trace',
     'refund',
     'loom',
+    'metaapps',
 ]);
 async function runUiCommand(args, context) {
     if (args[0] !== 'open') {

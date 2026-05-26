@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
+    <style>
+      .content:has(.metaapps-shell) {
+        max-width: none;
+        padding: 0;
+      }
+      .metaapps-shell {
+        min-height: calc(100vh - 52px);
+        background: var(--bg);
+      }
+      @supports (min-height: 100svh) {
+        .metaapps-shell { min-height: calc(100svh - 52px); }
+      }
+      .metaapps-header {
+        min-height: 82px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 20px;
+      }
+      .metaapps-kicker {
+        display: block;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        margin-bottom: 5px;
+      }
+      .metaapps-header h1 {
+        color: var(--text);
+        font-size: 22px;
+        font-weight: 650;
+        line-height: 1.2;
+      }
+      .metaapps-refresh,
+      .metaapps-action {
+        min-height: 32px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        color: var(--text);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font: 12px var(--mono);
+        padding: 6px 10px;
+        text-decoration: none;
+      }
+      .metaapps-refresh:hover,
+      .metaapps-action:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .metaapps-refresh:disabled {
+        opacity: .6;
+        cursor: wait;
+      }
+      .metaapps-status {
+        min-height: 34px;
+        border-bottom: 1px solid var(--border);
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        font: 11px var(--mono);
+        padding: 0 20px;
+      }
+      .metaapps-status[data-state="error"] { color: var(--red); }
+      .metaapps-status[data-state="warning"] { color: var(--amber); }
+      .metaapps-workspace {
+        display: grid;
+        grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+        min-height: calc(100vh - 168px);
+      }
+      .metaapps-list {
+        border-right: 1px solid var(--border);
+        background: var(--surface);
+        min-width: 0;
+        overflow: auto;
+      }
+      .metaapps-row {
+        width: 100%;
+        border: 0;
+        border-bottom: 1px solid var(--border);
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        display: grid;
+        gap: 5px;
+        padding: 12px 14px;
+        text-align: left;
+      }
+      .metaapps-row:hover,
+      .metaapps-row[aria-current="true"] {
+        background: var(--surface2);
+      }
+      .metaapps-row-title {
+        font-size: 13px;
+        font-weight: 650;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+      }
+      .metaapps-row-meta {
+        color: var(--muted);
+        font: 11px var(--mono);
+        overflow-wrap: anywhere;
+      }
+      .metaapps-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .metaapps-row-state,
+      .metaapps-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+      .metaapps-tags span,
+      .metaapps-row-state span,
+      .metaapps-version {
+        border: 1px solid var(--border2);
+        border-radius: 999px;
+        color: var(--muted);
+        font: 10px var(--mono);
+        padding: 2px 7px;
+      }
+      .metaapps-detail {
+        min-width: 0;
+        overflow: auto;
+        padding: 18px 20px;
+      }
+      .metaapps-detail-head,
+      .metaapps-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        justify-content: space-between;
+        min-width: 0;
+        flex-wrap: wrap;
+      }
+      .metaapps-detail-head h2 {
+        color: var(--text);
+        font-size: 18px;
+        font-weight: 650;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+      }
+      .metaapps-summary {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+        margin: 14px 0;
+        max-width: 760px;
+      }
+      .metaapps-actions {
+        justify-content: flex-start;
+        margin: 14px 0;
+      }
+      .metaapps-fields {
+        border-top: 1px solid var(--border);
+        display: grid;
+        margin-top: 14px;
+      }
+      .metaapps-fields div {
+        border-bottom: 1px solid var(--border);
+        display: grid;
+        gap: 8px;
+        grid-template-columns: 120px minmax(0, 1fr);
+        padding: 10px 0;
+      }
+      .metaapps-fields dt {
+        color: var(--muted);
+        font: 11px var(--mono);
+      }
+      .metaapps-fields dd {
+        color: var(--text);
+        font: 12px var(--mono);
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      .metaapps-history {
+        border-top: 1px solid var(--border);
+        margin-top: 18px;
+        padding-top: 14px;
+      }
+      .metaapps-history h3 {
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 650;
+        margin-bottom: 8px;
+      }
+      .metaapps-history ol {
+        color: var(--muted);
+        display: grid;
+        font: 11px var(--mono);
+        gap: 6px;
+        list-style-position: inside;
+        margin: 0;
+        padding: 0;
+      }
+      .metaapps-history li {
+        overflow-wrap: anywhere;
+      }
+      .metaapps-empty,
+      .metaapps-error {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+        padding: 14px;
+      }
+      .metaapps-error { color: var(--red); }
+      @media (max-width: 760px) {
+        .metaapps-workspace { grid-template-columns: 1fr; }
+        .metaapps-list {
+          border-right: 0;
+          max-height: 42vh;
+        }
+        .metaapps-fields div { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
+        <div class="topbar-sep"></div>
+        <span class="topbar-title">MetaApps</span>
+        <div class="topbar-spacer"></div>
+        <nav class="topbar-nav">__PAGE_NAV__</nav>
+      </header>
+
+      <main class="content">
+        __PAGE_CONTENT__
+      </main>
+    </div>
+    <script>
+      __PAGE_SCRIPT__
+    </script>
+  </body>
+</html>

@@ -24,6 +24,7 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-post-buzz',
   'metabot-post-skillservice',
   'metabot-loom-wish2task',
+  'metabot-metaapp-publish',
   'metabot-upload-file',
   'metabot-wallet-manage',
 ];
@@ -231,6 +232,21 @@ test('buildAgentConnectSkillpacks includes the Loom wish-to-task publishing work
   assert.match(content, /metabot loom validate --protocol task/);
   assert.match(content, /metabot loom post-task --from <bot-slug> --payload-file/);
   assert.match(content, /metabot ui open --page loom/);
+});
+
+test('buildAgentConnectSkillpacks includes the MetaApp publish/share workflow skill', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-metaapp-publish'), 'utf8');
+  assert.match(content, /^name:\s*metabot-metaapp-publish$/m);
+  assert.match(content, /Bot, bot, and MetaBot wording as equivalent/i);
+  assert.match(content, /metaapp preview/);
+  assert.match(content, /metaapp publish --from <bot-slug>/);
+  assert.match(content, /metaapp update --target-pin-id/);
+  assert.match(content, /metaapp share --pin-id/);
+  assert.match(content, /metaapp view/);
+  assert.match(content, /metaapp comment/);
+  assert.match(content, /publish\/update.*explicit confirmation.*--confirm/i);
 });
 
 test('buildAgentConnectSkillpacks renders shared skills without host-specific adapter sections or host override flags', async () => {
