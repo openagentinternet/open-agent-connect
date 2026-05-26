@@ -18,6 +18,7 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-help',
   'metabot-identity-manage',
   'metabot-network-manage',
+  'metabot-product-commerce',
   'metabot-call-remote-service',
   'metabot-chat-privatechat',
   'metabot-omni-reader',
@@ -231,6 +232,27 @@ test('buildAgentConnectSkillpacks includes the Loom wish-to-task publishing work
   assert.match(content, /metabot loom validate --protocol task/);
   assert.match(content, /metabot loom post-task --from <bot-slug> --payload-file/);
   assert.match(content, /metabot ui open --page loom/);
+});
+
+test('buildAgentConnectSkillpacks includes the Product Commerce skill workflow in the shared pack', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-product-commerce'), 'utf8');
+  assert.match(content, /^name:\s*metabot-product-commerce$/m);
+  assert.match(content, /products skills --from <seller-slug> --json/);
+  assert.match(content, /products publish --from <seller-slug> --payload-file <path>/);
+  assert.match(content, /network products --online --query <text> --json/);
+  assert.match(content, /products buy --from <buyer-slug> --request-file <path> --json/);
+  assert.match(content, /products orders list --from <bot-slug> --role <buyer\|seller\|all> --json/);
+  assert.match(content, /products orders inspect --from <bot-slug>/);
+  assert.match(content, /explicit confirmation/i);
+  assert.match(content, /fulfillmentSkills/i);
+  assert.match(content, /productType: "virtual"/);
+  assert.match(content, /fulfillment\.fulfillmentType: "digital_delivery"/);
+  assert.match(content, /fulfillment\.deliveryEndpoint: "simplemsg"/);
+  assert.match(content, /product-order context enters the fulfillment conversation\/runtime context/i);
+  assert.match(content, /Do not invent seller identity fields/i);
+  assert.match(content, /V1 does not require `?product-review`?/i);
 });
 
 test('buildAgentConnectSkillpacks renders shared skills without host-specific adapter sections or host override flags', async () => {

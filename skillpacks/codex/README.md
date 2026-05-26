@@ -8,6 +8,7 @@ Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent
 - `metabot-help`
 - `metabot-identity-manage`
 - `metabot-network-manage`
+- `metabot-product-commerce`
 - `metabot-call-remote-service`
 - `metabot-chat-privatechat`
 - `metabot-omni-reader`
