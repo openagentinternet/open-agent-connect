@@ -128,6 +128,7 @@ export function buildProductsPageScript(): string {
   return `(() => {
   const state = {
     profiles: [],
+    profileError: null,
     marketplace: null,
     marketplaceError: null,
     selectedListingPinId: '',
@@ -141,6 +142,7 @@ export function buildProductsPageScript(): string {
       previewEnvelope: null,
       confirmRequest: null,
       success: null,
+      successSelection: null,
       error: null,
     },
   };
@@ -182,6 +184,36 @@ export function buildProductsPageScript(): string {
     return [normalizeText(price.amount), normalizeText(price.currency).toUpperCase()].filter(Boolean).join(' ') || 'No price';
   };
   const productList = () => readArrayValue(state.marketplace && state.marketplace.products);
+  const currentPurchaseSelection = () => ({
+    buyerSlug: normalizeText(state.buyerSlug),
+    listingPinId: normalizeText(state.selectedListingPinId),
+    skuId: normalizeText(state.selectedSkuId),
+    query: normalizeText(state.query),
+    spendCap: elements.spendCap ? normalizeText(elements.spendCap.value) : '',
+    comment: elements.comment ? normalizeText(elements.comment.value) : '',
+  });
+  const purchaseSelectionKey = (selection) => JSON.stringify([
+    normalizeText(selection.buyerSlug),
+    normalizeText(selection.listingPinId),
+    normalizeText(selection.skuId),
+    normalizeText(selection.query),
+    normalizeText(selection.spendCap),
+    normalizeText(selection.comment),
+  ]);
+  const resetPurchaseOutcome = () => {
+    state.purchase.open = false;
+    state.purchase.busy = false;
+    state.purchase.previewEnvelope = null;
+    state.purchase.confirmRequest = null;
+    state.purchase.success = null;
+    state.purchase.successSelection = null;
+    state.purchase.error = null;
+  };
+  const syncPurchaseOutcomeToSelection = () => {
+    if (state.purchase.success && state.purchase.successSelection !== purchaseSelectionKey(currentPurchaseSelection())) {
+      resetPurchaseOutcome();
+    }
+  };
   const selectedProduct = () => {
     const products = productList();
     if (!state.selectedListingPinId) return products[0] || null;
@@ -204,9 +236,11 @@ export function buildProductsPageScript(): string {
   };
   const renderError = () => {
     if (!elements.error) return;
-    const error = state.marketplaceError;
-    elements.error.textContent = error ? [error.code, error.message].filter(Boolean).join(': ') : '';
-    elements.error.hidden = !error;
+    const errors = [state.profileError, state.marketplaceError].filter(Boolean);
+    elements.error.textContent = errors
+      .map((error) => [error.code, error.message].filter(Boolean).join(': '))
+      .join(' | ');
+    elements.error.hidden = errors.length === 0;
   };
   const loadJson = async (url) => {
     const response = await fetch(url, { cache: 'no-store' });
@@ -398,6 +432,7 @@ export function buildProductsPageScript(): string {
       previewEnvelope,
       confirmRequest,
       success: null,
+      successSelection: null,
       error: null,
     };
     renderConfirmationModal();
@@ -409,6 +444,11 @@ export function buildProductsPageScript(): string {
     renderConfirmationModal();
   };
   const previewPurchase = async () => {
+    syncPurchaseOutcomeToSelection();
+    if (state.purchase.success && state.purchase.successSelection === purchaseSelectionKey(currentPurchaseSelection())) {
+      renderPurchaseControls();
+      return;
+    }
     const reason = disabledReason();
     if (reason || state.busy || state.purchase.busy || state.purchase.open) {
       renderPurchaseControls();
@@ -451,6 +491,7 @@ export function buildProductsPageScript(): string {
         confirmed: true,
       });
       state.purchase.success = envelope;
+      state.purchase.successSelection = purchaseSelectionKey(currentPurchaseSelection());
       setStatus('Purchase submitted', 'ready');
     } catch (error) {
       state.purchase.error = error instanceof Error ? error.message : String(error);
@@ -538,13 +579,17 @@ export function buildProductsPageScript(): string {
     });
   };
   const renderPurchaseControls = () => {
+    syncPurchaseOutcomeToSelection();
     const reason = disabledReason();
+    const purchaseSubmitted = state.purchase.success && state.purchase.successSelection === purchaseSelectionKey(currentPurchaseSelection());
     if (elements.preview) {
-      elements.preview.disabled = Boolean(reason || state.busy || state.purchase.busy || state.purchase.open);
+      elements.preview.disabled = Boolean(reason || state.busy || state.purchase.busy || state.purchase.open || purchaseSubmitted);
       elements.preview.setAttribute('data-product-purchase-control', 'preview');
     }
     if (elements.purchaseReason) {
-      elements.purchaseReason.textContent = reason || 'Preview required before payment.';
+      elements.purchaseReason.textContent = purchaseSubmitted
+        ? 'Purchase submitted for this selection.'
+        : (reason || 'Preview required before payment.');
     }
   };
   const render = () => {
@@ -563,12 +608,14 @@ export function buildProductsPageScript(): string {
     renderDetail(model);
     renderSkus(model);
     renderPurchaseControls();
+    renderConfirmationModal();
     if (elements.refresh) elements.refresh.disabled = state.busy;
     if (elements.query) elements.query.disabled = state.busy;
   };
   const loadProfiles = async () => {
     const envelope = await loadJson('/api/bot/profiles');
     state.profiles = envelope.data && Array.isArray(envelope.data.profiles) ? envelope.data.profiles : [];
+    state.profileError = null;
   };
   const loadMarketplace = async () => {
     state.busy = true;
@@ -597,7 +644,7 @@ export function buildProductsPageScript(): string {
       await loadProfiles();
     } catch (error) {
       state.profiles = [];
-      state.marketplaceError = {
+      state.profileError = {
         code: error && error.code ? error.code : 'metabot_profiles_failed',
         message: error instanceof Error ? error.message : String(error),
       };
@@ -685,12 +732,14 @@ export function buildProductsPageScript(): string {
       state.selectedListingPinId = '';
       state.selectedSkuId = '';
       if (elements.spendCap) elements.spendCap.value = '';
+      syncPurchaseOutcomeToSelection();
       await loadMarketplace();
     });
   }
   if (elements.refresh) {
     elements.refresh.addEventListener('click', () => {
       state.query = elements.query ? normalizeText(elements.query.value) : state.query;
+      syncPurchaseOutcomeToSelection();
       loadMarketplace();
     });
   }
@@ -711,11 +760,16 @@ export function buildProductsPageScript(): string {
   if (elements.buyer) {
     elements.buyer.addEventListener('change', () => {
       state.buyerSlug = normalizeText(elements.buyer.value);
+      syncPurchaseOutcomeToSelection();
       render();
     });
   }
   [elements.spendCap, elements.comment].forEach((input) => {
-    if (input) input.addEventListener('input', renderPurchaseControls);
+    if (input) input.addEventListener('input', () => {
+      syncPurchaseOutcomeToSelection();
+      renderPurchaseControls();
+      renderConfirmationModal();
+    });
   });
   loadInitial();
 })();`;

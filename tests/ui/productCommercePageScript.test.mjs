@@ -236,6 +236,12 @@ async function runProductsScript(options = {}) {
         };
       }
       if (String(url) === '/api/bot/profiles') {
+        if (options.profilesFail) {
+          return {
+            ok: true,
+            json: async () => ({ ok: false, code: 'metabot_profiles_failed', message: 'Failed to load profiles.' }),
+          };
+        }
         return {
           ok: true,
           json: async () => ({ ok: true, data: { profiles: options.profiles || [profile()] } }),
@@ -427,6 +433,11 @@ test('products marketplace confirm posts returned request, shows success, and ne
     'marketplace refresh',
   );
   assert.equal(fetchCalls.filter((call) => call.url === '/api/products/buy').length, 2);
+  assert.equal(elements['[data-products-preview]'].disabled, true);
+  assert.match(elements['[data-products-purchase-reason]'].textContent, /purchase submitted/i);
+
+  await elements['[data-products-preview]'].listeners.get('click')();
+  assert.equal(fetchCalls.filter((call) => call.url === '/api/products/buy').length, 2);
 });
 
 test('products marketplace cancellation closes confirmation modal without confirmed post', async () => {
@@ -445,6 +456,18 @@ test('products marketplace cancellation closes confirmation modal without confir
 
   assert.equal(elements['[data-products-confirmation-modal]'].hidden, true);
   assert.equal(fetchCalls.filter((call) => call.url === '/api/products/buy').length, 1);
+});
+
+test('products marketplace profile load failure remains visible after marketplace load succeeds', async () => {
+  const { elements, fetchCalls } = await runProductsScript({
+    profilesFail: true,
+  });
+
+  assert.equal(fetchCalls[0].url, '/api/bot/profiles');
+  assert.equal(fetchCalls[1].url, '/api/network/products?online=true&limit=20');
+  assert.match(elements['[data-products-error]'].textContent, /metabot_profiles_failed/);
+  assert.match(elements['[data-products-error]'].textContent, /Directory exploded|failed to load profiles/i);
+  assert.match(elements['[data-products-list]'].innerHTML, /Mobile Top-up/);
 });
 
 test('products marketplace selection renders detail, SKU choices, and disabled offline purchase controls', async () => {
