@@ -133,6 +133,7 @@ import {
   queryWalletBalances,
 } from '../core/wallet/nativeWallet';
 import type { Signer } from '../core/signing/signer';
+import { uploadLargeFileToChain } from '../core/files/uploadLargeFile';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
@@ -14324,6 +14325,33 @@ export function createDefaultMetabotDaemonHandlers(input: {
             contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
             network,
             signer: actor.signer,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          return commandFailed(
+            'file_upload_failed',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      },
+      uploadLarge: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before uploading files.');
+        }
+
+        try {
+          const network = await resolveFileUploadNetworkForHome(rawInput.network, actor.homeDir);
+          const result = await uploadLargeFileToChain({
+            filePath: normalizeText(rawInput.filePath),
+            contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
+            network,
+            signer: actor.signer,
+            verify: rawInput.verify === true,
           });
           return commandSuccess(result);
         } catch (error) {

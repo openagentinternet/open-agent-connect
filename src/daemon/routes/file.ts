@@ -3,6 +3,7 @@ import type { RouteHandler } from './types';
 
 const AVATAR_ROUTE_PATH = '/api/file/avatar';
 const FILE_UPLOAD_ROUTE_PATH = '/api/file/upload';
+const FILE_UPLOAD_LARGE_ROUTE_PATH = '/api/file/upload-large';
 const DEFAULT_P2P_CONTENT_BASE = 'http://localhost:7281';
 const AVATAR_FETCH_TIMEOUT_MS = 4500;
 const PIN_CONTENT_PATTERNS = [
@@ -137,7 +138,7 @@ export const handleFileRoutes: RouteHandler = async (context) => {
     return true;
   }
 
-  if (url.pathname !== FILE_UPLOAD_ROUTE_PATH) {
+  if (url.pathname !== FILE_UPLOAD_ROUTE_PATH && url.pathname !== FILE_UPLOAD_LARGE_ROUTE_PATH) {
     return false;
   }
 
@@ -147,9 +148,16 @@ export const handleFileRoutes: RouteHandler = async (context) => {
   }
 
   const input = await context.readJsonBody();
-  const result = handlers.file?.upload
-    ? await handlers.file.upload(input)
-    : commandFailed('not_implemented', 'File upload handler is not configured.');
+  const isLargeUpload = url.pathname === FILE_UPLOAD_LARGE_ROUTE_PATH;
+  const handler = isLargeUpload ? handlers.file?.uploadLarge : handlers.file?.upload;
+  const result = handler
+    ? await handler(input)
+    : commandFailed(
+        'not_implemented',
+        isLargeUpload
+          ? 'Large file upload handler is not configured.'
+          : 'File upload handler is not configured.',
+      );
   context.sendJson(200, result);
   return true;
 };
