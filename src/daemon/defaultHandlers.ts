@@ -14355,10 +14355,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
           });
           return commandSuccess(result);
         } catch (error) {
-          return commandFailed(
-            'file_upload_failed',
-            error instanceof Error ? error.message : String(error)
-          );
+          const message = error instanceof Error ? error.message : String(error);
+          const code = error instanceof Error ? (error as Error & { code?: unknown }).code : undefined;
+          if (code === 'large_file_upload_unavailable') {
+            return commandFailed('large_file_upload_unavailable', message);
+          }
+          return commandFailed('file_upload_failed', message);
         }
       },
     },
