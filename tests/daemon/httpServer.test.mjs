@@ -2502,6 +2502,26 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.doesNotMatch(html, /\/api\/provider\/summary/);
 });
 
+test('GET /ui/products renders the built-in Products workspace and includes Products in navigation', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/products`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /Products/);
+  assert.match(html, /href="\/ui\/products"/);
+  assert.match(html, />Products \*</);
+  assert.match(html, /data-products-shell/);
+  assert.match(html, /data-products-tab="marketplace"/);
+  assert.match(html, /data-products-tab="sell"/);
+  assert.match(html, /data-products-tab="orders"/);
+  assert.doesNotMatch(html, /\/api\/products\/publish/);
+  assert.doesNotMatch(html, /\/api\/products\/buy/);
+});
+
 test('GET /ui/refund renders buyer and seller refund operations', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());

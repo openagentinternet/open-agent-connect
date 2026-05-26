@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
+    <style>
+      .content:has(.products-shell) {
+        max-width: 1120px;
+      }
+      .products-shell {
+        display: grid;
+        gap: 14px;
+      }
+      .products-toolbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .products-toolbar h1 {
+        font-size: 24px;
+        line-height: 1.15;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .products-toolbar p {
+        max-width: 560px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .products-eyebrow,
+      .products-status,
+      .products-panel-header span {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: .06em;
+        text-transform: uppercase;
+      }
+      .products-eyebrow {
+        color: var(--accent);
+        margin-bottom: 4px;
+      }
+      .products-status {
+        border: 1px solid var(--border2);
+        border-radius: var(--radius-sm);
+        color: var(--muted);
+        padding: 4px 8px;
+        white-space: nowrap;
+      }
+      .products-tabs {
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+      .products-tabs a {
+        border: 1px solid var(--border2);
+        border-radius: var(--radius-sm);
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+        min-height: 32px;
+        padding: 6px 12px;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+      .products-tabs a:hover {
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      .products-tabs a[data-active] {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .products-workspace {
+        min-height: 260px;
+        border-top: 1px solid var(--border);
+      }
+      .products-panel {
+        padding: 18px 0;
+      }
+      .products-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      .products-panel-header h2 {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .products-panel-header span {
+        color: var(--dim);
+      }
+      .products-panel p {
+        max-width: 620px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      @media (max-width: 640px) {
+        .products-toolbar {
+          display: grid;
+        }
+        .products-status {
+          width: max-content;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
+        <div class="topbar-sep"></div>
+        <span class="topbar-title">__PAGE_TITLE__</span>
+        <div class="topbar-spacer"></div>
+        <nav class="topbar-nav">__PAGE_NAV__</nav>
+      </header>
+
+      <main class="content">
+        __PAGE_CONTENT__
+      </main>
+    </div>
+    <script>__PAGE_SCRIPT__</script>
+  </body>
+</html>

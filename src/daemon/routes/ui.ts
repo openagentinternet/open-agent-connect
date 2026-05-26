@@ -4,6 +4,7 @@ import { buildHubPageDefinition } from '../../ui/pages/hub/app';
 import { buildChatViewerPageDefinition } from '../../ui/pages/chat-viewer/app';
 import { buildMyServicesPageDefinition } from '../../ui/pages/my-services/app';
 import { buildPublishPageDefinition } from '../../ui/pages/publish/app';
+import { buildProductsPageDefinition } from '../../ui/pages/products/app';
 import { buildRefundPageDefinition } from '../../ui/pages/refund/app';
 import { buildTracePageDefinition } from '../../ui/pages/trace/app';
 import { buildBotPageDefinition } from '../../ui/pages/bot/app';
@@ -26,6 +27,7 @@ const PAGE_BUILDERS: Record<MetabotUiPageName, () => LocalUiPageDefinition> = {
   'hub': buildHubPageDefinition,
   'publish': buildPublishPageDefinition,
   'my-services': buildMyServicesPageDefinition,
+  'products': buildProductsPageDefinition,
   'trace': buildTracePageDefinition,
   'refund': buildRefundPageDefinition,
   'chat-viewer': buildChatViewerPageDefinition,
@@ -38,6 +40,7 @@ const NAV_ITEMS: Array<{ page: MetabotUiPageName; label: string }> = [
   { page: 'bot', label: 'Bot' },
   { page: 'publish', label: 'Publish' },
   { page: 'my-services', label: 'My Services' },
+  { page: 'products', label: 'Products' },
   { page: 'trace', label: 'Trace' },
   { page: 'refund', label: 'Refund' },
   { page: 'loom', label: 'Loom' },

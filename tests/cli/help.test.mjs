@@ -876,9 +876,11 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
 
   const output = JSON.parse(stdout.join(''));
   assert.deepEqual(output.commandPath, ['ui', 'open']);
+  assert.match(output.summary, /products/);
   assert.match(output.usage, /\[--from <bot-slug>\]/);
   assert.match(output.usage, /\[--session-id <session-id>\]/);
   assert.match(output.usage, /\[--service-id <service-pin-id>\]/);
+  assert.ok(output.requiredFlags.some((entry) => entry.flag === '--page' && /products/.test(entry.description)));
   assert.ok(output.optionalFlags.some((entry) => entry.flag === '--from'));
   const traceFlag = output.optionalFlags.find((entry) => entry.flag === '--trace-id');
   assert.ok(traceFlag);
@@ -887,6 +889,8 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
   assert.ok(output.optionalFlags.some((entry) => entry.flag === '--service-id'));
   assert.ok(output.successFields.includes('localUiUrl'));
   assert.ok(output.examples.includes('metabot ui open --page publish --from alice'));
+  assert.ok(output.examples.includes('metabot ui open --page products'));
+  assert.ok(output.examples.includes('metabot ui open --page products --from alice'));
 });
 
 test('runCli prints machine-readable help for `metabot chat private --help --json`', async () => {
