@@ -336,12 +336,13 @@ export function buildProductsPageScript(): string {
   };
   const renderPurchaseControls = () => {
     const reason = disabledReason();
+    const previewUnavailableReason = 'Preview purchase is not wired yet.';
     if (elements.preview) {
-      elements.preview.disabled = state.busy || Boolean(reason);
+      elements.preview.disabled = true;
       elements.preview.setAttribute('data-product-purchase-control', 'preview');
     }
     if (elements.purchaseReason) {
-      elements.purchaseReason.textContent = reason || 'Ready to preview purchase.';
+      elements.purchaseReason.textContent = reason || previewUnavailableReason;
     }
   };
   const render = () => {

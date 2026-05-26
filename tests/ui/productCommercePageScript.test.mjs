@@ -273,6 +273,17 @@ test('products marketplace query reloads online products with encoded query', as
   assert.ok(fetchCalls.some((call) => call.url === '/api/network/products?online=true&query=mobile%20top-up&limit=20'));
 });
 
+test('products marketplace keeps purchase preview disabled until the preview step is wired', async () => {
+  const { elements } = await runProductsScript({
+    buyer: 'buyer-bot',
+    spendCap: '5',
+  });
+
+  assert.match(elements['[data-products-detail]'].innerHTML, /Mobile Top-up/);
+  assert.equal(elements['[data-products-preview]'].disabled, true);
+  assert.match(elements['[data-products-purchase-reason]'].textContent, /preview purchase is not wired|next step/i);
+});
+
 test('products marketplace selection renders detail, SKU choices, and disabled offline purchase controls', async () => {
   const { elements } = await runProductsScript({
     products: [
