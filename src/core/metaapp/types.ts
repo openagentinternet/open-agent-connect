@@ -49,6 +49,11 @@ export interface MetaAppGalleryRecord {
   operation: MetaAppOperation;
   title: string;
   appName: string;
+  prompt?: string;
+  icon?: string;
+  coverImg?: string;
+  introImgs?: string[];
+  intro?: string;
   version: string;
   runtime: string;
   indexFile: string;
@@ -69,6 +74,28 @@ export interface MetaAppGalleryRecord {
   runUrl?: string;
   downloadUrl?: string;
   raw?: Record<string, unknown>;
+}
+
+export interface MetaAppPreviewSession {
+  previewId: string;
+  artifactDir: string;
+  indexFile: string;
+  createdAt: number;
+  expiresAt: number;
+  localPreviewUrl: string;
+}
+
+export interface MetaAppPreviewAsset {
+  previewId: string;
+  assetPath: string;
+  filePath: string;
+  contentType: string;
+  body: Buffer;
+}
+
+export interface MetaAppWarning {
+  code: string;
+  message: string;
 }
 
 export interface MetaAppCacheState {
