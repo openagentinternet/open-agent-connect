@@ -253,6 +253,7 @@ test('buildAgentConnectSkillpacks includes the Product Commerce skill workflow i
   assert.match(content, /product-order context enters the fulfillment conversation\/runtime context/i);
   assert.match(content, /Do not invent seller identity fields/i);
   assert.match(content, /V1 does not require `?product-review`?/i);
+  assert.doesNotMatch(content, /manual refund confirmation/i);
 });
 
 test('buildAgentConnectSkillpacks renders shared skills without host-specific adapter sections or host override flags', async () => {

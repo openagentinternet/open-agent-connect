@@ -11,12 +11,11 @@ Guide Product Commerce V1 virtual goods through the existing MetaBot/OAC CLI wit
 
 ## Routing
 
-Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason over the returned JSON envelope.
+Route product-commerce intent through `$HOME/.metabot/bin/metabot` and keep the workflow focused on product listing, discovery, purchase, and order inspection.
 
-- Prefer JSON and local daemon routes for agent workflows.
-- Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
+- Prefer JSON and local daemon routes for product workflows.
+- Open local HTML only for human browsing, trace inspection, or publish review.
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
-
 
 ## Actor Selection
 
