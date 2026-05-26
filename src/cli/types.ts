@@ -99,6 +99,7 @@ export interface CliDependencies {
   };
   file?: {
     upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    uploadLarge?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   wallet?: {
     balance?: (input: { from?: string; chain: string }) => Awaitable<MetabotCommandResult<unknown>>;

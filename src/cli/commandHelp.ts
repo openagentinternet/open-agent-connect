@@ -183,6 +183,11 @@ const FILE_UPLOAD_CHAIN_FLAG: CommandHelpFlag = {
   description: `Optional chain network override: mvc, btc, or opcat. ${CONFIGURED_WRITE_NETWORK_TEXT} DOGE is not supported for file upload.`,
 };
 
+const VERIFY_FLAG: CommandHelpFlag = {
+  flag: '--verify',
+  description: 'Verify file availability after upload when supported by the daemon path.',
+};
+
 const WALLET_CHAIN_ALL_FLAG: CommandHelpFlag = {
   flag: '--chain',
   value: '<all|mvc|btc|doge|opcat>',
@@ -997,6 +1002,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot file <subcommand>',
     subcommands: [
       { name: 'upload', summary: 'Upload one local file through the shared MetaWeb file path.' },
+      { name: 'upload-large', summary: 'Upload one local file through the daemon-backed large file path.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
@@ -1027,6 +1033,39 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot file upload --from alice --request-file file-opcat-request.json --chain opcat',
     ],
     optionalFlags: [FROM_BOT_FLAG, FILE_UPLOAD_CHAIN_FLAG, HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['file', 'upload-large'],
+    summary: 'Upload one local file through the daemon large-file route and return the daemon result.',
+    usage: 'metabot file upload-large [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|opcat>] [--verify]',
+    requiredFlags: [
+      { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
+    ],
+    requestShape: {
+      filePath: '/absolute/or/relative/path/to/file',
+      contentType: 'optional MIME type',
+      network: 'optional chain network override',
+      verify: 'optional availability verification boolean',
+    },
+    successFields: [
+      'fileName',
+      'pinId',
+      'metafileUri',
+      'txids',
+      'uploadMode',
+      'verification',
+    ],
+    failureSemantics: [
+      'Fails when the local file is missing, unreadable, or the daemon upload route rejects the write.',
+      'DOGE is not supported for file upload.',
+      'Large uploads above the direct threshold currently require MVC.',
+      'Fails with large_file_upload_unavailable when the daemon has no production large-file uploader configured.',
+    ],
+    examples: [
+      'metabot file upload-large --from alice --request-file large-file-request.json --verify',
+      'metabot file upload-large --from alice --request-file large-file-opcat-request.json --chain opcat',
+    ],
+    optionalFlags: [FROM_BOT_FLAG, FILE_UPLOAD_CHAIN_FLAG, VERIFY_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['buzz'],
