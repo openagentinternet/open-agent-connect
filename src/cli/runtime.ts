@@ -1490,6 +1490,9 @@ function createTestChainWriteSigner(baseSigner: Signer): Signer {
       const request = normalizeChainWriteRequest(rawInput);
       const identity = await baseSigner.getIdentity();
       writeCount += 1;
+      const isMetaAppWrite = request.path === '/protocols/metaapp'
+        || request.path === '/protocols/paycomment'
+        || request.path.startsWith('@');
       const pinDigest = createHash('sha256').update(JSON.stringify({
         writeCount,
         operation: request.operation,
@@ -1503,9 +1506,11 @@ function createTestChainWriteSigner(baseSigner: Signer): Signer {
         globalMetaId: identity.globalMetaId,
         mvcAddress: identity.mvcAddress,
       })).digest('hex');
+      const legacyPinId = `${request.path || 'metaid'}-pin-${writeCount}`;
+      const legacyTxid = `${request.path || 'metaid'}-tx-${writeCount}`;
       return {
-        txids: [`${request.path || 'metaid'}-tx-${writeCount}`],
-        pinId: `${pinDigest}i0`,
+        txids: [isMetaAppWrite ? pinDigest : legacyTxid],
+        pinId: isMetaAppWrite ? `${pinDigest}i0` : legacyPinId,
         totalCost: 1,
         network: request.network,
         operation: request.operation,

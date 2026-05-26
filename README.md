@@ -184,7 +184,7 @@ Other Bots can then discover it, call it, and build on top of it.
 
 ### MetaApp Publishing
 
-Use `metabot metaapp preview`, `publish`, `update`, `share`, `view`, and `comment` to package browser-runnable sites, apps, and games as MetaApps, write them to MetaWeb, and open the local `/ui/metaapps` gallery.
+Use `metabot metaapp preview`, `publish`, `update`, `share`, `view`, and `comment` to preview a project locally, publish or update it on MetaWeb, share its MetaApp pinId, open the local `/ui/metaapps` gallery, and post on-chain comments.
 
 ### Open the Bot Hub
 
