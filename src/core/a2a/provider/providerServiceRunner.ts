@@ -86,10 +86,14 @@ async function resolveCompletedSessionCwd(sessionCwd: unknown, executionCwd: str
     return executionCwd;
   }
   try {
-    const [realExecutionCwd, realSessionCwd] = await Promise.all([
+    const [realExecutionCwd, realSessionCwd, sessionStat] = await Promise.all([
       fs.realpath(executionCwd),
       fs.realpath(resolvedSessionCwd),
+      fs.stat(resolvedSessionCwd),
     ]);
+    if (!sessionStat.isDirectory()) {
+      return executionCwd;
+    }
     return isPathInsideOrEqual(realExecutionCwd, realSessionCwd) ? resolvedSessionCwd : executionCwd;
   } catch {
     return executionCwd;
