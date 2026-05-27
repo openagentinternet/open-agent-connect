@@ -2125,6 +2125,7 @@ function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceRep
           ? step.responseText
           : 'Test fake remote reply.',
         deliveryPinId: typeof step.deliveryPinId === 'string' ? step.deliveryPinId : null,
+        artifacts: [],
         ratingRequestText: typeof step.ratingRequestText === 'string' ? step.ratingRequestText : null,
         observedAt: Number.isFinite(step.observedAt)
           ? Number(step.observedAt)

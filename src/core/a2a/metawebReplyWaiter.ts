@@ -8,6 +8,10 @@ import {
   cleanServiceResultText,
   parseDeliveryMessage,
 } from '../orders/serviceOrderProtocols';
+import {
+  normalizeDeliveryArtifacts,
+  type A2ADeliveryArtifact,
+} from './deliveryArtifacts';
 
 const DEFAULT_SOCKET_ENDPOINTS = [
   { url: 'wss://api.idchat.io', path: '/socket/socket.io' },
@@ -33,6 +37,7 @@ export type AwaitMetaWebServiceReplyResult =
       deliveryPinId: string | null;
       observedAt: number | null;
       rawMessage: Record<string, unknown> | null;
+      artifacts: A2ADeliveryArtifact[];
       ratingRequestText?: string | null;
     }
   | {
@@ -317,13 +322,18 @@ export function createSocketIoMetaWebReplyWaiter(): MetaWebServiceReplyWaiter {
             }
 
             pendingDeliveryOrderTxid = normalizeOrderProtocolReference(delivery.orderTxid) || null;
+            const resultText = normalizeText(delivery.result);
             pendingDelivery = {
-              responseText: cleanServiceResultText(normalizeText(delivery.result)) || normalizeText(delivery.result),
+              responseText: cleanServiceResultText(resultText) || resultText,
               deliveryPinId: pinIdFromMessage(message),
               observedAt: typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)
                 ? message.timestamp
                 : null,
               rawMessage: normalizeObject(message),
+              artifacts: normalizeDeliveryArtifacts({
+                artifacts: delivery.artifacts,
+                resultText,
+              }),
               ratingRequestText: null,
             };
             if (timeoutHandle) {

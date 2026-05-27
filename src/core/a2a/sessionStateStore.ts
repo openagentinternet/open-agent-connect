@@ -5,6 +5,7 @@ import { resolveMetabotPaths } from '../state/paths';
 import type { A2ASessionRecord, A2ASessionRole, A2ATaskRunRecord } from './sessionTypes';
 import type { PublicStatus } from './publicStatus';
 import { ensureRuntimeLayout } from '../state/runtimeStateStore';
+import type { A2ADeliveryArtifact } from './deliveryArtifacts';
 
 const SESSION_STATE_SCHEMA_VERSION = 1;
 const MAX_TRANSCRIPT_ITEMS = 2_000;
@@ -30,6 +31,7 @@ export interface A2ATranscriptItemRecord {
   type: string;
   sender: A2ATranscriptSender;
   content: string;
+  artifacts?: A2ADeliveryArtifact[];
   metadata?: Record<string, unknown> | null;
 }
 

@@ -1,3 +1,5 @@
+import type { A2ADeliveryArtifact } from './deliveryArtifacts';
+
 export type A2AConversationDirection = 'incoming' | 'outgoing';
 export type A2AConversationMessageKind = 'private_chat' | 'order_protocol';
 export type A2AConversationProtocolTag =
@@ -26,6 +28,7 @@ export interface A2AConversationMessage {
   paymentTxid?: string | null;
   content: string;
   contentType?: string | null;
+  artifacts?: A2ADeliveryArtifact[];
   chain?: string | null;
   pinId?: string | null;
   txid?: string | null;

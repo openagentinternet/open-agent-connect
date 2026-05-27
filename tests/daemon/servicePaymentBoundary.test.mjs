@@ -31,6 +31,18 @@ const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretSto
 const MVC_PAYMENT_ADDRESS = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 const MVC_OTHER_ADDRESS = '1dice8EMZmqKvrGE4Qc9bUFf9PX3xaYDp';
 const LOWER_HEX_64_RE = /^[0-9a-f]{64}$/;
+const IMAGE_REPLY_ARTIFACT = {
+  uri: 'metafile://buyer-image-pin.png',
+  pinId: 'buyer-image-pin',
+  kind: 'image',
+  fileName: 'buyer-image.png',
+  extension: '.png',
+  contentType: 'image/png',
+  byteLength: 512,
+  sourceUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/buyer-image-pin',
+  fallbackUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/content/buyer-image-pin',
+  downloadUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/buyer-image-pin',
+};
 
 async function waitForCondition(predicate, timeoutMs = 1000, intervalMs = 20) {
   const deadline = Date.now() + timeoutMs;
@@ -1609,7 +1621,7 @@ test('buyer-side refund request write failure leaves a retry marker for paid tim
   assert.equal(trace.order.refundApplyRetryCount, 1);
 });
 
-test('buyer-side invalid non-text deliverable creates a refund request for paid orders', async (t) => {
+test('buyer-side non-text deliverable accepts structured reply artifacts and preserves trace metadata', async (t) => {
   const paymentTxid = '5'.repeat(64);
   const harness = await createServiceCallHarness(t, {
     service: { outputType: 'image' },
@@ -1630,6 +1642,138 @@ test('buyer-side invalid non-text deliverable creates a refund request for paid 
         return {
           state: 'completed',
           responseText: 'Image generation finished successfully.',
+          artifacts: [IMAGE_REPLY_ARTIFACT],
+          deliveryPinId: 'delivery-pin-with-structured-artifact',
+          observedAt: Date.now(),
+          rawMessage: null,
+          ratingRequestText: null,
+        };
+      },
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Create a weather image',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting');
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.a2a?.taskRunState === 'completed'
+    )) ?? null;
+  });
+  assert.ok(trace, 'expected structured artifact delivery to complete');
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
+
+  const sessionStore = createSessionStateStore(harness.homeDir);
+  const sessionState = await sessionStore.readState();
+  const deliveryItem = sessionState.transcriptItems.find((item) => item.id === `${trace.traceId}-provider-delivery`);
+  assert.ok(deliveryItem);
+  assert.deepEqual(deliveryItem.artifacts.map((artifact) => artifact.uri), [
+    'metafile://buyer-image-pin.png',
+  ]);
+  assert.deepEqual(deliveryItem.metadata.deliveryArtifacts.map((artifact) => artifact.uri), [
+    'metafile://buyer-image-pin.png',
+  ]);
+
+  const traceResult = await harness.handlers.trace.getTrace({ traceId: trace.traceId });
+  assert.equal(traceResult.ok, true);
+  const projectedDelivery = traceResult.data.inspector.transcriptItems.find((item) => item.id === `${trace.traceId}-provider-delivery`);
+  assert.ok(projectedDelivery);
+  assert.deepEqual(projectedDelivery.metadata.deliveryArtifacts.map((artifact) => artifact.uri), [
+    'metafile://buyer-image-pin.png',
+  ]);
+});
+
+test('buyer-side non-text deliverable accepts fallback metafile references', async (t) => {
+  const paymentTxid = '6'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    service: { outputType: 'image' },
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return {
+          state: 'completed',
+          responseText: 'Image generation finished successfully: metafile://fallback-buyer-image.png',
+          artifacts: [],
+          deliveryPinId: 'delivery-pin-with-fallback-artifact',
+          observedAt: Date.now(),
+          rawMessage: null,
+          ratingRequestText: null,
+        };
+      },
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Create a weather image',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting');
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.a2a?.taskRunState === 'completed'
+    )) ?? null;
+  });
+  assert.ok(trace, 'expected fallback metafile delivery to complete');
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
+});
+
+test('buyer-side invalid non-text deliverable creates a refund request for paid orders', async (t) => {
+  const paymentTxid = '7'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    service: { outputType: 'image' },
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return {
+          state: 'completed',
+          responseText: 'Image generation finished successfully.',
+          artifacts: [],
           deliveryPinId: 'delivery-pin-without-artifact',
           observedAt: Date.now(),
           rawMessage: null,
@@ -1670,7 +1814,7 @@ test('buyer-side invalid non-text deliverable creates a refund request for paid 
 });
 
 test('buyer-side provider daemon execution failure creates a refund request after paid execution dispatch', async (t) => {
-  const paymentTxid = '6'.repeat(64);
+  const paymentTxid = '8'.repeat(64);
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;

@@ -10,6 +10,7 @@ import type {
   A2AConversationPeerProfile,
   A2AOrderConversationSession,
 } from './conversationTypes';
+import { normalizeDeliveryArtifacts } from './deliveryArtifacts';
 import { classifySimplemsgContent } from './simplemsgClassifier';
 
 const SENSITIVE_RAW_METADATA_KEYS = new Set([
@@ -34,6 +35,7 @@ export interface PersistA2AConversationMessageInput {
     direction: 'incoming' | 'outgoing';
     content: string;
     contentType?: string | null;
+    artifacts?: unknown;
     chain?: string | null;
     pinId?: string | null;
     txid?: string | null;
@@ -212,6 +214,10 @@ export async function persistA2AConversationMessage(
     ? Math.trunc(Number(input.message.timestamp))
     : Date.now();
   const classification = classifySimplemsgContent(input.message.content);
+  const artifacts = normalizeDeliveryArtifacts({
+    artifacts: input.message.artifacts,
+    resultText: input.message.content,
+  });
   const classifiedOrderTxid = classification.kind === 'order_protocol'
     ? classification.orderTxid
     : null;
@@ -238,6 +244,7 @@ export async function persistA2AConversationMessage(
     paymentTxid: normalizeText(input.message.paymentTxid) || null,
     content: String(input.message.content ?? ''),
     contentType: normalizeText(input.message.contentType) || 'text/plain',
+    ...(artifacts.length ? { artifacts } : {}),
     chain: normalizeText(input.message.chain) || null,
     pinId: normalizeText(input.message.pinId) || null,
     txid,

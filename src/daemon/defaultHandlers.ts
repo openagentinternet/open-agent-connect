@@ -236,6 +236,7 @@ import {
   type AwaitMetaWebServiceReplyResult,
   type MetaWebServiceReplyWaiter,
 } from '../core/a2a/metawebReplyWaiter';
+import type { A2ADeliveryArtifact } from '../core/a2a/deliveryArtifacts';
 import {
   buildOrderEndMessage,
   buildOrderStatusMessage,
@@ -2806,6 +2807,7 @@ async function appendA2ATranscriptItems(
     type: string;
     sender: 'caller' | 'provider' | 'system';
     content: string;
+    artifacts?: A2ADeliveryArtifact[];
     metadata?: Record<string, unknown> | null;
   }>,
 ): Promise<void> {
@@ -5139,6 +5141,7 @@ async function applyCallerReplyResult(input: {
     result: runnerResult,
   });
   const publicStatus = await persistSessionMutation(input.sessionStateStore, mutation);
+  const replyArtifacts = input.reply.state === 'completed' ? input.reply.artifacts : [];
   const transcriptItems: Parameters<typeof appendA2ATranscriptItems>[1] = [
     {
       id: `${input.trace.traceId}-provider-delivery`,
@@ -5148,10 +5151,12 @@ async function applyCallerReplyResult(input: {
       type: 'assistant',
       sender: 'provider',
       content: input.reply.state === 'completed' ? input.reply.responseText : '',
+      ...(replyArtifacts.length ? { artifacts: replyArtifacts } : {}),
       metadata: {
         publicStatus: publicStatus.status,
         event: mutation.event,
         deliveryPinId: input.reply.state === 'completed' ? input.reply.deliveryPinId : null,
+        deliveryArtifacts: replyArtifacts,
       },
     },
   ];
@@ -7170,6 +7175,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
     if (inputReply.reply.state !== 'completed') {
       return { ok: true };
     }
+    if (inputReply.reply.artifacts.length > 0) {
+      return { ok: true };
+    }
     if (
       containsDeliverableReference(inputReply.reply.responseText)
       || containsDeliverableReference(inputReply.reply.rawMessage)
@@ -9070,6 +9078,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         state: 'completed',
         responseText: result.resultText ?? '',
         deliveryPinId: result.resultDeliveryPinId ?? null,
+        artifacts: [],
         observedAt: ratingRequest.ratingRequestedAt
           ?? (Number.isFinite(inputMessage.timestamp) ? Number(inputMessage.timestamp) : Date.now()),
         rawMessage: null,

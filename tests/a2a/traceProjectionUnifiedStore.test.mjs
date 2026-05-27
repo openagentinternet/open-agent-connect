@@ -30,6 +30,12 @@ const ORDER_SESSION_ID = `a2a-order-${ORDER_TXID}`;
 const BASE_TIME = 1_777_000_000_000;
 const LOCAL_AVATAR = '/content/f77ba5db20c19242f9a5e5025357d29ad83f897f3700d2b1972f6ce1485098d7i0';
 const PEER_AVATAR = '/content/607b2da84bbd01e01397bb6ea8cd09e4f9b0e87552dd0d0e24b828f18884dd30i0';
+const DELIVERY_IMAGE_ARTIFACT = {
+  uri: 'metafile://weather-chart-1.png',
+  fileName: 'weather-chart.png',
+  contentType: 'image/png',
+  byteLength: 4096,
+};
 
 async function createProfileFixture() {
   const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-a2a-trace-projection-'));
@@ -200,6 +206,7 @@ async function seedUnifiedConversation(homeDir) {
         servicePinId: 'service-pin-1',
         serviceName: 'Weather Oracle',
         result: '# Forecast\n\nSunny with light wind.\n\nmetafile://weather-chart-1',
+        artifacts: [DELIVERY_IMAGE_ARTIFACT],
         deliveredAt: BASE_TIME + 60,
       })}`,
     }),
@@ -317,10 +324,103 @@ test('getUnifiedA2ATraceSessionForProfile maps service-order ids back to the pee
   assert.equal(delivery.content, '# Forecast\n\nSunny with light wind.\n\nmetafile://weather-chart-1');
   assert.equal(delivery.metadata.protocolTag, 'DELIVERY');
   assert.equal(delivery.metadata.deliveryPinId, 'pin-4');
+  assert.deepEqual(delivery.artifacts.map((artifact) => artifact.uri), [
+    'metafile://weather-chart-1.png',
+    'metafile://weather-chart-1',
+  ]);
+  assert.deepEqual(delivery.metadata.deliveryArtifacts.map((artifact) => artifact.uri), [
+    'metafile://weather-chart-1.png',
+    'metafile://weather-chart-1',
+  ]);
+  assert.deepEqual(detail.deliveryArtifacts.map((artifact) => artifact.uri), [
+    'metafile://weather-chart-1.png',
+    'metafile://weather-chart-1',
+  ]);
+  assert.equal(detail.deliveryArtifacts[0].kind, 'image');
+  assert.equal(detail.deliveryArtifacts[0].contentType, 'image/png');
   assert.equal(detail.resultText, delivery.content);
   assert.equal(detail.responseText, delivery.content);
   assert.equal(detail.ratingRequestText, 'Please rate this service.');
   assert.equal(detail.inspector.transcriptItems.length, 5);
+});
+
+test('persistA2AConversationMessage stores normalized artifacts and old messages still load', async () => {
+  const { homeDir } = await createProfileFixture();
+  const local = {
+    profileSlug: 'alice',
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    name: 'Alice',
+    chatPublicKey: 'alice-chat-public-key',
+  };
+  const peer = {
+    globalMetaId: PEER_GLOBAL_META_ID,
+    name: 'Remote Bot',
+    chatPublicKey: 'remote-chat-public-key',
+  };
+
+  const persisted = await persistA2AConversationMessage({
+    homeDir,
+    local,
+    peer,
+    message: {
+      direction: 'incoming',
+      content: `[DELIVERY:${ORDER_TXID}] ${JSON.stringify({
+        result: 'Image done: metafile://fallback-chart.png',
+        servicePinId: 'service-pin-1',
+      })}`,
+      artifacts: [
+        {
+          uri: 'metafile://structured-chart.png',
+          fileName: '/tmp/provider/structured-chart.png',
+          contentType: 'image/png',
+          byteLength: 2048,
+          localPath: '/tmp/provider/structured-chart.png',
+        },
+      ],
+      pinId: 'delivery-pin-with-artifacts',
+      txid: 'delivery-tx-with-artifacts',
+      chain: 'mvc',
+      timestamp: BASE_TIME + 10,
+    },
+    orderSession: {
+      role: 'caller',
+      state: 'awaiting_delivery',
+      orderTxid: ORDER_TXID,
+      paymentTxid: PAYMENT_TXID,
+      servicePinId: 'service-pin-1',
+      serviceName: 'Weather Oracle',
+      outputType: 'image',
+    },
+  });
+
+  assert.deepEqual(persisted.artifacts.map((artifact) => artifact.uri), [
+    'metafile://structured-chart.png',
+    'metafile://fallback-chart.png',
+  ]);
+  assert.equal(persisted.artifacts[0].fileName, 'structured-chart.png');
+  assert.equal(Object.hasOwn(persisted.artifacts[0], 'localPath'), false);
+
+  const store = createA2AConversationStore({ homeDir, local, peer });
+  const conversation = await store.readConversation();
+  assert.deepEqual(conversation.messages[0].artifacts.map((artifact) => artifact.uri), [
+    'metafile://structured-chart.png',
+    'metafile://fallback-chart.png',
+  ]);
+
+  await store.writeConversation({
+    ...conversation,
+    messages: [
+      ...conversation.messages,
+      createMessage(99, {
+        messageId: 'old-message-without-artifacts',
+        content: 'old text-only record',
+      }),
+    ],
+  });
+  const reloaded = await store.readConversation();
+  const oldMessage = reloaded.messages.find((message) => message.messageId === 'old-message-without-artifacts');
+  assert.ok(oldMessage);
+  assert.equal(oldMessage.artifacts, undefined);
 });
 
 test('default trace handlers read unified A2A sessions before legacy session-state fallback', async () => {
