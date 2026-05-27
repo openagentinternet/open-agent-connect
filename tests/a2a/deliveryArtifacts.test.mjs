@@ -49,6 +49,15 @@ test('parseMetafileUri strips trailing punctuation from text URIs', () => {
   assert.equal(artifact.extension, '.png');
 });
 
+test('parseMetafileUri keeps query and hash data out of pin and extension parsing', () => {
+  const artifact = parseMetafileUri('metafile://abc123i0.mp4?download=1#preview');
+
+  assert.equal(artifact.uri, 'metafile://abc123i0.mp4?download=1#preview');
+  assert.equal(artifact.pinId, 'abc123i0');
+  assert.equal(artifact.extension, '.mp4');
+  assert.equal(artifact.kind, 'video');
+});
+
 test('extractDeliveryArtifactsFromText dedupes URIs while preserving first-seen order', () => {
   const artifacts = extractDeliveryArtifactsFromText(
     'first metafile://onei0.png second metafile://twoi0.mp4 duplicate metafile://onei0.png!',
@@ -58,6 +67,17 @@ test('extractDeliveryArtifactsFromText dedupes URIs while preserving first-seen 
     artifacts.map((artifact) => artifact.uri),
     ['metafile://onei0.png', 'metafile://twoi0.mp4'],
   );
+});
+
+test('extractDeliveryArtifactsFromText normalizes wrapped metafile URIs', () => {
+  const artifacts = extractDeliveryArtifactsFromText(
+    '[metafile://abc123i0.png] `metafile://abc123i0.png` {metafile://abc123i0.png}',
+  );
+
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0].uri, 'metafile://abc123i0.png');
+  assert.equal(artifacts[0].extension, '.png');
+  assert.equal(artifacts[0].kind, 'image');
 });
 
 test('parseMetafileUri derives file-indexer URLs from buildMetafileContentUrls', () => {

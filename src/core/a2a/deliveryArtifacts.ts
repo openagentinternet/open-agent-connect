@@ -31,7 +31,7 @@ const IMAGE_EXTENSIONS = new Set([
 
 const VIDEO_EXTENSIONS = new Set(['.m4v', '.mov', '.mp4', '.webm']);
 const AUDIO_EXTENSIONS = new Set(['.flac', '.m4a', '.mp3', '.ogg', '.wav']);
-const TRAILING_TEXT_PUNCTUATION = /[),.;:!?]+$/;
+const TRAILING_TEXT_PUNCTUATION = /[)\]}`.,;:!?]+$/;
 const METAFILE_URI_PATTERN = /metafile:\/\/[^\s<>"']+/gi;
 
 function normalizeExtension(extension: string | null): string | null {
