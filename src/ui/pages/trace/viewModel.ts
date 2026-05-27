@@ -14,6 +14,20 @@ export type A2ASessionState =
 
 export type A2ATranscriptSender = 'caller' | 'provider' | 'system';
 export type MessageTone = 'local' | 'peer' | 'system' | 'tool';
+export type TraceDeliveryArtifactKind = 'image' | 'video' | 'audio' | 'file';
+
+export interface TraceDeliveryArtifact {
+  uri: string;
+  pinId: string;
+  kind: TraceDeliveryArtifactKind;
+  fileName: string | null;
+  extension: string | null;
+  contentType: string | null;
+  byteLength: number | null;
+  sourceUrl: string;
+  fallbackUrl: string;
+  downloadUrl: string;
+}
 
 export interface TraceSessionListItem {
   sessionId: string;
@@ -41,6 +55,7 @@ export interface TraceSessionMessage {
   sender: A2ATranscriptSender;
   content: string;
   metadata: Record<string, unknown> | null;
+  deliveryArtifacts: TraceDeliveryArtifact[];
   tone: MessageTone;
 }
 
@@ -65,6 +80,22 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function normalizeNullableText(value: unknown): string | null {
+  const normalized = normalizeText(value);
+  return normalized || null;
+}
+
+function normalizeByteLength(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function normalizeArtifactKind(value: unknown): TraceDeliveryArtifactKind {
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized === 'image' || normalized === 'video' || normalized === 'audio' || normalized === 'file'
+    ? normalized
+    : 'file';
+}
+
 function coerceArray(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
     ? value.filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry)) as Array<Record<string, unknown>>
@@ -74,6 +105,51 @@ function coerceArray(value: unknown): Array<Record<string, unknown>> {
 function coerceObject(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
+}
+
+function coerceDeliveryArtifact(value: unknown): TraceDeliveryArtifact | null {
+  const record = coerceObject(value);
+  if (!record) return null;
+
+  const uri = normalizeText(record.uri);
+  if (!uri) return null;
+
+  return {
+    uri,
+    pinId: normalizeText(record.pinId),
+    kind: normalizeArtifactKind(record.kind),
+    fileName: normalizeNullableText(record.fileName),
+    extension: normalizeNullableText(record.extension),
+    contentType: normalizeNullableText(record.contentType),
+    byteLength: normalizeByteLength(record.byteLength),
+    sourceUrl: normalizeText(record.sourceUrl),
+    fallbackUrl: normalizeText(record.fallbackUrl),
+    downloadUrl: normalizeText(record.downloadUrl),
+  };
+}
+
+function collectDeliveryArtifacts(item: Record<string, unknown>, metadata: Record<string, unknown> | null): TraceDeliveryArtifact[] {
+  const deliveryPayload = coerceObject(metadata?.deliveryPayload);
+  const sources = [
+    item.artifacts,
+    metadata?.deliveryArtifacts,
+    deliveryPayload?.artifacts,
+  ];
+  const seen = new Set<string>();
+  const artifacts: TraceDeliveryArtifact[] = [];
+
+  for (const source of sources) {
+    for (const entry of Array.isArray(source) ? source : []) {
+      const artifact = coerceDeliveryArtifact(entry);
+      if (!artifact || seen.has(artifact.uri)) {
+        continue;
+      }
+      seen.add(artifact.uri);
+      artifacts.push(artifact);
+    }
+  }
+
+  return artifacts;
 }
 
 function normalizeTimestamp(value: unknown): number {
@@ -203,6 +279,7 @@ export function buildSessionDetailViewModel(
       const timestamp = normalizeTimestamp(item.timestamp);
       const taskRunId = normalizeText(item.taskRunId) || null;
       const metadata = coerceObject(item.metadata);
+      const deliveryArtifacts = collectDeliveryArtifacts(item, metadata);
 
       return {
         id,
@@ -213,6 +290,7 @@ export function buildSessionDetailViewModel(
         sender,
         content,
         metadata,
+        deliveryArtifacts,
         tone: getMessageTone(sender, role, type),
       } satisfies TraceSessionMessage;
     })

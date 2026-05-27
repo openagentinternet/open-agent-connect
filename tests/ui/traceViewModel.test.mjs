@@ -10,6 +10,19 @@ const {
 
 const NOW = 1_775_000_100_000;
 
+const IMAGE_ARTIFACT = {
+  uri: 'metafile://image-pin.png',
+  pinId: 'image-pin',
+  kind: 'image',
+  fileName: 'image-pin.png',
+  extension: '.png',
+  contentType: 'image/png',
+  byteLength: 1234,
+  sourceUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/image-pin',
+  fallbackUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/content/image-pin',
+  downloadUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/image-pin',
+};
+
 test('buildSessionListViewModel returns empty array for no sessions', () => {
   const result = buildSessionListViewModel([], NOW);
   assert.deepEqual(result, []);
@@ -163,6 +176,50 @@ test('buildSessionDetailViewModel builds session detail with messages', () => {
   assert.equal(detail.messages[0].tone, 'system');
   assert.equal(detail.messages[1].tone, 'local');   // caller in caller session
   assert.equal(detail.messages[2].tone, 'peer');    // provider in caller session
+});
+
+test('buildSessionDetailViewModel exposes structured artifacts from transcript items', () => {
+  const detail = buildSessionDetailViewModel({
+    session: { sessionId: 'session-artifacts', role: 'caller', state: 'completed' },
+    transcriptItems: [
+      {
+        id: 'delivery-artifact',
+        timestamp: NOW,
+        type: 'delivery',
+        sender: 'provider',
+        content: 'Here is the image.',
+        artifacts: [IMAGE_ARTIFACT],
+      },
+    ],
+  });
+
+  assert.ok(detail !== null);
+  assert.deepEqual(detail.messages[0].deliveryArtifacts, [IMAGE_ARTIFACT]);
+});
+
+test('buildSessionDetailViewModel accepts deliveryArtifacts metadata fallbacks', () => {
+  const payloadArtifact = { ...IMAGE_ARTIFACT, uri: 'metafile://payload-pin.png', pinId: 'payload-pin' };
+  const detail = buildSessionDetailViewModel({
+    session: { sessionId: 'session-artifacts', role: 'caller', state: 'completed' },
+    transcriptItems: [
+      {
+        id: 'metadata-artifact',
+        timestamp: NOW,
+        type: 'delivery',
+        sender: 'provider',
+        content: 'Metadata artifact.',
+        metadata: {
+          deliveryArtifacts: [IMAGE_ARTIFACT],
+          deliveryPayload: {
+            artifacts: [payloadArtifact],
+          },
+        },
+      },
+    ],
+  });
+
+  assert.ok(detail !== null);
+  assert.deepEqual(detail.messages[0].deliveryArtifacts, [IMAGE_ARTIFACT, payloadArtifact]);
 });
 
 test('buildSessionDetailViewModel reads legacy trace messages from inspector transcript fallback', () => {
