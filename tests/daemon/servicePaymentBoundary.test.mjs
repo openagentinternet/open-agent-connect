@@ -2748,6 +2748,97 @@ test('/api services.execute resolves non-text provider artifacts into direct tra
   assert.match(runnerItem.content, /metafile:\/\/provider-artifact-1\.png/);
   assert.deepEqual(runnerItem.metadata.deliveryArtifacts.map((artifact) => artifact.kind), ['image']);
   assertNoProviderLocalPathLeak(runnerItem, filePath);
+
+  const traceResult = await harness.handlers.trace.getTrace({ traceId: 'trace-provider-direct-artifact' });
+  assert.equal(traceResult.ok, true);
+  const projectedDelivery = traceResult.data.inspector.transcriptItems.find((item) => (
+    item.type === 'delivery'
+    && item.id === 'trace-provider-direct-artifact-provider-delivery'
+  ));
+  assert.ok(projectedDelivery);
+  assert.match(projectedDelivery.content, /metafile:\/\/provider-artifact-1\.png/);
+  assert.deepEqual(projectedDelivery.artifacts.map((artifact) => artifact.kind), ['image']);
+  assert.deepEqual(projectedDelivery.metadata.deliveryArtifacts.map((artifact) => artifact.kind), ['image']);
+  assertNoProviderLocalPathLeak(projectedDelivery, filePath);
+});
+
+test('/api services.execute upload failure marks direct seller order and trace failed', async (t) => {
+  const paymentTxid = '3'.repeat(64);
+  const uploadCalls = [];
+  const { outputDir, filePath } = await createProviderOutputFixture(t, 'direct-upload-fails.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmOutput: `Direct image complete.\nartifactPath: ${filePath}`,
+    llmSessionCwd: outputDir,
+    providerArtifactUploadLargeFile: async (input) => {
+      uploadCalls.push(input);
+      const error = new Error(`simulated direct artifact upload failure at ${filePath}`);
+      error.code = 'provider_artifact_upload_failed';
+      throw error;
+    },
+  });
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-artifact-failure',
+    externalConversationId: 'direct:buyer:provider',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Create a weather image',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'provider_artifact_upload_failed');
+  assert.match(result.message, /simulated direct artifact upload failure/);
+  assertNoProviderLocalPathLeak(result.message, filePath);
+  assert.equal(uploadCalls.length, 1);
+
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.paymentTxid === paymentTxid);
+  assert.ok(sellerOrder, 'expected direct execution seller order');
+  assert.equal(sellerOrder.state, 'failed');
+  assert.equal(sellerOrder.endReason, 'provider_artifact_upload_failed');
+  assert.match(sellerOrder.failureReason, /simulated direct artifact upload failure/);
+  assertNoProviderLocalPathLeak(sellerOrder, filePath);
+
+  const trace = state.traces.find((entry) => entry.traceId === 'trace-provider-direct-artifact-failure');
+  assert.ok(trace, 'expected failed direct provider artifact trace');
+  assert.equal(trace.a2a.publicStatus, 'remote_failed');
+  assert.equal(trace.a2a.latestEvent, 'provider_failed');
+  assert.equal(trace.a2a.taskRunState, 'failed');
+  assertNoProviderLocalPathLeak(trace, filePath);
+
+  const sessionState = await createSessionStateStore(harness.homeDir).readState();
+  const taskRun = sessionState.taskRuns.find((entry) => entry.runId === trace.a2a.taskRunId);
+  assert.ok(taskRun);
+  assert.equal(taskRun.state, 'failed');
+  const failureItem = sessionState.transcriptItems.find((item) => item.id === 'trace-provider-direct-artifact-failure-provider-artifact-failure');
+  assert.ok(failureItem);
+  assert.equal(failureItem.type, 'failure');
+  assert.match(failureItem.content, /simulated direct artifact upload failure/);
+  assertNoProviderLocalPathLeak(failureItem, filePath);
+
+  const traceResult = await harness.handlers.trace.getTrace({ traceId: 'trace-provider-direct-artifact-failure' });
+  assert.equal(traceResult.ok, true);
+  assert.equal(traceResult.data.a2a.publicStatus, 'remote_failed');
+  assert.equal(traceResult.data.a2a.taskRunState, 'failed');
+  const projectedFailure = traceResult.data.inspector.transcriptItems.find((item) => item.id === failureItem.id);
+  assert.ok(projectedFailure);
+  assertNoProviderLocalPathLeak(traceResult.data, filePath);
 });
 
 test('/api services.execute rejects missing buyer globalMetaId before seller order persistence', async (t) => {

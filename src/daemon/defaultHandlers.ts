@@ -336,6 +336,36 @@ function readErrorMessage(error: unknown, code: string, fallback: string): strin
   return withoutCode || fallback;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function sanitizeProviderArtifactFailureText(value: string, localPaths: Array<string | null | undefined> = []): string {
+  let sanitized = normalizeText(value);
+  for (const localPath of localPaths) {
+    const normalizedPath = normalizeText(localPath);
+    if (!normalizedPath) {
+      continue;
+    }
+    sanitized = sanitized.replace(new RegExp(escapeRegExp(normalizedPath), 'g'), '[uploaded artifact]');
+  }
+  return sanitized
+    .replace(/\bfile:\/\/[^\s"'<>]+/g, '[uploaded artifact]')
+    .replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\s"'<>]+/g, '[uploaded artifact]')
+    .replace(/(^|[\s(])\/(?:Users|home|tmp|var|private|Volumes)[^\s"'<>)]*/g, '$1[uploaded artifact]')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+}
+
+function readProviderArtifactFailureText(
+  error: unknown,
+  code: string,
+  fallback: string,
+  localPaths: Array<string | null | undefined> = [],
+): string {
+  return sanitizeProviderArtifactFailureText(readErrorMessage(error, code, fallback), localPaths) || fallback;
+}
+
 const buyerAutoRatingPublishChainsByTrace = new Map<string, Promise<void>>();
 const pendingBuyerRatingPublishesByTrace = new Map<string, Promise<MetabotCommandResult<Record<string, unknown>>>>();
 
@@ -14018,13 +14048,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const baseResponseText = normalizeText(runnerResult.responseText);
         let responseText = baseResponseText;
         let deliveryArtifacts: A2ADeliveryArtifact[] = [];
+        const providerExecutionCwd = normalizeText(runnerResult.metadata?.sessionCwd) || null;
         if (!isTextLikeProviderOutputType(service.outputType)) {
           try {
             const artifactNetwork = await resolveFileUploadNetworkForHome(null, runtimeStateStore.paths.profileRoot);
             const resolvedDelivery = await resolveProviderDeliveryArtifacts({
               responseText: baseResponseText,
               outputType: service.outputType,
-              executionCwd: normalizeText(runnerResult.metadata?.sessionCwd) || null,
+              executionCwd: providerExecutionCwd,
               network: artifactNetwork,
               signer,
               uploadLargeFile: providerArtifactUploadLargeFile,
@@ -14034,11 +14065,154 @@ export function createDefaultMetabotDaemonHandlers(input: {
             deliveryArtifacts = resolvedDelivery.artifacts;
           } catch (error) {
             const failureCode = readErrorCode(error, 'provider_artifact_delivery_failed');
-            const failureText = readErrorMessage(
+            const failureText = readProviderArtifactFailureText(
               error,
               failureCode,
               'Provider artifact delivery preparation failed.',
+              [providerExecutionCwd],
             );
+            const artifactFailureResult = createServiceRunnerFailedResult(failureCode, failureText);
+            const failedApplied = sessionEngine.applyProviderRunnerResult({
+              session: received.session,
+              taskRun: received.taskRun,
+              result: artifactFailureResult,
+            });
+            const failedStatus = await persistSessionMutation(sessionStateStore, failedApplied);
+            await appendA2ATranscriptItems(sessionStateStore, [
+              {
+                id: `${traceId}-provider-artifact-failure`,
+                sessionId: received.session.sessionId,
+                taskRunId: failedApplied.taskRun.runId,
+                timestamp: failedApplied.session.updatedAt,
+                type: 'failure',
+                sender: 'system',
+                content: failureText,
+                metadata: {
+                  publicStatus: failedStatus.status,
+                  event: failedApplied.event,
+                  runnerState: 'failed',
+                  paymentTxid: execution.payment.paymentTxid,
+                  orderReference: execution.payment.orderReference,
+                },
+              },
+            ]);
+            const trace = buildSessionTrace({
+              traceId,
+              channel: 'a2a',
+              exportRoot: runtimeStateStore.paths.exportsRoot,
+              session: {
+                id: `session-${traceId}`,
+                title: `${service.displayName} Execution`,
+                type: 'a2a',
+                metabotId: state.identity.metabotId,
+                peerGlobalMetaId: execution.buyer.globalMetaId || null,
+                peerName: execution.buyer.name || execution.buyer.host || null,
+                externalConversationId: execution.externalConversationId || null,
+              },
+              order: {
+                id: `order-${traceId}`,
+                role: 'seller',
+                serviceId: service.currentPinId,
+                serviceName: service.displayName,
+                paymentTxid: execution.payment.paymentTxid,
+                paymentCommitTxid: execution.payment.paymentCommitTxid,
+                orderReference: execution.payment.orderReference,
+                paymentCurrency: execution.payment.paymentCurrency || service.currency,
+                paymentAmount: execution.payment.paymentAmount || service.price,
+                paymentChain: execution.payment.paymentChain,
+                settlementKind: execution.payment.settlementKind,
+                mrc20Ticker: execution.payment.mrc20Ticker,
+                mrc20Id: execution.payment.mrc20Id,
+                providerSkill: service.providerSkill,
+              },
+              a2a: {
+                sessionId: failedApplied.session.sessionId,
+                taskRunId: failedApplied.taskRun.runId,
+                role: failedApplied.session.role,
+                publicStatus: failedStatus.status,
+                latestEvent: failedApplied.event,
+                taskRunState: failedApplied.taskRun.state,
+                callerGlobalMetaId: failedApplied.session.callerGlobalMetaId,
+                callerName: execution.buyer.name || execution.buyer.host || null,
+                providerGlobalMetaId: failedApplied.session.providerGlobalMetaId,
+                servicePinId: failedApplied.session.servicePinId,
+              },
+              providerRuntime: providerRuntimeDiagnostics,
+            });
+            const artifacts = await exportSessionArtifacts({
+              trace,
+              transcript: {
+                sessionId: trace.session.id,
+                title: trace.session.title,
+                messages: [
+                  {
+                    id: `${trace.traceId}-buyer`,
+                    type: 'user',
+                    timestamp: trace.createdAt,
+                    content: execution.request.userTask,
+                    metadata: {
+                      taskContext: execution.request.taskContext || null,
+                      buyerHost: execution.buyer.host || null,
+                      buyerGlobalMetaId: execution.buyer.globalMetaId || null,
+                      paymentTxid: execution.payment.paymentTxid,
+                      orderReference: execution.payment.orderReference,
+                    },
+                  },
+                  {
+                    id: `${trace.traceId}-provider-failure`,
+                    type: 'assistant',
+                    timestamp: trace.createdAt,
+                    content: failureText,
+                    metadata: {
+                      failed: true,
+                      providerSessionId: failedApplied.session.sessionId,
+                      providerTaskRunId: failedApplied.taskRun.runId,
+                      providerEvent: failedApplied.event,
+                    },
+                  },
+                ],
+              },
+            });
+            const failedOrder = buildProviderSellerOrderRecord({
+              state,
+              service,
+              buyerGlobalMetaId: execution.buyer.globalMetaId,
+              lifecycleState: 'failed',
+              traceId,
+              orderMessageId,
+              orderTxid: '',
+              orderReference: execution.payment.orderReference,
+              paymentTxid: execution.payment.paymentTxid,
+              paymentAmount: execution.payment.paymentAmount || service.price,
+              paymentCurrency: execution.payment.paymentCurrency || service.currency,
+              paymentChain: execution.payment.paymentChain,
+              paymentCommitTxid: execution.payment.paymentCommitTxid,
+              settlementKind: execution.payment.settlementKind,
+              mrc20Ticker: execution.payment.mrc20Ticker,
+              mrc20Id: execution.payment.mrc20Id,
+              session: failedApplied.session,
+              taskRun: failedApplied.taskRun,
+              publicStatus: failedStatus.status,
+              latestEvent: failedApplied.event,
+              providerRuntime: providerRuntimeDiagnostics,
+              failureReason: failureText,
+              endReason: failureCode,
+              receivedAt: received.session.createdAt,
+              startedAt: directStartedAt,
+              endedAt: failedApplied.taskRun.completedAt ?? failedApplied.session.updatedAt,
+              updatedAt: failedApplied.session.updatedAt,
+            });
+            await runtimeStateStore.updateState((current) => ({
+              ...current,
+              traces: [
+                {
+                  ...trace,
+                  artifacts,
+                },
+                ...current.traces.filter((entry) => entry.traceId !== trace.traceId),
+              ],
+              sellerOrders: upsertSellerOrderRecord(current.sellerOrders, failedOrder),
+            }));
             return commandFailed(failureCode, failureText);
           }
         }
@@ -14059,6 +14233,27 @@ export function createDefaultMetabotDaemonHandlers(input: {
               ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
             },
           },
+          ...(deliveryArtifacts.length
+            ? [{
+              id: `${traceId}-provider-delivery`,
+              sessionId: received.session.sessionId,
+              taskRunId: applied.taskRun.runId,
+              timestamp: applied.session.updatedAt,
+              type: 'delivery' as const,
+              sender: 'provider' as const,
+              content: providerMessage,
+              artifacts: deliveryArtifacts,
+              metadata: {
+                publicStatus: appliedStatus.status,
+                event: applied.event,
+                runnerState: runnerResult.state,
+                paymentTxid: execution.payment.paymentTxid,
+                orderReference: execution.payment.orderReference,
+                servicePinId: service.currentPinId,
+                deliveryArtifacts,
+              },
+            }]
+            : []),
         ]);
 
         const trace = buildSessionTrace({
