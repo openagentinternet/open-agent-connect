@@ -213,6 +213,46 @@ function assertNoProviderLocalPathLeak(value, localPath) {
   assert.equal(serialized.includes(localPath), false, `expected no provider local path leak: ${localPath}`);
 }
 
+async function assertProviderSessionNotCompleted(homeDir, traceId) {
+  const sessionState = await createSessionStateStore(homeDir).readState();
+  const sessions = sessionState.sessions.filter((entry) => entry.traceId === traceId);
+  assert.ok(sessions.length > 0, `expected session state for ${traceId}`);
+  const sessionIds = new Set(sessions.map((entry) => entry.sessionId));
+  const taskRuns = sessionState.taskRuns.filter((entry) => sessionIds.has(entry.sessionId));
+  const taskRunIds = new Set(taskRuns.map((entry) => entry.runId));
+
+  assert.equal(sessions.some((entry) => entry.state === 'completed'), false);
+  assert.equal(taskRuns.some((entry) => entry.state === 'completed'), false);
+  assert.equal(sessionState.publicStatusSnapshots.some((entry) => (
+    sessionIds.has(entry.sessionId)
+    && (entry.status === 'completed' || entry.rawEvent === 'provider_completed')
+  )), false);
+  assert.equal(sessionState.transcriptItems.some((entry) => (
+    sessionIds.has(entry.sessionId)
+    && (!entry.taskRunId || taskRunIds.has(entry.taskRunId))
+    && (
+      entry.metadata?.event === 'provider_completed'
+      || entry.metadata?.publicStatus === 'completed'
+    )
+  )), false);
+}
+
+async function assertProviderSessionCompleted(homeDir, traceId) {
+  const sessionState = await createSessionStateStore(homeDir).readState();
+  const session = sessionState.sessions.find((entry) => entry.traceId === traceId);
+  assert.ok(session, `expected completed session state for ${traceId}`);
+  assert.equal(session.state, 'completed');
+  const taskRun = sessionState.taskRuns.find((entry) => entry.runId === session.currentTaskRunId);
+  assert.ok(taskRun, `expected completed task run for ${traceId}`);
+  assert.equal(taskRun.state, 'completed');
+  assert.equal(sessionState.publicStatusSnapshots.some((entry) => (
+    entry.sessionId === session.sessionId
+    && entry.taskRunId === taskRun.runId
+    && entry.status === 'completed'
+    && entry.rawEvent === 'provider_completed'
+  )), true);
+}
+
 function buildMvcPaymentRawTx(address, satoshis) {
   const txComposer = new TxComposer();
   txComposer.appendP2PKHOutput({
@@ -2446,6 +2486,44 @@ test('inbound provider ORDER image output uploads artifact and sends delivery be
   });
 });
 
+test('inbound provider ORDER image output does not complete session while artifact upload is pending', async (t) => {
+  const orderTxid = '4'.repeat(64);
+  const paymentTxid = '5'.repeat(64);
+  const traceId = 'trace-provider-4444444444444444';
+  const uploadCalls = [];
+  const uploadMock = createProviderArtifactUploadMock(uploadCalls);
+  let uploadWindowError = null;
+  const { outputDir, filePath } = await createProviderOutputFixture(t, 'pending-window-image.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmOutput: `Created pending-window image.\nartifactPath: ${filePath}`,
+    llmSessionCwd: outputDir,
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: async (input) => {
+      try {
+        await assertProviderSessionNotCompleted(harness.homeDir, traceId);
+      } catch (error) {
+        uploadWindowError = error;
+      }
+      return uploadMock(input);
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(uploadWindowError, null, uploadWindowError?.message);
+  assert.equal(uploadCalls.length, 1);
+  await assertProviderSessionCompleted(harness.homeDir, traceId);
+});
+
 test('inbound provider ORDER video output uploads artifact as video', async (t) => {
   await runProviderArtifactDeliveryCase(t, {
     outputType: 'video',
@@ -2847,6 +2925,56 @@ test('/api services.execute resolves non-text provider artifacts into direct tra
   assert.deepEqual(projectedDelivery.artifacts.map((artifact) => artifact.kind), ['image']);
   assert.deepEqual(projectedDelivery.metadata.deliveryArtifacts.map((artifact) => artifact.kind), ['image']);
   assertNoProviderLocalPathLeak(projectedDelivery, filePath);
+});
+
+test('/api services.execute image output does not complete session while artifact upload is pending', async (t) => {
+  const paymentTxid = '6'.repeat(64);
+  const traceId = 'trace-provider-direct-artifact-pending-state';
+  const uploadCalls = [];
+  const uploadMock = createProviderArtifactUploadMock(uploadCalls);
+  let uploadWindowError = null;
+  const { outputDir, filePath } = await createProviderOutputFixture(t, 'direct-pending-window-image.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmOutput: `Direct pending-window image complete.\nartifactPath: ${filePath}`,
+    llmSessionCwd: outputDir,
+    providerArtifactUploadLargeFile: async (input) => {
+      try {
+        await assertProviderSessionNotCompleted(harness.homeDir, traceId);
+      } catch (error) {
+        uploadWindowError = error;
+      }
+      return uploadMock(input);
+    },
+  });
+
+  const result = await harness.handlers.services.execute({
+    traceId,
+    externalConversationId: 'direct:buyer:provider',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Create a weather image',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(uploadWindowError, null, uploadWindowError?.message);
+  assert.equal(uploadCalls.length, 1);
+  await assertProviderSessionCompleted(harness.homeDir, traceId);
 });
 
 test('/api services.execute upload failure marks direct seller order and trace failed', async (t) => {

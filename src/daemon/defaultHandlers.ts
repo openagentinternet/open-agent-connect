@@ -8489,14 +8489,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
     const providerRuntimeDiagnostics = buildProviderRuntimeDiagnostics(service.providerSkill, runnerResult);
 
-    const applied = sessionEngine.applyProviderRunnerResult({
-      session: received.session,
-      taskRun: received.taskRun,
-      result: runnerResult,
-    });
-    const appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+    const deferCompletedPersistence = runnerResult.state === 'completed'
+      && !isTextLikeProviderOutputType(service.outputType);
+    let applied: ReturnType<typeof sessionEngine.applyProviderRunnerResult> | undefined;
+    let appliedStatus: Awaited<ReturnType<typeof persistSessionMutation>> | undefined;
+    if (!deferCompletedPersistence) {
+      applied = sessionEngine.applyProviderRunnerResult({
+        session: received.session,
+        taskRun: received.taskRun,
+        result: runnerResult,
+      });
+      appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+    }
 
     if (runnerResult.state !== 'completed') {
+      if (!applied || !appliedStatus) {
+        throw new Error('Provider runner result was not persisted before handling incomplete state.');
+      }
       const failureMessage = runnerResult.state === 'failed'
         ? runnerResult.message
         : runnerResult.question;
@@ -8883,6 +8892,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
         providerRuntime: providerRuntimeDiagnostics,
       });
       return commandFailed('provider_delivery_failed', failureText);
+    }
+
+    if (!applied || !appliedStatus) {
+      applied = sessionEngine.applyProviderRunnerResult({
+        session: received.session,
+        taskRun: received.taskRun,
+        result: runnerResult,
+      });
+      appliedStatus = await persistSessionMutation(sessionStateStore, applied);
     }
 
     let ratingWrite: { pinId: string | null; txids: string[] } = { pinId: null, txids: [] };
@@ -13889,13 +13907,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
           },
         });
         const providerRuntimeDiagnostics = buildProviderRuntimeDiagnostics(service.providerSkill, runnerResult);
-        const applied = sessionEngine.applyProviderRunnerResult({
-          session: received.session,
-          taskRun: received.taskRun,
-          result: runnerResult,
-        });
-        const appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+        const deferCompletedPersistence = runnerResult.state === 'completed'
+          && !isTextLikeProviderOutputType(service.outputType);
+        let applied: ReturnType<typeof sessionEngine.applyProviderRunnerResult> | undefined;
+        let appliedStatus: Awaited<ReturnType<typeof persistSessionMutation>> | undefined;
+        if (!deferCompletedPersistence) {
+          applied = sessionEngine.applyProviderRunnerResult({
+            session: received.session,
+            taskRun: received.taskRun,
+            result: runnerResult,
+          });
+          appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+        }
         if (runnerResult.state !== 'completed') {
+          if (!applied || !appliedStatus) {
+            throw new Error('Provider runner result was not persisted before handling incomplete state.');
+          }
           const failureText = runnerResult.state === 'failed'
             ? runnerResult.message
             : runnerResult.question;
@@ -14218,6 +14245,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }
         }
         const providerMessage = responseText;
+        if (!applied || !appliedStatus) {
+          applied = sessionEngine.applyProviderRunnerResult({
+            session: received.session,
+            taskRun: received.taskRun,
+            result: runnerResult,
+          });
+          appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+        }
         await appendA2ATranscriptItems(sessionStateStore, [
           {
             id: `${traceId}-provider-runner-result`,
