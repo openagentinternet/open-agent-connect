@@ -781,7 +781,72 @@ test('createProviderServiceRunner retries fallback when primary completes with e
   await cleanupProfileHome(homeDir);
 });
 
-test('createProviderServiceRunner rejects non-text deliverables after session start without fallback retry', async () => {
+test('createProviderServiceRunner allows non-text deliverables after session start without fallback retry', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+      runtime({ id: 'runtime-fallback', provider: 'claude-code' }),
+    ],
+  });
+  let fallbackCalls = 0;
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        return 'session-primary';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          runtimeId: 'runtime-primary',
+          provider: 'codex',
+          status: 'completed',
+          prompt: 'Forecast tomorrow',
+          cwd: homeDir,
+          createdAt: '2026-05-07T00:00:00.000Z',
+          result: {
+            status: 'completed',
+            output: 'Reading the weather.oracle skill to render the image.\n\n/tmp/provider-image.png',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+    getFallbackRuntime: async () => {
+      fallbackCalls += 1;
+      return runtime({ id: 'runtime-fallback', provider: 'claude-code' });
+    },
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.equal(result.responseText, '/tmp/provider-image.png');
+  assert.equal(result.runtimeId, 'runtime-primary');
+  assert.equal(result.sessionId, 'session-primary');
+  assert.equal(result.metadata.outputType, 'image');
+  assert.equal(result.metadata.runtimeId, 'runtime-primary');
+  assert.equal(result.metadata.sessionId, 'session-primary');
+  assert.equal(result.metadata.sessionCwd, homeDir);
+  assert.equal(result.metadata.providerSkill, 'weather.oracle');
+  assert.equal(calls.length, 1);
+  assert.equal(fallbackCalls, 0);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner treats markdown deliverables as text-like output', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   await runtimeStore.write({
     version: 1,
@@ -800,7 +865,7 @@ test('createProviderServiceRunner rejects non-text deliverables after session st
     bindingStore,
     llmExecutor: llmExecutorForTerminalResult({
       status: 'completed',
-      output: '/tmp/provider-image.png',
+      output: '# Weather Oracle\n\nSunny, 25C',
       durationMs: 10,
     }, calls),
     canStartRuntime: () => true,
@@ -810,10 +875,12 @@ test('createProviderServiceRunner rejects non-text deliverables after session st
     },
   });
 
-  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+  const result = await runner.execute(baseOrder({ outputType: 'markdown' }));
 
-  assert.equal(result.state, 'failed');
-  assert.equal(result.code, 'provider_deliverable_invalid');
+  assert.equal(result.state, 'completed');
+  assert.equal(result.responseText, '# Weather Oracle\n\nSunny, 25C');
+  assert.equal(result.metadata.outputType, 'markdown');
+  assert.equal(result.runtimeId, 'runtime-primary');
   assert.equal(calls.length, 1);
   assert.equal(fallbackCalls, 0);
   await cleanupProfileHome(homeDir);

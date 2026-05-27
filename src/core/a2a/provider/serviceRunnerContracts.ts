@@ -19,6 +19,10 @@ export interface ProviderServiceRunnerRequest {
 export interface ProviderServiceRunnerCompletedResult {
   state: 'completed';
   responseText: string;
+  /**
+   * Runner-level metadata can include outputType, sessionCwd, runtimeId, and sessionId
+   * for later provider-side artifact resolution without adding upload or signer coupling here.
+   */
   metadata?: Record<string, unknown> | null;
 }
 

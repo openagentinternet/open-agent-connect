@@ -123,7 +123,7 @@ function buildPaidOrderSystemPrompt(input: {
 
 function isTextOutputType(value: unknown): boolean {
   const outputType = normalizeText(value).toLowerCase();
-  return !outputType || outputType === 'text';
+  return !outputType || outputType === 'text' || outputType === 'markdown';
 }
 
 function resolveSkillRootAbsolutePath(
@@ -749,19 +749,6 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
           },
         );
       }
-      if (!isTextOutputType(order.outputType)) {
-        return createRuntimeFailedResult(
-          'provider_deliverable_invalid',
-          'Non-text provider deliverables require validation and upload support before delivery.',
-          {
-            runtime,
-            providerSkill: order.providerSkill,
-            sessionId,
-            selection,
-          },
-        );
-      }
-
       return {
         state: 'completed',
         responseText,
@@ -769,6 +756,8 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
           runtimeId: runtime.id,
           sessionId,
           providerSkill: order.providerSkill,
+          outputType: normalizeText(order.outputType) || 'text',
+          sessionCwd: session?.cwd ?? null,
           fallbackSelected: selection.fallbackSelected,
           selection,
         },
