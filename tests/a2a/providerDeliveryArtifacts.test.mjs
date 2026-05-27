@@ -587,6 +587,27 @@ test('missing bare SSH private key path rejects before fallback scan can upload 
   assert.equal(error.message.includes('.ssh/id_ed25519'), false);
 });
 
+test('missing backslash bare SSH private key path rejects before fallback scan can upload public file', async () => {
+  const workspace = await tempWorkspace();
+  const uploadCalls = [];
+  await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: '.ssh\\id_ed25519',
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('.ssh\\id_ed25519'), false);
+});
+
 test('missing dot-relative SSH private key path rejects before fallback scan can upload public file', async () => {
   const workspace = await tempWorkspace();
   const uploadCalls = [];
@@ -626,6 +647,28 @@ test('missing explicit SSH private key marker rejects as secret before missing-a
   );
 
   assert.equal(uploadCalls.length, 0);
+});
+
+test('missing backslash explicit SSH private key markers reject as secret before missing-artifact handling', async () => {
+  for (const marker of ['artifactPath', 'attachment']) {
+    const workspace = await tempWorkspace();
+    const uploadCalls = [];
+    await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+
+    await assertRejectCode(
+      resolveProviderDeliveryArtifacts({
+        responseText: `${marker}: .ssh\\id_ed25519`,
+        outputType: 'file',
+        executionCwd: workspace,
+        signer: fakeSigner(),
+        uploadLargeFile: fakeUploader(uploadCalls),
+        verifyAvailability: okVerifier(),
+      }),
+      'provider_artifact_secret_rejected',
+    );
+
+    assert.equal(uploadCalls.length, 0);
+  }
 });
 
 test('local file upload uses an injected uploader with verify true', async () => {

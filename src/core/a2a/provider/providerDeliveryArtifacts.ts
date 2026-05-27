@@ -227,7 +227,7 @@ async function extractExistingBarePathCandidates(
 }
 
 function isSecretLikeFileName(filePath: string): boolean {
-  const normalizedPath = filePath.split(path.sep).join('/');
+  const normalizedPath = filePath.replace(/[\\/]+/g, '/');
   const lowerPath = normalizedPath.toLowerCase();
   const segments = lowerPath.split('/').filter(Boolean);
   const base = path.basename(lowerPath);
