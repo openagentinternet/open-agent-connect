@@ -168,6 +168,31 @@ test('existing metafile URI reuse scrubs local workspace path prose', async () =
   assert.equal(result.responseText.includes(workspace), false);
 });
 
+test('existing metafile URI reuse scrubs relative local path prose', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'out/chart.png');
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: 'Saved image to out/chart.png and public artifact metafile://abc123i0.png',
+    outputType: 'image',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(uploadCalls),
+    verifyAvailability: okVerifier(verifierCalls),
+  });
+
+  assert.deepEqual(verifierCalls, ['abc123i0']);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://abc123i0.png');
+  assert.match(result.responseText, /metafile:\/\/abc123i0\.png/);
+  assert.equal(result.responseText.includes('out/chart.png'), false);
+  assert.equal(result.responseText.includes('chart.png'), false);
+  assert.equal(result.responseText.includes(workspace), false);
+});
+
 test('existing metafile URI verifier failure maps to provider_artifact_unavailable', async () => {
   await assertRejectCode(
     resolveProviderDeliveryArtifacts({

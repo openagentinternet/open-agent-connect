@@ -589,6 +589,36 @@ function scrubLocalPathMentions(responseText: string, scrubPaths: string[]): str
   return scrubbed.replace(/[ \t]+/g, ' ').trim();
 }
 
+async function collectRelativeExecutionPathMentions(
+  responseText: string,
+  executionCwd: string,
+): Promise<string[]> {
+  const mentions = new Set<string>();
+  const tokenPattern = /(?<![A-Za-z0-9_.:/\\-])(?:\.{1,2}[\\/])?[A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)+(?![A-Za-z0-9_.:/\\-])/g;
+  const matches = String(responseText || '').matchAll(tokenPattern);
+
+  for (const match of matches) {
+    const token = match[0];
+    if (!token || path.isAbsolute(token)) {
+      continue;
+    }
+
+    const absolutePath = path.resolve(executionCwd, token);
+    let realPath: string;
+    try {
+      realPath = await fs.realpath(absolutePath);
+    } catch {
+      continue;
+    }
+
+    if (containsPath(executionCwd, realPath)) {
+      mentions.add(token);
+    }
+  }
+
+  return [...mentions];
+}
+
 async function scrubExecutionWorkspacePathMentions(
   responseText: string,
   executionCwd?: string | null,
@@ -618,7 +648,8 @@ async function scrubExecutionWorkspacePathMentions(
     scrubbed = scrubbed.replace(new RegExp(pattern, 'g'), '[uploaded artifact]');
   }
 
-  return scrubbed.replace(/[ \t]+/g, ' ').trim();
+  const relativeMentions = await collectRelativeExecutionPathMentions(scrubbed, realExecutionCwd);
+  return scrubLocalPathMentions(scrubbed, relativeMentions);
 }
 
 async function uploadResolvedLocalArtifact(input: {
