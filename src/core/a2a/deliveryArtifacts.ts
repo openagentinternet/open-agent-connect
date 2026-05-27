@@ -34,8 +34,9 @@ const AUDIO_EXTENSIONS = new Set(['.flac', '.m4a', '.mp3', '.ogg', '.wav']);
 const TRAILING_TEXT_PUNCTUATION = /[)\]}`.,;:!?]+$/;
 const METAFILE_URI_PATTERN = /metafile:\/\/[^\s<>"']+/gi;
 const UNSAFE_METAFILE_URI_CHARACTER = /[\s\x00-\x1f\x7f]/;
+const UNSAFE_CONTENT_TYPE_CHARACTER = /[\x00-\x1f\x7f]/;
 const CONTENT_TYPE_PATTERN =
-  /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?:\s*;\s*[a-z0-9][a-z0-9!#$&^_.+-]*=[a-z0-9][a-z0-9!#$&^_.+:-]*)*$/i;
+  /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?: *; *[a-z0-9][a-z0-9!#$&^_.+-]*=[a-z0-9][a-z0-9!#$&^_.+:-]*)*$/i;
 
 function normalizeExtension(extension: string | null): string | null {
   const trimmed = String(extension || '').trim();
@@ -105,6 +106,10 @@ function valueAsByteLength(value: unknown): number | null {
 }
 
 function valueAsSafeContentType(value: unknown): string | null {
+  if (typeof value !== 'string' || UNSAFE_CONTENT_TYPE_CHARACTER.test(value)) {
+    return null;
+  }
+
   const trimmed = valueAsTrimmedString(value);
   if (
     !trimmed ||

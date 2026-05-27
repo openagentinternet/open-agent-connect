@@ -238,21 +238,48 @@ test('normalizeDeliveryArtifacts ignores path-like structured content types', ()
   }
 });
 
-test('normalizeDeliveryArtifacts keeps valid structured content types as kind hints', () => {
-  const artifact = normalizeDeliveryArtifacts({
-    artifacts: [
-      {
-        uri: 'metafile://abc123i0.bin',
-        contentType: 'image/png',
-      },
-    ],
-  })[0];
-  const summary = buildDeliveryArtifactSummary(artifact);
+test('normalizeDeliveryArtifacts rejects structured content types with control characters', () => {
+  for (const contentType of [
+    'image/png;\nfoo=bar',
+    'image/png;\rfoo=bar',
+    'image/png;\tfoo=bar',
+    'image/png;\u0001foo=bar',
+  ]) {
+    const artifact = normalizeDeliveryArtifacts({
+      artifacts: [
+        {
+          uri: 'metafile://abc123i0.png',
+          contentType,
+        },
+      ],
+    })[0];
+    const summary = buildDeliveryArtifactSummary(artifact);
 
-  assert.equal(artifact.extension, '.bin');
-  assert.equal(artifact.contentType, 'image/png');
-  assert.equal(artifact.kind, 'image');
-  assert.match(summary, /Content-Type: image\/png/);
+    assert.equal(artifact.contentType, null);
+    assert.equal(artifact.kind, 'image');
+    assert.doesNotMatch(summary, /Content-Type:/);
+    assert.doesNotMatch(summary, /foo=bar/);
+    assert.doesNotMatch(summary, /[\r\t\u0001]/);
+  }
+});
+
+test('normalizeDeliveryArtifacts keeps valid structured content types as kind hints', () => {
+  for (const contentType of ['image/png', 'text/plain; charset=utf-8', 'application/json; profile=v1']) {
+    const artifact = normalizeDeliveryArtifacts({
+      artifacts: [
+        {
+          uri: 'metafile://abc123i0.bin',
+          contentType,
+        },
+      ],
+    })[0];
+    const summary = buildDeliveryArtifactSummary(artifact);
+
+    assert.equal(artifact.extension, '.bin');
+    assert.equal(artifact.contentType, contentType);
+    assert.equal(artifact.kind, contentType === 'image/png' ? 'image' : 'file');
+    assert.match(summary, new RegExp(`Content-Type: ${contentType.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  }
 });
 
 test('normalizeDeliveryArtifacts ignores malformed structured entries', () => {
@@ -385,6 +412,37 @@ test('buildDeliveryArtifactSummary does not emit injected lines from malformed U
   assert.equal(summary, '');
   assert.doesNotMatch(summary, /Download: javascript:/);
   assert.doesNotMatch(summary, /[\u0000-\u001f]/);
+});
+
+test('buildDeliveryArtifactSummary does not emit injected content type continuations', () => {
+  for (const contentType of [
+    'image/png;\nDownload: javascript:alert(1)',
+    'image/png;\rDownload: javascript:alert(1)',
+    'image/png;\tfoo=bar',
+    'image/png;\u0002foo=bar',
+  ]) {
+    const summary = buildDeliveryArtifactSummary({
+      uri: 'metafile://abc123i0.png',
+      pinId: 'abc123i0',
+      kind: 'image',
+      fileName: 'abc123i0.png',
+      extension: '.png',
+      contentType,
+      byteLength: null,
+      sourceUrl: 'ignored',
+      fallbackUrl: 'ignored',
+      downloadUrl: 'ignored',
+    });
+
+    assert.doesNotMatch(summary, /Content-Type:/);
+    assert.doesNotMatch(summary, /javascript:alert/);
+    assert.doesNotMatch(summary, /foo=bar/);
+    assert.doesNotMatch(summary, /[\r\t\u0002]/);
+    assert.deepEqual(
+      summary.split('\n').map((line) => line.split(':', 1)[0]),
+      ['Artifact', 'PINID', 'File', 'Download'],
+    );
+  }
 });
 
 test('normalizeDeliveryArtifacts ignores structured URL fields that could expose local paths', () => {
