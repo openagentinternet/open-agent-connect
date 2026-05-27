@@ -550,6 +550,27 @@ test('fallback workspace scan rejects mixed secret and public candidates before 
   assert.equal(uploadCalls.length, 0);
 });
 
+test('fallback workspace scan rejects hidden config secrets before uploading public candidates', async () => {
+  const workspace = await tempWorkspace();
+  const uploadCalls = [];
+  await writeWorkspaceFile(workspace, '.config/.npmrc', '//registry.npmjs.org/:_authToken=secret');
+  await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'Generated the requested file.',
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+});
+
 test('bare secret basename response rejects before fallback scan can upload a public file', async () => {
   const workspace = await tempWorkspace();
   const uploadCalls = [];

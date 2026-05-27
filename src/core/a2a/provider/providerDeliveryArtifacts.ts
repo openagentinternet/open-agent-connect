@@ -429,10 +429,7 @@ function shouldVisitScanDirectory(directoryName: string, ignoredDirectories: Set
   if (ignoredDirectories.has(directoryName)) {
     return false;
   }
-  if (!directoryName.startsWith('.')) {
-    return true;
-  }
-  return directoryName === '.ssh' || directoryName === '.aws';
+  return true;
 }
 
 async function scanWorkspaceForCandidates(
