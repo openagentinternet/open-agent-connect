@@ -158,6 +158,50 @@ test('normalizeDeliveryArtifacts uses content type only as a kind hint', () => {
   assert.equal(artifacts[0].kind, 'image');
 });
 
+test('normalizeDeliveryArtifacts ignores path-like structured content types', () => {
+  for (const contentType of [
+    '/tmp/private/file.png',
+    './private/file.png',
+    '../private/file.png',
+    'file:///Users/example/secret/file.png',
+    'C:\\Users\\example\\secret\\file.png',
+  ]) {
+    const artifact = normalizeDeliveryArtifacts({
+      artifacts: [
+        {
+          uri: 'metafile://abc123i0.mp4',
+          contentType,
+        },
+      ],
+    })[0];
+    const summary = buildDeliveryArtifactSummary(artifact);
+
+    assert.equal(artifact.contentType, null);
+    assert.equal(artifact.kind, 'video');
+    assert.doesNotMatch(summary, /Content-Type:/);
+    assert.doesNotMatch(summary, /\/tmp\/private/);
+    assert.doesNotMatch(summary, /file:\/\/\/Users\/example\/secret/);
+    assert.doesNotMatch(summary, /C:\\Users\\example\\secret/);
+  }
+});
+
+test('normalizeDeliveryArtifacts keeps valid structured content types as kind hints', () => {
+  const artifact = normalizeDeliveryArtifacts({
+    artifacts: [
+      {
+        uri: 'metafile://abc123i0.bin',
+        contentType: 'image/png',
+      },
+    ],
+  })[0];
+  const summary = buildDeliveryArtifactSummary(artifact);
+
+  assert.equal(artifact.extension, '.bin');
+  assert.equal(artifact.contentType, 'image/png');
+  assert.equal(artifact.kind, 'image');
+  assert.match(summary, /Content-Type: image\/png/);
+});
+
 test('normalizeDeliveryArtifacts ignores malformed structured entries', () => {
   const artifacts = normalizeDeliveryArtifacts({
     artifacts: [

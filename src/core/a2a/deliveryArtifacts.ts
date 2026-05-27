@@ -33,6 +33,8 @@ const VIDEO_EXTENSIONS = new Set(['.m4v', '.mov', '.mp4', '.webm']);
 const AUDIO_EXTENSIONS = new Set(['.flac', '.m4a', '.mp3', '.ogg', '.wav']);
 const TRAILING_TEXT_PUNCTUATION = /[)\]}`.,;:!?]+$/;
 const METAFILE_URI_PATTERN = /metafile:\/\/[^\s<>"']+/gi;
+const CONTENT_TYPE_PATTERN =
+  /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?:\s*;\s*[a-z0-9][a-z0-9!#$&^_.+-]*=[a-z0-9][a-z0-9!#$&^_.+:-]*)*$/i;
 
 function normalizeExtension(extension: string | null): string | null {
   const trimmed = String(extension || '').trim();
@@ -99,6 +101,24 @@ function valueAsByteLength(value: unknown): number | null {
   return value;
 }
 
+function valueAsSafeContentType(value: unknown): string | null {
+  const trimmed = valueAsTrimmedString(value);
+  if (
+    !trimmed ||
+    trimmed.startsWith('/') ||
+    trimmed.startsWith('./') ||
+    trimmed.startsWith('../') ||
+    trimmed.includes('\\') ||
+    trimmed.includes('://') ||
+    /^[a-z]:/i.test(trimmed) ||
+    !CONTENT_TYPE_PATTERN.test(trimmed)
+  ) {
+    return null;
+  }
+
+  return trimmed.toLowerCase();
+}
+
 function normalizeStructuredDeliveryArtifact(value: unknown): A2ADeliveryArtifact | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -110,7 +130,7 @@ function normalizeStructuredDeliveryArtifact(value: unknown): A2ADeliveryArtifac
     return null;
   }
 
-  const contentType = valueAsTrimmedString(entry.contentType);
+  const contentType = valueAsSafeContentType(entry.contentType);
   const fileName = valueAsSafeFileName(entry.fileName) || base.fileName;
 
   return {
