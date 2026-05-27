@@ -2442,7 +2442,8 @@ async function runProviderArtifactDeliveryCase(t, { outputType, fileName, expect
 
   assert.equal(result.ok, true);
   assert.equal(uploadCalls.length, 1);
-  assert.equal(uploadCalls[0].filePath, output.filePath);
+  assert.notEqual(uploadCalls[0].filePath, output.filePath);
+  assert.equal(path.basename(uploadCalls[0].filePath), path.basename(output.filePath));
   assert.equal(uploadCalls[0].network, 'mvc');
   assert.equal(uploadCalls[0].verify, true);
 

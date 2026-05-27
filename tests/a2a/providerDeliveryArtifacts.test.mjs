@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, realpath, symlink, truncate, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readFile, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -82,6 +82,14 @@ function fakeUploader(calls = [], overrides = {}) {
     calls.push(input);
     return fakeUploadResult(input, overrides);
   };
+}
+
+async function assertUploaderReceivedSnapshot(uploadCall, originalPath) {
+  const originalRealPath = await realpath(originalPath);
+  assert.notEqual(uploadCall.filePath, originalRealPath);
+  assert.equal(path.basename(uploadCall.filePath), path.basename(originalPath));
+  assert.equal(path.extname(uploadCall.filePath), path.extname(originalPath));
+  assert.equal(await lstat(uploadCall.filePath).then(() => true, () => false), false);
 }
 
 async function assertRejectCode(promise, code) {
@@ -846,7 +854,7 @@ test('explicit local path marker resolves relative to executionCwd', async () =>
   });
 
   assert.equal(uploadCalls.length, 1);
-  assert.equal(uploadCalls[0].filePath, await realpath(filePath));
+  await assertUploaderReceivedSnapshot(uploadCalls[0], filePath);
   assert.equal(uploadCalls[0].verify, true);
   assert.equal(result.artifacts.length, 1);
   assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
@@ -949,7 +957,7 @@ test('fallback workspace scan accepts nested session cwd inside attempt root', a
   });
 
   assert.equal(uploadCalls.length, 1);
-  assert.equal(uploadCalls[0].filePath, await realpath(filePath));
+  await assertUploaderReceivedSnapshot(uploadCalls[0], filePath);
   assert.equal(result.artifacts.length, 1);
   assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
 });
@@ -969,7 +977,7 @@ test('fallback workspace scan scrubs local path prose for the resolved artifact'
   });
 
   assert.equal(uploadCalls.length, 1);
-  assert.equal(uploadCalls[0].filePath, await realpath(filePath));
+  await assertUploaderReceivedSnapshot(uploadCalls[0], filePath);
   assert.equal(result.artifacts.length, 1);
   assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
   assert.equal(result.responseText.includes(filePath), false);
@@ -994,7 +1002,7 @@ test('fallback workspace scan scrubs file URI workspace path prose for the resol
   });
 
   assert.equal(uploadCalls.length, 1);
-  assert.equal(uploadCalls[0].filePath, await realpath(filePath));
+  await assertUploaderReceivedSnapshot(uploadCalls[0], filePath);
   assert.equal(result.artifacts.length, 1);
   assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
   assert.equal(result.responseText.includes(filePath), false);
@@ -1021,7 +1029,7 @@ test('fallback workspace scan scrubs local directory path prose for the resolved
   });
 
   assert.equal(uploadCalls.length, 1);
-  assert.equal(uploadCalls[0].filePath, await realpath(filePath));
+  await assertUploaderReceivedSnapshot(uploadCalls[0], filePath);
   assert.equal(result.artifacts.length, 1);
   assert.equal(result.responseText.includes(artifactDirectory), false);
   assert.equal(result.responseText.includes(`${workspace}/out`), false);
@@ -1175,7 +1183,7 @@ test('fallback workspace scan scrubs execution workspace root path prose for the
   });
 
   assert.equal(uploadCalls.length, 1);
-  assert.equal(uploadCalls[0].filePath, await realpath(filePath));
+  await assertUploaderReceivedSnapshot(uploadCalls[0], filePath);
   assert.equal(result.artifacts.length, 1);
   assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
   assert.equal(result.responseText.includes(executionCwd), false);
@@ -1587,6 +1595,64 @@ test('local file upload uses an injected uploader with verify true', async () =>
   assert.equal(typeof uploadCalls[0].signer.writePin, 'function');
   assert.equal(typeof uploadCalls[0].verifyAvailability, 'function');
   assert.equal(typeof uploadCalls[0].largeUploader.upload, 'function');
+});
+
+test('local file upload snapshots artifact before uploader can follow a swapped symlink', async () => {
+  const workspace = await tempWorkspace();
+  const outsideWorkspace = await tempWorkspace();
+  const candidatePath = await writeWorkspaceFile(workspace, 'out/chart.png', 'safe image bytes');
+  const outsidePath = await writeWorkspaceFile(outsideWorkspace, 'chart.png', 'outside image bytes');
+  const originalCandidateRealPath = await realpath(candidatePath);
+  const outsideRealPath = await realpath(outsidePath);
+  const uploadCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: 'filePath: ./out/chart.png',
+    outputType: 'image',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: async (input) => {
+      await rm(candidatePath, { force: true });
+      await symlink(outsidePath, candidatePath);
+      const uploadRealPath = await realpath(input.filePath);
+      const uploadedBytes = await readFile(input.filePath, 'utf8');
+      uploadCalls.push({ input, uploadRealPath, uploadedBytes });
+      return fakeUploadResult(input);
+    },
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(uploadCalls.length, 1);
+  assert.notEqual(uploadCalls[0].input.filePath, originalCandidateRealPath);
+  assert.notEqual(uploadCalls[0].uploadRealPath, outsideRealPath);
+  assert.equal(uploadCalls[0].uploadedBytes, 'safe image bytes');
+  assert.equal(path.basename(uploadCalls[0].input.filePath), 'chart.png');
+  assert.equal(path.extname(uploadCalls[0].input.filePath), '.png');
+  assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
+});
+
+test('local file upload removes snapshot path after uploader failure', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'out/chart.png', 'safe image bytes');
+  let snapshotPath = null;
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'filePath: ./out/chart.png',
+      outputType: 'image',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: async (input) => {
+        snapshotPath = input.filePath;
+        throw new Error(`simulated upload failure at ${input.filePath}`);
+      },
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_upload_failed',
+  );
+
+  assert.ok(snapshotPath);
+  assert.equal(await lstat(snapshotPath).then(() => true, () => false), false);
 });
 
 test('direct small-file upload result becomes one artifact and final response text with no local path', async () => {

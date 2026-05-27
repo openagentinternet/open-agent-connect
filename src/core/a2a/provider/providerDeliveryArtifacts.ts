@@ -1,4 +1,5 @@
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {
   appendDeliveryArtifactSummaries,
@@ -54,6 +55,11 @@ interface ResolvedProviderFile {
   workspaceRootCwd: string;
   requestedExecutionCwd: string;
   requestedWorkspaceRootCwd: string;
+}
+
+interface ProviderArtifactUploadSnapshot {
+  filePath: string;
+  directory: string;
 }
 
 const PROVIDER_ARTIFACT_MARKER_PATTERN =
@@ -1003,6 +1009,70 @@ async function scrubExecutionWorkspacePathMentions(
   return scrubLocalPathMentions(scrubbed, relativeMentions);
 }
 
+async function snapshotProviderArtifactForUpload(
+  file: ResolvedProviderFile,
+): Promise<ProviderArtifactUploadSnapshot> {
+  let snapshotDirectory: string | null = null;
+  let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
+
+  try {
+    snapshotDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'oac-provider-artifact-upload-'));
+    const snapshotPath = path.join(snapshotDirectory, path.basename(file.filePath));
+    const noFollow = (fsConstants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0;
+    handle = await fs.open(file.filePath, fsConstants.O_RDONLY | noFollow);
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw providerArtifactError('provider_artifact_missing', 'Provider artifact must be a regular file.');
+    }
+    if (stat.size > LARGE_UPLOAD_MAX_BYTES) {
+      throw providerArtifactError(
+        'provider_artifact_too_large',
+        `Provider artifact exceeds the maximum upload size of ${LARGE_UPLOAD_MAX_BYTES} bytes.`,
+      );
+    }
+
+    const currentRealPath = await fs.realpath(file.filePath);
+    if (
+      !containsPath(file.executionCwd, currentRealPath)
+      || !containsPath(file.workspaceRootCwd, currentRealPath)
+    ) {
+      throw providerArtifactError(
+        'provider_artifact_outside_workspace',
+        'Provider artifact path resolves outside the provider attempt workspace.',
+      );
+    }
+
+    const artifactBytes = await handle.readFile();
+    if (artifactBytes.byteLength > LARGE_UPLOAD_MAX_BYTES) {
+      throw providerArtifactError(
+        'provider_artifact_too_large',
+        `Provider artifact exceeds the maximum upload size of ${LARGE_UPLOAD_MAX_BYTES} bytes.`,
+      );
+    }
+    await fs.writeFile(snapshotPath, artifactBytes, { mode: 0o600 });
+    return {
+      filePath: snapshotPath,
+      directory: snapshotDirectory,
+    };
+  } catch (error) {
+    if (handle) {
+      await handle.close().catch(() => undefined);
+      handle = null;
+    }
+    if (snapshotDirectory) {
+      await fs.rm(snapshotDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
+    if (error instanceof ProviderDeliveryArtifactError) {
+      throw error;
+    }
+    throw providerArtifactError('provider_artifact_missing', 'Provider artifact file was not found.');
+  } finally {
+    if (handle) {
+      await handle.close().catch(() => undefined);
+    }
+  }
+}
+
 async function uploadResolvedLocalArtifact(input: {
   file: ResolvedProviderFile;
   expectedFamily: ProviderExpectedArtifactFamily;
@@ -1013,11 +1083,12 @@ async function uploadResolvedLocalArtifact(input: {
   largeUploader?: LargeUploader;
 }): Promise<A2ADeliveryArtifact> {
   const uploader = input.uploadLargeFile ?? uploadLargeFileToChain;
+  const snapshot = await snapshotProviderArtifactForUpload(input.file);
 
   let uploadResult: UploadLargeFileResult;
   try {
     uploadResult = await uploader({
-      filePath: input.file.filePath,
+      filePath: snapshot.filePath,
       contentType: input.file.contentType,
       network: input.network ?? undefined,
       signer: input.signer,
@@ -1035,10 +1106,16 @@ async function uploadResolvedLocalArtifact(input: {
       rawMessage,
       input.file.requestedExecutionCwd,
     );
+    const uploadSafeMessage = scrubLocalPathMentions(
+      scrubbedMessage,
+      [snapshot.filePath, snapshot.directory],
+    );
     throw providerArtifactError(
       'provider_artifact_upload_failed',
-      scrubbedMessage,
+      uploadSafeMessage,
     );
+  } finally {
+    await fs.rm(snapshot.directory, { recursive: true, force: true }).catch(() => undefined);
   }
 
   ensureUploadVerification(uploadResult);
