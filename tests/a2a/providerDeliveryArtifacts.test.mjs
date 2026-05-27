@@ -324,6 +324,66 @@ test('resolution rejects secret-like local artifact names', async () => {
   }
 });
 
+test('fallback workspace scan rejects npm credential config before upload', async () => {
+  const workspace = await tempWorkspace();
+  const uploadCalls = [];
+  await writeWorkspaceFile(workspace, '.npmrc', '//registry.npmjs.org/:_authToken=secret');
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'Generated the requested file.',
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+});
+
+test('explicit attachment marker rejects SSH private key before upload', async () => {
+  const workspace = await tempWorkspace();
+  const uploadCalls = [];
+  await writeWorkspaceFile(workspace, '.ssh/id_ed25519', 'PRIVATE KEY');
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'attachment: ./.ssh/id_ed25519',
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+});
+
+test('bare local path rejects SSH private key before upload', async () => {
+  const workspace = await tempWorkspace();
+  const uploadCalls = [];
+  await writeWorkspaceFile(workspace, '.ssh/id_ed25519', 'PRIVATE KEY');
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: './.ssh/id_ed25519',
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+});
+
 test('local file upload uses an injected uploader with verify true', async () => {
   const workspace = await tempWorkspace();
   await writeWorkspaceFile(workspace, 'out/chart.png');

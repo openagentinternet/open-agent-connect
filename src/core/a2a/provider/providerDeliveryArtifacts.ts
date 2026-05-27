@@ -217,18 +217,41 @@ async function extractExistingBarePathCandidates(
   return candidates;
 }
 
-function isSecretLikeFileName(fileName: string): boolean {
-  const base = path.basename(fileName).toLowerCase();
+function isSecretLikeFileName(filePath: string): boolean {
+  const normalizedPath = filePath.split(path.sep).join('/');
+  const lowerPath = normalizedPath.toLowerCase();
+  const segments = lowerPath.split('/').filter(Boolean);
+  const base = path.basename(lowerPath);
   const compact = base.replace(/[\s._-]+/g, '');
+  const compactPath = lowerPath.replace(/[\s._/-]+/g, '');
+  const parent = segments.length > 1 ? segments[segments.length - 2] : '';
 
   return base === '.env'
     || base.startsWith('.env.')
+    || base === '.npmrc'
+    || base === '.pypirc'
+    || base === '.netrc'
+    || base === '.dockerconfigjson'
+    || (parent === '.aws' && base === 'credentials')
+    || parent === '.ssh'
     || base === 'id_rsa'
     || base.startsWith('id_rsa.')
+    || base === 'id_ed25519'
+    || base.startsWith('id_ed25519.')
+    || base === 'id_dsa'
+    || base.startsWith('id_dsa.')
+    || base === 'id_ecdsa'
+    || base.startsWith('id_ecdsa.')
     || base === 'wallet.json'
     || compact === 'walletjson'
     || compact.includes('privatekey')
-    || compact.includes('mnemonic');
+    || compact.includes('mnemonic')
+    || compact.includes('seedphrase')
+    || compact.includes('accesstoken')
+    || compact.includes('authtoken')
+    || compactPath.includes('awscredentials')
+    || compactPath.includes('privatekey')
+    || compactPath.includes('seedphrase');
 }
 
 function containsPath(root: string, candidate: string): boolean {
@@ -292,14 +315,15 @@ async function resolveLocalCandidate(input: {
     );
   }
 
-  const fileName = path.basename(realCandidatePath);
-  if (isSecretLikeFileName(fileName)) {
+  const relativeSecretCheckPath = path.relative(input.executionCwd, realCandidatePath);
+  if (isSecretLikeFileName(relativeSecretCheckPath)) {
     throw providerArtifactError(
       'provider_artifact_secret_rejected',
       'Provider artifact path looks like a secret file and cannot be delivered.',
     );
   }
 
+  const fileName = path.basename(realCandidatePath);
   const stat = await fs.stat(realCandidatePath);
   if (!stat.isFile()) {
     throw providerArtifactError('provider_artifact_missing', 'Provider artifact must be a regular file.');
@@ -339,8 +363,7 @@ function shouldScanFile(
   filePath: string,
   expectedFamily: ProviderExpectedArtifactFamily,
 ): boolean {
-  const fileName = path.basename(filePath);
-  if (isSecretLikeFileName(fileName)) {
+  if (isSecretLikeFileName(filePath)) {
     return false;
   }
 
@@ -365,6 +388,7 @@ async function scanWorkspaceForCandidates(
   }
 
   const candidates: ProviderLocalCandidate[] = [];
+  let secretLikeFileSeen = false;
   const ignoredDirectories = new Set(['.git', 'node_modules', 'dist']);
 
   async function visit(directory: string): Promise<void> {
@@ -387,6 +411,10 @@ async function scanWorkspaceForCandidates(
       }
 
       const filePath = path.join(directory, entry.name);
+      if (isSecretLikeFileName(path.relative(executionCwd, filePath))) {
+        secretLikeFileSeen = true;
+        continue;
+      }
       if (shouldScanFile(filePath, expectedFamily)) {
         candidates.push({ filePath, lineIndexes: [] });
       }
@@ -394,6 +422,12 @@ async function scanWorkspaceForCandidates(
   }
 
   await visit(executionCwd);
+  if (!candidates.length && secretLikeFileSeen) {
+    throw providerArtifactError(
+      'provider_artifact_secret_rejected',
+      'Provider artifact path looks like a secret file and cannot be delivered.',
+    );
+  }
   return candidates;
 }
 
