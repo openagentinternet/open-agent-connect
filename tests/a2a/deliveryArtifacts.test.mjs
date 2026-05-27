@@ -282,6 +282,39 @@ test('buildDeliveryArtifactSummary includes public artifact fields', () => {
   assert.match(summary, new RegExp(urls.accelerateUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
+test('buildDeliveryArtifactSummary sanitizes unnormalized artifact input', () => {
+  const urls = buildMetafileContentUrls('abc123i0');
+  const summary = buildDeliveryArtifactSummary({
+    uri: 'metafile://abc123i0.mp4?local=/Users/example/secret.mp4#preview',
+    pinId: '/Users/example/secret',
+    kind: 'video',
+    fileName: '/tmp/oac/private/clip.mp4?token=secret#hash',
+    extension: '.mp4',
+    contentType: 'file:///Users/example/secret/type.mp4',
+    byteLength: -1,
+    sourceUrl: '/tmp/oac/private/source.mp4',
+    fallbackUrl: 'file:///Users/example/secret/fallback.mp4',
+    downloadUrl: 'C:\\Users\\example\\secret\\download.mp4',
+  });
+
+  assert.match(summary, /Artifact: metafile:\/\/abc123i0\.mp4/);
+  assert.match(summary, /PINID: abc123i0/);
+  assert.match(summary, /File: clip\.mp4/);
+  assert.match(
+    summary,
+    new RegExp(`Download: ${urls.accelerateUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+  );
+  assert.doesNotMatch(summary, /Content-Type:/);
+  assert.doesNotMatch(summary, /Size:/);
+  assert.doesNotMatch(summary, /\?local=/);
+  assert.doesNotMatch(summary, /#preview/);
+  assert.doesNotMatch(summary, /token=secret/);
+  assert.doesNotMatch(summary, /\/tmp\/oac\/private/);
+  assert.doesNotMatch(summary, /\/Users\/example\/secret/);
+  assert.doesNotMatch(summary, /file:\/\/\/Users\/example\/secret/);
+  assert.doesNotMatch(summary, /C:\\Users\\example\\secret/);
+});
+
 test('normalizeDeliveryArtifacts ignores structured URL fields that could expose local paths', () => {
   const urls = buildMetafileContentUrls('abc123i0');
   const artifact = normalizeDeliveryArtifacts({
@@ -344,4 +377,14 @@ test('appendDeliveryArtifactSummaries preserves response text and appends summar
   assert.match(response, /^Here is your file\.\n\nArtifact:/);
   assert.match(response, /metafile:\/\/abc123i0\.mp4/);
   assert.match(response, /clip\.mp4/);
+});
+
+test('appendDeliveryArtifactSummaries preserves trailing response whitespace', () => {
+  const artifacts = normalizeDeliveryArtifacts({
+    artifacts: [{ uri: 'metafile://abc123i0.mp4' }],
+  });
+  const responseText = 'Here is your file.\n  ';
+  const response = appendDeliveryArtifactSummaries(responseText, artifacts);
+
+  assert.ok(response.startsWith(`${responseText}\n\nArtifact:`));
 });

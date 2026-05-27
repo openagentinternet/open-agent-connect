@@ -87,7 +87,11 @@ function valueAsSafeFileName(value: unknown): string | null {
   }
 
   const normalized = trimmed.replace(/\\/g, '/');
-  const fileName = normalized.split('/').filter(Boolean).pop();
+  const fileName = normalized
+    .split('/')
+    .filter(Boolean)
+    .pop()
+    ?.split(/[?#]/, 1)[0];
   return fileName || null;
 }
 
@@ -260,19 +264,27 @@ export function normalizeDeliveryArtifacts(input: {
 }
 
 export function buildDeliveryArtifactSummary(artifact: A2ADeliveryArtifact): string {
-  const lines = [`Artifact: ${artifact.uri}`, `PINID: ${artifact.pinId}`];
+  const base = parseMetafileUri(valueAsTrimmedString(artifact.uri) || '');
+  if (!base) {
+    return '';
+  }
 
-  if (artifact.fileName) {
-    lines.push(`File: ${artifact.fileName}`);
+  const fileName = valueAsSafeFileName(artifact.fileName) || base.fileName;
+  const contentType = valueAsSafeContentType(artifact.contentType);
+  const byteLength = valueAsByteLength(artifact.byteLength);
+  const lines = [`Artifact: ${base.uri}`, `PINID: ${base.pinId}`];
+
+  if (fileName) {
+    lines.push(`File: ${fileName}`);
   }
-  if (artifact.contentType) {
-    lines.push(`Content-Type: ${artifact.contentType}`);
+  if (contentType) {
+    lines.push(`Content-Type: ${contentType}`);
   }
-  if (artifact.byteLength !== null) {
-    lines.push(`Size: ${artifact.byteLength} bytes`);
+  if (byteLength !== null) {
+    lines.push(`Size: ${byteLength} bytes`);
   }
-  if (artifact.downloadUrl) {
-    lines.push(`Download: ${artifact.downloadUrl}`);
+  if (base.downloadUrl) {
+    lines.push(`Download: ${base.downloadUrl}`);
   }
 
   return lines.join('\n');
@@ -287,10 +299,9 @@ export function appendDeliveryArtifactSummaries(
   }
 
   const summaries = artifacts.map((artifact) => buildDeliveryArtifactSummary(artifact)).join('\n\n');
-  const trimmedResponseText = responseText.trimEnd();
-  if (!trimmedResponseText) {
+  if (!responseText) {
     return summaries;
   }
 
-  return `${trimmedResponseText}\n\n${summaries}`;
+  return `${responseText}\n\n${summaries}`;
 }
