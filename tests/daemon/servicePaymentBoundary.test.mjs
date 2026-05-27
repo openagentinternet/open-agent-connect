@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { createECDH } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -160,6 +161,58 @@ async function prepareProviderRuntimeSkill(homeDir, skillName = 'metabot-weather
   await writeFile(path.join(homeDir, '.codex', 'skills', skillName, 'SKILL.md'), '# Weather Oracle\n', 'utf8');
 }
 
+async function writeProviderOutputFile(homeDir, fileName, contents = 'provider artifact bytes') {
+  const outputDir = path.join(homeDir, 'provider-output');
+  await mkdir(outputDir, { recursive: true });
+  const filePath = path.join(outputDir, fileName);
+  await writeFile(filePath, contents);
+  return {
+    outputDir: await realpath(outputDir),
+    filePath: await realpath(filePath),
+  };
+}
+
+async function createProviderOutputFixture(t, fileName, contents = 'provider artifact bytes') {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-output-'));
+  t.after(async () => rm(homeDir, { recursive: true, force: true }));
+  return writeProviderOutputFile(homeDir, fileName, contents);
+}
+
+function createProviderArtifactUploadMock(uploadCalls = []) {
+  return async (input) => {
+    uploadCalls.push(input);
+    const extension = path.extname(input.filePath).toLowerCase();
+    const fileName = path.basename(input.filePath);
+    const pinId = `provider-artifact-${uploadCalls.length}${extension}`;
+    return {
+      pinId: `provider-artifact-${uploadCalls.length}`,
+      txids: [`provider-artifact-upload-tx-${uploadCalls.length}`],
+      totalCost: 1,
+      network: input.network,
+      filePath: input.filePath,
+      fileName,
+      contentType: input.contentType,
+      bytes: 24,
+      extension,
+      metafileUri: `metafile://${pinId}`,
+      previewUrl: `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/provider-artifact-${uploadCalls.length}`,
+      downloadUrl: `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/provider-artifact-${uploadCalls.length}`,
+      globalMetaId: 'idq1provider',
+      uploadMode: 'direct',
+      verification: {
+        ok: true,
+        url: `https://file.metaid.io/metafile-indexer/api/v1/files/content/provider-artifact-${uploadCalls.length}`,
+        attempts: 1,
+      },
+    };
+  };
+}
+
+function assertNoProviderLocalPathLeak(value, localPath) {
+  const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+  assert.equal(serialized.includes(localPath), false, `expected no provider local path leak: ${localPath}`);
+}
+
 function buildMvcPaymentRawTx(address, satoshis) {
   const txComposer = new TxComposer();
   txComposer.appendP2PKHOutput({
@@ -314,6 +367,7 @@ async function createInboundProviderOrderHarness(t, options = {}) {
         }
         return {
           sessionId,
+          cwd: options.llmSessionCwd ?? null,
           status: 'completed',
           result: {
             status: 'completed',
@@ -330,6 +384,8 @@ async function createInboundProviderOrderHarness(t, options = {}) {
     a2aConversationPersister: options.a2aConversationPersister,
     providerOrderReplyRunner: options.providerOrderReplyRunner,
     providerOrderTextGenerator: options.providerOrderTextGenerator,
+    providerArtifactUploadLargeFile: options.providerArtifactUploadLargeFile,
+    providerLargeFileUploader: options.providerLargeFileUploader,
   });
 
   function makeOrderContent(overrides = {}) {
@@ -2210,6 +2266,295 @@ test('inbound provider ORDER executes through runner and sends delivery plus rat
   assert.equal(orderSession.servicePinId, harness.service.currentPinId);
 });
 
+async function runProviderArtifactDeliveryCase(t, { outputType, fileName, expectedKind }) {
+  const orderTxid = `${expectedKind === 'image' ? '1' : expectedKind === 'video' ? '2' : expectedKind === 'audio' ? '3' : '4'}`.repeat(64);
+  const paymentTxid = `${expectedKind === 'image' ? '5' : expectedKind === 'video' ? '6' : expectedKind === 'audio' ? '7' : '8'}`.repeat(64);
+  const uploadCalls = [];
+  const { outputDir, filePath } = await createProviderOutputFixture(t, fileName);
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType },
+    llmOutput: `Created the requested ${expectedKind} deliverable.\nartifactPath: ${filePath}`,
+    llmSessionCwd: outputDir,
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(uploadCalls[0].filePath, filePath);
+  assert.equal(uploadCalls[0].network, 'mvc');
+  assert.equal(uploadCalls[0].verify, true);
+
+  const simplemsgWrites = harness.writes.filter((entry) => entry.path === '/protocols/simplemsg');
+  const contents = simplemsgWrites.map((entry) => harness.decryptProviderWrite(entry));
+  const deliveryMessages = contents.filter((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`));
+  const ratingMessages = contents.filter((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`));
+  assert.equal(deliveryMessages.length, 1);
+  assert.equal(ratingMessages.length, 1);
+  assert.equal(contents.indexOf(deliveryMessages[0]) < contents.indexOf(ratingMessages[0]), true);
+
+  const delivery = parseDeliveryMessage(deliveryMessages[0]);
+  assert.ok(delivery);
+  assert.match(delivery.result, /metafile:\/\/provider-artifact-1/);
+  assert.equal(delivery.result.includes(filePath), false);
+  assert.equal(Array.isArray(delivery.artifacts), true);
+  assert.equal(delivery.artifacts.length, 1);
+  assert.equal(delivery.artifacts[0].kind, expectedKind);
+  assert.match(delivery.artifacts[0].uri, /^metafile:\/\/provider-artifact-1/);
+  assertNoProviderLocalPathLeak(deliveryMessages[0], filePath);
+  assertNoProviderLocalPathLeak(delivery, filePath);
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.order?.orderTxid === orderTxid);
+  assert.ok(trace, 'expected seller trace for artifact delivery');
+  const sessionState = await createSessionStateStore(harness.homeDir).readState();
+  const runnerItem = sessionState.transcriptItems.find((item) => item.id === `${trace.traceId}-provider-runner-result`);
+  const deliveryItem = sessionState.transcriptItems.find((item) => (
+    item.type === 'delivery' && item.metadata?.orderTxid === orderTxid
+  ));
+  assert.ok(runnerItem);
+  assert.ok(deliveryItem);
+  assert.match(runnerItem.content, /metafile:\/\/provider-artifact-1/);
+  assert.match(deliveryItem.content, /metafile:\/\/provider-artifact-1/);
+  assert.deepEqual(runnerItem.metadata.deliveryArtifacts.map((artifact) => artifact.kind), [expectedKind]);
+  assert.deepEqual(deliveryItem.metadata.deliveryArtifacts.map((artifact) => artifact.kind), [expectedKind]);
+  assert.deepEqual(deliveryItem.artifacts.map((artifact) => artifact.kind), [expectedKind]);
+  assertNoProviderLocalPathLeak(runnerItem, filePath);
+  assertNoProviderLocalPathLeak(deliveryItem, filePath);
+
+  const conversation = await createA2AConversationStore({
+    homeDir: harness.homeDir,
+    local: {
+      globalMetaId: harness.identity.globalMetaId,
+      name: harness.identity.name,
+      chatPublicKey: harness.identity.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: harness.buyerGlobalMetaId,
+      chatPublicKey: harness.buyerPair.publicKeyHex,
+    },
+  }).readConversation();
+  const persistedDelivery = conversation.messages.find((entry) => (
+    entry.protocolTag === 'DELIVERY' && entry.orderTxid === orderTxid
+  ));
+  assert.ok(persistedDelivery);
+  assert.deepEqual(persistedDelivery.artifacts.map((artifact) => artifact.kind), [expectedKind]);
+  assertNoProviderLocalPathLeak(persistedDelivery, filePath);
+}
+
+test('inbound provider ORDER image output uploads artifact and sends delivery before NeedsRating', async (t) => {
+  await runProviderArtifactDeliveryCase(t, {
+    outputType: 'image',
+    fileName: 'weather-image.png',
+    expectedKind: 'image',
+  });
+});
+
+test('inbound provider ORDER video output uploads artifact as video', async (t) => {
+  await runProviderArtifactDeliveryCase(t, {
+    outputType: 'video',
+    fileName: 'weather-video.mp4',
+    expectedKind: 'video',
+  });
+});
+
+test('inbound provider ORDER audio output uploads artifact as audio', async (t) => {
+  await runProviderArtifactDeliveryCase(t, {
+    outputType: 'audio',
+    fileName: 'weather-audio.mp3',
+    expectedKind: 'audio',
+  });
+});
+
+test('inbound provider ORDER file output uploads generic artifact as file', async (t) => {
+  await runProviderArtifactDeliveryCase(t, {
+    outputType: 'other',
+    fileName: 'weather-data.bin',
+    expectedKind: 'file',
+  });
+});
+
+test('inbound provider ORDER preserves public https and metafile artifact references', async (t) => {
+  const orderTxid = '9'.repeat(64);
+  const paymentTxid = 'a'.repeat(64);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    body: {
+      async cancel() {},
+    },
+  });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'file' },
+    llmOutput: 'Download mirror: https://example.test/public.bin and canonical metafile://existing-provider-file.bin',
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: async () => {
+      throw new Error('public metafile references should not be re-uploaded');
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  const deliveryMessage = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry))
+    .find((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`));
+  assert.ok(deliveryMessage);
+  const delivery = parseDeliveryMessage(deliveryMessage);
+  assert.ok(delivery);
+  assert.match(delivery.result, /https:\/\/example\.test\/public\.bin/);
+  assert.match(delivery.result, /metafile:\/\/existing-provider-file\.bin/);
+  assert.equal(delivery.artifacts.length, 1);
+  assert.equal(delivery.artifacts[0].kind, 'file');
+  assert.equal(delivery.artifacts[0].uri, 'metafile://existing-provider-file.bin');
+});
+
+test('inbound provider ORDER upload failure marks seller order failed without delivery or NeedsRating', async (t) => {
+  const orderTxid = 'b'.repeat(64);
+  const paymentTxid = 'c'.repeat(64);
+  const uploadCalls = [];
+  const { outputDir, filePath } = await createProviderOutputFixture(t, 'upload-fails.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmOutput: `Here is the image.\nartifactPath: ${filePath}`,
+    llmSessionCwd: outputDir,
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: async (input) => {
+      uploadCalls.push(input);
+      const error = new Error('simulated provider artifact upload failure');
+      error.code = 'provider_artifact_upload_failed';
+      throw error;
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'provider_artifact_upload_failed');
+  assert.equal(uploadCalls.length, 1);
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(contents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+  assert.equal(contents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
+  assert.equal(contents.some((entry) => entry.startsWith(`[ORDER_END:${orderTxid} failed]`)), true);
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.order?.orderTxid === orderTxid);
+  assert.ok(trace, 'expected failed provider artifact trace');
+  assert.equal(trace.a2a.publicStatus, 'remote_failed');
+  assert.equal(trace.a2a.latestEvent, 'provider_failed');
+
+  const sellerOrder = state.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.ok(sellerOrder);
+  assert.equal(sellerOrder.state, 'failed');
+  assert.equal(sellerOrder.failureReason, 'simulated provider artifact upload failure');
+  assert.equal(sellerOrder.endReason, 'provider_artifact_upload_failed');
+  assertNoProviderLocalPathLeak(trace, filePath);
+});
+
+test('inbound provider ORDER preserves large_file_upload_unavailable when no large uploader exists', async (t) => {
+  const orderTxid = 'd'.repeat(64);
+  const paymentTxid = 'e'.repeat(64);
+  const { outputDir, filePath } = await createProviderOutputFixture(
+    t,
+    'large-image.png',
+    Buffer.alloc((2 * 1024 * 1024) + 1),
+  );
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmOutput: `Large image complete.\nartifactPath: ${filePath}`,
+    llmSessionCwd: outputDir,
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'large_file_upload_unavailable');
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(contents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+  assert.equal(contents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.ok(sellerOrder);
+  assert.equal(sellerOrder.endReason, 'large_file_upload_unavailable');
+});
+
+test('inbound provider ORDER delivery send failure after upload sends no NeedsRating', async (t) => {
+  const orderTxid = 'f'.repeat(64);
+  const paymentTxid = '1'.repeat(64);
+  const uploadCalls = [];
+  const { outputDir, filePath } = await createProviderOutputFixture(t, 'delivery-fails.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmOutput: `Image complete.\nartifactPath: ${filePath}`,
+    llmSessionCwd: outputDir,
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
+    writePinHook: async (_input, writes) => {
+      if (writes.filter((entry) => entry.path === '/protocols/simplemsg').length === 1) {
+        throw new Error('simulated artifact delivery write failure');
+      }
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'provider_delivery_failed');
+  assert.equal(uploadCalls.length, 1);
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(contents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+  assert.equal(contents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
+});
+
 test('inbound provider ORDER uses dedicated provider-generated protocol copy', async (t) => {
   const orderTxid = 'e'.repeat(64);
   const paymentTxid = 'f'.repeat(64);
@@ -2351,6 +2696,58 @@ test('/api services.execute persists seller lifecycle state and provider runtime
   assert.equal(sellerOrder.traceId, 'trace-provider-direct-execute');
   assert.equal(sellerOrder.a2aSessionId, trace.a2a.sessionId);
   assert.equal(sellerOrder.llmSessionId, 'provider-llm-session-1');
+});
+
+test('/api services.execute resolves non-text provider artifacts into direct traces', async (t) => {
+  const paymentTxid = '2'.repeat(64);
+  const uploadCalls = [];
+  const { outputDir, filePath } = await createProviderOutputFixture(t, 'direct-image.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmOutput: `Direct image complete.\nartifactPath: ${filePath}`,
+    llmSessionCwd: outputDir,
+    providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
+  });
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-artifact',
+    externalConversationId: 'direct:buyer:provider',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Create a weather image',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(uploadCalls.length, 1);
+  assert.match(result.data.responseText, /metafile:\/\/provider-artifact-1\.png/);
+  assertNoProviderLocalPathLeak(result.data.responseText, filePath);
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.traceId === 'trace-provider-direct-artifact');
+  assert.ok(trace, 'expected direct provider artifact trace');
+  assertNoProviderLocalPathLeak(trace, filePath);
+
+  const sessionState = await createSessionStateStore(harness.homeDir).readState();
+  const runnerItem = sessionState.transcriptItems.find((item) => item.id === 'trace-provider-direct-artifact-provider-runner-result');
+  assert.ok(runnerItem);
+  assert.match(runnerItem.content, /metafile:\/\/provider-artifact-1\.png/);
+  assert.deepEqual(runnerItem.metadata.deliveryArtifacts.map((artifact) => artifact.kind), ['image']);
+  assertNoProviderLocalPathLeak(runnerItem, filePath);
 });
 
 test('/api services.execute rejects missing buyer globalMetaId before seller order persistence', async (t) => {

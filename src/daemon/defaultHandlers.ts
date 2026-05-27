@@ -133,7 +133,7 @@ import {
   queryWalletBalances,
 } from '../core/wallet/nativeWallet';
 import type { Signer } from '../core/signing/signer';
-import { uploadLargeFileToChain } from '../core/files/uploadLargeFile';
+import { uploadLargeFileToChain, type ProductionLargeFileUploader } from '../core/files/uploadLargeFile';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
@@ -151,6 +151,10 @@ import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/
 import { resolvePublicStatus, type PublicStatus } from '../core/a2a/publicStatus';
 import type { ProviderServiceRunnerResult } from '../core/a2a/provider/serviceRunnerContracts';
 import { createServiceRunnerFailedResult } from '../core/a2a/provider/serviceRunnerContracts';
+import {
+  isTextLikeProviderOutputType,
+  resolveProviderDeliveryArtifacts,
+} from '../core/a2a/provider/providerDeliveryArtifacts';
 import type { A2ASessionRecord, A2ATaskRunRecord } from '../core/a2a/sessionTypes';
 import { buildTraceWatchEvents, serializeTraceWatchEvents } from '../core/a2a/watch/traceWatch';
 import { isTerminalTraceWatchStatus } from '../core/a2a/watch/watchEvents';
@@ -316,6 +320,20 @@ const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function readErrorCode(error: unknown, fallback: string): string {
+  const code = error instanceof Error ? (error as Error & { code?: unknown }).code : undefined;
+  return normalizeText(code) || fallback;
+}
+
+function readErrorMessage(error: unknown, code: string, fallback: string): string {
+  const rawMessage = normalizeText(error instanceof Error ? error.message : String(error ?? ''));
+  const prefix = code ? `${code}:` : '';
+  const withoutCode = prefix && rawMessage.startsWith(prefix)
+    ? rawMessage.slice(prefix.length).trim()
+    : rawMessage;
+  return withoutCode || fallback;
 }
 
 const buyerAutoRatingPublishChainsByTrace = new Map<string, Promise<void>>();
@@ -5219,6 +5237,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   callerOrderTextGenerator?: CallerOrderProtocolTextGenerator;
   providerOrderReplyRunner?: ChatReplyRunner;
   providerOrderTextGenerator?: ProviderOrderProtocolTextGenerator;
+  providerArtifactUploadLargeFile?: typeof uploadLargeFileToChain;
+  providerLargeFileUploader?: ProductionLargeFileUploader;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   onIdentityProfileRegistered?: () => Promise<void> | void;
   requestMvcGasSubsidy?: (
@@ -5242,6 +5262,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
     secretStore,
     adapters,
   });
+  const providerArtifactUploadLargeFile = input.providerArtifactUploadLargeFile ?? uploadLargeFileToChain;
+  const providerLargeFileUploader = input.providerLargeFileUploader;
   const configStore = createConfigStore(input.homeDir);
   function isSupportedWriteNetwork(value: string): value is DefaultWriteNetwork {
     return DEFAULT_WRITE_NETWORKS.includes(value as DefaultWriteNetwork);
@@ -8564,12 +8586,157 @@ export function createDefaultMetabotDaemonHandlers(input: {
         : commandManualActionRequired('clarification_needed', runnerResult.question);
     }
 
-    const responseText = normalizeText(runnerResult.responseText);
+    const baseResponseText = normalizeText(runnerResult.responseText);
+    let responseText = baseResponseText;
+    let deliveryArtifacts: A2ADeliveryArtifact[] = [];
+    if (!isTextLikeProviderOutputType(service.outputType)) {
+      try {
+        const artifactNetwork = await resolveFileUploadNetworkForHome(null, runtimeStateStore.paths.profileRoot);
+        const resolvedDelivery = await resolveProviderDeliveryArtifacts({
+          responseText: baseResponseText,
+          outputType: service.outputType,
+          executionCwd: normalizeText(runnerResult.metadata?.sessionCwd) || null,
+          network: artifactNetwork,
+          signer,
+          uploadLargeFile: providerArtifactUploadLargeFile,
+          largeUploader: providerLargeFileUploader,
+        });
+        responseText = normalizeText(resolvedDelivery.responseText);
+        deliveryArtifacts = resolvedDelivery.artifacts;
+      } catch (error) {
+        const failureCode = readErrorCode(error, 'provider_artifact_delivery_failed');
+        const failureText = readErrorMessage(
+          error,
+          failureCode,
+          'Provider artifact delivery preparation failed.',
+        );
+        const artifactFailureResult = createServiceRunnerFailedResult(failureCode, failureText);
+        const failedApplied = sessionEngine.applyProviderRunnerResult({
+          session: received.session,
+          taskRun: received.taskRun,
+          result: artifactFailureResult,
+        });
+        const failedStatus = await persistSessionMutation(sessionStateStore, failedApplied);
+        const orderEndMessage = buildOrderEndMessage(orderTxid, 'failed', failureText);
+        let orderEndWrite: { pinId: string | null; txids: string[] } = { pinId: null, txids: [] };
+        let orderEndSendFailure: string | null = null;
+        try {
+          orderEndWrite = await sendProviderOrderPrivateMessage({
+            toGlobalMetaId: inputMessage.fromGlobalMetaId,
+            peerChatPublicKey,
+            content: orderEndMessage,
+          });
+        } catch (sendError) {
+          orderEndSendFailure = sendError instanceof Error ? sendError.message : String(sendError);
+        }
+        await appendA2ATranscriptItems(sessionStateStore, [
+          {
+            id: `${traceId}-provider-artifact-failure`,
+            sessionId: received.session.sessionId,
+            taskRunId: failedApplied.taskRun.runId,
+            timestamp: failedApplied.session.updatedAt,
+            type: 'failure',
+            sender: 'system',
+            content: failureText,
+            metadata: {
+              publicStatus: failedStatus.status,
+              event: failedApplied.event,
+              runnerState: 'failed',
+              orderTxid,
+              paymentTxid: paymentTxid || null,
+              refundRequired: !serviceIsFree,
+            },
+          },
+          {
+            id: orderEndWrite.pinId || `${traceId}-provider-order-end-failed`,
+            sessionId: received.session.sessionId,
+            taskRunId: failedApplied.taskRun.runId,
+            timestamp: Date.now(),
+            type: 'order_end',
+            sender: 'provider',
+            content: failureText,
+            metadata: {
+              protocolTag: 'ORDER_END',
+              orderTxid,
+              paymentTxid: paymentTxid || null,
+              orderEndReason: 'failed',
+              orderEndPinId: orderEndWrite.pinId,
+              txids: orderEndWrite.txids,
+              publicStatus: failedStatus.status,
+              event: failedApplied.event,
+              refundRequired: !serviceIsFree,
+              sendFailure: orderEndSendFailure,
+            },
+          },
+        ]);
+        await persistA2AConversationMessageBestEffort({
+          paths: runtimeStateStore.paths,
+          local: {
+            profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+            globalMetaId: state.identity.globalMetaId,
+            name: state.identity.name,
+            chatPublicKey: state.identity.chatPublicKey,
+          },
+          peer: {
+            globalMetaId: inputMessage.fromGlobalMetaId,
+            chatPublicKey: peerChatPublicKey,
+          },
+          message: {
+            direction: 'outgoing',
+            content: orderEndMessage,
+            pinId: orderEndWrite.pinId,
+            txid: orderEndWrite.txids[0] ?? orderEndWrite.pinId,
+            txids: orderEndWrite.txids,
+            chain: 'mvc',
+            orderTxid,
+            paymentTxid: paymentTxid || null,
+            timestamp: Date.now(),
+          },
+          orderSession: {
+            role: 'provider',
+            state: 'failed',
+            orderTxid,
+            paymentTxid: paymentTxid || null,
+            servicePinId: service.currentPinId,
+            serviceName: normalizeText(service.displayName) || normalizeText(service.serviceName),
+            outputType: service.outputType,
+            endedAt: Date.now(),
+            endReason: failureCode,
+            failureReason: failureText,
+          },
+        }, a2aConversationPersister);
+        await persistProviderFailureTrace({
+          traceId,
+          state,
+          service,
+          buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+          orderTxid,
+          orderMessageId,
+          orderPinId: inputMessage.messagePinId || null,
+          paymentTxid: paymentTxid || null,
+          orderReference: orderReference || null,
+          paymentCurrency: amountLine.currency || service.currency,
+          paymentAmount: amountLine.amount || service.price,
+          paymentChain: paymentChain || null,
+          ...orderPaymentMetadata,
+          session: failedApplied.session,
+          taskRun: failedApplied.taskRun,
+          publicStatus: failedStatus,
+          latestEvent: failedApplied.event,
+          userTask,
+          failureText,
+          failureCode,
+          providerRuntime: providerRuntimeDiagnostics,
+        });
+        return commandFailed(failureCode, failureText);
+      }
+    }
     const deliveryMessage = buildDeliveryMessage({
       paymentTxid: paymentTxid || null,
       servicePinId: service.currentPinId,
       serviceName: normalizeText(service.displayName) || normalizeText(service.serviceName),
       result: responseText,
+      ...(deliveryArtifacts.length ? { artifacts: deliveryArtifacts } : {}),
       deliveredAt: Date.now(),
     }, orderTxid);
     const ratingRequestText = await generateProviderOrderProtocolReplyText({
@@ -8732,6 +8899,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           runnerState: runnerResult.state,
           orderTxid,
           paymentTxid: paymentTxid || null,
+          ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
         },
       },
       {
@@ -8742,6 +8910,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         type: 'delivery',
         sender: 'provider',
         content: responseText,
+        ...(deliveryArtifacts.length ? { artifacts: deliveryArtifacts } : {}),
         metadata: {
           protocolTag: 'DELIVERY',
           orderTxid,
@@ -8751,6 +8920,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           txids: deliveryWrite.txids,
           publicStatus: 'completed',
           event: 'provider_completed',
+          ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
         },
       },
       ...(ratingWrite.pinId || ratingWrite.txids.length
@@ -8789,6 +8959,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       message: {
         direction: 'outgoing',
         content: deliveryMessage,
+        ...(deliveryArtifacts.length ? { artifacts: deliveryArtifacts } : {}),
         pinId: deliveryWrite.pinId,
         txid: deliveryWrite.txids[0] ?? deliveryWrite.pinId,
         txids: deliveryWrite.txids,
@@ -13844,7 +14015,33 @@ export function createDefaultMetabotDaemonHandlers(input: {
             `/ui/trace?traceId=${encodeURIComponent(traceId)}`,
           );
         }
-        const responseText = normalizeText(runnerResult.responseText);
+        const baseResponseText = normalizeText(runnerResult.responseText);
+        let responseText = baseResponseText;
+        let deliveryArtifacts: A2ADeliveryArtifact[] = [];
+        if (!isTextLikeProviderOutputType(service.outputType)) {
+          try {
+            const artifactNetwork = await resolveFileUploadNetworkForHome(null, runtimeStateStore.paths.profileRoot);
+            const resolvedDelivery = await resolveProviderDeliveryArtifacts({
+              responseText: baseResponseText,
+              outputType: service.outputType,
+              executionCwd: normalizeText(runnerResult.metadata?.sessionCwd) || null,
+              network: artifactNetwork,
+              signer,
+              uploadLargeFile: providerArtifactUploadLargeFile,
+              largeUploader: providerLargeFileUploader,
+            });
+            responseText = normalizeText(resolvedDelivery.responseText);
+            deliveryArtifacts = resolvedDelivery.artifacts;
+          } catch (error) {
+            const failureCode = readErrorCode(error, 'provider_artifact_delivery_failed');
+            const failureText = readErrorMessage(
+              error,
+              failureCode,
+              'Provider artifact delivery preparation failed.',
+            );
+            return commandFailed(failureCode, failureText);
+          }
+        }
         const providerMessage = responseText;
         await appendA2ATranscriptItems(sessionStateStore, [
           {
@@ -13859,6 +14056,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               publicStatus: appliedStatus.status,
               event: applied.event,
               runnerState: runnerResult.state,
+              ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
             },
           },
         ]);
@@ -13936,6 +14134,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   providerSessionId: received.session.sessionId,
                   providerTaskRunId: received.taskRun.runId,
                   providerEvent: applied.event,
+                  ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
                 },
               },
             ],
