@@ -30,6 +30,7 @@
     "SKILLs/metabot-post-buzz/SKILL.md",
     "SKILLs/metabot-post-skillservice/SKILL.md",
     "SKILLs/metabot-upload-file/SKILL.md",
+    "SKILLs/metabot-upload-largefile/SKILL.md",
     "SKILLs/metabot-wallet-manage/SKILL.md",
     "skillpacks/common/templates/",
     "src/ui/",
