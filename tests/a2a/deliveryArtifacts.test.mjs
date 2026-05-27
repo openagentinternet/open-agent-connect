@@ -70,6 +70,18 @@ test('parseMetafileUri rejects backslash-containing Windows path-style metafile 
   assert.equal(parseMetafileUri('metafile://C:\\Users\\example\\secret\\preview.png'), null);
 });
 
+test('parseMetafileUri rejects whitespace and control characters in metafile paths', () => {
+  for (const rawUri of [
+    'metafile://abc123i0.png\nDownload: javascript:alert(1)',
+    'metafile://abc123i0.png\rDownload: javascript:alert(1)',
+    'metafile://abc123i0.png\tDownload: javascript:alert(1)',
+    'metafile://abc123i0.png\u0000Download: javascript:alert(1)',
+    'metafile://abc123i0.png Download: javascript:alert(1)',
+  ]) {
+    assert.equal(parseMetafileUri(rawUri), null);
+  }
+});
+
 test('extractDeliveryArtifactsFromText dedupes URIs while preserving first-seen order', () => {
   const artifacts = extractDeliveryArtifactsFromText(
     'first metafile://onei0.png second metafile://twoi0.mp4 duplicate metafile://onei0.png!',
@@ -123,6 +135,22 @@ test('extractDeliveryArtifactsFromText ignores Windows path-style metafile URIs'
   );
 
   assert.deepEqual(artifacts, []);
+});
+
+test('extractDeliveryArtifactsFromText stops multiline URI payloads at whitespace', () => {
+  const artifacts = extractDeliveryArtifactsFromText(
+    'Generated metafile://abc123i0.png\nDownload: javascript:alert(1)',
+  );
+
+  assert.deepEqual(
+    artifacts.map((artifact) => artifact.uri),
+    ['metafile://abc123i0.png'],
+  );
+});
+
+test('normalizeDeliveryArtifacts returns an empty list for nullish top-level input', () => {
+  assert.deepEqual(normalizeDeliveryArtifacts(null), []);
+  assert.deepEqual(normalizeDeliveryArtifacts(undefined), []);
 });
 
 test('normalizeDeliveryArtifacts preserves safe structured metadata and fills URL fields', () => {
@@ -338,6 +366,25 @@ test('buildDeliveryArtifactSummary sanitizes unnormalized artifact input', () =>
   assert.doesNotMatch(summary, /\/Users\/example\/secret/);
   assert.doesNotMatch(summary, /file:\/\/\/Users\/example\/secret/);
   assert.doesNotMatch(summary, /C:\\Users\\example\\secret/);
+});
+
+test('buildDeliveryArtifactSummary does not emit injected lines from malformed URI input', () => {
+  const summary = buildDeliveryArtifactSummary({
+    uri: 'metafile://abc123i0.png\nDownload: javascript:alert(1)',
+    pinId: 'abc123i0',
+    kind: 'image',
+    fileName: 'abc123i0.png',
+    extension: '.png',
+    contentType: null,
+    byteLength: null,
+    sourceUrl: 'javascript:alert(1)',
+    fallbackUrl: 'javascript:alert(1)',
+    downloadUrl: 'javascript:alert(1)',
+  });
+
+  assert.equal(summary, '');
+  assert.doesNotMatch(summary, /Download: javascript:/);
+  assert.doesNotMatch(summary, /[\u0000-\u001f]/);
 });
 
 test('normalizeDeliveryArtifacts ignores structured URL fields that could expose local paths', () => {

@@ -33,6 +33,7 @@ const VIDEO_EXTENSIONS = new Set(['.m4v', '.mov', '.mp4', '.webm']);
 const AUDIO_EXTENSIONS = new Set(['.flac', '.m4a', '.mp3', '.ogg', '.wav']);
 const TRAILING_TEXT_PUNCTUATION = /[)\]}`.,;:!?]+$/;
 const METAFILE_URI_PATTERN = /metafile:\/\/[^\s<>"']+/gi;
+const UNSAFE_METAFILE_URI_CHARACTER = /[\s\x00-\x1f\x7f]/;
 const CONTENT_TYPE_PATTERN =
   /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?:\s*;\s*[a-z0-9][a-z0-9!#$&^_.+-]*=[a-z0-9][a-z0-9!#$&^_.+:-]*)*$/i;
 
@@ -193,7 +194,7 @@ export function inferDeliveryArtifactKind(
 
 export function parseMetafileUri(rawUri: string): A2ADeliveryArtifact | null {
   const uri = stripTrailingTextPunctuation(rawUri);
-  if (!uri || !uri.toLowerCase().startsWith('metafile://')) {
+  if (!uri || UNSAFE_METAFILE_URI_CHARACTER.test(uri) || !uri.toLowerCase().startsWith('metafile://')) {
     return null;
   }
 
@@ -245,17 +246,21 @@ export function extractDeliveryArtifactsFromText(text: string): A2ADeliveryArtif
 export function normalizeDeliveryArtifacts(input: {
   artifacts?: unknown;
   resultText?: unknown;
-}): A2ADeliveryArtifact[] {
+} | null | undefined): A2ADeliveryArtifact[] {
   const seen = new Set<string>();
   const artifacts: A2ADeliveryArtifact[] = [];
-  const structuredArtifacts = Array.isArray(input.artifacts) ? input.artifacts : [];
+  const source =
+    input && typeof input === 'object' && !Array.isArray(input)
+      ? (input as { artifacts?: unknown; resultText?: unknown })
+      : {};
+  const structuredArtifacts = Array.isArray(source.artifacts) ? source.artifacts : [];
 
   for (const entry of structuredArtifacts) {
     addDeliveryArtifact(artifacts, seen, normalizeStructuredDeliveryArtifact(entry));
   }
 
-  if (typeof input.resultText === 'string') {
-    for (const artifact of extractDeliveryArtifactsFromText(input.resultText)) {
+  if (typeof source.resultText === 'string') {
+    for (const artifact of extractDeliveryArtifactsFromText(source.resultText)) {
       addDeliveryArtifact(artifacts, seen, artifact);
     }
   }
