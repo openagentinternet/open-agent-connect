@@ -530,6 +530,69 @@ test('existing metafile URI reuse rejects public-looking Windows slash path befo
   assert.equal(error.message.includes('C:/repo/out/report.pdf'), false);
 });
 
+test('existing metafile URI reuse rejects public-looking bare UNC path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+  const uncPath = '\\\\server\\share\\out\\report.pdf';
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: `${uncPath}\nPublic artifact: metafile://abc123.pdf`,
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes(uncPath), false);
+});
+
+test('existing metafile URI reuse rejects public-looking inline UNC path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+  const uncPath = '\\\\server\\share\\out\\report.pdf';
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: `Saved at ${uncPath} beside metafile://abc123.pdf`,
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes(uncPath), false);
+});
+
+test('existing metafile URI reuse rejects secret-like UNC path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+  const uncPath = '\\\\server\\share\\.ssh\\id_ed25519';
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: `${uncPath}\nPublic artifact: metafile://abc123.pdf`,
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes(uncPath), false);
+});
+
 test('existing metafile URI reuse rejects public-looking file URI path before verifier reuse', async () => {
   const verifierCalls = [];
   const uploadCalls = [];

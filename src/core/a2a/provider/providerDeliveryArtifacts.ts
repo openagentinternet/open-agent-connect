@@ -363,15 +363,19 @@ function looksLikeInlineFileHint(value: string): boolean {
     || path.extname(base) !== '';
 }
 
-function assertNoAbsoluteSecretLikeProviderHints(responseText: string): void {
-  const redactedText = redactPublicArtifactReferences(responseText);
-  const pathHintPatterns = [
+function absoluteProviderLocalHintPatterns(): RegExp[] {
+  return [
     /\bfile:\/\/\/?[^\s,;)\]}>"'`]+/gi,
+    /(?<![A-Za-z0-9_.:/\\-])\\\\[^\\/\s,;)\]}>"'`]+[\\/][^\s,;)\]}>"'`]+/g,
     /(?<![A-Za-z0-9_.:/\\-])[A-Za-z]:[\\/][^\s,;)\]}>"'`]+/g,
     /(?<![A-Za-z0-9_.:/\\-])\/[^\s,;)\]}>"'`]+/g,
   ];
+}
 
-  for (const pathHintPattern of pathHintPatterns) {
+function assertNoAbsoluteSecretLikeProviderHints(responseText: string): void {
+  const redactedText = redactPublicArtifactReferences(responseText);
+
+  for (const pathHintPattern of absoluteProviderLocalHintPatterns()) {
     const matches = redactedText.matchAll(pathHintPattern);
     for (const match of matches) {
       if (isRejectedProviderLocalHintPath(match[0])) {
@@ -383,13 +387,8 @@ function assertNoAbsoluteSecretLikeProviderHints(responseText: string): void {
 
 function assertNoAbsoluteProviderLocalHints(responseText: string): void {
   const redactedText = redactPublicArtifactReferences(responseText);
-  const pathHintPatterns = [
-    /\bfile:\/\/\/?[^\s,;)\]}>"'`]+/gi,
-    /(?<![A-Za-z0-9_.:/\\-])[A-Za-z]:[\\/][^\s,;)\]}>"'`]+/g,
-    /(?<![A-Za-z0-9_.:/\\-])\/[^\s,;)\]}>"'`]+/g,
-  ];
 
-  for (const pathHintPattern of pathHintPatterns) {
+  for (const pathHintPattern of absoluteProviderLocalHintPatterns()) {
     if (pathHintPattern.test(redactedText)) {
       throwProviderSecretRejected();
     }
