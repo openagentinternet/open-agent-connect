@@ -315,6 +315,7 @@ test('product commerce UI uses mocked endpoints for marketplace, sell, orders, a
     await page.getByRole('button', { name: 'Close' }).click();
 
     await page.getByRole('tab', { name: 'Sell' }).click();
+    await page.locator('[data-products-seller]').selectOption('seller-bot');
     await page.getByText('Digital delivery').waitFor();
     await page.getByLabel('Digital delivery').check();
     await page.locator('[data-products-listing-name]').fill('mobile-credit');
