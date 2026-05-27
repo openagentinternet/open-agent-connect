@@ -5158,14 +5158,21 @@ async function loadCallerContinuationState(input: {
 
 type CompletedMetaWebServiceReply = Extract<AwaitMetaWebServiceReplyResult, { state: 'completed' }>;
 
-function normalizeReplyRawMessage(reply: CompletedMetaWebServiceReply): Record<string, unknown> {
-  return reply.rawMessage && typeof reply.rawMessage === 'object' && !Array.isArray(reply.rawMessage)
-    ? reply.rawMessage
+function normalizeReplyRawRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
     : {};
 }
 
-function normalizeReplyRawText(reply: CompletedMetaWebServiceReply, keys: string[]): string {
-  const raw = normalizeReplyRawMessage(reply);
+function normalizeReplyRawMessage(reply: CompletedMetaWebServiceReply): Record<string, unknown> {
+  return normalizeReplyRawRecord(reply.rawMessage);
+}
+
+function normalizeReplyRatingRawMessage(reply: CompletedMetaWebServiceReply): Record<string, unknown> {
+  return normalizeReplyRawRecord(reply.ratingRawMessage);
+}
+
+function normalizeReplyRecordText(raw: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
     const value = normalizeText(raw[key]);
     if (value) {
@@ -5175,8 +5182,7 @@ function normalizeReplyRawText(reply: CompletedMetaWebServiceReply, keys: string
   return '';
 }
 
-function normalizeReplyRawTextArray(reply: CompletedMetaWebServiceReply, keys: string[]): string[] {
-  const raw = normalizeReplyRawMessage(reply);
+function normalizeReplyRecordTextArray(raw: Record<string, unknown>, keys: string[]): string[] {
   const values: string[] = [];
   for (const key of keys) {
     const value = raw[key];
@@ -5192,12 +5198,37 @@ function resolveCompletedReplyChainRefs(reply: CompletedMetaWebServiceReply): {
   txid: string | null;
   txids: string[];
 } {
-  const pinId = normalizeText(reply.deliveryPinId)
-    || normalizeReplyRawText(reply, ['pinId', 'messagePinId'])
+  return resolveReplyChainRefs({
+    fallbackPinId: reply.deliveryPinId,
+    raw: normalizeReplyRawMessage(reply),
+  });
+}
+
+function resolveCompletedReplyRatingChainRefs(reply: CompletedMetaWebServiceReply): {
+  pinId: string | null;
+  txid: string | null;
+  txids: string[];
+} {
+  return resolveReplyChainRefs({
+    fallbackPinId: reply.ratingRequestPinId,
+    raw: normalizeReplyRatingRawMessage(reply),
+  });
+}
+
+function resolveReplyChainRefs(input: {
+  fallbackPinId?: string | null;
+  raw: Record<string, unknown>;
+}): {
+  pinId: string | null;
+  txid: string | null;
+  txids: string[];
+} {
+  const pinId = normalizeText(input.fallbackPinId)
+    || normalizeReplyRecordText(input.raw, ['pinId', 'messagePinId'])
     || null;
-  const rawTxid = normalizeReplyRawText(reply, ['txid', 'txId']);
+  const rawTxid = normalizeReplyRecordText(input.raw, ['txid', 'txId']);
   const txids = [...new Set([
-    ...normalizeReplyRawTextArray(reply, ['txids', 'txIds']),
+    ...normalizeReplyRecordTextArray(input.raw, ['txids', 'txIds']),
     rawTxid,
   ].filter(Boolean))];
   return {
@@ -5210,6 +5241,12 @@ function resolveCompletedReplyChainRefs(reply: CompletedMetaWebServiceReply): {
 function normalizeReplyObservedAt(reply: CompletedMetaWebServiceReply, fallback: number): number {
   return Number.isFinite(reply.observedAt)
     ? Math.trunc(Number(reply.observedAt))
+    : fallback;
+}
+
+function normalizeReplyRatingObservedAt(reply: CompletedMetaWebServiceReply, fallback: number): number {
+  return Number.isFinite(reply.ratingRequestObservedAt)
+    ? Math.trunc(Number(reply.ratingRequestObservedAt))
     : fallback;
 }
 
@@ -5226,129 +5263,142 @@ async function persistCallerCompletedReplyConversationBestEffort(input: {
   providerChatPublicKey?: string | null;
   a2aConversationPersister?: A2AConversationMessagePersister;
 }): Promise<void> {
-  const localIdentity = input.localIdentity;
-  if (!localIdentity) {
-    return;
-  }
+  try {
+    const localIdentity = input.localIdentity;
+    if (!localIdentity) {
+      return;
+    }
 
-  const orderTxid = normalizeText(input.trace.order?.orderTxid)
-    || (Array.isArray(input.trace.order?.orderTxids)
-      ? input.trace.order.orderTxids.map((entry) => normalizeText(entry)).find(Boolean)
-      : '')
-    || null;
-  const paymentTxid = normalizeText(input.trace.order?.paymentTxid) || null;
-  const servicePinId = normalizeText(input.session.servicePinId)
-    || normalizeText(input.trace.a2a?.servicePinId)
-    || normalizeText(input.trace.order?.serviceId)
-    || null;
-  const serviceName = normalizeText(input.trace.order?.serviceName)
-    || normalizeText(input.trace.session.peerName)
-    || null;
-  const outputType = normalizeText((input.trace.order as Record<string, unknown> | null | undefined)?.outputType)
-    || null;
-  const deliveredAt = normalizeReplyObservedAt(input.reply, input.mutation.session.updatedAt);
-  const ratingRequestText = normalizeText(input.reply.ratingRequestText);
-  const ratingRequestedAt = ratingRequestText ? deliveredAt + 1 : null;
-  const artifacts = normalizeDeliveryArtifacts({
-    artifacts: input.reply.artifacts,
-    resultText: input.reply.responseText,
-  });
-  const chainRefs = resolveCompletedReplyChainRefs(input.reply);
-  const deliveryMessage = buildDeliveryMessage({
-    paymentTxid,
-    servicePinId,
-    serviceName,
-    result: input.reply.responseText,
-    ...(artifacts.length ? { artifacts } : {}),
-    deliveredAt,
-  }, orderTxid);
-  const deliveryMessageId = chainRefs.pinId || chainRefs.txid || `${input.trace.traceId}-caller-delivery`;
-
-  await persistA2AConversationMessageBestEffort({
-    paths: input.runtimeStateStore.paths,
-    local: {
-      profileSlug: path.basename(input.runtimeStateStore.paths.profileRoot),
-      globalMetaId: localIdentity.globalMetaId,
-      name: localIdentity.name,
-      chatPublicKey: localIdentity.chatPublicKey,
-    },
-    peer: {
-      globalMetaId: input.session.providerGlobalMetaId,
-      name: serviceName,
-      chatPublicKey: input.providerChatPublicKey || null,
-    },
-    message: {
-      messageId: deliveryMessageId,
-      direction: 'incoming',
-      content: deliveryMessage,
-      ...(artifacts.length ? { artifacts } : {}),
-      pinId: chainRefs.pinId,
-      txid: chainRefs.txid,
-      txids: chainRefs.txids,
-      chain: 'mvc',
-      orderTxid,
-      paymentTxid,
-      timestamp: deliveredAt,
-      raw: input.reply.rawMessage,
-    },
-    orderSession: {
-      role: 'caller',
-      state: ratingRequestText ? 'rating_pending' : 'completed',
-      orderTxid,
+    const orderTxid = normalizeText(input.trace.order?.orderTxid)
+      || (Array.isArray(input.trace.order?.orderTxids)
+        ? input.trace.order.orderTxids.map((entry) => normalizeText(entry)).find(Boolean)
+        : '')
+      || null;
+    const paymentTxid = normalizeText(input.trace.order?.paymentTxid) || null;
+    const servicePinId = normalizeText(input.session.servicePinId)
+      || normalizeText(input.trace.a2a?.servicePinId)
+      || normalizeText(input.trace.order?.serviceId)
+      || null;
+    const serviceName = normalizeText(input.trace.order?.serviceName)
+      || normalizeText(input.trace.session.peerName)
+      || null;
+    const outputType = normalizeText((input.trace.order as Record<string, unknown> | null | undefined)?.outputType)
+      || null;
+    const deliveredAt = normalizeReplyObservedAt(input.reply, input.mutation.session.updatedAt);
+    const ratingRequestText = normalizeText(input.reply.ratingRequestText);
+    const ratingRequestedAt = ratingRequestText
+      ? normalizeReplyRatingObservedAt(input.reply, deliveredAt + 1)
+      : null;
+    const artifacts = normalizeDeliveryArtifacts({
+      artifacts: input.reply.artifacts,
+      resultText: input.reply.responseText,
+    });
+    const chainRefs = resolveCompletedReplyChainRefs(input.reply);
+    const deliveryMessage = buildDeliveryMessage({
       paymentTxid,
       servicePinId,
       serviceName,
-      outputType,
+      result: input.reply.responseText,
+      ...(artifacts.length ? { artifacts } : {}),
       deliveredAt,
-    },
-  }, input.a2aConversationPersister);
+    }, orderTxid);
+    const deliveryMessageId = chainRefs.pinId || chainRefs.txid || `${input.trace.traceId}-caller-delivery`;
 
-  if (!ratingRequestText) {
-    return;
-  }
+    await persistA2AConversationMessageBestEffort({
+      paths: input.runtimeStateStore.paths,
+      local: {
+        profileSlug: path.basename(input.runtimeStateStore.paths.profileRoot),
+        globalMetaId: localIdentity.globalMetaId,
+        name: localIdentity.name,
+        chatPublicKey: localIdentity.chatPublicKey,
+      },
+      peer: {
+        globalMetaId: input.session.providerGlobalMetaId,
+        name: serviceName,
+        chatPublicKey: input.providerChatPublicKey || null,
+      },
+      message: {
+        messageId: deliveryMessageId,
+        direction: 'incoming',
+        content: deliveryMessage,
+        ...(artifacts.length ? { artifacts } : {}),
+        pinId: chainRefs.pinId,
+        txid: chainRefs.txid,
+        txids: chainRefs.txids,
+        chain: 'mvc',
+        orderTxid,
+        paymentTxid,
+        timestamp: deliveredAt,
+        raw: input.reply.rawMessage,
+      },
+      orderSession: {
+        role: 'caller',
+        state: ratingRequestText ? 'rating_pending' : 'completed',
+        orderTxid,
+        paymentTxid,
+        servicePinId,
+        serviceName,
+        outputType,
+        deliveredAt,
+      },
+    }, input.a2aConversationPersister);
 
-  await persistA2AConversationMessageBestEffort({
-    paths: input.runtimeStateStore.paths,
-    local: {
-      profileSlug: path.basename(input.runtimeStateStore.paths.profileRoot),
-      globalMetaId: localIdentity.globalMetaId,
-      name: localIdentity.name,
-      chatPublicKey: localIdentity.chatPublicKey,
-    },
-    peer: {
-      globalMetaId: input.session.providerGlobalMetaId,
-      name: serviceName,
-      chatPublicKey: input.providerChatPublicKey || null,
-    },
-    message: {
-      messageId: `${deliveryMessageId}-needs-rating`,
-      direction: 'incoming',
-      content: buildNeedsRatingMessage(orderTxid || '', ratingRequestText),
-      pinId: null,
-      txid: null,
-      txids: [],
-      chain: 'mvc',
-      orderTxid,
-      paymentTxid,
-      replyPinId: chainRefs.pinId,
-      timestamp: ratingRequestedAt,
-      raw: {
+    if (!ratingRequestText) {
+      return;
+    }
+
+    const ratingChainRefs = resolveCompletedReplyRatingChainRefs(input.reply);
+    const ratingMessageId = ratingChainRefs.pinId
+      || ratingChainRefs.txid
+      || `${deliveryMessageId}-needs-rating`;
+    const ratingRaw = Object.keys(normalizeReplyRatingRawMessage(input.reply)).length
+      ? input.reply.ratingRawMessage
+      : {
         synthetic: true,
         deliveryPinId: chainRefs.pinId,
         source: 'callerReplyWaiter',
+      };
+    await persistA2AConversationMessageBestEffort({
+      paths: input.runtimeStateStore.paths,
+      local: {
+        profileSlug: path.basename(input.runtimeStateStore.paths.profileRoot),
+        globalMetaId: localIdentity.globalMetaId,
+        name: localIdentity.name,
+        chatPublicKey: localIdentity.chatPublicKey,
       },
-    },
-    orderSession: {
-      role: 'caller',
-      state: 'rating_pending',
-      orderTxid,
-      paymentTxid,
-      servicePinId,
-      serviceName,
-      outputType,
-      ratingRequestedAt,
-    },
-  }, input.a2aConversationPersister);
+      peer: {
+        globalMetaId: input.session.providerGlobalMetaId,
+        name: serviceName,
+        chatPublicKey: input.providerChatPublicKey || null,
+      },
+      message: {
+        messageId: ratingMessageId,
+        direction: 'incoming',
+        content: buildNeedsRatingMessage(orderTxid || '', ratingRequestText),
+        pinId: ratingChainRefs.pinId,
+        txid: ratingChainRefs.txid,
+        txids: ratingChainRefs.txids,
+        chain: 'mvc',
+        orderTxid,
+        paymentTxid,
+        replyPinId: chainRefs.pinId,
+        timestamp: ratingRequestedAt,
+        raw: ratingRaw,
+      },
+      orderSession: {
+        role: 'caller',
+        state: 'rating_pending',
+        orderTxid,
+        paymentTxid,
+        servicePinId,
+        serviceName,
+        outputType,
+        ratingRequestedAt,
+      },
+    }, input.a2aConversationPersister);
+  } catch {
+    // Unified A2A persistence is best effort and must not block caller completion.
+  }
 }
 
 async function applyCallerReplyResult(input: {

@@ -196,6 +196,11 @@ test('metaweb reply waiter preserves delivery artifacts when NeedsRating arrives
   assert.equal(reply.state, 'completed');
   assert.equal(reply.responseText, 'Audio is ready: metafile://audio-pin-1.mp3');
   assert.equal(reply.ratingRequestText, 'Please rate this service.');
+  assert.equal(reply.ratingRequestPinId, `${'2'.repeat(64)}i0`);
+  assert.equal(reply.ratingRequestObservedAt, BASE_TIME + 1);
+  assert.equal(reply.ratingRawMessage.pinId, `${'2'.repeat(64)}i0`);
+  assert.equal(reply.ratingRawMessage.txId, '2'.repeat(64));
+  assert.equal(reply.ratingRawMessage.timestamp, BASE_TIME + 1);
   assert.equal(reply.artifacts.length, 1);
   assert.equal(reply.artifacts[0].uri, 'metafile://audio-pin-1.mp3');
   assert.equal(reply.artifacts[0].kind, 'audio');

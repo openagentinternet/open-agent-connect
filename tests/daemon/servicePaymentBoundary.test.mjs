@@ -1788,6 +1788,13 @@ test('buyer-side non-text deliverable accepts artifact-only structured replies a
             timestamp: 1_775_000_010_000,
           },
           ratingRequestText: 'Please rate this completed weather image.',
+          ratingRequestPinId: 'rating-pin-with-structured-artifact',
+          ratingRequestObservedAt: 1_775_000_010_250,
+          ratingRawMessage: {
+            pinId: 'rating-pin-with-structured-artifact',
+            txId: 'rating-tx-with-structured-artifact',
+            timestamp: 1_775_000_010_250,
+          },
         };
       },
     },
@@ -1865,7 +1872,7 @@ test('buyer-side non-text deliverable accepts artifact-only structured replies a
   assert.equal(orderSession.serviceName, 'Weather Oracle');
   assert.equal(orderSession.outputType, 'image');
   assert.equal(orderSession.deliveredAt, 1_775_000_010_000);
-  assert.equal(orderSession.ratingRequestedAt, 1_775_000_010_001);
+  assert.equal(orderSession.ratingRequestedAt, 1_775_000_010_250);
 
   const persistedDelivery = conversation.messages.find((entry) => (
     entry.orderTxid === trace.order.orderTxid
@@ -1886,6 +1893,13 @@ test('buyer-side non-text deliverable accepts artifact-only structured replies a
     && entry.protocolTag === 'NeedsRating'
   ));
   assert.ok(persistedNeedsRating, 'expected caller-side NeedsRating in unified A2A store');
+  assert.equal(persistedNeedsRating.messageId, 'rating-pin-with-structured-artifact');
+  assert.equal(persistedNeedsRating.pinId, 'rating-pin-with-structured-artifact');
+  assert.equal(persistedNeedsRating.txid, 'rating-tx-with-structured-artifact');
+  assert.deepEqual(persistedNeedsRating.txids, ['rating-tx-with-structured-artifact']);
+  assert.equal(persistedNeedsRating.replyPinId, 'delivery-pin-with-structured-artifact');
+  assert.equal(persistedNeedsRating.timestamp, 1_775_000_010_250);
+  assert.equal(persistedNeedsRating.raw.synthetic, undefined);
   assert.equal(persistedNeedsRating.content.includes('Please rate this completed weather image.'), true);
 
   await upsertIdentityProfile({
@@ -1902,6 +1916,78 @@ test('buyer-side non-text deliverable accepts artifact-only structured replies a
   assert.deepEqual(unifiedDelivery.artifacts.map((artifact) => [artifact.uri, artifact.kind]), [
     ['metafile://buyer-image-pin.png', 'image'],
   ]);
+});
+
+test('buyer-side completed reply ignores unified persistence failures and still auto-rates', async (t) => {
+  const paymentTxid = 'e'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    service: { outputType: 'image' },
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return {
+          state: 'completed',
+          responseText: '',
+          artifacts: [IMAGE_REPLY_ARTIFACT],
+          deliveryPinId: 'delivery-pin-with-persister-failure',
+          observedAt: 1_775_000_011_000,
+          rawMessage: {
+            pinId: 'delivery-pin-with-persister-failure',
+            txId: 'delivery-tx-with-persister-failure',
+            timestamp: 1_775_000_011_000,
+          },
+          ratingRequestText: 'Please rate this completed weather image.',
+          ratingRequestPinId: 'rating-pin-with-persister-failure',
+          ratingRequestObservedAt: 1_775_000_011_250,
+          ratingRawMessage: {
+            pinId: 'rating-pin-with-persister-failure',
+            txId: 'rating-tx-with-persister-failure',
+            timestamp: 1_775_000_011_250,
+          },
+        };
+      },
+    },
+    buyerRatingTextGenerator: async () => 'Rating: 5/5. The weather image satisfied the request.',
+    a2aConversationPersister: async () => {
+      throw new Error('simulated unified store outage');
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Create a weather image',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting');
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.a2a?.taskRunState === 'completed'
+    )) ?? null;
+  });
+  assert.ok(trace, 'expected caller reply completion despite unified persistence failure');
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/skill-service-rate'), true);
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
 });
 
 test('buyer-side non-text deliverable accepts fallback metafile references', async (t) => {

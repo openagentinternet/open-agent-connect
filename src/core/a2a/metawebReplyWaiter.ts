@@ -39,6 +39,9 @@ export type AwaitMetaWebServiceReplyResult =
       rawMessage: Record<string, unknown> | null;
       artifacts: A2ADeliveryArtifact[];
       ratingRequestText?: string | null;
+      ratingRequestPinId?: string | null;
+      ratingRequestObservedAt?: number | null;
+      ratingRawMessage?: Record<string, unknown> | null;
     }
   | {
       state: 'timeout';
@@ -305,6 +308,11 @@ export function createSocketIoMetaWebReplyWaiter(): MetaWebServiceReplyWaiter {
                 state: 'completed',
                 ...pendingDelivery,
                 ratingRequestText: ratingRequest.content,
+                ratingRequestPinId: pinIdFromMessage(message),
+                ratingRequestObservedAt: typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)
+                  ? message.timestamp
+                  : null,
+                ratingRawMessage: normalizeObject(message),
               });
               return;
             }
