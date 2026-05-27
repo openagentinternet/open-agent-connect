@@ -55,8 +55,8 @@ export interface ProductPurchaseRequest {
     listingPinId?: string;
     query?: string;
     skuId?: string;
-    maxAmount?: string;
-    currency?: string;
+    spendCap?: ProductPrice;
+    policyMode?: 'confirm_paid_only' | 'confirm_all' | 'auto_when_safe' | 'never';
     comment?: string;
     confirmed?: boolean;
 }
