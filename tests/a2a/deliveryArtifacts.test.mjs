@@ -55,10 +55,15 @@ test('parseMetafileUri strips trailing punctuation from text URIs', () => {
 test('parseMetafileUri keeps query and hash data out of pin and extension parsing', () => {
   const artifact = parseMetafileUri('metafile://abc123i0.mp4?download=1#preview');
 
-  assert.equal(artifact.uri, 'metafile://abc123i0.mp4?download=1#preview');
+  assert.equal(artifact.uri, 'metafile://abc123i0.mp4');
   assert.equal(artifact.pinId, 'abc123i0');
   assert.equal(artifact.extension, '.mp4');
   assert.equal(artifact.kind, 'video');
+});
+
+test('parseMetafileUri rejects slash-containing path-style metafile URIs', () => {
+  assert.equal(parseMetafileUri('metafile:///tmp/oac/private/preview.png'), null);
+  assert.equal(parseMetafileUri('metafile:///Users/example/private/preview.png'), null);
 });
 
 test('extractDeliveryArtifactsFromText dedupes URIs while preserving first-seen order', () => {
@@ -98,6 +103,14 @@ test('invalid or empty metafile URIs return null or an empty array', () => {
   assert.equal(parseMetafileUri('metafile://'), null);
   assert.deepEqual(extractDeliveryArtifactsFromText('no metafile URI here'), []);
   assert.deepEqual(extractDeliveryArtifactsFromText(''), []);
+});
+
+test('extractDeliveryArtifactsFromText ignores path-style metafile URIs', () => {
+  const artifacts = extractDeliveryArtifactsFromText(
+    'skip metafile:///tmp/oac/private/preview.png and metafile:///Users/example/private/preview.png',
+  );
+
+  assert.deepEqual(artifacts, []);
 });
 
 test('normalizeDeliveryArtifacts preserves safe structured metadata and fills URL fields', () => {
@@ -210,6 +223,8 @@ test('normalizeDeliveryArtifacts ignores malformed structured entries', () => {
       { uri: '' },
       { uri: 'https://example.test/not-a-metafile.mp4' },
       { uri: 'metafile://' },
+      { uri: 'metafile:///tmp/oac/private/preview.png' },
+      { uri: 'metafile:///Users/example/private/preview.png' },
       { uri: 'metafile://validi0.png' },
     ],
   });
@@ -218,6 +233,17 @@ test('normalizeDeliveryArtifacts ignores malformed structured entries', () => {
     artifacts.map((artifact) => artifact.uri),
     ['metafile://validi0.png'],
   );
+});
+
+test('normalizeDeliveryArtifacts canonicalizes structured URIs before summaries', () => {
+  const artifact = normalizeDeliveryArtifacts({
+    artifacts: [{ uri: 'metafile://abc123i0.png?local=/Users/example/secret.png' }],
+  })[0];
+  const summary = buildDeliveryArtifactSummary(artifact);
+
+  assert.equal(artifact.uri, 'metafile://abc123i0.png');
+  assert.match(summary, /metafile:\/\/abc123i0\.png/);
+  assert.doesNotMatch(summary, /\/Users\/example\/secret\.png/);
 });
 
 test('normalizeDeliveryArtifacts merges structured entries and text fallback entries with dedupe', () => {

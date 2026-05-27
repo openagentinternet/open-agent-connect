@@ -47,8 +47,7 @@ function normalizeExtension(extension: string | null): string | null {
 }
 
 function extensionFromPath(path: string): string | null {
-  const lastSlash = path.lastIndexOf('/');
-  const fileName = path.slice(lastSlash + 1);
+  const fileName = path;
   const lastDot = fileName.lastIndexOf('.');
   if (lastDot <= 0 || lastDot === fileName.length - 1) {
     return null;
@@ -58,8 +57,7 @@ function extensionFromPath(path: string): string | null {
 }
 
 function pinIdFromPath(path: string, extension: string | null): string | null {
-  const lastSlash = path.lastIndexOf('/');
-  const fileName = path.slice(lastSlash + 1);
+  const fileName = path;
   const pinId = extension ? fileName.slice(0, -extension.length) : fileName;
   const trimmed = pinId.trim();
   return trimmed ? trimmed : null;
@@ -197,7 +195,7 @@ export function parseMetafileUri(rawUri: string): A2ADeliveryArtifact | null {
 
   const withoutScheme = uri.slice('metafile://'.length);
   const path = withoutScheme.split(/[?#]/, 1)[0] || '';
-  if (!path) {
+  if (!path || path.includes('/')) {
     return null;
   }
 
@@ -210,7 +208,7 @@ export function parseMetafileUri(rawUri: string): A2ADeliveryArtifact | null {
   const urls = buildMetafileContentUrls(pinId);
 
   return {
-    uri,
+    uri: `metafile://${pinId}${extension || ''}`,
     pinId,
     kind: inferDeliveryArtifactKind(extension),
     fileName: extension ? `${pinId}${extension}` : null,
