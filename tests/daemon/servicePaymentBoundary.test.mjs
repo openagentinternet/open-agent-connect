@@ -1745,6 +1745,23 @@ test('buyer-side non-text deliverable accepts artifact-only structured replies a
   const paymentTxid = '5'.repeat(64);
   const harness = await createServiceCallHarness(t, {
     service: { outputType: 'image' },
+    writePin(input, { writes, identity }) {
+      if (input.path === '/protocols/skill-service-rate') {
+        throw new Error('simulated rating publish outage');
+      }
+      return {
+        txids: [`${input.path}-tx-${writes.length}`],
+        pinId: `${input.path}-pin-${writes.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      };
+    },
     servicePaymentExecutor: {
       async execute(input) {
         return {
@@ -1764,12 +1781,17 @@ test('buyer-side non-text deliverable accepts artifact-only structured replies a
           responseText: '',
           artifacts: [IMAGE_REPLY_ARTIFACT],
           deliveryPinId: 'delivery-pin-with-structured-artifact',
-          observedAt: Date.now(),
-          rawMessage: null,
-          ratingRequestText: null,
+          observedAt: 1_775_000_010_000,
+          rawMessage: {
+            pinId: 'delivery-pin-with-structured-artifact',
+            txId: 'delivery-tx-with-structured-artifact',
+            timestamp: 1_775_000_010_000,
+          },
+          ratingRequestText: 'Please rate this completed weather image.',
         };
       },
     },
+    buyerRatingTextGenerator: async () => 'Rating: 5/5. The weather image satisfied the request.',
   });
 
   const called = await harness.handlers.services.call({
@@ -1818,6 +1840,67 @@ test('buyer-side non-text deliverable accepts artifact-only structured replies a
   ]);
   assert.deepEqual(projectedDelivery.metadata.deliveryArtifacts.map((artifact) => artifact.uri), [
     'metafile://buyer-image-pin.png',
+  ]);
+
+  const conversation = await createA2AConversationStore({
+    homeDir: harness.homeDir,
+    local: {
+      globalMetaId: harness.identity.globalMetaId,
+      name: harness.identity.name,
+      chatPublicKey: harness.identity.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: 'idq1provider',
+      name: 'Weather Oracle',
+      chatPublicKey: harness.providerPair.publicKeyHex,
+    },
+  }).readConversation();
+  const orderSession = conversation.sessions.find((entry) => entry.sessionId === `a2a-order-${trace.order.orderTxid}`);
+  assert.ok(orderSession);
+  assert.equal(orderSession.type, 'service_order');
+  assert.equal(orderSession.role, 'caller');
+  assert.equal(orderSession.state, 'rating_pending');
+  assert.equal(orderSession.paymentTxid, paymentTxid);
+  assert.equal(orderSession.servicePinId, 'chain-service-pin-1');
+  assert.equal(orderSession.serviceName, 'Weather Oracle');
+  assert.equal(orderSession.outputType, 'image');
+  assert.equal(orderSession.deliveredAt, 1_775_000_010_000);
+  assert.equal(orderSession.ratingRequestedAt, 1_775_000_010_001);
+
+  const persistedDelivery = conversation.messages.find((entry) => (
+    entry.orderTxid === trace.order.orderTxid
+    && entry.direction === 'incoming'
+    && entry.protocolTag === 'DELIVERY'
+  ));
+  assert.ok(persistedDelivery, 'expected caller-side DELIVERY in unified A2A store');
+  assert.equal(persistedDelivery.pinId, 'delivery-pin-with-structured-artifact');
+  assert.equal(persistedDelivery.txid, 'delivery-tx-with-structured-artifact');
+  assert.equal(persistedDelivery.paymentTxid, paymentTxid);
+  assert.deepEqual(persistedDelivery.artifacts.map((artifact) => [artifact.uri, artifact.kind]), [
+    ['metafile://buyer-image-pin.png', 'image'],
+  ]);
+
+  const persistedNeedsRating = conversation.messages.find((entry) => (
+    entry.orderTxid === trace.order.orderTxid
+    && entry.direction === 'incoming'
+    && entry.protocolTag === 'NeedsRating'
+  ));
+  assert.ok(persistedNeedsRating, 'expected caller-side NeedsRating in unified A2A store');
+  assert.equal(persistedNeedsRating.content.includes('Please rate this completed weather image.'), true);
+
+  await upsertIdentityProfile({
+    systemHomeDir: deriveSystemHome(harness.homeDir),
+    name: harness.identity.name,
+    homeDir: harness.homeDir,
+    globalMetaId: harness.identity.globalMetaId,
+    mvcAddress: harness.identity.mvcAddress,
+  });
+  const unifiedSession = await harness.handlers.trace.getSession({ sessionId: orderSession.sessionId });
+  assert.equal(unifiedSession.ok, true);
+  const unifiedDelivery = unifiedSession.data.inspector.transcriptItems.find((item) => item.type === 'delivery');
+  assert.ok(unifiedDelivery, 'expected unified projection delivery item');
+  assert.deepEqual(unifiedDelivery.artifacts.map((artifact) => [artifact.uri, artifact.kind]), [
+    ['metafile://buyer-image-pin.png', 'image'],
   ]);
 });
 

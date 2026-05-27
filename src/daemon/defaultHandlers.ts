@@ -242,6 +242,7 @@ import {
 } from '../core/a2a/metawebReplyWaiter';
 import {
   extractDeliveryArtifactsFromText,
+  normalizeDeliveryArtifacts,
   type A2ADeliveryArtifact,
 } from '../core/a2a/deliveryArtifacts';
 import {
@@ -5155,6 +5156,201 @@ async function loadCallerContinuationState(input: {
   };
 }
 
+type CompletedMetaWebServiceReply = Extract<AwaitMetaWebServiceReplyResult, { state: 'completed' }>;
+
+function normalizeReplyRawMessage(reply: CompletedMetaWebServiceReply): Record<string, unknown> {
+  return reply.rawMessage && typeof reply.rawMessage === 'object' && !Array.isArray(reply.rawMessage)
+    ? reply.rawMessage
+    : {};
+}
+
+function normalizeReplyRawText(reply: CompletedMetaWebServiceReply, keys: string[]): string {
+  const raw = normalizeReplyRawMessage(reply);
+  for (const key of keys) {
+    const value = normalizeText(raw[key]);
+    if (value) {
+      return value;
+    }
+  }
+  return '';
+}
+
+function normalizeReplyRawTextArray(reply: CompletedMetaWebServiceReply, keys: string[]): string[] {
+  const raw = normalizeReplyRawMessage(reply);
+  const values: string[] = [];
+  for (const key of keys) {
+    const value = raw[key];
+    if (Array.isArray(value)) {
+      values.push(...value.map((entry) => normalizeText(entry)).filter(Boolean));
+    }
+  }
+  return [...new Set(values)];
+}
+
+function resolveCompletedReplyChainRefs(reply: CompletedMetaWebServiceReply): {
+  pinId: string | null;
+  txid: string | null;
+  txids: string[];
+} {
+  const pinId = normalizeText(reply.deliveryPinId)
+    || normalizeReplyRawText(reply, ['pinId', 'messagePinId'])
+    || null;
+  const rawTxid = normalizeReplyRawText(reply, ['txid', 'txId']);
+  const txids = [...new Set([
+    ...normalizeReplyRawTextArray(reply, ['txids', 'txIds']),
+    rawTxid,
+  ].filter(Boolean))];
+  return {
+    pinId,
+    txid: rawTxid || txids[0] || null,
+    txids,
+  };
+}
+
+function normalizeReplyObservedAt(reply: CompletedMetaWebServiceReply, fallback: number): number {
+  return Number.isFinite(reply.observedAt)
+    ? Math.trunc(Number(reply.observedAt))
+    : fallback;
+}
+
+async function persistCallerCompletedReplyConversationBestEffort(input: {
+  reply: CompletedMetaWebServiceReply;
+  session: A2ASessionRecord;
+  mutation: {
+    session: A2ASessionRecord;
+    taskRun: A2ATaskRunRecord;
+  };
+  trace: SessionTraceRecord;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  localIdentity: RuntimeIdentityRecord | null;
+  providerChatPublicKey?: string | null;
+  a2aConversationPersister?: A2AConversationMessagePersister;
+}): Promise<void> {
+  const localIdentity = input.localIdentity;
+  if (!localIdentity) {
+    return;
+  }
+
+  const orderTxid = normalizeText(input.trace.order?.orderTxid)
+    || (Array.isArray(input.trace.order?.orderTxids)
+      ? input.trace.order.orderTxids.map((entry) => normalizeText(entry)).find(Boolean)
+      : '')
+    || null;
+  const paymentTxid = normalizeText(input.trace.order?.paymentTxid) || null;
+  const servicePinId = normalizeText(input.session.servicePinId)
+    || normalizeText(input.trace.a2a?.servicePinId)
+    || normalizeText(input.trace.order?.serviceId)
+    || null;
+  const serviceName = normalizeText(input.trace.order?.serviceName)
+    || normalizeText(input.trace.session.peerName)
+    || null;
+  const outputType = normalizeText((input.trace.order as Record<string, unknown> | null | undefined)?.outputType)
+    || null;
+  const deliveredAt = normalizeReplyObservedAt(input.reply, input.mutation.session.updatedAt);
+  const ratingRequestText = normalizeText(input.reply.ratingRequestText);
+  const ratingRequestedAt = ratingRequestText ? deliveredAt + 1 : null;
+  const artifacts = normalizeDeliveryArtifacts({
+    artifacts: input.reply.artifacts,
+    resultText: input.reply.responseText,
+  });
+  const chainRefs = resolveCompletedReplyChainRefs(input.reply);
+  const deliveryMessage = buildDeliveryMessage({
+    paymentTxid,
+    servicePinId,
+    serviceName,
+    result: input.reply.responseText,
+    ...(artifacts.length ? { artifacts } : {}),
+    deliveredAt,
+  }, orderTxid);
+  const deliveryMessageId = chainRefs.pinId || chainRefs.txid || `${input.trace.traceId}-caller-delivery`;
+
+  await persistA2AConversationMessageBestEffort({
+    paths: input.runtimeStateStore.paths,
+    local: {
+      profileSlug: path.basename(input.runtimeStateStore.paths.profileRoot),
+      globalMetaId: localIdentity.globalMetaId,
+      name: localIdentity.name,
+      chatPublicKey: localIdentity.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: input.session.providerGlobalMetaId,
+      name: serviceName,
+      chatPublicKey: input.providerChatPublicKey || null,
+    },
+    message: {
+      messageId: deliveryMessageId,
+      direction: 'incoming',
+      content: deliveryMessage,
+      ...(artifacts.length ? { artifacts } : {}),
+      pinId: chainRefs.pinId,
+      txid: chainRefs.txid,
+      txids: chainRefs.txids,
+      chain: 'mvc',
+      orderTxid,
+      paymentTxid,
+      timestamp: deliveredAt,
+      raw: input.reply.rawMessage,
+    },
+    orderSession: {
+      role: 'caller',
+      state: ratingRequestText ? 'rating_pending' : 'completed',
+      orderTxid,
+      paymentTxid,
+      servicePinId,
+      serviceName,
+      outputType,
+      deliveredAt,
+    },
+  }, input.a2aConversationPersister);
+
+  if (!ratingRequestText) {
+    return;
+  }
+
+  await persistA2AConversationMessageBestEffort({
+    paths: input.runtimeStateStore.paths,
+    local: {
+      profileSlug: path.basename(input.runtimeStateStore.paths.profileRoot),
+      globalMetaId: localIdentity.globalMetaId,
+      name: localIdentity.name,
+      chatPublicKey: localIdentity.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: input.session.providerGlobalMetaId,
+      name: serviceName,
+      chatPublicKey: input.providerChatPublicKey || null,
+    },
+    message: {
+      messageId: `${deliveryMessageId}-needs-rating`,
+      direction: 'incoming',
+      content: buildNeedsRatingMessage(orderTxid || '', ratingRequestText),
+      pinId: null,
+      txid: null,
+      txids: [],
+      chain: 'mvc',
+      orderTxid,
+      paymentTxid,
+      replyPinId: chainRefs.pinId,
+      timestamp: ratingRequestedAt,
+      raw: {
+        synthetic: true,
+        deliveryPinId: chainRefs.pinId,
+        source: 'callerReplyWaiter',
+      },
+    },
+    orderSession: {
+      role: 'caller',
+      state: 'rating_pending',
+      orderTxid,
+      paymentTxid,
+      servicePinId,
+      serviceName,
+      outputType,
+      ratingRequestedAt,
+    },
+  }, input.a2aConversationPersister);
+}
+
 async function applyCallerReplyResult(input: {
   reply: AwaitMetaWebServiceReplyResult;
   session: A2ASessionRecord;
@@ -5163,6 +5359,9 @@ async function applyCallerReplyResult(input: {
   sessionStateStore: ReturnType<typeof createSessionStateStore>;
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
   trace: SessionTraceRecord;
+  localIdentity: RuntimeIdentityRecord | null;
+  providerChatPublicKey?: string | null;
+  a2aConversationPersister?: A2AConversationMessagePersister;
 }): Promise<{
   trace: SessionTraceRecord;
   artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>>;
@@ -5231,6 +5430,19 @@ async function applyCallerReplyResult(input: {
     });
   }
   await appendA2ATranscriptItems(input.sessionStateStore, transcriptItems);
+
+  if (input.reply.state === 'completed') {
+    await persistCallerCompletedReplyConversationBestEffort({
+      reply: input.reply,
+      session: input.session,
+      mutation,
+      trace: input.trace,
+      runtimeStateStore: input.runtimeStateStore,
+      localIdentity: input.localIdentity,
+      providerChatPublicKey: input.providerChatPublicKey,
+      a2aConversationPersister: input.a2aConversationPersister,
+    });
+  }
 
   const rebuilt = await rebuildTraceArtifactsFromSessionState({
     baseTrace: input.trace,
@@ -9466,6 +9678,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return;
         }
 
+        const latestRuntimeState = await runtimeStateStore.readState();
         const applied = await applyCallerReplyResult({
           reply,
           session: current.session,
@@ -9474,6 +9687,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           sessionStateStore,
           runtimeStateStore,
           trace: current.trace,
+          localIdentity: latestRuntimeState.identity ?? null,
+          providerChatPublicKey: input.waiterInput.providerChatPublicKey ?? null,
+          a2aConversationPersister,
         });
         await autoPublishBuyerRatingForReply({
           trace: applied.trace,
