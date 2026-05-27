@@ -1813,6 +1813,93 @@ test('buyer-side non-text deliverable accepts fallback metafile references', asy
   assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
 });
 
+test('buyer-side non-text deliverable rejects http-only media references for paid orders', async (t) => {
+  const scenarios = [
+    {
+      outputType: 'image',
+      paymentTxid: 'a'.repeat(64),
+      responseText: 'Image generation finished: https://cdn.example.test/result.png',
+    },
+    {
+      outputType: 'video',
+      paymentTxid: 'b'.repeat(64),
+      responseText: 'Video generation finished: https://cdn.example.test/result.mp4?download=1',
+    },
+    {
+      outputType: 'audio',
+      paymentTxid: 'c'.repeat(64),
+      responseText: 'Audio generation finished: https://cdn.example.test/result.mp3',
+    },
+    {
+      outputType: 'file',
+      paymentTxid: 'd'.repeat(64),
+      responseText: 'File uploaded: https://file.metaid.io/metafile-indexer/api/v1/files/content/http-only-file-pin',
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.outputType, async (t) => {
+      const harness = await createServiceCallHarness(t, {
+        service: { outputType: scenario.outputType },
+        servicePaymentExecutor: {
+          async execute(input) {
+            return {
+              paymentTxid: scenario.paymentTxid,
+              paymentChain: input.paymentChain,
+              paymentAmount: input.amount,
+              paymentCurrency: input.currency,
+              settlementKind: input.settlementKind,
+              network: input.paymentChain,
+            };
+          },
+        },
+        callerReplyWaiter: {
+          async awaitServiceReply() {
+            return {
+              state: 'completed',
+              responseText: scenario.responseText,
+              artifacts: [],
+              deliveryPinId: `delivery-pin-http-only-${scenario.outputType}`,
+              observedAt: Date.now(),
+              rawMessage: null,
+              ratingRequestText: null,
+            };
+          },
+        },
+      });
+
+      const called = await harness.handlers.services.call({
+        request: {
+          servicePinId: 'chain-service-pin-1',
+          providerGlobalMetaId: 'idq1provider',
+          userTask: `Create a weather ${scenario.outputType}`,
+          taskContext: 'User is in Shanghai',
+          spendCap: {
+            amount: '0.00002',
+            currency: 'SPACE',
+          },
+        },
+      });
+
+      assert.equal(called.state, 'waiting');
+      const refundWrite = await waitForCondition(() => (
+        harness.writes.find((entry) => entry.path === '/protocols/service-refund-request') ?? null
+      ));
+      assert.ok(refundWrite, `expected ${scenario.outputType} http-only delivery to publish a refund request`);
+      const payload = JSON.parse(refundWrite.payload);
+      assert.equal(payload.paymentTxid, scenario.paymentTxid);
+      assert.equal(payload.failureReason, 'invalid_deliverable');
+
+      const state = await harness.runtimeStateStore.readState();
+      const trace = state.traces.find((entry) => entry.order?.paymentTxid === scenario.paymentTxid);
+      assert.ok(trace, `expected ${scenario.outputType} invalid deliverable trace`);
+      assert.equal(trace.order.status, 'refund_pending');
+      assert.equal(trace.order.failureReason, 'invalid_deliverable');
+      assert.equal(trace.a2a.publicStatus, 'remote_failed');
+    });
+  }
+});
+
 test('buyer-side invalid non-text deliverable creates a refund request for paid orders', async (t) => {
   const paymentTxid = '7'.repeat(64);
   const harness = await createServiceCallHarness(t, {

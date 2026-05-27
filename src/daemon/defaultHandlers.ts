@@ -240,7 +240,10 @@ import {
   type AwaitMetaWebServiceReplyResult,
   type MetaWebServiceReplyWaiter,
 } from '../core/a2a/metawebReplyWaiter';
-import type { A2ADeliveryArtifact } from '../core/a2a/deliveryArtifacts';
+import {
+  extractDeliveryArtifactsFromText,
+  type A2ADeliveryArtifact,
+} from '../core/a2a/deliveryArtifacts';
 import {
   buildOrderEndMessage,
   buildOrderStatusMessage,
@@ -7212,10 +7215,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   }
 
   function containsDeliverableReference(value: unknown): boolean {
-    const text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
-    return /metafile:\/\/[^\s)]+/iu.test(text)
-      || /https?:\/\/[^\s)]+\.(?:png|jpe?g|webp|gif|mp4|mov|webm|mp3|wav|m4a|pdf|zip|csv|json)(?:[?#][^\s)]*)?/iu.test(text)
-      || /https?:\/\/file\.metaid\.io\/[^\s)]+/iu.test(text);
+    const text = typeof value === 'string' ? value : JSON.stringify(value ?? '') ?? '';
+    return extractDeliveryArtifactsFromText(text).length > 0;
   }
 
   function validateBuyerReplyDeliverable(inputReply: {
