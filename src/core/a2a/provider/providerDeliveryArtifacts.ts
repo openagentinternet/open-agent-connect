@@ -444,7 +444,7 @@ async function scanWorkspaceForCandidates(
   }
 
   await visit(executionCwd);
-  if (!candidates.length && secretLikeFileSeen) {
+  if (secretLikeFileSeen) {
     throw providerArtifactError(
       'provider_artifact_secret_rejected',
       'Provider artifact path looks like a secret file and cannot be delivered.',
@@ -589,6 +589,38 @@ function scrubLocalPathMentions(responseText: string, scrubPaths: string[]): str
   return scrubbed.replace(/[ \t]+/g, ' ').trim();
 }
 
+async function scrubExecutionWorkspacePathMentions(
+  responseText: string,
+  executionCwd?: string | null,
+): Promise<string> {
+  const normalizedExecutionCwd = normalizeText(executionCwd);
+  if (!normalizedExecutionCwd) {
+    return responseText;
+  }
+
+  let realExecutionCwd: string;
+  try {
+    realExecutionCwd = await fs.realpath(path.resolve(normalizedExecutionCwd));
+  } catch {
+    return responseText;
+  }
+
+  let scrubbed = String(responseText || '');
+  const roots = new Set<string>();
+  addPathScrubVariant(roots, realExecutionCwd);
+  addPathScrubVariant(roots, path.resolve(normalizedExecutionCwd));
+  const sortedRoots = [...roots]
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+
+  for (const root of sortedRoots) {
+    const pattern = `${escapeRegExp(root)}(?:[\\\\/][^\\s;,)\\]}>"'\`]+)*(?=$|[^A-Za-z0-9_.\\\\/-])`;
+    scrubbed = scrubbed.replace(new RegExp(pattern, 'g'), '[uploaded artifact]');
+  }
+
+  return scrubbed.replace(/[ \t]+/g, ' ').trim();
+}
+
 async function uploadResolvedLocalArtifact(input: {
   file: ResolvedProviderFile;
   expectedFamily: ProviderExpectedArtifactFamily;
@@ -643,7 +675,10 @@ export async function resolveProviderDeliveryArtifacts(
     verifyAvailability: input.verifyAvailability,
   });
   if (existingArtifacts.length > 0) {
-    return { responseText, artifacts: existingArtifacts };
+    return {
+      responseText: await scrubExecutionWorkspacePathMentions(responseText, input.executionCwd),
+      artifacts: existingArtifacts,
+    };
   }
 
   const localFile = await resolveLocalArtifact({

@@ -142,6 +142,32 @@ test('existing metafile URI reuse calls injected availability verifier before su
   assert.deepEqual(verifierCalls, ['abc123i0']);
 });
 
+test('existing metafile URI reuse scrubs local workspace path prose', async () => {
+  const workspace = await tempWorkspace();
+  const filePath = await writeWorkspaceFile(workspace, 'out/chart.png');
+  const artifactDirectory = path.dirname(filePath);
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: `Saved image to ${filePath}; output dir ${artifactDirectory}; public artifact metafile://abc123i0.png`,
+    outputType: 'image',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(uploadCalls),
+    verifyAvailability: okVerifier(verifierCalls),
+  });
+
+  assert.deepEqual(verifierCalls, ['abc123i0']);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://abc123i0.png');
+  assert.match(result.responseText, /metafile:\/\/abc123i0\.png/);
+  assert.equal(result.responseText.includes(filePath), false);
+  assert.equal(result.responseText.includes(artifactDirectory), false);
+  assert.equal(result.responseText.includes(workspace), false);
+});
+
 test('existing metafile URI verifier failure maps to provider_artifact_unavailable', async () => {
   await assertRejectCode(
     resolveProviderDeliveryArtifacts({
@@ -383,6 +409,27 @@ test('fallback workspace scan rejects npm credential config before upload', asyn
   const workspace = await tempWorkspace();
   const uploadCalls = [];
   await writeWorkspaceFile(workspace, '.npmrc', '//registry.npmjs.org/:_authToken=secret');
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'Generated the requested file.',
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+});
+
+test('fallback workspace scan rejects mixed secret and public candidates before upload', async () => {
+  const workspace = await tempWorkspace();
+  const uploadCalls = [];
+  await writeWorkspaceFile(workspace, '.npmrc', '//registry.npmjs.org/:_authToken=secret');
+  await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
 
   await assertRejectCode(
     resolveProviderDeliveryArtifacts({
