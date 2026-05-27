@@ -112,22 +112,18 @@ function normalizeStructuredDeliveryArtifact(value: unknown): A2ADeliveryArtifac
 
   const contentType = valueAsTrimmedString(entry.contentType);
   const fileName = valueAsSafeFileName(entry.fileName) || base.fileName;
-  const extension = normalizeExtension(valueAsTrimmedString(entry.extension)) || base.extension;
-  const sourceUrl = valueAsTrimmedString(entry.sourceUrl) || base.sourceUrl;
-  const fallbackUrl = valueAsTrimmedString(entry.fallbackUrl) || base.fallbackUrl;
-  const downloadUrl = valueAsTrimmedString(entry.downloadUrl) || base.downloadUrl;
 
   return {
     uri: base.uri,
     pinId: base.pinId,
-    kind: inferDeliveryArtifactKind(extension, contentType),
+    kind: inferDeliveryArtifactKind(base.extension, contentType),
     fileName,
-    extension,
+    extension: base.extension,
     contentType,
     byteLength: valueAsByteLength(entry.byteLength),
-    sourceUrl,
-    fallbackUrl,
-    downloadUrl,
+    sourceUrl: base.sourceUrl,
+    fallbackUrl: base.fallbackUrl,
+    downloadUrl: base.downloadUrl,
   };
 }
 

@@ -126,6 +126,38 @@ test('normalizeDeliveryArtifacts preserves safe structured metadata and fills UR
   assert.equal(artifacts[0].downloadUrl, urls.accelerateUrl);
 });
 
+test('normalizeDeliveryArtifacts keeps URI-derived extension when structured metadata conflicts', () => {
+  const artifacts = normalizeDeliveryArtifacts({
+    artifacts: [
+      {
+        uri: 'metafile://abc123i0.mp4',
+        extension: '.png',
+        kind: 'image',
+      },
+    ],
+  });
+
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0].extension, '.mp4');
+  assert.equal(artifacts[0].kind, 'video');
+});
+
+test('normalizeDeliveryArtifacts uses content type only as a kind hint', () => {
+  const artifacts = normalizeDeliveryArtifacts({
+    artifacts: [
+      {
+        uri: 'metafile://abc123i0.mp4',
+        extension: '.png',
+        contentType: 'image/png',
+      },
+    ],
+  });
+
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0].extension, '.mp4');
+  assert.equal(artifacts[0].kind, 'image');
+});
+
 test('normalizeDeliveryArtifacts ignores malformed structured entries', () => {
   const artifacts = normalizeDeliveryArtifacts({
     artifacts: [
@@ -159,6 +191,7 @@ test('normalizeDeliveryArtifacts merges structured entries and text fallback ent
 });
 
 test('buildDeliveryArtifactSummary includes public artifact fields', () => {
+  const urls = buildMetafileContentUrls('abc123i0');
   const artifact = normalizeDeliveryArtifacts({
     artifacts: [
       {
@@ -166,7 +199,6 @@ test('buildDeliveryArtifactSummary includes public artifact fields', () => {
         fileName: 'clip.mp4',
         contentType: 'video/mp4',
         byteLength: 123,
-        downloadUrl: 'https://download.example.test/abc123i0',
       },
     ],
   })[0];
@@ -177,7 +209,30 @@ test('buildDeliveryArtifactSummary includes public artifact fields', () => {
   assert.match(summary, /clip\.mp4/);
   assert.match(summary, /video\/mp4/);
   assert.match(summary, /123 bytes/);
-  assert.match(summary, /https:\/\/download\.example\.test\/abc123i0/);
+  assert.match(summary, new RegExp(urls.accelerateUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('normalizeDeliveryArtifacts ignores structured URL fields that could expose local paths', () => {
+  const urls = buildMetafileContentUrls('abc123i0');
+  const artifact = normalizeDeliveryArtifacts({
+    artifacts: [
+      {
+        uri: 'metafile://abc123i0.mp4',
+        sourceUrl: '/tmp/oac/private/source.mp4',
+        fallbackUrl: 'file:///Users/example/secret/fallback.mp4',
+        downloadUrl: 'C:\\Users\\example\\secret\\download.mp4',
+      },
+    ],
+  })[0];
+  const summary = buildDeliveryArtifactSummary(artifact);
+
+  assert.equal(artifact.sourceUrl, urls.accelerateUrl);
+  assert.equal(artifact.fallbackUrl, urls.contentUrl);
+  assert.equal(artifact.downloadUrl, urls.accelerateUrl);
+  assert.match(summary, new RegExp(urls.accelerateUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(summary, /\/tmp\/oac\/private/);
+  assert.doesNotMatch(summary, /file:\/\/\/Users\/example\/secret/);
+  assert.doesNotMatch(summary, /C:\\Users\\example\\secret/);
 });
 
 test('delivery artifact normalization and summaries never include local filesystem paths', () => {
