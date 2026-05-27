@@ -204,6 +204,12 @@ async function extractExistingBarePathCandidates(
     if (!looksLikeLocalPathLine(filePath)) {
       continue;
     }
+    if (isSecretLikeFileName(filePath)) {
+      throw providerArtifactError(
+        'provider_artifact_secret_rejected',
+        'Provider artifact path looks like a secret file and cannot be delivered.',
+      );
+    }
     const absolutePath = path.isAbsolute(filePath)
       ? filePath
       : path.resolve(executionCwd, filePath);
@@ -299,6 +305,12 @@ async function resolveLocalCandidate(input: {
   const candidatePath = trimCandidatePath(input.candidate.filePath);
   if (!candidatePath) {
     throw providerArtifactError('provider_artifact_missing', 'Provider artifact path is empty.');
+  }
+  if (isSecretLikeFileName(candidatePath)) {
+    throw providerArtifactError(
+      'provider_artifact_secret_rejected',
+      'Provider artifact path looks like a secret file and cannot be delivered.',
+    );
   }
 
   const absoluteCandidatePath = path.isAbsolute(candidatePath)

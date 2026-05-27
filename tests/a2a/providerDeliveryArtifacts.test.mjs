@@ -95,6 +95,20 @@ async function assertRejectCode(promise, code) {
   );
 }
 
+async function captureRejectCode(promise, code) {
+  let capturedError = null;
+  await assert.rejects(
+    promise,
+    (error) => {
+      assert.equal(error.code, code);
+      assert.match(error.message, new RegExp(code));
+      capturedError = error;
+      return true;
+    },
+  );
+  return capturedError;
+}
+
 test('classifyProviderOutputType treats text-like and non-text service outputs consistently', () => {
   assert.equal(classifyProviderOutputType(undefined), 'text');
   assert.equal(classifyProviderOutputType(''), 'text');
@@ -540,6 +554,68 @@ test('bare local path rejects SSH private key before upload', async () => {
   await assertRejectCode(
     resolveProviderDeliveryArtifacts({
       responseText: './.ssh/id_ed25519',
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+});
+
+test('missing bare SSH private key path rejects before fallback scan can upload public file', async () => {
+  const workspace = await tempWorkspace();
+  const uploadCalls = [];
+  await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: '.ssh/id_ed25519',
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('.ssh/id_ed25519'), false);
+});
+
+test('missing dot-relative SSH private key path rejects before fallback scan can upload public file', async () => {
+  const workspace = await tempWorkspace();
+  const uploadCalls = [];
+  await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: './.ssh/id_ed25519',
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('./.ssh/id_ed25519'), false);
+});
+
+test('missing explicit SSH private key marker rejects as secret before missing-artifact handling', async () => {
+  const workspace = await tempWorkspace();
+  const uploadCalls = [];
+  await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'artifactPath: ./.ssh/id_ed25519',
       outputType: 'file',
       executionCwd: workspace,
       signer: fakeSigner(),
