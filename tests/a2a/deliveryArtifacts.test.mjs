@@ -4,8 +4,11 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const {
+  appendDeliveryArtifactSummaries,
+  buildDeliveryArtifactSummary,
   extractDeliveryArtifactsFromText,
   inferDeliveryArtifactKind,
+  normalizeDeliveryArtifacts,
   parseMetafileUri,
 } = require('../../dist/core/a2a/deliveryArtifacts.js');
 const { buildMetafileContentUrls } = require('../../dist/core/files/metafileUrls.js');
@@ -95,4 +98,125 @@ test('invalid or empty metafile URIs return null or an empty array', () => {
   assert.equal(parseMetafileUri('metafile://'), null);
   assert.deepEqual(extractDeliveryArtifactsFromText('no metafile URI here'), []);
   assert.deepEqual(extractDeliveryArtifactsFromText(''), []);
+});
+
+test('normalizeDeliveryArtifacts preserves safe structured metadata and fills URL fields', () => {
+  const artifacts = normalizeDeliveryArtifacts({
+    artifacts: [
+      {
+        uri: 'metafile://abc123i0.mp4',
+        fileName: 'clip.mp4',
+        contentType: 'video/mp4',
+        byteLength: 123,
+      },
+    ],
+  });
+  const urls = buildMetafileContentUrls('abc123i0');
+
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0].uri, 'metafile://abc123i0.mp4');
+  assert.equal(artifacts[0].pinId, 'abc123i0');
+  assert.equal(artifacts[0].kind, 'video');
+  assert.equal(artifacts[0].fileName, 'clip.mp4');
+  assert.equal(artifacts[0].extension, '.mp4');
+  assert.equal(artifacts[0].contentType, 'video/mp4');
+  assert.equal(artifacts[0].byteLength, 123);
+  assert.equal(artifacts[0].sourceUrl, urls.accelerateUrl);
+  assert.equal(artifacts[0].fallbackUrl, urls.contentUrl);
+  assert.equal(artifacts[0].downloadUrl, urls.accelerateUrl);
+});
+
+test('normalizeDeliveryArtifacts ignores malformed structured entries', () => {
+  const artifacts = normalizeDeliveryArtifacts({
+    artifacts: [
+      null,
+      'metafile://string-entry-is-not-structured.mp4',
+      { uri: '' },
+      { uri: 'https://example.test/not-a-metafile.mp4' },
+      { uri: 'metafile://' },
+      { uri: 'metafile://validi0.png' },
+    ],
+  });
+
+  assert.deepEqual(
+    artifacts.map((artifact) => artifact.uri),
+    ['metafile://validi0.png'],
+  );
+});
+
+test('normalizeDeliveryArtifacts merges structured entries and text fallback entries with dedupe', () => {
+  const artifacts = normalizeDeliveryArtifacts({
+    artifacts: [{ uri: 'metafile://onei0.mp4', fileName: 'one.mp4' }],
+    resultText: 'Generated metafile://onei0.mp4 and metafile://twoi0.png',
+  });
+
+  assert.deepEqual(
+    artifacts.map((artifact) => artifact.uri),
+    ['metafile://onei0.mp4', 'metafile://twoi0.png'],
+  );
+  assert.equal(artifacts[0].fileName, 'one.mp4');
+  assert.equal(artifacts[1].kind, 'image');
+});
+
+test('buildDeliveryArtifactSummary includes public artifact fields', () => {
+  const artifact = normalizeDeliveryArtifacts({
+    artifacts: [
+      {
+        uri: 'metafile://abc123i0.mp4',
+        fileName: 'clip.mp4',
+        contentType: 'video/mp4',
+        byteLength: 123,
+        downloadUrl: 'https://download.example.test/abc123i0',
+      },
+    ],
+  })[0];
+  const summary = buildDeliveryArtifactSummary(artifact);
+
+  assert.match(summary, /metafile:\/\/abc123i0\.mp4/);
+  assert.match(summary, /abc123i0/);
+  assert.match(summary, /clip\.mp4/);
+  assert.match(summary, /video\/mp4/);
+  assert.match(summary, /123 bytes/);
+  assert.match(summary, /https:\/\/download\.example\.test\/abc123i0/);
+});
+
+test('delivery artifact normalization and summaries never include local filesystem paths', () => {
+  const artifact = normalizeDeliveryArtifacts({
+    artifacts: [
+      {
+        uri: 'metafile://abc123i0.png',
+        fileName: '/tmp/oac/private/preview.png',
+        localPath: '/tmp/oac/private/preview.png',
+        path: '/Users/example/secret/preview.png',
+        absolutePath: 'C:\\Users\\example\\secret\\preview.png',
+      },
+    ],
+  })[0];
+  const summary = buildDeliveryArtifactSummary(artifact);
+
+  assert.equal(artifact.fileName, 'preview.png');
+  assert.equal(Object.hasOwn(artifact, 'localPath'), false);
+  assert.equal(Object.hasOwn(artifact, 'path'), false);
+  assert.equal(Object.hasOwn(artifact, 'absolutePath'), false);
+  assert.doesNotMatch(summary, /\/tmp\/oac\/private/);
+  assert.doesNotMatch(summary, /\/Users\/example\/secret/);
+  assert.doesNotMatch(summary, /C:\\Users\\example\\secret/);
+});
+
+test('appendDeliveryArtifactSummaries preserves response text and appends summaries after blank lines', () => {
+  const artifacts = normalizeDeliveryArtifacts({
+    artifacts: [
+      {
+        uri: 'metafile://abc123i0.mp4',
+        fileName: 'clip.mp4',
+        contentType: 'video/mp4',
+        byteLength: 123,
+      },
+    ],
+  });
+  const response = appendDeliveryArtifactSummaries('Here is your file.', artifacts);
+
+  assert.match(response, /^Here is your file\.\n\nArtifact:/);
+  assert.match(response, /metafile:\/\/abc123i0\.mp4/);
+  assert.match(response, /clip\.mp4/);
 });

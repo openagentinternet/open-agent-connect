@@ -71,6 +71,79 @@ function stripTrailingTextPunctuation(value: string): string {
   return normalized;
 }
 
+function valueAsTrimmedString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function valueAsSafeFileName(value: unknown): string | null {
+  const trimmed = valueAsTrimmedString(value);
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = trimmed.replace(/\\/g, '/');
+  const fileName = normalized.split('/').filter(Boolean).pop();
+  return fileName || null;
+}
+
+function valueAsByteLength(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+
+  return value;
+}
+
+function normalizeStructuredDeliveryArtifact(value: unknown): A2ADeliveryArtifact | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const entry = value as Record<string, unknown>;
+  const base = parseMetafileUri(valueAsTrimmedString(entry.uri) || '');
+  if (!base) {
+    return null;
+  }
+
+  const contentType = valueAsTrimmedString(entry.contentType);
+  const fileName = valueAsSafeFileName(entry.fileName) || base.fileName;
+  const extension = normalizeExtension(valueAsTrimmedString(entry.extension)) || base.extension;
+  const sourceUrl = valueAsTrimmedString(entry.sourceUrl) || base.sourceUrl;
+  const fallbackUrl = valueAsTrimmedString(entry.fallbackUrl) || base.fallbackUrl;
+  const downloadUrl = valueAsTrimmedString(entry.downloadUrl) || base.downloadUrl;
+
+  return {
+    uri: base.uri,
+    pinId: base.pinId,
+    kind: inferDeliveryArtifactKind(extension, contentType),
+    fileName,
+    extension,
+    contentType,
+    byteLength: valueAsByteLength(entry.byteLength),
+    sourceUrl,
+    fallbackUrl,
+    downloadUrl,
+  };
+}
+
+function addDeliveryArtifact(
+  artifacts: A2ADeliveryArtifact[],
+  seen: Set<string>,
+  artifact: A2ADeliveryArtifact | null,
+): void {
+  if (!artifact || seen.has(artifact.uri)) {
+    return;
+  }
+
+  seen.add(artifact.uri);
+  artifacts.push(artifact);
+}
+
 export function inferDeliveryArtifactKind(
   extension: string | null,
   contentType?: string | null,
@@ -149,4 +222,61 @@ export function extractDeliveryArtifactsFromText(text: string): A2ADeliveryArtif
   }
 
   return artifacts;
+}
+
+export function normalizeDeliveryArtifacts(input: {
+  artifacts?: unknown;
+  resultText?: unknown;
+}): A2ADeliveryArtifact[] {
+  const seen = new Set<string>();
+  const artifacts: A2ADeliveryArtifact[] = [];
+  const structuredArtifacts = Array.isArray(input.artifacts) ? input.artifacts : [];
+
+  for (const entry of structuredArtifacts) {
+    addDeliveryArtifact(artifacts, seen, normalizeStructuredDeliveryArtifact(entry));
+  }
+
+  if (typeof input.resultText === 'string') {
+    for (const artifact of extractDeliveryArtifactsFromText(input.resultText)) {
+      addDeliveryArtifact(artifacts, seen, artifact);
+    }
+  }
+
+  return artifacts;
+}
+
+export function buildDeliveryArtifactSummary(artifact: A2ADeliveryArtifact): string {
+  const lines = [`Artifact: ${artifact.uri}`, `PINID: ${artifact.pinId}`];
+
+  if (artifact.fileName) {
+    lines.push(`File: ${artifact.fileName}`);
+  }
+  if (artifact.contentType) {
+    lines.push(`Content-Type: ${artifact.contentType}`);
+  }
+  if (artifact.byteLength !== null) {
+    lines.push(`Size: ${artifact.byteLength} bytes`);
+  }
+  if (artifact.downloadUrl) {
+    lines.push(`Download: ${artifact.downloadUrl}`);
+  }
+
+  return lines.join('\n');
+}
+
+export function appendDeliveryArtifactSummaries(
+  responseText: string,
+  artifacts: A2ADeliveryArtifact[],
+): string {
+  if (!artifacts.length) {
+    return responseText;
+  }
+
+  const summaries = artifacts.map((artifact) => buildDeliveryArtifactSummary(artifact)).join('\n\n');
+  const trimmedResponseText = responseText.trimEnd();
+  if (!trimmedResponseText) {
+    return summaries;
+  }
+
+  return `${trimmedResponseText}\n\n${summaries}`;
 }
