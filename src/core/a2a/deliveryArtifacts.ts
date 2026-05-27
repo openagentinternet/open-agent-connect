@@ -199,7 +199,7 @@ export function parseMetafileUri(rawUri: string): A2ADeliveryArtifact | null {
 
   const withoutScheme = uri.slice('metafile://'.length);
   const path = withoutScheme.split(/[?#]/, 1)[0] || '';
-  if (!path || path.includes('/')) {
+  if (!path || path.includes('/') || path.includes('\\')) {
     return null;
   }
 

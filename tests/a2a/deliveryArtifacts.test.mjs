@@ -66,6 +66,10 @@ test('parseMetafileUri rejects slash-containing path-style metafile URIs', () =>
   assert.equal(parseMetafileUri('metafile:///Users/example/private/preview.png'), null);
 });
 
+test('parseMetafileUri rejects backslash-containing Windows path-style metafile URIs', () => {
+  assert.equal(parseMetafileUri('metafile://C:\\Users\\example\\secret\\preview.png'), null);
+});
+
 test('extractDeliveryArtifactsFromText dedupes URIs while preserving first-seen order', () => {
   const artifacts = extractDeliveryArtifactsFromText(
     'first metafile://onei0.png second metafile://twoi0.mp4 duplicate metafile://onei0.png!',
@@ -108,6 +112,14 @@ test('invalid or empty metafile URIs return null or an empty array', () => {
 test('extractDeliveryArtifactsFromText ignores path-style metafile URIs', () => {
   const artifacts = extractDeliveryArtifactsFromText(
     'skip metafile:///tmp/oac/private/preview.png and metafile:///Users/example/private/preview.png',
+  );
+
+  assert.deepEqual(artifacts, []);
+});
+
+test('extractDeliveryArtifactsFromText ignores Windows path-style metafile URIs', () => {
+  const artifacts = extractDeliveryArtifactsFromText(
+    'skip metafile://C:\\Users\\example\\secret\\preview.png',
   );
 
   assert.deepEqual(artifacts, []);
@@ -225,6 +237,7 @@ test('normalizeDeliveryArtifacts ignores malformed structured entries', () => {
       { uri: 'metafile://' },
       { uri: 'metafile:///tmp/oac/private/preview.png' },
       { uri: 'metafile:///Users/example/private/preview.png' },
+      { uri: 'metafile://C:\\Users\\example\\secret\\preview.png' },
       { uri: 'metafile://validi0.png' },
     ],
   });
@@ -244,6 +257,18 @@ test('normalizeDeliveryArtifacts canonicalizes structured URIs before summaries'
   assert.equal(artifact.uri, 'metafile://abc123i0.png');
   assert.match(summary, /metafile:\/\/abc123i0\.png/);
   assert.doesNotMatch(summary, /\/Users\/example\/secret\.png/);
+});
+
+test('normalizeDeliveryArtifacts ignores Windows path-style URI text and structured entries', () => {
+  const artifacts = normalizeDeliveryArtifacts({
+    artifacts: [{ uri: 'metafile://C:\\Users\\example\\secret\\preview.png' }],
+    resultText: 'Generated metafile://C:\\Users\\example\\secret\\preview.png',
+  });
+  const response = appendDeliveryArtifactSummaries('No public artifact.', artifacts);
+
+  assert.deepEqual(artifacts, []);
+  assert.equal(response, 'No public artifact.');
+  assert.doesNotMatch(response, /C:\\Users\\example\\secret/);
 });
 
 test('normalizeDeliveryArtifacts merges structured entries and text fallback entries with dedupe', () => {
