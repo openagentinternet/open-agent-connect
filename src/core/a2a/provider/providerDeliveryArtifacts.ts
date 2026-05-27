@@ -175,6 +175,28 @@ function extractMarkerCandidates(responseText: string): ProviderLocalCandidate[]
   return candidates;
 }
 
+function isPublicProviderArtifactReference(value: string): boolean {
+  const trimmed = trimCandidatePath(value);
+  return trimmed.toLowerCase().startsWith('metafile://')
+    || /^https?:\/\//i.test(trimmed);
+}
+
+function stripProviderOnlyLocalHintLines(responseText: string): string {
+  const markerPattern = /^\s*(artifactPath|filePath|outputFile|outputPath|attachment)\s*:\s*(.+?)\s*$/i;
+  return String(responseText || '')
+    .split(/\r?\n/)
+    .filter((line) => {
+      const markerMatch = markerPattern.exec(line);
+      if (markerMatch) {
+        return isPublicProviderArtifactReference(markerMatch[2]);
+      }
+      const trimmed = trimCandidatePath(line);
+      return !isSecretLikeFileName(trimmed);
+    })
+    .join('\n')
+    .trim();
+}
+
 function looksLikeLocalPathLine(value: string): boolean {
   const trimmed = trimCandidatePath(value);
   if (!trimmed || /\s/.test(trimmed) || /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
@@ -719,8 +741,9 @@ export async function resolveProviderDeliveryArtifacts(
     verifyAvailability: input.verifyAvailability,
   });
   if (existingArtifacts.length > 0) {
+    const providerSafeResponseText = stripProviderOnlyLocalHintLines(responseText);
     return {
-      responseText: await scrubExecutionWorkspacePathMentions(responseText, input.executionCwd),
+      responseText: await scrubExecutionWorkspacePathMentions(providerSafeResponseText, input.executionCwd),
       artifacts: existingArtifacts,
     };
   }

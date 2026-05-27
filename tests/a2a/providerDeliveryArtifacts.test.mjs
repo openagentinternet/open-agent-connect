@@ -231,6 +231,47 @@ test('existing metafile URI reuse scrubs missing relative local path prose', asy
   assert.equal(result.responseText.includes(workspace), false);
 });
 
+test('existing metafile URI reuse removes secret-like attachment marker line', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: 'attachment: .npmrc\nPublic artifact: metafile://abc123.pdf',
+    outputType: 'file',
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(uploadCalls),
+    verifyAvailability: okVerifier(verifierCalls),
+  });
+
+  assert.deepEqual(verifierCalls, ['abc123']);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://abc123.pdf');
+  assert.match(result.responseText, /metafile:\/\/abc123\.pdf/);
+  assert.equal(result.responseText.includes('attachment:'), false);
+  assert.equal(result.responseText.includes('.npmrc'), false);
+});
+
+test('existing metafile URI reuse removes bare secret-like local path line', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: '.npmrc\nPublic artifact: metafile://abc123.pdf',
+    outputType: 'file',
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(uploadCalls),
+    verifyAvailability: okVerifier(verifierCalls),
+  });
+
+  assert.deepEqual(verifierCalls, ['abc123']);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://abc123.pdf');
+  assert.match(result.responseText, /metafile:\/\/abc123\.pdf/);
+  assert.equal(result.responseText.includes('.npmrc'), false);
+});
+
 test('existing metafile URI verifier failure maps to provider_artifact_unavailable', async () => {
   await assertRejectCode(
     resolveProviderDeliveryArtifacts({
