@@ -105,7 +105,8 @@ export interface ProductCommercePageViewModel {
     confirmed: false;
     listingPinId: string;
     skuId: string;
-    spendCap: string;
+    spendCap: { amount: string; currency: string };
+    policyMode: 'confirm_paid_only';
     comment?: string;
   } | null;
   listingPreviewPayload: ProductListingPayload | null;
@@ -639,11 +640,13 @@ function buildProductListingPreviewPayload(
 
 function buildProductPurchasePreviewRequest(
   selection: ProductCommercePurchaseSelectionInput,
+  selectedSku: unknown,
 ): {
   confirmed: false;
   listingPinId: string;
   skuId: string;
-  spendCap: string;
+  spendCap: { amount: string; currency: string };
+  policyMode: 'confirm_paid_only';
   comment?: string;
 } {
   const listingPinId = normalizeText(selection.listingPinId);
@@ -657,7 +660,11 @@ function buildProductPurchasePreviewRequest(
     confirmed: false,
     listingPinId,
     skuId,
-    spendCap,
+    spendCap: {
+      amount: spendCap,
+      currency: normalizeText(readObject(readObject(selectedSku).price).currency).toUpperCase() || 'SPACE',
+    },
+    policyMode: 'confirm_paid_only',
     ...(comment ? { comment } : {}),
   };
 }
@@ -682,8 +689,11 @@ export function buildProductCommercePageViewModel(input: {
     ? productRows.find((row) => row.listingPinId === normalizeText(selectedListing.listingPinId)) ?? null
     : productRows[0] ?? null;
   const selectedSkuRows = readArray(selectedListing.skus || selectedSkuSource.skus).map(buildProductSkuViewModel);
+  const selectedSkuForPurchase = readArray(selectedListing.skus || selectedSkuSource.skus)
+    .find((sku) => normalizeText(readObject(sku).skuId) === normalizeText((input.purchaseSelection as ProductCommercePurchaseSelectionInput | undefined)?.skuId))
+    ?? readArray(selectedListing.skus || selectedSkuSource.skus)[0];
   const purchasePreviewRequest = input.purchaseSelection
-    ? buildProductPurchasePreviewRequest(input.purchaseSelection as ProductCommercePurchaseSelectionInput)
+    ? buildProductPurchasePreviewRequest(input.purchaseSelection as ProductCommercePurchaseSelectionInput, selectedSkuForPurchase)
     : null;
   const listingPreviewPayload = input.listingForm
     ? buildProductListingPreviewPayload(input.listingForm, skillCatalog)

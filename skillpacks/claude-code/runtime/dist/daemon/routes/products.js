@@ -94,6 +94,7 @@ const handleProductsRoutes = async (context) => {
         const result = handlers.products?.inspectOrder
             ? await handlers.products.inspectOrder({
                 ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from').trim() } : {}),
+                ...(url.searchParams.has('all') ? { all: readBoolean(url.searchParams.get('all')) } : {}),
                 ...(url.searchParams.get('orderId')?.trim() ? { orderId: url.searchParams.get('orderId').trim() } : {}),
                 ...(url.searchParams.get('productOrderPinId')?.trim() ? { productOrderPinId: url.searchParams.get('productOrderPinId').trim() } : {}),
                 ...(url.searchParams.get('paymentTxid')?.trim() ? { paymentTxid: url.searchParams.get('paymentTxid').trim() } : {}),

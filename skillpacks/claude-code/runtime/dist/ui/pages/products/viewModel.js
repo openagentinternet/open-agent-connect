@@ -485,7 +485,7 @@ function buildProductListingPreviewPayload(form, skillCatalog) {
     }
     return validation.value;
 }
-function buildProductPurchasePreviewRequest(selection) {
+function buildProductPurchasePreviewRequest(selection, selectedSku) {
     const listingPinId = normalizeText(selection.listingPinId);
     const skuId = normalizeText(selection.skuId);
     const spendCap = normalizeText(selection.spendCap);
@@ -497,7 +497,11 @@ function buildProductPurchasePreviewRequest(selection) {
         confirmed: false,
         listingPinId,
         skuId,
-        spendCap,
+        spendCap: {
+            amount: spendCap,
+            currency: normalizeText(readObject(readObject(selectedSku).price).currency).toUpperCase() || 'SPACE',
+        },
+        policyMode: 'confirm_paid_only',
         ...(comment ? { comment } : {}),
     };
 }
@@ -511,8 +515,11 @@ function buildProductCommercePageViewModel(input) {
         ? productRows.find((row) => row.listingPinId === normalizeText(selectedListing.listingPinId)) ?? null
         : productRows[0] ?? null;
     const selectedSkuRows = readArray(selectedListing.skus || selectedSkuSource.skus).map(buildProductSkuViewModel);
+    const selectedSkuForPurchase = readArray(selectedListing.skus || selectedSkuSource.skus)
+        .find((sku) => normalizeText(readObject(sku).skuId) === normalizeText(input.purchaseSelection?.skuId))
+        ?? readArray(selectedListing.skus || selectedSkuSource.skus)[0];
     const purchasePreviewRequest = input.purchaseSelection
-        ? buildProductPurchasePreviewRequest(input.purchaseSelection)
+        ? buildProductPurchasePreviewRequest(input.purchaseSelection, selectedSkuForPurchase)
         : null;
     const listingPreviewPayload = input.listingForm
         ? buildProductListingPreviewPayload(input.listingForm, skillCatalog)

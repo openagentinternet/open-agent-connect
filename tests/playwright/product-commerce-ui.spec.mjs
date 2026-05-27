@@ -132,6 +132,9 @@ async function startMockServer() {
     if (req.url === '/api/products/buy') {
       const body = await readJsonBody(req);
       buyRequests.push(body);
+      const spendCap = body.spendCap && typeof body.spendCap === 'object'
+        ? body.spendCap
+        : { amount: body.spendCap, currency: 'SPACE' };
       res.writeHead(200, { 'content-type': 'application/json' });
       if (body.confirmed === true) {
         res.end(JSON.stringify({
@@ -152,14 +155,15 @@ async function startMockServer() {
           data: {
             product: { listingPinId: body.listingPinId },
             sku: { skuId: body.skuId },
-            payment: { amount: body.spendCap, currency: 'SPACE' },
+            payment: { amount: spendCap.amount, currency: spendCap.currency },
             seller: { name: 'Seller Bot' },
             confirmRequest: {
               request: {
                 listingPinId: body.listingPinId,
                 skuId: body.skuId,
-                spendCap: body.spendCap,
+                spendCap,
                 comment: body.comment,
+                policyMode: body.policyMode,
               },
             },
           },
@@ -308,9 +312,13 @@ test('product commerce UI uses mocked endpoints for marketplace, sell, orders, a
     await page.getByRole('dialog', { name: 'Confirm payment' }).waitFor();
     await page.getByText('sku-10').waitFor();
     assert.equal(server.buyRequests.at(-1).confirmed, false);
+    assert.deepEqual(server.buyRequests.at(-1).spendCap, { amount: '10', currency: 'SPACE' });
+    assert.equal(server.buyRequests.at(-1).policyMode, 'confirm_paid_only');
     await page.keyboard.press('Tab');
     await page.getByRole('button', { name: 'Confirm and pay' }).click();
     assert.equal(server.buyRequests.at(-1).confirmed, true);
+    assert.deepEqual(server.buyRequests.at(-1).spendCap, { amount: '10', currency: 'SPACE' });
+    assert.equal(server.buyRequests.at(-1).policyMode, 'confirm_paid_only');
     await page.getByRole('heading', { name: 'Purchase submitted' }).waitFor();
     await page.getByRole('button', { name: 'Close' }).click();
 

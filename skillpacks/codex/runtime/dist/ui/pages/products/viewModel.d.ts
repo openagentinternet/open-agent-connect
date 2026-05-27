@@ -94,7 +94,11 @@ export interface ProductCommercePageViewModel {
         confirmed: false;
         listingPinId: string;
         skuId: string;
-        spendCap: string;
+        spendCap: {
+            amount: string;
+            currency: string;
+        };
+        policyMode: 'confirm_paid_only';
         comment?: string;
     } | null;
     listingPreviewPayload: ProductListingPayload | null;
