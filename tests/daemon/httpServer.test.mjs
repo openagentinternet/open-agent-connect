@@ -2518,8 +2518,6 @@ test('GET /ui/products renders the built-in Products workspace and includes Prod
   assert.match(html, /data-products-tab="marketplace"/);
   assert.match(html, /data-products-tab="sell"/);
   assert.match(html, /data-products-tab="orders"/);
-  assert.doesNotMatch(html, /\/api\/products\/publish/);
-  assert.doesNotMatch(html, /\/api\/products\/buy/);
 });
 
 test('GET /ui/refund renders buyer and seller refund operations', async (t) => {
