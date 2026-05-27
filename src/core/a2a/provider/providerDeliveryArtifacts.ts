@@ -379,6 +379,16 @@ function shouldScanFile(
   return inferDeliveryArtifactKind(extension, contentType) === expectedFamily;
 }
 
+function shouldVisitScanDirectory(directoryName: string, ignoredDirectories: Set<string>): boolean {
+  if (ignoredDirectories.has(directoryName)) {
+    return false;
+  }
+  if (!directoryName.startsWith('.')) {
+    return true;
+  }
+  return directoryName === '.ssh' || directoryName === '.aws';
+}
+
 async function scanWorkspaceForCandidates(
   executionCwd: string,
   expectedFamily: ProviderExpectedArtifactFamily,
@@ -401,7 +411,7 @@ async function scanWorkspaceForCandidates(
 
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        if (!ignoredDirectories.has(entry.name) && !entry.name.startsWith('.')) {
+        if (shouldVisitScanDirectory(entry.name, ignoredDirectories)) {
           await visit(path.join(directory, entry.name));
         }
         continue;

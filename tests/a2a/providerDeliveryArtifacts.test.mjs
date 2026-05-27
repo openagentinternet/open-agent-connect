@@ -344,6 +344,26 @@ test('fallback workspace scan rejects npm credential config before upload', asyn
   assert.equal(uploadCalls.length, 0);
 });
 
+test('fallback workspace scan rejects SSH private key before upload', async () => {
+  const workspace = await tempWorkspace();
+  const uploadCalls = [];
+  await writeWorkspaceFile(workspace, '.ssh/id_ed25519', 'PRIVATE KEY');
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'Generated the requested file.',
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+});
+
 test('explicit attachment marker rejects SSH private key before upload', async () => {
   const workspace = await tempWorkspace();
   const uploadCalls = [];
