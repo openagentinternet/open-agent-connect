@@ -666,7 +666,8 @@ test('products marketplace preview posts unconfirmed request and opens confirmat
     confirmed: false,
     listingPinId: 'listing-mobile-top-up',
     skuId: 'sku-5',
-    spendCap: '5',
+    spendCap: { amount: '5', currency: 'SPACE' },
+    policyMode: 'confirm_paid_only',
     comment: 'send after 6pm',
   });
   assert.match(elements['[data-products-confirmation-summary]'].innerHTML, /Buyer Bot/);
@@ -1230,8 +1231,9 @@ test('products sell publish confirmation posts previewed payload and shows listi
   assert.deepEqual(JSON.parse(publishCall.options.body), {
     from: 'alice',
     network: 'mvc',
-    payload: previewedPayload,
+    ...previewedPayload,
   });
+  assert.equal(Object.prototype.hasOwnProperty.call(JSON.parse(publishCall.options.body), 'payload'), false);
   assert.match(elements['[data-products-publish-success]'].innerHTML, /listing-pin-published/);
   assert.match(elements['[data-products-publish-success]'].innerHTML, /listing-txid-1/);
   assert.match(elements['[data-products-publish-success]'].innerHTML, /listing-txid-2/);

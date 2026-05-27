@@ -121,7 +121,8 @@ test('buildProductCommercePageViewModel builds purchase preview and listing payl
     confirmed: false,
     listingPinId: 'listing-pin-1',
     skuId: 'sku-premium',
-    spendCap: '0.005',
+    spendCap: { amount: '0.005', currency: 'SPACE' },
+    policyMode: 'confirm_paid_only',
     comment: 'Ship fast',
   });
   assert.equal(model.listingPreviewPayload.productType, 'virtual');

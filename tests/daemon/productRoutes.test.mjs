@@ -265,7 +265,7 @@ test('/api/products routes forward requests to product handlers', async (t) => {
   });
   const owned = await fetchJson(app.baseUrl, '/api/products/owned?from=alice&page=2&pageSize=10&refresh=true');
   const orders = await fetchJson(app.baseUrl, '/api/products/orders?from=bob&role=buyer&state=delivered&page=2&pageSize=10');
-  const orderInspect = await fetchJson(app.baseUrl, '/api/products/orders/inspect?from=bob&orderId=order-1');
+  const orderInspect = await fetchJson(app.baseUrl, '/api/products/orders/inspect?from=bob&all=true&orderId=order-1');
 
   assert.equal(skills.status, 200);
   assert.equal(publish.status, 200);
@@ -277,7 +277,7 @@ test('/api/products routes forward requests to product handlers', async (t) => {
     ['publish', { name: 'digital-guide', network: 'mvc' }],
     ['owned', { from: 'alice', page: 2, pageSize: 10, refresh: true }],
     ['orders', { from: 'bob', all: false, role: 'buyer', state: 'delivered', page: 2, pageSize: 10 }],
-    ['inspect-order', { from: 'bob', orderId: 'order-1' }],
+    ['inspect-order', { from: 'bob', all: true, orderId: 'order-1' }],
   ]);
 });
 

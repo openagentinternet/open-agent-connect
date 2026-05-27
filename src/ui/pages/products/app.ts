@@ -1038,7 +1038,7 @@ export function buildProductsPageScript(): string {
       const envelope = await postJson('/api/products/publish', {
         from: state.sell.sellerSlug,
         network: elements.network ? elements.network.value : 'mvc',
-        payload: state.sell.previewPayload,
+        ...state.sell.previewPayload,
       });
       state.sell.publishSuccess = envelope;
       state.sell.publishOpen = false;
