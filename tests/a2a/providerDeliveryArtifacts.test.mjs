@@ -272,6 +272,31 @@ test('fallback workspace scan scrubs local path prose for the resolved artifact'
   assert.match(result.responseText, /Artifact: metafile:\/\/uploaded-chart\.png/);
 });
 
+test('fallback workspace scan scrubs local directory path prose for the resolved artifact', async () => {
+  const workspace = await tempWorkspace();
+  const filePath = await writeWorkspaceFile(workspace, 'out/chart.png');
+  const artifactDirectory = path.join(workspace, 'out');
+  const uploadCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: `Saved image in ${artifactDirectory} with filename chart.png`,
+    outputType: 'image',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(uploadCalls),
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(uploadCalls[0].filePath, await realpath(filePath));
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.responseText.includes(artifactDirectory), false);
+  assert.equal(result.responseText.includes(`${workspace}/out`), false);
+  assert.equal(result.responseText.includes('workspace/out'), false);
+  assert.match(result.responseText, /Saved image in/);
+  assert.match(result.responseText, /Artifact: metafile:\/\/uploaded-chart\.png/);
+});
+
 test('resolution rejects files outside executionCwd including parent paths and symlink escapes', async () => {
   const workspace = await tempWorkspace();
   const outsideRoot = await tempWorkspace();
@@ -332,6 +357,27 @@ test('fallback workspace scan rejects npm credential config before upload', asyn
   await assertRejectCode(
     resolveProviderDeliveryArtifacts({
       responseText: 'Generated the requested file.',
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+});
+
+test('bare secret basename response rejects before fallback scan can upload a public file', async () => {
+  const workspace = await tempWorkspace();
+  const uploadCalls = [];
+  await writeWorkspaceFile(workspace, '.npmrc', '//registry.npmjs.org/:_authToken=secret');
+  await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: '.npmrc',
       outputType: 'file',
       executionCwd: workspace,
       signer: fakeSigner(),

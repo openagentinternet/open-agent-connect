@@ -183,6 +183,9 @@ function looksLikeLocalPathLine(value: string): boolean {
   if (trimmed.toLowerCase().startsWith('metafile://')) {
     return false;
   }
+  if (isSecretLikeFileName(trimmed)) {
+    return true;
+  }
   return trimmed.startsWith('./')
     || trimmed.startsWith('../')
     || trimmed.startsWith('/')
@@ -350,6 +353,13 @@ async function resolveLocalCandidate(input: {
   addPathScrubVariant(scrubPaths, relativeCandidatePath
     ? path.join(input.requestedExecutionCwd, relativeCandidatePath)
     : null);
+  addPathScrubVariant(scrubPaths, path.dirname(absoluteCandidatePath));
+  addPathScrubVariant(scrubPaths, path.dirname(realCandidatePath));
+  const relativeCandidateDirectory = path.dirname(relativeCandidatePath);
+  addPathScrubVariant(scrubPaths, relativeCandidateDirectory === '.' ? null : relativeCandidateDirectory);
+  addPathScrubVariant(scrubPaths, relativeCandidateDirectory === '.'
+    ? null
+    : path.join(input.requestedExecutionCwd, relativeCandidateDirectory));
 
   return {
     filePath: realCandidatePath,
