@@ -509,6 +509,18 @@ test('appendDeliveryArtifactSummaries preserves response text and appends summar
   assert.match(response, /clip\.mp4/);
 });
 
+test('appendDeliveryArtifactSummaries does not append a summary block already present in response text', () => {
+  const artifacts = normalizeDeliveryArtifacts({
+    artifacts: [{ uri: 'metafile://abc123i0.png' }],
+  });
+  const summary = buildDeliveryArtifactSummary(artifacts[0]);
+  const responseText = `Here is your file.\n\n${summary}`;
+  const response = appendDeliveryArtifactSummaries(responseText, artifacts);
+
+  assert.equal(response, responseText);
+  assert.equal((response.match(/^Artifact: metafile:\/\/abc123i0\.png$/gm) || []).length, 1);
+});
+
 test('appendDeliveryArtifactSummaries preserves trailing response whitespace', () => {
   const artifacts = normalizeDeliveryArtifacts({
     artifacts: [{ uri: 'metafile://abc123i0.mp4' }],

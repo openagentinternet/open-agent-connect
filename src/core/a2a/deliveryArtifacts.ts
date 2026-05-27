@@ -308,10 +308,17 @@ export function appendDeliveryArtifactSummaries(
     return responseText;
   }
 
-  const summaries = artifacts.map((artifact) => buildDeliveryArtifactSummary(artifact)).join('\n\n');
-  if (!responseText) {
-    return summaries;
+  const summaries = artifacts
+    .map((artifact) => buildDeliveryArtifactSummary(artifact))
+    .filter((summary) => summary && !responseText.includes(summary));
+  if (!summaries.length) {
+    return responseText;
   }
 
-  return `${responseText}\n\n${summaries}`;
+  const summaryText = summaries.join('\n\n');
+  if (!responseText) {
+    return summaryText;
+  }
+
+  return `${responseText}\n\n${summaryText}`;
 }

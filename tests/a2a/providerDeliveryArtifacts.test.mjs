@@ -174,6 +174,30 @@ test('existing metafile URI in response text is normalized and reused for an ima
   assert.deepEqual(verifierCalls, ['abc123i0']);
 });
 
+test('existing metafile URI reuse does not duplicate an already-present generated summary', async () => {
+  const verifierCalls = [];
+  const downloadUrl = 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/abc123i0';
+  const summary = [
+    'Artifact: metafile://abc123i0.png',
+    'PINID: abc123i0',
+    'File: abc123i0.png',
+    `Download: ${downloadUrl}`,
+  ].join('\n');
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: `Generated image is ready.\n\n${summary}`,
+    outputType: 'image',
+    signer: fakeSigner(),
+    verifyAvailability: okVerifier(verifierCalls),
+  });
+
+  assert.equal(result.responseText.split(summary).length - 1, 1);
+  assert.equal((result.responseText.match(/^Artifact: metafile:\/\/abc123i0\.png$/gm) || []).length, 1);
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://abc123i0.png');
+  assert.deepEqual(verifierCalls, ['abc123i0']);
+});
+
 test('existing metafile URI reuse calls injected availability verifier before success', async () => {
   const verifierCalls = [];
 
