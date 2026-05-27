@@ -156,30 +156,30 @@ test('existing metafile URI reuse calls injected availability verifier before su
   assert.deepEqual(verifierCalls, ['abc123i0']);
 });
 
-test('existing metafile URI reuse scrubs local workspace path prose', async () => {
+test('existing metafile URI reuse rejects local workspace absolute path prose', async () => {
   const workspace = await tempWorkspace();
   const filePath = await writeWorkspaceFile(workspace, 'out/chart.png');
   const artifactDirectory = path.dirname(filePath);
   const verifierCalls = [];
   const uploadCalls = [];
 
-  const result = await resolveProviderDeliveryArtifacts({
-    responseText: `Saved image to ${filePath}; output dir ${artifactDirectory}; public artifact metafile://abc123i0.png`,
-    outputType: 'image',
-    executionCwd: workspace,
-    signer: fakeSigner(),
-    uploadLargeFile: fakeUploader(uploadCalls),
-    verifyAvailability: okVerifier(verifierCalls),
-  });
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: `Saved image to ${filePath}; output dir ${artifactDirectory}; public artifact metafile://abc123i0.png`,
+      outputType: 'image',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
 
-  assert.deepEqual(verifierCalls, ['abc123i0']);
+  assert.deepEqual(verifierCalls, []);
   assert.equal(uploadCalls.length, 0);
-  assert.equal(result.artifacts.length, 1);
-  assert.equal(result.artifacts[0].uri, 'metafile://abc123i0.png');
-  assert.match(result.responseText, /metafile:\/\/abc123i0\.png/);
-  assert.equal(result.responseText.includes(filePath), false);
-  assert.equal(result.responseText.includes(artifactDirectory), false);
-  assert.equal(result.responseText.includes(workspace), false);
+  assert.equal(error.message.includes(filePath), false);
+  assert.equal(error.message.includes(artifactDirectory), false);
+  assert.equal(error.message.includes(workspace), false);
 });
 
 test('existing metafile URI reuse scrubs relative local path prose', async () => {
@@ -470,6 +470,86 @@ test('existing metafile URI reuse rejects file URI hidden path before verifier r
   assert.equal(error.message.includes('file:///home/me/.config/report.pdf'), false);
 });
 
+test('existing metafile URI reuse rejects public-looking absolute POSIX path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: '/home/me/out/report.pdf\nPublic artifact: metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('/home/me/out/report.pdf'), false);
+});
+
+test('existing metafile URI reuse rejects public-looking Windows backslash path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'C:\\repo\\out\\report.pdf\nPublic artifact: metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('C:\\repo\\out\\report.pdf'), false);
+});
+
+test('existing metafile URI reuse rejects public-looking Windows slash path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'C:/repo/out/report.pdf\nPublic artifact: metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('C:/repo/out/report.pdf'), false);
+});
+
+test('existing metafile URI reuse rejects public-looking file URI path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'file:///home/me/out/report.pdf\nPublic artifact: metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('file:///home/me/out/report.pdf'), false);
+});
+
 test('existing metafile URI verifier failure maps to provider_artifact_unavailable', async () => {
   await assertRejectCode(
     resolveProviderDeliveryArtifacts({
@@ -596,6 +676,32 @@ test('fallback workspace scan scrubs local path prose for the resolved artifact'
   assert.equal(result.responseText.includes(filePath), false);
   assert.equal(result.responseText.includes(workspace), false);
   assert.equal(result.responseText.includes('out/chart.png'), false);
+  assert.match(result.responseText, /Saved image to/);
+  assert.match(result.responseText, /Artifact: metafile:\/\/uploaded-chart\.png/);
+});
+
+test('fallback workspace scan scrubs file URI workspace path prose for the resolved artifact', async () => {
+  const workspace = await tempWorkspace();
+  const filePath = await writeWorkspaceFile(workspace, 'out/chart.png');
+  const uploadCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: `Saved image to file://${filePath}; final file is out/chart.png`,
+    outputType: 'image',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(uploadCalls),
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(uploadCalls[0].filePath, await realpath(filePath));
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
+  assert.equal(result.responseText.includes(filePath), false);
+  assert.equal(result.responseText.includes(workspace), false);
+  assert.equal(result.responseText.includes('out/chart.png'), false);
+  assert.equal(result.responseText.includes('file://[uploaded artifact]'), false);
   assert.match(result.responseText, /Saved image to/);
   assert.match(result.responseText, /Artifact: metafile:\/\/uploaded-chart\.png/);
 });

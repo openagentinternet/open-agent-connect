@@ -148,6 +148,8 @@ async function resolveExistingMetafileArtifacts(input: {
     return [];
   }
 
+  assertNoAbsoluteProviderLocalHints(input.responseText);
+
   for (const artifact of artifacts) {
     validateArtifactFamily(artifact, input.expectedFamily);
     await verifyReusableMetafile(artifact, input.verifyAvailability);
@@ -375,6 +377,21 @@ function assertNoAbsoluteSecretLikeProviderHints(responseText: string): void {
       if (isRejectedProviderLocalHintPath(match[0])) {
         throwProviderSecretRejected();
       }
+    }
+  }
+}
+
+function assertNoAbsoluteProviderLocalHints(responseText: string): void {
+  const redactedText = redactPublicArtifactReferences(responseText);
+  const pathHintPatterns = [
+    /\bfile:\/\/\/?[^\s,;)\]}>"'`]+/gi,
+    /(?<![A-Za-z0-9_.:/\\-])[A-Za-z]:[\\/][^\s,;)\]}>"'`]+/g,
+    /(?<![A-Za-z0-9_.:/\\-])\/[^\s,;)\]}>"'`]+/g,
+  ];
+
+  for (const pathHintPattern of pathHintPatterns) {
+    if (pathHintPattern.test(redactedText)) {
+      throwProviderSecretRejected();
     }
   }
 }
@@ -830,6 +847,26 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function scrubFileUriLocalPathMentions(responseText: string, localPath: string): string {
+  if (!path.isAbsolute(localPath) && !/^[A-Za-z]:[\\/]/.test(localPath)) {
+    return responseText;
+  }
+
+  let scrubbed = responseText;
+  const slashPath = localPath.replace(/\\/g, '/');
+  const variants = new Set([
+    `file://${localPath}`,
+    `file://${slashPath}`,
+  ]);
+
+  for (const variant of variants) {
+    const pattern = `${escapeRegExp(variant)}(?:[\\\\/][^\\s;,)\\]}>"'\`]+)*(?=$|[^A-Za-z0-9_.\\\\/-])`;
+    scrubbed = scrubbed.replace(new RegExp(pattern, 'g'), '[uploaded artifact]');
+  }
+
+  return scrubbed;
+}
+
 function scrubLocalPathMentions(responseText: string, scrubPaths: string[]): string {
   let scrubbed = String(responseText || '');
   const sortedPaths = [...new Set(scrubPaths)]
@@ -837,6 +874,7 @@ function scrubLocalPathMentions(responseText: string, scrubPaths: string[]): str
     .sort((left, right) => right.length - left.length);
 
   for (const localPath of sortedPaths) {
+    scrubbed = scrubFileUriLocalPathMentions(scrubbed, localPath);
     const pattern = path.isAbsolute(localPath) || localPath.startsWith(`.${path.sep}`)
       ? escapeRegExp(localPath)
       : `(?<![A-Za-z0-9_.\\\\/-])${escapeRegExp(localPath)}`;
@@ -902,6 +940,7 @@ async function scrubExecutionWorkspacePathMentions(
     .sort((left, right) => right.length - left.length);
 
   for (const root of sortedRoots) {
+    scrubbed = scrubFileUriLocalPathMentions(scrubbed, root);
     const pattern = `${escapeRegExp(root)}(?:[\\\\/][^\\s;,)\\]}>"'\`]+)*(?=$|[^A-Za-z0-9_.\\\\/-])`;
     scrubbed = scrubbed.replace(new RegExp(pattern, 'g'), '[uploaded artifact]');
   }
