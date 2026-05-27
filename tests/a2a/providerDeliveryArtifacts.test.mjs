@@ -1,0 +1,393 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, realpath, symlink, truncate, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import test from 'node:test';
+
+const require = createRequire(import.meta.url);
+const {
+  LARGE_UPLOAD_MAX_BYTES,
+} = require('../../dist/core/files/uploadLargeFile.js');
+const {
+  classifyProviderOutputType,
+  isTextLikeProviderOutputType,
+  resolveProviderDeliveryArtifacts,
+} = require('../../dist/core/a2a/provider/providerDeliveryArtifacts.js');
+
+function fakeSigner() {
+  return {
+    writePin: async () => {
+      throw new Error('signer should not be called directly by provider artifact tests');
+    },
+  };
+}
+
+async function tempWorkspace() {
+  return mkdtemp(path.join(os.tmpdir(), 'oac-provider-artifacts-'));
+}
+
+async function writeWorkspaceFile(workspace, relativePath, content = 'artifact') {
+  const filePath = path.join(workspace, relativePath);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, content);
+  return filePath;
+}
+
+function okVerifier(calls = []) {
+  return async (pinId) => {
+    calls.push(pinId);
+    return {
+      ok: true,
+      url: `https://verify.example/${pinId}`,
+      attempts: 1,
+    };
+  };
+}
+
+function fakeUploadResult(input, overrides = {}) {
+  const extension = path.extname(input.filePath).toLowerCase();
+  const pinId = overrides.pinId || `uploaded-${path.basename(input.filePath, extension)}`;
+  const contentType = extension === '.mp4'
+    ? 'video/mp4'
+    : extension === '.mp3'
+      ? 'audio/mpeg'
+      : extension === '.png'
+        ? 'image/png'
+        : 'application/octet-stream';
+  return {
+    pinId,
+    txids: ['tx-uploaded'],
+    totalCost: 7,
+    network: input.network || 'mvc',
+    fileName: path.basename(input.filePath),
+    contentType,
+    bytes: overrides.bytes ?? 12,
+    extension,
+    metafileUri: `metafile://${pinId}${extension}`,
+    previewUrl: `https://preview.example/${pinId}`,
+    downloadUrl: `https://download.example/${pinId}`,
+    globalMetaId: 'gm-provider',
+    uploadMode: 'direct',
+    verification: {
+      ok: true,
+      url: `https://verify.example/${pinId}`,
+      attempts: 1,
+    },
+  };
+}
+
+function fakeUploader(calls = [], overrides = {}) {
+  return async (input) => {
+    calls.push(input);
+    return fakeUploadResult(input, overrides);
+  };
+}
+
+async function assertRejectCode(promise, code) {
+  await assert.rejects(
+    promise,
+    (error) => {
+      assert.equal(error.code, code);
+      assert.match(error.message, new RegExp(code));
+      return true;
+    },
+  );
+}
+
+test('classifyProviderOutputType treats text-like and non-text service outputs consistently', () => {
+  assert.equal(classifyProviderOutputType(undefined), 'text');
+  assert.equal(classifyProviderOutputType(''), 'text');
+  assert.equal(classifyProviderOutputType('text'), 'text');
+  assert.equal(classifyProviderOutputType('markdown'), 'text');
+  assert.equal(classifyProviderOutputType('image'), 'image');
+  assert.equal(classifyProviderOutputType('video'), 'video');
+  assert.equal(classifyProviderOutputType('audio'), 'audio');
+  assert.equal(classifyProviderOutputType('file'), 'file');
+  assert.equal(classifyProviderOutputType('attachment'), 'file');
+  assert.equal(classifyProviderOutputType('other'), 'file');
+  assert.equal(classifyProviderOutputType('spreadsheet'), 'file');
+  assert.equal(isTextLikeProviderOutputType('markdown'), true);
+  assert.equal(isTextLikeProviderOutputType('image'), false);
+});
+
+test('existing metafile URI in response text is normalized and reused for an image service', async () => {
+  const verifierCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: 'Done: metafile://abc123i0.png.',
+    outputType: 'image',
+    signer: fakeSigner(),
+    verifyAvailability: okVerifier(verifierCalls),
+  });
+
+  assert.equal(result.responseText, 'Done: metafile://abc123i0.png.');
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://abc123i0.png');
+  assert.equal(result.artifacts[0].pinId, 'abc123i0');
+  assert.equal(result.artifacts[0].kind, 'image');
+  assert.deepEqual(verifierCalls, ['abc123i0']);
+});
+
+test('existing metafile URI reuse calls injected availability verifier before success', async () => {
+  const verifierCalls = [];
+
+  await resolveProviderDeliveryArtifacts({
+    responseText: 'metafile://abc123i0.png',
+    outputType: 'image',
+    signer: fakeSigner(),
+    verifyAvailability: okVerifier(verifierCalls),
+  });
+
+  assert.deepEqual(verifierCalls, ['abc123i0']);
+});
+
+test('existing metafile URI verifier failure maps to provider_artifact_unavailable', async () => {
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'metafile://abc123i0.png',
+      outputType: 'image',
+      signer: fakeSigner(),
+      verifyAvailability: async () => ({
+        ok: false,
+        url: null,
+        attempts: 2,
+        error: 'not propagated',
+      }),
+    }),
+    'provider_artifact_unavailable',
+  );
+});
+
+test('existing video metafile URI fails media validation for an image service', async () => {
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'metafile://abc123i0.mp4',
+      outputType: 'image',
+      signer: fakeSigner(),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_type_mismatch',
+  );
+});
+
+test('explicit local path marker resolves relative to executionCwd', async () => {
+  const workspace = await tempWorkspace();
+  const filePath = await writeWorkspaceFile(workspace, 'out/chart.png');
+  const uploadCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: 'Here is the chart.\nartifactPath: ./out/chart.png',
+    outputType: 'image',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(uploadCalls),
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(uploadCalls[0].filePath, await realpath(filePath));
+  assert.equal(uploadCalls[0].verify, true);
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
+  assert.equal(result.responseText.includes('./out/chart.png'), false);
+  assert.equal(result.responseText.includes('artifactPath:'), false);
+});
+
+test('bare local path line resolves when it is the only explicit candidate', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'out/clip.mp4');
+  const uploadCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: './out/clip.mp4',
+    outputType: 'video',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(uploadCalls),
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(result.artifacts[0].kind, 'video');
+  assert.equal(result.responseText.includes('./out/clip.mp4'), false);
+});
+
+test('fallback workspace scan succeeds only when exactly one file matches the requested media family', async () => {
+  const singleWorkspace = await tempWorkspace();
+  await writeWorkspaceFile(singleWorkspace, 'nested/only.png');
+  const singleCalls = [];
+
+  const single = await resolveProviderDeliveryArtifacts({
+    responseText: 'Generated the requested image.',
+    outputType: 'image',
+    executionCwd: singleWorkspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(singleCalls),
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(single.artifacts.length, 1);
+  assert.equal(single.artifacts[0].uri, 'metafile://uploaded-only.png');
+
+  const ambiguousWorkspace = await tempWorkspace();
+  await writeWorkspaceFile(ambiguousWorkspace, 'a.png');
+  await writeWorkspaceFile(ambiguousWorkspace, 'b.jpg');
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'Generated the requested image.',
+      outputType: 'image',
+      executionCwd: ambiguousWorkspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_ambiguous',
+  );
+});
+
+test('resolution rejects files outside executionCwd including parent paths and symlink escapes', async () => {
+  const workspace = await tempWorkspace();
+  const outsideRoot = await tempWorkspace();
+  const childWorkspace = path.join(outsideRoot, 'child');
+  await mkdir(childWorkspace);
+  const outsideFile = await writeWorkspaceFile(outsideRoot, 'outside.png');
+  await symlink(outsideFile, path.join(workspace, 'escape.png'));
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'artifactPath: ../outside.png',
+      outputType: 'image',
+      executionCwd: childWorkspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_outside_workspace',
+  );
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'artifactPath: ./escape.png',
+      outputType: 'image',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_outside_workspace',
+  );
+});
+
+test('resolution rejects secret-like local artifact names', async () => {
+  for (const fileName of ['.env', 'id_rsa', 'wallet.json', 'private-key.txt', 'mnemonic.txt']) {
+    const workspace = await tempWorkspace();
+    await writeWorkspaceFile(workspace, fileName, 'secret');
+
+    await assertRejectCode(
+      resolveProviderDeliveryArtifacts({
+        responseText: `artifactPath: ./${fileName}`,
+        outputType: 'file',
+        executionCwd: workspace,
+        signer: fakeSigner(),
+        uploadLargeFile: fakeUploader(),
+        verifyAvailability: okVerifier(),
+      }),
+      'provider_artifact_secret_rejected',
+    );
+  }
+});
+
+test('local file upload uses an injected uploader with verify true', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'out/chart.png');
+  const uploadCalls = [];
+
+  await resolveProviderDeliveryArtifacts({
+    responseText: 'filePath: ./out/chart.png',
+    outputType: 'image',
+    executionCwd: workspace,
+    network: 'mvc',
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(uploadCalls),
+    largeUploader: {
+      upload: async () => {
+        throw new Error('large uploader should be passed through, not called here');
+      },
+    },
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(uploadCalls[0].network, 'mvc');
+  assert.equal(uploadCalls[0].verify, true);
+  assert.equal(typeof uploadCalls[0].signer.writePin, 'function');
+  assert.equal(typeof uploadCalls[0].verifyAvailability, 'function');
+  assert.equal(typeof uploadCalls[0].largeUploader.upload, 'function');
+});
+
+test('direct small-file upload result becomes one artifact and final response text with no local path', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'out/chart.png');
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: 'Chart ready.\noutputFile: ./out/chart.png',
+    outputType: 'image',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(),
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
+  assert.equal(result.artifacts[0].kind, 'image');
+  assert.equal(result.artifacts[0].fileName, 'chart.png');
+  assert.equal(result.artifacts[0].contentType, 'image/png');
+  assert.equal(result.responseText.includes('./out/chart.png'), false);
+  assert.match(result.responseText, /Artifact: metafile:\/\/uploaded-chart\.png/);
+  assert.match(result.responseText, /PINID: uploaded-chart/);
+});
+
+test('uploader failure with large_file_upload_unavailable preserves provider failure code', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'out/movie.mp4');
+  const uploadError = new Error('large_file_upload_unavailable: no uploader configured');
+  uploadError.code = 'large_file_upload_unavailable';
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'attachment: ./out/movie.mp4',
+      outputType: 'video',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: async () => {
+        throw uploadError;
+      },
+      verifyAvailability: okVerifier(),
+    }),
+    'large_file_upload_unavailable',
+  );
+});
+
+test('files above 50 MiB fail before upload', async () => {
+  const workspace = await tempWorkspace();
+  const hugePath = await writeWorkspaceFile(workspace, 'out/huge.mp4', Buffer.alloc(1));
+  await truncate(hugePath, LARGE_UPLOAD_MAX_BYTES + 1);
+  const uploadCalls = [];
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'artifactPath: ./out/huge.mp4',
+      outputType: 'video',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_too_large',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+});
