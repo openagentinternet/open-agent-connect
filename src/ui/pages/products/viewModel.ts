@@ -33,10 +33,38 @@ export interface ProductCommerceOrderRowViewModel {
   stateLabel: string;
   paymentTxid: string;
   orderTxid: string;
+  deliveryLabel: string;
   buyerLabel: string;
   sellerLabel: string;
   createdAtLabel: string;
   updatedAtLabel: string;
+}
+
+export interface ProductCommerceOwnedListingViewModel {
+  listingPinId: string;
+  title: string;
+  skuCountLabel: string;
+  fulfillmentSkillsLabel: string;
+  stateLabel: string;
+}
+
+export interface ProductCommerceOrderInspectViewModel {
+  orderId: string;
+  productOrderPinId: string;
+  listingPinId: string;
+  skuId: string;
+  roleLabel: string;
+  stateLabel: string;
+  paymentVerificationLabel: string;
+  paymentTxid: string;
+  fulfillmentSkillsLabel: string;
+  selectedSkuLabel: string;
+  traceLabel: string;
+  sessionLabel: string;
+  traceUrl: string;
+  deliveryPinId: string;
+  deliverySummaryLabel: string;
+  failureReason: string;
 }
 
 export interface ProductCommerceListingFormInput {
@@ -81,7 +109,9 @@ export interface ProductCommercePageViewModel {
     comment?: string;
   } | null;
   listingPreviewPayload: ProductListingPayload | null;
+  ownedListingRows: ProductCommerceOwnedListingViewModel[];
   orderRows: ProductCommerceOrderRowViewModel[];
+  orderInspect: ProductCommerceOrderInspectViewModel | null;
   fulfillmentLabel: string;
 }
 
@@ -166,6 +196,21 @@ function formatOrderStateLabel(state: unknown): string {
     default:
       return 'Unknown';
   }
+}
+
+function formatBooleanLabel(value: unknown): string {
+  if (value === true) return 'Yes';
+  if (value === false) return 'No';
+  return 'Unknown';
+}
+
+function formatDeliverySummaryLabel(value: unknown): string {
+  const delivery = readObject(value);
+  return normalizeText(delivery.label)
+    || normalizeText(delivery.summary)
+    || normalizeText(delivery.status)
+    || normalizeText(delivery.deliveryPinId)
+    || 'No delivery summary';
 }
 
 function isMetafileUri(value: unknown): value is string {
@@ -431,6 +476,8 @@ function buildProductDirectoryRowViewModel(product: unknown): ProductCommerceRow
 
 function buildProductOrderRowViewModel(order: unknown): ProductCommerceOrderRowViewModel {
   const row = readObject(order);
+  const buyer = readObject(row.buyer);
+  const seller = readObject(row.seller);
   return {
     orderId: normalizeText(row.orderId || row.id || row.productOrderPinId),
     productOrderPinId: normalizeText(row.productOrderPinId),
@@ -440,10 +487,66 @@ function buildProductOrderRowViewModel(order: unknown): ProductCommerceOrderRowV
     stateLabel: formatOrderStateLabel(row.state),
     paymentTxid: normalizeText(row.paymentTxid),
     orderTxid: normalizeText(row.orderTxid),
-    buyerLabel: normalizeText(row.buyerMetaId),
-    sellerLabel: normalizeText(row.sellerMetaId),
+    deliveryLabel: formatDeliverySummaryLabel(row.delivery),
+    buyerLabel: normalizeText(buyer.name || buyer.globalMetaId || row.buyerMetaId),
+    sellerLabel: normalizeText(seller.name || seller.globalMetaId || row.sellerMetaId),
     createdAtLabel: formatTimestamp(row.createdAt),
     updatedAtLabel: formatTimestamp(row.updatedAt),
+  };
+}
+
+function buildOwnedListingViewModel(listing: unknown): ProductCommerceOwnedListingViewModel {
+  const row = readObject(listing);
+  const payload = readObject(row.payload);
+  const fulfillment = readObject(payload.fulfillment);
+  const skills = readArray(row.fulfillmentSkills || fulfillment.fulfillmentSkills)
+    .map((skill) => normalizeText(skill))
+    .filter(Boolean);
+  const skuCount = normalizeInteger(row.skuCount) ?? readArray(payload.skus).length;
+  return {
+    listingPinId: normalizeText(row.listingPinId),
+    title: normalizeText(row.title || payload.title || row.name || payload.name),
+    skuCountLabel: `${skuCount} SKU${skuCount === 1 ? '' : 's'}`,
+    fulfillmentSkillsLabel: skills.join(', ') || 'No fulfillment skills',
+    stateLabel: row.available === false || normalizeText(row.revokedAt) ? 'Revoked' : 'Available',
+  };
+}
+
+function buildOrderInspectViewModel(detail: unknown): ProductCommerceOrderInspectViewModel | null {
+  const source = readObject(detail);
+  if (!Object.keys(source).length) {
+    return null;
+  }
+  const order = readObject(source.order);
+  const sku = readObject(source.sku);
+  const payment = readObject(source.payment);
+  const fulfillment = readObject(source.fulfillment);
+  const trace = readObject(source.trace);
+  const delivery = readObject(source.delivery);
+  const skills = readArray(fulfillment.fulfillmentSkills).map((skill) => normalizeText(skill)).filter(Boolean);
+  const price = readObject(sku.price);
+  const selectedSkuLabel = [
+    normalizeText(sku.name),
+    normalizeText(sku.skuId || order.skuId),
+    formatPrice(price.amount, price.currency),
+  ].filter(Boolean).join(' | ');
+  return {
+    orderId: normalizeText(order.orderId),
+    productOrderPinId: normalizeText(order.productOrderPinId),
+    listingPinId: normalizeText(order.listingPinId),
+    skuId: normalizeText(order.skuId),
+    roleLabel: normalizeText(order.role) === 'seller' ? 'Seller' : 'Buyer',
+    stateLabel: formatOrderStateLabel(order.state),
+    paymentVerificationLabel: formatBooleanLabel(payment.verified),
+    paymentTxid: normalizeText(payment.paymentTxid || order.paymentTxid),
+    fulfillmentSkillsLabel: skills.join(', ') || 'No fulfillment skills',
+    selectedSkuLabel: selectedSkuLabel || normalizeText(order.skuId),
+    traceLabel: normalizeText(trace.traceId),
+    sessionLabel: normalizeText(trace.sessionId),
+    traceUrl: normalizeText(trace.localUiUrl),
+    deliveryPinId: normalizeText(delivery.deliveryPinId),
+    deliverySummaryLabel: formatDeliverySummaryLabel(delivery.summary),
+    failureReason: normalizeText(fulfillment.failureReason),
   };
 }
 
@@ -565,7 +668,9 @@ export function buildProductCommercePageViewModel(input: {
   selectedSku?: unknown;
   purchaseSelection?: unknown;
   listingForm?: ProductCommerceListingFormInput | null;
+  ownedListings?: unknown;
   orderRows?: unknown;
+  orderInspect?: unknown;
   skillCatalog?: unknown;
 }): ProductCommercePageViewModel {
   const skillCatalog = readSkillCatalog(input.skillCatalog);
@@ -583,7 +688,9 @@ export function buildProductCommercePageViewModel(input: {
   const listingPreviewPayload = input.listingForm
     ? buildProductListingPreviewPayload(input.listingForm, skillCatalog)
     : null;
+  const ownedListingRows = readArray(input.ownedListings).map(buildOwnedListingViewModel);
   const orderRows = readArray(input.orderRows).map(buildProductOrderRowViewModel);
+  const orderInspect = input.orderInspect ? buildOrderInspectViewModel(input.orderInspect) : null;
 
   return {
     productRows,
@@ -591,7 +698,9 @@ export function buildProductCommercePageViewModel(input: {
     selectedSkuRows,
     purchasePreviewRequest,
     listingPreviewPayload,
+    ownedListingRows,
     orderRows,
+    orderInspect,
     fulfillmentLabel: skillCatalog.length > 0
       ? `All fulfillment skills available: ${skillCatalog.join(', ')}`
       : 'No fulfillment skills loaded',
@@ -608,6 +717,8 @@ export function buildProductCommercePageViewModelRuntimeSource(): string {
     formatPrice,
     formatTimestamp,
     formatOrderStateLabel,
+    formatBooleanLabel,
+    formatDeliverySummaryLabel,
     isMetafileUri,
     extractMetafileRef,
     normalizeMetafileUri,
@@ -623,6 +734,8 @@ export function buildProductCommercePageViewModelRuntimeSource(): string {
     buildProductSkuViewModel,
     buildProductDirectoryRowViewModel,
     buildProductOrderRowViewModel,
+    buildOwnedListingViewModel,
+    buildOrderInspectViewModel,
     buildProductListingPreviewPayload,
     buildProductPurchasePreviewRequest,
     buildProductCommercePageViewModel,

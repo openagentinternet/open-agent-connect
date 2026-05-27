@@ -347,6 +347,80 @@ test('buildProductCommercePageViewModel strips raw delivery body fields and keep
   assert.equal(model.fulfillmentLabel, 'All fulfillment skills available: skill-a, skill-b');
 });
 
+test('buildProductCommercePageViewModel renders owned listings and order inspection without raw delivery payloads', () => {
+  const model = buildProductCommercePageViewModel({
+    ownedListings: [
+      {
+        listingPinId: 'owned-listing-pin-1',
+        title: 'Owned Mobile Top-up',
+        skuCount: 2,
+        fulfillmentSkills: ['deliver-code', 'notify-buyer'],
+        available: false,
+        revokedAt: 123,
+      },
+    ],
+    orderRows: [
+      {
+        role: 'seller',
+        state: 'failed',
+        listingPinId: 'listing-mobile-top-up',
+        skuId: 'sku-5',
+        paymentTxid: 'payment-txid-1',
+        productOrderPinId: 'product-order-pin-1',
+        delivery: { label: 'Delivery failed' },
+      },
+    ],
+    orderInspect: {
+      order: {
+        orderId: 'local-order-1',
+        role: 'seller',
+        state: 'failed',
+        listingPinId: 'listing-mobile-top-up',
+        skuId: 'sku-5',
+        paymentTxid: 'payment-txid-1',
+        productOrderPinId: 'product-order-pin-1',
+      },
+      sku: {
+        skuId: 'sku-5',
+        name: '5 SPACE credit',
+        price: { amount: '5', currency: 'SPACE' },
+      },
+      payment: { paymentTxid: 'payment-txid-1', verified: true },
+      fulfillment: {
+        fulfillmentSkills: ['deliver-code', 'notify-buyer'],
+        failureReason: 'fulfillment runtime timeout',
+      },
+      delivery: {
+        summary: { label: 'Delivery failed', decryptedDeliveryBody: 'secret-code-123' },
+        deliveryPinId: 'delivery-pin-1',
+        decryptedDeliveryBody: 'secret-code-123',
+      },
+      trace: {
+        traceId: 'trace-product-order-1',
+        sessionId: 'session-product-order-1',
+        localUiUrl: 'http://127.0.0.1:25200/ui/trace?traceId=trace-product-order-1',
+      },
+    },
+  });
+
+  assert.equal(model.ownedListingRows[0].title, 'Owned Mobile Top-up');
+  assert.equal(model.ownedListingRows[0].listingPinId, 'owned-listing-pin-1');
+  assert.equal(model.ownedListingRows[0].skuCountLabel, '2 SKUs');
+  assert.equal(model.ownedListingRows[0].fulfillmentSkillsLabel, 'deliver-code, notify-buyer');
+  assert.equal(model.ownedListingRows[0].stateLabel, 'Revoked');
+  assert.equal(model.orderRows[0].roleLabel, 'Seller');
+  assert.equal(model.orderRows[0].stateLabel, 'Failed');
+  assert.equal(model.orderRows[0].deliveryLabel, 'Delivery failed');
+  assert.equal(model.orderInspect.paymentVerificationLabel, 'Yes');
+  assert.equal(model.orderInspect.fulfillmentSkillsLabel, 'deliver-code, notify-buyer');
+  assert.equal(model.orderInspect.selectedSkuLabel, '5 SPACE credit | sku-5 | 5 SPACE');
+  assert.equal(model.orderInspect.traceLabel, 'trace-product-order-1');
+  assert.equal(model.orderInspect.sessionLabel, 'session-product-order-1');
+  assert.equal(model.orderInspect.deliveryPinId, 'delivery-pin-1');
+  assert.equal(model.orderInspect.failureReason, 'fulfillment runtime timeout');
+  assert.equal(Object.prototype.hasOwnProperty.call(model.orderInspect, 'decryptedDeliveryBody'), false);
+});
+
 test('buildProductCommercePageViewModelRuntimeSource produces browser-compatible helper source', () => {
   const source = buildProductCommercePageViewModelRuntimeSource();
   assert.match(source, /buildProductCommercePageViewModel/);

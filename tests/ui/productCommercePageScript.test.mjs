@@ -104,6 +104,15 @@ class FakeElement {
     if (selector === '[data-product-sell-sku-field]') {
       return this.nodes.filter((node) => node.attrs['data-product-sell-sku-field'] !== undefined);
     }
+    if (selector === '[data-product-owned-copy]') {
+      return this.nodes.filter((node) => node.attrs['data-product-owned-copy'] !== undefined);
+    }
+    if (selector === '[data-product-owned-inspect]') {
+      return this.nodes.filter((node) => node.attrs['data-product-owned-inspect'] !== undefined);
+    }
+    if (selector === '[data-product-order-row]') {
+      return this.nodes.filter((node) => node.attrs['data-product-order-row'] !== undefined);
+    }
     return [];
   }
 }
@@ -167,6 +176,71 @@ function product(overrides = {}) {
   };
 }
 
+function ownedListing(overrides = {}) {
+  return {
+    listingPinId: 'owned-listing-pin-1',
+    title: 'Owned Mobile Top-up',
+    skuCount: 2,
+    fulfillmentSkills: ['deliver-code', 'notify-buyer'],
+    available: true,
+    payload: {
+      title: 'Owned Mobile Top-up',
+      fulfillment: { fulfillmentSkills: ['deliver-code', 'notify-buyer'] },
+      skus: [{ skuId: 'sku-5' }, { skuId: 'sku-10' }],
+    },
+    ...overrides,
+  };
+}
+
+function order(overrides = {}) {
+  return {
+    orderId: 'local-order-1',
+    role: 'buyer',
+    state: 'delivered',
+    productOrderPinId: 'product-order-pin-1',
+    listingPinId: 'listing-mobile-top-up',
+    skuId: 'sku-5',
+    paymentTxid: 'payment-txid-1',
+    orderTxid: 'order-txid-1',
+    delivery: { label: 'Delivered by simplemsg', deliveryPinId: 'delivery-pin-1' },
+    ...overrides,
+  };
+}
+
+function orderDetail(overrides = {}) {
+  return {
+    order: order(),
+    sku: {
+      skuId: 'sku-5',
+      name: '5 SPACE credit',
+      price: { amount: '5', currency: 'SPACE' },
+    },
+    payment: {
+      paymentTxid: 'payment-txid-1',
+      verified: true,
+    },
+    fulfillment: {
+      fulfillmentSkills: ['deliver-code', 'notify-buyer'],
+      failureReason: 'fulfillment runtime timeout',
+    },
+    delivery: {
+      summary: { label: 'Delivered by simplemsg', decryptedDeliveryBody: 'secret-code-123' },
+      deliveryPinId: 'delivery-pin-1',
+      decryptedDeliveryBody: 'secret-code-123',
+    },
+    trace: {
+      traceId: 'trace-product-order-1',
+      sessionId: 'session-product-order-1',
+      localUiUrl: 'http://127.0.0.1:25200/ui/trace?traceId=trace-product-order-1',
+    },
+    raw: {
+      decryptedDeliveryBody: 'secret-code-123',
+      productOrder: { comment: 'safe public comment' },
+    },
+    ...overrides,
+  };
+}
+
 async function runProductsScript(options = {}) {
   const elements = {
     '[data-products-tab]': null,
@@ -211,6 +285,25 @@ async function runProductsScript(options = {}) {
     '[data-products-confirm-publish]': new FakeElement(),
     '[data-products-cancel-publish]': new FakeElement(),
     '[data-products-publish-success]': new FakeElement(),
+    '[data-products-owned-refresh]': new FakeElement(),
+    '[data-products-owned-error]': new FakeElement(),
+    '[data-products-owned-list]': new FakeElement(),
+    '[data-products-order-actor]': new FakeElement(options.orderActor || ''),
+    '[data-products-order-role]': new FakeElement(options.orderRole || 'buyer'),
+    '[data-products-order-state]': new FakeElement(options.orderState || ''),
+    '[data-products-order-page-size]': new FakeElement(String(options.orderPageSize || 20)),
+    '[data-products-order-refresh]': new FakeElement(),
+    '[data-products-order-selector]': new FakeElement(options.orderSelector || ''),
+    '[data-products-order-selector-kind]': new FakeElement(options.orderSelectorKind || 'auto'),
+    '[data-products-order-inspect]': new FakeElement(),
+    '[data-products-order-error]': new FakeElement(),
+    '[data-products-orders-list]': new FakeElement(),
+    '[data-products-order-prev]': new FakeElement(),
+    '[data-products-order-next]': new FakeElement(),
+    '[data-products-order-page-label]': new FakeElement(),
+    '[data-products-order-detail-modal]': new FakeElement(),
+    '[data-products-order-detail]': new FakeElement(),
+    '[data-products-order-detail-close]': new FakeElement(),
   };
   const tabs = ['marketplace', 'sell', 'orders'].map((name) => {
     const tab = new FakeElement();
@@ -327,6 +420,45 @@ async function runProductsScript(options = {}) {
           }),
         };
       }
+      if (String(url).startsWith('/api/products/owned')) {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            data: options.ownedPage || {
+              items: options.ownedListings || [ownedListing()],
+              page: 1,
+              pageSize: 20,
+              total: (options.ownedListings || [ownedListing()]).length,
+              totalPages: 1,
+            },
+          }),
+        };
+      }
+      if (String(url).startsWith('/api/products/orders/inspect')) {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            data: options.orderDetail || orderDetail(),
+          }),
+        };
+      }
+      if (String(url).startsWith('/api/products/orders')) {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            data: options.ordersPage || {
+              items: options.orders || [order()],
+              page: options.ordersPageNumber || 1,
+              pageSize: options.orderPageSize || 20,
+              total: options.ordersTotal || 1,
+              totalPages: options.ordersTotalPages || 1,
+            },
+          }),
+        };
+      }
       if (String(url) === '/api/products/publish') {
         const body = requestOptions && requestOptions.body ? JSON.parse(String(requestOptions.body)) : {};
         return {
@@ -437,6 +569,26 @@ async function openSellTab(options = {}) {
     'seller skills load',
   );
   result.callsBeforeSell = callsBeforeSell;
+  return result;
+}
+
+async function openOrdersTab(options = {}) {
+  const result = await runProductsScript({
+    ...options,
+    profiles: options.profiles || [
+      profile({ slug: 'actor-bot', name: 'Actor Bot' }),
+      profile({ slug: 'buyer-bot', name: 'Buyer Bot' }),
+    ],
+  });
+  const ordersTab = result.tabs.find((tab) => tab.dataset.productsTab === 'orders');
+  const callsBeforeOrders = result.fetchCalls.length;
+  await ordersTab.listeners.get('click')({ preventDefault() {} });
+  await waitFor(
+    () => result.fetchCalls.some((call) => call.url.startsWith('/api/products/orders?')) ||
+      result.elements['[data-products-order-error]'].textContent,
+    'orders load',
+  );
+  result.callsBeforeOrders = callsBeforeOrders;
   return result;
 }
 
@@ -646,6 +798,65 @@ test('products sell tab loads seller profiles, loads selected seller skills, and
   assert.deepEqual(payload.fulfillment.fulfillmentSkills, ['deliver-code', 'notify-buyer']);
 });
 
+test('products sell tab loads owned listings for selected seller and renders read-only actions', async () => {
+  const { elements, fetchCalls, callsBeforeSell } = await openSellTab();
+  const sellCalls = fetchCalls.slice(callsBeforeSell);
+
+  assert.ok(sellCalls.some((call) => call.url === '/api/products/owned?from=alice&page=1&pageSize=20'));
+  assert.match(elements['[data-products-owned-list]'].innerHTML, /Owned Mobile Top-up/);
+  assert.match(elements['[data-products-owned-list]'].innerHTML, /owned-listing-pin-1/);
+  assert.match(elements['[data-products-owned-list]'].innerHTML, /2 SKUs/);
+  assert.match(elements['[data-products-owned-list]'].innerHTML, /deliver-code, notify-buyer/);
+  assert.match(elements['[data-products-owned-list]'].innerHTML, /Available/);
+  assert.match(elements['[data-products-owned-list]'].innerHTML, /data-product-owned-inspect/);
+  assert.match(elements['[data-products-owned-list]'].innerHTML, /data-product-owned-copy/);
+  assert.doesNotMatch(elements['[data-products-owned-list]'].innerHTML, /modify|revoke/i);
+});
+
+test('products sell tab can load owned listings across all profiles and refreshes with refresh flag', async () => {
+  const { elements, tabs, fetchCalls } = await runProductsScript({ profiles: [] });
+  const sellTab = tabs.find((tab) => tab.dataset.productsTab === 'sell');
+
+  await sellTab.listeners.get('click')({ preventDefault() {} });
+  await waitFor(
+    () => fetchCalls.some((call) => call.url === '/api/products/owned?all=true&page=1&pageSize=20'),
+    'all-profile owned listings',
+  );
+  await elements['[data-products-owned-refresh]'].listeners.get('click')();
+  await waitFor(
+    () => fetchCalls.some((call) => call.url === '/api/products/owned?all=true&page=1&pageSize=20&refresh=true'),
+    'owned refresh listings',
+  );
+
+  assert.ok(fetchCalls.some((call) => call.url === '/api/products/owned?all=true&page=1&pageSize=20'));
+  assert.ok(fetchCalls.some((call) => call.url === '/api/products/owned?all=true&page=1&pageSize=20&refresh=true'));
+});
+
+test('products sell seller actor change removes all-profile owned query flag', async () => {
+  const { elements, tabs, fetchCalls } = await runProductsScript({
+    profiles: [
+      profile({ slug: 'alice', name: 'Alice Seller' }),
+      profile({ slug: 'bob', name: 'Bob Seller' }),
+    ],
+  });
+  const sellTab = tabs.find((tab) => tab.dataset.productsTab === 'sell');
+  await sellTab.listeners.get('click')({ preventDefault() {} });
+  await waitFor(
+    () => fetchCalls.some((call) => call.url === '/api/products/owned?from=alice&page=1&pageSize=20'),
+    'alice owned listings',
+  );
+
+  elements['[data-products-seller]'].value = 'bob';
+  await elements['[data-products-seller]'].listeners.get('change')();
+  await waitFor(
+    () => fetchCalls.some((call) => call.url === '/api/products/owned?from=bob&page=1&pageSize=20'),
+    'bob owned listings',
+  );
+
+  assert.ok(fetchCalls.some((call) => call.url === '/api/products/owned?from=bob&page=1&pageSize=20'));
+  assert.ok(!fetchCalls.some((call) => call.url.includes('from=bob') && call.url.includes('all=true')));
+});
+
 test('products sell ignores stale seller skills when responses return out of order', async () => {
   const { elements, tabs, fetchCalls, skillResponseReleases } = await runProductsScript({
     skillResponses: {
@@ -701,6 +912,110 @@ test('products sell ignores stale seller skills when responses return out of ord
 
   assert.match(elements['[data-products-sell-skills]'].innerHTML, /Bob Skill/);
   assert.doesNotMatch(elements['[data-products-sell-skills]'].innerHTML, /Alice Skill/);
+});
+
+test('products orders tab loads buyer orders and supports all-profile fallback', async () => {
+  const withActor = await openOrdersTab();
+  assert.ok(withActor.fetchCalls.some((call) => call.url === '/api/products/orders?from=actor-bot&role=buyer&page=1&pageSize=20'));
+
+  const noActor = await openOrdersTab({ profiles: [] });
+  assert.ok(noActor.fetchCalls.some((call) => call.url === '/api/products/orders?all=true&role=buyer&page=1&pageSize=20'));
+});
+
+test('products orders actor selection removes cross-profile all flag', async () => {
+  const { elements, fetchCalls } = await openOrdersTab();
+
+  elements['[data-products-order-actor]'].value = 'buyer-bot';
+  await elements['[data-products-order-actor]'].listeners.get('change')();
+  await waitFor(
+    () => fetchCalls.some((call) => call.url === '/api/products/orders?from=buyer-bot&role=buyer&page=1&pageSize=20'),
+    'actor order load',
+  );
+
+  assert.ok(fetchCalls.some((call) => call.url === '/api/products/orders?from=buyer-bot&role=buyer&page=1&pageSize=20'));
+  assert.ok(!fetchCalls.some((call) => call.url.includes('from=buyer-bot') && call.url.includes('all=true')));
+});
+
+test('products orders filters role state and pagination independently from all-profile flag', async () => {
+  const { elements, fetchCalls } = await openOrdersTab({ profiles: [], ordersTotalPages: 3 });
+
+  elements['[data-products-order-role]'].value = 'seller';
+  await elements['[data-products-order-role]'].listeners.get('change')();
+  elements['[data-products-order-role]'].value = 'all';
+  await elements['[data-products-order-role]'].listeners.get('change')();
+  elements['[data-products-order-state]'].value = 'delivered';
+  await elements['[data-products-order-state]'].listeners.get('change')();
+  elements['[data-products-order-page-size]'].value = '10';
+  await elements['[data-products-order-page-size]'].listeners.get('change')();
+  await elements['[data-products-order-next]'].listeners.get('click')();
+
+  await waitFor(
+    () => fetchCalls.some((call) => call.url === '/api/products/orders?all=true&role=all&state=delivered&page=2&pageSize=10'),
+    'filtered paginated orders',
+  );
+
+  assert.ok(fetchCalls.some((call) => call.url === '/api/products/orders?all=true&role=seller&page=1&pageSize=20'));
+  assert.ok(fetchCalls.some((call) => call.url === '/api/products/orders?all=true&role=all&page=1&pageSize=20'));
+  assert.ok(fetchCalls.some((call) => call.url === '/api/products/orders?all=true&role=all&state=delivered&page=1&pageSize=20'));
+  assert.ok(fetchCalls.some((call) => call.url === '/api/products/orders?all=true&role=all&state=delivered&page=2&pageSize=10'));
+});
+
+test('products orders rows render copy-friendly order fields and delivery summary', async () => {
+  const { elements } = await openOrdersTab();
+
+  assert.match(elements['[data-products-orders-list]'].innerHTML, /Buyer/);
+  assert.match(elements['[data-products-orders-list]'].innerHTML, /Delivered/);
+  assert.match(elements['[data-products-orders-list]'].innerHTML, /listing-mobile-top-up/);
+  assert.match(elements['[data-products-orders-list]'].innerHTML, /sku-5/);
+  assert.match(elements['[data-products-orders-list]'].innerHTML, /payment-txid-1/);
+  assert.match(elements['[data-products-orders-list]'].innerHTML, /product-order-pin-1/);
+  assert.match(elements['[data-products-orders-list]'].innerHTML, /Delivered by simplemsg/);
+});
+
+test('products order row inspection uses best selector and detail hides raw decrypted payloads', async () => {
+  const { elements, fetchCalls } = await openOrdersTab({ profiles: [] });
+
+  const [row] = elements['[data-products-orders-list]'].querySelectorAll('[data-product-order-row]');
+  await row.listeners.get('click')();
+  await waitFor(
+    () => fetchCalls.some((call) => call.url === '/api/products/orders/inspect?all=true&productOrderPinId=product-order-pin-1'),
+    'row inspect fetch',
+  );
+
+  assert.ok(fetchCalls.some((call) => call.url === '/api/products/orders/inspect?all=true&productOrderPinId=product-order-pin-1'));
+  assert.match(elements['[data-products-order-detail]'].innerHTML, /Payment verified/);
+  assert.match(elements['[data-products-order-detail]'].innerHTML, /Yes/);
+  assert.match(elements['[data-products-order-detail]'].innerHTML, /deliver-code, notify-buyer/);
+  assert.match(elements['[data-products-order-detail]'].innerHTML, /5 SPACE credit/);
+  assert.match(elements['[data-products-order-detail]'].innerHTML, /trace-product-order-1/);
+  assert.match(elements['[data-products-order-detail]'].innerHTML, /session-product-order-1/);
+  assert.match(elements['[data-products-order-detail]'].innerHTML, /delivery-pin-1/);
+  assert.match(elements['[data-products-order-detail]'].innerHTML, /fulfillment runtime timeout/);
+  assert.doesNotMatch(elements['[data-products-order-detail]'].innerHTML, /secret-code-123|decryptedDeliveryBody/);
+});
+
+test('products direct order inspection supports explicit selector types', async () => {
+  const { elements, fetchCalls } = await openOrdersTab({ profiles: [] });
+
+  const cases = [
+    ['productOrderPinId', 'product-order-pin-2', 'productOrderPinId=product-order-pin-2'],
+    ['paymentTxid', 'payment-txid-2', 'paymentTxid=payment-txid-2'],
+    ['orderTxid', 'order-txid-2', 'orderTxid=order-txid-2'],
+    ['orderId', 'local-order-2', 'orderId=local-order-2'],
+  ];
+  for (const [kind, value, expected] of cases) {
+    elements['[data-products-order-selector-kind]'].value = kind;
+    elements['[data-products-order-selector]'].value = value;
+    await elements['[data-products-order-inspect]'].listeners.get('click')();
+    await waitFor(
+      () => fetchCalls.some((call) => call.url.includes(expected)),
+      `${kind} inspect`,
+    );
+  }
+
+  for (const [, , expected] of cases) {
+    assert.ok(fetchCalls.some((call) => call.url === `/api/products/orders/inspect?all=true&${expected}`));
+  }
 });
 
 test('products sell tab disables publish controls and shows code/message when skill loading fails', async () => {

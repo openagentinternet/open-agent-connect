@@ -166,6 +166,12 @@ export function buildProductsPageDefinition(): LocalUiPageDefinition {
                   <span data-products-publish-reason></span>
                 </div>
                 <div class="products-success-block" data-products-publish-success></div>
+                <div class="products-region-heading">
+                  <h3>Owned listings</h3>
+                  <button class="products-secondary-button" type="button" data-products-owned-refresh>Refresh</button>
+                </div>
+                <div class="products-error" data-products-owned-error role="alert" aria-live="polite"></div>
+                <div class="products-owned-list" data-products-owned-list></div>
               </aside>
             </div>
           </section>
@@ -173,9 +179,82 @@ export function buildProductsPageDefinition(): LocalUiPageDefinition {
           <section id="orders" class="products-panel" data-products-panel="orders" role="tabpanel" aria-labelledby="products-tab-orders" hidden>
             <div class="products-panel-header">
               <h2>Orders</h2>
-              <span>Activity</span>
+              <span>/api/products/orders</span>
             </div>
-            <p>Inspect buyer and seller order state from the local Product Commerce cache.</p>
+            <div class="products-orders-toolbar" aria-label="Order filters">
+              <label class="products-field">
+                <span>Actor</span>
+                <select data-products-order-actor></select>
+              </label>
+              <label class="products-field">
+                <span>Role</span>
+                <select data-products-order-role>
+                  <option value="buyer">buyer</option>
+                  <option value="seller">seller</option>
+                  <option value="all">all</option>
+                </select>
+              </label>
+              <label class="products-field">
+                <span>State</span>
+                <select data-products-order-state>
+                  <option value="">Any state</option>
+                  <option value="created">created</option>
+                  <option value="payment_pending">payment_pending</option>
+                  <option value="paid">paid</option>
+                  <option value="notified">notified</option>
+                  <option value="accepted">accepted</option>
+                  <option value="fulfilling">fulfilling</option>
+                  <option value="delivered">delivered</option>
+                  <option value="failed">failed</option>
+                  <option value="closed">closed</option>
+                </select>
+              </label>
+              <label class="products-field">
+                <span>Page size</span>
+                <select data-products-order-page-size>
+                  <option value="10">10</option>
+                  <option value="20" selected>20</option>
+                  <option value="50">50</option>
+                </select>
+              </label>
+              <button class="products-secondary-button" type="button" data-products-order-refresh>Refresh</button>
+            </div>
+            <div class="products-orders-inspect-row">
+              <label class="products-field products-field-grow">
+                <span>Inspect selector</span>
+                <input data-products-order-selector type="text" autocomplete="off" placeholder="product-order pin, payment txid, order txid, or order id" />
+              </label>
+              <select data-products-order-selector-kind aria-label="Order selector type">
+                <option value="auto">Auto</option>
+                <option value="productOrderPinId">Product-order pin</option>
+                <option value="paymentTxid">Payment txid</option>
+                <option value="orderTxid">Order txid</option>
+                <option value="orderId">Order id</option>
+              </select>
+              <button class="products-primary-button" type="button" data-products-order-inspect>Inspect</button>
+            </div>
+            <div class="products-error" data-products-order-error role="alert" aria-live="polite"></div>
+            <div class="products-orders-table-wrap">
+              <table class="products-orders-table">
+                <thead>
+                  <tr>
+                    <th>Role</th>
+                    <th>State</th>
+                    <th>Listing</th>
+                    <th>SKU</th>
+                    <th>Payment txid</th>
+                    <th>Product-order pin</th>
+                    <th>Delivery</th>
+                  </tr>
+                </thead>
+                <tbody data-products-orders-list></tbody>
+              </table>
+            </div>
+            <div class="products-pagination">
+              <button class="products-secondary-button" type="button" data-products-order-prev>Previous</button>
+              <span data-products-order-page-label>Page 1</span>
+              <button class="products-secondary-button" type="button" data-products-order-next>Next</button>
+            </div>
           </section>
         </section>
         <div class="products-modal-backdrop" data-products-confirmation-modal hidden>
@@ -214,6 +293,18 @@ export function buildProductsPageDefinition(): LocalUiPageDefinition {
             <div class="products-confirmation-actions">
               <button class="products-primary-button products-danger-button" type="button" data-products-confirm-publish>Publish listing</button>
             </div>
+          </section>
+        </div>
+        <div class="products-modal-backdrop" data-products-order-detail-modal hidden>
+          <section class="products-confirmation products-order-detail" role="dialog" aria-modal="true" aria-labelledby="products-order-detail-title">
+            <div class="products-confirmation-head">
+              <div>
+                <p class="products-eyebrow">Order inspection</p>
+                <h2 id="products-order-detail-title">Product order detail</h2>
+              </div>
+              <button class="products-secondary-button" type="button" data-products-order-detail-close>Close</button>
+            </div>
+            <div data-products-order-detail></div>
           </section>
         </div>
       </section>
@@ -269,6 +360,16 @@ export function buildProductsPageScript(): string {
         }],
       },
     },
+    ownedListings: null,
+    ownedListingsError: null,
+    ordersPage: null,
+    orderInspect: null,
+    orderError: null,
+    orderRole: 'buyer',
+    orderState: '',
+    orderPage: 1,
+    orderPageSize: 20,
+    orderActorSlug: '',
   };
   const elements = {
     status: document.querySelector('[data-products-status]'),
@@ -311,6 +412,25 @@ export function buildProductsPageScript(): string {
     confirmPublish: document.querySelector('[data-products-confirm-publish]'),
     cancelPublish: document.querySelector('[data-products-cancel-publish]'),
     publishSuccess: document.querySelector('[data-products-publish-success]'),
+    ownedRefresh: document.querySelector('[data-products-owned-refresh]'),
+    ownedError: document.querySelector('[data-products-owned-error]'),
+    ownedList: document.querySelector('[data-products-owned-list]'),
+    orderActor: document.querySelector('[data-products-order-actor]'),
+    orderRole: document.querySelector('[data-products-order-role]'),
+    orderState: document.querySelector('[data-products-order-state]'),
+    orderPageSize: document.querySelector('[data-products-order-page-size]'),
+    orderRefresh: document.querySelector('[data-products-order-refresh]'),
+    orderSelector: document.querySelector('[data-products-order-selector]'),
+    orderSelectorKind: document.querySelector('[data-products-order-selector-kind]'),
+    orderInspectButton: document.querySelector('[data-products-order-inspect]'),
+    orderError: document.querySelector('[data-products-order-error]'),
+    ordersList: document.querySelector('[data-products-orders-list]'),
+    orderPrev: document.querySelector('[data-products-order-prev]'),
+    orderNext: document.querySelector('[data-products-order-next]'),
+    orderPageLabel: document.querySelector('[data-products-order-page-label]'),
+    orderDetailModal: document.querySelector('[data-products-order-detail-modal]'),
+    orderDetail: document.querySelector('[data-products-order-detail]'),
+    orderDetailClose: document.querySelector('[data-products-order-detail-close]'),
   };
   const tabs = Array.from(document.querySelectorAll('[data-products-tab]'));
   const panels = Array.from(document.querySelectorAll('[data-products-panel]'));
@@ -338,6 +458,27 @@ export function buildProductsPageScript(): string {
     query: normalizeText(state.query),
     spendCap: elements.spendCap ? normalizeText(elements.spendCap.value) : '',
     comment: elements.comment ? normalizeText(elements.comment.value) : '',
+  });
+  const pageItems = (page) => readArrayValue(page && (page.items || page.orders || page.listings));
+  const appendQuery = (base, params) => {
+    const query = Object.keys(params)
+      .filter((key) => params[key] !== undefined && params[key] !== null && normalizeText(params[key]) !== '')
+      .map((key) => encodeURIComponent(key) + '=' + encodeURIComponent(String(params[key])))
+      .join('&');
+    return base + (query ? '?' + query : '');
+  };
+  const ownedListingsUrl = (refresh) => appendQuery('/api/products/owned', {
+    ...(state.sell.sellerSlug ? { from: state.sell.sellerSlug } : { all: true }),
+    page: 1,
+    pageSize: 20,
+    ...(refresh ? { refresh: true } : {}),
+  });
+  const ordersUrl = () => appendQuery('/api/products/orders', {
+    ...(state.orderActorSlug ? { from: state.orderActorSlug } : { all: true }),
+    role: state.orderRole || 'buyer',
+    ...(state.orderState ? { state: state.orderState } : {}),
+    page: state.orderPage,
+    pageSize: state.orderPageSize,
   });
   const purchaseSelectionKey = (selection) => JSON.stringify([
     normalizeText(selection.buyerSlug),
@@ -485,6 +626,31 @@ export function buildProductsPageScript(): string {
   const sellerLabel = () => {
     const profile = state.profiles.find((item) => normalizeText(item.slug) === state.sell.sellerSlug);
     return normalizeText(profile && (profile.name || profile.displayName || profile.slug)) || state.sell.sellerSlug;
+  };
+  const renderOrderActorSelect = () => {
+    if (!elements.orderActor) return;
+    const previous = state.orderActorSlug || elements.orderActor.value;
+    elements.orderActor.innerHTML = '';
+    const allOption = document.createElement('option');
+    allOption.value = '';
+    allOption.textContent = 'All local profiles';
+    elements.orderActor.appendChild(allOption);
+    state.profiles.forEach((profile) => {
+      const option = document.createElement('option');
+      option.value = normalizeText(profile.slug);
+      option.textContent = normalizeText(profile.name || profile.displayName || profile.slug) || option.value;
+      elements.orderActor.appendChild(option);
+    });
+    if (previous && state.profiles.some((profile) => normalizeText(profile.slug) === previous)) {
+      state.orderActorSlug = previous;
+      elements.orderActor.value = previous;
+    } else if (state.profiles.length > 0) {
+      state.orderActorSlug = normalizeText(state.profiles[0].slug);
+      elements.orderActor.value = state.orderActorSlug;
+    } else {
+      state.orderActorSlug = '';
+      elements.orderActor.value = '';
+    }
   };
   const renderSellerSelect = () => {
     if (!elements.seller) return;
@@ -713,6 +879,75 @@ export function buildProductsPageScript(): string {
       ]),
     ].join('');
   };
+  const renderOwnedListings = () => {
+    if (elements.ownedError) {
+      elements.ownedError.textContent = state.ownedListingsError
+        ? [state.ownedListingsError.code, state.ownedListingsError.message].filter(Boolean).join(': ')
+        : '';
+      elements.ownedError.hidden = !state.ownedListingsError;
+    }
+    if (!elements.ownedList) return;
+    const model = buildProductCommercePageViewModel({
+      ownedListings: pageItems(state.ownedListings),
+    });
+    if (!model.ownedListingRows.length) {
+      elements.ownedList.innerHTML = '<p class="products-empty">No owned product listings found.</p>';
+      return;
+    }
+    elements.ownedList.innerHTML = model.ownedListingRows.map((row) => (
+      '<section class="products-owned-row">' +
+        '<div class="products-row-main">' +
+          '<strong>' + escapeHtml(row.title || row.listingPinId) + '</strong>' +
+          '<span>' + escapeHtml(row.listingPinId) + '</span>' +
+        '</div>' +
+        '<dl class="products-mini-facts">' +
+          '<div><dt>SKUs</dt><dd>' + escapeHtml(row.skuCountLabel) + '</dd></div>' +
+          '<div><dt>Fulfillment</dt><dd>' + escapeHtml(row.fulfillmentSkillsLabel) + '</dd></div>' +
+          '<div><dt>State</dt><dd>' + escapeHtml(row.stateLabel) + '</dd></div>' +
+        '</dl>' +
+        '<div class="products-row-actions">' +
+          '<button class="products-secondary-button" type="button" data-product-owned-inspect="' + escapeHtml(row.listingPinId) + '">Inspect</button>' +
+          '<button class="products-secondary-button" type="button" data-product-owned-copy="' + escapeHtml(row.listingPinId) + '">Copy</button>' +
+        '</div>' +
+      '</section>'
+    )).join('');
+    elements.ownedList.querySelectorAll('[data-product-owned-copy]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const value = button.getAttribute('data-product-owned-copy');
+        if (typeof navigator !== 'undefined' && navigator.clipboard && value) navigator.clipboard.writeText(value).catch(() => {});
+      });
+    });
+    elements.ownedList.querySelectorAll('[data-product-owned-inspect]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const pinId = button.getAttribute('data-product-owned-inspect');
+        const source = pageItems(state.ownedListings).find((item) => normalizeText(item && item.listingPinId) === pinId);
+        const payload = readObjectValue(source && source.payload);
+        state.ownedListingsError = {
+          code: 'listing_inspect',
+          message: JSON.stringify(payload && Object.keys(payload).length ? payload : source || {}, null, 2),
+        };
+        renderOwnedListings();
+      });
+    });
+  };
+  const loadOwnedListings = async (refresh) => {
+    setStatus('Loading owned listings', 'busy');
+    state.ownedListingsError = null;
+    try {
+      const envelope = await loadJson(ownedListingsUrl(refresh));
+      state.ownedListings = envelope.data || { items: [] };
+      setStatus('Owned listings loaded', 'ready');
+    } catch (error) {
+      state.ownedListings = { items: [] };
+      state.ownedListingsError = {
+        code: error && error.code ? error.code : 'products_owned_failed',
+        message: error instanceof Error ? error.message : String(error),
+      };
+      setStatus('Owned listings failed', 'error');
+    } finally {
+      renderOwnedListings();
+    }
+  };
   const loadSellerSkills = async () => {
     if (!state.sell.sellerSlug) {
       state.sell.skills = [];
@@ -720,6 +955,7 @@ export function buildProductsPageScript(): string {
       state.sell.skillsLoadedFor = '';
       renderSkillList();
       renderSellPreview();
+      await loadOwnedListings(false);
       return;
     }
     const sellerSlug = state.sell.sellerSlug;
@@ -738,6 +974,7 @@ export function buildProductsPageScript(): string {
       state.sell.skills = readArrayValue(envelope.data && (envelope.data.skills || envelope.data.catalog));
       state.sell.skillsLoadedFor = sellerSlug;
       setStatus('Seller skills loaded', 'ready');
+      await loadOwnedListings(false);
     } catch (error) {
       if (requestSequence !== sellEntrySequence || state.sell.sellerSlug !== sellerSlug) {
         return;
@@ -823,6 +1060,126 @@ export function buildProductsPageScript(): string {
     selectedSku: { skus: selectedSkus() },
     ...(options && options.purchaseSelection ? { purchaseSelection: options.purchaseSelection } : {}),
   });
+  const inferOrderSelector = (value) => {
+    const normalized = normalizeText(value);
+    const kind = elements.orderSelectorKind ? elements.orderSelectorKind.value : 'auto';
+    if (kind && kind !== 'auto') return kind;
+    if (normalized.startsWith('product-order-') || normalized.startsWith('pin:')) return 'productOrderPinId';
+    if (normalized.startsWith('payment-')) return 'paymentTxid';
+    if (normalized.startsWith('order-tx-')) return 'orderTxid';
+    if (/^[a-f0-9]{64}$/iu.test(normalized)) return 'paymentTxid';
+    return 'orderId';
+  };
+  const orderInspectUrl = (selectorValue) => {
+    const selector = inferOrderSelector(selectorValue);
+    return appendQuery('/api/products/orders/inspect', {
+      ...(state.orderActorSlug ? { from: state.orderActorSlug } : { all: true }),
+      [selector]: selectorValue,
+    });
+  };
+  const renderOrders = () => {
+    if (elements.orderError) {
+      elements.orderError.textContent = state.orderError
+        ? [state.orderError.code, state.orderError.message].filter(Boolean).join(': ')
+        : '';
+      elements.orderError.hidden = !state.orderError;
+    }
+    if (elements.orderRole) elements.orderRole.value = state.orderRole;
+    if (elements.orderState) elements.orderState.value = state.orderState;
+    if (elements.orderPageSize) elements.orderPageSize.value = String(state.orderPageSize);
+    if (elements.ordersList) {
+      const model = buildProductCommercePageViewModel({ orderRows: pageItems(state.ordersPage) });
+      elements.ordersList.innerHTML = model.orderRows.length
+        ? model.orderRows.map((row) => (
+          '<tr data-product-order-row="' + escapeHtml(row.productOrderPinId || row.paymentTxid || row.orderTxid || row.orderId) + '">' +
+            '<td>' + escapeHtml(row.roleLabel) + '</td>' +
+            '<td>' + escapeHtml(row.stateLabel) + '</td>' +
+            '<td>' + escapeHtml(row.listingPinId) + '</td>' +
+            '<td>' + escapeHtml(row.skuId) + '</td>' +
+            '<td>' + escapeHtml(row.paymentTxid) + '</td>' +
+            '<td>' + escapeHtml(row.productOrderPinId) + '</td>' +
+            '<td>' + escapeHtml(row.deliveryLabel) + '</td>' +
+          '</tr>'
+        )).join('')
+        : '<tr><td colspan="7">No product orders found.</td></tr>';
+      elements.ordersList.querySelectorAll('[data-product-order-row]').forEach((row) => {
+        row.addEventListener('click', () => inspectOrder(row.getAttribute('data-product-order-row')));
+      });
+    }
+    const totalPages = Number(state.ordersPage && state.ordersPage.totalPages) || 1;
+    if (elements.orderPageLabel) elements.orderPageLabel.textContent = 'Page ' + state.orderPage + ' of ' + totalPages;
+    if (elements.orderPrev) elements.orderPrev.disabled = state.orderPage <= 1;
+    if (elements.orderNext) elements.orderNext.disabled = state.orderPage >= totalPages;
+    renderOrderDetail();
+  };
+  const loadOrders = async () => {
+    setStatus('Loading orders', 'busy');
+    state.orderError = null;
+    try {
+      const envelope = await loadJson(ordersUrl());
+      state.ordersPage = envelope.data || { items: [] };
+      setStatus('Orders loaded', 'ready');
+    } catch (error) {
+      state.ordersPage = { items: [] };
+      state.orderError = {
+        code: error && error.code ? error.code : 'products_orders_failed',
+        message: error instanceof Error ? error.message : String(error),
+      };
+      setStatus('Orders failed', 'error');
+    } finally {
+      renderOrders();
+    }
+  };
+  const renderOrderDetail = () => {
+    if (!elements.orderDetailModal || !elements.orderDetail) return;
+    elements.orderDetailModal.hidden = !state.orderInspect;
+    const model = buildProductCommercePageViewModel({ orderInspect: state.orderInspect }).orderInspect;
+    if (!model) {
+      elements.orderDetail.innerHTML = '';
+      return;
+    }
+    elements.orderDetail.innerHTML = renderFacts([
+      { label: 'Role', value: model.roleLabel },
+      { label: 'State', value: model.stateLabel },
+      { label: 'Listing pin id', value: model.listingPinId },
+      { label: 'SKU id', value: model.skuId },
+      { label: 'Selected SKU', value: model.selectedSkuLabel },
+      { label: 'Payment txid', value: model.paymentTxid },
+      { label: 'Payment verified', value: model.paymentVerificationLabel },
+      { label: 'Product-order pin id', value: model.productOrderPinId },
+      { label: 'Fulfillment skills', value: model.fulfillmentSkillsLabel },
+      { label: 'Trace id', value: model.traceLabel },
+      { label: 'Session id', value: model.sessionLabel },
+      { label: 'Trace link', value: model.traceUrl },
+      { label: 'Delivery pin id', value: model.deliveryPinId },
+      { label: 'Delivery summary', value: model.deliverySummaryLabel },
+      { label: 'Failure reason', value: model.failureReason },
+    ]);
+  };
+  const inspectOrder = async (selectorValue) => {
+    const value = normalizeText(selectorValue || (elements.orderSelector && elements.orderSelector.value));
+    if (!value) {
+      state.orderError = { code: 'missing_product_order_selector', message: 'Enter an order selector.' };
+      renderOrders();
+      return;
+    }
+    setStatus('Inspecting order', 'busy');
+    state.orderError = null;
+    try {
+      const envelope = await loadJson(orderInspectUrl(value));
+      state.orderInspect = envelope.data || null;
+      setStatus('Order inspected', 'ready');
+    } catch (error) {
+      state.orderInspect = null;
+      state.orderError = {
+        code: error && error.code ? error.code : 'products_order_inspect_failed',
+        message: error instanceof Error ? error.message : String(error),
+      };
+      setStatus('Order inspect failed', 'error');
+    } finally {
+      renderOrders();
+    }
+  };
   const selectedBuyerLabel = () => {
     const profile = state.profiles.find((item) => normalizeText(item.slug) === state.buyerSlug);
     return normalizeText(profile && (profile.name || profile.displayName || profile.slug)) || state.buyerSlug;
@@ -1098,6 +1455,9 @@ export function buildProductsPageScript(): string {
     renderSkuEditor();
     renderSellPreview();
     renderPublishSuccess();
+    renderOwnedListings();
+    renderOrderActorSelect();
+    renderOrders();
     if (elements.refresh) elements.refresh.disabled = state.busy;
     if (elements.query) elements.query.disabled = state.busy;
   };
@@ -1169,6 +1529,14 @@ export function buildProductsPageScript(): string {
       if (panelName) panel.setAttribute('aria-labelledby', tabIdForName(panelName));
     });
     if (nextName === 'sell') enterSellTab();
+    if (nextName === 'orders') {
+      loadProfiles()
+        .catch(() => {})
+        .then(() => {
+          renderOrderActorSelect();
+          return loadOrders();
+        });
+    }
   };
 
   const navigateTo = (name, options) => {
@@ -1259,6 +1627,57 @@ export function buildProductsPageScript(): string {
       state.sell.skillError = null;
       state.sell.publishSuccess = null;
       loadSellerSkills();
+    });
+  }
+  if (elements.ownedRefresh) elements.ownedRefresh.addEventListener('click', () => loadOwnedListings(true));
+  if (elements.orderActor) {
+    elements.orderActor.addEventListener('change', () => {
+      state.orderActorSlug = normalizeText(elements.orderActor.value);
+      state.orderPage = 1;
+      loadOrders();
+    });
+  }
+  if (elements.orderRole) {
+    elements.orderRole.addEventListener('change', () => {
+      state.orderRole = elements.orderRole.value || 'buyer';
+      state.orderPage = 1;
+      loadOrders();
+    });
+  }
+  if (elements.orderState) {
+    elements.orderState.addEventListener('change', () => {
+      state.orderState = normalizeText(elements.orderState.value);
+      state.orderPage = 1;
+      loadOrders();
+    });
+  }
+  if (elements.orderPageSize) {
+    elements.orderPageSize.addEventListener('change', () => {
+      state.orderPageSize = Number(elements.orderPageSize.value) || 20;
+      state.orderPage = 1;
+      loadOrders();
+    });
+  }
+  if (elements.orderRefresh) elements.orderRefresh.addEventListener('click', loadOrders);
+  if (elements.orderInspectButton) elements.orderInspectButton.addEventListener('click', () => inspectOrder());
+  if (elements.orderPrev) {
+    elements.orderPrev.addEventListener('click', () => {
+      if (state.orderPage > 1) {
+        state.orderPage -= 1;
+        loadOrders();
+      }
+    });
+  }
+  if (elements.orderNext) {
+    elements.orderNext.addEventListener('click', () => {
+      state.orderPage += 1;
+      loadOrders();
+    });
+  }
+  if (elements.orderDetailClose) {
+    elements.orderDetailClose.addEventListener('click', () => {
+      state.orderInspect = null;
+      renderOrderDetail();
     });
   }
   [
