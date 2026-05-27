@@ -1070,12 +1070,18 @@ export function buildProductsPageScript(): string {
     if (/^[a-f0-9]{64}$/iu.test(normalized)) return 'paymentTxid';
     return 'orderId';
   };
-  const orderInspectUrl = (selectorValue) => {
-    const selector = inferOrderSelector(selectorValue);
+  const orderInspectUrl = (selectorValue, selectorKind) => {
+    const selector = selectorKind || inferOrderSelector(selectorValue);
     return appendQuery('/api/products/orders/inspect', {
       ...(state.orderActorSlug ? { from: state.orderActorSlug } : { all: true }),
       [selector]: selectorValue,
     });
+  };
+  const bestOrderSelector = (row) => {
+    if (normalizeText(row.productOrderPinId)) return { kind: 'productOrderPinId', value: normalizeText(row.productOrderPinId) };
+    if (normalizeText(row.paymentTxid)) return { kind: 'paymentTxid', value: normalizeText(row.paymentTxid) };
+    if (normalizeText(row.orderTxid)) return { kind: 'orderTxid', value: normalizeText(row.orderTxid) };
+    return { kind: 'orderId', value: normalizeText(row.orderId) };
   };
   const renderOrders = () => {
     if (elements.orderError) {
@@ -1090,8 +1096,10 @@ export function buildProductsPageScript(): string {
     if (elements.ordersList) {
       const model = buildProductCommercePageViewModel({ orderRows: pageItems(state.ordersPage) });
       elements.ordersList.innerHTML = model.orderRows.length
-        ? model.orderRows.map((row) => (
-          '<tr data-product-order-row="' + escapeHtml(row.productOrderPinId || row.paymentTxid || row.orderTxid || row.orderId) + '">' +
+        ? model.orderRows.map((row) => {
+          const selector = bestOrderSelector(row);
+          return (
+          '<tr data-product-order-row="' + escapeHtml(selector.value) + '" data-product-order-selector-kind="' + escapeHtml(selector.kind) + '">' +
             '<td>' + escapeHtml(row.roleLabel) + '</td>' +
             '<td>' + escapeHtml(row.stateLabel) + '</td>' +
             '<td>' + escapeHtml(row.listingPinId) + '</td>' +
@@ -1100,10 +1108,14 @@ export function buildProductsPageScript(): string {
             '<td>' + escapeHtml(row.productOrderPinId) + '</td>' +
             '<td>' + escapeHtml(row.deliveryLabel) + '</td>' +
           '</tr>'
-        )).join('')
+          );
+        }).join('')
         : '<tr><td colspan="7">No product orders found.</td></tr>';
       elements.ordersList.querySelectorAll('[data-product-order-row]').forEach((row) => {
-        row.addEventListener('click', () => inspectOrder(row.getAttribute('data-product-order-row')));
+        row.addEventListener('click', () => inspectOrder(
+          row.getAttribute('data-product-order-row'),
+          row.getAttribute('data-product-order-selector-kind'),
+        ));
       });
     }
     const totalPages = Number(state.ordersPage && state.ordersPage.totalPages) || 1;
@@ -1113,13 +1125,16 @@ export function buildProductsPageScript(): string {
     renderOrderDetail();
   };
   const loadOrders = async () => {
+    const requestSequence = ++orderRequestSequence;
     setStatus('Loading orders', 'busy');
     state.orderError = null;
     try {
       const envelope = await loadJson(ordersUrl());
+      if (requestSequence !== orderRequestSequence) return;
       state.ordersPage = envelope.data || { items: [] };
       setStatus('Orders loaded', 'ready');
     } catch (error) {
+      if (requestSequence !== orderRequestSequence) return;
       state.ordersPage = { items: [] };
       state.orderError = {
         code: error && error.code ? error.code : 'products_orders_failed',
@@ -1127,7 +1142,7 @@ export function buildProductsPageScript(): string {
       };
       setStatus('Orders failed', 'error');
     } finally {
-      renderOrders();
+      if (requestSequence === orderRequestSequence) renderOrders();
     }
   };
   const renderOrderDetail = () => {
@@ -1156,7 +1171,7 @@ export function buildProductsPageScript(): string {
       { label: 'Failure reason', value: model.failureReason },
     ]);
   };
-  const inspectOrder = async (selectorValue) => {
+  const inspectOrder = async (selectorValue, selectorKind) => {
     const value = normalizeText(selectorValue || (elements.orderSelector && elements.orderSelector.value));
     if (!value) {
       state.orderError = { code: 'missing_product_order_selector', message: 'Enter an order selector.' };
@@ -1166,7 +1181,7 @@ export function buildProductsPageScript(): string {
     setStatus('Inspecting order', 'busy');
     state.orderError = null;
     try {
-      const envelope = await loadJson(orderInspectUrl(value));
+      const envelope = await loadJson(orderInspectUrl(value, selectorKind));
       state.orderInspect = envelope.data || null;
       setStatus('Order inspected', 'ready');
     } catch (error) {
@@ -1466,6 +1481,7 @@ export function buildProductsPageScript(): string {
     state.profiles = envelope.data && Array.isArray(envelope.data.profiles) ? envelope.data.profiles : [];
     state.profileError = null;
   };
+  let orderRequestSequence = 0;
   const loadMarketplace = async () => {
     state.busy = true;
     state.marketplaceError = null;

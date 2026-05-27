@@ -319,7 +319,9 @@ async function runProductsScript(options = {}) {
   });
   const fetchCalls = [];
   const skillResponseReleases = [];
+  const orderResponseReleases = [];
   const skillResponseCounts = new Map();
+  let orderResponseCount = 0;
   const productsPayload = options.products || [product()];
 
   const context = {
@@ -445,11 +447,28 @@ async function runProductsScript(options = {}) {
         };
       }
       if (String(url).startsWith('/api/products/orders')) {
+        const currentCount = orderResponseCount;
+        orderResponseCount += 1;
+        const scriptedResponses = options.orderResponses || [];
+        const scriptedResponse = scriptedResponses[currentCount];
+        if (scriptedResponse && scriptedResponse.defer) {
+          let release;
+          const jsonPromise = new Promise((resolve) => {
+            release = () => resolve(scriptedResponse.response);
+          });
+          orderResponseReleases.push(release);
+          return {
+            ok: true,
+            json: async () => jsonPromise,
+          };
+        }
         return {
           ok: true,
           json: async () => ({
             ok: true,
-            data: options.ordersPage || {
+            data: scriptedResponse && scriptedResponse.response && scriptedResponse.response.data
+              ? scriptedResponse.response.data
+              : options.ordersPage || {
               items: options.orders || [order()],
               page: options.ordersPageNumber || 1,
               pageSize: options.orderPageSize || 20,
@@ -537,7 +556,7 @@ async function runProductsScript(options = {}) {
     () => elements['[data-products-list]'].innerHTML.includes('Mobile Top-up') || elements['[data-products-error]'].textContent,
     'initial products render',
   );
-  return { elements, fetchCalls, tabs, panels, skillResponseReleases };
+  return { elements, fetchCalls, tabs, panels, skillResponseReleases, orderResponseReleases };
 }
 
 function fillListingForm(elements, overrides = {}) {
@@ -992,6 +1011,98 @@ test('products order row inspection uses best selector and detail hides raw decr
   assert.match(elements['[data-products-order-detail]'].innerHTML, /delivery-pin-1/);
   assert.match(elements['[data-products-order-detail]'].innerHTML, /fulfillment runtime timeout/);
   assert.doesNotMatch(elements['[data-products-order-detail]'].innerHTML, /secret-code-123|decryptedDeliveryBody/);
+});
+
+test('products order row inspection preserves orderTxid selector for 64-hex txid fallback', async () => {
+  const orderTxid = 'a'.repeat(64);
+  const { elements, fetchCalls } = await openOrdersTab({
+    profiles: [],
+    orders: [
+      order({
+        productOrderPinId: '',
+        paymentTxid: '',
+        orderTxid,
+      }),
+    ],
+  });
+
+  const [row] = elements['[data-products-orders-list]'].querySelectorAll('[data-product-order-row]');
+  await row.listeners.get('click')();
+  await waitFor(
+    () => fetchCalls.some((call) => call.url.includes(orderTxid)),
+    'order txid row inspect fetch',
+  );
+
+  assert.ok(fetchCalls.some((call) => call.url === `/api/products/orders/inspect?all=true&orderTxid=${orderTxid}`));
+  assert.ok(!fetchCalls.some((call) => call.url === `/api/products/orders/inspect?all=true&paymentTxid=${orderTxid}`));
+});
+
+test('products orders ignores stale list responses when filters change quickly', async () => {
+  const { elements, fetchCalls, orderResponseReleases } = await openOrdersTab({
+    profiles: [],
+    orderResponses: [
+      {
+        response: {
+          ok: true,
+          data: {
+            items: [order({ productOrderPinId: 'initial-order-pin', state: 'created' })],
+            page: 1,
+            pageSize: 20,
+            total: 1,
+            totalPages: 1,
+          },
+        },
+      },
+      {
+        defer: true,
+        response: {
+          ok: true,
+          data: {
+            items: [order({ productOrderPinId: 'stale-order-pin', state: 'paid' })],
+            page: 1,
+            pageSize: 20,
+            total: 1,
+            totalPages: 1,
+          },
+        },
+      },
+      {
+        response: {
+          ok: true,
+          data: {
+            items: [order({ productOrderPinId: 'current-order-pin', state: 'delivered' })],
+            page: 1,
+            pageSize: 20,
+            total: 1,
+            totalPages: 1,
+          },
+        },
+      },
+    ],
+  });
+
+  elements['[data-products-order-role]'].value = 'seller';
+  const staleLoad = elements['[data-products-order-role]'].listeners.get('change')();
+  await waitFor(
+    () => orderResponseReleases.length === 1,
+    'deferred stale order response',
+  );
+  elements['[data-products-order-role]'].value = 'buyer';
+  await elements['[data-products-order-role]'].listeners.get('change')();
+  await waitFor(
+    () => elements['[data-products-orders-list]'].innerHTML.includes('current-order-pin'),
+    'current order response render',
+  );
+
+  orderResponseReleases[0]();
+  await staleLoad;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.ok(fetchCalls.some((call) => call.url === '/api/products/orders?all=true&role=seller&page=1&pageSize=20'));
+  assert.ok(fetchCalls.some((call) => call.url === '/api/products/orders?all=true&role=buyer&page=1&pageSize=20'));
+  assert.match(elements['[data-products-orders-list]'].innerHTML, /current-order-pin/);
+  assert.doesNotMatch(elements['[data-products-orders-list]'].innerHTML, /stale-order-pin/);
+  assert.match(elements['[data-products-status]'].textContent, /Orders loaded/);
 });
 
 test('products direct order inspection supports explicit selector types', async () => {
