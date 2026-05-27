@@ -620,6 +620,7 @@ async function collectRelativeExecutionPathMentions(
     try {
       realPath = await fs.realpath(absolutePath);
     } catch {
+      mentions.add(token);
       continue;
     }
 
