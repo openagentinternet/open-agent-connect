@@ -290,6 +290,27 @@ test('existing metafile URI reuse rejects mixed public URI and ordinary credenti
   }
 });
 
+test('existing metafile URI reuse rejects inline secret-like prose before verifier reuse', async () => {
+  for (const secretHint of ['The notes mention token.txt. metafile://abc123.pdf', 'See .npmrc before using metafile://abc123.pdf']) {
+    const verifierCalls = [];
+    const uploadCalls = [];
+
+    await assertRejectCode(
+      resolveProviderDeliveryArtifacts({
+        responseText: secretHint,
+        outputType: 'file',
+        signer: fakeSigner(),
+        uploadLargeFile: fakeUploader(uploadCalls),
+        verifyAvailability: okVerifier(verifierCalls),
+      }),
+      'provider_artifact_secret_rejected',
+    );
+
+    assert.deepEqual(verifierCalls, []);
+    assert.equal(uploadCalls.length, 0);
+  }
+});
+
 test('existing metafile URI verifier failure maps to provider_artifact_unavailable', async () => {
   await assertRejectCode(
     resolveProviderDeliveryArtifacts({
@@ -445,6 +466,33 @@ test('fallback workspace scan scrubs local directory path prose for the resolved
   assert.match(result.responseText, /Artifact: metafile:\/\/uploaded-chart\.png/);
 });
 
+test('local upload scrubs unrelated execution workspace descendant path prose', async () => {
+  const workspace = await tempWorkspace();
+  const filePath = await writeWorkspaceFile(workspace, 'out/chart.png');
+  await writeWorkspaceFile(workspace, 'logs/debug.log', 'debug details');
+  const debugPath = path.join(workspace, 'logs/debug.log');
+  const uploadCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: `Saved image to ${filePath}; debug log ${debugPath}; relative log logs/debug.log`,
+    outputType: 'image',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(uploadCalls),
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
+  assert.equal(result.responseText.includes(workspace), false);
+  assert.equal(result.responseText.includes(filePath), false);
+  assert.equal(result.responseText.includes(debugPath), false);
+  assert.equal(result.responseText.includes('logs/debug.log'), false);
+  assert.equal(result.responseText.includes('[uploaded artifact]/logs'), false);
+  assert.match(result.responseText, /Artifact: metafile:\/\/uploaded-chart\.png/);
+});
+
 test('fallback workspace scan scrubs execution workspace root path prose for the resolved artifact', async () => {
   const root = await tempWorkspace();
   const workspace = path.join(root, 'workspace-root');
@@ -540,10 +588,50 @@ test('resolution rejects secret-like local artifact names', async () => {
   }
 });
 
+test('explicit hidden directory artifact marker rejects before upload', async () => {
+  const workspace = await tempWorkspace();
+  const uploadCalls = [];
+  await writeWorkspaceFile(workspace, '.config/report.pdf', 'public-looking report');
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'attachment: ./.config/report.pdf',
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+});
+
 test('fallback workspace scan rejects npm credential config before upload', async () => {
   const workspace = await tempWorkspace();
   const uploadCalls = [];
   await writeWorkspaceFile(workspace, '.npmrc', '//registry.npmjs.org/:_authToken=secret');
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'Generated the requested file.',
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+});
+
+test('fallback workspace scan rejects hidden directory candidate before upload', async () => {
+  const workspace = await tempWorkspace();
+  const uploadCalls = [];
+  await writeWorkspaceFile(workspace, '.config/report.pdf', 'public-looking report');
 
   await assertRejectCode(
     resolveProviderDeliveryArtifacts({
@@ -887,6 +975,30 @@ test('upload result metadata is sanitized before becoming a structured artifact'
   assert.equal(result.responseText.includes('X-Local-Path'), false);
 });
 
+test('upload result does not trust unsafe extension metadata without a URI extension', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'out/chart.png');
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: 'Chart ready.\noutputFile: ./out/chart.png',
+    outputType: 'image',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: async (input) => ({
+      ...fakeUploadResult(input),
+      metafileUri: 'metafile://uploaded-chart',
+      extension: '../secret\r\n.png',
+    }),
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart');
+  assert.equal(result.artifacts[0].kind, 'image');
+  assert.equal(result.artifacts[0].extension, null);
+  assert.equal(result.responseText.includes('../secret'), false);
+});
+
 test('upload result fails closed when returned pinId and metafile URI disagree', async () => {
   const workspace = await tempWorkspace();
   await writeWorkspaceFile(workspace, 'out/chart.png');
@@ -932,6 +1044,30 @@ test('uploader failure with large_file_upload_unavailable preserves provider fai
     }),
     'large_file_upload_unavailable',
   );
+});
+
+test('uploader failure message scrubs execution workspace descendant paths', async () => {
+  const workspace = await tempWorkspace();
+  const filePath = await writeWorkspaceFile(workspace, 'out/chart.png');
+  const debugPath = path.join(workspace, 'logs/debug.log');
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: `attachment: ${filePath}`,
+      outputType: 'image',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: async () => {
+        throw new Error(`upload failed while reading ${debugPath}`);
+      },
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_upload_failed',
+  );
+
+  assert.equal(error.message.includes(workspace), false);
+  assert.equal(error.message.includes(debugPath), false);
+  assert.equal(error.message.includes('logs/debug.log'), false);
 });
 
 test('files above 50 MiB fail before upload', async () => {

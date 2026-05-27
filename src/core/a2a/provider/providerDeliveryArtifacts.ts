@@ -49,6 +49,8 @@ interface ResolvedProviderFile {
   contentType: string;
   lineIndexes: number[];
   scrubPaths: string[];
+  executionCwd: string;
+  requestedExecutionCwd: string;
 }
 
 const PROVIDER_ARTIFACT_MARKER_PATTERN =
@@ -184,6 +186,13 @@ function isPublicProviderArtifactReference(value: string): boolean {
   const trimmed = trimCandidatePath(value);
   return trimmed.toLowerCase().startsWith('metafile://')
     || /^https?:\/\//i.test(trimmed);
+}
+
+function redactPublicArtifactReferences(value: string): string {
+  return String(value || '').replace(
+    /\b(?:metafile:\/\/[^\s,;)\]}>"'`]+|https?:\/\/[^\s,;)\]}>"'`]+)/gi,
+    '[public artifact]',
+  );
 }
 
 function stripProviderOnlyLocalHintLines(responseText: string): string {
@@ -326,6 +335,37 @@ function isSecretLikeFileName(filePath: string): boolean {
     || compactPath.includes('seedphrase');
 }
 
+function hasHiddenDirectorySegment(filePath: string): boolean {
+  const segments = filePath.replace(/[\\/]+/g, '/').split('/').filter(Boolean);
+  const directorySegments = segments.slice(0, -1);
+  return directorySegments.some((segment) => segment !== '.' && segment !== '..' && segment.startsWith('.'));
+}
+
+function looksLikeInlineFileHint(value: string): boolean {
+  const normalized = value.replace(/[\\/]+/g, '/');
+  const base = path.basename(normalized);
+  return normalized.includes('/')
+    || value.includes('\\')
+    || base.startsWith('.')
+    || path.extname(base) !== '';
+}
+
+function assertNoInlineSecretLikeProviderHints(responseText: string): void {
+  const redactedText = redactPublicArtifactReferences(responseText);
+  const hintPattern = /(?<![A-Za-z0-9_./\\:-])(?:\.{1,2}[\\/])?(?:(?:\.?[A-Za-z0-9_-]+)[\\/])*(?:\.?[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)(?![A-Za-z0-9_/\\:-])/g;
+  const matches = redactedText.matchAll(hintPattern);
+
+  for (const match of matches) {
+    const candidate = match[0];
+    if (looksLikeInlineFileHint(candidate) && isSecretLikeFileName(candidate)) {
+      throw providerArtifactError(
+        'provider_artifact_secret_rejected',
+        'Provider artifact path looks like a secret file and cannot be delivered.',
+      );
+    }
+  }
+}
+
 function assertNoSecretLikeProviderLocalHints(responseText: string): void {
   const lines = String(responseText || '').split(/\r?\n/);
 
@@ -350,6 +390,8 @@ function assertNoSecretLikeProviderLocalHints(responseText: string): void {
       );
     }
   }
+
+  assertNoInlineSecretLikeProviderHints(responseText);
 }
 
 function containsPath(root: string, candidate: string): boolean {
@@ -401,6 +443,12 @@ async function resolveLocalCandidate(input: {
       'Provider artifact path looks like a secret file and cannot be delivered.',
     );
   }
+  if (hasHiddenDirectorySegment(candidatePath)) {
+    throw providerArtifactError(
+      'provider_artifact_secret_rejected',
+      'Provider artifact path looks like a secret file and cannot be delivered.',
+    );
+  }
 
   const absoluteCandidatePath = path.isAbsolute(candidatePath)
     ? path.resolve(candidatePath)
@@ -421,6 +469,12 @@ async function resolveLocalCandidate(input: {
 
   const relativeSecretCheckPath = path.relative(input.executionCwd, realCandidatePath);
   if (isSecretLikeFileName(relativeSecretCheckPath)) {
+    throw providerArtifactError(
+      'provider_artifact_secret_rejected',
+      'Provider artifact path looks like a secret file and cannot be delivered.',
+    );
+  }
+  if (hasHiddenDirectorySegment(relativeSecretCheckPath)) {
     throw providerArtifactError(
       'provider_artifact_secret_rejected',
       'Provider artifact path looks like a secret file and cannot be delivered.',
@@ -469,6 +523,8 @@ async function resolveLocalCandidate(input: {
     contentType,
     lineIndexes: input.candidate.lineIndexes,
     scrubPaths: [...scrubPaths],
+    executionCwd: input.executionCwd,
+    requestedExecutionCwd: input.requestedExecutionCwd,
   };
 }
 
@@ -509,9 +565,10 @@ async function scanWorkspaceForCandidates(
 
   const candidates: ProviderLocalCandidate[] = [];
   let secretLikeFileSeen = false;
+  let hiddenDirectoryCandidateSeen = false;
   const ignoredDirectories = new Set(['.git', 'node_modules', 'dist']);
 
-  async function visit(directory: string): Promise<void> {
+  async function visit(directory: string, inHiddenDirectory = false): Promise<void> {
     let entries: import('node:fs').Dirent[];
     try {
       entries = await fs.readdir(directory, { withFileTypes: true });
@@ -522,7 +579,7 @@ async function scanWorkspaceForCandidates(
     for (const entry of entries) {
       if (entry.isDirectory()) {
         if (shouldVisitScanDirectory(entry.name, ignoredDirectories)) {
-          await visit(path.join(directory, entry.name));
+          await visit(path.join(directory, entry.name), inHiddenDirectory || entry.name.startsWith('.'));
         }
         continue;
       }
@@ -535,6 +592,11 @@ async function scanWorkspaceForCandidates(
         secretLikeFileSeen = true;
         continue;
       }
+      if ((inHiddenDirectory || hasHiddenDirectorySegment(path.relative(executionCwd, filePath)))
+        && shouldScanFile(filePath, expectedFamily)) {
+        hiddenDirectoryCandidateSeen = true;
+        continue;
+      }
       if (shouldScanFile(filePath, expectedFamily)) {
         candidates.push({ filePath, lineIndexes: [] });
       }
@@ -543,6 +605,12 @@ async function scanWorkspaceForCandidates(
 
   await visit(executionCwd);
   if (secretLikeFileSeen) {
+    throw providerArtifactError(
+      'provider_artifact_secret_rejected',
+      'Provider artifact path looks like a secret file and cannot be delivered.',
+    );
+  }
+  if (hiddenDirectoryCandidateSeen) {
     throw providerArtifactError(
       'provider_artifact_secret_rejected',
       'Provider artifact path looks like a secret file and cannot be delivered.',
@@ -671,11 +739,30 @@ function safeArtifactContentType(value: unknown): string | null {
   return trimmed;
 }
 
+function safeArtifactExtension(value: unknown): string | null {
+  if (typeof value !== 'string' || UNSAFE_STRUCTURED_METADATA_CHARACTER.test(value)) {
+    return null;
+  }
+  const trimmed = value.trim().toLowerCase();
+  if (
+    !trimmed
+    || trimmed.includes('/')
+    || trimmed.includes('\\')
+    || trimmed.includes('://')
+    || /^[a-z]:/i.test(trimmed)
+    || isSecretLikeFileName(trimmed)
+    || !/^\.[a-z0-9][a-z0-9+-]{0,31}$/.test(trimmed)
+  ) {
+    return null;
+  }
+  return trimmed;
+}
+
 function uploadResultToArtifact(result: UploadLargeFileResult): A2ADeliveryArtifact {
   const base = parseVerifiedUploadMetafile(result);
   const urls = buildMetafileContentUrls(base.pinId);
   const contentType = safeArtifactContentType(result.contentType);
-  const extension = base.extension ?? (normalizeText(result.extension) || null);
+  const extension = base.extension ?? safeArtifactExtension(result.extension);
   const kind: A2ADeliveryArtifactKind = inferDeliveryArtifactKind(extension, contentType);
 
   return {
@@ -828,9 +915,14 @@ async function uploadResolvedLocalArtifact(input: {
     if (code === 'large_file_upload_unavailable') {
       throw error;
     }
+    const rawMessage = error instanceof Error ? error.message : 'Provider artifact upload failed.';
+    const scrubbedMessage = await scrubExecutionWorkspacePathMentions(
+      rawMessage,
+      input.file.requestedExecutionCwd,
+    );
     throw providerArtifactError(
       'provider_artifact_upload_failed',
-      error instanceof Error ? error.message : 'Provider artifact upload failed.',
+      scrubbedMessage,
     );
   }
 
@@ -879,10 +971,17 @@ export async function resolveProviderDeliveryArtifacts(
     largeUploader: input.largeUploader,
   });
   const publicResponseText = stripLocalCandidateLines(responseText, localFile.lineIndexes);
-  const scrubbedResponseText = scrubLocalPathMentions(publicResponseText, localFile.scrubPaths);
+  const workspaceScrubbedResponseText = await scrubExecutionWorkspacePathMentions(
+    publicResponseText,
+    input.executionCwd,
+  );
+  const providerSafeResponseText = scrubLocalPathMentions(
+    workspaceScrubbedResponseText,
+    localFile.scrubPaths,
+  );
 
   return {
-    responseText: appendDeliveryArtifactSummaries(scrubbedResponseText, [artifact]),
+    responseText: appendDeliveryArtifactSummaries(providerSafeResponseText, [artifact]),
     artifacts: [artifact],
   };
 }
