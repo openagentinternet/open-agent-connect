@@ -698,6 +698,49 @@ test('existing metafile URI reuse rejects drive-relative Windows path before ver
   assert.equal(error.message.includes(driveRelativePath), false);
 });
 
+test('existing metafile URI reuse rejects basename-only drive-relative path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+  const driveRelativePath = 'C:report.pdf';
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: `Saved report at ${driveRelativePath}\nPublic artifact: metafile://abc123.pdf`,
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes(driveRelativePath), false);
+});
+
+test('existing metafile URI reuse rejects secret-looking basename-only drive-relative paths before verifier reuse', async () => {
+  for (const driveRelativePath of ['C:token.txt', 'C:.env']) {
+    const verifierCalls = [];
+    const uploadCalls = [];
+
+    const error = await captureRejectCode(
+      resolveProviderDeliveryArtifacts({
+        responseText: `Saved report at ${driveRelativePath}\nPublic artifact: metafile://abc123.pdf`,
+        outputType: 'file',
+        signer: fakeSigner(),
+        uploadLargeFile: fakeUploader(uploadCalls),
+        verifyAvailability: okVerifier(verifierCalls),
+      }),
+      'provider_artifact_secret_rejected',
+    );
+
+    assert.deepEqual(verifierCalls, []);
+    assert.equal(uploadCalls.length, 0);
+    assert.equal(error.message.includes(driveRelativePath), false);
+  }
+});
+
 test('existing metafile URI verifier failure maps to provider_artifact_unavailable', async () => {
   await assertRejectCode(
     resolveProviderDeliveryArtifacts({
@@ -958,15 +1001,32 @@ test('local upload does not leak Windows drive prose when no metafile URI was pr
   const slashPath = 'C:/repo/out/report.pdf';
   const driveRelativeBackslashPath = 'C:repo\\out\\report.pdf';
   const driveRelativeSlashPath = 'C:repo/out/report.pdf';
+  const driveRelativeBasenamePath = 'C:report.pdf';
 
   await assertNoUnsafeProviderUploadSuccess({
-    responseText: `Saved reports at ${backslashPath}, ${slashPath}, ${driveRelativeBackslashPath}, and ${driveRelativeSlashPath}\nattachment: ./report.pdf`,
+    responseText: `Saved reports at ${backslashPath}, ${slashPath}, ${driveRelativeBackslashPath}, ${driveRelativeSlashPath}, and ${driveRelativeBasenamePath}\nattachment: ./report.pdf`,
     outputType: 'file',
     executionCwd: workspace,
     signer: fakeSigner(),
     uploadLargeFile: fakeUploader(),
     verifyAvailability: okVerifier(),
-  }, [backslashPath, slashPath, driveRelativeBackslashPath, driveRelativeSlashPath]);
+  }, [backslashPath, slashPath, driveRelativeBackslashPath, driveRelativeSlashPath, driveRelativeBasenamePath]);
+});
+
+test('local upload does not leak secret-looking basename-only drive-relative prose when no metafile URI was provided', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+
+  for (const driveRelativePath of ['C:token.txt', 'C:.env']) {
+    await assertNoUnsafeProviderUploadSuccess({
+      responseText: `Saved report at ${driveRelativePath}\nattachment: ./report.pdf`,
+      outputType: 'file',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(),
+      verifyAvailability: okVerifier(),
+    }, [driveRelativePath]);
+  }
 });
 
 test('local upload does not leak file URI prose when no metafile URI was provided', async () => {
