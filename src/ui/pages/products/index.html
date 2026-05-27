@@ -81,9 +81,11 @@
         border-color: var(--accent);
       }
       .products-tabs a[data-active] {
-        background: var(--accent);
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
         border-color: var(--accent);
-        color: #fff;
+        box-shadow: inset 0 -2px 0 var(--accent);
+        color: var(--text);
+        font-weight: 600;
       }
       .products-workspace {
         min-height: 260px;
@@ -153,6 +155,10 @@
       .products-secondary-button,
       .products-primary-button,
       .products-sku-table button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 92px;
         min-height: 34px;
         border: 1px solid var(--border2);
         border-radius: var(--radius-sm);
@@ -168,10 +174,30 @@
         border-color: var(--accent);
         color: #fff;
       }
+      .products-secondary-button:hover,
+      .products-primary-button:hover,
+      .products-sku-table button:hover {
+        border-color: var(--accent);
+      }
       .products-danger-button {
         background: var(--red);
         border-color: var(--red);
         color: #fff;
+        font-weight: 600;
+      }
+      .products-tabs a:focus-visible,
+      .products-row:focus-visible,
+      .products-secondary-button:focus-visible,
+      .products-primary-button:focus-visible,
+      .products-sku-table button:focus-visible,
+      .products-skill-chip:focus-within,
+      .products-field input:focus-visible,
+      .products-field select:focus-visible,
+      .products-field textarea:focus-visible,
+      .products-orders-inspect-row > select:focus-visible,
+      .products-orders-table tbody tr:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
       }
       .products-secondary-button:disabled,
       .products-primary-button:disabled,
@@ -216,11 +242,13 @@
         gap: 6px;
       }
       .products-row {
+        position: relative;
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 12px;
         align-items: center;
         width: 100%;
+        min-height: 66px;
         border: 1px solid transparent;
         border-radius: var(--radius-sm);
         background: transparent;
@@ -233,6 +261,10 @@
       .products-row[data-selected="true"] {
         border-color: var(--border2);
         background: var(--surface);
+      }
+      .products-row[data-selected="true"] {
+        border-color: var(--accent);
+        box-shadow: inset 3px 0 0 var(--accent);
       }
       .products-row-main {
         display: grid;
@@ -315,6 +347,9 @@
         text-align: left;
         vertical-align: middle;
       }
+      .products-sku-table tbody tr {
+        min-height: 52px;
+      }
       .products-sku-table td:first-child {
         display: grid;
         gap: 2px;
@@ -327,6 +362,12 @@
       }
       .products-sku-table tr[data-selected="true"] {
         background: var(--surface);
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+      .products-sku-table tr[data-selected="true"] button {
+        border-color: var(--accent);
+        color: var(--accent);
+        font-weight: 600;
       }
       .products-purchase-panel {
         display: grid;
@@ -388,6 +429,8 @@
       .products-skill-chip:has(input:checked) {
         border-color: var(--accent);
         background: color-mix(in srgb, var(--accent) 12%, transparent);
+        box-shadow: inset 0 -2px 0 var(--accent);
+        font-weight: 600;
       }
       .products-sku-editor {
         display: grid;
@@ -510,6 +553,10 @@
       .products-orders-table tbody tr:hover {
         background: var(--surface);
       }
+      .products-orders-table tbody tr:focus-visible,
+      .products-orders-table tbody tr:hover {
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
       .products-pagination {
         justify-content: flex-end;
         margin-top: 10px;
@@ -527,9 +574,12 @@
         background: color-mix(in srgb, var(--bg) 68%, transparent);
         backdrop-filter: blur(6px);
         z-index: 40;
+        overflow: auto;
       }
       .products-confirmation {
         width: min(720px, 100%);
+        max-height: calc(100vh - 40px);
+        overflow: auto;
         border: 1px solid var(--border2);
         border-radius: var(--radius-sm);
         background: var(--surface);
@@ -592,6 +642,7 @@
       .products-confirmation-actions {
         display: flex;
         justify-content: flex-end;
+        gap: 8px;
       }
       .products-empty {
         color: var(--muted);
@@ -603,7 +654,9 @@
           display: grid;
         }
         .products-status {
-          width: max-content;
+          width: fit-content;
+          max-width: 100%;
+          white-space: normal;
         }
         .products-marketplace-toolbar,
         .products-orders-toolbar,
@@ -633,6 +686,26 @@
         }
         .products-confirmation-facts {
           grid-template-columns: 1fr;
+        }
+        .products-modal-backdrop {
+          align-items: start;
+          padding: 12px;
+        }
+        .products-confirmation {
+          max-height: calc(100vh - 24px);
+          padding: 12px;
+        }
+        .products-confirmation-head {
+          display: grid;
+        }
+        .products-confirmation-actions {
+          justify-content: stretch;
+        }
+        .products-confirmation-actions .products-primary-button,
+        .products-confirmation-head .products-secondary-button,
+        .products-purchase-actions .products-primary-button,
+        .products-publish-actions .products-primary-button {
+          width: 100%;
         }
       }
     </style>

@@ -842,6 +842,7 @@ export function buildProductsPageScript(): string {
   const renderPublishModal = () => {
     if (!elements.publishConfirmationModal) return;
     elements.publishConfirmationModal.hidden = !state.sell.publishOpen;
+    elements.publishConfirmationModal.toggleAttribute('data-modal-open', state.sell.publishOpen);
     const payload = readObjectValue(state.sell.previewPayload);
     const fulfillment = readObjectValue(payload.fulfillment);
     const skuCount = readArrayValue(payload.skus).length;
@@ -1027,6 +1028,7 @@ export function buildProductsPageScript(): string {
     if (state.sell.publishBusy) return;
     state.sell.publishOpen = false;
     renderPublishModal();
+    if (elements.publish) elements.publish.focus();
   };
   const confirmPublish = async () => {
     if (!state.sell.publishOpen || state.sell.publishBusy || !state.sell.previewPayload) return;
@@ -1111,11 +1113,22 @@ export function buildProductsPageScript(): string {
           );
         }).join('')
         : '<tr><td colspan="7">No product orders found.</td></tr>';
-      elements.ordersList.querySelectorAll('[data-product-order-row]').forEach((row) => {
+    elements.ordersList.querySelectorAll('[data-product-order-row]').forEach((row) => {
+        row.setAttribute('tabindex', '0');
+        row.setAttribute('role', 'button');
+        row.setAttribute('aria-label', 'Inspect product order ' + row.getAttribute('data-product-order-row'));
         row.addEventListener('click', () => inspectOrder(
           row.getAttribute('data-product-order-row'),
           row.getAttribute('data-product-order-selector-kind'),
         ));
+        row.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          inspectOrder(
+            row.getAttribute('data-product-order-row'),
+            row.getAttribute('data-product-order-selector-kind'),
+          );
+        });
       });
     }
     const totalPages = Number(state.ordersPage && state.ordersPage.totalPages) || 1;
@@ -1148,6 +1161,7 @@ export function buildProductsPageScript(): string {
   const renderOrderDetail = () => {
     if (!elements.orderDetailModal || !elements.orderDetail) return;
     elements.orderDetailModal.hidden = !state.orderInspect;
+    elements.orderDetailModal.toggleAttribute('data-modal-open', Boolean(state.orderInspect));
     const model = buildProductCommercePageViewModel({ orderInspect: state.orderInspect }).orderInspect;
     if (!model) {
       elements.orderDetail.innerHTML = '';
@@ -1229,6 +1243,7 @@ export function buildProductsPageScript(): string {
   const renderConfirmationModal = () => {
     if (!elements.confirmationModal) return;
     elements.confirmationModal.hidden = !state.purchase.open;
+    elements.confirmationModal.toggleAttribute('data-modal-open', state.purchase.open);
     const previewData = readObjectValue(state.purchase.previewEnvelope && state.purchase.previewEnvelope.data);
     const successData = readObjectValue(state.purchase.success && state.purchase.success.data);
     const product = readObjectValue(previewData.product);
@@ -1298,6 +1313,7 @@ export function buildProductsPageScript(): string {
     if (state.purchase.busy) return;
     state.purchase.open = false;
     renderConfirmationModal();
+    if (elements.preview) elements.preview.focus();
   };
   const previewPurchase = async () => {
     syncPurchaseOutcomeToSelection();
@@ -1624,9 +1640,49 @@ export function buildProductsPageScript(): string {
   if (elements.cancelConfirmation) {
     elements.cancelConfirmation.addEventListener('click', closeConfirmationModal);
   }
+  const visibleModal = () => document.querySelector('[data-modal-open]:not([hidden])');
+  const focusableSelector = [
+    'button:not([disabled]):not([hidden])',
+    'input:not([disabled]):not([type="hidden"])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    'a[href]',
+    'details summary',
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(',');
+  const trapModalFocus = (event) => {
+    if (event.key !== 'Tab') return;
+    const modal = visibleModal();
+    if (!modal) return;
+    const focusable = Array.from(modal.querySelectorAll(focusableSelector))
+      .filter((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden';
+      });
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && state.purchase.open && !state.purchase.busy) {
-      closeConfirmationModal();
+    trapModalFocus(event);
+    if (event.key === 'Escape') {
+      if (state.purchase.open && !state.purchase.busy) {
+        closeConfirmationModal();
+      } else if (state.sell.publishOpen && !state.sell.publishBusy) {
+        closePublishModal();
+      } else if (state.orderInspect) {
+        state.orderInspect = null;
+        renderOrderDetail();
+        if (elements.orderInspectButton) elements.orderInspectButton.focus();
+      }
     }
   });
   if (elements.buyer) {
@@ -1694,6 +1750,7 @@ export function buildProductsPageScript(): string {
     elements.orderDetailClose.addEventListener('click', () => {
       state.orderInspect = null;
       renderOrderDetail();
+      if (elements.orderInspectButton) elements.orderInspectButton.focus();
     });
   }
   [
