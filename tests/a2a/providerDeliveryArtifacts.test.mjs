@@ -250,6 +250,25 @@ test('existing metafile URI reuse rejects secret-like attachment marker line', a
   assert.equal(uploadCalls.length, 0);
 });
 
+test('existing metafile URI reuse rejects hidden-directory attachment marker line', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'attachment: ./.config/report.pdf\nPublic artifact: metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+});
+
 test('existing metafile URI reuse rejects bare secret-like local path line', async () => {
   const verifierCalls = [];
   const uploadCalls = [];
@@ -267,6 +286,26 @@ test('existing metafile URI reuse rejects bare secret-like local path line', asy
 
   assert.deepEqual(verifierCalls, []);
   assert.equal(uploadCalls.length, 0);
+});
+
+test('existing metafile URI reuse rejects bare hidden-directory local path line without execution cwd', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: './.config/report.pdf\nPublic artifact: metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('./.config/report.pdf'), false);
 });
 
 test('existing metafile URI reuse rejects mixed public URI and ordinary credential path marker', async () => {
@@ -288,6 +327,26 @@ test('existing metafile URI reuse rejects mixed public URI and ordinary credenti
     assert.deepEqual(verifierCalls, []);
     assert.equal(uploadCalls.length, 0);
   }
+});
+
+test('existing metafile URI reuse rejects inline hidden-directory prose before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'Saved a copy under ./.config/report.pdf beside public artifact metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('./.config/report.pdf'), false);
 });
 
 test('existing metafile URI reuse rejects inline secret-like prose before verifier reuse', async () => {

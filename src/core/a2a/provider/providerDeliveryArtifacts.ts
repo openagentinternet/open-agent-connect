@@ -341,6 +341,17 @@ function hasHiddenDirectorySegment(filePath: string): boolean {
   return directorySegments.some((segment) => segment !== '.' && segment !== '..' && segment.startsWith('.'));
 }
 
+function isRejectedProviderLocalHintPath(filePath: string): boolean {
+  return isSecretLikeFileName(filePath) || hasHiddenDirectorySegment(filePath);
+}
+
+function throwProviderSecretRejected(): never {
+  throw providerArtifactError(
+    'provider_artifact_secret_rejected',
+    'Provider artifact path looks like a secret file and cannot be delivered.',
+  );
+}
+
 function looksLikeInlineFileHint(value: string): boolean {
   const normalized = value.replace(/[\\/]+/g, '/');
   const base = path.basename(normalized);
@@ -357,11 +368,8 @@ function assertNoInlineSecretLikeProviderHints(responseText: string): void {
 
   for (const match of matches) {
     const candidate = match[0];
-    if (looksLikeInlineFileHint(candidate) && isSecretLikeFileName(candidate)) {
-      throw providerArtifactError(
-        'provider_artifact_secret_rejected',
-        'Provider artifact path looks like a secret file and cannot be delivered.',
-      );
+    if (looksLikeInlineFileHint(candidate) && isRejectedProviderLocalHintPath(candidate)) {
+      throwProviderSecretRejected();
     }
   }
 }
@@ -373,21 +381,15 @@ function assertNoSecretLikeProviderLocalHints(responseText: string): void {
     const markerMatch = PROVIDER_ARTIFACT_MARKER_PATTERN.exec(line);
     if (markerMatch) {
       const markerPath = trimCandidatePath(markerMatch[2]);
-      if (!isPublicProviderArtifactReference(markerPath) && isSecretLikeFileName(markerPath)) {
-        throw providerArtifactError(
-          'provider_artifact_secret_rejected',
-          'Provider artifact path looks like a secret file and cannot be delivered.',
-        );
+      if (!isPublicProviderArtifactReference(markerPath) && isRejectedProviderLocalHintPath(markerPath)) {
+        throwProviderSecretRejected();
       }
       continue;
     }
 
     const candidatePath = trimCandidatePath(line);
-    if (looksLikeLocalPathLine(candidatePath) && isSecretLikeFileName(candidatePath)) {
-      throw providerArtifactError(
-        'provider_artifact_secret_rejected',
-        'Provider artifact path looks like a secret file and cannot be delivered.',
-      );
+    if (looksLikeLocalPathLine(candidatePath) && isRejectedProviderLocalHintPath(candidatePath)) {
+      throwProviderSecretRejected();
     }
   }
 
