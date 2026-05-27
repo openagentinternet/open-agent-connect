@@ -1621,7 +1621,7 @@ test('buyer-side refund request write failure leaves a retry marker for paid tim
   assert.equal(trace.order.refundApplyRetryCount, 1);
 });
 
-test('buyer-side non-text deliverable accepts structured reply artifacts and preserves trace metadata', async (t) => {
+test('buyer-side non-text deliverable accepts artifact-only structured replies and preserves trace metadata', async (t) => {
   const paymentTxid = '5'.repeat(64);
   const harness = await createServiceCallHarness(t, {
     service: { outputType: 'image' },
@@ -1641,7 +1641,7 @@ test('buyer-side non-text deliverable accepts structured reply artifacts and pre
       async awaitServiceReply() {
         return {
           state: 'completed',
-          responseText: 'Image generation finished successfully.',
+          responseText: '',
           artifacts: [IMAGE_REPLY_ARTIFACT],
           deliveryPinId: 'delivery-pin-with-structured-artifact',
           observedAt: Date.now(),
@@ -1680,6 +1680,7 @@ test('buyer-side non-text deliverable accepts structured reply artifacts and pre
   const sessionState = await sessionStore.readState();
   const deliveryItem = sessionState.transcriptItems.find((item) => item.id === `${trace.traceId}-provider-delivery`);
   assert.ok(deliveryItem);
+  assert.equal(deliveryItem.content, '');
   assert.deepEqual(deliveryItem.artifacts.map((artifact) => artifact.uri), [
     'metafile://buyer-image-pin.png',
   ]);
@@ -1691,6 +1692,10 @@ test('buyer-side non-text deliverable accepts structured reply artifacts and pre
   assert.equal(traceResult.ok, true);
   const projectedDelivery = traceResult.data.inspector.transcriptItems.find((item) => item.id === `${trace.traceId}-provider-delivery`);
   assert.ok(projectedDelivery);
+  assert.equal(projectedDelivery.content, '');
+  assert.deepEqual(projectedDelivery.artifacts.map((artifact) => artifact.uri), [
+    'metafile://buyer-image-pin.png',
+  ]);
   assert.deepEqual(projectedDelivery.metadata.deliveryArtifacts.map((artifact) => artifact.uri), [
     'metafile://buyer-image-pin.png',
   ]);

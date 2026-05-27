@@ -2820,7 +2820,11 @@ async function appendA2ATranscriptItems(
       type: normalizeText(item.type) || 'message',
       content: normalizeText(item.content),
     }))
-    .filter((item) => item.id && item.sessionId && item.content);
+    .filter((item) => (
+      item.id
+      && item.sessionId
+      && (item.content || (Array.isArray(item.artifacts) && item.artifacts.length > 0))
+    ));
 
   if (!normalizedItems.length) {
     return;
