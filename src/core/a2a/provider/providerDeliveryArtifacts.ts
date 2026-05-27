@@ -361,7 +361,27 @@ function looksLikeInlineFileHint(value: string): boolean {
     || path.extname(base) !== '';
 }
 
+function assertNoAbsoluteSecretLikeProviderHints(responseText: string): void {
+  const redactedText = redactPublicArtifactReferences(responseText);
+  const pathHintPatterns = [
+    /\bfile:\/\/\/?[^\s,;)\]}>"'`]+/gi,
+    /(?<![A-Za-z0-9_.:/\\-])[A-Za-z]:[\\/][^\s,;)\]}>"'`]+/g,
+    /(?<![A-Za-z0-9_.:/\\-])\/[^\s,;)\]}>"'`]+/g,
+  ];
+
+  for (const pathHintPattern of pathHintPatterns) {
+    const matches = redactedText.matchAll(pathHintPattern);
+    for (const match of matches) {
+      if (isRejectedProviderLocalHintPath(match[0])) {
+        throwProviderSecretRejected();
+      }
+    }
+  }
+}
+
 function assertNoInlineSecretLikeProviderHints(responseText: string): void {
+  assertNoAbsoluteSecretLikeProviderHints(responseText);
+
   const redactedText = redactPublicArtifactReferences(responseText);
   const hintPattern = /(?<![A-Za-z0-9_./\\:-])(?:\.{1,2}[\\/])?(?:(?:\.?[A-Za-z0-9_-]+)[\\/])*(?:\.?[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)(?![A-Za-z0-9_/\\:-])/g;
   const matches = redactedText.matchAll(hintPattern);

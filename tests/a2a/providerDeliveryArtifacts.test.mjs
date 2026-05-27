@@ -370,6 +370,106 @@ test('existing metafile URI reuse rejects inline secret-like prose before verifi
   }
 });
 
+test('existing metafile URI reuse rejects inline absolute POSIX hidden path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'Saved copy at /home/me/.config/report.pdf beside metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('/home/me/.config/report.pdf'), false);
+});
+
+test('existing metafile URI reuse rejects bare absolute POSIX secret path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: '/home/me/.ssh/id_ed25519\nPublic artifact: metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('/home/me/.ssh/id_ed25519'), false);
+});
+
+test('existing metafile URI reuse rejects Windows backslash hidden path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'C:\\repo\\.config\\report.pdf\nPublic artifact: metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('C:\\repo\\.config\\report.pdf'), false);
+});
+
+test('existing metafile URI reuse rejects Windows slash secret path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'C:/repo/.ssh/id_ed25519\nPublic artifact: metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('C:/repo/.ssh/id_ed25519'), false);
+});
+
+test('existing metafile URI reuse rejects file URI hidden path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'file:///home/me/.config/report.pdf\nPublic artifact: metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes('file:///home/me/.config/report.pdf'), false);
+});
+
 test('existing metafile URI verifier failure maps to provider_artifact_unavailable', async () => {
   await assertRejectCode(
     resolveProviderDeliveryArtifacts({
