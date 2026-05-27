@@ -883,6 +883,16 @@ function scrubLocalPathMentions(responseText: string, scrubPaths: string[]): str
   return scrubbed.replace(/[ \t]+/g, ' ').trim();
 }
 
+function scrubAbsoluteProviderLocalHints(responseText: string): string {
+  let scrubbed = String(responseText || '');
+
+  for (const pathHintPattern of absoluteProviderLocalHintPatterns()) {
+    scrubbed = scrubbed.replace(pathHintPattern, '[uploaded artifact]');
+  }
+
+  return scrubbed.replace(/[ \t]+/g, ' ').trim();
+}
+
 async function collectRelativeExecutionPathMentions(
   responseText: string,
   executionCwd: string,
@@ -1039,9 +1049,11 @@ export async function resolveProviderDeliveryArtifacts(
     workspaceScrubbedResponseText,
     localFile.scrubPaths,
   );
+  const absoluteSafeResponseText = scrubAbsoluteProviderLocalHints(providerSafeResponseText);
+  assertNoAbsoluteProviderLocalHints(absoluteSafeResponseText);
 
   return {
-    responseText: appendDeliveryArtifactSummaries(providerSafeResponseText, [artifact]),
+    responseText: appendDeliveryArtifactSummaries(absoluteSafeResponseText, [artifact]),
     artifacts: [artifact],
   };
 }

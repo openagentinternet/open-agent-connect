@@ -109,6 +109,28 @@ async function captureRejectCode(promise, code) {
   return capturedError;
 }
 
+async function assertNoUnsafeProviderUploadSuccess(input, unsafeHints) {
+  let result = null;
+  try {
+    result = await resolveProviderDeliveryArtifacts(input);
+  } catch (error) {
+    assert.match(error.code, /^provider_artifact_/);
+    for (const unsafeHint of unsafeHints) {
+      assert.equal(error.message.includes(unsafeHint), false);
+    }
+    return;
+  }
+
+  assert.equal(result.artifacts.length, 1);
+  assert.match(result.artifacts[0].uri, /^metafile:\/\//);
+  assert.equal(JSON.stringify(result.artifacts).includes('file:///'), false);
+
+  for (const unsafeHint of unsafeHints) {
+    assert.equal(result.responseText.includes(unsafeHint), false);
+    assert.equal(JSON.stringify(result.artifacts).includes(unsafeHint), false);
+  }
+}
+
 test('classifyProviderOutputType treats text-like and non-text service outputs consistently', () => {
   assert.equal(classifyProviderOutputType(undefined), 'text');
   assert.equal(classifyProviderOutputType(''), 'text');
@@ -819,6 +841,83 @@ test('local upload scrubs unrelated execution workspace descendant path prose', 
   assert.equal(result.responseText.includes('logs/debug.log'), false);
   assert.equal(result.responseText.includes('[uploaded artifact]/logs'), false);
   assert.match(result.responseText, /Artifact: metafile:\/\/uploaded-chart\.png/);
+});
+
+test('local upload does not leak bare UNC prose when no metafile URI was provided', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+  const uncPath = '\\\\server\\share\\out\\report.pdf';
+
+  await assertNoUnsafeProviderUploadSuccess({
+    responseText: `${uncPath}\nattachment: ./report.pdf`,
+    outputType: 'file',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(),
+    verifyAvailability: okVerifier(),
+  }, [uncPath]);
+});
+
+test('fallback upload does not leak inline UNC prose when no metafile URI was provided', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+  const uncPath = '\\\\server\\share\\out\\report.pdf';
+
+  await assertNoUnsafeProviderUploadSuccess({
+    responseText: `Saved report at ${uncPath}`,
+    outputType: 'file',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(),
+    verifyAvailability: okVerifier(),
+  }, [uncPath]);
+});
+
+test('local upload does not leak POSIX absolute prose outside executionCwd when no metafile URI was provided', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+  const absolutePath = '/home/me/out/report.pdf';
+
+  await assertNoUnsafeProviderUploadSuccess({
+    responseText: `Saved report at ${absolutePath}\nattachment: ./report.pdf`,
+    outputType: 'file',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(),
+    verifyAvailability: okVerifier(),
+  }, [absolutePath]);
+});
+
+test('local upload does not leak Windows drive prose when no metafile URI was provided', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+  const backslashPath = 'C:\\repo\\out\\report.pdf';
+  const slashPath = 'C:/repo/out/report.pdf';
+
+  await assertNoUnsafeProviderUploadSuccess({
+    responseText: `Saved reports at ${backslashPath} and ${slashPath}\nattachment: ./report.pdf`,
+    outputType: 'file',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(),
+    verifyAvailability: okVerifier(),
+  }, [backslashPath, slashPath]);
+});
+
+test('local upload does not leak file URI prose when no metafile URI was provided', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+  const posixFileUri = 'file:///home/me/out/report.pdf';
+  const windowsFileUri = 'file:///C:/repo/out/report.pdf';
+
+  await assertNoUnsafeProviderUploadSuccess({
+    responseText: `Saved reports at ${posixFileUri} and ${windowsFileUri}\nattachment: ./report.pdf`,
+    outputType: 'file',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(),
+    verifyAvailability: okVerifier(),
+  }, [posixFileUri, windowsFileUri]);
 });
 
 test('fallback workspace scan scrubs execution workspace root path prose for the resolved artifact', async () => {
