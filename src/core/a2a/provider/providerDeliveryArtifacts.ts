@@ -48,6 +48,7 @@ interface ResolvedProviderFile {
   filePath: string;
   contentType: string;
   lineIndexes: number[];
+  scrubPaths: string[];
 }
 
 export class ProviderDeliveryArtifactError extends Error {
@@ -235,6 +236,16 @@ function containsPath(root: string, candidate: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+function addPathScrubVariant(paths: Set<string>, value: string | null | undefined): void {
+  const trimmed = normalizeText(value);
+  if (!trimmed) {
+    return;
+  }
+  paths.add(trimmed);
+  paths.add(trimmed.split(path.sep).join('/'));
+  paths.add(trimmed.split(path.sep).join('\\'));
+}
+
 async function resolveExecutionCwd(executionCwd?: string | null): Promise<string> {
   const normalized = normalizeText(executionCwd);
   if (!normalized) {
@@ -256,6 +267,7 @@ async function resolveExecutionCwd(executionCwd?: string | null): Promise<string
 async function resolveLocalCandidate(input: {
   candidate: ProviderLocalCandidate;
   executionCwd: string;
+  requestedExecutionCwd: string;
   expectedFamily: ProviderExpectedArtifactFamily;
 }): Promise<ResolvedProviderFile> {
   const candidatePath = trimCandidatePath(input.candidate.filePath);
@@ -304,10 +316,22 @@ async function resolveLocalCandidate(input: {
   const kind = inferDeliveryArtifactKind(extension, contentType);
   validateArtifactFamily({ uri: `file://${fileName}`, kind }, input.expectedFamily);
 
+  const scrubPaths = new Set<string>();
+  addPathScrubVariant(scrubPaths, candidatePath);
+  addPathScrubVariant(scrubPaths, absoluteCandidatePath);
+  addPathScrubVariant(scrubPaths, realCandidatePath);
+  const relativeCandidatePath = path.relative(input.executionCwd, realCandidatePath);
+  addPathScrubVariant(scrubPaths, relativeCandidatePath);
+  addPathScrubVariant(scrubPaths, relativeCandidatePath ? `.${path.sep}${relativeCandidatePath}` : null);
+  addPathScrubVariant(scrubPaths, relativeCandidatePath
+    ? path.join(input.requestedExecutionCwd, relativeCandidatePath)
+    : null);
+
   return {
     filePath: realCandidatePath,
     contentType,
     lineIndexes: input.candidate.lineIndexes,
+    scrubPaths: [...scrubPaths],
   };
 }
 
@@ -378,7 +402,11 @@ async function resolveLocalArtifact(input: {
   executionCwd?: string | null;
   expectedFamily: ProviderExpectedArtifactFamily;
 }): Promise<ResolvedProviderFile> {
+  const normalizedExecutionCwd = normalizeText(input.executionCwd);
   const realExecutionCwd = await resolveExecutionCwd(input.executionCwd);
+  const requestedExecutionCwd = normalizedExecutionCwd
+    ? path.resolve(normalizedExecutionCwd)
+    : realExecutionCwd;
   const markerCandidates = extractMarkerCandidates(input.responseText);
   if (markerCandidates.length > 1) {
     throw providerArtifactError(
@@ -390,6 +418,7 @@ async function resolveLocalArtifact(input: {
     return resolveLocalCandidate({
       candidate: markerCandidates[0],
       executionCwd: realExecutionCwd,
+      requestedExecutionCwd,
       expectedFamily: input.expectedFamily,
     });
   }
@@ -405,6 +434,7 @@ async function resolveLocalArtifact(input: {
     return resolveLocalCandidate({
       candidate: bareCandidates[0],
       executionCwd: realExecutionCwd,
+      requestedExecutionCwd,
       expectedFamily: input.expectedFamily,
     });
   }
@@ -425,6 +455,7 @@ async function resolveLocalArtifact(input: {
   return resolveLocalCandidate({
     candidate: scannedCandidates[0],
     executionCwd: realExecutionCwd,
+    requestedExecutionCwd,
     expectedFamily: input.expectedFamily,
   });
 }
@@ -480,6 +511,26 @@ function stripLocalCandidateLines(responseText: string, lineIndexes: number[]): 
     .filter((_, index) => !remove.has(index))
     .join('\n')
     .trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function scrubLocalPathMentions(responseText: string, scrubPaths: string[]): string {
+  let scrubbed = String(responseText || '');
+  const sortedPaths = [...new Set(scrubPaths)]
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+
+  for (const localPath of sortedPaths) {
+    const pattern = path.isAbsolute(localPath) || localPath.startsWith(`.${path.sep}`)
+      ? escapeRegExp(localPath)
+      : `(?<![A-Za-z0-9_.\\\\/-])${escapeRegExp(localPath)}`;
+    scrubbed = scrubbed.replace(new RegExp(pattern, 'g'), '[uploaded artifact]');
+  }
+
+  return scrubbed.replace(/[ \t]+/g, ' ').trim();
 }
 
 async function uploadResolvedLocalArtifact(input: {
@@ -554,9 +605,10 @@ export async function resolveProviderDeliveryArtifacts(
     largeUploader: input.largeUploader,
   });
   const publicResponseText = stripLocalCandidateLines(responseText, localFile.lineIndexes);
+  const scrubbedResponseText = scrubLocalPathMentions(publicResponseText, localFile.scrubPaths);
 
   return {
-    responseText: appendDeliveryArtifactSummaries(publicResponseText, [artifact]),
+    responseText: appendDeliveryArtifactSummaries(scrubbedResponseText, [artifact]),
     artifacts: [artifact],
   };
 }

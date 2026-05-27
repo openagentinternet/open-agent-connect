@@ -247,6 +247,31 @@ test('fallback workspace scan succeeds only when exactly one file matches the re
   );
 });
 
+test('fallback workspace scan scrubs local path prose for the resolved artifact', async () => {
+  const workspace = await tempWorkspace();
+  const filePath = await writeWorkspaceFile(workspace, 'out/chart.png');
+  const uploadCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: `Saved image to ${filePath}; relative copy at out/chart.png for inspection.`,
+    outputType: 'image',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(uploadCalls),
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(uploadCalls[0].filePath, await realpath(filePath));
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
+  assert.equal(result.responseText.includes(filePath), false);
+  assert.equal(result.responseText.includes(workspace), false);
+  assert.equal(result.responseText.includes('out/chart.png'), false);
+  assert.match(result.responseText, /Saved image to/);
+  assert.match(result.responseText, /Artifact: metafile:\/\/uploaded-chart\.png/);
+});
+
 test('resolution rejects files outside executionCwd including parent paths and symlink escapes', async () => {
   const workspace = await tempWorkspace();
   const outsideRoot = await tempWorkspace();
