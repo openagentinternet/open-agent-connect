@@ -300,6 +300,43 @@ export function buildDeliveryArtifactSummary(artifact: A2ADeliveryArtifact): str
   return lines.join('\n');
 }
 
+function hasDeliveryArtifactSummaryBlock(responseText: string, artifact: A2ADeliveryArtifact): boolean {
+  const base = parseMetafileUri(valueAsTrimmedString(artifact.uri) || '');
+  if (!base) {
+    return false;
+  }
+
+  const artifactLine = `Artifact: ${base.uri}`;
+  const pinIdLine = `PINID: ${base.pinId}`;
+  let hasArtifactLine = false;
+  let hasPinIdLine = false;
+
+  const flushBlock = () => {
+    const matched = hasArtifactLine && hasPinIdLine;
+    hasArtifactLine = false;
+    hasPinIdLine = false;
+    return matched;
+  };
+
+  for (const rawLine of String(responseText || '').split('\n')) {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    if (!line.trim()) {
+      if (flushBlock()) {
+        return true;
+      }
+      continue;
+    }
+
+    if (line === artifactLine) {
+      hasArtifactLine = true;
+    } else if (line === pinIdLine) {
+      hasPinIdLine = true;
+    }
+  }
+
+  return flushBlock();
+}
+
 export function appendDeliveryArtifactSummaries(
   responseText: string,
   artifacts: A2ADeliveryArtifact[],
@@ -309,8 +346,12 @@ export function appendDeliveryArtifactSummaries(
   }
 
   const summaries = artifacts
-    .map((artifact) => buildDeliveryArtifactSummary(artifact))
-    .filter((summary) => summary && !responseText.includes(summary));
+    .map((artifact) => ({
+      artifact,
+      summary: buildDeliveryArtifactSummary(artifact),
+    }))
+    .filter(({ artifact, summary }) => summary && !hasDeliveryArtifactSummaryBlock(responseText, artifact))
+    .map(({ summary }) => summary);
   if (!summaries.length) {
     return responseText;
   }

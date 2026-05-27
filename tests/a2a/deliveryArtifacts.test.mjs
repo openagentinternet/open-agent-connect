@@ -521,6 +521,55 @@ test('appendDeliveryArtifactSummaries does not append a summary block already pr
   assert.equal((response.match(/^Artifact: metafile:\/\/abc123i0\.png$/gm) || []).length, 1);
 });
 
+test('appendDeliveryArtifactSummaries does not duplicate richer existing summary blocks', () => {
+  const artifacts = normalizeDeliveryArtifacts({
+    artifacts: [{ uri: 'metafile://abc123i0.png' }],
+  });
+  const responseText = [
+    'Generated image is ready.',
+    '',
+    'Artifact: metafile://abc123i0.png',
+    'PINID: abc123i0',
+    'File: abc123i0.png',
+    'Content-Type: image/png',
+    'Size: 123 bytes',
+    'Download: https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/abc123i0',
+  ].join('\n');
+  const response = appendDeliveryArtifactSummaries(responseText, artifacts);
+
+  assert.equal(response, responseText);
+  assert.equal((response.match(/^Artifact: metafile:\/\/abc123i0\.png$/gm) || []).length, 1);
+});
+
+test('appendDeliveryArtifactSummaries appends when prose only mentions a metafile URI', () => {
+  const responseText = 'Generated image is available at metafile://abc123i0.png.';
+  const artifacts = normalizeDeliveryArtifacts({ resultText: responseText });
+  const response = appendDeliveryArtifactSummaries(responseText, artifacts);
+
+  assert.match(response, /^Generated image is available at metafile:\/\/abc123i0\.png\.\n\nArtifact:/);
+  assert.equal((response.match(/^Artifact: metafile:\/\/abc123i0\.png$/gm) || []).length, 1);
+  assert.match(response, /^PINID: abc123i0$/m);
+});
+
+test('appendDeliveryArtifactSummaries skips summarized artifacts and appends missing ones', () => {
+  const responseText = [
+    'Generated image is ready at metafile://twoi0.png.',
+    '',
+    'Artifact: metafile://onei0.png',
+    'PINID: onei0',
+    'File: onei0.png',
+    'Content-Type: image/png',
+    'Size: 123 bytes',
+    'Download: https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/onei0',
+  ].join('\n');
+  const artifacts = normalizeDeliveryArtifacts({ resultText: responseText });
+  const response = appendDeliveryArtifactSummaries(responseText, artifacts);
+
+  assert.equal((response.match(/^Artifact: metafile:\/\/onei0\.png$/gm) || []).length, 1);
+  assert.equal((response.match(/^Artifact: metafile:\/\/twoi0\.png$/gm) || []).length, 1);
+  assert.match(response, /^PINID: twoi0$/m);
+});
+
 test('appendDeliveryArtifactSummaries preserves trailing response whitespace', () => {
   const artifacts = normalizeDeliveryArtifacts({
     artifacts: [{ uri: 'metafile://abc123i0.mp4' }],
