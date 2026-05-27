@@ -582,8 +582,9 @@ async function openSellTab(options = {}) {
   const sellTab = result.tabs.find((tab) => tab.dataset.productsTab === 'sell');
   const callsBeforeSell = result.fetchCalls.length;
   await sellTab.listeners.get('click')({ preventDefault() {} });
+  const expectedSkillText = options.expectedSkillText || 'deliver-code';
   await waitFor(
-    () => result.elements['[data-products-sell-skills]'].innerHTML.includes('deliver-code') ||
+    () => result.elements['[data-products-sell-skills]'].innerHTML.includes(expectedSkillText) ||
       result.elements['[data-products-sell-error]'].textContent.includes('products_skills_failed'),
     'seller skills load',
   );
@@ -816,6 +817,30 @@ test('products sell tab loads seller profiles, loads selected seller skills, and
 
   const payload = JSON.parse(elements['[data-products-listing-preview-json]'].textContent);
   assert.deepEqual(payload.fulfillment.fulfillmentSkills, ['deliver-code', 'notify-buyer']);
+});
+
+test('products sell tab uses skillName API field for fulfillment skill values', async () => {
+  const { elements } = await openSellTab({
+    expectedSkillText: 'S1',
+    skills: [
+      { skillName: 'S1' },
+    ],
+  });
+
+  assert.match(elements['[data-products-sell-skills]'].innerHTML, /S1/);
+  assert.doesNotMatch(elements['[data-products-sell-skills]'].innerHTML, /\[object Object\]/);
+
+  const [skill] = elements['[data-products-sell-skills]'].querySelectorAll('[data-product-sell-skill]');
+  assert.equal(skill.value, 'S1');
+  assert.equal(skill.getAttribute('data-product-sell-skill'), 'S1');
+  skill.checked = true;
+  await skill.listeners.get('change')();
+
+  fillListingForm(elements);
+  await elements['[data-products-listing-title]'].listeners.get('input')();
+
+  const payload = JSON.parse(elements['[data-products-listing-preview-json]'].textContent);
+  assert.deepEqual(payload.fulfillment.fulfillmentSkills, ['S1']);
 });
 
 test('products sell tab loads owned listings for selected seller and renders read-only actions', async () => {

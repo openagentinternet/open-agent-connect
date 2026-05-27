@@ -621,8 +621,8 @@ export function buildProductsPageScript(): string {
       elements.buyer.value = '';
     }
   };
-  const skillName = (skill) => normalizeText(skill && (skill.name || skill.id || skill.slug || skill));
-  const skillLabel = (skill) => normalizeText(skill && (skill.title || skill.displayName || skill.name || skill.id || skill.slug || skill));
+  const skillName = (skill) => normalizeText(skill && (skill.skillName || skill.name || skill.id || skill.slug || skill));
+  const skillLabel = (skill) => normalizeText(skill && (skill.title || skill.displayName || skill.name || skill.skillName || skill.id || skill.slug || skill));
   const sellerLabel = () => {
     const profile = state.profiles.find((item) => normalizeText(item.slug) === state.sell.sellerSlug);
     return normalizeText(profile && (profile.name || profile.displayName || profile.slug)) || state.sell.sellerSlug;
