@@ -11,6 +11,7 @@ const SUPPORTED_UI_PAGES = new Set([
     'chat-viewer',
     'publish',
     'my-services',
+    'products',
     'trace',
     'refund',
     'loom',

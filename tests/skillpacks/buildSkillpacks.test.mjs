@@ -245,6 +245,7 @@ test('buildAgentConnectSkillpacks includes the Product Commerce skill workflow i
   assert.match(content, /products buy --from <buyer-slug> --request-file <path> --json/);
   assert.match(content, /products orders list --from <bot-slug> --role <buyer\|seller\|all> --json/);
   assert.match(content, /products orders inspect --from <bot-slug>/);
+  assert.match(content, /metabot ui open --page products/);
   assert.match(content, /explicit confirmation/i);
   assert.match(content, /fulfillmentSkills/i);
   assert.match(content, /productType: "virtual"/);

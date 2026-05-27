@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Buffer } from 'node:buffer';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 export type Awaitable<T> = T | Promise<T>;
-export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'chat-viewer' | 'bot' | 'loom';
+export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'products' | 'trace' | 'refund' | 'chat-viewer' | 'bot' | 'loom';
 export interface MetabotDaemonHttpHandlers {
     config?: {
         get?: () => Awaitable<MetabotCommandResult<unknown>>;

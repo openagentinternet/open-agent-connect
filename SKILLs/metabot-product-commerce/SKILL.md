@@ -13,9 +13,16 @@ Guide Product Commerce V1 virtual goods through the existing MetaBot/OAC CLI wit
 
 Route product-commerce intent through `{{METABOT_CLI}}` and keep the workflow focused on product listing, discovery, purchase, and order inspection.
 
-- Prefer JSON and local daemon routes for product workflows.
-- Open local HTML only for human browsing, trace inspection, or publish review.
+- Prefer CLI, JSON, and local daemon routes for agent workflows, automation, and repeatable product operations.
+- Use `/ui/products` for human browsing, publish review, purchase confirmation, and buyer or seller order inspection.
+- Open the local Products UI with:
+
+```bash
+{{METABOT_CLI}} ui open --page products
+```
+
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
+- Do not use UI wording to introduce `product-review`, refunds, physical logistics, or raw private delivery views.
 
 ## Actor Selection
 
