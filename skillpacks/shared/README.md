@@ -15,6 +15,7 @@ This shared pack installs the host-neutral MetaBot skills into `~/.metabot/skill
 - `metabot-post-skillservice`
 - `metabot-loom-wish2task`
 - `metabot-upload-file`
+- `metabot-upload-largefile`
 - `metabot-wallet-manage`
 
 ## Install

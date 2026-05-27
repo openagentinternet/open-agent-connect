@@ -175,6 +175,7 @@ export interface MetabotDaemonHttpHandlers {
     };
     file?: {
         upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        uploadLarge?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
     trace?: {
         getTrace?: (input: {

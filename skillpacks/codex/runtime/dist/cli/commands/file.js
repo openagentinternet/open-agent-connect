@@ -13,7 +13,8 @@ function resolveMaybeRelativePath(baseDir, filePath) {
     return node_path_1.default.isAbsolute(filePath) ? filePath : node_path_1.default.resolve(baseDir, filePath);
 }
 async function runFileCommand(args, context) {
-    if (args[0] !== 'upload') {
+    const subcommand = args[0];
+    if (subcommand !== 'upload' && subcommand !== 'upload-large') {
         return (0, helpers_1.commandUnknownSubcommand)(`file ${args.join(' ')}`.trim());
     }
     const requestFile = (0, helpers_1.readFlagValue)(args, '--request-file');
@@ -25,9 +26,13 @@ async function runFileCommand(args, context) {
     if (chainFlag.error) {
         return chainFlag.error;
     }
-    const handler = context.dependencies.file?.upload;
+    const handler = subcommand === 'upload-large'
+        ? context.dependencies.file?.uploadLarge
+        : context.dependencies.file?.upload;
     if (!handler) {
-        return (0, commandResult_1.commandFailed)('not_implemented', 'File upload handler is not configured.');
+        return (0, commandResult_1.commandFailed)('not_implemented', subcommand === 'upload-large'
+            ? 'Large file upload handler is not configured.'
+            : 'File upload handler is not configured.');
     }
     const request = await (0, helpers_1.readJsonFile)(context, requestFile);
     const requestDir = node_path_1.default.dirname(node_path_1.default.isAbsolute(requestFile) ? requestFile : node_path_1.default.resolve(context.cwd, requestFile));
@@ -36,6 +41,7 @@ async function runFileCommand(args, context) {
         filePath: resolveMaybeRelativePath(requestDir, request.filePath) ?? request.filePath,
         ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
         ...(from ? { from } : {}),
+        ...(subcommand === 'upload-large' && (0, helpers_1.hasFlag)(args, '--verify') ? { verify: true } : {}),
     };
     return handler(resolvedRequest);
 }
