@@ -51,6 +51,12 @@ interface ResolvedProviderFile {
   scrubPaths: string[];
 }
 
+const PROVIDER_ARTIFACT_MARKER_PATTERN =
+  /^\s*(artifactPath|filePath|outputFile|outputPath|attachment)\s*:\s*(.+?)\s*$/i;
+const UNSAFE_STRUCTURED_METADATA_CHARACTER = /[\x00-\x1f\x7f]/;
+const SAFE_CONTENT_TYPE_PATTERN =
+  /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?: *; *[a-z0-9][a-z0-9!#$&^_.+-]*=[a-z0-9][a-z0-9!#$&^_.+:-]*)*$/i;
+
 export class ProviderDeliveryArtifactError extends Error {
   code: string;
 
@@ -159,10 +165,9 @@ function trimCandidatePath(value: string): string {
 function extractMarkerCandidates(responseText: string): ProviderLocalCandidate[] {
   const candidates: ProviderLocalCandidate[] = [];
   const lines = String(responseText || '').split(/\r?\n/);
-  const markerPattern = /^\s*(artifactPath|filePath|outputFile|outputPath|attachment)\s*:\s*(.+?)\s*$/i;
 
   lines.forEach((line, index) => {
-    const match = markerPattern.exec(line);
+    const match = PROVIDER_ARTIFACT_MARKER_PATTERN.exec(line);
     if (!match) {
       return;
     }
@@ -182,11 +187,10 @@ function isPublicProviderArtifactReference(value: string): boolean {
 }
 
 function stripProviderOnlyLocalHintLines(responseText: string): string {
-  const markerPattern = /^\s*(artifactPath|filePath|outputFile|outputPath|attachment)\s*:\s*(.+?)\s*$/i;
   return String(responseText || '')
     .split(/\r?\n/)
     .filter((line) => {
-      const markerMatch = markerPattern.exec(line);
+      const markerMatch = PROVIDER_ARTIFACT_MARKER_PATTERN.exec(line);
       if (markerMatch) {
         return isPublicProviderArtifactReference(markerMatch[2]);
       }
@@ -253,9 +257,43 @@ function isSecretLikeFileName(filePath: string): boolean {
   const lowerPath = normalizedPath.toLowerCase();
   const segments = lowerPath.split('/').filter(Boolean);
   const base = path.basename(lowerPath);
+  const extension = path.extname(base);
+  const stem = extension ? base.slice(0, -extension.length) : base;
   const compact = base.replace(/[\s._-]+/g, '');
+  const compactStem = stem.replace(/[\s._-]+/g, '');
   const compactPath = lowerPath.replace(/[\s._/-]+/g, '');
   const parent = segments.length > 1 ? segments[segments.length - 2] : '';
+  const secretStems = new Set([
+    'apikey',
+    'apitoken',
+    'authkey',
+    'authtoken',
+    'bearertoken',
+    'clientsecret',
+    'credential',
+    'credentials',
+    'keyfile',
+    'password',
+    'passwd',
+    'secret',
+    'token',
+  ]);
+  const secretFileNames = new Set([
+    'api-key.json',
+    'apikey.json',
+    'api_key.json',
+    'auth-token.json',
+    'authtoken.json',
+    'credentials.json',
+    'password.txt',
+    'secret.txt',
+    'token.txt',
+  ]);
+  const configDirectorySecretNames = new Set([
+    ...secretFileNames,
+    'config.json',
+    'settings.json',
+  ]);
 
   return base === '.env'
     || base.startsWith('.env.')
@@ -275,6 +313,9 @@ function isSecretLikeFileName(filePath: string): boolean {
     || base.startsWith('id_ecdsa.')
     || base === 'wallet.json'
     || compact === 'walletjson'
+    || secretStems.has(compactStem)
+    || secretFileNames.has(base)
+    || (segments.includes('.config') && configDirectorySecretNames.has(base))
     || compact.includes('privatekey')
     || compact.includes('mnemonic')
     || compact.includes('seedphrase')
@@ -283,6 +324,32 @@ function isSecretLikeFileName(filePath: string): boolean {
     || compactPath.includes('awscredentials')
     || compactPath.includes('privatekey')
     || compactPath.includes('seedphrase');
+}
+
+function assertNoSecretLikeProviderLocalHints(responseText: string): void {
+  const lines = String(responseText || '').split(/\r?\n/);
+
+  for (const line of lines) {
+    const markerMatch = PROVIDER_ARTIFACT_MARKER_PATTERN.exec(line);
+    if (markerMatch) {
+      const markerPath = trimCandidatePath(markerMatch[2]);
+      if (!isPublicProviderArtifactReference(markerPath) && isSecretLikeFileName(markerPath)) {
+        throw providerArtifactError(
+          'provider_artifact_secret_rejected',
+          'Provider artifact path looks like a secret file and cannot be delivered.',
+        );
+      }
+      continue;
+    }
+
+    const candidatePath = trimCandidatePath(line);
+    if (looksLikeLocalPathLine(candidatePath) && isSecretLikeFileName(candidatePath)) {
+      throw providerArtifactError(
+        'provider_artifact_secret_rejected',
+        'Provider artifact path looks like a secret file and cannot be delivered.',
+      );
+    }
+  }
 }
 
 function containsPath(root: string, candidate: string): boolean {
@@ -547,9 +614,8 @@ async function resolveLocalArtifact(input: {
   });
 }
 
-function uploadResultToArtifact(result: UploadLargeFileResult): A2ADeliveryArtifact {
-  const base = parseMetafileUri(result.metafileUri)
-    ?? parseMetafileUri(`metafile://${result.pinId}${result.extension || ''}`);
+function parseVerifiedUploadMetafile(result: UploadLargeFileResult): A2ADeliveryArtifact {
+  const base = parseMetafileUri(normalizeText(result.metafileUri));
   if (!base) {
     throw providerArtifactError(
       'provider_artifact_upload_invalid',
@@ -557,8 +623,58 @@ function uploadResultToArtifact(result: UploadLargeFileResult): A2ADeliveryArtif
     );
   }
 
+  if (normalizeText(result.pinId) !== base.pinId) {
+    throw providerArtifactError(
+      'provider_artifact_upload_invalid',
+      'Provider artifact upload returned inconsistent metafile and PIN identifiers.',
+    );
+  }
+
+  return base;
+}
+
+function safeArtifactFileName(value: unknown, fallback: string | null): string | null {
+  if (typeof value !== 'string' || UNSAFE_STRUCTURED_METADATA_CHARACTER.test(value)) {
+    return fallback;
+  }
+  const trimmed = value.trim();
+  if (
+    !trimmed
+    || trimmed.includes('/')
+    || trimmed.includes('\\')
+    || trimmed.includes('://')
+    || /^[a-z]:/i.test(trimmed)
+    || isSecretLikeFileName(trimmed)
+  ) {
+    return fallback;
+  }
+  return trimmed;
+}
+
+function safeArtifactContentType(value: unknown): string | null {
+  if (typeof value !== 'string' || UNSAFE_STRUCTURED_METADATA_CHARACTER.test(value)) {
+    return null;
+  }
+  const trimmed = value.trim().toLowerCase();
+  if (
+    !trimmed
+    || trimmed.startsWith('/')
+    || trimmed.startsWith('./')
+    || trimmed.startsWith('../')
+    || trimmed.includes('\\')
+    || trimmed.includes('://')
+    || /^[a-z]:/i.test(trimmed)
+    || !SAFE_CONTENT_TYPE_PATTERN.test(trimmed)
+  ) {
+    return null;
+  }
+  return trimmed;
+}
+
+function uploadResultToArtifact(result: UploadLargeFileResult): A2ADeliveryArtifact {
+  const base = parseVerifiedUploadMetafile(result);
   const urls = buildMetafileContentUrls(base.pinId);
-  const contentType = normalizeText(result.contentType) || null;
+  const contentType = safeArtifactContentType(result.contentType);
   const extension = base.extension ?? (normalizeText(result.extension) || null);
   const kind: A2ADeliveryArtifactKind = inferDeliveryArtifactKind(extension, contentType);
 
@@ -566,7 +682,7 @@ function uploadResultToArtifact(result: UploadLargeFileResult): A2ADeliveryArtif
     uri: base.uri,
     pinId: base.pinId,
     kind,
-    fileName: normalizeText(result.fileName) || base.fileName,
+    fileName: safeArtifactFileName(result.fileName, base.fileName),
     extension,
     contentType,
     byteLength: typeof result.bytes === 'number' && Number.isFinite(result.bytes) && result.bytes >= 0
@@ -579,6 +695,7 @@ function uploadResultToArtifact(result: UploadLargeFileResult): A2ADeliveryArtif
 }
 
 function ensureUploadVerification(result: UploadLargeFileResult): void {
+  parseVerifiedUploadMetafile(result);
   if (result.verification && !result.verification.ok) {
     throw providerArtifactError(
       'provider_artifact_unavailable',
@@ -731,6 +848,8 @@ export async function resolveProviderDeliveryArtifacts(
   if (expectedFamily === 'text') {
     return { responseText, artifacts: [] };
   }
+
+  assertNoSecretLikeProviderLocalHints(responseText);
 
   const existingArtifacts = await resolveExistingMetafileArtifacts({
     responseText,

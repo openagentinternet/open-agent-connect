@@ -231,45 +231,63 @@ test('existing metafile URI reuse scrubs missing relative local path prose', asy
   assert.equal(result.responseText.includes(workspace), false);
 });
 
-test('existing metafile URI reuse removes secret-like attachment marker line', async () => {
+test('existing metafile URI reuse rejects secret-like attachment marker line', async () => {
   const verifierCalls = [];
   const uploadCalls = [];
 
-  const result = await resolveProviderDeliveryArtifacts({
-    responseText: 'attachment: .npmrc\nPublic artifact: metafile://abc123.pdf',
-    outputType: 'file',
-    signer: fakeSigner(),
-    uploadLargeFile: fakeUploader(uploadCalls),
-    verifyAvailability: okVerifier(verifierCalls),
-  });
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'attachment: .npmrc\nPublic artifact: metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
 
-  assert.deepEqual(verifierCalls, ['abc123']);
+  assert.deepEqual(verifierCalls, []);
   assert.equal(uploadCalls.length, 0);
-  assert.equal(result.artifacts.length, 1);
-  assert.equal(result.artifacts[0].uri, 'metafile://abc123.pdf');
-  assert.match(result.responseText, /metafile:\/\/abc123\.pdf/);
-  assert.equal(result.responseText.includes('attachment:'), false);
-  assert.equal(result.responseText.includes('.npmrc'), false);
 });
 
-test('existing metafile URI reuse removes bare secret-like local path line', async () => {
+test('existing metafile URI reuse rejects bare secret-like local path line', async () => {
   const verifierCalls = [];
   const uploadCalls = [];
 
-  const result = await resolveProviderDeliveryArtifacts({
-    responseText: '.npmrc\nPublic artifact: metafile://abc123.pdf',
-    outputType: 'file',
-    signer: fakeSigner(),
-    uploadLargeFile: fakeUploader(uploadCalls),
-    verifyAvailability: okVerifier(verifierCalls),
-  });
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: '.npmrc\nPublic artifact: metafile://abc123.pdf',
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
 
-  assert.deepEqual(verifierCalls, ['abc123']);
+  assert.deepEqual(verifierCalls, []);
   assert.equal(uploadCalls.length, 0);
-  assert.equal(result.artifacts.length, 1);
-  assert.equal(result.artifacts[0].uri, 'metafile://abc123.pdf');
-  assert.match(result.responseText, /metafile:\/\/abc123\.pdf/);
-  assert.equal(result.responseText.includes('.npmrc'), false);
+});
+
+test('existing metafile URI reuse rejects mixed public URI and ordinary credential path marker', async () => {
+  for (const fileName of ['token.txt', 'secret.txt', 'api-key.json', 'password.txt', '.config/settings.json']) {
+    const verifierCalls = [];
+    const uploadCalls = [];
+
+    await assertRejectCode(
+      resolveProviderDeliveryArtifacts({
+        responseText: `attachment: ${fileName}\nPublic artifact: metafile://abc123.pdf`,
+        outputType: 'file',
+        signer: fakeSigner(),
+        uploadLargeFile: fakeUploader(uploadCalls),
+        verifyAvailability: okVerifier(verifierCalls),
+      }),
+      'provider_artifact_secret_rejected',
+    );
+
+    assert.deepEqual(verifierCalls, []);
+    assert.equal(uploadCalls.length, 0);
+  }
 });
 
 test('existing metafile URI verifier failure maps to provider_artifact_unavailable', async () => {
@@ -491,7 +509,20 @@ test('resolution rejects files outside executionCwd including parent paths and s
 });
 
 test('resolution rejects secret-like local artifact names', async () => {
-  for (const fileName of ['.env', 'id_rsa', 'wallet.json', 'private-key.txt', 'mnemonic.txt']) {
+  for (const fileName of [
+    '.env',
+    'id_rsa',
+    'wallet.json',
+    'private-key.txt',
+    'mnemonic.txt',
+    'token.txt',
+    'secret.txt',
+    'api-key.json',
+    'password.txt',
+    '.config/settings.json',
+    'credentials.json',
+    'private_key.pem',
+  ]) {
     const workspace = await tempWorkspace();
     await writeWorkspaceFile(workspace, fileName, 'secret');
 
@@ -527,6 +558,29 @@ test('fallback workspace scan rejects npm credential config before upload', asyn
   );
 
   assert.equal(uploadCalls.length, 0);
+});
+
+test('fallback workspace scan rejects ordinary credential and config names before upload', async () => {
+  for (const fileName of ['token.txt', 'secret.txt', 'api-key.json', 'password.txt', '.config/settings.json']) {
+    const workspace = await tempWorkspace();
+    const uploadCalls = [];
+    await writeWorkspaceFile(workspace, fileName, 'secret');
+    await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
+
+    await assertRejectCode(
+      resolveProviderDeliveryArtifacts({
+        responseText: 'Generated the requested file.',
+        outputType: 'file',
+        executionCwd: workspace,
+        signer: fakeSigner(),
+        uploadLargeFile: fakeUploader(uploadCalls),
+        verifyAvailability: okVerifier(),
+      }),
+      'provider_artifact_secret_rejected',
+    );
+
+    assert.equal(uploadCalls.length, 0);
+  }
 });
 
 test('fallback workspace scan rejects mixed secret and public candidates before upload', async () => {
@@ -806,6 +860,57 @@ test('direct small-file upload result becomes one artifact and final response te
   assert.equal(result.responseText.includes('./out/chart.png'), false);
   assert.match(result.responseText, /Artifact: metafile:\/\/uploaded-chart\.png/);
   assert.match(result.responseText, /PINID: uploaded-chart/);
+});
+
+test('upload result metadata is sanitized before becoming a structured artifact', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'out/chart.png');
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: 'Chart ready.\noutputFile: ./out/chart.png',
+    outputType: 'image',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: async (input) => ({
+      ...fakeUploadResult(input),
+      fileName: '/tmp/workspace/secret.png',
+      contentType: 'image/png\r\nX-Local-Path: /tmp/workspace/secret.png',
+    }),
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
+  assert.equal(result.artifacts[0].fileName, 'uploaded-chart.png');
+  assert.equal(result.artifacts[0].contentType, null);
+  assert.equal(result.responseText.includes('/tmp/workspace/secret.png'), false);
+  assert.equal(result.responseText.includes('X-Local-Path'), false);
+});
+
+test('upload result fails closed when returned pinId and metafile URI disagree', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'out/chart.png');
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'Chart ready.\noutputFile: ./out/chart.png',
+      outputType: 'image',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: async (input) => ({
+        ...fakeUploadResult(input),
+        pinId: 'uploaded-other',
+        metafileUri: 'metafile://uploaded-chart.png',
+        verification: {
+          ok: true,
+          url: 'https://verify.example/uploaded-other',
+          attempts: 1,
+        },
+      }),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_upload_invalid',
+  );
 });
 
 test('uploader failure with large_file_upload_unavailable preserves provider failure code', async () => {
