@@ -76,13 +76,24 @@ function isPathInsideOrEqual(parentPath: string, candidatePath: string): boolean
   return relative === '' || (Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-function resolveCompletedSessionCwd(sessionCwd: unknown, executionCwd: string): string {
+async function resolveCompletedSessionCwd(sessionCwd: unknown, executionCwd: string): Promise<string> {
   const normalizedSessionCwd = normalizeText(sessionCwd);
   if (!normalizedSessionCwd) {
     return executionCwd;
   }
   const resolvedSessionCwd = path.resolve(executionCwd, normalizedSessionCwd);
-  return isPathInsideOrEqual(executionCwd, resolvedSessionCwd) ? resolvedSessionCwd : executionCwd;
+  if (!isPathInsideOrEqual(executionCwd, resolvedSessionCwd)) {
+    return executionCwd;
+  }
+  try {
+    const [realExecutionCwd, realSessionCwd] = await Promise.all([
+      fs.realpath(executionCwd),
+      fs.realpath(resolvedSessionCwd),
+    ]);
+    return isPathInsideOrEqual(realExecutionCwd, realSessionCwd) ? resolvedSessionCwd : executionCwd;
+  } catch {
+    return executionCwd;
+  }
 }
 
 async function createProviderExecutionWorkspace(
@@ -814,7 +825,7 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
           sessionId,
           providerSkill: order.providerSkill,
           outputType: normalizeText(order.outputType) || 'text',
-          sessionCwd: resolveCompletedSessionCwd(session?.cwd, run.executionCwd),
+          sessionCwd: await resolveCompletedSessionCwd(session?.cwd, run.executionCwd),
           fallbackSelected: selection.fallbackSelected,
           selection,
         },

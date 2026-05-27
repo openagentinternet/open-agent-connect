@@ -382,6 +382,107 @@ test('createProviderServiceRunner executes non-text orders in a dedicated runtim
   await cleanupProfileHome(homeDir);
 });
 
+test('createProviderServiceRunner rejects session cwd symlinks that escape the dedicated workspace', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+  const calls = [];
+  let reportedSessionCwd = '';
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        reportedSessionCwd = path.join(request.cwd, 'escape');
+        await fs.symlink(homeDir, reportedSessionCwd, 'dir');
+        return 'session-primary';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'completed',
+          cwd: reportedSessionCwd,
+          result: {
+            status: 'completed',
+            output: 'out/provider-image.png',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.equal(calls.length, 1);
+  assert.equal(result.metadata.sessionCwd, calls[0].cwd);
+  assert.notEqual(result.metadata.sessionCwd, reportedSessionCwd);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner preserves legitimate nested session cwd inside the dedicated workspace', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+  const calls = [];
+  let reportedSessionCwd = '';
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        reportedSessionCwd = path.join(request.cwd, 'nested');
+        await fs.mkdir(reportedSessionCwd, { recursive: true });
+        return 'session-primary';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'completed',
+          cwd: reportedSessionCwd,
+          result: {
+            status: 'completed',
+            output: 'out/provider-image.png',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.equal(calls.length, 1);
+  assert.equal(result.metadata.sessionCwd, reportedSessionCwd);
+  await cleanupProfileHome(homeDir);
+});
+
 test('createProviderServiceRunner uses distinct dedicated workspaces for fallback attempts', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   await runtimeStore.write({
