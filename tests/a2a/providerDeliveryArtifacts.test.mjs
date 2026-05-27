@@ -149,15 +149,24 @@ test('classifyProviderOutputType treats text-like and non-text service outputs c
 
 test('existing metafile URI in response text is normalized and reused for an image service', async () => {
   const verifierCalls = [];
+  const publicPreviewUrl = 'https://cdn.example/artifacts/abc123i0.png';
 
   const result = await resolveProviderDeliveryArtifacts({
-    responseText: 'Done: metafile://abc123i0.png.',
+    responseText: `Done: metafile://abc123i0.png.\nPreview: ${publicPreviewUrl}`,
     outputType: 'image',
     signer: fakeSigner(),
     verifyAvailability: okVerifier(verifierCalls),
   });
 
-  assert.equal(result.responseText, 'Done: metafile://abc123i0.png.');
+  assert.match(result.responseText, /Done: metafile:\/\/abc123i0\.png\./);
+  assert.match(result.responseText, new RegExp(publicPreviewUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(result.responseText, /Artifact: metafile:\/\/abc123i0\.png/);
+  assert.match(result.responseText, /PINID: abc123i0/);
+  assert.match(result.responseText, /File: abc123i0\.png/);
+  assert.match(
+    result.responseText,
+    /Download: https:\/\/file\.metaid\.io\/metafile-indexer\/api\/v1\/files\/accelerate\/content\/abc123i0/,
+  );
   assert.equal(result.artifacts.length, 1);
   assert.equal(result.artifacts[0].uri, 'metafile://abc123i0.png');
   assert.equal(result.artifacts[0].pinId, 'abc123i0');

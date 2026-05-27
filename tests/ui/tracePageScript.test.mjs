@@ -300,7 +300,10 @@ test('trace page still renders old text-only metafile image, video, audio, and f
         data.inspector.transcriptItems[0].content = [
           'metafile://old-image.png',
           'metafile://old-video.mp4',
+          'metafile://old-video-m4v.m4v',
           'metafile://old-audio.mp3',
+          'metafile://old-audio-ogg.ogg',
+          'metafile://old-audio-m4a.m4a',
           'metafile://old-file.pdf',
         ].join('\n');
         return data;
@@ -309,10 +312,13 @@ test('trace page still renders old text-only metafile image, video, audio, and f
   );
 
   assert.match(detail.innerHTML, /old-image\.png/);
-  assert.match(detail.innerHTML, /<video controls/);
+  assert.equal((detail.innerHTML.match(/<video controls/g) || []).length, 2);
   assert.match(detail.innerHTML, /old-video/);
-  assert.match(detail.innerHTML, /<audio controls/);
+  assert.match(detail.innerHTML, /old-video-m4v/);
+  assert.equal((detail.innerHTML.match(/<audio controls/g) || []).length, 3);
   assert.match(detail.innerHTML, /old-audio/);
+  assert.match(detail.innerHTML, /old-audio-ogg/);
+  assert.match(detail.innerHTML, /old-audio-m4a/);
   assert.match(detail.innerHTML, /Download<\/a>/);
   assert.match(detail.innerHTML, /old-file\.pdf/);
 });

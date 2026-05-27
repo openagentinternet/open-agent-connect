@@ -1020,8 +1020,12 @@ export async function resolveProviderDeliveryArtifacts(
   });
   if (existingArtifacts.length > 0) {
     const providerSafeResponseText = stripProviderOnlyLocalHintLines(responseText);
+    const workspaceSafeResponseText = await scrubExecutionWorkspacePathMentions(
+      providerSafeResponseText,
+      input.executionCwd,
+    );
     return {
-      responseText: await scrubExecutionWorkspacePathMentions(providerSafeResponseText, input.executionCwd),
+      responseText: appendDeliveryArtifactSummaries(workspaceSafeResponseText, existingArtifacts),
       artifacts: existingArtifacts,
     };
   }

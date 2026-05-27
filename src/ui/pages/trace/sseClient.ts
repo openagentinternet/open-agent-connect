@@ -219,8 +219,8 @@ function fmtDate(ms) {
 
 const METAFILE_REGEX = /metafile:\\/\\/[^\\s<>"'\`]+/gi;
 const IMG_EXT = new Set(['.jpg','.jpeg','.gif','.png','.webp','.bmp','.svg']);
-const VID_EXT = new Set(['.mp4','.webm','.mov']);
-const AUD_EXT = new Set(['.mp3','.wav','.flac']);
+const VID_EXT = new Set(['.m4v','.mp4','.webm','.mov']);
+const AUD_EXT = new Set(['.m4a','.mp3','.ogg','.wav','.flac']);
 const MEDIA_HYDRATION_LIMIT = 8;
 const MEDIA_FETCH_TIMEOUT_MS = 10000;
 
