@@ -344,6 +344,8 @@ async function resolveLocalCandidate(input: {
   validateArtifactFamily({ uri: `file://${fileName}`, kind }, input.expectedFamily);
 
   const scrubPaths = new Set<string>();
+  addPathScrubVariant(scrubPaths, input.executionCwd);
+  addPathScrubVariant(scrubPaths, input.requestedExecutionCwd);
   addPathScrubVariant(scrubPaths, candidatePath);
   addPathScrubVariant(scrubPaths, absoluteCandidatePath);
   addPathScrubVariant(scrubPaths, realCandidatePath);

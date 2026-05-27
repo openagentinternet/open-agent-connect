@@ -297,6 +297,36 @@ test('fallback workspace scan scrubs local directory path prose for the resolved
   assert.match(result.responseText, /Artifact: metafile:\/\/uploaded-chart\.png/);
 });
 
+test('fallback workspace scan scrubs execution workspace root path prose for the resolved artifact', async () => {
+  const root = await tempWorkspace();
+  const workspace = path.join(root, 'workspace-root');
+  const requestedCwd = path.join(root, 'requested-workspace');
+  await mkdir(workspace);
+  await symlink(workspace, requestedCwd);
+  const filePath = await writeWorkspaceFile(workspace, 'out/chart.png');
+  const executionCwd = await realpath(workspace);
+  const uploadCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: `Saved image in ${executionCwd}; requested cwd ${requestedCwd}; final file is out/chart.png`,
+    outputType: 'image',
+    executionCwd: requestedCwd,
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(uploadCalls),
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(uploadCalls[0].filePath, await realpath(filePath));
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
+  assert.equal(result.responseText.includes(executionCwd), false);
+  assert.equal(result.responseText.includes(requestedCwd), false);
+  assert.equal(result.responseText.includes('workspace'), false);
+  assert.match(result.responseText, /Saved image in/);
+  assert.match(result.responseText, /Artifact: metafile:\/\/uploaded-chart\.png/);
+});
+
 test('resolution rejects files outside executionCwd including parent paths and symlink escapes', async () => {
   const workspace = await tempWorkspace();
   const outsideRoot = await tempWorkspace();
