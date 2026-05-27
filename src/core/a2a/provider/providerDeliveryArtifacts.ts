@@ -365,9 +365,9 @@ function looksLikeInlineFileHint(value: string): boolean {
 
 function absoluteProviderLocalHintPatterns(): RegExp[] {
   return [
-    /\bfile:\/\/\/?[^\s,;)\]}>"'`]+/gi,
+    /\bfile:[^\s,;)\]}>"'`]+/gi,
     /(?<![A-Za-z0-9_.:/\\-])\\\\[^\\/\s,;)\]}>"'`]+[\\/][^\s,;)\]}>"'`]+/g,
-    /(?<![A-Za-z0-9_.:/\\-])[A-Za-z]:[\\/][^\s,;)\]}>"'`]+/g,
+    /(?<![A-Za-z0-9_.:/\\-])[A-Za-z]:(?:[\\/]|[^\\/\s,;)\]}>"'`]+[\\/])[^\s,;)\]}>"'`]+/g,
     /(?<![A-Za-z0-9_.:/\\-])\/[^\s,;)\]}>"'`]+/g,
   ];
 }

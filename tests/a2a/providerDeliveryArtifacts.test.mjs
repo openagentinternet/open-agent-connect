@@ -635,6 +635,69 @@ test('existing metafile URI reuse rejects public-looking file URI path before ve
   assert.equal(error.message.includes('file:///home/me/out/report.pdf'), false);
 });
 
+test('existing metafile URI reuse rejects single-slash file URI before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+  const fileUri = 'file:/home/me/out/report.pdf';
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: `${fileUri}\nPublic artifact: metafile://abc123.pdf`,
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes(fileUri), false);
+});
+
+test('existing metafile URI reuse rejects drive-qualified file URI before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+  const fileUri = 'file:C:/repo/out/report.pdf';
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: `${fileUri}\nPublic artifact: metafile://abc123.pdf`,
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes(fileUri), false);
+});
+
+test('existing metafile URI reuse rejects drive-relative Windows path before verifier reuse', async () => {
+  const verifierCalls = [];
+  const uploadCalls = [];
+  const driveRelativePath = 'C:repo\\out\\report.pdf';
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: `${driveRelativePath}\nPublic artifact: metafile://abc123.pdf`,
+      outputType: 'file',
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(verifierCalls),
+    }),
+    'provider_artifact_secret_rejected',
+  );
+
+  assert.deepEqual(verifierCalls, []);
+  assert.equal(uploadCalls.length, 0);
+  assert.equal(error.message.includes(driveRelativePath), false);
+});
+
 test('existing metafile URI verifier failure maps to provider_artifact_unavailable', async () => {
   await assertRejectCode(
     resolveProviderDeliveryArtifacts({
@@ -893,15 +956,17 @@ test('local upload does not leak Windows drive prose when no metafile URI was pr
   await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
   const backslashPath = 'C:\\repo\\out\\report.pdf';
   const slashPath = 'C:/repo/out/report.pdf';
+  const driveRelativeBackslashPath = 'C:repo\\out\\report.pdf';
+  const driveRelativeSlashPath = 'C:repo/out/report.pdf';
 
   await assertNoUnsafeProviderUploadSuccess({
-    responseText: `Saved reports at ${backslashPath} and ${slashPath}\nattachment: ./report.pdf`,
+    responseText: `Saved reports at ${backslashPath}, ${slashPath}, ${driveRelativeBackslashPath}, and ${driveRelativeSlashPath}\nattachment: ./report.pdf`,
     outputType: 'file',
     executionCwd: workspace,
     signer: fakeSigner(),
     uploadLargeFile: fakeUploader(),
     verifyAvailability: okVerifier(),
-  }, [backslashPath, slashPath]);
+  }, [backslashPath, slashPath, driveRelativeBackslashPath, driveRelativeSlashPath]);
 });
 
 test('local upload does not leak file URI prose when no metafile URI was provided', async () => {
@@ -909,15 +974,17 @@ test('local upload does not leak file URI prose when no metafile URI was provide
   await writeWorkspaceFile(workspace, 'report.pdf', 'public report');
   const posixFileUri = 'file:///home/me/out/report.pdf';
   const windowsFileUri = 'file:///C:/repo/out/report.pdf';
+  const singleSlashFileUri = 'file:/home/me/out/report.pdf';
+  const driveFileUri = 'file:C:/repo/out/report.pdf';
 
   await assertNoUnsafeProviderUploadSuccess({
-    responseText: `Saved reports at ${posixFileUri} and ${windowsFileUri}\nattachment: ./report.pdf`,
+    responseText: `Saved reports at ${posixFileUri}, ${windowsFileUri}, ${singleSlashFileUri}, and ${driveFileUri}\nattachment: ./report.pdf`,
     outputType: 'file',
     executionCwd: workspace,
     signer: fakeSigner(),
     uploadLargeFile: fakeUploader(),
     verifyAvailability: okVerifier(),
-  }, [posixFileUri, windowsFileUri]);
+  }, [posixFileUri, windowsFileUri, singleSlashFileUri, driveFileUri]);
 });
 
 test('fallback workspace scan scrubs execution workspace root path prose for the resolved artifact', async () => {
