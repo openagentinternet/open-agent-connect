@@ -109,6 +109,11 @@ function baseOrder(overrides = {}) {
   };
 }
 
+function isInsideRuntimeArea(homeDir, candidatePath) {
+  const relative = path.relative(path.join(homeDir, '.runtime'), candidatePath);
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
 test('buildProviderServiceOrderPrompt includes paid-order guidance and required skill instructions', () => {
   const prompt = buildProviderServiceOrderPrompt({
     serviceName: 'Weather Oracle',
@@ -326,6 +331,120 @@ test('createProviderServiceRunner reuses selected primary skill source for fallb
   await cleanupProfileHome(homeDir);
 });
 
+test('createProviderServiceRunner executes non-text orders in a dedicated runtime workspace', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+  const calls = [];
+  let cwdExistedDuringExecute = false;
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        cwdExistedDuringExecute = Boolean(await fs.stat(request.cwd).catch(() => null));
+        return 'session-primary';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'completed',
+          result: {
+            status: 'completed',
+            output: 'out/provider-image.png',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.equal(calls.length, 1);
+  assert.notEqual(calls[0].cwd, homeDir);
+  assert.equal(isInsideRuntimeArea(homeDir, calls[0].cwd), true);
+  assert.equal(cwdExistedDuringExecute, true);
+  assert.equal(result.metadata.sessionCwd, calls[0].cwd);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner uses distinct dedicated workspaces for fallback attempts', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+      runtime({ id: 'runtime-fallback', provider: 'claude-code' }),
+    ],
+  });
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        return request.runtimeId === 'runtime-primary' ? 'session-primary' : 'session-fallback';
+      },
+      async getSession(sessionId) {
+        if (sessionId === 'session-primary') {
+          return {
+            sessionId,
+            status: 'failed',
+            result: {
+              status: 'failed',
+              output: '',
+              error: 'primary failed after writing partial artifacts',
+              durationMs: 10,
+            },
+          };
+        }
+        return {
+          sessionId,
+          status: 'completed',
+          result: {
+            status: 'completed',
+            output: 'out/fallback-image.png',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+    getFallbackRuntime: async () => runtime({ id: 'runtime-fallback', provider: 'claude-code' }),
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.deepEqual(calls.map((call) => call.runtimeId), ['runtime-primary', 'runtime-fallback']);
+  assert.equal(isInsideRuntimeArea(homeDir, calls[0].cwd), true);
+  assert.equal(isInsideRuntimeArea(homeDir, calls[1].cwd), true);
+  assert.notEqual(calls[0].cwd, calls[1].cwd);
+  assert.equal(result.metadata.sessionCwd, calls[1].cwd);
+  await cleanupProfileHome(homeDir);
+});
+
 test('createProviderServiceRunner reads provider skills from project roots', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   await fs.rm(path.join(systemHomeDir, '.codex'), { recursive: true, force: true });
@@ -392,7 +511,8 @@ test('createProviderServiceRunner passes selected global skill source path to ex
 
   assert.equal(result.state, 'completed');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].cwd, homeDir);
+  assert.notEqual(calls[0].cwd, homeDir);
+  assert.equal(isInsideRuntimeArea(homeDir, calls[0].cwd), true);
   assert.equal(
     calls[0].skillSourcePaths['weather.oracle'],
     path.join(systemHomeDir, '.codex', 'skills', 'weather.oracle'),
@@ -839,7 +959,8 @@ test('createProviderServiceRunner allows non-text deliverables after session sta
   assert.equal(result.metadata.outputType, 'image');
   assert.equal(result.metadata.runtimeId, 'runtime-primary');
   assert.equal(result.metadata.sessionId, 'session-primary');
-  assert.equal(result.metadata.sessionCwd, homeDir);
+  assert.equal(result.metadata.sessionCwd, calls[0].cwd);
+  assert.equal(isInsideRuntimeArea(homeDir, calls[0].cwd), true);
   assert.equal(result.metadata.providerSkill, 'weather.oracle');
   assert.equal(calls.length, 1);
   assert.equal(fallbackCalls, 0);
