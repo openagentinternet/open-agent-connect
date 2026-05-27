@@ -82,9 +82,6 @@ async function resolveCompletedSessionCwd(sessionCwd: unknown, executionCwd: str
     return executionCwd;
   }
   const resolvedSessionCwd = path.resolve(executionCwd, normalizedSessionCwd);
-  if (!isPathInsideOrEqual(executionCwd, resolvedSessionCwd)) {
-    return executionCwd;
-  }
   try {
     const [realExecutionCwd, realSessionCwd, sessionStat] = await Promise.all([
       fs.realpath(executionCwd),
@@ -225,6 +222,7 @@ interface ProviderRuntimeRun {
   sessionId: string;
   session: LlmSessionRecord | null;
   executionCwd: string;
+  attemptWorkspaceCwd: string;
 }
 
 interface ProviderRuntimeFailure {
@@ -698,6 +696,7 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
         const selectedRuntime = selectedSelection.runtime;
         attemptIndex += 1;
         const executionCwd = await createProviderExecutionWorkspace(input, order, selectedRuntime, runNonce, attemptIndex);
+        const attemptWorkspaceCwd = await fs.realpath(executionCwd);
         const sessionId = await input.llmExecutor.execute({
           runtimeId: selectedRuntime.id,
           runtime: selectedRuntime,
@@ -716,6 +715,7 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
           selection: selectedSelection,
           sessionId,
           executionCwd,
+          attemptWorkspaceCwd,
           session: await waitForSession(input.llmExecutor, sessionId, sessionTimeoutMs, pollIntervalMs),
         };
       };
@@ -830,6 +830,7 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
           providerSkill: order.providerSkill,
           outputType: normalizeText(order.outputType) || 'text',
           sessionCwd: await resolveCompletedSessionCwd(session?.cwd, run.executionCwd),
+          attemptWorkspaceCwd: run.attemptWorkspaceCwd,
           fallbackSelected: selection.fallbackSelected,
           selection,
         },

@@ -379,6 +379,7 @@ test('createProviderServiceRunner executes non-text orders in a dedicated runtim
   assert.equal(isInsideRuntimeArea(homeDir, calls[0].cwd), true);
   assert.equal(cwdExistedDuringExecute, true);
   assert.equal(result.metadata.sessionCwd, calls[0].cwd);
+  assert.equal(result.metadata.attemptWorkspaceCwd, await fs.realpath(calls[0].cwd));
   await cleanupProfileHome(homeDir);
 });
 
@@ -429,6 +430,7 @@ test('createProviderServiceRunner rejects session cwd symlinks that escape the d
   assert.equal(result.state, 'completed');
   assert.equal(calls.length, 1);
   assert.equal(result.metadata.sessionCwd, calls[0].cwd);
+  assert.equal(result.metadata.attemptWorkspaceCwd, await fs.realpath(calls[0].cwd));
   assert.notEqual(result.metadata.sessionCwd, reportedSessionCwd);
   await cleanupProfileHome(homeDir);
 });
@@ -581,6 +583,7 @@ test('createProviderServiceRunner preserves legitimate nested session cwd inside
   assert.equal(result.state, 'completed');
   assert.equal(calls.length, 1);
   assert.equal(result.metadata.sessionCwd, reportedSessionCwd);
+  assert.equal(result.metadata.attemptWorkspaceCwd, await fs.realpath(calls[0].cwd));
   await cleanupProfileHome(homeDir);
 });
 
@@ -644,6 +647,7 @@ test('createProviderServiceRunner uses distinct dedicated workspaces for fallbac
   assert.equal(isInsideRuntimeArea(homeDir, calls[1].cwd), true);
   assert.notEqual(calls[0].cwd, calls[1].cwd);
   assert.equal(result.metadata.sessionCwd, calls[1].cwd);
+  assert.equal(result.metadata.attemptWorkspaceCwd, await fs.realpath(calls[1].cwd));
   await cleanupProfileHome(homeDir);
 });
 

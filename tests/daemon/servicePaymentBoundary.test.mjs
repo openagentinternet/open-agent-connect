@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { createECDH } from 'node:crypto';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -172,10 +171,28 @@ async function writeProviderOutputFile(homeDir, fileName, contents = 'provider a
   };
 }
 
-async function createProviderOutputFixture(t, fileName, contents = 'provider artifact bytes') {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-output-'));
-  t.after(async () => rm(homeDir, { recursive: true, force: true }));
-  return writeProviderOutputFile(homeDir, fileName, contents);
+function createAttemptOutputController(fileName, contents = 'provider artifact bytes') {
+  let outputDir = '';
+  let filePath = '';
+  return {
+    get outputDir() {
+      return outputDir;
+    },
+    get filePath() {
+      return filePath;
+    },
+    async write(request) {
+      const fixture = await writeProviderOutputFile(request.cwd, fileName, contents);
+      outputDir = fixture.outputDir;
+      filePath = fixture.filePath;
+    },
+    sessionCwd() {
+      return outputDir;
+    },
+    outputText(prefix) {
+      return `${prefix}\nartifactPath: ${path.basename(filePath)}`;
+    },
+  };
 }
 
 function createProviderArtifactUploadMock(uploadCalls = []) {
@@ -393,6 +410,9 @@ async function createInboundProviderOrderHarness(t, options = {}) {
     llmExecutor: {
       async execute(request) {
         llmCalls.push(request);
+        if (options.llmExecuteHook) {
+          await options.llmExecuteHook(request, { llmCalls });
+        }
         if (options.llmDelayMs) {
           await delay(options.llmDelayMs);
         }
@@ -407,11 +427,15 @@ async function createInboundProviderOrderHarness(t, options = {}) {
         }
         return {
           sessionId,
-          cwd: options.llmSessionCwd ?? null,
+          cwd: typeof options.llmSessionCwd === 'function'
+            ? options.llmSessionCwd({ sessionId, llmCalls })
+            : options.llmSessionCwd ?? null,
           status: 'completed',
           result: {
             status: 'completed',
-            output: options.llmOutput ?? 'Tomorrow weather: bright with light wind.',
+            output: typeof options.llmOutput === 'function'
+              ? options.llmOutput({ sessionId, llmCalls })
+              : options.llmOutput ?? 'Tomorrow weather: bright with light wind.',
             durationMs: 1,
           },
         };
@@ -2397,11 +2421,12 @@ async function runProviderArtifactDeliveryCase(t, { outputType, fileName, expect
   const orderTxid = `${expectedKind === 'image' ? '1' : expectedKind === 'video' ? '2' : expectedKind === 'audio' ? '3' : '4'}`.repeat(64);
   const paymentTxid = `${expectedKind === 'image' ? '5' : expectedKind === 'video' ? '6' : expectedKind === 'audio' ? '7' : '8'}`.repeat(64);
   const uploadCalls = [];
-  const { outputDir, filePath } = await createProviderOutputFixture(t, fileName);
+  const output = createAttemptOutputController(fileName);
   const harness = await createInboundProviderOrderHarness(t, {
     service: { outputType },
-    llmOutput: `Created the requested ${expectedKind} deliverable.\nartifactPath: ${filePath}`,
-    llmSessionCwd: outputDir,
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText(`Created the requested ${expectedKind} deliverable.`),
+    llmSessionCwd: () => output.sessionCwd(),
     rawTxs: {
       [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
     },
@@ -2417,7 +2442,7 @@ async function runProviderArtifactDeliveryCase(t, { outputType, fileName, expect
 
   assert.equal(result.ok, true);
   assert.equal(uploadCalls.length, 1);
-  assert.equal(uploadCalls[0].filePath, filePath);
+  assert.equal(uploadCalls[0].filePath, output.filePath);
   assert.equal(uploadCalls[0].network, 'mvc');
   assert.equal(uploadCalls[0].verify, true);
 
@@ -2432,13 +2457,13 @@ async function runProviderArtifactDeliveryCase(t, { outputType, fileName, expect
   const delivery = parseDeliveryMessage(deliveryMessages[0]);
   assert.ok(delivery);
   assert.match(delivery.result, /metafile:\/\/provider-artifact-1/);
-  assert.equal(delivery.result.includes(filePath), false);
+  assert.equal(delivery.result.includes(output.filePath), false);
   assert.equal(Array.isArray(delivery.artifacts), true);
   assert.equal(delivery.artifacts.length, 1);
   assert.equal(delivery.artifacts[0].kind, expectedKind);
   assert.match(delivery.artifacts[0].uri, /^metafile:\/\/provider-artifact-1/);
-  assertNoProviderLocalPathLeak(deliveryMessages[0], filePath);
-  assertNoProviderLocalPathLeak(delivery, filePath);
+  assertNoProviderLocalPathLeak(deliveryMessages[0], output.filePath);
+  assertNoProviderLocalPathLeak(delivery, output.filePath);
 
   const state = await harness.runtimeStateStore.readState();
   const trace = state.traces.find((entry) => entry.order?.orderTxid === orderTxid);
@@ -2455,8 +2480,8 @@ async function runProviderArtifactDeliveryCase(t, { outputType, fileName, expect
   assert.deepEqual(runnerItem.metadata.deliveryArtifacts.map((artifact) => artifact.kind), [expectedKind]);
   assert.deepEqual(deliveryItem.metadata.deliveryArtifacts.map((artifact) => artifact.kind), [expectedKind]);
   assert.deepEqual(deliveryItem.artifacts.map((artifact) => artifact.kind), [expectedKind]);
-  assertNoProviderLocalPathLeak(runnerItem, filePath);
-  assertNoProviderLocalPathLeak(deliveryItem, filePath);
+  assertNoProviderLocalPathLeak(runnerItem, output.filePath);
+  assertNoProviderLocalPathLeak(deliveryItem, output.filePath);
 
   const conversation = await createA2AConversationStore({
     homeDir: harness.homeDir,
@@ -2475,7 +2500,7 @@ async function runProviderArtifactDeliveryCase(t, { outputType, fileName, expect
   ));
   assert.ok(persistedDelivery);
   assert.deepEqual(persistedDelivery.artifacts.map((artifact) => artifact.kind), [expectedKind]);
-  assertNoProviderLocalPathLeak(persistedDelivery, filePath);
+  assertNoProviderLocalPathLeak(persistedDelivery, output.filePath);
 }
 
 test('inbound provider ORDER image output uploads artifact and sends delivery before NeedsRating', async (t) => {
@@ -2493,11 +2518,12 @@ test('inbound provider ORDER image output does not complete session while artifa
   const uploadCalls = [];
   const uploadMock = createProviderArtifactUploadMock(uploadCalls);
   let uploadWindowError = null;
-  const { outputDir, filePath } = await createProviderOutputFixture(t, 'pending-window-image.png');
+  const output = createAttemptOutputController('pending-window-image.png');
   const harness = await createInboundProviderOrderHarness(t, {
     service: { outputType: 'image' },
-    llmOutput: `Created pending-window image.\nartifactPath: ${filePath}`,
-    llmSessionCwd: outputDir,
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Created pending-window image.'),
+    llmSessionCwd: () => output.sessionCwd(),
     rawTxs: {
       [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
     },
@@ -2599,11 +2625,12 @@ test('inbound provider ORDER upload failure marks seller order failed without de
   const orderTxid = 'b'.repeat(64);
   const paymentTxid = 'c'.repeat(64);
   const uploadCalls = [];
-  const { outputDir, filePath } = await createProviderOutputFixture(t, 'upload-fails.png');
+  const output = createAttemptOutputController('upload-fails.png');
   const harness = await createInboundProviderOrderHarness(t, {
     service: { outputType: 'image' },
-    llmOutput: `Here is the image.\nartifactPath: ${filePath}`,
-    llmSessionCwd: outputDir,
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Here is the image.'),
+    llmSessionCwd: () => output.sessionCwd(),
     rawTxs: {
       [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
     },
@@ -2643,21 +2670,18 @@ test('inbound provider ORDER upload failure marks seller order failed without de
   assert.equal(sellerOrder.state, 'failed');
   assert.equal(sellerOrder.failureReason, 'simulated provider artifact upload failure');
   assert.equal(sellerOrder.endReason, 'provider_artifact_upload_failed');
-  assertNoProviderLocalPathLeak(trace, filePath);
+  assertNoProviderLocalPathLeak(trace, output.filePath);
 });
 
 test('inbound provider ORDER preserves large_file_upload_unavailable when no large uploader exists', async (t) => {
   const orderTxid = 'd'.repeat(64);
   const paymentTxid = 'e'.repeat(64);
-  const { outputDir, filePath } = await createProviderOutputFixture(
-    t,
-    'large-image.png',
-    Buffer.alloc((2 * 1024 * 1024) + 1),
-  );
+  const output = createAttemptOutputController('large-image.png', Buffer.alloc((2 * 1024 * 1024) + 1));
   const harness = await createInboundProviderOrderHarness(t, {
     service: { outputType: 'image' },
-    llmOutput: `Large image complete.\nartifactPath: ${filePath}`,
-    llmSessionCwd: outputDir,
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Large image complete.'),
+    llmSessionCwd: () => output.sessionCwd(),
     rawTxs: {
       [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
     },
@@ -2687,11 +2711,12 @@ test('inbound provider ORDER delivery send failure after upload sends no NeedsRa
   const orderTxid = 'f'.repeat(64);
   const paymentTxid = '1'.repeat(64);
   const uploadCalls = [];
-  const { outputDir, filePath } = await createProviderOutputFixture(t, 'delivery-fails.png');
+  const output = createAttemptOutputController('delivery-fails.png');
   const harness = await createInboundProviderOrderHarness(t, {
     service: { outputType: 'image' },
-    llmOutput: `Image complete.\nartifactPath: ${filePath}`,
-    llmSessionCwd: outputDir,
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Image complete.'),
+    llmSessionCwd: () => output.sessionCwd(),
     rawTxs: {
       [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
     },
@@ -2866,11 +2891,12 @@ test('/api services.execute persists seller lifecycle state and provider runtime
 test('/api services.execute resolves non-text provider artifacts into direct traces', async (t) => {
   const paymentTxid = '2'.repeat(64);
   const uploadCalls = [];
-  const { outputDir, filePath } = await createProviderOutputFixture(t, 'direct-image.png');
+  const output = createAttemptOutputController('direct-image.png');
   const harness = await createInboundProviderOrderHarness(t, {
     service: { outputType: 'image' },
-    llmOutput: `Direct image complete.\nartifactPath: ${filePath}`,
-    llmSessionCwd: outputDir,
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Direct image complete.'),
+    llmSessionCwd: () => output.sessionCwd(),
     providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
   });
 
@@ -2900,19 +2926,19 @@ test('/api services.execute resolves non-text provider artifacts into direct tra
   assert.equal(result.ok, true);
   assert.equal(uploadCalls.length, 1);
   assert.match(result.data.responseText, /metafile:\/\/provider-artifact-1\.png/);
-  assertNoProviderLocalPathLeak(result.data.responseText, filePath);
+  assertNoProviderLocalPathLeak(result.data.responseText, output.filePath);
 
   const state = await harness.runtimeStateStore.readState();
   const trace = state.traces.find((entry) => entry.traceId === 'trace-provider-direct-artifact');
   assert.ok(trace, 'expected direct provider artifact trace');
-  assertNoProviderLocalPathLeak(trace, filePath);
+  assertNoProviderLocalPathLeak(trace, output.filePath);
 
   const sessionState = await createSessionStateStore(harness.homeDir).readState();
   const runnerItem = sessionState.transcriptItems.find((item) => item.id === 'trace-provider-direct-artifact-provider-runner-result');
   assert.ok(runnerItem);
   assert.match(runnerItem.content, /metafile:\/\/provider-artifact-1\.png/);
   assert.deepEqual(runnerItem.metadata.deliveryArtifacts.map((artifact) => artifact.kind), ['image']);
-  assertNoProviderLocalPathLeak(runnerItem, filePath);
+  assertNoProviderLocalPathLeak(runnerItem, output.filePath);
 
   const traceResult = await harness.handlers.trace.getTrace({ traceId: 'trace-provider-direct-artifact' });
   assert.equal(traceResult.ok, true);
@@ -2924,7 +2950,7 @@ test('/api services.execute resolves non-text provider artifacts into direct tra
   assert.match(projectedDelivery.content, /metafile:\/\/provider-artifact-1\.png/);
   assert.deepEqual(projectedDelivery.artifacts.map((artifact) => artifact.kind), ['image']);
   assert.deepEqual(projectedDelivery.metadata.deliveryArtifacts.map((artifact) => artifact.kind), ['image']);
-  assertNoProviderLocalPathLeak(projectedDelivery, filePath);
+  assertNoProviderLocalPathLeak(projectedDelivery, output.filePath);
 });
 
 test('/api services.execute image output does not complete session while artifact upload is pending', async (t) => {
@@ -2933,11 +2959,12 @@ test('/api services.execute image output does not complete session while artifac
   const uploadCalls = [];
   const uploadMock = createProviderArtifactUploadMock(uploadCalls);
   let uploadWindowError = null;
-  const { outputDir, filePath } = await createProviderOutputFixture(t, 'direct-pending-window-image.png');
+  const output = createAttemptOutputController('direct-pending-window-image.png');
   const harness = await createInboundProviderOrderHarness(t, {
     service: { outputType: 'image' },
-    llmOutput: `Direct pending-window image complete.\nartifactPath: ${filePath}`,
-    llmSessionCwd: outputDir,
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Direct pending-window image complete.'),
+    llmSessionCwd: () => output.sessionCwd(),
     providerArtifactUploadLargeFile: async (input) => {
       try {
         await assertProviderSessionNotCompleted(harness.homeDir, traceId);
@@ -2980,14 +3007,15 @@ test('/api services.execute image output does not complete session while artifac
 test('/api services.execute upload failure marks direct seller order and trace failed', async (t) => {
   const paymentTxid = '3'.repeat(64);
   const uploadCalls = [];
-  const { outputDir, filePath } = await createProviderOutputFixture(t, 'direct-upload-fails.png');
+  const output = createAttemptOutputController('direct-upload-fails.png');
   const harness = await createInboundProviderOrderHarness(t, {
     service: { outputType: 'image' },
-    llmOutput: `Direct image complete.\nartifactPath: ${filePath}`,
-    llmSessionCwd: outputDir,
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Direct image complete.'),
+    llmSessionCwd: () => output.sessionCwd(),
     providerArtifactUploadLargeFile: async (input) => {
       uploadCalls.push(input);
-      const error = new Error(`simulated direct artifact upload failure at ${filePath}`);
+      const error = new Error(`simulated direct artifact upload failure at ${output.filePath}`);
       error.code = 'provider_artifact_upload_failed';
       throw error;
     },
@@ -3019,7 +3047,7 @@ test('/api services.execute upload failure marks direct seller order and trace f
   assert.equal(result.ok, false);
   assert.equal(result.code, 'provider_artifact_upload_failed');
   assert.match(result.message, /simulated direct artifact upload failure/);
-  assertNoProviderLocalPathLeak(result.message, filePath);
+  assertNoProviderLocalPathLeak(result.message, output.filePath);
   assert.equal(uploadCalls.length, 1);
 
   const state = await harness.runtimeStateStore.readState();
@@ -3028,14 +3056,14 @@ test('/api services.execute upload failure marks direct seller order and trace f
   assert.equal(sellerOrder.state, 'failed');
   assert.equal(sellerOrder.endReason, 'provider_artifact_upload_failed');
   assert.match(sellerOrder.failureReason, /simulated direct artifact upload failure/);
-  assertNoProviderLocalPathLeak(sellerOrder, filePath);
+  assertNoProviderLocalPathLeak(sellerOrder, output.filePath);
 
   const trace = state.traces.find((entry) => entry.traceId === 'trace-provider-direct-artifact-failure');
   assert.ok(trace, 'expected failed direct provider artifact trace');
   assert.equal(trace.a2a.publicStatus, 'remote_failed');
   assert.equal(trace.a2a.latestEvent, 'provider_failed');
   assert.equal(trace.a2a.taskRunState, 'failed');
-  assertNoProviderLocalPathLeak(trace, filePath);
+  assertNoProviderLocalPathLeak(trace, output.filePath);
 
   const sessionState = await createSessionStateStore(harness.homeDir).readState();
   const taskRun = sessionState.taskRuns.find((entry) => entry.runId === trace.a2a.taskRunId);
@@ -3045,7 +3073,7 @@ test('/api services.execute upload failure marks direct seller order and trace f
   assert.ok(failureItem);
   assert.equal(failureItem.type, 'failure');
   assert.match(failureItem.content, /simulated direct artifact upload failure/);
-  assertNoProviderLocalPathLeak(failureItem, filePath);
+  assertNoProviderLocalPathLeak(failureItem, output.filePath);
 
   const traceResult = await harness.handlers.trace.getTrace({ traceId: 'trace-provider-direct-artifact-failure' });
   assert.equal(traceResult.ok, true);
@@ -3053,7 +3081,7 @@ test('/api services.execute upload failure marks direct seller order and trace f
   assert.equal(traceResult.data.a2a.taskRunState, 'failed');
   const projectedFailure = traceResult.data.inspector.transcriptItems.find((item) => item.id === failureItem.id);
   assert.ok(projectedFailure);
-  assertNoProviderLocalPathLeak(traceResult.data, filePath);
+  assertNoProviderLocalPathLeak(traceResult.data, output.filePath);
 });
 
 test('/api services.execute rejects missing buyer globalMetaId before seller order persistence', async (t) => {

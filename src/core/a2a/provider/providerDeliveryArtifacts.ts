@@ -27,6 +27,7 @@ export interface ResolveProviderDeliveryArtifactsInput {
   responseText: string;
   outputType: string | null | undefined;
   executionCwd?: string | null;
+  workspaceRootCwd?: string | null;
   network?: string | null;
   signer: Signer;
   uploadLargeFile?: typeof uploadLargeFileToChain;
@@ -50,7 +51,9 @@ interface ResolvedProviderFile {
   lineIndexes: number[];
   scrubPaths: string[];
   executionCwd: string;
+  workspaceRootCwd: string;
   requestedExecutionCwd: string;
+  requestedWorkspaceRootCwd: string;
 }
 
 const PROVIDER_ARTIFACT_MARKER_PATTERN =
@@ -447,8 +450,8 @@ function addPathScrubVariant(paths: Set<string>, value: string | null | undefine
   paths.add(trimmed.split(path.sep).join('\\'));
 }
 
-async function resolveExecutionCwd(executionCwd?: string | null): Promise<string> {
-  const normalized = normalizeText(executionCwd);
+async function resolveWorkspaceDirectory(inputPath: string | null | undefined): Promise<string> {
+  const normalized = normalizeText(inputPath);
   if (!normalized) {
     throw providerArtifactError(
       'provider_artifact_workspace_required',
@@ -456,7 +459,12 @@ async function resolveExecutionCwd(executionCwd?: string | null): Promise<string
     );
   }
   try {
-    return await fs.realpath(path.resolve(normalized));
+    const realPath = await fs.realpath(path.resolve(normalized));
+    const stat = await fs.stat(realPath);
+    if (!stat.isDirectory()) {
+      throw new Error('workspace is not a directory');
+    }
+    return realPath;
   } catch {
     throw providerArtifactError(
       'provider_artifact_workspace_required',
@@ -468,7 +476,9 @@ async function resolveExecutionCwd(executionCwd?: string | null): Promise<string
 async function resolveLocalCandidate(input: {
   candidate: ProviderLocalCandidate;
   executionCwd: string;
+  workspaceRootCwd: string;
   requestedExecutionCwd: string;
+  requestedWorkspaceRootCwd: string;
   expectedFamily: ProviderExpectedArtifactFamily;
 }): Promise<ResolvedProviderFile> {
   const candidatePath = trimCandidatePath(input.candidate.filePath);
@@ -502,6 +512,12 @@ async function resolveLocalCandidate(input: {
     throw providerArtifactError(
       'provider_artifact_outside_workspace',
       'Provider artifact path resolves outside the execution workspace.',
+    );
+  }
+  if (!containsPath(input.workspaceRootCwd, realCandidatePath)) {
+    throw providerArtifactError(
+      'provider_artifact_outside_workspace',
+      'Provider artifact path resolves outside the provider attempt workspace.',
     );
   }
 
@@ -538,7 +554,9 @@ async function resolveLocalCandidate(input: {
 
   const scrubPaths = new Set<string>();
   addPathScrubVariant(scrubPaths, input.executionCwd);
+  addPathScrubVariant(scrubPaths, input.workspaceRootCwd);
   addPathScrubVariant(scrubPaths, input.requestedExecutionCwd);
+  addPathScrubVariant(scrubPaths, input.requestedWorkspaceRootCwd);
   addPathScrubVariant(scrubPaths, candidatePath);
   addPathScrubVariant(scrubPaths, absoluteCandidatePath);
   addPathScrubVariant(scrubPaths, realCandidatePath);
@@ -562,7 +580,9 @@ async function resolveLocalCandidate(input: {
     lineIndexes: input.candidate.lineIndexes,
     scrubPaths: [...scrubPaths],
     executionCwd: input.executionCwd,
+    workspaceRootCwd: input.workspaceRootCwd,
     requestedExecutionCwd: input.requestedExecutionCwd,
+    requestedWorkspaceRootCwd: input.requestedWorkspaceRootCwd,
   };
 }
 
@@ -660,13 +680,32 @@ async function scanWorkspaceForCandidates(
 async function resolveLocalArtifact(input: {
   responseText: string;
   executionCwd?: string | null;
+  workspaceRootCwd?: string | null;
   expectedFamily: ProviderExpectedArtifactFamily;
 }): Promise<ResolvedProviderFile> {
   const normalizedExecutionCwd = normalizeText(input.executionCwd);
-  const realExecutionCwd = await resolveExecutionCwd(input.executionCwd);
+  const explicitWorkspaceRootCwd = normalizeText(input.workspaceRootCwd);
+  const normalizedWorkspaceRootCwd = explicitWorkspaceRootCwd || normalizedExecutionCwd;
+  const realWorkspaceRootCwd = await resolveWorkspaceDirectory(normalizedWorkspaceRootCwd);
+  const realExecutionCwd = await resolveWorkspaceDirectory(input.executionCwd);
+  if (explicitWorkspaceRootCwd && path.resolve(explicitWorkspaceRootCwd) !== realWorkspaceRootCwd) {
+    throw providerArtifactError(
+      'provider_artifact_outside_workspace',
+      'Provider attempt workspace no longer resolves to its original directory.',
+    );
+  }
+  if (!containsPath(realWorkspaceRootCwd, realExecutionCwd)) {
+    throw providerArtifactError(
+      'provider_artifact_outside_workspace',
+      'Provider execution workspace resolves outside the provider attempt workspace.',
+    );
+  }
   const requestedExecutionCwd = normalizedExecutionCwd
     ? path.resolve(normalizedExecutionCwd)
     : realExecutionCwd;
+  const requestedWorkspaceRootCwd = normalizedWorkspaceRootCwd
+    ? path.resolve(normalizedWorkspaceRootCwd)
+    : realWorkspaceRootCwd;
   const markerCandidates = extractMarkerCandidates(input.responseText);
   if (markerCandidates.length > 1) {
     throw providerArtifactError(
@@ -678,7 +717,9 @@ async function resolveLocalArtifact(input: {
     return resolveLocalCandidate({
       candidate: markerCandidates[0],
       executionCwd: realExecutionCwd,
+      workspaceRootCwd: realWorkspaceRootCwd,
       requestedExecutionCwd,
+      requestedWorkspaceRootCwd,
       expectedFamily: input.expectedFamily,
     });
   }
@@ -694,7 +735,9 @@ async function resolveLocalArtifact(input: {
     return resolveLocalCandidate({
       candidate: bareCandidates[0],
       executionCwd: realExecutionCwd,
+      workspaceRootCwd: realWorkspaceRootCwd,
       requestedExecutionCwd,
+      requestedWorkspaceRootCwd,
       expectedFamily: input.expectedFamily,
     });
   }
@@ -715,7 +758,9 @@ async function resolveLocalArtifact(input: {
   return resolveLocalCandidate({
     candidate: scannedCandidates[0],
     executionCwd: realExecutionCwd,
+    workspaceRootCwd: realWorkspaceRootCwd,
     requestedExecutionCwd,
+    requestedWorkspaceRootCwd,
     expectedFamily: input.expectedFamily,
   });
 }
@@ -1033,6 +1078,7 @@ export async function resolveProviderDeliveryArtifacts(
   const localFile = await resolveLocalArtifact({
     responseText,
     executionCwd: input.executionCwd,
+    workspaceRootCwd: input.workspaceRootCwd,
     expectedFamily,
   });
   const artifact = await uploadResolvedLocalArtifact({

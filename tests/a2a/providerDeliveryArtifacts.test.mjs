@@ -907,6 +907,53 @@ test('fallback workspace scan succeeds only when exactly one file matches the re
   );
 });
 
+test('fallback workspace scan rejects mutable session cwd symlink outside attempt root', async () => {
+  const attemptWorkspace = await tempWorkspace();
+  const outsideWorkspace = await tempWorkspace();
+  const sessionCwd = path.join(attemptWorkspace, 'session-cwd');
+  await writeWorkspaceFile(outsideWorkspace, 'outside.png');
+  await symlink(outsideWorkspace, sessionCwd, 'dir');
+  const uploadCalls = [];
+
+  await assertRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'Generated the requested image.',
+      outputType: 'image',
+      executionCwd: sessionCwd,
+      workspaceRootCwd: await realpath(attemptWorkspace),
+      signer: fakeSigner(),
+      uploadLargeFile: fakeUploader(uploadCalls),
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_outside_workspace',
+  );
+
+  assert.equal(uploadCalls.length, 0);
+});
+
+test('fallback workspace scan accepts nested session cwd inside attempt root', async () => {
+  const attemptWorkspace = await tempWorkspace();
+  const sessionCwd = path.join(attemptWorkspace, 'nested-session');
+  await mkdir(sessionCwd, { recursive: true });
+  const filePath = await writeWorkspaceFile(sessionCwd, 'out/chart.png');
+  const uploadCalls = [];
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: 'Generated the requested image.',
+    outputType: 'image',
+    executionCwd: sessionCwd,
+    workspaceRootCwd: await realpath(attemptWorkspace),
+    signer: fakeSigner(),
+    uploadLargeFile: fakeUploader(uploadCalls),
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(uploadCalls[0].filePath, await realpath(filePath));
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
+});
+
 test('fallback workspace scan scrubs local path prose for the resolved artifact', async () => {
   const workspace = await tempWorkspace();
   const filePath = await writeWorkspaceFile(workspace, 'out/chart.png');

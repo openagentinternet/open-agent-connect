@@ -8636,6 +8636,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           responseText: baseResponseText,
           outputType: service.outputType,
           executionCwd: normalizeText(runnerResult.metadata?.sessionCwd) || null,
+          workspaceRootCwd: normalizeText(runnerResult.metadata?.attemptWorkspaceCwd) || null,
           network: artifactNetwork,
           signer,
           uploadLargeFile: providerArtifactUploadLargeFile,
@@ -14077,6 +14078,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         let responseText = baseResponseText;
         let deliveryArtifacts: A2ADeliveryArtifact[] = [];
         const providerExecutionCwd = normalizeText(runnerResult.metadata?.sessionCwd) || null;
+        const providerAttemptWorkspaceCwd = normalizeText(runnerResult.metadata?.attemptWorkspaceCwd) || null;
         if (!isTextLikeProviderOutputType(service.outputType)) {
           try {
             const artifactNetwork = await resolveFileUploadNetworkForHome(null, runtimeStateStore.paths.profileRoot);
@@ -14084,6 +14086,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               responseText: baseResponseText,
               outputType: service.outputType,
               executionCwd: providerExecutionCwd,
+              workspaceRootCwd: providerAttemptWorkspaceCwd,
               network: artifactNetwork,
               signer,
               uploadLargeFile: providerArtifactUploadLargeFile,
