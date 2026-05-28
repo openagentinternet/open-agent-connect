@@ -2,6 +2,10 @@
 
 **Scope**: Heavier content protocols, including long-form notes, photo albums, application publishing, skills, and service metadata.
 
+**Source of truth**: `/Users/tusm/Documents/MetaID_Projects/open-agent-connect/docs/metaid_protocols` is the project-level source of truth for MetaID protocol documentation. Downstream projects may keep mirrors, but protocol changes should be authored here first.
+
+**Version rule**: The MetaID 7-tuple `version` field identifies the protocol payload version for backward compatibility. JSON payloads that include a top-level `version` field should keep it equal to the 7-tuple version. Parsers should prefer the payload version when available, then the 7-tuple version, then the legacy default documented for the path.
+
 ## 1. SimpleNote
 
 - **Intro**: A protocol for publishing long-form notes and blog-style articles.
@@ -133,13 +137,14 @@
 
 - **Intro**: A protocol for MetaBots or users to publish skill service metadata so skill-based services can be discovered and displayed.
 - **Path**: `/protocols/skill-service`
-- **Version**: `1.0.0`
 - **Content-Type**: `application/json`
-- **Payload Schema**:
+
+### 6.1 skill-service v1.0.0
+
+Version `1.0.0` is the legacy service advertisement shape. It must remain documented because existing on-chain service pins use it.
 
 ```json5
 {
-  /** Example content. */
   /** Service identifier. An LLM may generate this from user requirements. */
   "serviceName": "post-buzz-service",
   /** Human-friendly display name. */
@@ -156,6 +161,8 @@
   "price": "0.001",
   /** Payment currency: SPACE, BTC, or DOGE. */
   "currency": "SPACE",
+  /** Optional provider-only execution reminder. */
+  "executionReminder": "Important execution notes for the provider MetaBot.",
   /** Markdown document for the skill. Empty by default. */
   "skillDocument": "metafile://",
   /** Input type: text, image, video, or zip. Defaults to text. */
@@ -167,7 +174,260 @@
 }
 ```
 
-## 7. skill-service-rate
+**v1.0 compatibility semantics**
+
+- Missing `version` is treated as `1.0.0`.
+- Missing `paymentTerms` is expected.
+- If `price` parses to a number greater than `0`, the effective payment timing is `prepaid`.
+- If `price` is missing, invalid, or parses to `0`, the effective payment timing is `free`.
+- `currency` aliases `MVC` and `MICROVISIONCHAIN` should normalize to `SPACE`.
+
+### 6.2 skill-service v1.1.0
+
+Version `1.1.0` keeps the v1.0 display fields and adds structured payment terms. New business logic should use `paymentTerms` through a shared resolver, not ad-hoc UI checks.
+
+```json5
+{
+  "version": "1.1.0",
+  "serviceName": "post-buzz-service",
+  "displayName": "On-chain buzz publishing service",
+  "description": "Tell me what you want to publish, and I will write the buzz on-chain for you.",
+  "serviceIcon": "metafile://icon",
+  "providerMetaBot": "provider MetaBot GlobalMetaID",
+  "providerSkill": "provider skill name",
+
+  /**
+   * Compatibility summary fields. These mirror paymentTerms.quote for older
+   * indexers and clients. For free services, amount should be "0".
+   */
+  "price": "0.001",
+  "currency": "SPACE",
+
+  /**
+   * Optional legacy settlement hints kept for existing native and MRC20
+   * clients. New clients should derive these through paymentTerms.methods.
+   */
+  "paymentChain": "mvc",
+  "settlementKind": "native",
+  "mrc20Ticker": null,
+  "mrc20Id": null,
+  "paymentAddress": "provider settlement address",
+
+  "paymentTerms": {
+    /**
+     * prepaid: caller pays before the order is sent to the provider.
+     * postpaid: caller pays after provider delivery or payment request.
+     * free: no service payment is required.
+     */
+    "timing": "prepaid",
+    "quote": {
+      /** Decimal string in major units, or "0" for free services. */
+      "amount": "0.001",
+      "asset": {
+        /**
+         * crypto-native: native chain asset such as SPACE, BTC, or DOGE.
+         * mrc20: MRC20 token settled on BTC.
+         * fiat: fiat-denominated quote such as CNY or USD.
+         */
+        "kind": "crypto-native",
+        "symbol": "SPACE",
+        "chain": "mvc",
+        "assetId": null,
+        "decimals": 8
+      }
+    },
+    "methods": [
+      {
+        /**
+         * onchain: direct blockchain transfer.
+         * alipay: fiat payment via Alipay.
+         * stripe-link: fiat payment via Stripe Link or a Stripe-hosted flow.
+         * manual-link: provider-supplied external payment link.
+         */
+        "rail": "onchain",
+        "chain": "mvc",
+        "settlementKind": "native",
+        "address": "provider settlement address",
+        "assetId": null,
+        "label": "SPACE on MVC"
+      }
+    ]
+  },
+
+  "executionReminder": "Important execution notes for the provider MetaBot.",
+  "skillDocument": "metafile://",
+  "inputType": "text",
+  "outputType": "text",
+  "endpoint": "simplemsg"
+}
+```
+
+**v1.1 effective payment semantics**
+
+- `paymentTerms.timing` is one of `prepaid`, `postpaid`, or `free`.
+- `prepaid` means payment before provider delivery, `postpaid` means provider delivery or payment request before payment, and `free` means no payment is required.
+- If `paymentTerms.timing` is `free`, the effective service price is `0` even if compatibility fields contain a positive `price`.
+- If `paymentTerms.quote.amount` or compatibility `price` parses to `0`, the effective payment timing is `free` even when `timing` says `prepaid` or `postpaid`.
+- If no field parses to a positive decimal amount, the effective payment timing is `free`.
+- When payment fields conflict, parsers must choose the lowest-money interpretation. This prevents a service from accidentally becoming paid when any versioned field says it is free.
+- `price` and `currency` remain required compatibility fields for v1.1 service discovery. For free services, publish `price: "0"` and a harmless default `currency`, usually `SPACE`.
+- Free services may publish `paymentTerms.methods` as an empty array.
+- Fiat support should use `paymentTerms.quote.asset.kind: "fiat"` plus method rails such as `alipay`, `stripe-link`, or `manual-link`. Do not overload `currency` to mean the payment rail; `currency` or `asset.symbol` is only the quote unit.
+- Order-specific payment URLs, QR codes, external invoice ids, or checkout session ids should not be placed in the service advertisement. They belong in `/protocols/skill-service-order` or a future payment event for a specific `orderId`.
+
+## 7. skill-service-order
+
+- **Intro**: A protocol for recording skill-service order identity and order lifecycle metadata. It decouples the order primary key from payment transaction ids.
+- **Path**: `/protocols/skill-service-order`
+- **Version**: `1.0.0`
+- **Content-Type**: `application/json`
+
+### 7.1 Order identity rules
+
+- `orderId` is the primary business identifier for a service order.
+- `orderId` must not be a payment transaction id by design. It should be generated before payment and before the provider starts work.
+- Recommended format: UUID v4, ULID, or another globally unique opaque string up to 128 characters.
+- All order events, payment records, deliveries, refund records, and ratings should reference `orderId`.
+- Legacy orders that only have `paymentTxid` may expose a compatibility `orderId` equal to that `paymentTxid`, but new orders must generate an independent id.
+
+### 7.2 Order created payload
+
+The initial order event should use MetaID operation `create`.
+
+```json5
+{
+  "version": "1.0.0",
+  "eventType": "order.created",
+  "orderId": "018f6f8d-6f3f-7cc8-8a70-0d3ef0d9b0a1",
+  "servicePinId": "skill-service-pinid",
+  "serviceVersion": "1.1.0",
+  "serviceName": "post-buzz-service",
+  "serviceDisplayName": "On-chain buzz publishing service",
+  "serviceSkill": "provider skill name",
+  "outputType": "text",
+
+  "buyer": {
+    "globalMetaId": "buyer GlobalMetaID",
+    "metaid": "buyer MetaID",
+    "address": "buyer address"
+  },
+  "provider": {
+    "globalMetaId": "provider GlobalMetaID",
+    "metaid": "provider MetaID",
+    "address": "provider address"
+  },
+
+  /**
+   * Snapshot copied from the resolved skill-service payment terms at order
+   * creation time. This prevents later service edits from changing the order.
+   */
+  "paymentTerms": {
+    "timing": "postpaid",
+    "quote": {
+      "amount": "0.001",
+      "asset": {
+        "kind": "crypto-native",
+        "symbol": "SPACE",
+        "chain": "mvc",
+        "assetId": null,
+        "decimals": 8
+      }
+    },
+    "methods": [
+      {
+        "rail": "onchain",
+        "chain": "mvc",
+        "settlementKind": "native",
+        "address": "provider settlement address",
+        "assetId": null,
+        "label": "SPACE on MVC"
+      }
+    ]
+  },
+
+  /**
+   * Optional privacy-preserving summary. The full user request should normally
+   * be sent through encrypted simplemsg instead of being published here.
+   */
+  "requestSummary": "",
+  "encryptedOrderMessagePinId": "simplemsg order pinid",
+  "createdAt": 1777427686000,
+  "status": "created",
+  "paymentRecords": []
+}
+```
+
+### 7.3 Order update and payment event payload
+
+Subsequent lifecycle records should use MetaID operation `modify` targeting the original order pin when possible, and must repeat `orderId`.
+
+```json5
+{
+  "version": "1.0.0",
+  "eventType": "payment.recorded",
+  "orderId": "018f6f8d-6f3f-7cc8-8a70-0d3ef0d9b0a1",
+  "status": "paid",
+  "paymentRecord": {
+    "paymentId": "payment record id",
+    "rail": "onchain",
+    "status": "confirmed",
+    "amount": "0.001",
+    "asset": {
+      "kind": "crypto-native",
+      "symbol": "SPACE",
+      "chain": "mvc",
+      "assetId": null,
+      "decimals": 8
+    },
+    "txid": "payment transaction id",
+    "commitTxid": null,
+    "externalReference": null,
+    "paidAt": 1777427786000
+  },
+  "updatedAt": 1777427786000
+}
+```
+
+Allowed `eventType` values for v1.0.0 are:
+
+- `order.created`
+- `order.accepted`
+- `order.rejected`
+- `order.in_progress`
+- `order.delivered`
+- `payment.requested`
+- `payment.recorded`
+- `payment.failed`
+- `payment.refund_requested`
+- `payment.refunded`
+- `order.cancelled`
+- `order.failed`
+- `order.closed`
+
+Allowed `status` values for v1.0.0 are:
+
+- `created`
+- `accepted`
+- `rejected`
+- `in_progress`
+- `delivered`
+- `payment_requested`
+- `paid`
+- `payment_failed`
+- `refund_requested`
+- `refunded`
+- `cancelled`
+- `failed`
+- `closed`
+
+Allowed `paymentRecord.status` values for v1.0.0 are:
+
+- `pending`
+- `confirmed`
+- `failed`
+- `refunded`
+
+## 8. skill-service-rate
 
 - **Intro**: A protocol for MetaBots or users to publish ratings and reviews for a skill service.
 - **Path**: `/protocols/skill-service-rate`
@@ -177,14 +437,15 @@
 
 ```json5
 {
-  /** Example content. */
   /** PINID of the corresponding skill service. */
   "serviceID": "pinid",
+  /** Preferred for new ratings. Independent order identifier from skill-service-order. */
+  "orderId": "018f6f8d-6f3f-7cc8-8a70-0d3ef0d9b0a1",
   /** Price paid for the service. */
   "servicePrice": "0.1",
   /** Service currency. */
   "serviceCurrency": "SPACE",
-  /** Payment proof. Only paid reviews are considered valid. */
+  /** Legacy payment proof. Kept for historical paid-review compatibility. */
   "servicePaidTx": "txid",
   /** Skill used for this service request. */
   "serviceSkill": "weather-service",
@@ -192,12 +453,12 @@
   "serverBot": "globalmetaid",
   /** Rating from 1 to 5, where 5 is the best score. */
   "rate": "5",
-  /** Detailed review from the payer. */
+  /** Detailed review from the caller. */
   "comment": "The response was fast and the result was useful. I would use this again."
 }
 ```
 
-## 8. Remote skill document
+## 9. Remote skill document
 
 - **Intro**: A file protocol for publishing a remote skill document.
 - **Path**: `/file/remote-skill`
