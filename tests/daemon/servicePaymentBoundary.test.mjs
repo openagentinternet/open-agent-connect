@@ -1525,8 +1525,15 @@ test('buyer-side timeout creates a service refund request for paid simplemsg ord
   assert.ok(Array.isArray(payload.evidencePinIds));
   assert.ok(payload.evidencePinIds.includes(called.data.orderPinId));
 
-  const state = await harness.runtimeStateStore.readState();
-  const trace = state.traces.find((entry) => entry.order?.paymentTxid === paymentTxid);
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.order?.status === 'refund_pending'
+      && entry.order?.failureReason === 'delivery_timeout'
+      && entry.order?.refundRequestPinId
+    )) ?? null;
+  });
   assert.ok(trace, 'expected caller trace for timed-out paid order');
   assert.equal(trace.order.status, 'refund_pending');
   assert.match(trace.order.refundRequestPinId, /^\/protocols\/service-refund-request-pin-/);
@@ -1986,7 +1993,10 @@ test('buyer-side completed reply ignores unified persistence failures and still 
     )) ?? null;
   });
   assert.ok(trace, 'expected caller reply completion despite unified persistence failure');
-  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/skill-service-rate'), true);
+  const ratingWrite = await waitForCondition(() => (
+    harness.writes.find((entry) => entry.path === '/protocols/skill-service-rate') ?? null
+  ));
+  assert.ok(ratingWrite, 'expected completed reply to publish an auto-rating pin');
   assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
 });
 
@@ -2123,8 +2133,15 @@ test('buyer-side non-text deliverable rejects http-only media references for pai
       assert.equal(payload.paymentTxid, scenario.paymentTxid);
       assert.equal(payload.failureReason, 'invalid_deliverable');
 
-      const state = await harness.runtimeStateStore.readState();
-      const trace = state.traces.find((entry) => entry.order?.paymentTxid === scenario.paymentTxid);
+      const trace = await waitForCondition(async () => {
+        const state = await harness.runtimeStateStore.readState();
+        return state.traces.find((entry) => (
+          entry.order?.paymentTxid === scenario.paymentTxid
+          && entry.order?.status === 'refund_pending'
+          && entry.order?.failureReason === 'invalid_deliverable'
+          && entry.a2a?.publicStatus === 'remote_failed'
+        )) ?? null;
+      });
       assert.ok(trace, `expected ${scenario.outputType} invalid deliverable trace`);
       assert.equal(trace.order.status, 'refund_pending');
       assert.equal(trace.order.failureReason, 'invalid_deliverable');
@@ -2186,8 +2203,15 @@ test('buyer-side invalid non-text deliverable creates a refund request for paid 
   assert.equal(payload.paymentTxid, paymentTxid);
   assert.equal(payload.failureReason, 'invalid_deliverable');
 
-  const state = await harness.runtimeStateStore.readState();
-  const trace = state.traces.find((entry) => entry.order?.paymentTxid === paymentTxid);
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.order?.status === 'refund_pending'
+      && entry.order?.failureReason === 'invalid_deliverable'
+      && entry.a2a?.publicStatus === 'remote_failed'
+    )) ?? null;
+  });
   assert.ok(trace, 'expected invalid deliverable trace');
   assert.equal(trace.order.status, 'refund_pending');
   assert.equal(trace.order.failureReason, 'invalid_deliverable');
