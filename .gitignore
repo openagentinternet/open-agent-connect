@@ -7,6 +7,7 @@ release/packs/
 coverage/
 *.log
 .worktrees/
+.playwright-mcp/
 
 !skillpacks/**/runtime/dist/
 !skillpacks/**/runtime/dist/**
