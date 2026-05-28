@@ -1,3 +1,4 @@
+import '../../compat/nodeLocalStorage';
 import {
   AddressType,
   BtcWallet,

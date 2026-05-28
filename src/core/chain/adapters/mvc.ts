@@ -1,3 +1,4 @@
+import '../../compat/nodeLocalStorage';
 import { TxComposer, mvc } from 'meta-contract';
 import {
   AddressType,
