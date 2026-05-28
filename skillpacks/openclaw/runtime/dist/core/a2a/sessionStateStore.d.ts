@@ -1,6 +1,7 @@
 import type { MetabotPaths } from '../state/paths';
 import type { A2ASessionRecord, A2ASessionRole, A2ATaskRunRecord } from './sessionTypes';
 import type { PublicStatus } from './publicStatus';
+import type { A2ADeliveryArtifact } from './deliveryArtifacts';
 export type A2ATranscriptSender = 'caller' | 'provider' | 'system';
 export type A2ALoopCursor = string | number | null;
 export interface A2ALoopCursors {
@@ -15,6 +16,7 @@ export interface A2ATranscriptItemRecord {
     type: string;
     sender: A2ATranscriptSender;
     content: string;
+    artifacts?: A2ADeliveryArtifact[];
     metadata?: Record<string, unknown> | null;
 }
 export interface A2APublicStatusSnapshot {

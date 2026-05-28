@@ -10,6 +10,7 @@ const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const paths_1 = require("../state/paths");
 const orderProtocol_1 = require("./protocol/orderProtocol");
+const deliveryArtifacts_1 = require("./deliveryArtifacts");
 const CHAT_FILE_RE = /^chat-[a-z0-9]{8}-[a-z0-9]{8}\.json$/i;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -256,6 +257,9 @@ function messageBelongsToSession(message, session) {
 function stripOrderProtocolFallback(content) {
     return content.replace(/^\[[A-Za-z_]+(?::[0-9a-fA-F]{64})?(?:\s+[A-Za-z0-9_-]+)?\]\s*/u, '').trim();
 }
+function arrayValue(value) {
+    return Array.isArray(value) ? value : [];
+}
 function projectProtocolMessage(input) {
     const { message, session } = input;
     const protocolTag = normalizeText(message.protocolTag);
@@ -280,6 +284,7 @@ function projectProtocolMessage(input) {
         return {
             type: 'message',
             content: rawContent,
+            artifacts: [],
             metadata,
         };
     }
@@ -287,6 +292,7 @@ function projectProtocolMessage(input) {
         return {
             type: 'order',
             content: stripOrderProtocolFallback(rawContent) || rawContent,
+            artifacts: [],
             metadata,
         };
     }
@@ -295,19 +301,37 @@ function projectProtocolMessage(input) {
         return {
             type: 'order_status',
             content: normalizeText(parsed?.content) || stripOrderProtocolFallback(rawContent) || rawContent,
+            artifacts: [],
             metadata,
         };
     }
     if (protocolTag.toUpperCase() === 'DELIVERY') {
         const parsed = (0, orderProtocol_1.parseDeliveryMessage)(rawContent);
-        const content = normalizeText(parsed?.result) || stripOrderProtocolFallback(rawContent) || rawContent;
+        const content = parsed
+            ? normalizeText(parsed.result)
+            : stripOrderProtocolFallback(rawContent) || rawContent;
+        const artifacts = (0, deliveryArtifacts_1.normalizeDeliveryArtifacts)({
+            artifacts: [
+                ...arrayValue(message.artifacts),
+                ...arrayValue(parsed?.artifacts),
+            ],
+            resultText: rawContent,
+        });
+        const deliveryPayload = parsed
+            ? {
+                ...parsed,
+                artifacts,
+            }
+            : null;
         return {
             type: 'delivery',
             content,
+            artifacts,
             metadata: {
                 ...metadata,
                 deliveryPinId: normalizeText(message.pinId) || null,
-                deliveryPayload: parsed ?? null,
+                deliveryPayload,
+                deliveryArtifacts: artifacts,
                 publicStatus: 'completed',
                 event: 'provider_completed',
                 servicePinId: normalizeText(parsed?.servicePinId)
@@ -322,6 +346,7 @@ function projectProtocolMessage(input) {
         return {
             type: 'needs_rating',
             content: normalizeText(parsed?.content) || stripOrderProtocolFallback(rawContent) || rawContent,
+            artifacts: [],
             metadata: {
                 ...metadata,
                 needsRating: true,
@@ -333,6 +358,7 @@ function projectProtocolMessage(input) {
         return {
             type: 'order_end',
             content: normalizeText(parsed?.content) || stripOrderProtocolFallback(rawContent) || rawContent,
+            artifacts: [],
             metadata: {
                 ...metadata,
                 endReason: normalizeText(parsed?.reason) || null,
@@ -343,6 +369,7 @@ function projectProtocolMessage(input) {
     return {
         type: protocolTag.toLowerCase(),
         content: stripOrderProtocolFallback(rawContent) || rawContent,
+        artifacts: [],
         metadata,
     };
 }
@@ -361,6 +388,7 @@ function projectTranscriptItems(input) {
             type: projected.type,
             sender: message.direction === 'outgoing' ? localSender : peerSender,
             content: projected.content,
+            ...(projected.artifacts.length ? { artifacts: projected.artifacts } : {}),
             metadata: projected.metadata,
         };
     })
@@ -374,19 +402,22 @@ function extractProjectedResult(items) {
             continue;
         }
         const content = normalizeText(item.content);
-        if (!content) {
+        const deliveryArtifacts = Array.isArray(item.artifacts) ? item.artifacts : [];
+        if (!content && deliveryArtifacts.length === 0) {
             continue;
         }
         return {
-            resultText: content,
+            resultText: content || null,
             resultObservedAt: normalizeTimestamp(item.timestamp),
             resultDeliveryPinId: normalizeText(item.metadata.deliveryPinId) || null,
+            deliveryArtifacts,
         };
     }
     return {
         resultText: null,
         resultObservedAt: null,
         resultDeliveryPinId: null,
+        deliveryArtifacts: [],
     };
 }
 function extractProjectedRatingRequest(items) {
@@ -524,6 +555,7 @@ function projectDetailSession(input) {
         },
         resultText: result.resultText,
         responseText: result.resultText,
+        deliveryArtifacts: result.deliveryArtifacts,
         resultObservedAt: result.resultObservedAt,
         resultDeliveryPinId: result.resultDeliveryPinId,
         ratingRequestText: ratingRequest.ratingRequestText,

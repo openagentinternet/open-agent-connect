@@ -8,6 +8,20 @@ export function buildTraceInspectorScript(): string {
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
+function normalizeNullableText(value) {
+  var normalized = normalizeText(value);
+  return normalized || null;
+}
+function normalizeByteLength(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+function normalizeArtifactFileName(value) {
+  var normalized = normalizeText(value).replace(/\\\\/g, '/');
+  if (!normalized) return null;
+  var fileName = normalized.split('/').filter(Boolean).pop() || '';
+  fileName = fileName.split(/[?#]/, 1)[0];
+  return fileName || null;
+}
 function coerceObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return value;
@@ -21,6 +35,56 @@ function normalizeTimestamp(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   if (value >= 1e9 && value < 1e12) return value * 1000;
   return value;
+}
+function normalizeArtifactContentType(value) {
+  var normalized = normalizeText(value).toLowerCase();
+  if (!normalized || normalized.indexOf('://') !== -1 || normalized.indexOf('\\\\') !== -1 || normalized.charAt(0) === '/') return '';
+  if (!/^[a-z0-9][a-z0-9!#$&^_.+-]*\\/[a-z0-9][a-z0-9!#$&^_.+-]*(?: *; *[a-z0-9][a-z0-9!#$&^_.+-]*=[a-z0-9][a-z0-9!#$&^_.+:-]*)*$/i.test(normalized)) return '';
+  return normalized;
+}
+function inferArtifactKind(ext, contentType) {
+  if (contentType.indexOf('image/') === 0) return 'image';
+  if (contentType.indexOf('video/') === 0) return 'video';
+  if (contentType.indexOf('audio/') === 0) return 'audio';
+  return ext && IMG_EXT.has(ext) ? 'image' : ext && VID_EXT.has(ext) ? 'video' : ext && AUD_EXT.has(ext) ? 'audio' : 'file';
+}
+function coerceDeliveryArtifact(value) {
+  var record = coerceObject(value);
+  if (!record) return null;
+  var base = parseMetafileUri(normalizeText(record.uri));
+  if (!base) return null;
+  var contentType = normalizeArtifactContentType(record.contentType);
+  return {
+    uri: base.uri,
+    pinId: base.pinId,
+    kind: inferArtifactKind(base.ext, contentType),
+    fileName: normalizeArtifactFileName(record.fileName) || base.fileName,
+    extension: base.ext,
+    contentType: contentType || null,
+    byteLength: normalizeByteLength(record.byteLength),
+    sourceUrl: base.sourceUrl,
+    fallbackUrl: base.fallbackUrl,
+    downloadUrl: base.downloadUrl,
+  };
+}
+function collectDeliveryArtifacts(item, metadata) {
+  var deliveryPayload = coerceObject(metadata && metadata.deliveryPayload);
+  var sources = [
+    item.artifacts,
+    metadata && metadata.deliveryArtifacts,
+    deliveryPayload && deliveryPayload.artifacts,
+  ];
+  var seen = new Set();
+  var artifacts = [];
+  sources.forEach(function(source) {
+    (Array.isArray(source) ? source : []).forEach(function(entry) {
+      var artifact = coerceDeliveryArtifact(entry);
+      if (!artifact || seen.has(artifact.uri)) return;
+      seen.add(artifact.uri);
+      artifacts.push(artifact);
+    });
+  });
+  return artifacts;
 }
 const ACTIVE_STATES = new Set(['requesting_remote', 'remote_received', 'remote_executing']);
 const STALE_THRESHOLD_MS = 15 * 60 * 1000;
@@ -89,6 +153,7 @@ function buildSessionDetailViewModel(payload) {
     if (!id) return null;
     var type = normalizeText(item.type) || 'message';
     var sender = normalizeText(item.sender) || 'system';
+    var metadata = coerceObject(item.metadata);
     return {
       id: id,
       sessionId: sessionId,
@@ -97,7 +162,8 @@ function buildSessionDetailViewModel(payload) {
       type: type,
       sender: sender,
       content: normalizeText(item.content),
-      metadata: coerceObject(item.metadata),
+      metadata: metadata,
+      deliveryArtifacts: collectDeliveryArtifacts(item, metadata),
       tone: getMessageTone(sender, role, type),
     };
   }).filter(function(m) { return m !== null; })
@@ -167,42 +233,75 @@ function fmtDate(ms) {
 
 const METAFILE_REGEX = /metafile:\\/\\/[^\\s<>"'\`]+/gi;
 const IMG_EXT = new Set(['.jpg','.jpeg','.gif','.png','.webp','.bmp','.svg']);
-const VID_EXT = new Set(['.mp4','.webm','.mov']);
-const AUD_EXT = new Set(['.mp3','.wav','.flac']);
+const VID_EXT = new Set(['.m4v','.mp4','.webm','.mov']);
+const AUD_EXT = new Set(['.m4a','.mp3','.ogg','.wav','.flac']);
+const MEDIA_HYDRATION_LIMIT = 8;
+const MEDIA_FETCH_TIMEOUT_MS = 10000;
 
 function parseMetafileUri(rawUri) {
   const uri = rawUri.trim().replace(/[),.;:!?]+$/, '');
-  if (!uri.toLowerCase().startsWith('metafile://')) return null;
+  if (!uri || /[\\s\\x00-\\x1f\\x7f]/.test(uri) || !uri.toLowerCase().startsWith('metafile://')) return null;
   const withoutScheme = uri.slice('metafile://'.length);
-  if (!withoutScheme) return null;
   const basePart = withoutScheme.split(/[?#]/)[0] || '';
+  if (!basePart || basePart.indexOf('/') !== -1 || basePart.indexOf('\\\\') !== -1) return null;
   const lastDot = basePart.lastIndexOf('.');
   const hasExt = lastDot > 0 && lastDot < basePart.length - 1;
   const pinId = hasExt ? basePart.slice(0, lastDot) : basePart;
   const ext = hasExt ? ('.' + basePart.slice(lastDot + 1).toLowerCase()) : null;
   if (!pinId) return null;
-  const kind = ext && IMG_EXT.has(ext) ? 'image' : ext && VID_EXT.has(ext) ? 'video' : ext && AUD_EXT.has(ext) ? 'audio' : 'download';
+  const kind = ext && IMG_EXT.has(ext) ? 'image' : ext && VID_EXT.has(ext) ? 'video' : ext && AUD_EXT.has(ext) ? 'audio' : 'file';
   const enc = encodeURIComponent(pinId);
   return { uri, pinId, ext, kind,
     sourceUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/' + enc,
     fallbackUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/content/' + enc,
+    downloadUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/' + enc,
     fileName: ext ? pinId + ext : pinId };
+}
+
+function normalizeMetafileArtifact(rawArtifact) {
+  var artifact = coerceObject(rawArtifact);
+  if (!artifact) return null;
+  var base = parseMetafileUri(normalizeText(artifact.uri));
+  if (!base) return null;
+  var contentType = normalizeArtifactContentType(artifact.contentType);
+  var kind = inferArtifactKind(base.ext, contentType);
+  var sourceUrl = base.sourceUrl;
+  var fallbackUrl = base.fallbackUrl;
+  var downloadUrl = base.downloadUrl;
+  return {
+    uri: base.uri,
+    pinId: normalizeText(artifact.pinId) || base.pinId,
+    ext: normalizeText(artifact.extension) || base.ext,
+    kind: kind,
+    sourceUrl: sourceUrl,
+    fallbackUrl: fallbackUrl,
+    downloadUrl: downloadUrl,
+    fileName: normalizeArtifactFileName(artifact.fileName) || base.fileName || base.pinId,
+  };
 }
 
 function imgWithFallback(src, fallback, alt, cls) {
   return '<img src="' + escHtml(src) + '" alt="' + escHtml(alt || '') + '"' + (cls ? ' class="' + cls + '"' : '') + ' loading="lazy" data-fallback="' + escHtml(fallback) + '" onerror="if(this.src!==this.dataset.fallback)this.src=this.dataset.fallback" />';
 }
+function renderMetafileFooter(item) {
+  var fileName = item.fileName || item.pinId || 'Artifact';
+  var pin = item.pinId && item.pinId !== fileName ? '<span class="metafile-pin">' + escHtml(item.pinId) + '</span>' : '';
+  return '<div class="metafile-footer">' +
+    '<div class="metafile-labels"><span class="metafile-name">' + escHtml(fileName) + '</span>' + pin + '</div>' +
+    '<a href="' + escHtml(item.downloadUrl || item.sourceUrl || item.fallbackUrl) + '" target="_blank" rel="noopener" class="metafile-dl">Download</a>' +
+  '</div>';
+}
 function renderMetafilePreview(item) {
   if (item.kind === 'image') {
-    return '<div class="metafile-preview">' + imgWithFallback(item.sourceUrl, item.fallbackUrl, item.fileName, '') + '<div class="metafile-footer"><span class="metafile-pin">' + escHtml(item.pinId) + '</span><a href="' + escHtml(item.sourceUrl) + '" target="_blank" rel="noopener" class="metafile-dl">↓</a></div></div>';
+    return '<div class="metafile-preview">' + imgWithFallback(item.sourceUrl, item.fallbackUrl, item.fileName, '') + renderMetafileFooter(item) + '</div>';
   }
   if (item.kind === 'video') {
-    return '<div class="metafile-preview"><video controls preload="auto" playsinline><source src="' + escHtml(item.sourceUrl) + '" /></video><div class="metafile-footer"><span class="metafile-pin">' + escHtml(item.pinId) + '</span><a href="' + escHtml(item.sourceUrl) + '" target="_blank" rel="noopener" class="metafile-dl">↓</a></div></div>';
+    return '<div class="metafile-preview"><video controls class="metafile-media is-loading" preload="metadata" playsinline data-source-url="' + escHtml(item.sourceUrl) + '" data-fallback-url="' + escHtml(item.fallbackUrl) + '" data-download-url="' + escHtml(item.downloadUrl) + '"></video>' + renderMetafileFooter(item) + '</div>';
   }
   if (item.kind === 'audio') {
-    return '<div class="metafile-preview"><audio controls preload="auto"><source src="' + escHtml(item.sourceUrl) + '" /></audio><div class="metafile-footer"><span class="metafile-pin">' + escHtml(item.pinId) + '</span><a href="' + escHtml(item.sourceUrl) + '" target="_blank" rel="noopener" class="metafile-dl">↓</a></div></div>';
+    return '<div class="metafile-preview"><audio controls class="metafile-media is-loading" preload="metadata" data-source-url="' + escHtml(item.sourceUrl) + '" data-fallback-url="' + escHtml(item.fallbackUrl) + '" data-download-url="' + escHtml(item.downloadUrl) + '"></audio>' + renderMetafileFooter(item) + '</div>';
   }
-  return '<div class="metafile-preview metafile-dl-card"><span class="metafile-pin">' + escHtml(item.fileName) + '</span><a href="' + escHtml(item.sourceUrl) + '" target="_blank" rel="noopener" class="metafile-dl">↓ Download</a></div>';
+  return '<div class="metafile-preview metafile-dl-card"><div class="metafile-labels"><span class="metafile-name">' + escHtml(item.fileName || item.pinId || 'Artifact') + '</span><span class="metafile-pin">' + escHtml(item.pinId || '') + '</span></div><a href="' + escHtml(item.downloadUrl || item.sourceUrl || item.fallbackUrl) + '" target="_blank" rel="noopener" class="metafile-dl">Download</a></div>';
 }
 
 function extractMetafiles(content) {
@@ -213,6 +312,18 @@ function extractMetafiles(content) {
     const parsed = parseMetafileUri(m);
     if (parsed && !seen.has(parsed.uri)) { seen.add(parsed.uri); result.push(parsed); }
   }
+  return result;
+}
+
+function normalizeMessageArtifacts(artifacts) {
+  const seen = new Set();
+  const result = [];
+  (Array.isArray(artifacts) ? artifacts : []).forEach(function(entry) {
+    const artifact = normalizeMetafileArtifact(entry);
+    if (!artifact || seen.has(artifact.uri)) return;
+    seen.add(artifact.uri);
+    result.push(artifact);
+  });
   return result;
 }
 
@@ -577,6 +688,7 @@ let refreshInFlight = false;
 let detailLoadSeq = 0;
 let renderedDetailSignature = '';
 let renderedMessageCount = 0;
+let activeMediaObjectUrls = new Set();
 
 const $ = (sel) => document.querySelector(sel);
 const qAll = (sel) => [...document.querySelectorAll(sel)];
@@ -622,6 +734,7 @@ function buildMessageSignature(msg) {
     msg.sender,
     msg.content,
     stableStringify(msg.metadata || null),
+    stableStringify(msg.deliveryArtifacts || null),
   ].join('\\u001f');
 }
 
@@ -716,6 +829,7 @@ async function renderSessionDetail() {
   if (!sessionDetail) {
     renderedDetailSignature = '';
     renderedMessageCount = 0;
+    revokeMediaObjectUrls();
     panel.innerHTML = '<div class="detail-empty"><p>Select a session from the list to inspect it.</p></div>';
     return;
   }
@@ -769,6 +883,7 @@ async function renderSessionDetail() {
     ? '<div class="messages-list">' + detail.messages.map(msg => renderMessage(msg, localName, peerName, localAvatar, peerAvatar)).join('') + '</div>'
     : '<div class="messages-empty"><span class="mono">No transcript messages recorded for this session.</span></div>';
 
+  revokeMediaObjectUrls();
   panel.innerHTML = headerHtml + '<div class="messages-scroll">' + messagesHtml + '</div>';
   const scroll = panel.querySelector('.messages-scroll');
   if (scroll) {
@@ -789,6 +904,7 @@ async function renderSessionDetail() {
   panel.querySelectorAll('[data-copy-text]').forEach(btn => {
     btn.addEventListener('click', () => copyTextToClipboard(btn.dataset.copyText || ''));
   });
+  hydrateMediaPlayback(panel);
 }
 
 const TOOL_ID_SEQ = { n: 0 };
@@ -858,6 +974,98 @@ async function copyTextToClipboard(value) {
   showToast(copied ? 'Copied' : 'Copy unavailable');
 }
 
+function revokeMediaObjectUrls() {
+  if (typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') {
+    activeMediaObjectUrls.clear();
+    return;
+  }
+  activeMediaObjectUrls.forEach(function(objectUrl) {
+    try {
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      /* ignore */
+    }
+  });
+  activeMediaObjectUrls.clear();
+}
+
+function setMediaHydrationState(element, state) {
+  if (!element || !element.classList) return;
+  element.classList.toggle('is-loading', state === 'loading');
+  element.classList.toggle('is-ready', state === 'ready');
+  element.classList.toggle('is-fallback', state === 'fallback');
+}
+
+async function fetchMediaBlob(url) {
+  if (!url || typeof fetch !== 'function') return null;
+  let controller = null;
+  let timeout = null;
+  const options = {};
+  if (typeof AbortController !== 'undefined') {
+    controller = new AbortController();
+    options.signal = controller.signal;
+  }
+  if (controller && typeof setTimeout === 'function') {
+    timeout = setTimeout(function() { controller.abort(); }, MEDIA_FETCH_TIMEOUT_MS);
+  }
+  try {
+    const response = await fetch(url, options);
+    if (!response || !response.ok || typeof response.blob !== 'function') {
+      return null;
+    }
+    return await response.blob();
+  } finally {
+    if (timeout && typeof clearTimeout === 'function') {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+async function hydrateMediaElement(element) {
+  if (!element || !element.dataset || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+    return;
+  }
+  setMediaHydrationState(element, 'loading');
+  const sourceUrl = normalizeText(element.dataset.sourceUrl);
+  const fallbackUrl = normalizeText(element.dataset.fallbackUrl);
+  const urls = sourceUrl && sourceUrl === fallbackUrl ? [sourceUrl] : [sourceUrl, fallbackUrl].filter(Boolean);
+
+  for (const url of urls) {
+    try {
+      const blob = await fetchMediaBlob(url);
+      if (!blob) continue;
+      const oldObjectUrl = element.dataset.objectUrl;
+      if (oldObjectUrl && activeMediaObjectUrls.has(oldObjectUrl) && typeof URL.revokeObjectURL === 'function') {
+        URL.revokeObjectURL(oldObjectUrl);
+        activeMediaObjectUrls.delete(oldObjectUrl);
+      }
+      const objectUrl = URL.createObjectURL(blob);
+      activeMediaObjectUrls.add(objectUrl);
+      element.dataset.objectUrl = objectUrl;
+      element.src = objectUrl;
+      setMediaHydrationState(element, 'ready');
+      return;
+    } catch {
+      /* try the next URL */
+    }
+  }
+  setMediaHydrationState(element, 'fallback');
+}
+
+function hydrateMediaPlayback(root) {
+  if (!root || typeof root.querySelectorAll !== 'function') return;
+  const mediaElements = Array.prototype.slice.call(
+    root.querySelectorAll('video[data-source-url], audio[data-source-url]'),
+    0,
+    MEDIA_HYDRATION_LIMIT,
+  );
+  mediaElements.forEach(function(element) {
+    hydrateMediaElement(element).catch(function() {
+      setMediaHydrationState(element, 'fallback');
+    });
+  });
+}
+
 function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
   if (msg.tone === 'system') {
     return '<div class="msg-system"><span>' + escHtml(msg.content) + '</span></div>';
@@ -878,7 +1086,9 @@ function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
   const isLocal = msg.tone === 'local';
   const name = isLocal ? localName : peerName;
   const avatar = isLocal ? localAvatar : peerAvatar;
-  const metafiles = extractMetafiles(msg.content);
+  const structuredMetafiles = normalizeMessageArtifacts(msg.deliveryArtifacts);
+  const usingTextMetafiles = structuredMetafiles.length === 0;
+  const metafiles = usingTextMetafiles ? extractMetafiles(msg.content) : structuredMetafiles;
   const timeStr = fmtTime(msg.timestamp);
   const txid = resolveMessageTxid(msg);
   const txidPreview = formatTxidPreview(txid);
@@ -890,7 +1100,7 @@ function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
     ? txidHtml + timeHtml
     : timeHtml + txidHtml;
   let contentHtml = renderMarkdown(msg.content);
-  if (metafiles.length) {
+  if (usingTextMetafiles && metafiles.length) {
     const cleanContent = msg.content.replace(METAFILE_REGEX, '').trim();
     contentHtml = cleanContent ? renderMarkdown(cleanContent) : '';
   }
@@ -930,6 +1140,7 @@ async function loadSessionDetail(sessionId, options) {
   if (panel && !silent) {
     renderedDetailSignature = '';
     renderedMessageCount = 0;
+    revokeMediaObjectUrls();
     panel.innerHTML = '<div class="detail-loading"><span class="mono">Loading session…</span></div>';
   }
   try {
@@ -944,6 +1155,7 @@ async function loadSessionDetail(sessionId, options) {
     sessionDetail = null;
     renderedDetailSignature = '';
     renderedMessageCount = 0;
+    revokeMediaObjectUrls();
     if (panel) panel.innerHTML = '<div class="detail-empty error-text"><p>Failed to load session: ' + escHtml(String(err)) + '</p></div>';
   }
 }

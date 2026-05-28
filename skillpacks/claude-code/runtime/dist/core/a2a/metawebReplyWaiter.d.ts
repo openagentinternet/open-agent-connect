@@ -1,3 +1,4 @@
+import { type A2ADeliveryArtifact } from './deliveryArtifacts';
 export interface AwaitMetaWebServiceReplyInput {
     callerGlobalMetaId: string;
     callerPrivateKeyHex: string;
@@ -14,7 +15,11 @@ export type AwaitMetaWebServiceReplyResult = {
     deliveryPinId: string | null;
     observedAt: number | null;
     rawMessage: Record<string, unknown> | null;
+    artifacts: A2ADeliveryArtifact[];
     ratingRequestText?: string | null;
+    ratingRequestPinId?: string | null;
+    ratingRequestObservedAt?: number | null;
+    ratingRawMessage?: Record<string, unknown> | null;
 } | {
     state: 'timeout';
 };

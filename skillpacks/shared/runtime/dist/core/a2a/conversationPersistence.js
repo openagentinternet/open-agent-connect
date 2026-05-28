@@ -11,6 +11,7 @@ exports.persistA2AConversationMessageBestEffort = persistA2AConversationMessageB
 const node_path_1 = __importDefault(require("node:path"));
 const paths_1 = require("../state/paths");
 const conversationStore_1 = require("./conversationStore");
+const deliveryArtifacts_1 = require("./deliveryArtifacts");
 const simplemsgClassifier_1 = require("./simplemsgClassifier");
 const SENSITIVE_RAW_METADATA_KEYS = new Set([
     'content',
@@ -143,6 +144,10 @@ async function persistA2AConversationMessage(input) {
         ? Math.trunc(Number(input.message.timestamp))
         : Date.now();
     const classification = (0, simplemsgClassifier_1.classifySimplemsgContent)(input.message.content);
+    const artifacts = (0, deliveryArtifacts_1.normalizeDeliveryArtifacts)({
+        artifacts: input.message.artifacts,
+        resultText: input.message.content,
+    });
     const classifiedOrderTxid = classification.kind === 'order_protocol'
         ? classification.orderTxid
         : null;
@@ -169,6 +174,7 @@ async function persistA2AConversationMessage(input) {
         paymentTxid: normalizeText(input.message.paymentTxid) || null,
         content: String(input.message.content ?? ''),
         contentType: normalizeText(input.message.contentType) || 'text/plain',
+        ...(artifacts.length ? { artifacts } : {}),
         chain: normalizeText(input.message.chain) || null,
         pinId: normalizeText(input.message.pinId) || null,
         txid,

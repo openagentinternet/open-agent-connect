@@ -8,6 +8,7 @@ const socket_io_client_1 = require("socket.io-client");
 const privateChat_1 = require("../chat/privateChat");
 const orderProtocol_1 = require("./protocol/orderProtocol");
 const serviceOrderProtocols_1 = require("../orders/serviceOrderProtocols");
+const deliveryArtifacts_1 = require("./deliveryArtifacts");
 const DEFAULT_SOCKET_ENDPOINTS = [
     { url: 'wss://api.idchat.io', path: '/socket/socket.io' },
     { url: 'wss://www.show.now', path: '/socket/socket.io' },
@@ -210,6 +211,11 @@ function createSocketIoMetaWebReplyWaiter() {
                                 state: 'completed',
                                 ...pendingDelivery,
                                 ratingRequestText: ratingRequest.content,
+                                ratingRequestPinId: pinIdFromMessage(message),
+                                ratingRequestObservedAt: typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)
+                                    ? message.timestamp
+                                    : null,
+                                ratingRawMessage: normalizeObject(message),
                             });
                             return;
                         }
@@ -224,13 +230,18 @@ function createSocketIoMetaWebReplyWaiter() {
                             return;
                         }
                         pendingDeliveryOrderTxid = normalizeOrderProtocolReference(delivery.orderTxid) || null;
+                        const resultText = normalizeText(delivery.result);
                         pendingDelivery = {
-                            responseText: (0, serviceOrderProtocols_1.cleanServiceResultText)(normalizeText(delivery.result)) || normalizeText(delivery.result),
+                            responseText: (0, serviceOrderProtocols_1.cleanServiceResultText)(resultText) || resultText,
                             deliveryPinId: pinIdFromMessage(message),
                             observedAt: typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)
                                 ? message.timestamp
                                 : null,
                             rawMessage: normalizeObject(message),
+                            artifacts: (0, deliveryArtifacts_1.normalizeDeliveryArtifacts)({
+                                artifacts: delivery.artifacts,
+                                resultText,
+                            }),
                             ratingRequestText: null,
                         };
                         if (timeoutHandle) {

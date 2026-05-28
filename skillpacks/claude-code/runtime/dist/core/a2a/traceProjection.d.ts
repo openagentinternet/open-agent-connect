@@ -1,3 +1,4 @@
+import { type A2ADeliveryArtifact } from './deliveryArtifacts';
 export interface A2ATraceProjectionProfile {
     name?: string | null;
     slug?: string | null;
@@ -39,6 +40,7 @@ export interface UnifiedA2ATraceTranscriptItem {
     type: string;
     sender: 'caller' | 'provider' | 'system';
     content: string;
+    artifacts?: A2ADeliveryArtifact[];
     metadata: Record<string, unknown>;
 }
 export interface UnifiedA2ATraceSessionDetail {
@@ -63,6 +65,7 @@ export interface UnifiedA2ATraceSessionDetail {
     };
     resultText: string | null;
     responseText: string | null;
+    deliveryArtifacts: A2ADeliveryArtifact[];
     resultObservedAt: number | null;
     resultDeliveryPinId: string | null;
     ratingRequestText: string | null;

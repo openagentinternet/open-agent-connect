@@ -3,8 +3,13 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildSessionListViewModel = buildSessionListViewModel;
 exports.buildSessionDetailViewModel = buildSessionDetailViewModel;
+const deliveryArtifacts_1 = require("../../../core/a2a/deliveryArtifacts");
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
+}
+function normalizeNullableText(value) {
+    const normalized = normalizeText(value);
+    return normalized || null;
 }
 function coerceArray(value) {
     return Array.isArray(value)
@@ -15,6 +20,30 @@ function coerceObject(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value))
         return null;
     return value;
+}
+function coerceDeliveryArtifact(value) {
+    return (0, deliveryArtifacts_1.normalizeDeliveryArtifacts)({ artifacts: [value] })[0] ?? null;
+}
+function collectDeliveryArtifacts(item, metadata) {
+    const deliveryPayload = coerceObject(metadata?.deliveryPayload);
+    const sources = [
+        item.artifacts,
+        metadata?.deliveryArtifacts,
+        deliveryPayload?.artifacts,
+    ];
+    const seen = new Set();
+    const artifacts = [];
+    for (const source of sources) {
+        for (const entry of Array.isArray(source) ? source : []) {
+            const artifact = coerceDeliveryArtifact(entry);
+            if (!artifact || seen.has(artifact.uri)) {
+                continue;
+            }
+            seen.add(artifact.uri);
+            artifacts.push(artifact);
+        }
+    }
+    return artifacts;
 }
 function normalizeTimestamp(value) {
     if (typeof value !== 'number' || !Number.isFinite(value))
@@ -132,6 +161,7 @@ function buildSessionDetailViewModel(payload) {
         const timestamp = normalizeTimestamp(item.timestamp);
         const taskRunId = normalizeText(item.taskRunId) || null;
         const metadata = coerceObject(item.metadata);
+        const deliveryArtifacts = collectDeliveryArtifacts(item, metadata);
         return {
             id,
             sessionId,
@@ -141,6 +171,7 @@ function buildSessionDetailViewModel(payload) {
             sender,
             content,
             metadata,
+            deliveryArtifacts,
             tone: getMessageTone(sender, role, type),
         };
     })

@@ -13,6 +13,59 @@ const platformRegistry_1 = require("../../platform/platformRegistry");
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
+function sanitizeWorkspaceSegment(value, fallback) {
+    const normalized = normalizeText(value)
+        .replace(/[^a-zA-Z0-9._-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+    return normalized || fallback;
+}
+function readOrderWorkspaceIdentifier(order) {
+    const metadata = order.metadata ?? {};
+    return normalizeText(metadata.traceId)
+        || normalizeText(metadata.orderTxid)
+        || normalizeText(metadata.servicePinId)
+        || normalizeText(order.servicePinId)
+        || 'order';
+}
+function isPathInsideOrEqual(parentPath, candidatePath) {
+    const relative = node_path_1.default.relative(parentPath, candidatePath);
+    return relative === '' || (Boolean(relative) && !relative.startsWith('..') && !node_path_1.default.isAbsolute(relative));
+}
+async function resolveCompletedSessionCwd(sessionCwd, executionCwd) {
+    const normalizedSessionCwd = normalizeText(sessionCwd);
+    if (!normalizedSessionCwd) {
+        return executionCwd;
+    }
+    const resolvedSessionCwd = node_path_1.default.resolve(executionCwd, normalizedSessionCwd);
+    try {
+        const [realExecutionCwd, realSessionCwd, sessionStat] = await Promise.all([
+            node_fs_1.promises.realpath(executionCwd),
+            node_fs_1.promises.realpath(resolvedSessionCwd),
+            node_fs_1.promises.stat(resolvedSessionCwd),
+        ]);
+        if (!sessionStat.isDirectory()) {
+            return executionCwd;
+        }
+        return isPathInsideOrEqual(realExecutionCwd, realSessionCwd) ? resolvedSessionCwd : executionCwd;
+    }
+    catch {
+        return executionCwd;
+    }
+}
+async function createProviderExecutionWorkspace(deps, order, runtime, runNonce, attemptIndex) {
+    const runId = [
+        sanitizeWorkspaceSegment(readOrderWorkspaceIdentifier(order), 'order'),
+        sanitizeWorkspaceSegment(runNonce, 'run'),
+    ].join('-');
+    const attemptId = [
+        `attempt-${attemptIndex}`,
+        sanitizeWorkspaceSegment(runtime.id, 'runtime'),
+    ].join('-');
+    const workspace = node_path_1.default.join(deps.projectRoot, '.runtime', 'a2a-provider-runs', runId, attemptId);
+    await node_fs_1.promises.mkdir(workspace, { recursive: true });
+    return workspace;
+}
 function isLeadingProcessNarration(value, providerSkill) {
     const text = normalizeText(value);
     if (!text || text.length > 320) {
@@ -72,7 +125,7 @@ function buildPaidOrderSystemPrompt(input) {
 }
 function isTextOutputType(value) {
     const outputType = normalizeText(value).toLowerCase();
-    return !outputType || outputType === 'text';
+    return !outputType || outputType === 'text' || outputType === 'markdown';
 }
 function resolveSkillRootAbsolutePath(deps, root) {
     return root.kind === 'project'
@@ -428,14 +481,19 @@ function createProviderServiceRunner(input) {
                 userTask: order.userTask,
                 taskContext: order.taskContext,
             });
+            const runNonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+            let attemptIndex = 0;
             const executeWithSelection = async (selectedSelection) => {
                 const selectedRuntime = selectedSelection.runtime;
+                attemptIndex += 1;
+                const executionCwd = await createProviderExecutionWorkspace(input, order, selectedRuntime, runNonce, attemptIndex);
+                const attemptWorkspaceCwd = await node_fs_1.promises.realpath(executionCwd);
                 const sessionId = await input.llmExecutor.execute({
                     runtimeId: selectedRuntime.id,
                     runtime: selectedRuntime,
                     prompt: buildPaidOrderUserPrompt(order),
                     systemPrompt,
-                    cwd: input.projectRoot,
+                    cwd: executionCwd,
                     skills: [order.providerSkill],
                     skillSourcePaths: {
                         [order.providerSkill]: selectedSelection.skill.absolutePath,
@@ -447,6 +505,8 @@ function createProviderServiceRunner(input) {
                     runtime: selectedRuntime,
                     selection: selectedSelection,
                     sessionId,
+                    executionCwd,
+                    attemptWorkspaceCwd,
                     session: await waitForSession(input.llmExecutor, sessionId, sessionTimeoutMs, pollIntervalMs),
                 };
             };
@@ -533,14 +593,6 @@ function createProviderServiceRunner(input) {
                     selection,
                 });
             }
-            if (!isTextOutputType(order.outputType)) {
-                return createRuntimeFailedResult('provider_deliverable_invalid', 'Non-text provider deliverables require validation and upload support before delivery.', {
-                    runtime,
-                    providerSkill: order.providerSkill,
-                    sessionId,
-                    selection,
-                });
-            }
             return {
                 state: 'completed',
                 responseText,
@@ -548,6 +600,9 @@ function createProviderServiceRunner(input) {
                     runtimeId: runtime.id,
                     sessionId,
                     providerSkill: order.providerSkill,
+                    outputType: normalizeText(order.outputType) || 'text',
+                    sessionCwd: await resolveCompletedSessionCwd(session?.cwd, run.executionCwd),
+                    attemptWorkspaceCwd: run.attemptWorkspaceCwd,
                     fallbackSelected: selection.fallbackSelected,
                     selection,
                 },

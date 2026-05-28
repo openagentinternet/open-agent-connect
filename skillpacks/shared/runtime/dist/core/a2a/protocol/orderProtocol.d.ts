@@ -4,6 +4,7 @@ export interface DeliveryMessagePayload {
     servicePinId?: string | null;
     serviceName?: string | null;
     result?: string | null;
+    artifacts?: unknown;
     deliveredAt?: number | null;
     orderTxid?: string;
     [key: string]: unknown;

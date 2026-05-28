@@ -63,6 +63,7 @@ const privateChatStateStore_1 = require("../core/chat/privateChatStateStore");
 const sessionEngine_1 = require("../core/a2a/sessionEngine");
 const publicStatus_1 = require("../core/a2a/publicStatus");
 const serviceRunnerContracts_1 = require("../core/a2a/provider/serviceRunnerContracts");
+const providerDeliveryArtifacts_1 = require("../core/a2a/provider/providerDeliveryArtifacts");
 const traceWatch_1 = require("../core/a2a/watch/traceWatch");
 const watchEvents_1 = require("../core/a2a/watch/watchEvents");
 const conversationStore_1 = require("../core/a2a/conversationStore");
@@ -85,6 +86,7 @@ const opcat_1 = require("../core/chain/adapters/opcat");
 const configStore_1 = require("../core/config/configStore");
 const configTypes_1 = require("../core/config/configTypes");
 const metawebReplyWaiter_1 = require("../core/a2a/metawebReplyWaiter");
+const deliveryArtifacts_1 = require("../core/a2a/deliveryArtifacts");
 const orderProtocol_1 = require("../core/a2a/protocol/orderProtocol");
 const callerRating_1 = require("../core/a2a/callerRating");
 const orderProtocolTextGenerator_1 = require("../core/a2a/orderProtocolTextGenerator");
@@ -119,6 +121,40 @@ const LOOM_DEV_ROUND_LLM_TIMEOUT_MS = 900_000;
 const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
+}
+function readErrorCode(error, fallback) {
+    const code = error instanceof Error ? error.code : undefined;
+    return normalizeText(code) || fallback;
+}
+function readErrorMessage(error, code, fallback) {
+    const rawMessage = normalizeText(error instanceof Error ? error.message : String(error ?? ''));
+    const prefix = code ? `${code}:` : '';
+    const withoutCode = prefix && rawMessage.startsWith(prefix)
+        ? rawMessage.slice(prefix.length).trim()
+        : rawMessage;
+    return withoutCode || fallback;
+}
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function sanitizeProviderArtifactFailureText(value, localPaths = []) {
+    let sanitized = normalizeText(value);
+    for (const localPath of localPaths) {
+        const normalizedPath = normalizeText(localPath);
+        if (!normalizedPath) {
+            continue;
+        }
+        sanitized = sanitized.replace(new RegExp(escapeRegExp(normalizedPath), 'g'), '[uploaded artifact]');
+    }
+    return sanitized
+        .replace(/\bfile:\/\/[^\s"'<>]+/g, '[uploaded artifact]')
+        .replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\s"'<>]+/g, '[uploaded artifact]')
+        .replace(/(^|[\s(])\/(?:Users|home|tmp|var|private|Volumes)[^\s"'<>)]*/g, '$1[uploaded artifact]')
+        .replace(/[ \t]+/g, ' ')
+        .trim();
+}
+function readProviderArtifactFailureText(error, code, fallback, localPaths = []) {
+    return sanitizeProviderArtifactFailureText(readErrorMessage(error, code, fallback), localPaths) || fallback;
 }
 const buyerAutoRatingPublishChainsByTrace = new Map();
 const pendingBuyerRatingPublishesByTrace = new Map();
@@ -2135,7 +2171,9 @@ async function appendA2ATranscriptItems(sessionStateStore, items) {
         type: normalizeText(item.type) || 'message',
         content: normalizeText(item.content),
     }))
-        .filter((item) => item.id && item.sessionId && item.content);
+        .filter((item) => (item.id
+        && item.sessionId
+        && (item.content || (Array.isArray(item.artifacts) && item.artifacts.length > 0))));
     if (!normalizedItems.length) {
         return;
     }
@@ -2696,6 +2734,7 @@ function projectPrivateHistorySimpleMessageToTranscript(input) {
     };
     let type = protocolTag ? protocolTag.toLowerCase() : 'message';
     let content = stripOrderProtocolBubblePrefix(rawContent) || rawContent;
+    let deliveryArtifacts = [];
     if (protocolTag === 'ORDER') {
         type = 'order';
     }
@@ -2705,9 +2744,25 @@ function projectPrivateHistorySimpleMessageToTranscript(input) {
     }
     else if (protocolTag === 'DELIVERY') {
         type = 'delivery';
-        content = normalizeText(delivery?.result) || content;
+        content = normalizeText(delivery?.result);
+        deliveryArtifacts = (0, deliveryArtifacts_1.normalizeDeliveryArtifacts)({
+            artifacts: delivery?.artifacts,
+            resultText: delivery?.result,
+        });
+        const deliveryPayload = delivery ? { ...delivery } : null;
+        if (deliveryPayload) {
+            if (deliveryArtifacts.length) {
+                deliveryPayload.artifacts = deliveryArtifacts;
+            }
+            else {
+                delete deliveryPayload.artifacts;
+            }
+        }
         metadata.deliveryPinId = normalizeText(input.message.pinId) || null;
-        metadata.deliveryPayload = delivery ?? null;
+        metadata.deliveryPayload = deliveryPayload;
+        if (deliveryArtifacts.length) {
+            metadata.deliveryArtifacts = deliveryArtifacts;
+        }
         metadata.publicStatus = 'completed';
         metadata.event = 'provider_completed';
         metadata.servicePinId = parsedServicePinId || null;
@@ -2745,6 +2800,7 @@ function projectPrivateHistorySimpleMessageToTranscript(input) {
         type,
         sender,
         content,
+        ...(deliveryArtifacts.length ? { artifacts: deliveryArtifacts } : {}),
         metadata,
     };
 }
@@ -3929,6 +3985,208 @@ async function loadCallerContinuationState(input) {
         trace,
     };
 }
+function normalizeReplyRawRecord(value) {
+    return value && typeof value === 'object' && !Array.isArray(value)
+        ? value
+        : {};
+}
+function normalizeReplyRawMessage(reply) {
+    return normalizeReplyRawRecord(reply.rawMessage);
+}
+function normalizeReplyRatingRawMessage(reply) {
+    return normalizeReplyRawRecord(reply.ratingRawMessage);
+}
+function normalizeReplyRecordText(raw, keys) {
+    for (const key of keys) {
+        const value = normalizeText(raw[key]);
+        if (value) {
+            return value;
+        }
+    }
+    return '';
+}
+function normalizeReplyRecordTextArray(raw, keys) {
+    const values = [];
+    for (const key of keys) {
+        const value = raw[key];
+        if (Array.isArray(value)) {
+            values.push(...value.map((entry) => normalizeText(entry)).filter(Boolean));
+        }
+    }
+    return [...new Set(values)];
+}
+function resolveCompletedReplyChainRefs(reply) {
+    return resolveReplyChainRefs({
+        fallbackPinId: reply.deliveryPinId,
+        raw: normalizeReplyRawMessage(reply),
+    });
+}
+function resolveCompletedReplyRatingChainRefs(reply) {
+    return resolveReplyChainRefs({
+        fallbackPinId: reply.ratingRequestPinId,
+        raw: normalizeReplyRatingRawMessage(reply),
+    });
+}
+function resolveReplyChainRefs(input) {
+    const pinId = normalizeText(input.fallbackPinId)
+        || normalizeReplyRecordText(input.raw, ['pinId', 'messagePinId'])
+        || null;
+    const rawTxid = normalizeReplyRecordText(input.raw, ['txid', 'txId']);
+    const txids = [...new Set([
+            ...normalizeReplyRecordTextArray(input.raw, ['txids', 'txIds']),
+            rawTxid,
+        ].filter(Boolean))];
+    return {
+        pinId,
+        txid: rawTxid || txids[0] || null,
+        txids,
+    };
+}
+function normalizeReplyObservedAt(reply, fallback) {
+    return Number.isFinite(reply.observedAt)
+        ? Math.trunc(Number(reply.observedAt))
+        : fallback;
+}
+function normalizeReplyRatingObservedAt(reply, fallback) {
+    return Number.isFinite(reply.ratingRequestObservedAt)
+        ? Math.trunc(Number(reply.ratingRequestObservedAt))
+        : fallback;
+}
+async function persistCallerCompletedReplyConversationBestEffort(input) {
+    try {
+        const localIdentity = input.localIdentity;
+        if (!localIdentity) {
+            return;
+        }
+        const orderTxid = normalizeText(input.trace.order?.orderTxid)
+            || (Array.isArray(input.trace.order?.orderTxids)
+                ? input.trace.order.orderTxids.map((entry) => normalizeText(entry)).find(Boolean)
+                : '')
+            || null;
+        const paymentTxid = normalizeText(input.trace.order?.paymentTxid) || null;
+        const servicePinId = normalizeText(input.session.servicePinId)
+            || normalizeText(input.trace.a2a?.servicePinId)
+            || normalizeText(input.trace.order?.serviceId)
+            || null;
+        const serviceName = normalizeText(input.trace.order?.serviceName)
+            || normalizeText(input.trace.session.peerName)
+            || null;
+        const outputType = normalizeText(input.trace.order?.outputType)
+            || null;
+        const deliveredAt = normalizeReplyObservedAt(input.reply, input.mutation.session.updatedAt);
+        const ratingRequestText = normalizeText(input.reply.ratingRequestText);
+        const ratingRequestedAt = ratingRequestText
+            ? normalizeReplyRatingObservedAt(input.reply, deliveredAt + 1)
+            : null;
+        const artifacts = (0, deliveryArtifacts_1.normalizeDeliveryArtifacts)({
+            artifacts: input.reply.artifacts,
+            resultText: input.reply.responseText,
+        });
+        const chainRefs = resolveCompletedReplyChainRefs(input.reply);
+        const deliveryMessage = (0, orderProtocol_1.buildDeliveryMessage)({
+            paymentTxid,
+            servicePinId,
+            serviceName,
+            result: input.reply.responseText,
+            ...(artifacts.length ? { artifacts } : {}),
+            deliveredAt,
+        }, orderTxid);
+        const deliveryMessageId = chainRefs.pinId || chainRefs.txid || `${input.trace.traceId}-caller-delivery`;
+        await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
+            paths: input.runtimeStateStore.paths,
+            local: {
+                profileSlug: node_path_1.default.basename(input.runtimeStateStore.paths.profileRoot),
+                globalMetaId: localIdentity.globalMetaId,
+                name: localIdentity.name,
+                chatPublicKey: localIdentity.chatPublicKey,
+            },
+            peer: {
+                globalMetaId: input.session.providerGlobalMetaId,
+                name: serviceName,
+                chatPublicKey: input.providerChatPublicKey || null,
+            },
+            message: {
+                messageId: deliveryMessageId,
+                direction: 'incoming',
+                content: deliveryMessage,
+                ...(artifacts.length ? { artifacts } : {}),
+                pinId: chainRefs.pinId,
+                txid: chainRefs.txid,
+                txids: chainRefs.txids,
+                chain: 'mvc',
+                orderTxid,
+                paymentTxid,
+                timestamp: deliveredAt,
+                raw: input.reply.rawMessage,
+            },
+            orderSession: {
+                role: 'caller',
+                state: ratingRequestText ? 'rating_pending' : 'completed',
+                orderTxid,
+                paymentTxid,
+                servicePinId,
+                serviceName,
+                outputType,
+                deliveredAt,
+            },
+        }, input.a2aConversationPersister);
+        if (!ratingRequestText) {
+            return;
+        }
+        const ratingChainRefs = resolveCompletedReplyRatingChainRefs(input.reply);
+        const ratingMessageId = ratingChainRefs.pinId
+            || ratingChainRefs.txid
+            || `${deliveryMessageId}-needs-rating`;
+        const ratingRaw = Object.keys(normalizeReplyRatingRawMessage(input.reply)).length
+            ? input.reply.ratingRawMessage
+            : {
+                synthetic: true,
+                deliveryPinId: chainRefs.pinId,
+                source: 'callerReplyWaiter',
+            };
+        await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
+            paths: input.runtimeStateStore.paths,
+            local: {
+                profileSlug: node_path_1.default.basename(input.runtimeStateStore.paths.profileRoot),
+                globalMetaId: localIdentity.globalMetaId,
+                name: localIdentity.name,
+                chatPublicKey: localIdentity.chatPublicKey,
+            },
+            peer: {
+                globalMetaId: input.session.providerGlobalMetaId,
+                name: serviceName,
+                chatPublicKey: input.providerChatPublicKey || null,
+            },
+            message: {
+                messageId: ratingMessageId,
+                direction: 'incoming',
+                content: (0, orderProtocol_1.buildNeedsRatingMessage)(orderTxid || '', ratingRequestText),
+                pinId: ratingChainRefs.pinId,
+                txid: ratingChainRefs.txid,
+                txids: ratingChainRefs.txids,
+                chain: 'mvc',
+                orderTxid,
+                paymentTxid,
+                replyPinId: chainRefs.pinId,
+                timestamp: ratingRequestedAt,
+                raw: ratingRaw,
+            },
+            orderSession: {
+                role: 'caller',
+                state: 'rating_pending',
+                orderTxid,
+                paymentTxid,
+                servicePinId,
+                serviceName,
+                outputType,
+                ratingRequestedAt,
+            },
+        }, input.a2aConversationPersister);
+    }
+    catch {
+        // Unified A2A persistence is best effort and must not block caller completion.
+    }
+}
 async function applyCallerReplyResult(input) {
     await input.sessionStateStore.appendPublicStatusSnapshots([
         {
@@ -3952,6 +4210,7 @@ async function applyCallerReplyResult(input) {
         result: runnerResult,
     });
     const publicStatus = await persistSessionMutation(input.sessionStateStore, mutation);
+    const replyArtifacts = input.reply.state === 'completed' ? input.reply.artifacts : [];
     const transcriptItems = [
         {
             id: `${input.trace.traceId}-provider-delivery`,
@@ -3961,10 +4220,12 @@ async function applyCallerReplyResult(input) {
             type: 'assistant',
             sender: 'provider',
             content: input.reply.state === 'completed' ? input.reply.responseText : '',
+            ...(replyArtifacts.length ? { artifacts: replyArtifacts } : {}),
             metadata: {
                 publicStatus: publicStatus.status,
                 event: mutation.event,
                 deliveryPinId: input.reply.state === 'completed' ? input.reply.deliveryPinId : null,
+                deliveryArtifacts: replyArtifacts,
             },
         },
     ];
@@ -3984,6 +4245,18 @@ async function applyCallerReplyResult(input) {
         });
     }
     await appendA2ATranscriptItems(input.sessionStateStore, transcriptItems);
+    if (input.reply.state === 'completed') {
+        await persistCallerCompletedReplyConversationBestEffort({
+            reply: input.reply,
+            session: input.session,
+            mutation,
+            trace: input.trace,
+            runtimeStateStore: input.runtimeStateStore,
+            localIdentity: input.localIdentity,
+            providerChatPublicKey: input.providerChatPublicKey,
+            a2aConversationPersister: input.a2aConversationPersister,
+        });
+    }
     const rebuilt = await rebuildTraceArtifactsFromSessionState({
         baseTrace: input.trace,
         runtimeStateStore: input.runtimeStateStore,
@@ -4008,6 +4281,8 @@ function createDefaultMetabotDaemonHandlers(input) {
         secretStore,
         adapters,
     });
+    const providerArtifactUploadLargeFile = input.providerArtifactUploadLargeFile ?? uploadLargeFile_1.uploadLargeFileToChain;
+    const providerLargeFileUploader = input.providerLargeFileUploader;
     const configStore = (0, configStore_1.createConfigStore)(input.homeDir);
     function isSupportedWriteNetwork(value) {
         return configTypes_1.DEFAULT_WRITE_NETWORKS.includes(value);
@@ -5577,10 +5852,8 @@ function createDefaultMetabotDaemonHandlers(input) {
         return !outputType || outputType === 'text' || outputType === 'markdown';
     }
     function containsDeliverableReference(value) {
-        const text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
-        return /metafile:\/\/[^\s)]+/iu.test(text)
-            || /https?:\/\/[^\s)]+\.(?:png|jpe?g|webp|gif|mp4|mov|webm|mp3|wav|m4a|pdf|zip|csv|json)(?:[?#][^\s)]*)?/iu.test(text)
-            || /https?:\/\/file\.metaid\.io\/[^\s)]+/iu.test(text);
+        const text = typeof value === 'string' ? value : JSON.stringify(value ?? '') ?? '';
+        return (0, deliveryArtifacts_1.extractDeliveryArtifactsFromText)(text).length > 0;
     }
     function validateBuyerReplyDeliverable(inputReply) {
         const expectedOutputType = normalizeServiceOutputType(inputReply.trace.order?.outputType);
@@ -5588,6 +5861,9 @@ function createDefaultMetabotDaemonHandlers(input) {
             return { ok: true };
         }
         if (inputReply.reply.state !== 'completed') {
+            return { ok: true };
+        }
+        if (inputReply.reply.artifacts.length > 0) {
             return { ok: true };
         }
         if (containsDeliverableReference(inputReply.reply.responseText)
@@ -6722,13 +6998,22 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
         });
         const providerRuntimeDiagnostics = buildProviderRuntimeDiagnostics(service.providerSkill, runnerResult);
-        const applied = sessionEngine.applyProviderRunnerResult({
-            session: received.session,
-            taskRun: received.taskRun,
-            result: runnerResult,
-        });
-        const appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+        const deferCompletedPersistence = runnerResult.state === 'completed'
+            && !(0, providerDeliveryArtifacts_1.isTextLikeProviderOutputType)(service.outputType);
+        let applied;
+        let appliedStatus;
+        if (!deferCompletedPersistence) {
+            applied = sessionEngine.applyProviderRunnerResult({
+                session: received.session,
+                taskRun: received.taskRun,
+                result: runnerResult,
+            });
+            appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+        }
         if (runnerResult.state !== 'completed') {
+            if (!applied || !appliedStatus) {
+                throw new Error('Provider runner result was not persisted before handling incomplete state.');
+            }
             const failureMessage = runnerResult.state === 'failed'
                 ? runnerResult.message
                 : runnerResult.question;
@@ -6849,12 +7134,156 @@ function createDefaultMetabotDaemonHandlers(input) {
                 ? (0, commandResult_1.commandFailed)(runnerResult.code, runnerResult.message)
                 : (0, commandResult_1.commandManualActionRequired)('clarification_needed', runnerResult.question);
         }
-        const responseText = normalizeText(runnerResult.responseText);
+        const baseResponseText = normalizeText(runnerResult.responseText);
+        let responseText = baseResponseText;
+        let deliveryArtifacts = [];
+        if (!(0, providerDeliveryArtifacts_1.isTextLikeProviderOutputType)(service.outputType)) {
+            try {
+                const artifactNetwork = await resolveFileUploadNetworkForHome(null, runtimeStateStore.paths.profileRoot);
+                const resolvedDelivery = await (0, providerDeliveryArtifacts_1.resolveProviderDeliveryArtifacts)({
+                    responseText: baseResponseText,
+                    outputType: service.outputType,
+                    executionCwd: normalizeText(runnerResult.metadata?.sessionCwd) || null,
+                    workspaceRootCwd: normalizeText(runnerResult.metadata?.attemptWorkspaceCwd) || null,
+                    network: artifactNetwork,
+                    signer,
+                    uploadLargeFile: providerArtifactUploadLargeFile,
+                    largeUploader: providerLargeFileUploader,
+                });
+                responseText = normalizeText(resolvedDelivery.responseText);
+                deliveryArtifacts = resolvedDelivery.artifacts;
+            }
+            catch (error) {
+                const failureCode = readErrorCode(error, 'provider_artifact_delivery_failed');
+                const failureText = readErrorMessage(error, failureCode, 'Provider artifact delivery preparation failed.');
+                const artifactFailureResult = (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)(failureCode, failureText);
+                const failedApplied = sessionEngine.applyProviderRunnerResult({
+                    session: received.session,
+                    taskRun: received.taskRun,
+                    result: artifactFailureResult,
+                });
+                const failedStatus = await persistSessionMutation(sessionStateStore, failedApplied);
+                const orderEndMessage = (0, orderProtocol_1.buildOrderEndMessage)(orderTxid, 'failed', failureText);
+                let orderEndWrite = { pinId: null, txids: [] };
+                let orderEndSendFailure = null;
+                try {
+                    orderEndWrite = await sendProviderOrderPrivateMessage({
+                        toGlobalMetaId: inputMessage.fromGlobalMetaId,
+                        peerChatPublicKey,
+                        content: orderEndMessage,
+                    });
+                }
+                catch (sendError) {
+                    orderEndSendFailure = sendError instanceof Error ? sendError.message : String(sendError);
+                }
+                await appendA2ATranscriptItems(sessionStateStore, [
+                    {
+                        id: `${traceId}-provider-artifact-failure`,
+                        sessionId: received.session.sessionId,
+                        taskRunId: failedApplied.taskRun.runId,
+                        timestamp: failedApplied.session.updatedAt,
+                        type: 'failure',
+                        sender: 'system',
+                        content: failureText,
+                        metadata: {
+                            publicStatus: failedStatus.status,
+                            event: failedApplied.event,
+                            runnerState: 'failed',
+                            orderTxid,
+                            paymentTxid: paymentTxid || null,
+                            refundRequired: !serviceIsFree,
+                        },
+                    },
+                    {
+                        id: orderEndWrite.pinId || `${traceId}-provider-order-end-failed`,
+                        sessionId: received.session.sessionId,
+                        taskRunId: failedApplied.taskRun.runId,
+                        timestamp: Date.now(),
+                        type: 'order_end',
+                        sender: 'provider',
+                        content: failureText,
+                        metadata: {
+                            protocolTag: 'ORDER_END',
+                            orderTxid,
+                            paymentTxid: paymentTxid || null,
+                            orderEndReason: 'failed',
+                            orderEndPinId: orderEndWrite.pinId,
+                            txids: orderEndWrite.txids,
+                            publicStatus: failedStatus.status,
+                            event: failedApplied.event,
+                            refundRequired: !serviceIsFree,
+                            sendFailure: orderEndSendFailure,
+                        },
+                    },
+                ]);
+                await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
+                    paths: runtimeStateStore.paths,
+                    local: {
+                        profileSlug: node_path_1.default.basename(runtimeStateStore.paths.profileRoot),
+                        globalMetaId: state.identity.globalMetaId,
+                        name: state.identity.name,
+                        chatPublicKey: state.identity.chatPublicKey,
+                    },
+                    peer: {
+                        globalMetaId: inputMessage.fromGlobalMetaId,
+                        chatPublicKey: peerChatPublicKey,
+                    },
+                    message: {
+                        direction: 'outgoing',
+                        content: orderEndMessage,
+                        pinId: orderEndWrite.pinId,
+                        txid: orderEndWrite.txids[0] ?? orderEndWrite.pinId,
+                        txids: orderEndWrite.txids,
+                        chain: 'mvc',
+                        orderTxid,
+                        paymentTxid: paymentTxid || null,
+                        timestamp: Date.now(),
+                    },
+                    orderSession: {
+                        role: 'provider',
+                        state: 'failed',
+                        orderTxid,
+                        paymentTxid: paymentTxid || null,
+                        servicePinId: service.currentPinId,
+                        serviceName: normalizeText(service.displayName) || normalizeText(service.serviceName),
+                        outputType: service.outputType,
+                        endedAt: Date.now(),
+                        endReason: failureCode,
+                        failureReason: failureText,
+                    },
+                }, a2aConversationPersister);
+                await persistProviderFailureTrace({
+                    traceId,
+                    state,
+                    service,
+                    buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+                    orderTxid,
+                    orderMessageId,
+                    orderPinId: inputMessage.messagePinId || null,
+                    paymentTxid: paymentTxid || null,
+                    orderReference: orderReference || null,
+                    paymentCurrency: amountLine.currency || service.currency,
+                    paymentAmount: amountLine.amount || service.price,
+                    paymentChain: paymentChain || null,
+                    ...orderPaymentMetadata,
+                    session: failedApplied.session,
+                    taskRun: failedApplied.taskRun,
+                    publicStatus: failedStatus,
+                    latestEvent: failedApplied.event,
+                    userTask,
+                    failureText,
+                    failureCode,
+                    providerRuntime: providerRuntimeDiagnostics,
+                });
+                return (0, commandResult_1.commandFailed)(failureCode, failureText);
+            }
+        }
         const deliveryMessage = (0, orderProtocol_1.buildDeliveryMessage)({
             paymentTxid: paymentTxid || null,
             servicePinId: service.currentPinId,
             serviceName: normalizeText(service.displayName) || normalizeText(service.serviceName),
             result: responseText,
+            ...(deliveryArtifacts.length ? { artifacts: deliveryArtifacts } : {}),
             deliveredAt: Date.now(),
         }, orderTxid);
         const ratingRequestText = await generateProviderOrderProtocolReplyText({
@@ -6972,6 +7401,14 @@ function createDefaultMetabotDaemonHandlers(input) {
             });
             return (0, commandResult_1.commandFailed)('provider_delivery_failed', failureText);
         }
+        if (!applied || !appliedStatus) {
+            applied = sessionEngine.applyProviderRunnerResult({
+                session: received.session,
+                taskRun: received.taskRun,
+                result: runnerResult,
+            });
+            appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+        }
         let ratingWrite = { pinId: null, txids: [] };
         try {
             ratingWrite = await sendProviderOrderPrivateMessage({
@@ -7017,6 +7454,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     runnerState: runnerResult.state,
                     orderTxid,
                     paymentTxid: paymentTxid || null,
+                    ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
                 },
             },
             {
@@ -7027,6 +7465,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 type: 'delivery',
                 sender: 'provider',
                 content: responseText,
+                ...(deliveryArtifacts.length ? { artifacts: deliveryArtifacts } : {}),
                 metadata: {
                     protocolTag: 'DELIVERY',
                     orderTxid,
@@ -7036,6 +7475,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     txids: deliveryWrite.txids,
                     publicStatus: 'completed',
                     event: 'provider_completed',
+                    ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
                 },
             },
             ...(ratingWrite.pinId || ratingWrite.txids.length
@@ -7073,6 +7513,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             message: {
                 direction: 'outgoing',
                 content: deliveryMessage,
+                ...(deliveryArtifacts.length ? { artifacts: deliveryArtifacts } : {}),
                 pinId: deliveryWrite.pinId,
                 txid: deliveryWrite.txids[0] ?? deliveryWrite.pinId,
                 txids: deliveryWrite.txids,
@@ -7349,6 +7790,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 state: 'completed',
                 responseText: result.resultText ?? '',
                 deliveryPinId: result.resultDeliveryPinId ?? null,
+                artifacts: [],
                 observedAt: ratingRequest.ratingRequestedAt
                     ?? (Number.isFinite(inputMessage.timestamp) ? Number(inputMessage.timestamp) : Date.now()),
                 rawMessage: null,
@@ -7501,6 +7943,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     });
                     return;
                 }
+                const latestRuntimeState = await runtimeStateStore.readState();
                 const applied = await applyCallerReplyResult({
                     reply,
                     session: current.session,
@@ -7509,6 +7952,9 @@ function createDefaultMetabotDaemonHandlers(input) {
                     sessionStateStore,
                     runtimeStateStore,
                     trace: current.trace,
+                    localIdentity: latestRuntimeState.identity ?? null,
+                    providerChatPublicKey: input.waiterInput.providerChatPublicKey ?? null,
+                    a2aConversationPersister,
                 });
                 await autoPublishBuyerRatingForReply({
                     trace: applied.trace,
@@ -11824,13 +12270,22 @@ function createDefaultMetabotDaemonHandlers(input) {
                     },
                 });
                 const providerRuntimeDiagnostics = buildProviderRuntimeDiagnostics(service.providerSkill, runnerResult);
-                const applied = sessionEngine.applyProviderRunnerResult({
-                    session: received.session,
-                    taskRun: received.taskRun,
-                    result: runnerResult,
-                });
-                const appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+                const deferCompletedPersistence = runnerResult.state === 'completed'
+                    && !(0, providerDeliveryArtifacts_1.isTextLikeProviderOutputType)(service.outputType);
+                let applied;
+                let appliedStatus;
+                if (!deferCompletedPersistence) {
+                    applied = sessionEngine.applyProviderRunnerResult({
+                        session: received.session,
+                        taskRun: received.taskRun,
+                        result: runnerResult,
+                    });
+                    appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+                }
                 if (runnerResult.state !== 'completed') {
+                    if (!applied || !appliedStatus) {
+                        throw new Error('Provider runner result was not persisted before handling incomplete state.');
+                    }
                     const failureText = runnerResult.state === 'failed'
                         ? runnerResult.message
                         : runnerResult.question;
@@ -11976,8 +12431,184 @@ function createDefaultMetabotDaemonHandlers(input) {
                     }
                     return (0, commandResult_1.commandManualActionRequired)('clarification_needed', runnerResult.question, `/ui/trace?traceId=${encodeURIComponent(traceId)}`);
                 }
-                const responseText = normalizeText(runnerResult.responseText);
+                const baseResponseText = normalizeText(runnerResult.responseText);
+                let responseText = baseResponseText;
+                let deliveryArtifacts = [];
+                const providerExecutionCwd = normalizeText(runnerResult.metadata?.sessionCwd) || null;
+                const providerAttemptWorkspaceCwd = normalizeText(runnerResult.metadata?.attemptWorkspaceCwd) || null;
+                if (!(0, providerDeliveryArtifacts_1.isTextLikeProviderOutputType)(service.outputType)) {
+                    try {
+                        const artifactNetwork = await resolveFileUploadNetworkForHome(null, runtimeStateStore.paths.profileRoot);
+                        const resolvedDelivery = await (0, providerDeliveryArtifacts_1.resolveProviderDeliveryArtifacts)({
+                            responseText: baseResponseText,
+                            outputType: service.outputType,
+                            executionCwd: providerExecutionCwd,
+                            workspaceRootCwd: providerAttemptWorkspaceCwd,
+                            network: artifactNetwork,
+                            signer,
+                            uploadLargeFile: providerArtifactUploadLargeFile,
+                            largeUploader: providerLargeFileUploader,
+                        });
+                        responseText = normalizeText(resolvedDelivery.responseText);
+                        deliveryArtifacts = resolvedDelivery.artifacts;
+                    }
+                    catch (error) {
+                        const failureCode = readErrorCode(error, 'provider_artifact_delivery_failed');
+                        const failureText = readProviderArtifactFailureText(error, failureCode, 'Provider artifact delivery preparation failed.', [providerExecutionCwd]);
+                        const artifactFailureResult = (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)(failureCode, failureText);
+                        const failedApplied = sessionEngine.applyProviderRunnerResult({
+                            session: received.session,
+                            taskRun: received.taskRun,
+                            result: artifactFailureResult,
+                        });
+                        const failedStatus = await persistSessionMutation(sessionStateStore, failedApplied);
+                        await appendA2ATranscriptItems(sessionStateStore, [
+                            {
+                                id: `${traceId}-provider-artifact-failure`,
+                                sessionId: received.session.sessionId,
+                                taskRunId: failedApplied.taskRun.runId,
+                                timestamp: failedApplied.session.updatedAt,
+                                type: 'failure',
+                                sender: 'system',
+                                content: failureText,
+                                metadata: {
+                                    publicStatus: failedStatus.status,
+                                    event: failedApplied.event,
+                                    runnerState: 'failed',
+                                    paymentTxid: execution.payment.paymentTxid,
+                                    orderReference: execution.payment.orderReference,
+                                },
+                            },
+                        ]);
+                        const trace = (0, sessionTrace_1.buildSessionTrace)({
+                            traceId,
+                            channel: 'a2a',
+                            exportRoot: runtimeStateStore.paths.exportsRoot,
+                            session: {
+                                id: `session-${traceId}`,
+                                title: `${service.displayName} Execution`,
+                                type: 'a2a',
+                                metabotId: state.identity.metabotId,
+                                peerGlobalMetaId: execution.buyer.globalMetaId || null,
+                                peerName: execution.buyer.name || execution.buyer.host || null,
+                                externalConversationId: execution.externalConversationId || null,
+                            },
+                            order: {
+                                id: `order-${traceId}`,
+                                role: 'seller',
+                                serviceId: service.currentPinId,
+                                serviceName: service.displayName,
+                                paymentTxid: execution.payment.paymentTxid,
+                                paymentCommitTxid: execution.payment.paymentCommitTxid,
+                                orderReference: execution.payment.orderReference,
+                                paymentCurrency: execution.payment.paymentCurrency || service.currency,
+                                paymentAmount: execution.payment.paymentAmount || service.price,
+                                paymentChain: execution.payment.paymentChain,
+                                settlementKind: execution.payment.settlementKind,
+                                mrc20Ticker: execution.payment.mrc20Ticker,
+                                mrc20Id: execution.payment.mrc20Id,
+                                providerSkill: service.providerSkill,
+                            },
+                            a2a: {
+                                sessionId: failedApplied.session.sessionId,
+                                taskRunId: failedApplied.taskRun.runId,
+                                role: failedApplied.session.role,
+                                publicStatus: failedStatus.status,
+                                latestEvent: failedApplied.event,
+                                taskRunState: failedApplied.taskRun.state,
+                                callerGlobalMetaId: failedApplied.session.callerGlobalMetaId,
+                                callerName: execution.buyer.name || execution.buyer.host || null,
+                                providerGlobalMetaId: failedApplied.session.providerGlobalMetaId,
+                                servicePinId: failedApplied.session.servicePinId,
+                            },
+                            providerRuntime: providerRuntimeDiagnostics,
+                        });
+                        const artifacts = await (0, transcriptExport_1.exportSessionArtifacts)({
+                            trace,
+                            transcript: {
+                                sessionId: trace.session.id,
+                                title: trace.session.title,
+                                messages: [
+                                    {
+                                        id: `${trace.traceId}-buyer`,
+                                        type: 'user',
+                                        timestamp: trace.createdAt,
+                                        content: execution.request.userTask,
+                                        metadata: {
+                                            taskContext: execution.request.taskContext || null,
+                                            buyerHost: execution.buyer.host || null,
+                                            buyerGlobalMetaId: execution.buyer.globalMetaId || null,
+                                            paymentTxid: execution.payment.paymentTxid,
+                                            orderReference: execution.payment.orderReference,
+                                        },
+                                    },
+                                    {
+                                        id: `${trace.traceId}-provider-failure`,
+                                        type: 'assistant',
+                                        timestamp: trace.createdAt,
+                                        content: failureText,
+                                        metadata: {
+                                            failed: true,
+                                            providerSessionId: failedApplied.session.sessionId,
+                                            providerTaskRunId: failedApplied.taskRun.runId,
+                                            providerEvent: failedApplied.event,
+                                        },
+                                    },
+                                ],
+                            },
+                        });
+                        const failedOrder = buildProviderSellerOrderRecord({
+                            state,
+                            service,
+                            buyerGlobalMetaId: execution.buyer.globalMetaId,
+                            lifecycleState: 'failed',
+                            traceId,
+                            orderMessageId,
+                            orderTxid: '',
+                            orderReference: execution.payment.orderReference,
+                            paymentTxid: execution.payment.paymentTxid,
+                            paymentAmount: execution.payment.paymentAmount || service.price,
+                            paymentCurrency: execution.payment.paymentCurrency || service.currency,
+                            paymentChain: execution.payment.paymentChain,
+                            paymentCommitTxid: execution.payment.paymentCommitTxid,
+                            settlementKind: execution.payment.settlementKind,
+                            mrc20Ticker: execution.payment.mrc20Ticker,
+                            mrc20Id: execution.payment.mrc20Id,
+                            session: failedApplied.session,
+                            taskRun: failedApplied.taskRun,
+                            publicStatus: failedStatus.status,
+                            latestEvent: failedApplied.event,
+                            providerRuntime: providerRuntimeDiagnostics,
+                            failureReason: failureText,
+                            endReason: failureCode,
+                            receivedAt: received.session.createdAt,
+                            startedAt: directStartedAt,
+                            endedAt: failedApplied.taskRun.completedAt ?? failedApplied.session.updatedAt,
+                            updatedAt: failedApplied.session.updatedAt,
+                        });
+                        await runtimeStateStore.updateState((current) => ({
+                            ...current,
+                            traces: [
+                                {
+                                    ...trace,
+                                    artifacts,
+                                },
+                                ...current.traces.filter((entry) => entry.traceId !== trace.traceId),
+                            ],
+                            sellerOrders: (0, sellerOrderState_1.upsertSellerOrderRecord)(current.sellerOrders, failedOrder),
+                        }));
+                        return (0, commandResult_1.commandFailed)(failureCode, failureText);
+                    }
+                }
                 const providerMessage = responseText;
+                if (!applied || !appliedStatus) {
+                    applied = sessionEngine.applyProviderRunnerResult({
+                        session: received.session,
+                        taskRun: received.taskRun,
+                        result: runnerResult,
+                    });
+                    appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+                }
                 await appendA2ATranscriptItems(sessionStateStore, [
                     {
                         id: `${traceId}-provider-runner-result`,
@@ -11991,8 +12622,30 @@ function createDefaultMetabotDaemonHandlers(input) {
                             publicStatus: appliedStatus.status,
                             event: applied.event,
                             runnerState: runnerResult.state,
+                            ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
                         },
                     },
+                    ...(deliveryArtifacts.length
+                        ? [{
+                                id: `${traceId}-provider-delivery`,
+                                sessionId: received.session.sessionId,
+                                taskRunId: applied.taskRun.runId,
+                                timestamp: applied.session.updatedAt,
+                                type: 'delivery',
+                                sender: 'provider',
+                                content: providerMessage,
+                                artifacts: deliveryArtifacts,
+                                metadata: {
+                                    publicStatus: appliedStatus.status,
+                                    event: applied.event,
+                                    runnerState: runnerResult.state,
+                                    paymentTxid: execution.payment.paymentTxid,
+                                    orderReference: execution.payment.orderReference,
+                                    servicePinId: service.currentPinId,
+                                    deliveryArtifacts,
+                                },
+                            }]
+                        : []),
                 ]);
                 const trace = (0, sessionTrace_1.buildSessionTrace)({
                     traceId,
@@ -12066,6 +12719,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                                     providerSessionId: received.session.sessionId,
                                     providerTaskRunId: received.taskRun.runId,
                                     providerEvent: applied.event,
+                                    ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
                                 },
                             },
                         ],

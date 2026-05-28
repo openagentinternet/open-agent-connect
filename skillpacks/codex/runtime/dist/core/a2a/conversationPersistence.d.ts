@@ -10,6 +10,7 @@ export interface PersistA2AConversationMessageInput {
         direction: 'incoming' | 'outgoing';
         content: string;
         contentType?: string | null;
+        artifacts?: unknown;
         chain?: string | null;
         pinId?: string | null;
         txid?: string | null;

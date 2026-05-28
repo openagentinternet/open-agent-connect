@@ -11,6 +11,7 @@ import type { ChatReplyRunner } from '../core/chat/privateChatTypes';
 import { type FetchPrivateHistory } from '../core/chat/privateConversation';
 import type { SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
+import { uploadLargeFileToChain, type ProductionLargeFileUploader } from '../core/files/uploadLargeFile';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
 import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import { type A2AConversationMessagePersister } from '../core/a2a/conversationPersistence';
@@ -120,6 +121,8 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     callerOrderTextGenerator?: CallerOrderProtocolTextGenerator;
     providerOrderReplyRunner?: ChatReplyRunner;
     providerOrderTextGenerator?: ProviderOrderProtocolTextGenerator;
+    providerArtifactUploadLargeFile?: typeof uploadLargeFileToChain;
+    providerLargeFileUploader?: ProductionLargeFileUploader;
     onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
     onIdentityProfileRegistered?: () => Promise<void> | void;
     requestMvcGasSubsidy?: (options: RequestMvcGasSubsidyOptions) => Promise<RequestMvcGasSubsidyResult>;

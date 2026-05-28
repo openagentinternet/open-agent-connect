@@ -1147,9 +1147,27 @@ function createTestChainWriteSigner(baseSigner) {
             const request = (0, writePin_1.normalizeChainWriteRequest)(rawInput);
             const identity = await baseSigner.getIdentity();
             writeCount += 1;
+            const isMetaAppWrite = request.path === '/protocols/metaapp'
+                || request.path === '/protocols/paycomment'
+                || request.path.startsWith('@');
+            const pinDigest = (0, node_crypto_1.createHash)('sha256').update(JSON.stringify({
+                writeCount,
+                operation: request.operation,
+                path: request.path,
+                encryption: request.encryption,
+                version: request.version,
+                contentType: request.contentType,
+                payload: request.payload,
+                encoding: request.encoding,
+                network: request.network,
+                globalMetaId: identity.globalMetaId,
+                mvcAddress: identity.mvcAddress,
+            })).digest('hex');
+            const legacyPinId = `${request.path || 'metaid'}-pin-${writeCount}`;
+            const legacyTxid = `${request.path || 'metaid'}-tx-${writeCount}`;
             return {
-                txids: [`${request.path || 'metaid'}-tx-${writeCount}`],
-                pinId: `${request.path || 'metaid'}-pin-${writeCount}`,
+                txids: [isMetaAppWrite ? pinDigest : legacyTxid],
+                pinId: isMetaAppWrite ? `${pinDigest}i0` : legacyPinId,
                 totalCost: 1,
                 network: request.network,
                 operation: request.operation,
@@ -1638,6 +1656,7 @@ function createTestMetaWebReplyWaiter(env) {
                     ? step.responseText
                     : 'Test fake remote reply.',
                 deliveryPinId: typeof step.deliveryPinId === 'string' ? step.deliveryPinId : null,
+                artifacts: [],
                 ratingRequestText: typeof step.ratingRequestText === 'string' ? step.ratingRequestText : null,
                 observedAt: Number.isFinite(step.observedAt)
                     ? Number(step.observedAt)
