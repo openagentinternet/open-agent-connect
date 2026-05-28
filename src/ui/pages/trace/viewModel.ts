@@ -1,5 +1,7 @@
 // View models for the A2A Trace page session list and session detail
 
+import { normalizeDeliveryArtifacts } from '../../../core/a2a/deliveryArtifacts';
+
 export type A2ASessionRole = 'caller' | 'provider';
 export type A2ASessionState =
   | 'discovered'
@@ -85,17 +87,6 @@ function normalizeNullableText(value: unknown): string | null {
   return normalized || null;
 }
 
-function normalizeByteLength(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
-}
-
-function normalizeArtifactKind(value: unknown): TraceDeliveryArtifactKind {
-  const normalized = normalizeText(value).toLowerCase();
-  return normalized === 'image' || normalized === 'video' || normalized === 'audio' || normalized === 'file'
-    ? normalized
-    : 'file';
-}
-
 function coerceArray(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
     ? value.filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry)) as Array<Record<string, unknown>>
@@ -108,24 +99,7 @@ function coerceObject(value: unknown): Record<string, unknown> | null {
 }
 
 function coerceDeliveryArtifact(value: unknown): TraceDeliveryArtifact | null {
-  const record = coerceObject(value);
-  if (!record) return null;
-
-  const uri = normalizeText(record.uri);
-  if (!uri) return null;
-
-  return {
-    uri,
-    pinId: normalizeText(record.pinId),
-    kind: normalizeArtifactKind(record.kind),
-    fileName: normalizeNullableText(record.fileName),
-    extension: normalizeNullableText(record.extension),
-    contentType: normalizeNullableText(record.contentType),
-    byteLength: normalizeByteLength(record.byteLength),
-    sourceUrl: normalizeText(record.sourceUrl),
-    fallbackUrl: normalizeText(record.fallbackUrl),
-    downloadUrl: normalizeText(record.downloadUrl),
-  };
+  return normalizeDeliveryArtifacts({ artifacts: [value] })[0] ?? null;
 }
 
 function collectDeliveryArtifacts(item: Record<string, unknown>, metadata: Record<string, unknown> | null): TraceDeliveryArtifact[] {

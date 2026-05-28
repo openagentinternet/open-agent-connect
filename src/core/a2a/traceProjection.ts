@@ -502,7 +502,9 @@ function projectProtocolMessage(input: {
 
   if (protocolTag.toUpperCase() === 'DELIVERY') {
     const parsed = parseDeliveryMessage(rawContent);
-    const content = normalizeText(parsed?.result) || stripOrderProtocolFallback(rawContent) || rawContent;
+    const content = parsed
+      ? normalizeText(parsed.result)
+      : stripOrderProtocolFallback(rawContent) || rawContent;
     const artifacts = normalizeDeliveryArtifacts({
       artifacts: [
         ...arrayValue(message.artifacts),
@@ -510,6 +512,12 @@ function projectProtocolMessage(input: {
       ],
       resultText: rawContent,
     });
+    const deliveryPayload = parsed
+      ? {
+          ...parsed,
+          artifacts,
+        }
+      : null;
     return {
       type: 'delivery',
       content,
@@ -517,7 +525,7 @@ function projectProtocolMessage(input: {
       metadata: {
         ...metadata,
         deliveryPinId: normalizeText(message.pinId) || null,
-        deliveryPayload: parsed ?? null,
+        deliveryPayload,
         deliveryArtifacts: artifacts,
         publicStatus: 'completed',
         event: 'provider_completed',

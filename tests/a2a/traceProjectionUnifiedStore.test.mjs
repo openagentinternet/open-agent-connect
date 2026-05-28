@@ -423,6 +423,117 @@ test('persistA2AConversationMessage stores normalized artifacts and old messages
   assert.equal(oldMessage.artifacts, undefined);
 });
 
+test('getUnifiedA2ATraceSessionForProfile hides raw DELIVERY JSON for persisted empty-result artifacts', async () => {
+  const { homeDir, profile } = await createProfileFixture();
+  const store = createA2AConversationStore({
+    homeDir,
+    local: {
+      profileSlug: 'alice',
+      globalMetaId: LOCAL_GLOBAL_META_ID,
+      name: 'Alice',
+      avatar: 'https://example.test/alice.png',
+    },
+    peer: {
+      globalMetaId: PEER_GLOBAL_META_ID,
+      name: 'Remote Bot',
+      avatar: 'https://example.test/remote.png',
+      chatPublicKey: 'remote-chat-public-key',
+    },
+  });
+  const deliveryTxid = 'persisted-empty-delivery-txid';
+
+  await store.upsertSession({
+    sessionId: PEER_SESSION_ID,
+    type: 'peer',
+    state: 'active',
+    createdAt: BASE_TIME,
+    updatedAt: BASE_TIME + 20,
+    latestMessageId: 'persisted-empty-delivery',
+  });
+  await store.upsertSession({
+    sessionId: ORDER_SESSION_ID,
+    type: 'service_order',
+    role: 'caller',
+    state: 'completed',
+    orderTxid: ORDER_TXID,
+    paymentTxid: PAYMENT_TXID,
+    servicePinId: 'service-pin-1',
+    serviceName: 'Weather Oracle',
+    outputType: 'image',
+    createdAt: BASE_TIME,
+    updatedAt: BASE_TIME + 20,
+    deliveredAt: BASE_TIME + 20,
+  });
+  await store.appendMessages([
+    createMessage(1, {
+      kind: 'order_protocol',
+      protocolTag: 'ORDER',
+      orderSessionId: ORDER_SESSION_ID,
+      orderTxid: ORDER_TXID,
+      paymentTxid: PAYMENT_TXID,
+      pinId: `${ORDER_TXID}i0`,
+      txid: ORDER_TXID,
+      txids: [ORDER_TXID],
+      content: `[ORDER] Send the image\n<raw_request>\nSend the image\n</raw_request>\ntxid: ${PAYMENT_TXID}\nservice id: service-pin-1\nskill name: Weather Oracle`,
+    }),
+    createMessage(2, {
+      messageId: 'persisted-empty-delivery',
+      direction: 'incoming',
+      kind: 'order_protocol',
+      protocolTag: 'DELIVERY',
+      orderSessionId: ORDER_SESSION_ID,
+      orderTxid: ORDER_TXID,
+      paymentTxid: PAYMENT_TXID,
+      pinId: `${deliveryTxid}i0`,
+      txid: deliveryTxid,
+      txids: [deliveryTxid],
+      content: `[DELIVERY:${ORDER_TXID}] ${JSON.stringify({
+        paymentTxid: PAYMENT_TXID,
+        servicePinId: 'service-pin-1',
+        serviceName: 'Weather Oracle',
+        result: '',
+        artifacts: [
+          {
+            uri: 'metafile://unified-empty-result.png',
+            fileName: '/Users/alice/private/unified-empty-result.png',
+            sourceUrl: 'file:///Users/alice/private/unified-empty-result.png',
+            fallbackUrl: '/Users/alice/private/unified-empty-result.png',
+            downloadUrl: 'https://attacker.example/unified-empty-result.png',
+            localPath: '/Users/alice/private/unified-empty-result.png',
+          },
+        ],
+        deliveredAt: BASE_TIME + 20,
+      })}`,
+    }),
+  ]);
+
+  const detail = await getUnifiedA2ATraceSessionForProfile({
+    profile,
+    sessionId: PEER_SESSION_ID,
+    daemon: { baseUrl: 'http://127.0.0.1:38245' },
+  });
+
+  assert.ok(detail);
+  const delivery = detail.inspector.transcriptItems.find((item) => item.metadata.txid === deliveryTxid);
+  assert.ok(delivery);
+  assert.equal(delivery.type, 'delivery');
+  assert.equal(delivery.content, '');
+  assert.doesNotMatch(delivery.content, /DELIVERY|artifacts|file:\/\/|\/Users\/|attacker\.example|unified-empty-result/);
+  assert.deepEqual(delivery.artifacts.map((artifact) => artifact.uri), [
+    'metafile://unified-empty-result.png',
+  ]);
+  assert.equal(delivery.artifacts[0].fileName, 'unified-empty-result.png');
+  assert.deepEqual(delivery.metadata.deliveryPayload.artifacts, delivery.artifacts);
+  assert.doesNotMatch(
+    JSON.stringify({
+      artifacts: delivery.artifacts,
+      deliveryArtifacts: delivery.metadata.deliveryArtifacts,
+      deliveryPayload: delivery.metadata.deliveryPayload,
+    }),
+    /"[^"]*Url":"(?:file:|\/Users\/|https:\/\/attacker\.example)|\/Users\/alice|localPath|"fileName":"\/Users\//,
+  );
+});
+
 test('default trace handlers read unified A2A sessions before legacy session-state fallback', async () => {
   const { systemHomeDir, homeDir } = await createProfileFixture();
   await seedUnifiedConversation(homeDir);
@@ -495,7 +606,21 @@ test('default trace handlers enrich unified peer windows with full on-chain priv
           paymentTxid: PAYMENT_TXID,
           servicePinId: 'service-pin-1',
           serviceName: 'Weather Oracle',
-          result: '# Chain Forecast\n\nRain clearing later.',
+          result: '# Chain Forecast\n\nRain clearing later.\n\nmetafile://chain-fallback',
+          artifacts: [
+            {
+              uri: 'metafile://chain-video-pin.mp4',
+              sourceUrl: 'file:///Users/secret.mp4',
+              fallbackUrl: '/Users/secret.mp4',
+              downloadUrl: 'file:///tmp/secret.mp4',
+            },
+            {
+              uri: 'https://attacker.example/evil.mp4',
+              sourceUrl: 'file:///Users/evil.mp4',
+              fallbackUrl: '/Users/evil.mp4',
+              downloadUrl: 'file:///tmp/evil.mp4',
+            },
+          ],
           deliveredAt: BASE_TIME + 400,
         })}`,
       }),
@@ -541,13 +666,109 @@ test('default trace handlers enrich unified peer windows with full on-chain priv
   assert.equal(items[0].sender, 'provider');
   assert.equal(items[1].sender, 'caller');
   assert.equal(items[2].content, 'I received the order and started processing.');
-  assert.equal(items[3].content, '# Chain Forecast\n\nRain clearing later.');
+  assert.equal(items[3].content, '# Chain Forecast\n\nRain clearing later.\n\nmetafile://chain-fallback');
+  assert.deepEqual(items[3].artifacts.map((artifact) => artifact.uri), [
+    'metafile://chain-video-pin.mp4',
+    'metafile://chain-fallback',
+  ]);
+  assert.deepEqual(items[3].metadata.deliveryArtifacts.map((artifact) => artifact.uri), [
+    'metafile://chain-video-pin.mp4',
+    'metafile://chain-fallback',
+  ]);
+  assert.equal(items[3].artifacts[0].kind, 'video');
+  assert.equal(
+    items[3].artifacts[0].sourceUrl,
+    'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/chain-video-pin',
+  );
+  assert.equal(
+    items[3].artifacts[0].fallbackUrl,
+    'https://file.metaid.io/metafile-indexer/api/v1/files/content/chain-video-pin',
+  );
+  assert.equal(
+    items[3].artifacts[0].downloadUrl,
+    'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/chain-video-pin',
+  );
+  assert.deepEqual(items[3].metadata.deliveryPayload.artifacts, items[3].artifacts);
+  assert.doesNotMatch(
+    JSON.stringify({
+      artifacts: items[3].artifacts,
+      deliveryArtifacts: items[3].metadata.deliveryArtifacts,
+      deliveryPayload: items[3].metadata.deliveryPayload,
+    }),
+    /"[^"]*Url":"(?:file:|\/Users\/|https:\/\/attacker\.example)/,
+  );
   assert.equal(items[5].sender, 'caller');
-  assert.equal(detailResult.data.resultText, '# Chain Forecast\n\nRain clearing later.');
-  assert.equal(detailResult.data.responseText, '# Chain Forecast\n\nRain clearing later.');
+  assert.equal(detailResult.data.resultText, '# Chain Forecast\n\nRain clearing later.\n\nmetafile://chain-fallback');
+  assert.equal(detailResult.data.responseText, '# Chain Forecast\n\nRain clearing later.\n\nmetafile://chain-fallback');
   assert.equal(detailResult.data.ratingRequestText, 'Please rate this service.');
   assert.equal(detailResult.data.localMetabotAvatar, LOCAL_AVATAR);
   assert.equal(detailResult.data.peerAvatar, PEER_AVATAR);
+});
+
+test('default trace handlers do not expose raw DELIVERY JSON when private history delivery has artifacts but empty result', async () => {
+  const { systemHomeDir, homeDir } = await createProfileFixture();
+  await seedUnifiedConversation(homeDir);
+  const deliveryTxid = '6'.repeat(64);
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
+    fetchPeerChatPublicKey: async () => 'peer-chat-public-key',
+    signer: {
+      getPrivateChatIdentity: async () => ({
+        globalMetaId: LOCAL_GLOBAL_META_ID,
+        privateKeyHex: '1'.repeat(64),
+        chatPublicKey: 'local-chat-public-key',
+      }),
+    },
+    fetchPrivateChatHistory: async () => [
+      privateHistoryRow({
+        index: 1,
+        from: 'local',
+        txid: ORDER_TXID,
+        content: `[ORDER] Send an image\n<raw_request>\nSend an image\n</raw_request>\ntxid: ${PAYMENT_TXID}\nservice id: service-pin-1\nskill name: Weather Oracle`,
+      }),
+      privateHistoryRow({
+        index: 2,
+        from: 'peer',
+        txid: deliveryTxid,
+        content: `[DELIVERY:${ORDER_TXID}] ${JSON.stringify({
+          paymentTxid: PAYMENT_TXID,
+          servicePinId: 'service-pin-1',
+          serviceName: 'Weather Oracle',
+          result: '',
+          artifacts: [
+            {
+              uri: 'metafile://private-history-secret.png',
+              fileName: '/Users/alice/private-history-secret.png',
+              sourceUrl: 'file:///Users/alice/private-history-secret.png',
+              fallbackUrl: '/Users/alice/private-history-secret.png',
+              downloadUrl: 'https://attacker.example/private-history-secret.png',
+            },
+          ],
+          deliveredAt: BASE_TIME + 200,
+        })}`,
+      }),
+    ],
+  });
+
+  const detailResult = await handlers.trace.getSession({ sessionId: PEER_SESSION_ID });
+
+  assert.equal(detailResult.ok, true);
+  const delivery = detailResult.data.inspector.transcriptItems.find((item) => item.metadata.txid === deliveryTxid);
+  assert.ok(delivery);
+  assert.equal(delivery.type, 'delivery');
+  assert.equal(delivery.content, '');
+  assert.doesNotMatch(delivery.content, /DELIVERY|artifacts|file:\/\/|\/Users\/|attacker\.example|private-history-secret/);
+  assert.deepEqual(delivery.artifacts.map((artifact) => artifact.uri), [
+    'metafile://private-history-secret.png',
+  ]);
+  assert.equal(delivery.artifacts[0].fileName, 'private-history-secret.png');
+  assert.deepEqual(delivery.metadata.deliveryPayload.artifacts, delivery.artifacts);
+  assert.doesNotMatch(
+    JSON.stringify(delivery.metadata.deliveryPayload.artifacts),
+    /"[^"]*Url":"(?:file:|\/Users\/|https:\/\/attacker\.example)|"fileName":"\/Users\//,
+  );
 });
 
 test('default trace handlers hide legacy duplicate windows when a unified peer window exists', async () => {

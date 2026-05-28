@@ -198,7 +198,14 @@ test('buildSessionDetailViewModel exposes structured artifacts from transcript i
 });
 
 test('buildSessionDetailViewModel accepts deliveryArtifacts metadata fallbacks', () => {
-  const payloadArtifact = { ...IMAGE_ARTIFACT, uri: 'metafile://payload-pin.png', pinId: 'payload-pin' };
+  const payloadArtifact = {
+    ...IMAGE_ARTIFACT,
+    uri: 'metafile://payload-pin.png',
+    pinId: 'payload-pin',
+    sourceUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/payload-pin',
+    fallbackUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/content/payload-pin',
+    downloadUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/payload-pin',
+  };
   const detail = buildSessionDetailViewModel({
     session: { sessionId: 'session-artifacts', role: 'caller', state: 'completed' },
     transcriptItems: [
@@ -220,6 +227,61 @@ test('buildSessionDetailViewModel accepts deliveryArtifacts metadata fallbacks',
 
   assert.ok(detail !== null);
   assert.deepEqual(detail.messages[0].deliveryArtifacts, [IMAGE_ARTIFACT, payloadArtifact]);
+});
+
+test('buildSessionDetailViewModel sanitizes deliveryPayload artifacts before rendering', () => {
+  const detail = buildSessionDetailViewModel({
+    session: { sessionId: 'session-payload-sanitize', role: 'caller', state: 'completed' },
+    transcriptItems: [
+      {
+        id: 'payload-artifact',
+        timestamp: NOW,
+        type: 'delivery',
+        sender: 'provider',
+        content: 'Payload artifact.',
+        metadata: {
+          deliveryPayload: {
+            artifacts: [
+              {
+                uri: 'metafile://abc123i0.mp4',
+                sourceUrl: 'file:///Users/secret.mp4',
+                fallbackUrl: '/Users/secret.mp4',
+                downloadUrl: 'file:///tmp/secret.mp4',
+              },
+              {
+                uri: 'https://attacker.example/evil.mp4',
+                sourceUrl: 'file:///Users/evil.mp4',
+                fallbackUrl: '/Users/evil.mp4',
+                downloadUrl: 'file:///tmp/evil.mp4',
+              },
+            ],
+          },
+        },
+      },
+    ],
+  });
+
+  assert.ok(detail !== null);
+  assert.deepEqual(detail.messages[0].deliveryArtifacts.map((artifact) => artifact.uri), [
+    'metafile://abc123i0.mp4',
+  ]);
+  assert.equal(detail.messages[0].deliveryArtifacts[0].kind, 'video');
+  assert.equal(
+    detail.messages[0].deliveryArtifacts[0].sourceUrl,
+    'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/abc123i0',
+  );
+  assert.equal(
+    detail.messages[0].deliveryArtifacts[0].fallbackUrl,
+    'https://file.metaid.io/metafile-indexer/api/v1/files/content/abc123i0',
+  );
+  assert.equal(
+    detail.messages[0].deliveryArtifacts[0].downloadUrl,
+    'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/abc123i0',
+  );
+  assert.doesNotMatch(
+    JSON.stringify(detail.messages[0].deliveryArtifacts),
+    /"[^"]*Url":"(?:file:|\/Users\/|https:\/\/attacker\.example)/,
+  );
 });
 
 test('buildSessionDetailViewModel reads legacy trace messages from inspector transcript fallback', () => {

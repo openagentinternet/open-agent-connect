@@ -3624,6 +3624,7 @@ function projectPrivateHistorySimpleMessageToTranscript(input: {
 
   let type = protocolTag ? protocolTag.toLowerCase() : 'message';
   let content = stripOrderProtocolBubblePrefix(rawContent) || rawContent;
+  let deliveryArtifacts: A2ADeliveryArtifact[] = [];
   if (protocolTag === 'ORDER') {
     type = 'order';
   } else if (protocolTag === 'ORDER_STATUS') {
@@ -3631,9 +3632,24 @@ function projectPrivateHistorySimpleMessageToTranscript(input: {
     content = normalizeText(status?.content) || content;
   } else if (protocolTag === 'DELIVERY') {
     type = 'delivery';
-    content = normalizeText(delivery?.result) || content;
+    content = normalizeText(delivery?.result);
+    deliveryArtifacts = normalizeDeliveryArtifacts({
+      artifacts: delivery?.artifacts,
+      resultText: delivery?.result,
+    });
+    const deliveryPayload = delivery ? { ...delivery } : null;
+    if (deliveryPayload) {
+      if (deliveryArtifacts.length) {
+        deliveryPayload.artifacts = deliveryArtifacts;
+      } else {
+        delete deliveryPayload.artifacts;
+      }
+    }
     metadata.deliveryPinId = normalizeText(input.message.pinId) || null;
-    metadata.deliveryPayload = delivery ?? null;
+    metadata.deliveryPayload = deliveryPayload;
+    if (deliveryArtifacts.length) {
+      metadata.deliveryArtifacts = deliveryArtifacts;
+    }
     metadata.publicStatus = 'completed';
     metadata.event = 'provider_completed';
     metadata.servicePinId = parsedServicePinId || null;
@@ -3669,6 +3685,7 @@ function projectPrivateHistorySimpleMessageToTranscript(input: {
     type,
     sender,
     content,
+    ...(deliveryArtifacts.length ? { artifacts: deliveryArtifacts } : {}),
     metadata,
   };
 }

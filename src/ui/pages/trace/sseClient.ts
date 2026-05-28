@@ -15,11 +15,12 @@ function normalizeNullableText(value) {
 function normalizeByteLength(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 }
-function normalizeArtifactKind(value) {
-  var normalized = normalizeText(value).toLowerCase();
-  return normalized === 'image' || normalized === 'video' || normalized === 'audio' || normalized === 'file'
-    ? normalized
-    : 'file';
+function normalizeArtifactFileName(value) {
+  var normalized = normalizeText(value).replace(/\\\\/g, '/');
+  if (!normalized) return null;
+  var fileName = normalized.split('/').filter(Boolean).pop() || '';
+  fileName = fileName.split(/[?#]/, 1)[0];
+  return fileName || null;
 }
 function coerceObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -35,22 +36,35 @@ function normalizeTimestamp(value) {
   if (value >= 1e9 && value < 1e12) return value * 1000;
   return value;
 }
+function normalizeArtifactContentType(value) {
+  var normalized = normalizeText(value).toLowerCase();
+  if (!normalized || normalized.indexOf('://') !== -1 || normalized.indexOf('\\\\') !== -1 || normalized.charAt(0) === '/') return '';
+  if (!/^[a-z0-9][a-z0-9!#$&^_.+-]*\\/[a-z0-9][a-z0-9!#$&^_.+-]*(?: *; *[a-z0-9][a-z0-9!#$&^_.+-]*=[a-z0-9][a-z0-9!#$&^_.+:-]*)*$/i.test(normalized)) return '';
+  return normalized;
+}
+function inferArtifactKind(ext, contentType) {
+  if (contentType.indexOf('image/') === 0) return 'image';
+  if (contentType.indexOf('video/') === 0) return 'video';
+  if (contentType.indexOf('audio/') === 0) return 'audio';
+  return ext && IMG_EXT.has(ext) ? 'image' : ext && VID_EXT.has(ext) ? 'video' : ext && AUD_EXT.has(ext) ? 'audio' : 'file';
+}
 function coerceDeliveryArtifact(value) {
   var record = coerceObject(value);
   if (!record) return null;
-  var uri = normalizeText(record.uri);
-  if (!uri) return null;
+  var base = parseMetafileUri(normalizeText(record.uri));
+  if (!base) return null;
+  var contentType = normalizeArtifactContentType(record.contentType);
   return {
-    uri: uri,
-    pinId: normalizeText(record.pinId),
-    kind: normalizeArtifactKind(record.kind),
-    fileName: normalizeNullableText(record.fileName),
-    extension: normalizeNullableText(record.extension),
-    contentType: normalizeNullableText(record.contentType),
+    uri: base.uri,
+    pinId: base.pinId,
+    kind: inferArtifactKind(base.ext, contentType),
+    fileName: normalizeArtifactFileName(record.fileName) || base.fileName,
+    extension: base.ext,
+    contentType: contentType || null,
     byteLength: normalizeByteLength(record.byteLength),
-    sourceUrl: normalizeText(record.sourceUrl),
-    fallbackUrl: normalizeText(record.fallbackUrl),
-    downloadUrl: normalizeText(record.downloadUrl),
+    sourceUrl: base.sourceUrl,
+    fallbackUrl: base.fallbackUrl,
+    downloadUrl: base.downloadUrl,
   };
 }
 function collectDeliveryArtifacts(item, metadata) {
@@ -226,10 +240,10 @@ const MEDIA_FETCH_TIMEOUT_MS = 10000;
 
 function parseMetafileUri(rawUri) {
   const uri = rawUri.trim().replace(/[),.;:!?]+$/, '');
-  if (!uri.toLowerCase().startsWith('metafile://')) return null;
+  if (!uri || /[\\s\\x00-\\x1f\\x7f]/.test(uri) || !uri.toLowerCase().startsWith('metafile://')) return null;
   const withoutScheme = uri.slice('metafile://'.length);
-  if (!withoutScheme) return null;
   const basePart = withoutScheme.split(/[?#]/)[0] || '';
+  if (!basePart || basePart.indexOf('/') !== -1 || basePart.indexOf('\\\\') !== -1) return null;
   const lastDot = basePart.lastIndexOf('.');
   const hasExt = lastDot > 0 && lastDot < basePart.length - 1;
   const pinId = hasExt ? basePart.slice(0, lastDot) : basePart;
@@ -244,27 +258,16 @@ function parseMetafileUri(rawUri) {
     fileName: ext ? pinId + ext : pinId };
 }
 
-function normalizeArtifactUrl(value, fallback) {
-  const url = normalizeText(value);
-  if (/^(https?:|file:|blob:)/i.test(url) || url.indexOf('/') === 0) {
-    return url;
-  }
-  return fallback || '';
-}
-
 function normalizeMetafileArtifact(rawArtifact) {
   var artifact = coerceObject(rawArtifact);
   if (!artifact) return null;
   var base = parseMetafileUri(normalizeText(artifact.uri));
   if (!base) return null;
-  var kind = normalizeText(artifact.kind).toLowerCase();
-  if (kind === 'download') kind = 'file';
-  if (kind !== 'image' && kind !== 'video' && kind !== 'audio' && kind !== 'file') {
-    kind = base.kind || 'file';
-  }
-  var sourceUrl = normalizeArtifactUrl(artifact.sourceUrl, base.sourceUrl);
-  var fallbackUrl = normalizeArtifactUrl(artifact.fallbackUrl, base.fallbackUrl);
-  var downloadUrl = normalizeArtifactUrl(artifact.downloadUrl, sourceUrl || fallbackUrl || base.downloadUrl);
+  var contentType = normalizeArtifactContentType(artifact.contentType);
+  var kind = inferArtifactKind(base.ext, contentType);
+  var sourceUrl = base.sourceUrl;
+  var fallbackUrl = base.fallbackUrl;
+  var downloadUrl = base.downloadUrl;
   return {
     uri: base.uri,
     pinId: normalizeText(artifact.pinId) || base.pinId,
@@ -273,7 +276,7 @@ function normalizeMetafileArtifact(rawArtifact) {
     sourceUrl: sourceUrl,
     fallbackUrl: fallbackUrl,
     downloadUrl: downloadUrl,
-    fileName: normalizeText(artifact.fileName) || base.fileName || base.pinId,
+    fileName: normalizeArtifactFileName(artifact.fileName) || base.fileName || base.pinId,
   };
 }
 

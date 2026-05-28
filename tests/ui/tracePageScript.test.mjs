@@ -292,6 +292,27 @@ test('trace page renders structured image artifacts without metafile text in the
   assert.match(detail.innerHTML, /<img src="https:\/\/file\.metaid\.io\/metafile-indexer\/api\/v1\/files\/accelerate\/content\/image-pin"/);
 });
 
+test('trace page strips local path components from structured artifact file names', async () => {
+  const { detail } = await runTraceScriptWithUrl(
+    '?traceId=trace-weather-1&sessionId=session-weather-1',
+    {
+      detailData(data) {
+        data.inspector.transcriptItems[0].content = 'Image delivered separately.';
+        data.inspector.transcriptItems[0].artifacts = [
+          {
+            ...IMAGE_ARTIFACT,
+            fileName: '/Users/alice/secret.png',
+          },
+        ];
+        return data;
+      },
+    },
+  );
+
+  assert.match(detail.innerHTML, /secret\.png/);
+  assert.doesNotMatch(detail.innerHTML, /\/Users\/alice\/secret\.png/);
+});
+
 test('trace page still renders old text-only metafile image, video, audio, and file links', async () => {
   const { detail } = await runTraceScriptWithUrl(
     '?traceId=trace-weather-1&sessionId=session-weather-1',
@@ -351,8 +372,8 @@ test('trace page prefers structured artifacts over duplicate text-parsed artifac
 });
 
 test('trace page renders video and audio cards with stable download links before playback hydration', async () => {
-  const videoDownload = 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/video-pin?download=1';
-  const audioDownload = 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/audio-pin?download=1';
+  const videoDownload = 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/video-pin';
+  const audioDownload = 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/audio-pin';
   const { detail } = await runTraceScriptWithUrl(
     '?traceId=trace-weather-1&sessionId=session-weather-1',
     {
@@ -397,6 +418,100 @@ test('trace page renders video and audio cards with stable download links before
   assert.match(detail.innerHTML, new RegExp(`href="${audioDownload.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
 });
 
+test('trace page rebuilds structured metafile URLs and rejects non-metafile artifacts', async () => {
+  const { detail } = await runTraceScriptWithUrl(
+    '?traceId=trace-weather-1&sessionId=session-weather-1',
+    {
+      detailData(data) {
+        data.inspector.transcriptItems[0].content = 'Video delivered separately.';
+        data.inspector.transcriptItems[0].artifacts = [
+          {
+            uri: 'metafile://abc123i0.mp4',
+            sourceUrl: 'file:///Users/secret.mp4',
+            fallbackUrl: '/Users/secret.mp4',
+            downloadUrl: 'file:///tmp/secret.mp4',
+          },
+          {
+            uri: 'https://attacker.example/evil.mp4',
+            sourceUrl: 'file:///Users/evil.mp4',
+            fallbackUrl: '/Users/evil.mp4',
+            downloadUrl: 'file:///tmp/evil.mp4',
+          },
+        ];
+        return data;
+      },
+    },
+  );
+
+  assert.match(detail.innerHTML, /<video controls/);
+  assert.match(detail.innerHTML, /data-source-url="https:\/\/file\.metaid\.io\/metafile-indexer\/api\/v1\/files\/accelerate\/content\/abc123i0"/);
+  assert.match(detail.innerHTML, /data-fallback-url="https:\/\/file\.metaid\.io\/metafile-indexer\/api\/v1\/files\/content\/abc123i0"/);
+  assert.match(detail.innerHTML, /href="https:\/\/file\.metaid\.io\/metafile-indexer\/api\/v1\/files\/accelerate\/content\/abc123i0"/);
+  assert.doesNotMatch(detail.innerHTML, /(?:href|data-source-url|data-fallback-url|data-download-url)="(?:file:|\/Users\/|https:\/\/attacker\.example)/);
+});
+
+test('trace page rejects path-like structured metafile artifact URIs', async () => {
+  const { detail } = await runTraceScriptWithUrl(
+    '?traceId=trace-weather-1&sessionId=session-weather-1',
+    {
+      detailData(data) {
+        data.inspector.transcriptItems[0].content = 'Artifacts delivered separately.';
+        data.inspector.transcriptItems[0].artifacts = [
+          {
+            uri: 'metafile://valid-image.png',
+            fileName: 'valid-image.png',
+          },
+          {
+            uri: 'metafile:///Users/alice/secret.png',
+          },
+          {
+            uri: 'metafile://C:\\Users\\alice\\secret.png',
+          },
+        ];
+        return data;
+      },
+    },
+  );
+
+  assert.match(detail.innerHTML, /valid-image\.png/);
+  assert.match(detail.innerHTML, /files\/accelerate\/content\/valid-image/);
+  assert.doesNotMatch(detail.innerHTML, /\/Users|secret\.png|%2FUsers%2Falice%2Fsecret|C%3A%5CUsers%5Calice%5Csecret/i);
+});
+
+test('trace page ignores raw structured kind when rendering metafile artifacts', async () => {
+  const { detail } = await runTraceScriptWithUrl(
+    '?traceId=trace-weather-1&sessionId=session-weather-1',
+    {
+      detailData(data) {
+        data.inspector.transcriptItems[0].content = 'Typed artifacts delivered.';
+        data.inspector.transcriptItems[0].artifacts = [
+          {
+            uri: 'metafile://kind-video-pin.mp4',
+            kind: 'image',
+          },
+          {
+            uri: 'metafile://kind-image-pin.png',
+            kind: 'video',
+          },
+          {
+            uri: 'metafile://kind-audio-pin.bin',
+            kind: 'image',
+            contentType: 'audio/mpeg',
+          },
+        ];
+        return data;
+      },
+    },
+  );
+
+  assert.equal((detail.innerHTML.match(/<video controls/g) || []).length, 1);
+  assert.equal((detail.innerHTML.match(/<div class="metafile-preview"><img src=/g) || []).length, 1);
+  assert.equal((detail.innerHTML.match(/<audio controls/g) || []).length, 1);
+  assert.match(detail.innerHTML, /data-source-url="https:\/\/file\.metaid\.io\/metafile-indexer\/api\/v1\/files\/accelerate\/content\/kind-video-pin"/);
+  assert.match(detail.innerHTML, /<img src="https:\/\/file\.metaid\.io\/metafile-indexer\/api\/v1\/files\/accelerate\/content\/kind-image-pin"/);
+  assert.match(detail.innerHTML, /data-source-url="https:\/\/file\.metaid\.io\/metafile-indexer\/api\/v1\/files\/accelerate\/content\/kind-audio-pin"/);
+});
+
 test('trace page escapes structured artifact names, pin ids, and URLs', async () => {
   const { detail } = await runTraceScriptWithUrl(
     '?traceId=trace-weather-1&sessionId=session-weather-1',
@@ -425,8 +540,9 @@ test('trace page escapes structured artifact names, pin ids, and URLs', async ()
   assert.doesNotMatch(detail.innerHTML, /<script>/);
   assert.doesNotMatch(detail.innerHTML, /<img src=x/);
   assert.match(detail.innerHTML, /evil&lt;img src=x onerror=alert\(2\)&gt;\.png/);
-  assert.match(detail.innerHTML, /escape-pin&quot;&gt;&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
-  assert.match(detail.innerHTML, /https:\/\/files\.example\.test\/download\.png\?x=&quot;&gt;&lt;script&gt;alert\(5\)&lt;\/script&gt;/);
+  assert.doesNotMatch(detail.innerHTML, /escape-pin&quot;&gt;&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(detail.innerHTML, /https:\/\/file\.metaid\.io\/metafile-indexer\/api\/v1\/files\/accelerate\/content\/escape-pin/);
+  assert.doesNotMatch(detail.innerHTML, /files\.example\.test/);
 });
 
 test('trace page header renders remote on the left, local on the right, avatars, and icon trace copy', async () => {
