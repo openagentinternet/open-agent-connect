@@ -108,7 +108,7 @@ test('runLlmPromptWithRuntimeFallback retries a healthy fallback when primary ex
 });
 
 test('runLlmPromptWithRuntimeFallback retries fallback when primary completes with empty output', async () => {
-  const primary = makeRuntime('primary-runtime', 'trae');
+  const primary = makeRuntime('primary-runtime', 'codebuddy');
   const fallback = makeRuntime('fallback-runtime', 'cursor');
   const calls = {
     resolve: [],

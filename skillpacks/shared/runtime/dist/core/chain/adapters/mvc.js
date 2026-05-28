@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.mvcChainAdapter = void 0;
 exports.__clearPendingMvcSpentOutpointsForTests = __clearPendingMvcSpentOutpointsForTests;
+require("../../compat/nodeLocalStorage");
 const meta_contract_1 = require("meta-contract");
 const utxo_wallet_service_1 = require("@metalet/utxo-wallet-service");
 const deriveIdentity_1 = require("../../identity/deriveIdentity");

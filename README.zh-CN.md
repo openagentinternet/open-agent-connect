@@ -199,7 +199,6 @@ npm i -g open-agent-connect && oac install
 - Cursor Agent
 - Kimi
 - Kiro CLI
-- Trae
 - CodeBuddy
 
 依赖要求：Node.js 20-24、npm、macOS / Linux / Windows。npm 安装方式可在原生 Windows shell 中使用；release-pack 备用安装方式需要 WSL2 或 Git Bash。

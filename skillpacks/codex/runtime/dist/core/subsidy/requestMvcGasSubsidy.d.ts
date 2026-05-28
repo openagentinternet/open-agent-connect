@@ -1,3 +1,4 @@
+import '../compat/nodeLocalStorage';
 export interface RequestMvcGasSubsidyOptions {
     mvcAddress: string;
     mnemonic?: string;

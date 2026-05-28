@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.btcChainAdapter = void 0;
+require("../../compat/nodeLocalStorage");
 const utxo_wallet_service_1 = require("@metalet/utxo-wallet-service");
 const deriveIdentity_1 = require("../../identity/deriveIdentity");
 const METALET_HOST = 'https://www.metalet.space';

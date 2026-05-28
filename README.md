@@ -228,7 +228,6 @@ Supported platforms:
 - Cursor Agent
 - Kimi
 - Kiro CLI
-- Trae
 - CodeBuddy
 
 Requirements: Node.js 20-24, npm, macOS / Linux / Windows. The npm path works

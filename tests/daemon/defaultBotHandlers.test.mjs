@@ -955,7 +955,7 @@ test('default bot createProfile notifies the daemon after registering the profil
   assert.equal(registrationCallbackCalls, 1);
 });
 
-test('default identity create prefers the requested Cursor host provider over newer Trae activity', async (t) => {
+test('default identity create prefers the requested Cursor host provider over newer CodeBuddy activity', async (t) => {
   const homeDir = await createProfileHome('metabot-default-identity-create-', 'cursor-default-bot');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -964,19 +964,19 @@ test('default identity create prefers the requested Cursor host provider over ne
   const binDir = path.join(systemHomeDir, 'bin');
   await mkdir(binDir, { recursive: true });
   const cursorPath = path.join(binDir, 'cursor-agent');
-  const traePath = path.join(binDir, 'trae');
+  const codebuddyPath = path.join(binDir, 'codebuddy');
   await writeFile(cursorPath, [
     '#!/bin/sh',
     'if [ "$1" = "--version" ]; then echo "cursor-agent 1.0.0"; exit 0; fi',
     'echo \'{"type":"text","text":"OK"}\'',
   ].join('\n'), 'utf8');
-  await writeFile(traePath, [
+  await writeFile(codebuddyPath, [
     '#!/bin/sh',
-    'if [ "$1" = "--version" ]; then echo "trae 1.0.0"; exit 0; fi',
-    'echo "OK"',
+    'if [ "$1" = "--version" ]; then echo "codebuddy 1.0.0"; exit 0; fi',
+    'echo \'{"type":"text","text":"OK"}\'',
   ].join('\n'), 'utf8');
   await chmod(cursorPath, 0o755);
-  await chmod(traePath, 0o755);
+  await chmod(codebuddyPath, 0o755);
   const originalPath = process.env.PATH;
   process.env.PATH = binDir;
   t.after(() => {
@@ -992,7 +992,7 @@ test('default identity create prefers the requested Cursor host provider over ne
         updatedAt: '2026-05-06T00:01:00.000Z',
       },
       {
-        ...runtime('trae', 'runtime-trae', 'healthy'),
+        ...runtime('codebuddy', 'runtime-codebuddy', 'healthy'),
         lastSeenAt: '2026-05-06T00:05:00.000Z',
         updatedAt: '2026-05-06T00:05:00.000Z',
       },
@@ -1034,7 +1034,7 @@ test('default identity create prefers the requested Cursor host provider over ne
   assert.deepEqual(
     bindingState.bindings.map((binding) => [binding.role, providerByRuntimeId.get(binding.llmRuntimeId)]).sort(),
     [
-      ['fallback', 'trae'],
+      ['fallback', 'codebuddy'],
       ['primary', 'cursor'],
     ],
   );

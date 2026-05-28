@@ -40,6 +40,7 @@ exports.validateGlobalMetaId = validateGlobalMetaId;
 exports.derivePrivateKeyHex = derivePrivateKeyHex;
 exports.convertToGlobalMetaId = convertToGlobalMetaId;
 exports.deriveIdentity = deriveIdentity;
+require("../compat/nodeLocalStorage");
 const node_crypto_1 = require("node:crypto");
 const bip39 = __importStar(require("@scure/bip39"));
 const english_1 = require("@scure/bip39/wordlists/english");

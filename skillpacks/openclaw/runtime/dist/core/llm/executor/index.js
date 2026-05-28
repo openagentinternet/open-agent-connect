@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveProviderSkillRoot = exports.injectSkills = exports.isSafeLlmSessionId = exports.createFileSessionManager = exports.createRegistryBackendFactories = exports.traeBackendFactory = exports.createTraeBackend = exports.piBackendFactory = exports.createPiBackend = exports.opencodeBackendFactory = exports.createOpenCodeBackend = exports.openClawBackendFactory = exports.createOpenClawBackend = exports.kiroBackendFactory = exports.createKiroBackend = exports.kimiBackendFactory = exports.createKimiBackend = exports.hermesBackendFactory = exports.createHermesBackend = exports.geminiBackendFactory = exports.createGeminiBackend = exports.cursorBackendFactory = exports.createCursorBackend = exports.copilotBackendFactory = exports.createCopilotBackend = exports.codeBuddyBackendFactory = exports.createCodeBuddyBackend = exports.codexBackendFactory = exports.createCodexBackend = exports.claudeBackendFactory = exports.createClaudeBackend = exports.LlmExecutor = void 0;
+exports.resolveProviderSkillRoot = exports.injectSkills = exports.isSafeLlmSessionId = exports.createFileSessionManager = exports.createRegistryBackendFactories = exports.piBackendFactory = exports.createPiBackend = exports.opencodeBackendFactory = exports.createOpenCodeBackend = exports.openClawBackendFactory = exports.createOpenClawBackend = exports.kiroBackendFactory = exports.createKiroBackend = exports.kimiBackendFactory = exports.createKimiBackend = exports.hermesBackendFactory = exports.createHermesBackend = exports.geminiBackendFactory = exports.createGeminiBackend = exports.cursorBackendFactory = exports.createCursorBackend = exports.copilotBackendFactory = exports.createCopilotBackend = exports.codeBuddyBackendFactory = exports.createCodeBuddyBackend = exports.codexBackendFactory = exports.createCodexBackend = exports.claudeBackendFactory = exports.createClaudeBackend = exports.LlmExecutor = void 0;
 var executor_1 = require("./executor");
 Object.defineProperty(exports, "LlmExecutor", { enumerable: true, get: function () { return executor_1.LlmExecutor; } });
 var claude_1 = require("./backends/claude");
@@ -39,9 +39,6 @@ Object.defineProperty(exports, "opencodeBackendFactory", { enumerable: true, get
 var pi_1 = require("./backends/pi");
 Object.defineProperty(exports, "createPiBackend", { enumerable: true, get: function () { return pi_1.createPiBackend; } });
 Object.defineProperty(exports, "piBackendFactory", { enumerable: true, get: function () { return pi_1.piBackendFactory; } });
-var trae_1 = require("./backends/trae");
-Object.defineProperty(exports, "createTraeBackend", { enumerable: true, get: function () { return trae_1.createTraeBackend; } });
-Object.defineProperty(exports, "traeBackendFactory", { enumerable: true, get: function () { return trae_1.traeBackendFactory; } });
 var registry_1 = require("./backends/registry");
 Object.defineProperty(exports, "createRegistryBackendFactories", { enumerable: true, get: function () { return registry_1.createRegistryBackendFactories; } });
 var session_manager_1 = require("./session-manager");

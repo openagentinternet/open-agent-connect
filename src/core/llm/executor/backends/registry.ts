@@ -11,7 +11,6 @@ import { kiroBackendFactory } from './kiro';
 import { openClawBackendFactory } from './openclaw';
 import { opencodeBackendFactory } from './opencode';
 import { piBackendFactory } from './pi';
-import { traeBackendFactory } from './trae';
 import type { LlmBackendFactory } from './backend';
 
 const FACTORY_BY_EXECUTOR_KIND: Record<PlatformExecutorKind, LlmBackendFactory> = {
@@ -26,7 +25,6 @@ const FACTORY_BY_EXECUTOR_KIND: Record<PlatformExecutorKind, LlmBackendFactory> 
   'cursor-stream-json': cursorBackendFactory,
   'acp-kimi': kimiBackendFactory,
   'acp-kiro': kiroBackendFactory,
-  'trae-chat': traeBackendFactory,
   'codebuddy-stream-json': codeBuddyBackendFactory,
 };
 

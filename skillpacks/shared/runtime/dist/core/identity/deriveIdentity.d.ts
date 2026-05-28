@@ -1,3 +1,4 @@
+import '../compat/nodeLocalStorage';
 export interface DerivedIdentity {
     mnemonic: string;
     path: string;

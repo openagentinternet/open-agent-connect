@@ -34,7 +34,6 @@ Current supported host roots are registry-driven and match `oac install`:
 - `Cursor Agent`: `$HOME/.cursor/skills`
 - `Kimi`: `$HOME/.kimi/skills` and `$HOME/.config/agents/skills`
 - `Kiro CLI`: `$HOME/.kiro/skills`
-- `Trae`: `$HOME/.trae/skills`
 - `CodeBuddy`: `$HOME/.codebuddy/skills`
 - Shared standard root: `$HOME/.agents/skills`
 
@@ -149,7 +148,6 @@ remove_metabot_host_symlinks "$HOME/.cursor/skills"
 remove_metabot_host_symlinks "$HOME/.kimi/skills"
 remove_metabot_host_symlinks "$HOME/.config/agents/skills"
 remove_metabot_host_symlinks "$HOME/.kiro/skills"
-remove_metabot_host_symlinks "$HOME/.trae/skills"
 remove_metabot_host_symlinks "$HOME/.codebuddy/skills"
 
 rm -f "$HOME/.metabot/bin/metabot"
@@ -173,7 +171,6 @@ for root in \
   "$HOME/.kimi/skills" \
   "$HOME/.config/agents/skills" \
   "$HOME/.kiro/skills" \
-  "$HOME/.trae/skills" \
   "$HOME/.codebuddy/skills"; do
   test ! -L "$root/metabot-identity-manage"
 done

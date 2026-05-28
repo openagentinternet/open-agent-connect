@@ -12,7 +12,6 @@ export type PlatformId =
   | 'cursor'
   | 'kimi'
   | 'kiro'
-  | 'trae'
   | 'codebuddy';
 
 export type RuntimePlatformId = PlatformId;
@@ -29,7 +28,6 @@ export type PlatformExecutorKind =
   | 'cursor-stream-json'
   | 'acp-kimi'
   | 'acp-kiro'
-  | 'trae-chat'
   | 'codebuddy-stream-json';
 
 export interface PlatformDefinition {
@@ -324,29 +322,6 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
       backendFactoryExport: 'kiroBackendFactory',
       launchCommand: 'kiro-cli acp --trust-all-tools',
       multicaReferencePath: 'agent/kiro.go',
-    },
-  },
-  {
-    id: 'trae',
-    displayName: 'Trae',
-    logoPath: '/ui/assets/platforms/generic.svg',
-    runtime: {
-      binaryNames: ['trae', 'Trae'],
-      versionArgs: ['--version'],
-      authEnv: [],
-      capabilities: DEFAULT_CAPABILITIES,
-    },
-    skills: {
-      roots: [
-        { id: 'trae-home', kind: 'global', path: '~/.trae/skills', autoBind: 'when-parent-exists' },
-        { id: 'trae-project', kind: 'project', path: '.trae/skills', autoBind: 'manual' },
-      ],
-    },
-    executor: {
-      kind: 'trae-chat',
-      backendFactoryExport: 'traeBackendFactory',
-      launchCommand: 'trae chat <prompt> --mode agent --reuse-window',
-      multicaReferencePath: 'agent/trae.go',
     },
   },
   {

@@ -21,7 +21,6 @@ export { createKiroBackend, kiroBackendFactory } from './backends/kiro';
 export { createOpenClawBackend, openClawBackendFactory } from './backends/openclaw';
 export { createOpenCodeBackend, opencodeBackendFactory } from './backends/opencode';
 export { createPiBackend, piBackendFactory } from './backends/pi';
-export { createTraeBackend, traeBackendFactory } from './backends/trae';
 export { createRegistryBackendFactories } from './backends/registry';
 export { createFileSessionManager, isSafeLlmSessionId, type SessionManager } from './session-manager';
 export { injectSkills, resolveProviderSkillRoot, type SkillInjectionResult, type SkillInjectorInput } from './skill-injector';

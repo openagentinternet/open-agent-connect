@@ -276,29 +276,6 @@ exports.PLATFORM_DEFINITIONS = [
         },
     },
     {
-        id: 'trae',
-        displayName: 'Trae',
-        logoPath: '/ui/assets/platforms/generic.svg',
-        runtime: {
-            binaryNames: ['trae', 'Trae'],
-            versionArgs: ['--version'],
-            authEnv: [],
-            capabilities: DEFAULT_CAPABILITIES,
-        },
-        skills: {
-            roots: [
-                { id: 'trae-home', kind: 'global', path: '~/.trae/skills', autoBind: 'when-parent-exists' },
-                { id: 'trae-project', kind: 'project', path: '.trae/skills', autoBind: 'manual' },
-            ],
-        },
-        executor: {
-            kind: 'trae-chat',
-            backendFactoryExport: 'traeBackendFactory',
-            launchCommand: 'trae chat <prompt> --mode agent --reuse-window',
-            multicaReferencePath: 'agent/trae.go',
-        },
-    },
-    {
         id: 'codebuddy',
         displayName: 'CodeBuddy',
         logoPath: '/ui/assets/platforms/generic.svg',

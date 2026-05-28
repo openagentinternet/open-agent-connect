@@ -41,17 +41,14 @@ test('supported provider metadata includes all managed host providers and custom
     'cursor',
     'kimi',
     'kiro',
-    'trae',
     'codebuddy',
   ]);
   assert.deepEqual(HOST_SEARCH_ORDER, SUPPORTED_LLM_PROVIDERS);
   assert.equal(HOST_BINARY_MAP.copilot, 'copilot');
   assert.equal(HOST_BINARY_MAP.cursor, 'cursor-agent');
   assert.equal(HOST_BINARY_MAP.kiro, 'kiro-cli');
-  assert.equal(HOST_BINARY_MAP.trae, 'trae');
   assert.equal(HOST_BINARY_MAP.codebuddy, 'codebuddy');
   assert.equal(PROVIDER_DISPLAY_NAMES.gemini, 'Gemini CLI');
-  assert.equal(PROVIDER_DISPLAY_NAMES.trae, 'Trae');
   assert.equal(PROVIDER_DISPLAY_NAMES.codebuddy, 'CodeBuddy');
   assert.deepEqual(SUPPORTED_PLATFORM_IDS, SUPPORTED_LLM_PROVIDERS);
   assert.deepEqual(getPlatformSearchOrder(), HOST_SEARCH_ORDER);
@@ -62,12 +59,12 @@ test('supported provider metadata includes all managed host providers and custom
     assert.equal(isLlmProvider(provider), true, provider);
   }
   assert.equal(isLlmProvider('unknown-provider'), false);
-  assert.equal(isLlmProvider('trae'), true);
+  assert.equal(isLlmProvider('trae'), false);
   assert.equal(isLlmProvider('codebuddy'), true);
 });
 
 test('platform registry defines managed runtime metadata and install skill roots', () => {
-  assert.equal(PLATFORM_DEFINITIONS.length, 13);
+  assert.equal(PLATFORM_DEFINITIONS.length, 12);
   assert.deepEqual(
     PLATFORM_DEFINITIONS.map((platform) => platform.id),
     SUPPORTED_LLM_PROVIDERS,
@@ -95,10 +92,8 @@ test('platform registry defines managed runtime metadata and install skill roots
   }
 
   assert.deepEqual(getRuntimePlatforms().map((platform) => platform.id), SUPPORTED_LLM_PROVIDERS);
-  assert.equal(PLATFORM_DEFINITIONS.find((platform) => platform.id === 'trae').executor.backendFactoryExport, 'traeBackendFactory');
   assert.equal(PLATFORM_DEFINITIONS.find((platform) => platform.id === 'codebuddy').executor.backendFactoryExport, 'codeBuddyBackendFactory');
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'codex'));
-  assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'trae' && root.path === '~/.trae/skills'));
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'codebuddy' && root.path === '~/.codebuddy/skills'));
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'shared-agents'));
 });
@@ -112,21 +107,18 @@ test('runtime discovery uses expanded provider metadata and environment auth che
   const geminiPath = path.join(binDir, 'gemini');
   const kiroPath = path.join(binDir, 'kiro-cli');
   const opencodePath = path.join(binDir, 'opencode');
-  const traePath = path.join(binDir, 'trae');
   const codeBuddyPath = path.join(binDir, 'codebuddy');
   await writeFile(copilotPath, '#!/bin/sh\necho "copilot 1.2.3"\n', 'utf8');
   await writeFile(cursorPath, '#!/bin/sh\necho "cursor-agent 3.4.5"\n', 'utf8');
   await writeFile(geminiPath, '#!/bin/sh\necho "gemini 2.3.4"\n', 'utf8');
   await writeFile(kiroPath, '#!/bin/sh\necho "kiro-cli 5.6.7"\n', 'utf8');
   await writeFile(opencodePath, '#!/bin/sh\necho "opencode 0.9.1"\n', 'utf8');
-  await writeFile(traePath, '#!/bin/sh\necho "Trae 1.107.1"\n', 'utf8');
   await writeFile(codeBuddyPath, '#!/bin/sh\necho "CodeBuddy 2.0.0"\n', 'utf8');
   await chmod(copilotPath, 0o755);
   await chmod(cursorPath, 0o755);
   await chmod(geminiPath, 0o755);
   await chmod(kiroPath, 0o755);
   await chmod(opencodePath, 0o755);
-  await chmod(traePath, 0o755);
   await chmod(codeBuddyPath, 0o755);
 
   const result = await discoverLlmRuntimes({
@@ -143,7 +135,7 @@ test('runtime discovery uses expanded provider metadata and environment auth che
   assert.equal(result.errors.length, 0);
   assert.deepEqual(
     result.runtimes.map((runtime) => runtime.provider),
-    ['copilot', 'opencode', 'gemini', 'cursor', 'kiro', 'trae', 'codebuddy'],
+    ['copilot', 'opencode', 'gemini', 'cursor', 'kiro', 'codebuddy'],
   );
 
   for (const runtime of result.runtimes) {
@@ -175,10 +167,6 @@ test('runtime discovery uses expanded provider metadata and environment auth che
 
   const kiro = result.runtimes.find((runtime) => runtime.provider === 'kiro');
   assert.equal(kiro.binaryPath, kiroPath);
-
-  const trae = result.runtimes.find((runtime) => runtime.provider === 'trae');
-  assert.equal(trae.binaryPath, traePath);
-  assert.equal(trae.version, '1.107.1');
 
   const codebuddy = result.runtimes.find((runtime) => runtime.provider === 'codebuddy');
   assert.equal(codebuddy.binaryPath, codeBuddyPath);

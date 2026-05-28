@@ -25,12 +25,10 @@ const {
   createOpenCodeBackend,
   createPiBackend,
   createRegistryBackendFactories,
-  createTraeBackend,
   injectSkills,
   openClawBackendFactory,
   codeBuddyBackendFactory,
   resolveProviderSkillRoot,
-  traeBackendFactory,
 } = require('../../dist/core/llm/executor/index.js');
 const {
   getPlatformDefinition,
@@ -192,13 +190,6 @@ test('registry preserves Claude Code and Codex executor metadata', async () => {
   assert.equal(codex.executor.launchCommand, 'codex app-server --listen stdio://');
   assert.equal(codex.executor.multicaReferencePath, 'agent/codex.go');
 
-  const trae = getPlatformDefinition('trae');
-  assert.equal(trae.id, 'trae');
-  assert.equal(trae.displayName, 'Trae');
-  assert.equal(trae.executor.kind, 'trae-chat');
-  assert.equal(trae.executor.backendFactoryExport, 'traeBackendFactory');
-  assert.equal(trae.executor.launchCommand, 'trae chat <prompt> --mode agent --reuse-window');
-
   const codebuddy = getPlatformDefinition('codebuddy');
   assert.equal(codebuddy.id, 'codebuddy');
   assert.equal(codebuddy.displayName, 'CodeBuddy');
@@ -219,7 +210,6 @@ test('registry backend factory helper covers every managed provider and CLI runt
   assert.equal(factories['claude-code'], claudeBackendFactory);
   assert.equal(factories.codex, codexBackendFactory);
   assert.equal(factories.openclaw, openClawBackendFactory);
-  assert.equal(factories.trae, traeBackendFactory);
   assert.equal(factories.codebuddy, codeBuddyBackendFactory);
 
   const base = await createTempDir();
@@ -1488,79 +1478,6 @@ process.stdout.write(JSON.stringify({ type: 'result', result: 'done' }) + '\\n')
   assert.equal(args[1], '-p');
   assert.match(args[2], /Provider-only system contract/);
   assert.match(args[2], /User task only/);
-});
-
-test('Trae backend launches editor chat mode and captures process output', async () => {
-  const base = await createTempDir();
-  const argsPath = path.join(base, 'args.json');
-  const cwdPath = path.join(base, 'cwd.txt');
-  const envPath = path.join(base, 'env.txt');
-  const binaryPath = await writeExecutableScript(base, 'fake-trae.js', `#!/usr/bin/env node
-const fs = require('node:fs');
-fs.writeFileSync(process.env.FAKE_TRAE_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
-fs.writeFileSync(process.env.FAKE_TRAE_CWD_PATH, process.cwd());
-fs.writeFileSync(process.env.FAKE_TRAE_ENV_PATH, process.env.OAC_TEST_MARKER || '');
-process.stdout.write('Trae response\\n');
-process.stderr.write('Trae diagnostic\\n');
-`);
-  const backend = createTraeBackend(binaryPath, {
-    FAKE_TRAE_ARGS_PATH: argsPath,
-    FAKE_TRAE_CWD_PATH: cwdPath,
-    FAKE_TRAE_ENV_PATH: envPath,
-  });
-  const events = [];
-  const result = await backend.execute(
-    {
-      runtimeId: 'llm_trae',
-      runtime: { ...runtime, provider: 'trae', binaryPath },
-      prompt: 'hello trae',
-      cwd: base,
-      env: { OAC_TEST_MARKER: 'trae-env' },
-      extraArgs: ['--mode', 'ask', '--new-window', '--maximize'],
-    },
-    { emit: (event) => events.push(event) },
-    new AbortController().signal,
-  );
-
-  const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
-  assert.deepEqual(args.slice(0, 5), ['chat', 'hello trae', '--mode', 'agent', '--reuse-window']);
-  assert.equal(args.includes('ask'), false);
-  assert.equal(args.includes('--new-window'), false);
-  assert.ok(args.includes('--maximize'));
-  await assertSameRealpath(await fs.readFile(cwdPath, 'utf8'), base);
-  assert.equal(await fs.readFile(envPath, 'utf8'), 'trae-env');
-  assert.equal(result.status, 'completed');
-  assert.equal(result.output, 'Trae response');
-  assert.deepEqual(events.filter((event) => event.type === 'text').map((event) => event.content), ['Trae response']);
-  assert.equal(events.some((event) => event.type === 'log' && event.message === 'Trae diagnostic'), true);
-});
-
-test('Trae backend reports empty editor launch output as failed', async () => {
-  const base = await createTempDir();
-  const argsPath = path.join(base, 'args.json');
-  const binaryPath = await writeExecutableScript(base, 'fake-empty-trae.js', `#!/usr/bin/env node
-const fs = require('node:fs');
-fs.writeFileSync(process.env.FAKE_TRAE_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
-`);
-  const backend = createTraeBackend(binaryPath, {
-    FAKE_TRAE_ARGS_PATH: argsPath,
-  });
-  const result = await backend.execute(
-    {
-      runtimeId: 'llm_trae',
-      runtime: { ...runtime, provider: 'trae', binaryPath },
-      prompt: 'hello trae',
-      cwd: base,
-    },
-    { emit: () => undefined },
-    new AbortController().signal,
-  );
-
-  const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
-  assert.deepEqual(args.slice(0, 5), ['chat', 'hello trae', '--mode', 'agent', '--reuse-window']);
-  assert.equal(result.status, 'failed');
-  assert.equal(result.output, '');
-  assert.match(result.error, /without returning text output/);
 });
 
 test('CodeBuddy backend launches stream-json print mode and normalizes events', async () => {

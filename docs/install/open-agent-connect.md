@@ -125,7 +125,6 @@ Supported platforms:
 - `cursor` - Cursor Agent
 - `kimi` - Kimi
 - `kiro` - Kiro CLI
-- `trae` - Trae
 - `codebuddy` - CodeBuddy
 
 Runtime discovery requires a real CLI executable, not just a desktop app bundle.
@@ -187,7 +186,6 @@ Host-native roots used by the built-in binder:
 - `Cursor Agent`: `$HOME/.cursor/skills`
 - `Kimi`: `$HOME/.kimi/skills` and `$HOME/.config/agents/skills`
 - `Kiro CLI`: `$HOME/.kiro/skills`
-- `Trae`: `$HOME/.trae/skills`
 - `CodeBuddy`: `$HOME/.codebuddy/skills`
 - Shared standard root: `$HOME/.agents/skills`
 

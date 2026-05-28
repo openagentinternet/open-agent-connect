@@ -1908,7 +1908,7 @@ test('POST /api/bot/runtimes/:runtimeId/test supports encoded runtime ids with p
   const server = await startServer();
   t.after(async () => server.close());
 
-  const runtimeId = 'llm_trae_/usr/local/bin/trae';
+  const runtimeId = 'llm_codebuddy_/usr/local/bin/codebuddy';
   const response = await fetch(`${server.baseUrl}/api/bot/runtimes/${encodeURIComponent(runtimeId)}/test`, {
     method: 'POST',
   });

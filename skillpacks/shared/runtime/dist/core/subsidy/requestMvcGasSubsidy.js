@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.requestMvcGasSubsidy = requestMvcGasSubsidy;
+require("../compat/nodeLocalStorage");
 const utxo_wallet_service_1 = require("@metalet/utxo-wallet-service");
 const deriveIdentity_1 = require("../identity/deriveIdentity");
 const DEFAULT_ADDRESS_INIT_URL = 'https://www.metaso.network/assist-open-api/v1/assist/gas/mvc/address-init';

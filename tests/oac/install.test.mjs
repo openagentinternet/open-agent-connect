@@ -83,7 +83,7 @@ test('runOac help shows primary bare install flow and registry platform host lis
   assert.match(result.stdout, /oac install/);
   assert.match(result.stdout, /oac doctor/);
   assert.match(result.stdout, /uninstall\s+Remove OAC shim/);
-  assert.match(result.stdout, /oac install --host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro\|trae\|codebuddy>/);
+  assert.match(result.stdout, /oac install --host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro\|codebuddy>/);
 });
 
 test('runOac installs shared skills, metabot shim, and codex host bindings for an explicit host', async (t) => {
@@ -274,19 +274,9 @@ test('runOac install --host openclaw force-creates platform-native bindings', as
   );
 });
 
-test('runOac install can force-bind Trae and CodeBuddy skill roots', async (t) => {
-  const { systemHome } = await createSystemHome('oac-install-force-trae-codebuddy-');
+test('runOac install can force-bind CodeBuddy skill roots', async (t) => {
+  const { systemHome } = await createSystemHome('oac-install-force-codebuddy-');
   t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
-
-  const trae = await runOacCli(systemHome, ['install', '--host', 'trae']);
-  assert.equal(trae.exitCode, 0);
-  assert.equal(trae.payload.ok, true);
-  assert.equal(trae.payload.data.host, 'trae');
-  assert.ok(trae.payload.data.boundRoots.some((root) => root.platformId === 'trae' && root.rootId === 'trae-home'));
-  await assertSymlinkPointsTo(
-    path.join(systemHome, '.trae', 'skills', 'metabot-ask-master'),
-    path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'),
-  );
 
   const codebuddy = await runOacCli(systemHome, ['install', '--host', 'codebuddy']);
   assert.equal(codebuddy.exitCode, 0);
@@ -297,6 +287,18 @@ test('runOac install can force-bind Trae and CodeBuddy skill roots', async (t) =
     path.join(systemHome, '.codebuddy', 'skills', 'metabot-ask-master'),
     path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'),
   );
+});
+
+test('runOac install rejects removed Trae host support', async (t) => {
+  const { systemHome } = await createSystemHome('oac-install-reject-trae-');
+  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
+
+  const result = await runOacCli(systemHome, ['install', '--host', 'trae']);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.code, 'invalid_argument');
+  assert.match(result.payload.message, /Unsupported --host value: trae/);
 });
 
 test('runOac doctor verifies an existing install without rewriting installed skills', async (t) => {

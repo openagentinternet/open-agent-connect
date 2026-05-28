@@ -158,7 +158,6 @@ test('uninstall guide defines safe, test cleanup, and danger-zone tiers', async 
     'Cursor Agent',
     'Kimi',
     'Kiro CLI',
-    'Trae',
     'CodeBuddy',
   ]) {
     assert.match(guide, new RegExp(platform.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));

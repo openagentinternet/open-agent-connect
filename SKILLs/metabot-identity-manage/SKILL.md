@@ -79,7 +79,6 @@ reliably identified as one of the supported platform ids:
 - `cursor`
 - `kimi`
 - `kiro`
-- `trae`
 - `codebuddy`
 
 For example, when this skill is running from Cursor, pass Cursor explicitly:

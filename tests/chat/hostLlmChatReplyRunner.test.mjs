@@ -303,9 +303,9 @@ test('host LLM chat runner falls back when the injected executor fails', async (
 test('host LLM chat runner treats completed empty output as unavailable and tries fallback', async () => {
   const primaryRuntime = {
     id: 'llm-runtime-primary',
-    provider: 'trae',
-    displayName: 'Trae',
-    binaryPath: '/bin/trae',
+    provider: 'codebuddy',
+    displayName: 'CodeBuddy',
+    binaryPath: '/bin/codebuddy',
     authState: 'authenticated',
     health: 'healthy',
     capabilities: ['streaming'],

@@ -37,6 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.dogeChainAdapter = void 0;
+require("../../compat/nodeLocalStorage");
 const utxo_wallet_service_1 = require("@metalet/utxo-wallet-service");
 const bitcoin = __importStar(require("bitcoinjs-lib"));
 const ecpair_1 = __importDefault(require("ecpair"));
