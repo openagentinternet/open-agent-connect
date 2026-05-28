@@ -4,7 +4,7 @@ import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 
 export type Awaitable<T> = T | Promise<T>;
 
-export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'chat-viewer' | 'bot' | 'loom';
+export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'chat-viewer' | 'bot' | 'loom' | 'metaapps';
 
 export interface MetabotDaemonHttpHandlers {
   config?: {
@@ -13,6 +13,18 @@ export interface MetabotDaemonHttpHandlers {
   };
   buzz?: {
     post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
+  metaapp?: {
+    preview?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    share?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    comment?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    previewAsset?: (input: { previewId: string; assetPath?: string }) => Awaitable<{
+      body: Buffer | string;
+      contentType: string;
+    } | MetabotCommandResult<unknown>>;
   };
   chain?: {
     write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

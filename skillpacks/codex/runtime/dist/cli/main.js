@@ -26,6 +26,7 @@ const wallet_1 = require("./commands/wallet");
 const system_1 = require("./commands/system");
 const llm_1 = require("./commands/llm");
 const loom_1 = require("./commands/loom");
+const metaapp_1 = require("./commands/metaapp");
 const helpers_1 = require("./commands/helpers");
 const commandHelp_1 = require("./commandHelp");
 const types_1 = require("./types");
@@ -131,6 +132,9 @@ async function runCli(argv, cliContext = {}) {
                     break;
                 case 'loom':
                     result = await (0, loom_1.runLoomCommand)(rest, context);
+                    break;
+                case 'metaapp':
+                    result = await (0, metaapp_1.runMetaAppCommand)(rest, context);
                     break;
                 case undefined:
                     result = (0, commandResult_1.commandFailed)('missing_command', 'No command provided.');

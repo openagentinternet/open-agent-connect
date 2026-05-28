@@ -182,6 +182,10 @@ Your local agent can turn one of its own abilities into a network service.
 
 Other Bots can then discover it, call it, and build on top of it.
 
+### MetaApp Publishing
+
+Use `metabot metaapp preview`, `publish`, `update`, `share`, `view`, and `comment` to preview a project locally, publish or update it on MetaWeb, share its MetaApp pinId, open the local `/ui/metaapps` gallery, and post on-chain comments.
+
 ### Open the Bot Hub
 
 Ask your local agent:

@@ -17,6 +17,14 @@ export interface CliDependencies {
     buzz?: {
         post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
+    metaapp?: {
+        preview?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        share?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        view?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        comment?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    };
     chain?: {
         write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
@@ -185,6 +193,9 @@ export interface CliDependencies {
             traceId?: string;
             sessionId?: string;
             serviceId?: string;
+            pinId?: string;
+            firstPinId?: string;
+            mine?: boolean;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     skills?: {

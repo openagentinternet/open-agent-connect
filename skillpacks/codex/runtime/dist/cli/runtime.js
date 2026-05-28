@@ -1746,6 +1746,29 @@ async function runWalletTransferRuntime(context, input) {
     });
 }
 function createDefaultCliDependencies(context) {
+    async function openLocalUiPage(input) {
+        const baseUrl = await ensureDaemonBaseUrl(context);
+        const query = new URLSearchParams();
+        if (input.from)
+            query.set('from', input.from);
+        if (input.traceId)
+            query.set('traceId', input.traceId);
+        if (input.sessionId)
+            query.set('sessionId', input.sessionId);
+        if (input.serviceId)
+            query.set('serviceId', input.serviceId);
+        if (input.pinId)
+            query.set('pinId', input.pinId);
+        if (input.firstPinId)
+            query.set('firstPinId', input.firstPinId);
+        if (input.mine)
+            query.set('mine', 'true');
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return (0, commandResult_1.commandSuccess)({
+            page: input.page,
+            localUiUrl: `${baseUrl}${resolveLocalUiPath(input.page)}${suffix}`,
+        });
+    }
     return {
         config: {
             get: async (input) => {
@@ -1789,6 +1812,32 @@ function createDefaultCliDependencies(context) {
                     value: readConfigValue(nextConfig, input.key),
                 });
             },
+        },
+        metaapp: {
+            preview: async (input) => requestJson(context, 'POST', '/api/metaapp/preview', {
+                ...input,
+                projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
+                manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
+            }),
+            publish: async (input) => requestJson(context, 'POST', '/api/metaapp/publish', {
+                ...input,
+                projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
+                manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
+            }),
+            update: async (input) => requestJson(context, 'POST', '/api/metaapp/update', {
+                ...input,
+                projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
+                manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
+            }),
+            share: async (input) => requestJson(context, 'POST', '/api/metaapp/share', input),
+            view: async (input) => openLocalUiPage({
+                page: 'metaapps',
+                ...(typeof input.from === 'string' ? { from: input.from } : {}),
+                ...(typeof input.pinId === 'string' ? { pinId: input.pinId } : {}),
+                ...(typeof input.firstPinId === 'string' ? { firstPinId: input.firstPinId } : {}),
+                ...(input.mine === true ? { mine: true } : {}),
+            }),
+            comment: async (input) => requestJson(context, 'POST', '/api/metaapp/comment', input),
         },
         buzz: {
             post: async (input) => requestJson(context, 'POST', '/api/buzz/post', input),
@@ -2191,23 +2240,7 @@ function createDefaultCliDependencies(context) {
             },
         },
         ui: {
-            open: async (input) => {
-                const baseUrl = await ensureDaemonBaseUrl(context);
-                const query = new URLSearchParams();
-                if (input.from)
-                    query.set('from', input.from);
-                if (input.traceId)
-                    query.set('traceId', input.traceId);
-                if (input.sessionId)
-                    query.set('sessionId', input.sessionId);
-                if (input.serviceId)
-                    query.set('serviceId', input.serviceId);
-                const suffix = query.size ? `?${query.toString()}` : '';
-                return (0, commandResult_1.commandSuccess)({
-                    page: input.page,
-                    localUiUrl: `${baseUrl}${resolveLocalUiPath(input.page)}${suffix}`,
-                });
-            },
+            open: async (input) => openLocalUiPage(input),
         },
         skills: {
             resolve: async (input) => {
@@ -3103,6 +3136,7 @@ function mergeCliDependencies(context) {
     return {
         config: { ...defaults.config, ...provided.config },
         buzz: { ...defaults.buzz, ...provided.buzz },
+        metaapp: { ...defaults.metaapp, ...provided.metaapp },
         chain: { ...defaults.chain, ...provided.chain },
         daemon: { ...defaults.daemon, ...provided.daemon },
         doctor: { ...defaults.doctor, ...provided.doctor },

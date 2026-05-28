@@ -1382,6 +1382,36 @@ test('ui open chat returns the bundled Chat entry html url', async (t) => {
   assert.match(opened.payload.data.localUiUrl, /\/ui\/chat\/app\/chat\.html$/);
 });
 
+test('metaapp view returns a local metaapps gallery url for one pin id', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const opened = await runCommand(homeDir, ['metaapp', 'view', '--pin-id', 'pin-1i0']);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, true);
+  assert.equal(opened.payload.data.page, 'metaapps');
+  assert.match(opened.payload.data.localUiUrl, /\/ui\/metaapps\?pinId=pin-1i0$/);
+});
+
+test('metaapp view returns a local metaapps gallery url for mine scope and from selector', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const opened = await runCommand(homeDir, ['metaapp', 'view', '--mine', '--from', 'alice']);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, true);
+  assert.equal(opened.payload.data.page, 'metaapps');
+  assert.match(opened.payload.data.localUiUrl, /\/ui\/metaapps\?from=alice&mine=true$/);
+});
+
 test('buzz post succeeds immediately after bootstrap identity create', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
