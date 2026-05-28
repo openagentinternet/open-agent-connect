@@ -13,6 +13,10 @@ import type {
   A2AConversationState,
   A2AOrderConversationSession,
 } from './conversationTypes';
+import {
+  normalizeDeliveryArtifacts,
+  type A2ADeliveryArtifact,
+} from './deliveryArtifacts';
 
 export interface A2ATraceProjectionProfile {
   name?: string | null;
@@ -58,6 +62,7 @@ export interface UnifiedA2ATraceTranscriptItem {
   type: string;
   sender: 'caller' | 'provider' | 'system';
   content: string;
+  artifacts?: A2ADeliveryArtifact[];
   metadata: Record<string, unknown>;
 }
 
@@ -83,6 +88,7 @@ export interface UnifiedA2ATraceSessionDetail {
   };
   resultText: string | null;
   responseText: string | null;
+  deliveryArtifacts: A2ADeliveryArtifact[];
   resultObservedAt: number | null;
   resultDeliveryPinId: string | null;
   ratingRequestText: string | null;
@@ -433,10 +439,19 @@ function stripOrderProtocolFallback(content: string): string {
   return content.replace(/^\[[A-Za-z_]+(?::[0-9a-fA-F]{64})?(?:\s+[A-Za-z0-9_-]+)?\]\s*/u, '').trim();
 }
 
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
 function projectProtocolMessage(input: {
   message: A2AConversationMessage;
   session: A2AConversationSession;
-}): { type: string; content: string; metadata: Record<string, unknown> } {
+}): {
+  type: string;
+  content: string;
+  artifacts: A2ADeliveryArtifact[];
+  metadata: Record<string, unknown>;
+} {
   const { message, session } = input;
   const protocolTag = normalizeText(message.protocolTag);
   const rawContent = String(message.content ?? '');
@@ -461,6 +476,7 @@ function projectProtocolMessage(input: {
     return {
       type: 'message',
       content: rawContent,
+      artifacts: [],
       metadata,
     };
   }
@@ -469,6 +485,7 @@ function projectProtocolMessage(input: {
     return {
       type: 'order',
       content: stripOrderProtocolFallback(rawContent) || rawContent,
+      artifacts: [],
       metadata,
     };
   }
@@ -478,20 +495,38 @@ function projectProtocolMessage(input: {
     return {
       type: 'order_status',
       content: normalizeText(parsed?.content) || stripOrderProtocolFallback(rawContent) || rawContent,
+      artifacts: [],
       metadata,
     };
   }
 
   if (protocolTag.toUpperCase() === 'DELIVERY') {
     const parsed = parseDeliveryMessage(rawContent);
-    const content = normalizeText(parsed?.result) || stripOrderProtocolFallback(rawContent) || rawContent;
+    const content = parsed
+      ? normalizeText(parsed.result)
+      : stripOrderProtocolFallback(rawContent) || rawContent;
+    const artifacts = normalizeDeliveryArtifacts({
+      artifacts: [
+        ...arrayValue(message.artifacts),
+        ...arrayValue(parsed?.artifacts),
+      ],
+      resultText: rawContent,
+    });
+    const deliveryPayload = parsed
+      ? {
+          ...parsed,
+          artifacts,
+        }
+      : null;
     return {
       type: 'delivery',
       content,
+      artifacts,
       metadata: {
         ...metadata,
         deliveryPinId: normalizeText(message.pinId) || null,
-        deliveryPayload: parsed ?? null,
+        deliveryPayload,
+        deliveryArtifacts: artifacts,
         publicStatus: 'completed',
         event: 'provider_completed',
         servicePinId: normalizeText(parsed?.servicePinId)
@@ -507,6 +542,7 @@ function projectProtocolMessage(input: {
     return {
       type: 'needs_rating',
       content: normalizeText(parsed?.content) || stripOrderProtocolFallback(rawContent) || rawContent,
+      artifacts: [],
       metadata: {
         ...metadata,
         needsRating: true,
@@ -519,6 +555,7 @@ function projectProtocolMessage(input: {
     return {
       type: 'order_end',
       content: normalizeText(parsed?.content) || stripOrderProtocolFallback(rawContent) || rawContent,
+      artifacts: [],
       metadata: {
         ...metadata,
         endReason: normalizeText(parsed?.reason) || null,
@@ -530,6 +567,7 @@ function projectProtocolMessage(input: {
   return {
     type: protocolTag.toLowerCase(),
     content: stripOrderProtocolFallback(rawContent) || rawContent,
+    artifacts: [],
     metadata,
   };
 }
@@ -554,6 +592,7 @@ function projectTranscriptItems(input: {
         type: projected.type,
         sender: message.direction === 'outgoing' ? localSender : peerSender,
         content: projected.content,
+        ...(projected.artifacts.length ? { artifacts: projected.artifacts } : {}),
         metadata: projected.metadata,
       };
     })
@@ -565,6 +604,7 @@ function extractProjectedResult(items: UnifiedA2ATraceTranscriptItem[]): {
   resultText: string | null;
   resultObservedAt: number | null;
   resultDeliveryPinId: string | null;
+  deliveryArtifacts: A2ADeliveryArtifact[];
 } {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
@@ -572,19 +612,22 @@ function extractProjectedResult(items: UnifiedA2ATraceTranscriptItem[]): {
       continue;
     }
     const content = normalizeText(item.content);
-    if (!content) {
+    const deliveryArtifacts = Array.isArray(item.artifacts) ? item.artifacts : [];
+    if (!content && deliveryArtifacts.length === 0) {
       continue;
     }
     return {
-      resultText: content,
+      resultText: content || null,
       resultObservedAt: normalizeTimestamp(item.timestamp),
       resultDeliveryPinId: normalizeText(item.metadata.deliveryPinId) || null,
+      deliveryArtifacts,
     };
   }
   return {
     resultText: null,
     resultObservedAt: null,
     resultDeliveryPinId: null,
+    deliveryArtifacts: [],
   };
 }
 
@@ -748,6 +791,7 @@ function projectDetailSession(input: {
     },
     resultText: result.resultText,
     responseText: result.resultText,
+    deliveryArtifacts: result.deliveryArtifacts,
     resultObservedAt: result.resultObservedAt,
     resultDeliveryPinId: result.resultDeliveryPinId,
     ratingRequestText: ratingRequest.ratingRequestText,

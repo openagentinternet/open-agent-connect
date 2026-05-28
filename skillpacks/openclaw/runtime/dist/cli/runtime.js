@@ -2138,6 +2138,7 @@ function createDefaultCliDependencies(context) {
         },
         file: {
             upload: async (input) => requestJson(context, 'POST', '/api/file/upload', input),
+            uploadLarge: async (input) => requestJson(context, 'POST', '/api/file/upload-large', input),
         },
         wallet: {
             balance: async (input) => {

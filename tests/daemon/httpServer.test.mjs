@@ -18,6 +18,7 @@ async function startServer(options = {}) {
     identityProfiles: [],
     chain: [],
     file: [],
+    fileLarge: [],
     buzz: [],
     master: [],
     masterTrace: [],
@@ -117,6 +118,14 @@ async function startServer(options = {}) {
         return commandSuccess({
           pinId: 'file-pin-1',
           metafileUri: 'metafile://file-pin-1.png',
+        });
+      },
+      uploadLarge: async (input) => {
+        calls.fileLarge.push(input);
+        return commandSuccess({
+          pinId: 'large-file-pin-1',
+          metafileUri: 'metafile://large-file-pin-1.mp4',
+          uploadMode: 'chunked',
         });
       },
     },
@@ -997,6 +1006,90 @@ test('POST /api/file/upload parses the JSON body and forwards it to file.upload'
       metafileUri: 'metafile://file-pin-1.png',
     },
   });
+});
+
+test('POST /api/file/upload-large parses the JSON body and forwards it to file.uploadLarge', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const request = {
+    filePath: '/tmp/video.mp4',
+    contentType: 'video/mp4',
+    verify: true,
+  };
+
+  const response = await fetch(`${server.baseUrl}/api/file/upload-large`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.fileLarge, [request]);
+  assert.deepEqual(payload, {
+    ok: true,
+    state: 'success',
+    data: {
+      pinId: 'large-file-pin-1',
+      metafileUri: 'metafile://large-file-pin-1.mp4',
+      uploadMode: 'chunked',
+    },
+  });
+});
+
+test('POST /api/file/upload-large returns not_implemented when file.uploadLarge is missing', async (t) => {
+  const server = createHttpServer({});
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const response = await fetch(`http://127.0.0.1:${address.port}/api/file/upload-large`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ filePath: '/tmp/video.mp4' }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(payload, commandFailed('not_implemented', 'Large file upload handler is not configured.'));
+});
+
+test('unsupported method on /api/file/upload-large returns method_not_allowed', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/file/upload-large`, {
+    method: 'GET',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 405);
+  assert.equal(response.headers.get('allow'), 'POST');
+  assert.deepEqual(payload, commandFailed('method_not_allowed', 'Expected POST.'));
 });
 
 test('GET /api/file/avatar resolves MetaID avatar pin references through the daemon', async (t) => {

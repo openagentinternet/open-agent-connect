@@ -318,6 +318,56 @@ test('default bot wallet transfers prepare balances with displayed wallet addres
   );
 });
 
+test('default file.uploadLarge preserves unavailable uploader failure code', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-large-upload-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const filePath = path.join(homeDir, 'large-video.mp4');
+  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  await createRuntimeStateStore(homeDir).writeState({
+    identity: {
+      metabotId: 1,
+      name: 'Large Upload Bot',
+      createdAt: 1776836000000,
+      path: "m/44'/10001'/0'/0/0",
+      publicKey: 'public-key',
+      chatPublicKey: 'chat-public-key',
+      addresses: {
+        btc: 'btc-address',
+        mvc: 'mvc-address',
+        doge: 'doge-address',
+        opcat: 'opcat-address',
+      },
+      mvcAddress: 'mvc-address',
+      metaId: 'metaid-large-upload-bot',
+      globalMetaId: 'gm-large-upload-bot',
+    },
+    services: [],
+    traces: [],
+    sellerOrders: [],
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    signer: makeSigner(async () => {
+      throw new Error('direct signer should not be used for large uploads without a largeUploader');
+    }),
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.file.uploadLarge({
+    filePath,
+    contentType: 'video/mp4',
+    network: 'mvc',
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'large_file_upload_unavailable');
+  assert.match(result.message, /Large file upload requires an injected largeUploader/);
+});
+
 test('default LLM handlers use the active profile when actor selectors are omitted', async (t) => {
   const homeDir = await createProfileHome('metabot-default-llm-handlers-', 'active-bot');
   t.after(async () => {

@@ -20,6 +20,7 @@ const EXPECTED_NPM_SKILLS = [
   'metabot-post-buzz',
   'metabot-post-skillservice',
   'metabot-upload-file',
+  'metabot-upload-largefile',
   'metabot-wallet-manage',
 ];
 const NON_DISTRIBUTED_SKILLS = [

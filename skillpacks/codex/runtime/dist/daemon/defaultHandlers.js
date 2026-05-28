@@ -47,6 +47,7 @@ const defaultChatReplyRunner_1 = require("../core/chat/defaultChatReplyRunner");
 const privateConversation_1 = require("../core/chat/privateConversation");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const nativeWallet_1 = require("../core/wallet/nativeWallet");
+const uploadLargeFile_1 = require("../core/files/uploadLargeFile");
 const uploadFile_1 = require("../core/files/uploadFile");
 const postBuzz_1 = require("../core/buzz/postBuzz");
 const bootstrapFlow_1 = require("../core/bootstrap/bootstrapFlow");
@@ -12092,6 +12093,35 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 catch (error) {
                     return (0, commandResult_1.commandFailed)('file_upload_failed', error instanceof Error ? error.message : String(error));
+                }
+            },
+            uploadLarge: async (rawInput) => {
+                const actor = await resolveActorWriteContext(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const state = await actor.runtimeStateStore.readState();
+                if (!state.identity) {
+                    return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before uploading files.');
+                }
+                try {
+                    const network = await resolveFileUploadNetworkForHome(rawInput.network, actor.homeDir);
+                    const result = await (0, uploadLargeFile_1.uploadLargeFileToChain)({
+                        filePath: normalizeText(rawInput.filePath),
+                        contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
+                        network,
+                        signer: actor.signer,
+                        verify: rawInput.verify === true,
+                    });
+                    return (0, commandResult_1.commandSuccess)(result);
+                }
+                catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    const code = error instanceof Error ? error.code : undefined;
+                    if (code === 'large_file_upload_unavailable') {
+                        return (0, commandResult_1.commandFailed)('large_file_upload_unavailable', message);
+                    }
+                    return (0, commandResult_1.commandFailed)('file_upload_failed', message);
                 }
             },
         },

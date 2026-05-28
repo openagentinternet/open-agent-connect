@@ -109,6 +109,11 @@ function baseOrder(overrides = {}) {
   };
 }
 
+function isInsideRuntimeArea(homeDir, candidatePath) {
+  const relative = path.relative(path.join(homeDir, '.runtime'), candidatePath);
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
 test('buildProviderServiceOrderPrompt includes paid-order guidance and required skill instructions', () => {
   const prompt = buildProviderServiceOrderPrompt({
     serviceName: 'Weather Oracle',
@@ -326,6 +331,326 @@ test('createProviderServiceRunner reuses selected primary skill source for fallb
   await cleanupProfileHome(homeDir);
 });
 
+test('createProviderServiceRunner executes non-text orders in a dedicated runtime workspace', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+  const calls = [];
+  let cwdExistedDuringExecute = false;
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        cwdExistedDuringExecute = Boolean(await fs.stat(request.cwd).catch(() => null));
+        return 'session-primary';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'completed',
+          result: {
+            status: 'completed',
+            output: 'out/provider-image.png',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.equal(calls.length, 1);
+  assert.notEqual(calls[0].cwd, homeDir);
+  assert.equal(isInsideRuntimeArea(homeDir, calls[0].cwd), true);
+  assert.equal(cwdExistedDuringExecute, true);
+  assert.equal(result.metadata.sessionCwd, calls[0].cwd);
+  assert.equal(result.metadata.attemptWorkspaceCwd, await fs.realpath(calls[0].cwd));
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner rejects session cwd symlinks that escape the dedicated workspace', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+  const calls = [];
+  let reportedSessionCwd = '';
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        reportedSessionCwd = path.join(request.cwd, 'escape');
+        await fs.symlink(homeDir, reportedSessionCwd, 'dir');
+        return 'session-primary';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'completed',
+          cwd: reportedSessionCwd,
+          result: {
+            status: 'completed',
+            output: 'out/provider-image.png',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.equal(calls.length, 1);
+  assert.equal(result.metadata.sessionCwd, calls[0].cwd);
+  assert.equal(result.metadata.attemptWorkspaceCwd, await fs.realpath(calls[0].cwd));
+  assert.notEqual(result.metadata.sessionCwd, reportedSessionCwd);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner rejects session cwd files inside the dedicated workspace', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+  const calls = [];
+  let reportedSessionCwd = '';
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        reportedSessionCwd = path.join(request.cwd, 'not-a-directory.txt');
+        await fs.writeFile(reportedSessionCwd, 'not a cwd', 'utf8');
+        return 'session-primary';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'completed',
+          cwd: reportedSessionCwd,
+          result: {
+            status: 'completed',
+            output: 'out/provider-image.png',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.equal(calls.length, 1);
+  assert.equal(result.metadata.sessionCwd, calls[0].cwd);
+  assert.notEqual(result.metadata.sessionCwd, reportedSessionCwd);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner rejects nonexistent session cwd inside the dedicated workspace', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+  const calls = [];
+  let reportedSessionCwd = '';
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        reportedSessionCwd = path.join(request.cwd, 'missing-cwd');
+        return 'session-primary';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'completed',
+          cwd: reportedSessionCwd,
+          result: {
+            status: 'completed',
+            output: 'out/provider-image.png',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.equal(calls.length, 1);
+  assert.equal(result.metadata.sessionCwd, calls[0].cwd);
+  assert.notEqual(result.metadata.sessionCwd, reportedSessionCwd);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner preserves legitimate nested session cwd inside the dedicated workspace', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+  const calls = [];
+  let reportedSessionCwd = '';
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        reportedSessionCwd = path.join(request.cwd, 'nested');
+        await fs.mkdir(reportedSessionCwd, { recursive: true });
+        return 'session-primary';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'completed',
+          cwd: reportedSessionCwd,
+          result: {
+            status: 'completed',
+            output: 'out/provider-image.png',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.equal(calls.length, 1);
+  assert.equal(result.metadata.sessionCwd, reportedSessionCwd);
+  assert.equal(result.metadata.attemptWorkspaceCwd, await fs.realpath(calls[0].cwd));
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner uses distinct dedicated workspaces for fallback attempts', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+      runtime({ id: 'runtime-fallback', provider: 'claude-code' }),
+    ],
+  });
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        return request.runtimeId === 'runtime-primary' ? 'session-primary' : 'session-fallback';
+      },
+      async getSession(sessionId) {
+        if (sessionId === 'session-primary') {
+          return {
+            sessionId,
+            status: 'failed',
+            result: {
+              status: 'failed',
+              output: '',
+              error: 'primary failed after writing partial artifacts',
+              durationMs: 10,
+            },
+          };
+        }
+        return {
+          sessionId,
+          status: 'completed',
+          result: {
+            status: 'completed',
+            output: 'out/fallback-image.png',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+    getFallbackRuntime: async () => runtime({ id: 'runtime-fallback', provider: 'claude-code' }),
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.deepEqual(calls.map((call) => call.runtimeId), ['runtime-primary', 'runtime-fallback']);
+  assert.equal(isInsideRuntimeArea(homeDir, calls[0].cwd), true);
+  assert.equal(isInsideRuntimeArea(homeDir, calls[1].cwd), true);
+  assert.notEqual(calls[0].cwd, calls[1].cwd);
+  assert.equal(result.metadata.sessionCwd, calls[1].cwd);
+  assert.equal(result.metadata.attemptWorkspaceCwd, await fs.realpath(calls[1].cwd));
+  await cleanupProfileHome(homeDir);
+});
+
 test('createProviderServiceRunner reads provider skills from project roots', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   await fs.rm(path.join(systemHomeDir, '.codex'), { recursive: true, force: true });
@@ -392,7 +717,8 @@ test('createProviderServiceRunner passes selected global skill source path to ex
 
   assert.equal(result.state, 'completed');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].cwd, homeDir);
+  assert.notEqual(calls[0].cwd, homeDir);
+  assert.equal(isInsideRuntimeArea(homeDir, calls[0].cwd), true);
   assert.equal(
     calls[0].skillSourcePaths['weather.oracle'],
     path.join(systemHomeDir, '.codex', 'skills', 'weather.oracle'),
@@ -781,7 +1107,73 @@ test('createProviderServiceRunner retries fallback when primary completes with e
   await cleanupProfileHome(homeDir);
 });
 
-test('createProviderServiceRunner rejects non-text deliverables after session start without fallback retry', async () => {
+test('createProviderServiceRunner allows non-text deliverables after session start without fallback retry', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+      runtime({ id: 'runtime-fallback', provider: 'claude-code' }),
+    ],
+  });
+  let fallbackCalls = 0;
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        return 'session-primary';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          runtimeId: 'runtime-primary',
+          provider: 'codex',
+          status: 'completed',
+          prompt: 'Forecast tomorrow',
+          cwd: homeDir,
+          createdAt: '2026-05-07T00:00:00.000Z',
+          result: {
+            status: 'completed',
+            output: 'Reading the weather.oracle skill to render the image.\n\n/tmp/provider-image.png',
+            durationMs: 10,
+          },
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+    getFallbackRuntime: async () => {
+      fallbackCalls += 1;
+      return runtime({ id: 'runtime-fallback', provider: 'claude-code' });
+    },
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.equal(result.responseText, '/tmp/provider-image.png');
+  assert.equal(result.runtimeId, 'runtime-primary');
+  assert.equal(result.sessionId, 'session-primary');
+  assert.equal(result.metadata.outputType, 'image');
+  assert.equal(result.metadata.runtimeId, 'runtime-primary');
+  assert.equal(result.metadata.sessionId, 'session-primary');
+  assert.equal(result.metadata.sessionCwd, calls[0].cwd);
+  assert.equal(isInsideRuntimeArea(homeDir, calls[0].cwd), true);
+  assert.equal(result.metadata.providerSkill, 'weather.oracle');
+  assert.equal(calls.length, 1);
+  assert.equal(fallbackCalls, 0);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner treats markdown deliverables as text-like output', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   await runtimeStore.write({
     version: 1,
@@ -800,7 +1192,7 @@ test('createProviderServiceRunner rejects non-text deliverables after session st
     bindingStore,
     llmExecutor: llmExecutorForTerminalResult({
       status: 'completed',
-      output: '/tmp/provider-image.png',
+      output: '# Weather Oracle\n\nSunny, 25C',
       durationMs: 10,
     }, calls),
     canStartRuntime: () => true,
@@ -810,10 +1202,12 @@ test('createProviderServiceRunner rejects non-text deliverables after session st
     },
   });
 
-  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+  const result = await runner.execute(baseOrder({ outputType: 'markdown' }));
 
-  assert.equal(result.state, 'failed');
-  assert.equal(result.code, 'provider_deliverable_invalid');
+  assert.equal(result.state, 'completed');
+  assert.equal(result.responseText, '# Weather Oracle\n\nSunny, 25C');
+  assert.equal(result.metadata.outputType, 'markdown');
+  assert.equal(result.runtimeId, 'runtime-primary');
   assert.equal(calls.length, 1);
   assert.equal(fallbackCalls, 0);
   await cleanupProfileHome(homeDir);

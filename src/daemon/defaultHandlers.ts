@@ -133,6 +133,7 @@ import {
   queryWalletBalances,
 } from '../core/wallet/nativeWallet';
 import type { Signer } from '../core/signing/signer';
+import { uploadLargeFileToChain, type ProductionLargeFileUploader } from '../core/files/uploadLargeFile';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
@@ -150,6 +151,10 @@ import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/
 import { resolvePublicStatus, type PublicStatus } from '../core/a2a/publicStatus';
 import type { ProviderServiceRunnerResult } from '../core/a2a/provider/serviceRunnerContracts';
 import { createServiceRunnerFailedResult } from '../core/a2a/provider/serviceRunnerContracts';
+import {
+  isTextLikeProviderOutputType,
+  resolveProviderDeliveryArtifacts,
+} from '../core/a2a/provider/providerDeliveryArtifacts';
 import type { A2ASessionRecord, A2ATaskRunRecord } from '../core/a2a/sessionTypes';
 import { buildTraceWatchEvents, serializeTraceWatchEvents } from '../core/a2a/watch/traceWatch';
 import { isTerminalTraceWatchStatus } from '../core/a2a/watch/watchEvents';
@@ -236,6 +241,11 @@ import {
   type MetaWebServiceReplyWaiter,
 } from '../core/a2a/metawebReplyWaiter';
 import {
+  extractDeliveryArtifactsFromText,
+  normalizeDeliveryArtifacts,
+  type A2ADeliveryArtifact,
+} from '../core/a2a/deliveryArtifacts';
+import {
   buildOrderEndMessage,
   buildOrderStatusMessage,
   buildDeliveryMessage,
@@ -314,6 +324,50 @@ const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function readErrorCode(error: unknown, fallback: string): string {
+  const code = error instanceof Error ? (error as Error & { code?: unknown }).code : undefined;
+  return normalizeText(code) || fallback;
+}
+
+function readErrorMessage(error: unknown, code: string, fallback: string): string {
+  const rawMessage = normalizeText(error instanceof Error ? error.message : String(error ?? ''));
+  const prefix = code ? `${code}:` : '';
+  const withoutCode = prefix && rawMessage.startsWith(prefix)
+    ? rawMessage.slice(prefix.length).trim()
+    : rawMessage;
+  return withoutCode || fallback;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function sanitizeProviderArtifactFailureText(value: string, localPaths: Array<string | null | undefined> = []): string {
+  let sanitized = normalizeText(value);
+  for (const localPath of localPaths) {
+    const normalizedPath = normalizeText(localPath);
+    if (!normalizedPath) {
+      continue;
+    }
+    sanitized = sanitized.replace(new RegExp(escapeRegExp(normalizedPath), 'g'), '[uploaded artifact]');
+  }
+  return sanitized
+    .replace(/\bfile:\/\/[^\s"'<>]+/g, '[uploaded artifact]')
+    .replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\s"'<>]+/g, '[uploaded artifact]')
+    .replace(/(^|[\s(])\/(?:Users|home|tmp|var|private|Volumes)[^\s"'<>)]*/g, '$1[uploaded artifact]')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+}
+
+function readProviderArtifactFailureText(
+  error: unknown,
+  code: string,
+  fallback: string,
+  localPaths: Array<string | null | undefined> = [],
+): string {
+  return sanitizeProviderArtifactFailureText(readErrorMessage(error, code, fallback), localPaths) || fallback;
 }
 
 const buyerAutoRatingPublishChainsByTrace = new Map<string, Promise<void>>();
@@ -2805,6 +2859,7 @@ async function appendA2ATranscriptItems(
     type: string;
     sender: 'caller' | 'provider' | 'system';
     content: string;
+    artifacts?: A2ADeliveryArtifact[];
     metadata?: Record<string, unknown> | null;
   }>,
 ): Promise<void> {
@@ -2817,7 +2872,11 @@ async function appendA2ATranscriptItems(
       type: normalizeText(item.type) || 'message',
       content: normalizeText(item.content),
     }))
-    .filter((item) => item.id && item.sessionId && item.content);
+    .filter((item) => (
+      item.id
+      && item.sessionId
+      && (item.content || (Array.isArray(item.artifacts) && item.artifacts.length > 0))
+    ));
 
   if (!normalizedItems.length) {
     return;
@@ -3565,6 +3624,7 @@ function projectPrivateHistorySimpleMessageToTranscript(input: {
 
   let type = protocolTag ? protocolTag.toLowerCase() : 'message';
   let content = stripOrderProtocolBubblePrefix(rawContent) || rawContent;
+  let deliveryArtifacts: A2ADeliveryArtifact[] = [];
   if (protocolTag === 'ORDER') {
     type = 'order';
   } else if (protocolTag === 'ORDER_STATUS') {
@@ -3572,9 +3632,24 @@ function projectPrivateHistorySimpleMessageToTranscript(input: {
     content = normalizeText(status?.content) || content;
   } else if (protocolTag === 'DELIVERY') {
     type = 'delivery';
-    content = normalizeText(delivery?.result) || content;
+    content = normalizeText(delivery?.result);
+    deliveryArtifacts = normalizeDeliveryArtifacts({
+      artifacts: delivery?.artifacts,
+      resultText: delivery?.result,
+    });
+    const deliveryPayload = delivery ? { ...delivery } : null;
+    if (deliveryPayload) {
+      if (deliveryArtifacts.length) {
+        deliveryPayload.artifacts = deliveryArtifacts;
+      } else {
+        delete deliveryPayload.artifacts;
+      }
+    }
     metadata.deliveryPinId = normalizeText(input.message.pinId) || null;
-    metadata.deliveryPayload = delivery ?? null;
+    metadata.deliveryPayload = deliveryPayload;
+    if (deliveryArtifacts.length) {
+      metadata.deliveryArtifacts = deliveryArtifacts;
+    }
     metadata.publicStatus = 'completed';
     metadata.event = 'provider_completed';
     metadata.servicePinId = parsedServicePinId || null;
@@ -3610,6 +3685,7 @@ function projectPrivateHistorySimpleMessageToTranscript(input: {
     type,
     sender,
     content,
+    ...(deliveryArtifacts.length ? { artifacts: deliveryArtifacts } : {}),
     metadata,
   };
 }
@@ -5097,6 +5173,251 @@ async function loadCallerContinuationState(input: {
   };
 }
 
+type CompletedMetaWebServiceReply = Extract<AwaitMetaWebServiceReplyResult, { state: 'completed' }>;
+
+function normalizeReplyRawRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function normalizeReplyRawMessage(reply: CompletedMetaWebServiceReply): Record<string, unknown> {
+  return normalizeReplyRawRecord(reply.rawMessage);
+}
+
+function normalizeReplyRatingRawMessage(reply: CompletedMetaWebServiceReply): Record<string, unknown> {
+  return normalizeReplyRawRecord(reply.ratingRawMessage);
+}
+
+function normalizeReplyRecordText(raw: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = normalizeText(raw[key]);
+    if (value) {
+      return value;
+    }
+  }
+  return '';
+}
+
+function normalizeReplyRecordTextArray(raw: Record<string, unknown>, keys: string[]): string[] {
+  const values: string[] = [];
+  for (const key of keys) {
+    const value = raw[key];
+    if (Array.isArray(value)) {
+      values.push(...value.map((entry) => normalizeText(entry)).filter(Boolean));
+    }
+  }
+  return [...new Set(values)];
+}
+
+function resolveCompletedReplyChainRefs(reply: CompletedMetaWebServiceReply): {
+  pinId: string | null;
+  txid: string | null;
+  txids: string[];
+} {
+  return resolveReplyChainRefs({
+    fallbackPinId: reply.deliveryPinId,
+    raw: normalizeReplyRawMessage(reply),
+  });
+}
+
+function resolveCompletedReplyRatingChainRefs(reply: CompletedMetaWebServiceReply): {
+  pinId: string | null;
+  txid: string | null;
+  txids: string[];
+} {
+  return resolveReplyChainRefs({
+    fallbackPinId: reply.ratingRequestPinId,
+    raw: normalizeReplyRatingRawMessage(reply),
+  });
+}
+
+function resolveReplyChainRefs(input: {
+  fallbackPinId?: string | null;
+  raw: Record<string, unknown>;
+}): {
+  pinId: string | null;
+  txid: string | null;
+  txids: string[];
+} {
+  const pinId = normalizeText(input.fallbackPinId)
+    || normalizeReplyRecordText(input.raw, ['pinId', 'messagePinId'])
+    || null;
+  const rawTxid = normalizeReplyRecordText(input.raw, ['txid', 'txId']);
+  const txids = [...new Set([
+    ...normalizeReplyRecordTextArray(input.raw, ['txids', 'txIds']),
+    rawTxid,
+  ].filter(Boolean))];
+  return {
+    pinId,
+    txid: rawTxid || txids[0] || null,
+    txids,
+  };
+}
+
+function normalizeReplyObservedAt(reply: CompletedMetaWebServiceReply, fallback: number): number {
+  return Number.isFinite(reply.observedAt)
+    ? Math.trunc(Number(reply.observedAt))
+    : fallback;
+}
+
+function normalizeReplyRatingObservedAt(reply: CompletedMetaWebServiceReply, fallback: number): number {
+  return Number.isFinite(reply.ratingRequestObservedAt)
+    ? Math.trunc(Number(reply.ratingRequestObservedAt))
+    : fallback;
+}
+
+async function persistCallerCompletedReplyConversationBestEffort(input: {
+  reply: CompletedMetaWebServiceReply;
+  session: A2ASessionRecord;
+  mutation: {
+    session: A2ASessionRecord;
+    taskRun: A2ATaskRunRecord;
+  };
+  trace: SessionTraceRecord;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  localIdentity: RuntimeIdentityRecord | null;
+  providerChatPublicKey?: string | null;
+  a2aConversationPersister?: A2AConversationMessagePersister;
+}): Promise<void> {
+  try {
+    const localIdentity = input.localIdentity;
+    if (!localIdentity) {
+      return;
+    }
+
+    const orderTxid = normalizeText(input.trace.order?.orderTxid)
+      || (Array.isArray(input.trace.order?.orderTxids)
+        ? input.trace.order.orderTxids.map((entry) => normalizeText(entry)).find(Boolean)
+        : '')
+      || null;
+    const paymentTxid = normalizeText(input.trace.order?.paymentTxid) || null;
+    const servicePinId = normalizeText(input.session.servicePinId)
+      || normalizeText(input.trace.a2a?.servicePinId)
+      || normalizeText(input.trace.order?.serviceId)
+      || null;
+    const serviceName = normalizeText(input.trace.order?.serviceName)
+      || normalizeText(input.trace.session.peerName)
+      || null;
+    const outputType = normalizeText((input.trace.order as Record<string, unknown> | null | undefined)?.outputType)
+      || null;
+    const deliveredAt = normalizeReplyObservedAt(input.reply, input.mutation.session.updatedAt);
+    const ratingRequestText = normalizeText(input.reply.ratingRequestText);
+    const ratingRequestedAt = ratingRequestText
+      ? normalizeReplyRatingObservedAt(input.reply, deliveredAt + 1)
+      : null;
+    const artifacts = normalizeDeliveryArtifacts({
+      artifacts: input.reply.artifacts,
+      resultText: input.reply.responseText,
+    });
+    const chainRefs = resolveCompletedReplyChainRefs(input.reply);
+    const deliveryMessage = buildDeliveryMessage({
+      paymentTxid,
+      servicePinId,
+      serviceName,
+      result: input.reply.responseText,
+      ...(artifacts.length ? { artifacts } : {}),
+      deliveredAt,
+    }, orderTxid);
+    const deliveryMessageId = chainRefs.pinId || chainRefs.txid || `${input.trace.traceId}-caller-delivery`;
+
+    await persistA2AConversationMessageBestEffort({
+      paths: input.runtimeStateStore.paths,
+      local: {
+        profileSlug: path.basename(input.runtimeStateStore.paths.profileRoot),
+        globalMetaId: localIdentity.globalMetaId,
+        name: localIdentity.name,
+        chatPublicKey: localIdentity.chatPublicKey,
+      },
+      peer: {
+        globalMetaId: input.session.providerGlobalMetaId,
+        name: serviceName,
+        chatPublicKey: input.providerChatPublicKey || null,
+      },
+      message: {
+        messageId: deliveryMessageId,
+        direction: 'incoming',
+        content: deliveryMessage,
+        ...(artifacts.length ? { artifacts } : {}),
+        pinId: chainRefs.pinId,
+        txid: chainRefs.txid,
+        txids: chainRefs.txids,
+        chain: 'mvc',
+        orderTxid,
+        paymentTxid,
+        timestamp: deliveredAt,
+        raw: input.reply.rawMessage,
+      },
+      orderSession: {
+        role: 'caller',
+        state: ratingRequestText ? 'rating_pending' : 'completed',
+        orderTxid,
+        paymentTxid,
+        servicePinId,
+        serviceName,
+        outputType,
+        deliveredAt,
+      },
+    }, input.a2aConversationPersister);
+
+    if (!ratingRequestText) {
+      return;
+    }
+
+    const ratingChainRefs = resolveCompletedReplyRatingChainRefs(input.reply);
+    const ratingMessageId = ratingChainRefs.pinId
+      || ratingChainRefs.txid
+      || `${deliveryMessageId}-needs-rating`;
+    const ratingRaw = Object.keys(normalizeReplyRatingRawMessage(input.reply)).length
+      ? input.reply.ratingRawMessage
+      : {
+        synthetic: true,
+        deliveryPinId: chainRefs.pinId,
+        source: 'callerReplyWaiter',
+      };
+    await persistA2AConversationMessageBestEffort({
+      paths: input.runtimeStateStore.paths,
+      local: {
+        profileSlug: path.basename(input.runtimeStateStore.paths.profileRoot),
+        globalMetaId: localIdentity.globalMetaId,
+        name: localIdentity.name,
+        chatPublicKey: localIdentity.chatPublicKey,
+      },
+      peer: {
+        globalMetaId: input.session.providerGlobalMetaId,
+        name: serviceName,
+        chatPublicKey: input.providerChatPublicKey || null,
+      },
+      message: {
+        messageId: ratingMessageId,
+        direction: 'incoming',
+        content: buildNeedsRatingMessage(orderTxid || '', ratingRequestText),
+        pinId: ratingChainRefs.pinId,
+        txid: ratingChainRefs.txid,
+        txids: ratingChainRefs.txids,
+        chain: 'mvc',
+        orderTxid,
+        paymentTxid,
+        replyPinId: chainRefs.pinId,
+        timestamp: ratingRequestedAt,
+        raw: ratingRaw,
+      },
+      orderSession: {
+        role: 'caller',
+        state: 'rating_pending',
+        orderTxid,
+        paymentTxid,
+        servicePinId,
+        serviceName,
+        outputType,
+        ratingRequestedAt,
+      },
+    }, input.a2aConversationPersister);
+  } catch {
+    // Unified A2A persistence is best effort and must not block caller completion.
+  }
+}
+
 async function applyCallerReplyResult(input: {
   reply: AwaitMetaWebServiceReplyResult;
   session: A2ASessionRecord;
@@ -5105,6 +5426,9 @@ async function applyCallerReplyResult(input: {
   sessionStateStore: ReturnType<typeof createSessionStateStore>;
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
   trace: SessionTraceRecord;
+  localIdentity: RuntimeIdentityRecord | null;
+  providerChatPublicKey?: string | null;
+  a2aConversationPersister?: A2AConversationMessagePersister;
 }): Promise<{
   trace: SessionTraceRecord;
   artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>>;
@@ -5138,6 +5462,7 @@ async function applyCallerReplyResult(input: {
     result: runnerResult,
   });
   const publicStatus = await persistSessionMutation(input.sessionStateStore, mutation);
+  const replyArtifacts = input.reply.state === 'completed' ? input.reply.artifacts : [];
   const transcriptItems: Parameters<typeof appendA2ATranscriptItems>[1] = [
     {
       id: `${input.trace.traceId}-provider-delivery`,
@@ -5147,10 +5472,12 @@ async function applyCallerReplyResult(input: {
       type: 'assistant',
       sender: 'provider',
       content: input.reply.state === 'completed' ? input.reply.responseText : '',
+      ...(replyArtifacts.length ? { artifacts: replyArtifacts } : {}),
       metadata: {
         publicStatus: publicStatus.status,
         event: mutation.event,
         deliveryPinId: input.reply.state === 'completed' ? input.reply.deliveryPinId : null,
+        deliveryArtifacts: replyArtifacts,
       },
     },
   ];
@@ -5170,6 +5497,19 @@ async function applyCallerReplyResult(input: {
     });
   }
   await appendA2ATranscriptItems(input.sessionStateStore, transcriptItems);
+
+  if (input.reply.state === 'completed') {
+    await persistCallerCompletedReplyConversationBestEffort({
+      reply: input.reply,
+      session: input.session,
+      mutation,
+      trace: input.trace,
+      runtimeStateStore: input.runtimeStateStore,
+      localIdentity: input.localIdentity,
+      providerChatPublicKey: input.providerChatPublicKey,
+      a2aConversationPersister: input.a2aConversationPersister,
+    });
+  }
 
   const rebuilt = await rebuildTraceArtifactsFromSessionState({
     baseTrace: input.trace,
@@ -5209,6 +5549,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   callerOrderTextGenerator?: CallerOrderProtocolTextGenerator;
   providerOrderReplyRunner?: ChatReplyRunner;
   providerOrderTextGenerator?: ProviderOrderProtocolTextGenerator;
+  providerArtifactUploadLargeFile?: typeof uploadLargeFileToChain;
+  providerLargeFileUploader?: ProductionLargeFileUploader;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   onIdentityProfileRegistered?: () => Promise<void> | void;
   requestMvcGasSubsidy?: (
@@ -5232,6 +5574,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
     secretStore,
     adapters,
   });
+  const providerArtifactUploadLargeFile = input.providerArtifactUploadLargeFile ?? uploadLargeFileToChain;
+  const providerLargeFileUploader = input.providerLargeFileUploader;
   const configStore = createConfigStore(input.homeDir);
   function isSupportedWriteNetwork(value: string): value is DefaultWriteNetwork {
     return DEFAULT_WRITE_NETWORKS.includes(value as DefaultWriteNetwork);
@@ -7150,10 +7494,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   }
 
   function containsDeliverableReference(value: unknown): boolean {
-    const text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
-    return /metafile:\/\/[^\s)]+/iu.test(text)
-      || /https?:\/\/[^\s)]+\.(?:png|jpe?g|webp|gif|mp4|mov|webm|mp3|wav|m4a|pdf|zip|csv|json)(?:[?#][^\s)]*)?/iu.test(text)
-      || /https?:\/\/file\.metaid\.io\/[^\s)]+/iu.test(text);
+    const text = typeof value === 'string' ? value : JSON.stringify(value ?? '') ?? '';
+    return extractDeliveryArtifactsFromText(text).length > 0;
   }
 
   function validateBuyerReplyDeliverable(inputReply: {
@@ -7167,6 +7509,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
       return { ok: true };
     }
     if (inputReply.reply.state !== 'completed') {
+      return { ok: true };
+    }
+    if (inputReply.reply.artifacts.length > 0) {
       return { ok: true };
     }
     if (
@@ -8423,14 +8768,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
     const providerRuntimeDiagnostics = buildProviderRuntimeDiagnostics(service.providerSkill, runnerResult);
 
-    const applied = sessionEngine.applyProviderRunnerResult({
-      session: received.session,
-      taskRun: received.taskRun,
-      result: runnerResult,
-    });
-    const appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+    const deferCompletedPersistence = runnerResult.state === 'completed'
+      && !isTextLikeProviderOutputType(service.outputType);
+    let applied: ReturnType<typeof sessionEngine.applyProviderRunnerResult> | undefined;
+    let appliedStatus: Awaited<ReturnType<typeof persistSessionMutation>> | undefined;
+    if (!deferCompletedPersistence) {
+      applied = sessionEngine.applyProviderRunnerResult({
+        session: received.session,
+        taskRun: received.taskRun,
+        result: runnerResult,
+      });
+      appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+    }
 
     if (runnerResult.state !== 'completed') {
+      if (!applied || !appliedStatus) {
+        throw new Error('Provider runner result was not persisted before handling incomplete state.');
+      }
       const failureMessage = runnerResult.state === 'failed'
         ? runnerResult.message
         : runnerResult.question;
@@ -8551,12 +8905,158 @@ export function createDefaultMetabotDaemonHandlers(input: {
         : commandManualActionRequired('clarification_needed', runnerResult.question);
     }
 
-    const responseText = normalizeText(runnerResult.responseText);
+    const baseResponseText = normalizeText(runnerResult.responseText);
+    let responseText = baseResponseText;
+    let deliveryArtifacts: A2ADeliveryArtifact[] = [];
+    if (!isTextLikeProviderOutputType(service.outputType)) {
+      try {
+        const artifactNetwork = await resolveFileUploadNetworkForHome(null, runtimeStateStore.paths.profileRoot);
+        const resolvedDelivery = await resolveProviderDeliveryArtifacts({
+          responseText: baseResponseText,
+          outputType: service.outputType,
+          executionCwd: normalizeText(runnerResult.metadata?.sessionCwd) || null,
+          workspaceRootCwd: normalizeText(runnerResult.metadata?.attemptWorkspaceCwd) || null,
+          network: artifactNetwork,
+          signer,
+          uploadLargeFile: providerArtifactUploadLargeFile,
+          largeUploader: providerLargeFileUploader,
+        });
+        responseText = normalizeText(resolvedDelivery.responseText);
+        deliveryArtifacts = resolvedDelivery.artifacts;
+      } catch (error) {
+        const failureCode = readErrorCode(error, 'provider_artifact_delivery_failed');
+        const failureText = readErrorMessage(
+          error,
+          failureCode,
+          'Provider artifact delivery preparation failed.',
+        );
+        const artifactFailureResult = createServiceRunnerFailedResult(failureCode, failureText);
+        const failedApplied = sessionEngine.applyProviderRunnerResult({
+          session: received.session,
+          taskRun: received.taskRun,
+          result: artifactFailureResult,
+        });
+        const failedStatus = await persistSessionMutation(sessionStateStore, failedApplied);
+        const orderEndMessage = buildOrderEndMessage(orderTxid, 'failed', failureText);
+        let orderEndWrite: { pinId: string | null; txids: string[] } = { pinId: null, txids: [] };
+        let orderEndSendFailure: string | null = null;
+        try {
+          orderEndWrite = await sendProviderOrderPrivateMessage({
+            toGlobalMetaId: inputMessage.fromGlobalMetaId,
+            peerChatPublicKey,
+            content: orderEndMessage,
+          });
+        } catch (sendError) {
+          orderEndSendFailure = sendError instanceof Error ? sendError.message : String(sendError);
+        }
+        await appendA2ATranscriptItems(sessionStateStore, [
+          {
+            id: `${traceId}-provider-artifact-failure`,
+            sessionId: received.session.sessionId,
+            taskRunId: failedApplied.taskRun.runId,
+            timestamp: failedApplied.session.updatedAt,
+            type: 'failure',
+            sender: 'system',
+            content: failureText,
+            metadata: {
+              publicStatus: failedStatus.status,
+              event: failedApplied.event,
+              runnerState: 'failed',
+              orderTxid,
+              paymentTxid: paymentTxid || null,
+              refundRequired: !serviceIsFree,
+            },
+          },
+          {
+            id: orderEndWrite.pinId || `${traceId}-provider-order-end-failed`,
+            sessionId: received.session.sessionId,
+            taskRunId: failedApplied.taskRun.runId,
+            timestamp: Date.now(),
+            type: 'order_end',
+            sender: 'provider',
+            content: failureText,
+            metadata: {
+              protocolTag: 'ORDER_END',
+              orderTxid,
+              paymentTxid: paymentTxid || null,
+              orderEndReason: 'failed',
+              orderEndPinId: orderEndWrite.pinId,
+              txids: orderEndWrite.txids,
+              publicStatus: failedStatus.status,
+              event: failedApplied.event,
+              refundRequired: !serviceIsFree,
+              sendFailure: orderEndSendFailure,
+            },
+          },
+        ]);
+        await persistA2AConversationMessageBestEffort({
+          paths: runtimeStateStore.paths,
+          local: {
+            profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+            globalMetaId: state.identity.globalMetaId,
+            name: state.identity.name,
+            chatPublicKey: state.identity.chatPublicKey,
+          },
+          peer: {
+            globalMetaId: inputMessage.fromGlobalMetaId,
+            chatPublicKey: peerChatPublicKey,
+          },
+          message: {
+            direction: 'outgoing',
+            content: orderEndMessage,
+            pinId: orderEndWrite.pinId,
+            txid: orderEndWrite.txids[0] ?? orderEndWrite.pinId,
+            txids: orderEndWrite.txids,
+            chain: 'mvc',
+            orderTxid,
+            paymentTxid: paymentTxid || null,
+            timestamp: Date.now(),
+          },
+          orderSession: {
+            role: 'provider',
+            state: 'failed',
+            orderTxid,
+            paymentTxid: paymentTxid || null,
+            servicePinId: service.currentPinId,
+            serviceName: normalizeText(service.displayName) || normalizeText(service.serviceName),
+            outputType: service.outputType,
+            endedAt: Date.now(),
+            endReason: failureCode,
+            failureReason: failureText,
+          },
+        }, a2aConversationPersister);
+        await persistProviderFailureTrace({
+          traceId,
+          state,
+          service,
+          buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+          orderTxid,
+          orderMessageId,
+          orderPinId: inputMessage.messagePinId || null,
+          paymentTxid: paymentTxid || null,
+          orderReference: orderReference || null,
+          paymentCurrency: amountLine.currency || service.currency,
+          paymentAmount: amountLine.amount || service.price,
+          paymentChain: paymentChain || null,
+          ...orderPaymentMetadata,
+          session: failedApplied.session,
+          taskRun: failedApplied.taskRun,
+          publicStatus: failedStatus,
+          latestEvent: failedApplied.event,
+          userTask,
+          failureText,
+          failureCode,
+          providerRuntime: providerRuntimeDiagnostics,
+        });
+        return commandFailed(failureCode, failureText);
+      }
+    }
     const deliveryMessage = buildDeliveryMessage({
       paymentTxid: paymentTxid || null,
       servicePinId: service.currentPinId,
       serviceName: normalizeText(service.displayName) || normalizeText(service.serviceName),
       result: responseText,
+      ...(deliveryArtifacts.length ? { artifacts: deliveryArtifacts } : {}),
       deliveredAt: Date.now(),
     }, orderTxid);
     const ratingRequestText = await generateProviderOrderProtocolReplyText({
@@ -8674,6 +9174,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
       return commandFailed('provider_delivery_failed', failureText);
     }
 
+    if (!applied || !appliedStatus) {
+      applied = sessionEngine.applyProviderRunnerResult({
+        session: received.session,
+        taskRun: received.taskRun,
+        result: runnerResult,
+      });
+      appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+    }
+
     let ratingWrite: { pinId: string | null; txids: string[] } = { pinId: null, txids: [] };
     try {
       ratingWrite = await sendProviderOrderPrivateMessage({
@@ -8719,6 +9228,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           runnerState: runnerResult.state,
           orderTxid,
           paymentTxid: paymentTxid || null,
+          ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
         },
       },
       {
@@ -8729,6 +9239,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         type: 'delivery',
         sender: 'provider',
         content: responseText,
+        ...(deliveryArtifacts.length ? { artifacts: deliveryArtifacts } : {}),
         metadata: {
           protocolTag: 'DELIVERY',
           orderTxid,
@@ -8738,6 +9249,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           txids: deliveryWrite.txids,
           publicStatus: 'completed',
           event: 'provider_completed',
+          ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
         },
       },
       ...(ratingWrite.pinId || ratingWrite.txids.length
@@ -8776,6 +9288,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       message: {
         direction: 'outgoing',
         content: deliveryMessage,
+        ...(deliveryArtifacts.length ? { artifacts: deliveryArtifacts } : {}),
         pinId: deliveryWrite.pinId,
         txid: deliveryWrite.txids[0] ?? deliveryWrite.pinId,
         txids: deliveryWrite.txids,
@@ -9069,6 +9582,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         state: 'completed',
         responseText: result.resultText ?? '',
         deliveryPinId: result.resultDeliveryPinId ?? null,
+        artifacts: [],
         observedAt: ratingRequest.ratingRequestedAt
           ?? (Number.isFinite(inputMessage.timestamp) ? Number(inputMessage.timestamp) : Date.now()),
         rawMessage: null,
@@ -9231,6 +9745,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return;
         }
 
+        const latestRuntimeState = await runtimeStateStore.readState();
         const applied = await applyCallerReplyResult({
           reply,
           session: current.session,
@@ -9239,6 +9754,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           sessionStateStore,
           runtimeStateStore,
           trace: current.trace,
+          localIdentity: latestRuntimeState.identity ?? null,
+          providerChatPublicKey: input.waiterInput.providerChatPublicKey ?? null,
+          a2aConversationPersister,
         });
         await autoPublishBuyerRatingForReply({
           trace: applied.trace,
@@ -13673,13 +14191,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
           },
         });
         const providerRuntimeDiagnostics = buildProviderRuntimeDiagnostics(service.providerSkill, runnerResult);
-        const applied = sessionEngine.applyProviderRunnerResult({
-          session: received.session,
-          taskRun: received.taskRun,
-          result: runnerResult,
-        });
-        const appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+        const deferCompletedPersistence = runnerResult.state === 'completed'
+          && !isTextLikeProviderOutputType(service.outputType);
+        let applied: ReturnType<typeof sessionEngine.applyProviderRunnerResult> | undefined;
+        let appliedStatus: Awaited<ReturnType<typeof persistSessionMutation>> | undefined;
+        if (!deferCompletedPersistence) {
+          applied = sessionEngine.applyProviderRunnerResult({
+            session: received.session,
+            taskRun: received.taskRun,
+            result: runnerResult,
+          });
+          appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+        }
         if (runnerResult.state !== 'completed') {
+          if (!applied || !appliedStatus) {
+            throw new Error('Provider runner result was not persisted before handling incomplete state.');
+          }
           const failureText = runnerResult.state === 'failed'
             ? runnerResult.message
             : runnerResult.question;
@@ -13830,8 +14357,188 @@ export function createDefaultMetabotDaemonHandlers(input: {
             `/ui/trace?traceId=${encodeURIComponent(traceId)}`,
           );
         }
-        const responseText = normalizeText(runnerResult.responseText);
+        const baseResponseText = normalizeText(runnerResult.responseText);
+        let responseText = baseResponseText;
+        let deliveryArtifacts: A2ADeliveryArtifact[] = [];
+        const providerExecutionCwd = normalizeText(runnerResult.metadata?.sessionCwd) || null;
+        const providerAttemptWorkspaceCwd = normalizeText(runnerResult.metadata?.attemptWorkspaceCwd) || null;
+        if (!isTextLikeProviderOutputType(service.outputType)) {
+          try {
+            const artifactNetwork = await resolveFileUploadNetworkForHome(null, runtimeStateStore.paths.profileRoot);
+            const resolvedDelivery = await resolveProviderDeliveryArtifacts({
+              responseText: baseResponseText,
+              outputType: service.outputType,
+              executionCwd: providerExecutionCwd,
+              workspaceRootCwd: providerAttemptWorkspaceCwd,
+              network: artifactNetwork,
+              signer,
+              uploadLargeFile: providerArtifactUploadLargeFile,
+              largeUploader: providerLargeFileUploader,
+            });
+            responseText = normalizeText(resolvedDelivery.responseText);
+            deliveryArtifacts = resolvedDelivery.artifacts;
+          } catch (error) {
+            const failureCode = readErrorCode(error, 'provider_artifact_delivery_failed');
+            const failureText = readProviderArtifactFailureText(
+              error,
+              failureCode,
+              'Provider artifact delivery preparation failed.',
+              [providerExecutionCwd],
+            );
+            const artifactFailureResult = createServiceRunnerFailedResult(failureCode, failureText);
+            const failedApplied = sessionEngine.applyProviderRunnerResult({
+              session: received.session,
+              taskRun: received.taskRun,
+              result: artifactFailureResult,
+            });
+            const failedStatus = await persistSessionMutation(sessionStateStore, failedApplied);
+            await appendA2ATranscriptItems(sessionStateStore, [
+              {
+                id: `${traceId}-provider-artifact-failure`,
+                sessionId: received.session.sessionId,
+                taskRunId: failedApplied.taskRun.runId,
+                timestamp: failedApplied.session.updatedAt,
+                type: 'failure',
+                sender: 'system',
+                content: failureText,
+                metadata: {
+                  publicStatus: failedStatus.status,
+                  event: failedApplied.event,
+                  runnerState: 'failed',
+                  paymentTxid: execution.payment.paymentTxid,
+                  orderReference: execution.payment.orderReference,
+                },
+              },
+            ]);
+            const trace = buildSessionTrace({
+              traceId,
+              channel: 'a2a',
+              exportRoot: runtimeStateStore.paths.exportsRoot,
+              session: {
+                id: `session-${traceId}`,
+                title: `${service.displayName} Execution`,
+                type: 'a2a',
+                metabotId: state.identity.metabotId,
+                peerGlobalMetaId: execution.buyer.globalMetaId || null,
+                peerName: execution.buyer.name || execution.buyer.host || null,
+                externalConversationId: execution.externalConversationId || null,
+              },
+              order: {
+                id: `order-${traceId}`,
+                role: 'seller',
+                serviceId: service.currentPinId,
+                serviceName: service.displayName,
+                paymentTxid: execution.payment.paymentTxid,
+                paymentCommitTxid: execution.payment.paymentCommitTxid,
+                orderReference: execution.payment.orderReference,
+                paymentCurrency: execution.payment.paymentCurrency || service.currency,
+                paymentAmount: execution.payment.paymentAmount || service.price,
+                paymentChain: execution.payment.paymentChain,
+                settlementKind: execution.payment.settlementKind,
+                mrc20Ticker: execution.payment.mrc20Ticker,
+                mrc20Id: execution.payment.mrc20Id,
+                providerSkill: service.providerSkill,
+              },
+              a2a: {
+                sessionId: failedApplied.session.sessionId,
+                taskRunId: failedApplied.taskRun.runId,
+                role: failedApplied.session.role,
+                publicStatus: failedStatus.status,
+                latestEvent: failedApplied.event,
+                taskRunState: failedApplied.taskRun.state,
+                callerGlobalMetaId: failedApplied.session.callerGlobalMetaId,
+                callerName: execution.buyer.name || execution.buyer.host || null,
+                providerGlobalMetaId: failedApplied.session.providerGlobalMetaId,
+                servicePinId: failedApplied.session.servicePinId,
+              },
+              providerRuntime: providerRuntimeDiagnostics,
+            });
+            const artifacts = await exportSessionArtifacts({
+              trace,
+              transcript: {
+                sessionId: trace.session.id,
+                title: trace.session.title,
+                messages: [
+                  {
+                    id: `${trace.traceId}-buyer`,
+                    type: 'user',
+                    timestamp: trace.createdAt,
+                    content: execution.request.userTask,
+                    metadata: {
+                      taskContext: execution.request.taskContext || null,
+                      buyerHost: execution.buyer.host || null,
+                      buyerGlobalMetaId: execution.buyer.globalMetaId || null,
+                      paymentTxid: execution.payment.paymentTxid,
+                      orderReference: execution.payment.orderReference,
+                    },
+                  },
+                  {
+                    id: `${trace.traceId}-provider-failure`,
+                    type: 'assistant',
+                    timestamp: trace.createdAt,
+                    content: failureText,
+                    metadata: {
+                      failed: true,
+                      providerSessionId: failedApplied.session.sessionId,
+                      providerTaskRunId: failedApplied.taskRun.runId,
+                      providerEvent: failedApplied.event,
+                    },
+                  },
+                ],
+              },
+            });
+            const failedOrder = buildProviderSellerOrderRecord({
+              state,
+              service,
+              buyerGlobalMetaId: execution.buyer.globalMetaId,
+              lifecycleState: 'failed',
+              traceId,
+              orderMessageId,
+              orderTxid: '',
+              orderReference: execution.payment.orderReference,
+              paymentTxid: execution.payment.paymentTxid,
+              paymentAmount: execution.payment.paymentAmount || service.price,
+              paymentCurrency: execution.payment.paymentCurrency || service.currency,
+              paymentChain: execution.payment.paymentChain,
+              paymentCommitTxid: execution.payment.paymentCommitTxid,
+              settlementKind: execution.payment.settlementKind,
+              mrc20Ticker: execution.payment.mrc20Ticker,
+              mrc20Id: execution.payment.mrc20Id,
+              session: failedApplied.session,
+              taskRun: failedApplied.taskRun,
+              publicStatus: failedStatus.status,
+              latestEvent: failedApplied.event,
+              providerRuntime: providerRuntimeDiagnostics,
+              failureReason: failureText,
+              endReason: failureCode,
+              receivedAt: received.session.createdAt,
+              startedAt: directStartedAt,
+              endedAt: failedApplied.taskRun.completedAt ?? failedApplied.session.updatedAt,
+              updatedAt: failedApplied.session.updatedAt,
+            });
+            await runtimeStateStore.updateState((current) => ({
+              ...current,
+              traces: [
+                {
+                  ...trace,
+                  artifacts,
+                },
+                ...current.traces.filter((entry) => entry.traceId !== trace.traceId),
+              ],
+              sellerOrders: upsertSellerOrderRecord(current.sellerOrders, failedOrder),
+            }));
+            return commandFailed(failureCode, failureText);
+          }
+        }
         const providerMessage = responseText;
+        if (!applied || !appliedStatus) {
+          applied = sessionEngine.applyProviderRunnerResult({
+            session: received.session,
+            taskRun: received.taskRun,
+            result: runnerResult,
+          });
+          appliedStatus = await persistSessionMutation(sessionStateStore, applied);
+        }
         await appendA2ATranscriptItems(sessionStateStore, [
           {
             id: `${traceId}-provider-runner-result`,
@@ -13845,8 +14552,30 @@ export function createDefaultMetabotDaemonHandlers(input: {
               publicStatus: appliedStatus.status,
               event: applied.event,
               runnerState: runnerResult.state,
+              ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
             },
           },
+          ...(deliveryArtifacts.length
+            ? [{
+              id: `${traceId}-provider-delivery`,
+              sessionId: received.session.sessionId,
+              taskRunId: applied.taskRun.runId,
+              timestamp: applied.session.updatedAt,
+              type: 'delivery' as const,
+              sender: 'provider' as const,
+              content: providerMessage,
+              artifacts: deliveryArtifacts,
+              metadata: {
+                publicStatus: appliedStatus.status,
+                event: applied.event,
+                runnerState: runnerResult.state,
+                paymentTxid: execution.payment.paymentTxid,
+                orderReference: execution.payment.orderReference,
+                servicePinId: service.currentPinId,
+                deliveryArtifacts,
+              },
+            }]
+            : []),
         ]);
 
         const trace = buildSessionTrace({
@@ -13922,6 +14651,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   providerSessionId: received.session.sessionId,
                   providerTaskRunId: received.taskRun.runId,
                   providerEvent: applied.event,
+                  ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
                 },
               },
             ],
@@ -14331,6 +15061,35 @@ export function createDefaultMetabotDaemonHandlers(input: {
             'file_upload_failed',
             error instanceof Error ? error.message : String(error)
           );
+        }
+      },
+      uploadLarge: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before uploading files.');
+        }
+
+        try {
+          const network = await resolveFileUploadNetworkForHome(rawInput.network, actor.homeDir);
+          const result = await uploadLargeFileToChain({
+            filePath: normalizeText(rawInput.filePath),
+            contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
+            network,
+            signer: actor.signer,
+            verify: rawInput.verify === true,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const code = error instanceof Error ? (error as Error & { code?: unknown }).code : undefined;
+          if (code === 'large_file_upload_unavailable') {
+            return commandFailed('large_file_upload_unavailable', message);
+          }
+          return commandFailed('file_upload_failed', message);
         }
       },
     },

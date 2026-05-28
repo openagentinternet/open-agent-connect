@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, readFileUploadChainFlag, readFlagValue, readFromFlag, readJsonFile } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFileUploadChainFlag, readFlagValue, readFromFlag, readJsonFile } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function resolveMaybeRelativePath(baseDir: string, filePath: unknown): string | undefined {
@@ -9,7 +9,8 @@ function resolveMaybeRelativePath(baseDir: string, filePath: unknown): string | 
 }
 
 export async function runFileCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
-  if (args[0] !== 'upload') {
+  const subcommand = args[0];
+  if (subcommand !== 'upload' && subcommand !== 'upload-large') {
     return commandUnknownSubcommand(`file ${args.join(' ')}`.trim());
   }
 
@@ -24,9 +25,16 @@ export async function runFileCommand(args: string[], context: CliRuntimeContext)
     return chainFlag.error;
   }
 
-  const handler = context.dependencies.file?.upload;
+  const handler = subcommand === 'upload-large'
+    ? context.dependencies.file?.uploadLarge
+    : context.dependencies.file?.upload;
   if (!handler) {
-    return commandFailed('not_implemented', 'File upload handler is not configured.');
+    return commandFailed(
+      'not_implemented',
+      subcommand === 'upload-large'
+        ? 'Large file upload handler is not configured.'
+        : 'File upload handler is not configured.',
+    );
   }
 
   const request = await readJsonFile(context, requestFile);
@@ -36,6 +44,7 @@ export async function runFileCommand(args: string[], context: CliRuntimeContext)
     filePath: resolveMaybeRelativePath(requestDir, request.filePath) ?? request.filePath,
     ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
     ...(from ? { from } : {}),
+    ...(subcommand === 'upload-large' && hasFlag(args, '--verify') ? { verify: true } : {}),
   };
   return handler(resolvedRequest);
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createECDH } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
@@ -31,6 +31,18 @@ const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretSto
 const MVC_PAYMENT_ADDRESS = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 const MVC_OTHER_ADDRESS = '1dice8EMZmqKvrGE4Qc9bUFf9PX3xaYDp';
 const LOWER_HEX_64_RE = /^[0-9a-f]{64}$/;
+const IMAGE_REPLY_ARTIFACT = {
+  uri: 'metafile://buyer-image-pin.png',
+  pinId: 'buyer-image-pin',
+  kind: 'image',
+  fileName: 'buyer-image.png',
+  extension: '.png',
+  contentType: 'image/png',
+  byteLength: 512,
+  sourceUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/buyer-image-pin',
+  fallbackUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/content/buyer-image-pin',
+  downloadUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/buyer-image-pin',
+};
 
 async function waitForCondition(predicate, timeoutMs = 1000, intervalMs = 20) {
   const deadline = Date.now() + timeoutMs;
@@ -146,6 +158,116 @@ async function prepareProviderRuntimeSkill(homeDir, skillName = 'metabot-weather
   });
   await mkdir(path.join(homeDir, '.codex', 'skills', skillName), { recursive: true });
   await writeFile(path.join(homeDir, '.codex', 'skills', skillName, 'SKILL.md'), '# Weather Oracle\n', 'utf8');
+}
+
+async function writeProviderOutputFile(homeDir, fileName, contents = 'provider artifact bytes') {
+  const outputDir = path.join(homeDir, 'provider-output');
+  await mkdir(outputDir, { recursive: true });
+  const filePath = path.join(outputDir, fileName);
+  await writeFile(filePath, contents);
+  return {
+    outputDir: await realpath(outputDir),
+    filePath: await realpath(filePath),
+  };
+}
+
+function createAttemptOutputController(fileName, contents = 'provider artifact bytes') {
+  let outputDir = '';
+  let filePath = '';
+  return {
+    get outputDir() {
+      return outputDir;
+    },
+    get filePath() {
+      return filePath;
+    },
+    async write(request) {
+      const fixture = await writeProviderOutputFile(request.cwd, fileName, contents);
+      outputDir = fixture.outputDir;
+      filePath = fixture.filePath;
+    },
+    sessionCwd() {
+      return outputDir;
+    },
+    outputText(prefix) {
+      return `${prefix}\nartifactPath: ${path.basename(filePath)}`;
+    },
+  };
+}
+
+function createProviderArtifactUploadMock(uploadCalls = []) {
+  return async (input) => {
+    uploadCalls.push(input);
+    const extension = path.extname(input.filePath).toLowerCase();
+    const fileName = path.basename(input.filePath);
+    const pinId = `provider-artifact-${uploadCalls.length}${extension}`;
+    return {
+      pinId: `provider-artifact-${uploadCalls.length}`,
+      txids: [`provider-artifact-upload-tx-${uploadCalls.length}`],
+      totalCost: 1,
+      network: input.network,
+      filePath: input.filePath,
+      fileName,
+      contentType: input.contentType,
+      bytes: 24,
+      extension,
+      metafileUri: `metafile://${pinId}`,
+      previewUrl: `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/provider-artifact-${uploadCalls.length}`,
+      downloadUrl: `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/provider-artifact-${uploadCalls.length}`,
+      globalMetaId: 'idq1provider',
+      uploadMode: 'direct',
+      verification: {
+        ok: true,
+        url: `https://file.metaid.io/metafile-indexer/api/v1/files/content/provider-artifact-${uploadCalls.length}`,
+        attempts: 1,
+      },
+    };
+  };
+}
+
+function assertNoProviderLocalPathLeak(value, localPath) {
+  const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+  assert.equal(serialized.includes(localPath), false, `expected no provider local path leak: ${localPath}`);
+}
+
+async function assertProviderSessionNotCompleted(homeDir, traceId) {
+  const sessionState = await createSessionStateStore(homeDir).readState();
+  const sessions = sessionState.sessions.filter((entry) => entry.traceId === traceId);
+  assert.ok(sessions.length > 0, `expected session state for ${traceId}`);
+  const sessionIds = new Set(sessions.map((entry) => entry.sessionId));
+  const taskRuns = sessionState.taskRuns.filter((entry) => sessionIds.has(entry.sessionId));
+  const taskRunIds = new Set(taskRuns.map((entry) => entry.runId));
+
+  assert.equal(sessions.some((entry) => entry.state === 'completed'), false);
+  assert.equal(taskRuns.some((entry) => entry.state === 'completed'), false);
+  assert.equal(sessionState.publicStatusSnapshots.some((entry) => (
+    sessionIds.has(entry.sessionId)
+    && (entry.status === 'completed' || entry.rawEvent === 'provider_completed')
+  )), false);
+  assert.equal(sessionState.transcriptItems.some((entry) => (
+    sessionIds.has(entry.sessionId)
+    && (!entry.taskRunId || taskRunIds.has(entry.taskRunId))
+    && (
+      entry.metadata?.event === 'provider_completed'
+      || entry.metadata?.publicStatus === 'completed'
+    )
+  )), false);
+}
+
+async function assertProviderSessionCompleted(homeDir, traceId) {
+  const sessionState = await createSessionStateStore(homeDir).readState();
+  const session = sessionState.sessions.find((entry) => entry.traceId === traceId);
+  assert.ok(session, `expected completed session state for ${traceId}`);
+  assert.equal(session.state, 'completed');
+  const taskRun = sessionState.taskRuns.find((entry) => entry.runId === session.currentTaskRunId);
+  assert.ok(taskRun, `expected completed task run for ${traceId}`);
+  assert.equal(taskRun.state, 'completed');
+  assert.equal(sessionState.publicStatusSnapshots.some((entry) => (
+    entry.sessionId === session.sessionId
+    && entry.taskRunId === taskRun.runId
+    && entry.status === 'completed'
+    && entry.rawEvent === 'provider_completed'
+  )), true);
 }
 
 function buildMvcPaymentRawTx(address, satoshis) {
@@ -288,6 +410,9 @@ async function createInboundProviderOrderHarness(t, options = {}) {
     llmExecutor: {
       async execute(request) {
         llmCalls.push(request);
+        if (options.llmExecuteHook) {
+          await options.llmExecuteHook(request, { llmCalls });
+        }
         if (options.llmDelayMs) {
           await delay(options.llmDelayMs);
         }
@@ -302,10 +427,15 @@ async function createInboundProviderOrderHarness(t, options = {}) {
         }
         return {
           sessionId,
+          cwd: typeof options.llmSessionCwd === 'function'
+            ? options.llmSessionCwd({ sessionId, llmCalls })
+            : options.llmSessionCwd ?? null,
           status: 'completed',
           result: {
             status: 'completed',
-            output: options.llmOutput ?? 'Tomorrow weather: bright with light wind.',
+            output: typeof options.llmOutput === 'function'
+              ? options.llmOutput({ sessionId, llmCalls })
+              : options.llmOutput ?? 'Tomorrow weather: bright with light wind.',
             durationMs: 1,
           },
         };
@@ -318,6 +448,8 @@ async function createInboundProviderOrderHarness(t, options = {}) {
     a2aConversationPersister: options.a2aConversationPersister,
     providerOrderReplyRunner: options.providerOrderReplyRunner,
     providerOrderTextGenerator: options.providerOrderTextGenerator,
+    providerArtifactUploadLargeFile: options.providerArtifactUploadLargeFile,
+    providerLargeFileUploader: options.providerLargeFileUploader,
   });
 
   function makeOrderContent(overrides = {}) {
@@ -1393,8 +1525,15 @@ test('buyer-side timeout creates a service refund request for paid simplemsg ord
   assert.ok(Array.isArray(payload.evidencePinIds));
   assert.ok(payload.evidencePinIds.includes(called.data.orderPinId));
 
-  const state = await harness.runtimeStateStore.readState();
-  const trace = state.traces.find((entry) => entry.order?.paymentTxid === paymentTxid);
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.order?.status === 'refund_pending'
+      && entry.order?.failureReason === 'delivery_timeout'
+      && entry.order?.refundRequestPinId
+    )) ?? null;
+  });
   assert.ok(trace, 'expected caller trace for timed-out paid order');
   assert.equal(trace.order.status, 'refund_pending');
   assert.match(trace.order.refundRequestPinId, /^\/protocols\/service-refund-request-pin-/);
@@ -1609,8 +1748,410 @@ test('buyer-side refund request write failure leaves a retry marker for paid tim
   assert.equal(trace.order.refundApplyRetryCount, 1);
 });
 
-test('buyer-side invalid non-text deliverable creates a refund request for paid orders', async (t) => {
+test('buyer-side non-text deliverable accepts artifact-only structured replies and preserves trace metadata', async (t) => {
   const paymentTxid = '5'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    service: { outputType: 'image' },
+    writePin(input, { writes, identity }) {
+      if (input.path === '/protocols/skill-service-rate') {
+        throw new Error('simulated rating publish outage');
+      }
+      return {
+        txids: [`${input.path}-tx-${writes.length}`],
+        pinId: `${input.path}-pin-${writes.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      };
+    },
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return {
+          state: 'completed',
+          responseText: '',
+          artifacts: [IMAGE_REPLY_ARTIFACT],
+          deliveryPinId: 'delivery-pin-with-structured-artifact',
+          observedAt: 1_775_000_010_000,
+          rawMessage: {
+            pinId: 'delivery-pin-with-structured-artifact',
+            txId: 'delivery-tx-with-structured-artifact',
+            timestamp: 1_775_000_010_000,
+          },
+          ratingRequestText: 'Please rate this completed weather image.',
+          ratingRequestPinId: 'rating-pin-with-structured-artifact',
+          ratingRequestObservedAt: 1_775_000_010_250,
+          ratingRawMessage: {
+            pinId: 'rating-pin-with-structured-artifact',
+            txId: 'rating-tx-with-structured-artifact',
+            timestamp: 1_775_000_010_250,
+          },
+        };
+      },
+    },
+    buyerRatingTextGenerator: async () => 'Rating: 5/5. The weather image satisfied the request.',
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Create a weather image',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting');
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.a2a?.taskRunState === 'completed'
+    )) ?? null;
+  });
+  assert.ok(trace, 'expected structured artifact delivery to complete');
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
+
+  const sessionStore = createSessionStateStore(harness.homeDir);
+  const sessionState = await sessionStore.readState();
+  const deliveryItem = sessionState.transcriptItems.find((item) => item.id === `${trace.traceId}-provider-delivery`);
+  assert.ok(deliveryItem);
+  assert.equal(deliveryItem.content, '');
+  assert.deepEqual(deliveryItem.artifacts.map((artifact) => artifact.uri), [
+    'metafile://buyer-image-pin.png',
+  ]);
+  assert.deepEqual(deliveryItem.metadata.deliveryArtifacts.map((artifact) => artifact.uri), [
+    'metafile://buyer-image-pin.png',
+  ]);
+
+  const traceResult = await harness.handlers.trace.getTrace({ traceId: trace.traceId });
+  assert.equal(traceResult.ok, true);
+  const projectedDelivery = traceResult.data.inspector.transcriptItems.find((item) => item.id === `${trace.traceId}-provider-delivery`);
+  assert.ok(projectedDelivery);
+  assert.equal(projectedDelivery.content, '');
+  assert.deepEqual(projectedDelivery.artifacts.map((artifact) => artifact.uri), [
+    'metafile://buyer-image-pin.png',
+  ]);
+  assert.deepEqual(projectedDelivery.metadata.deliveryArtifacts.map((artifact) => artifact.uri), [
+    'metafile://buyer-image-pin.png',
+  ]);
+
+  const conversation = await createA2AConversationStore({
+    homeDir: harness.homeDir,
+    local: {
+      globalMetaId: harness.identity.globalMetaId,
+      name: harness.identity.name,
+      chatPublicKey: harness.identity.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: 'idq1provider',
+      name: 'Weather Oracle',
+      chatPublicKey: harness.providerPair.publicKeyHex,
+    },
+  }).readConversation();
+  const orderSession = conversation.sessions.find((entry) => entry.sessionId === `a2a-order-${trace.order.orderTxid}`);
+  assert.ok(orderSession);
+  assert.equal(orderSession.type, 'service_order');
+  assert.equal(orderSession.role, 'caller');
+  assert.equal(orderSession.state, 'rating_pending');
+  assert.equal(orderSession.paymentTxid, paymentTxid);
+  assert.equal(orderSession.servicePinId, 'chain-service-pin-1');
+  assert.equal(orderSession.serviceName, 'Weather Oracle');
+  assert.equal(orderSession.outputType, 'image');
+  assert.equal(orderSession.deliveredAt, 1_775_000_010_000);
+  assert.equal(orderSession.ratingRequestedAt, 1_775_000_010_250);
+
+  const persistedDelivery = conversation.messages.find((entry) => (
+    entry.orderTxid === trace.order.orderTxid
+    && entry.direction === 'incoming'
+    && entry.protocolTag === 'DELIVERY'
+  ));
+  assert.ok(persistedDelivery, 'expected caller-side DELIVERY in unified A2A store');
+  assert.equal(persistedDelivery.pinId, 'delivery-pin-with-structured-artifact');
+  assert.equal(persistedDelivery.txid, 'delivery-tx-with-structured-artifact');
+  assert.equal(persistedDelivery.paymentTxid, paymentTxid);
+  assert.deepEqual(persistedDelivery.artifacts.map((artifact) => [artifact.uri, artifact.kind]), [
+    ['metafile://buyer-image-pin.png', 'image'],
+  ]);
+
+  const persistedNeedsRating = conversation.messages.find((entry) => (
+    entry.orderTxid === trace.order.orderTxid
+    && entry.direction === 'incoming'
+    && entry.protocolTag === 'NeedsRating'
+  ));
+  assert.ok(persistedNeedsRating, 'expected caller-side NeedsRating in unified A2A store');
+  assert.equal(persistedNeedsRating.messageId, 'rating-pin-with-structured-artifact');
+  assert.equal(persistedNeedsRating.pinId, 'rating-pin-with-structured-artifact');
+  assert.equal(persistedNeedsRating.txid, 'rating-tx-with-structured-artifact');
+  assert.deepEqual(persistedNeedsRating.txids, ['rating-tx-with-structured-artifact']);
+  assert.equal(persistedNeedsRating.replyPinId, 'delivery-pin-with-structured-artifact');
+  assert.equal(persistedNeedsRating.timestamp, 1_775_000_010_250);
+  assert.equal(persistedNeedsRating.raw.synthetic, undefined);
+  assert.equal(persistedNeedsRating.content.includes('Please rate this completed weather image.'), true);
+
+  await upsertIdentityProfile({
+    systemHomeDir: deriveSystemHome(harness.homeDir),
+    name: harness.identity.name,
+    homeDir: harness.homeDir,
+    globalMetaId: harness.identity.globalMetaId,
+    mvcAddress: harness.identity.mvcAddress,
+  });
+  const unifiedSession = await harness.handlers.trace.getSession({ sessionId: orderSession.sessionId });
+  assert.equal(unifiedSession.ok, true);
+  const unifiedDelivery = unifiedSession.data.inspector.transcriptItems.find((item) => item.type === 'delivery');
+  assert.ok(unifiedDelivery, 'expected unified projection delivery item');
+  assert.deepEqual(unifiedDelivery.artifacts.map((artifact) => [artifact.uri, artifact.kind]), [
+    ['metafile://buyer-image-pin.png', 'image'],
+  ]);
+});
+
+test('buyer-side completed reply ignores unified persistence failures and still auto-rates', async (t) => {
+  const paymentTxid = 'e'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    service: { outputType: 'image' },
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return {
+          state: 'completed',
+          responseText: '',
+          artifacts: [IMAGE_REPLY_ARTIFACT],
+          deliveryPinId: 'delivery-pin-with-persister-failure',
+          observedAt: 1_775_000_011_000,
+          rawMessage: {
+            pinId: 'delivery-pin-with-persister-failure',
+            txId: 'delivery-tx-with-persister-failure',
+            timestamp: 1_775_000_011_000,
+          },
+          ratingRequestText: 'Please rate this completed weather image.',
+          ratingRequestPinId: 'rating-pin-with-persister-failure',
+          ratingRequestObservedAt: 1_775_000_011_250,
+          ratingRawMessage: {
+            pinId: 'rating-pin-with-persister-failure',
+            txId: 'rating-tx-with-persister-failure',
+            timestamp: 1_775_000_011_250,
+          },
+        };
+      },
+    },
+    buyerRatingTextGenerator: async () => 'Rating: 5/5. The weather image satisfied the request.',
+    a2aConversationPersister: async () => {
+      throw new Error('simulated unified store outage');
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Create a weather image',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting');
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.a2a?.taskRunState === 'completed'
+    )) ?? null;
+  });
+  assert.ok(trace, 'expected caller reply completion despite unified persistence failure');
+  const ratingWrite = await waitForCondition(() => (
+    harness.writes.find((entry) => entry.path === '/protocols/skill-service-rate') ?? null
+  ));
+  assert.ok(ratingWrite, 'expected completed reply to publish an auto-rating pin');
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
+});
+
+test('buyer-side non-text deliverable accepts fallback metafile references', async (t) => {
+  const paymentTxid = '6'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    service: { outputType: 'image' },
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return {
+          state: 'completed',
+          responseText: 'Image generation finished successfully: metafile://fallback-buyer-image.png',
+          artifacts: [],
+          deliveryPinId: 'delivery-pin-with-fallback-artifact',
+          observedAt: Date.now(),
+          rawMessage: null,
+          ratingRequestText: null,
+        };
+      },
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Create a weather image',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.state, 'waiting');
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.a2a?.taskRunState === 'completed'
+    )) ?? null;
+  });
+  assert.ok(trace, 'expected fallback metafile delivery to complete');
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
+});
+
+test('buyer-side non-text deliverable rejects http-only media references for paid orders', async (t) => {
+  const scenarios = [
+    {
+      outputType: 'image',
+      paymentTxid: 'a'.repeat(64),
+      responseText: 'Image generation finished: https://cdn.example.test/result.png',
+    },
+    {
+      outputType: 'video',
+      paymentTxid: 'b'.repeat(64),
+      responseText: 'Video generation finished: https://cdn.example.test/result.mp4?download=1',
+    },
+    {
+      outputType: 'audio',
+      paymentTxid: 'c'.repeat(64),
+      responseText: 'Audio generation finished: https://cdn.example.test/result.mp3',
+    },
+    {
+      outputType: 'file',
+      paymentTxid: 'd'.repeat(64),
+      responseText: 'File uploaded: https://file.metaid.io/metafile-indexer/api/v1/files/content/http-only-file-pin',
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.outputType, async (t) => {
+      const harness = await createServiceCallHarness(t, {
+        service: { outputType: scenario.outputType },
+        servicePaymentExecutor: {
+          async execute(input) {
+            return {
+              paymentTxid: scenario.paymentTxid,
+              paymentChain: input.paymentChain,
+              paymentAmount: input.amount,
+              paymentCurrency: input.currency,
+              settlementKind: input.settlementKind,
+              network: input.paymentChain,
+            };
+          },
+        },
+        callerReplyWaiter: {
+          async awaitServiceReply() {
+            return {
+              state: 'completed',
+              responseText: scenario.responseText,
+              artifacts: [],
+              deliveryPinId: `delivery-pin-http-only-${scenario.outputType}`,
+              observedAt: Date.now(),
+              rawMessage: null,
+              ratingRequestText: null,
+            };
+          },
+        },
+      });
+
+      const called = await harness.handlers.services.call({
+        request: {
+          servicePinId: 'chain-service-pin-1',
+          providerGlobalMetaId: 'idq1provider',
+          userTask: `Create a weather ${scenario.outputType}`,
+          taskContext: 'User is in Shanghai',
+          spendCap: {
+            amount: '0.00002',
+            currency: 'SPACE',
+          },
+        },
+      });
+
+      assert.equal(called.state, 'waiting');
+      const refundWrite = await waitForCondition(() => (
+        harness.writes.find((entry) => entry.path === '/protocols/service-refund-request') ?? null
+      ));
+      assert.ok(refundWrite, `expected ${scenario.outputType} http-only delivery to publish a refund request`);
+      const payload = JSON.parse(refundWrite.payload);
+      assert.equal(payload.paymentTxid, scenario.paymentTxid);
+      assert.equal(payload.failureReason, 'invalid_deliverable');
+
+      const trace = await waitForCondition(async () => {
+        const state = await harness.runtimeStateStore.readState();
+        return state.traces.find((entry) => (
+          entry.order?.paymentTxid === scenario.paymentTxid
+          && entry.order?.status === 'refund_pending'
+          && entry.order?.failureReason === 'invalid_deliverable'
+          && entry.a2a?.publicStatus === 'remote_failed'
+        )) ?? null;
+      });
+      assert.ok(trace, `expected ${scenario.outputType} invalid deliverable trace`);
+      assert.equal(trace.order.status, 'refund_pending');
+      assert.equal(trace.order.failureReason, 'invalid_deliverable');
+      assert.equal(trace.a2a.publicStatus, 'remote_failed');
+    });
+  }
+});
+
+test('buyer-side invalid non-text deliverable creates a refund request for paid orders', async (t) => {
+  const paymentTxid = '7'.repeat(64);
   const harness = await createServiceCallHarness(t, {
     service: { outputType: 'image' },
     servicePaymentExecutor: {
@@ -1630,6 +2171,7 @@ test('buyer-side invalid non-text deliverable creates a refund request for paid 
         return {
           state: 'completed',
           responseText: 'Image generation finished successfully.',
+          artifacts: [],
           deliveryPinId: 'delivery-pin-without-artifact',
           observedAt: Date.now(),
           rawMessage: null,
@@ -1661,8 +2203,15 @@ test('buyer-side invalid non-text deliverable creates a refund request for paid 
   assert.equal(payload.paymentTxid, paymentTxid);
   assert.equal(payload.failureReason, 'invalid_deliverable');
 
-  const state = await harness.runtimeStateStore.readState();
-  const trace = state.traces.find((entry) => entry.order?.paymentTxid === paymentTxid);
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.order?.status === 'refund_pending'
+      && entry.order?.failureReason === 'invalid_deliverable'
+      && entry.a2a?.publicStatus === 'remote_failed'
+    )) ?? null;
+  });
   assert.ok(trace, 'expected invalid deliverable trace');
   assert.equal(trace.order.status, 'refund_pending');
   assert.equal(trace.order.failureReason, 'invalid_deliverable');
@@ -1670,7 +2219,7 @@ test('buyer-side invalid non-text deliverable creates a refund request for paid 
 });
 
 test('buyer-side provider daemon execution failure creates a refund request after paid execution dispatch', async (t) => {
-  const paymentTxid = '6'.repeat(64);
+  const paymentTxid = '8'.repeat(64);
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -2061,6 +2610,335 @@ test('inbound provider ORDER executes through runner and sends delivery plus rat
   assert.equal(orderSession.servicePinId, harness.service.currentPinId);
 });
 
+async function runProviderArtifactDeliveryCase(t, { outputType, fileName, expectedKind }) {
+  const orderTxid = `${expectedKind === 'image' ? '1' : expectedKind === 'video' ? '2' : expectedKind === 'audio' ? '3' : '4'}`.repeat(64);
+  const paymentTxid = `${expectedKind === 'image' ? '5' : expectedKind === 'video' ? '6' : expectedKind === 'audio' ? '7' : '8'}`.repeat(64);
+  const uploadCalls = [];
+  const output = createAttemptOutputController(fileName);
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText(`Created the requested ${expectedKind} deliverable.`),
+    llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(uploadCalls.length, 1);
+  assert.notEqual(uploadCalls[0].filePath, output.filePath);
+  assert.equal(path.basename(uploadCalls[0].filePath), path.basename(output.filePath));
+  assert.equal(uploadCalls[0].network, 'mvc');
+  assert.equal(uploadCalls[0].verify, true);
+
+  const simplemsgWrites = harness.writes.filter((entry) => entry.path === '/protocols/simplemsg');
+  const contents = simplemsgWrites.map((entry) => harness.decryptProviderWrite(entry));
+  const deliveryMessages = contents.filter((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`));
+  const ratingMessages = contents.filter((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`));
+  assert.equal(deliveryMessages.length, 1);
+  assert.equal(ratingMessages.length, 1);
+  assert.equal(contents.indexOf(deliveryMessages[0]) < contents.indexOf(ratingMessages[0]), true);
+
+  const delivery = parseDeliveryMessage(deliveryMessages[0]);
+  assert.ok(delivery);
+  assert.match(delivery.result, /metafile:\/\/provider-artifact-1/);
+  assert.equal(delivery.result.includes(output.filePath), false);
+  assert.equal(Array.isArray(delivery.artifacts), true);
+  assert.equal(delivery.artifacts.length, 1);
+  assert.equal(delivery.artifacts[0].kind, expectedKind);
+  assert.match(delivery.artifacts[0].uri, /^metafile:\/\/provider-artifact-1/);
+  assertNoProviderLocalPathLeak(deliveryMessages[0], output.filePath);
+  assertNoProviderLocalPathLeak(delivery, output.filePath);
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.order?.orderTxid === orderTxid);
+  assert.ok(trace, 'expected seller trace for artifact delivery');
+  const sessionState = await createSessionStateStore(harness.homeDir).readState();
+  const runnerItem = sessionState.transcriptItems.find((item) => item.id === `${trace.traceId}-provider-runner-result`);
+  const deliveryItem = sessionState.transcriptItems.find((item) => (
+    item.type === 'delivery' && item.metadata?.orderTxid === orderTxid
+  ));
+  assert.ok(runnerItem);
+  assert.ok(deliveryItem);
+  assert.match(runnerItem.content, /metafile:\/\/provider-artifact-1/);
+  assert.match(deliveryItem.content, /metafile:\/\/provider-artifact-1/);
+  assert.deepEqual(runnerItem.metadata.deliveryArtifacts.map((artifact) => artifact.kind), [expectedKind]);
+  assert.deepEqual(deliveryItem.metadata.deliveryArtifacts.map((artifact) => artifact.kind), [expectedKind]);
+  assert.deepEqual(deliveryItem.artifacts.map((artifact) => artifact.kind), [expectedKind]);
+  assertNoProviderLocalPathLeak(runnerItem, output.filePath);
+  assertNoProviderLocalPathLeak(deliveryItem, output.filePath);
+
+  const conversation = await createA2AConversationStore({
+    homeDir: harness.homeDir,
+    local: {
+      globalMetaId: harness.identity.globalMetaId,
+      name: harness.identity.name,
+      chatPublicKey: harness.identity.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: harness.buyerGlobalMetaId,
+      chatPublicKey: harness.buyerPair.publicKeyHex,
+    },
+  }).readConversation();
+  const persistedDelivery = conversation.messages.find((entry) => (
+    entry.protocolTag === 'DELIVERY' && entry.orderTxid === orderTxid
+  ));
+  assert.ok(persistedDelivery);
+  assert.deepEqual(persistedDelivery.artifacts.map((artifact) => artifact.kind), [expectedKind]);
+  assertNoProviderLocalPathLeak(persistedDelivery, output.filePath);
+}
+
+test('inbound provider ORDER image output uploads artifact and sends delivery before NeedsRating', async (t) => {
+  await runProviderArtifactDeliveryCase(t, {
+    outputType: 'image',
+    fileName: 'weather-image.png',
+    expectedKind: 'image',
+  });
+});
+
+test('inbound provider ORDER image output does not complete session while artifact upload is pending', async (t) => {
+  const orderTxid = '4'.repeat(64);
+  const paymentTxid = '5'.repeat(64);
+  const traceId = 'trace-provider-4444444444444444';
+  const uploadCalls = [];
+  const uploadMock = createProviderArtifactUploadMock(uploadCalls);
+  let uploadWindowError = null;
+  const output = createAttemptOutputController('pending-window-image.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Created pending-window image.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: async (input) => {
+      try {
+        await assertProviderSessionNotCompleted(harness.homeDir, traceId);
+      } catch (error) {
+        uploadWindowError = error;
+      }
+      return uploadMock(input);
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(uploadWindowError, null, uploadWindowError?.message);
+  assert.equal(uploadCalls.length, 1);
+  await assertProviderSessionCompleted(harness.homeDir, traceId);
+});
+
+test('inbound provider ORDER video output uploads artifact as video', async (t) => {
+  await runProviderArtifactDeliveryCase(t, {
+    outputType: 'video',
+    fileName: 'weather-video.mp4',
+    expectedKind: 'video',
+  });
+});
+
+test('inbound provider ORDER audio output uploads artifact as audio', async (t) => {
+  await runProviderArtifactDeliveryCase(t, {
+    outputType: 'audio',
+    fileName: 'weather-audio.mp3',
+    expectedKind: 'audio',
+  });
+});
+
+test('inbound provider ORDER file output uploads generic artifact as file', async (t) => {
+  await runProviderArtifactDeliveryCase(t, {
+    outputType: 'other',
+    fileName: 'weather-data.bin',
+    expectedKind: 'file',
+  });
+});
+
+test('inbound provider ORDER preserves public https and metafile artifact references', async (t) => {
+  const orderTxid = '9'.repeat(64);
+  const paymentTxid = 'a'.repeat(64);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    body: {
+      async cancel() {},
+    },
+  });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'file' },
+    llmOutput: 'Download mirror: https://example.test/public.bin and canonical metafile://existing-provider-file.bin',
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: async () => {
+      throw new Error('public metafile references should not be re-uploaded');
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  const deliveryMessage = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry))
+    .find((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`));
+  assert.ok(deliveryMessage);
+  const delivery = parseDeliveryMessage(deliveryMessage);
+  assert.ok(delivery);
+  assert.match(delivery.result, /https:\/\/example\.test\/public\.bin/);
+  assert.match(delivery.result, /metafile:\/\/existing-provider-file\.bin/);
+  assert.equal(delivery.artifacts.length, 1);
+  assert.equal(delivery.artifacts[0].kind, 'file');
+  assert.equal(delivery.artifacts[0].uri, 'metafile://existing-provider-file.bin');
+});
+
+test('inbound provider ORDER upload failure marks seller order failed without delivery or NeedsRating', async (t) => {
+  const orderTxid = 'b'.repeat(64);
+  const paymentTxid = 'c'.repeat(64);
+  const uploadCalls = [];
+  const output = createAttemptOutputController('upload-fails.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Here is the image.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: async (input) => {
+      uploadCalls.push(input);
+      const error = new Error('simulated provider artifact upload failure');
+      error.code = 'provider_artifact_upload_failed';
+      throw error;
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'provider_artifact_upload_failed');
+  assert.equal(uploadCalls.length, 1);
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(contents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+  assert.equal(contents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
+  assert.equal(contents.some((entry) => entry.startsWith(`[ORDER_END:${orderTxid} failed]`)), true);
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.order?.orderTxid === orderTxid);
+  assert.ok(trace, 'expected failed provider artifact trace');
+  assert.equal(trace.a2a.publicStatus, 'remote_failed');
+  assert.equal(trace.a2a.latestEvent, 'provider_failed');
+
+  const sellerOrder = state.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.ok(sellerOrder);
+  assert.equal(sellerOrder.state, 'failed');
+  assert.equal(sellerOrder.failureReason, 'simulated provider artifact upload failure');
+  assert.equal(sellerOrder.endReason, 'provider_artifact_upload_failed');
+  assertNoProviderLocalPathLeak(trace, output.filePath);
+});
+
+test('inbound provider ORDER preserves large_file_upload_unavailable when no large uploader exists', async (t) => {
+  const orderTxid = 'd'.repeat(64);
+  const paymentTxid = 'e'.repeat(64);
+  const output = createAttemptOutputController('large-image.png', Buffer.alloc((2 * 1024 * 1024) + 1));
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Large image complete.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'large_file_upload_unavailable');
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(contents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+  assert.equal(contents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.ok(sellerOrder);
+  assert.equal(sellerOrder.endReason, 'large_file_upload_unavailable');
+});
+
+test('inbound provider ORDER delivery send failure after upload sends no NeedsRating', async (t) => {
+  const orderTxid = 'f'.repeat(64);
+  const paymentTxid = '1'.repeat(64);
+  const uploadCalls = [];
+  const output = createAttemptOutputController('delivery-fails.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Image complete.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
+    writePinHook: async (_input, writes) => {
+      if (writes.filter((entry) => entry.path === '/protocols/simplemsg').length === 1) {
+        throw new Error('simulated artifact delivery write failure');
+      }
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'provider_delivery_failed');
+  assert.equal(uploadCalls.length, 1);
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(contents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+  assert.equal(contents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
+});
+
 test('inbound provider ORDER uses dedicated provider-generated protocol copy', async (t) => {
   const orderTxid = 'e'.repeat(64);
   const paymentTxid = 'f'.repeat(64);
@@ -2202,6 +3080,202 @@ test('/api services.execute persists seller lifecycle state and provider runtime
   assert.equal(sellerOrder.traceId, 'trace-provider-direct-execute');
   assert.equal(sellerOrder.a2aSessionId, trace.a2a.sessionId);
   assert.equal(sellerOrder.llmSessionId, 'provider-llm-session-1');
+});
+
+test('/api services.execute resolves non-text provider artifacts into direct traces', async (t) => {
+  const paymentTxid = '2'.repeat(64);
+  const uploadCalls = [];
+  const output = createAttemptOutputController('direct-image.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Direct image complete.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
+  });
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-artifact',
+    externalConversationId: 'direct:buyer:provider',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Create a weather image',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(uploadCalls.length, 1);
+  assert.match(result.data.responseText, /metafile:\/\/provider-artifact-1\.png/);
+  assertNoProviderLocalPathLeak(result.data.responseText, output.filePath);
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.traceId === 'trace-provider-direct-artifact');
+  assert.ok(trace, 'expected direct provider artifact trace');
+  assertNoProviderLocalPathLeak(trace, output.filePath);
+
+  const sessionState = await createSessionStateStore(harness.homeDir).readState();
+  const runnerItem = sessionState.transcriptItems.find((item) => item.id === 'trace-provider-direct-artifact-provider-runner-result');
+  assert.ok(runnerItem);
+  assert.match(runnerItem.content, /metafile:\/\/provider-artifact-1\.png/);
+  assert.deepEqual(runnerItem.metadata.deliveryArtifacts.map((artifact) => artifact.kind), ['image']);
+  assertNoProviderLocalPathLeak(runnerItem, output.filePath);
+
+  const traceResult = await harness.handlers.trace.getTrace({ traceId: 'trace-provider-direct-artifact' });
+  assert.equal(traceResult.ok, true);
+  const projectedDelivery = traceResult.data.inspector.transcriptItems.find((item) => (
+    item.type === 'delivery'
+    && item.id === 'trace-provider-direct-artifact-provider-delivery'
+  ));
+  assert.ok(projectedDelivery);
+  assert.match(projectedDelivery.content, /metafile:\/\/provider-artifact-1\.png/);
+  assert.deepEqual(projectedDelivery.artifacts.map((artifact) => artifact.kind), ['image']);
+  assert.deepEqual(projectedDelivery.metadata.deliveryArtifacts.map((artifact) => artifact.kind), ['image']);
+  assertNoProviderLocalPathLeak(projectedDelivery, output.filePath);
+});
+
+test('/api services.execute image output does not complete session while artifact upload is pending', async (t) => {
+  const paymentTxid = '6'.repeat(64);
+  const traceId = 'trace-provider-direct-artifact-pending-state';
+  const uploadCalls = [];
+  const uploadMock = createProviderArtifactUploadMock(uploadCalls);
+  let uploadWindowError = null;
+  const output = createAttemptOutputController('direct-pending-window-image.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Direct pending-window image complete.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    providerArtifactUploadLargeFile: async (input) => {
+      try {
+        await assertProviderSessionNotCompleted(harness.homeDir, traceId);
+      } catch (error) {
+        uploadWindowError = error;
+      }
+      return uploadMock(input);
+    },
+  });
+
+  const result = await harness.handlers.services.execute({
+    traceId,
+    externalConversationId: 'direct:buyer:provider',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Create a weather image',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(uploadWindowError, null, uploadWindowError?.message);
+  assert.equal(uploadCalls.length, 1);
+  await assertProviderSessionCompleted(harness.homeDir, traceId);
+});
+
+test('/api services.execute upload failure marks direct seller order and trace failed', async (t) => {
+  const paymentTxid = '3'.repeat(64);
+  const uploadCalls = [];
+  const output = createAttemptOutputController('direct-upload-fails.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Direct image complete.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    providerArtifactUploadLargeFile: async (input) => {
+      uploadCalls.push(input);
+      const error = new Error(`simulated direct artifact upload failure at ${output.filePath}`);
+      error.code = 'provider_artifact_upload_failed';
+      throw error;
+    },
+  });
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-artifact-failure',
+    externalConversationId: 'direct:buyer:provider',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Create a weather image',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'provider_artifact_upload_failed');
+  assert.match(result.message, /simulated direct artifact upload failure/);
+  assertNoProviderLocalPathLeak(result.message, output.filePath);
+  assert.equal(uploadCalls.length, 1);
+
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.paymentTxid === paymentTxid);
+  assert.ok(sellerOrder, 'expected direct execution seller order');
+  assert.equal(sellerOrder.state, 'failed');
+  assert.equal(sellerOrder.endReason, 'provider_artifact_upload_failed');
+  assert.match(sellerOrder.failureReason, /simulated direct artifact upload failure/);
+  assertNoProviderLocalPathLeak(sellerOrder, output.filePath);
+
+  const trace = state.traces.find((entry) => entry.traceId === 'trace-provider-direct-artifact-failure');
+  assert.ok(trace, 'expected failed direct provider artifact trace');
+  assert.equal(trace.a2a.publicStatus, 'remote_failed');
+  assert.equal(trace.a2a.latestEvent, 'provider_failed');
+  assert.equal(trace.a2a.taskRunState, 'failed');
+  assertNoProviderLocalPathLeak(trace, output.filePath);
+
+  const sessionState = await createSessionStateStore(harness.homeDir).readState();
+  const taskRun = sessionState.taskRuns.find((entry) => entry.runId === trace.a2a.taskRunId);
+  assert.ok(taskRun);
+  assert.equal(taskRun.state, 'failed');
+  const failureItem = sessionState.transcriptItems.find((item) => item.id === 'trace-provider-direct-artifact-failure-provider-artifact-failure');
+  assert.ok(failureItem);
+  assert.equal(failureItem.type, 'failure');
+  assert.match(failureItem.content, /simulated direct artifact upload failure/);
+  assertNoProviderLocalPathLeak(failureItem, output.filePath);
+
+  const traceResult = await harness.handlers.trace.getTrace({ traceId: 'trace-provider-direct-artifact-failure' });
+  assert.equal(traceResult.ok, true);
+  assert.equal(traceResult.data.a2a.publicStatus, 'remote_failed');
+  assert.equal(traceResult.data.a2a.taskRunState, 'failed');
+  const projectedFailure = traceResult.data.inspector.transcriptItems.find((item) => item.id === failureItem.id);
+  assert.ok(projectedFailure);
+  assertNoProviderLocalPathLeak(traceResult.data, output.filePath);
 });
 
 test('/api services.execute rejects missing buyer globalMetaId before seller order persistence', async (t) => {

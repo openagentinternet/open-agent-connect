@@ -433,6 +433,61 @@ test('runCli prints file upload help with OPCAT support and DOGE exclusion', asy
   assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
 });
 
+test('runCli prints file group help with upload-large listed', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['file', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot file <subcommand>/m);
+  assert.match(output, /upload\s+Upload one local file through the shared MetaWeb file path\./);
+  assert.match(output, /upload-large\s+Upload one local file through the daemon-backed large file path\./);
+});
+
+test('runCli prints file upload-large help with request shape and MVC large-upload notes', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['file', 'upload-large', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot file upload-large \[--from <bot-slug>\] --request-file <path> \[--chain <mvc\|btc\|opcat>\] \[--verify\]/m);
+  assert.match(output, /"filePath": "\/absolute\/or\/relative\/path\/to\/file"/);
+  assert.match(output, /"verify": "optional availability verification boolean"/);
+  assert.match(output, /metafileUri/);
+  assert.match(output, /verification/);
+  assert.match(output, /DOGE is not supported for file upload/i);
+  assert.match(output, /Large uploads above the direct threshold currently require MVC/i);
+  assert.match(output, /large_file_upload_unavailable/);
+  assert.match(output, /metabot file upload-large --from alice --request-file large-file-request\.json --verify/);
+});
+
+test('runCli prints machine-readable file upload-large help', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['file', 'upload-large', '--help', '--json'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = JSON.parse(stdout.join(''));
+  assert.deepEqual(output.commandPath, ['file', 'upload-large']);
+  assert.equal(output.command, 'metabot file upload-large');
+  assert.ok(output.requiredFlags.some((flag) => flag.flag === '--request-file'));
+  assert.ok(output.optionalFlags.some((flag) => flag.flag === '--verify'));
+});
+
 test('runCli prints master publish help with DOGE and OPCAT chain support', async () => {
   const stdout = [];
 

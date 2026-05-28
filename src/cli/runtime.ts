@@ -2125,6 +2125,7 @@ function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceRep
           ? step.responseText
           : 'Test fake remote reply.',
         deliveryPinId: typeof step.deliveryPinId === 'string' ? step.deliveryPinId : null,
+        artifacts: [],
         ratingRequestText: typeof step.ratingRequestText === 'string' ? step.ratingRequestText : null,
         observedAt: Number.isFinite(step.observedAt)
           ? Number(step.observedAt)
@@ -2688,6 +2689,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     },
     file: {
       upload: async (input) => requestJson(context, 'POST', '/api/file/upload', input),
+      uploadLarge: async (input) => requestJson(context, 'POST', '/api/file/upload-large', input),
     },
     wallet: {
       balance: async (input) => {

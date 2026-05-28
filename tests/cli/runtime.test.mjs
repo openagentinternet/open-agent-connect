@@ -4399,3 +4399,29 @@ test('file upload fails clearly when default write network is DOGE', async (t) =
   assert.equal(uploaded.payload.code, 'file_upload_failed');
   assert.match(uploaded.payload.message, /DOGE is not supported for file upload/i);
 });
+
+test('file upload-large daemon route supports direct small uploads', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const filePath = path.join(homeDir, 'small-large-route.txt');
+  const requestFile = path.join(homeDir, 'large-file-request.json');
+  await writeFile(filePath, 'hello large upload direct route', 'utf8');
+  await writeFile(requestFile, JSON.stringify({
+    filePath: 'small-large-route.txt',
+    contentType: 'text/plain',
+  }), 'utf8');
+
+  const uploaded = await runCommand(homeDir, ['file', 'upload-large', '--request-file', requestFile]);
+
+  assert.equal(uploaded.exitCode, 0);
+  assert.equal(uploaded.payload.ok, true);
+  assert.equal(uploaded.payload.data.uploadMode, 'direct');
+  assert.equal(uploaded.payload.data.network, 'mvc');
+  assert.equal(uploaded.payload.data.contentType, 'text/plain');
+  assert.equal(uploaded.payload.data.fileName, 'small-large-route.txt');
+  assert.match(uploaded.payload.data.metafileUri, /^metafile:\/\//);
+});
