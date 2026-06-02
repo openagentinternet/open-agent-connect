@@ -186,9 +186,11 @@ function buildOrderRowWithRating(
   }
 
   const paymentTxid = normalizeText(order.paymentTxid) || null;
-  const ratingDetail = servicePinId && paymentTxid
+  const serviceOrderPinId = normalizeText(order.serviceOrderPinId) || null;
+  const ratingDetail = servicePinId && (serviceOrderPinId || paymentTxid)
     ? findRatingDetailByServicePayment(ratingDetails, {
         serviceId: servicePinId,
+        serviceOrderPinId,
         servicePaidTx: paymentTxid,
       })
     : null;
@@ -197,7 +199,7 @@ function buildOrderRowWithRating(
   return {
     traceId: normalizeText(trace.traceId),
     orderId,
-    ...(normalizeText(order.serviceOrderPinId) ? { serviceOrderPinId: normalizeText(order.serviceOrderPinId) } : {}),
+    ...(serviceOrderPinId ? { serviceOrderPinId } : {}),
     servicePinId,
     serviceName: normalizeText(order.serviceName),
     paymentTxid,
@@ -228,9 +230,11 @@ function buildSellerOrderRowWithRating(
   }
 
   const paymentTxid = normalizeText(order.paymentTxid) || null;
-  const ratingDetail = servicePinId && paymentTxid
+  const serviceOrderPinId = normalizeText(order.serviceOrderPinId) || null;
+  const ratingDetail = servicePinId && (serviceOrderPinId || paymentTxid)
     ? findRatingDetailByServicePayment(ratingDetails, {
         serviceId: servicePinId,
+        serviceOrderPinId,
         servicePaidTx: paymentTxid,
       })
     : null;
@@ -316,7 +320,7 @@ function buildSellerOrderRowWithRating(
   return {
     traceId: normalizeText(order.traceId),
     orderId,
-    ...(normalizeText(order.serviceOrderPinId) ? { serviceOrderPinId: normalizeText(order.serviceOrderPinId) } : {}),
+    ...(serviceOrderPinId ? { serviceOrderPinId } : {}),
     servicePinId,
     serviceName: normalizeText(order.serviceName),
     paymentTxid,

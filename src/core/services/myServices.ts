@@ -230,14 +230,31 @@ function sortOrdersDesc(left: SellerOrderRecord, right: SellerOrderRecord): numb
 
 function pickRatingDetail(
   ratings: RatingDetailItem[],
-  paymentTxid: string,
+  order: {
+    servicePinId?: string | null;
+    currentServicePinId?: string | null;
+    serviceOrderPinId?: string | null;
+    paymentTxid?: string | null;
+  },
   counterpartyGlobalMetaid?: string | null,
 ): MyServiceOrderRating | null {
-  const normalizedPaymentTxid = toSafeString(paymentTxid);
-  if (!normalizedPaymentTxid) return null;
+  const serviceIds = [...new Set([
+    order.currentServicePinId,
+    order.servicePinId,
+  ].map(toSafeString).filter(Boolean))];
+  const serviceOrderPinId = toSafeString(order.serviceOrderPinId);
+  const paymentTxid = toSafeString(order.paymentTxid);
+  if (serviceIds.length === 0 || (!serviceOrderPinId && !paymentTxid)) return null;
   const buyerGlobalMetaId = toSafeString(counterpartyGlobalMetaid);
-  const candidates = ratings
-    .filter((rating) => toSafeString(rating.servicePaidTx) === normalizedPaymentTxid)
+  const serviceRatings = ratings.filter((rating) => (
+    serviceIds.includes(toSafeString(rating.serviceId))
+  ));
+  const orderPinCandidates = serviceOrderPinId
+    ? serviceRatings.filter((rating) => toSafeString(rating.serviceOrderPinId) === serviceOrderPinId)
+    : [];
+  const candidates = (orderPinCandidates.length > 0
+    ? orderPinCandidates
+    : serviceRatings.filter((rating) => paymentTxid && toSafeString(rating.servicePaidTx) === paymentTxid))
     .sort((left, right) => toSafeNumber(right.createdAt) - toSafeNumber(left.createdAt));
   const selected = buyerGlobalMetaId
     ? candidates.find((rating) => toSafeString(rating.raterGlobalMetaId) === buyerGlobalMetaId) ?? candidates[0]
@@ -260,13 +277,13 @@ function buildRatingIndex(profile: MyServicesProfileInput, servicePinIds: Set<st
 }
 
 function buildClosedOrderRatings(ratings: RatingDetailItem[], orders: SellerOrderRecord[]): number[] {
-  const seenPaymentTxids = new Set<string>();
+  const seenOrderKeys = new Set<string>();
   const matchedRatings: number[] = [];
   for (const order of orders) {
-    const paymentTxid = toSafeString(order.paymentTxid);
-    if (!paymentTxid || seenPaymentTxids.has(paymentTxid)) continue;
-    seenPaymentTxids.add(paymentTxid);
-    const rating = pickRatingDetail(ratings, paymentTxid, order.buyerGlobalMetaId);
+    const orderKey = toSafeString(order.serviceOrderPinId) || toSafeString(order.paymentTxid);
+    if (!orderKey || seenOrderKeys.has(orderKey)) continue;
+    seenOrderKeys.add(orderKey);
+    const rating = pickRatingDetail(ratings, order, order.buyerGlobalMetaId);
     if (rating) matchedRatings.push(rating.rate);
   }
   return matchedRatings;
@@ -423,7 +440,7 @@ export function buildMyServiceOrderDetails(input: {
         runtimeId: toSafeString(order.runtimeId) || null,
         runtimeProvider: toSafeString(order.runtimeProvider) || null,
         llmSessionId: toSafeString(order.llmSessionId) || null,
-        rating: pickRatingDetail(ratingDetails, paymentTxid, order.buyerGlobalMetaId),
+        rating: pickRatingDetail(ratingDetails, order, order.buyerGlobalMetaId),
       });
     }
   }

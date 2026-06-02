@@ -40,7 +40,10 @@ test('parseRatingDetailItem normalizes one /protocols/skill-service-rate row wit
     timestamp: 'not-a-number',
     contentSummary: {
       serviceID: 'service-pin-parse-1',
+      serviceOrderPinId: 'skill-service-order-parse-pin',
       servicePaidTx: '',
+      serviceSkills: ['weather-service', 'post-buzz', 'weather-service', ' '],
+      serviceSkill: 'weather-service',
       rate: 5,
       comment: '   ',
     },
@@ -51,7 +54,9 @@ test('parseRatingDetailItem normalizes one /protocols/skill-service-rate row wit
   assert.deepEqual(parsed, {
     pinId: 'rating-pin-parse-1',
     serviceId: 'service-pin-parse-1',
+    serviceOrderPinId: 'skill-service-order-parse-pin',
     servicePaidTx: null,
+    serviceSkills: ['weather-service', 'post-buzz'],
     rate: 5,
     comment: null,
     raterGlobalMetaId: 'idq1buyer',
@@ -97,7 +102,9 @@ test('refreshRatingDetailCache skips invalid rows and persists initial latest pi
       {
         pinId: 'rating-pin-1',
         serviceId: 'service-pin-1',
+        serviceOrderPinId: null,
         servicePaidTx: 'payment-tx-1',
+        serviceSkills: [],
         rate: 4,
         comment: 'Useful and concrete.',
         raterGlobalMetaId: 'idq1buyer',
@@ -120,7 +127,9 @@ test('refreshRatingDetailCache ignores already-seen pin ids and finds rating det
         {
           pinId: 'rating-pin-1',
           serviceId: 'service-pin-1',
+          serviceOrderPinId: null,
           servicePaidTx: 'payment-tx-1',
+          serviceSkills: [],
           rate: 4,
           comment: 'Useful and concrete.',
           raterGlobalMetaId: 'idq1buyer',
@@ -144,7 +153,9 @@ test('refreshRatingDetailCache ignores already-seen pin ids and finds rating det
             metaid: 'buyer-meta-id-2',
             contentSummary: JSON.stringify({
               serviceID: 'service-pin-2',
+              serviceOrderPinId: 'skill-service-order-pin-2',
               servicePaidTx: 'payment-tx-2',
+              serviceSkills: ['forecast-skill'],
               rate: '5',
               comment: 'Clear and fast.',
             }),
@@ -165,13 +176,16 @@ test('refreshRatingDetailCache ignores already-seen pin ids and finds rating det
 
     const matched = findRatingDetailByServicePayment(refreshed.state, {
       serviceId: 'service-pin-2',
+      serviceOrderPinId: 'skill-service-order-pin-2',
       servicePaidTx: 'payment-tx-2',
     });
 
     assert.deepEqual(matched, {
       pinId: 'rating-pin-2',
       serviceId: 'service-pin-2',
+      serviceOrderPinId: 'skill-service-order-pin-2',
       servicePaidTx: 'payment-tx-2',
+      serviceSkills: ['forecast-skill'],
       rate: 5,
       comment: 'Clear and fast.',
       raterGlobalMetaId: 'idq1buyer',
@@ -181,4 +195,44 @@ test('refreshRatingDetailCache ignores already-seen pin ids and finds rating det
   } finally {
     await cleanupProfileHome(homeDir);
   }
+});
+
+test('findRatingDetailByServicePayment prefers serviceOrderPinId and falls back to legacy servicePaidTx', () => {
+  const ratings = [
+    {
+      pinId: 'rating-by-order-pin',
+      serviceId: 'service-pin-1',
+      serviceOrderPinId: 'skill-service-order-pin-1',
+      servicePaidTx: 'payment-other',
+      serviceSkills: ['weather-service'],
+      rate: 5,
+      comment: 'Matched by order pin.',
+      raterGlobalMetaId: 'idq1buyer',
+      raterMetaId: 'buyer-meta-id',
+      createdAt: 1_775_000_010_000,
+    },
+    {
+      pinId: 'rating-by-payment',
+      serviceId: 'service-pin-1',
+      serviceOrderPinId: 'skill-service-order-pin-other',
+      servicePaidTx: 'payment-shared',
+      serviceSkills: [],
+      rate: 3,
+      comment: 'Legacy payment match.',
+      raterGlobalMetaId: 'idq1buyer',
+      raterMetaId: 'buyer-meta-id',
+      createdAt: 1_775_000_009_000,
+    },
+  ];
+
+  assert.equal(findRatingDetailByServicePayment(ratings, {
+    serviceId: 'service-pin-1',
+    serviceOrderPinId: 'skill-service-order-pin-1',
+    servicePaidTx: 'payment-shared',
+  })?.pinId, 'rating-by-order-pin');
+
+  assert.equal(findRatingDetailByServicePayment(ratings, {
+    serviceId: 'service-pin-1',
+    servicePaidTx: 'payment-shared',
+  })?.pinId, 'rating-by-payment');
 });

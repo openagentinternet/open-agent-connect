@@ -5,7 +5,9 @@ import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 export interface RatingDetailItem {
   pinId: string;
   serviceId: string;
+  serviceOrderPinId: string | null;
   servicePaidTx: string | null;
+  serviceSkills: string[];
   rate: number;
   comment: string | null;
   raterGlobalMetaId: string | null;
@@ -44,6 +46,13 @@ function normalizeNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeTextList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [...new Set(value.map((entry) => normalizeText(entry)).filter(Boolean))];
+}
+
 function createEmptyRatingDetailState(): RatingDetailState {
   return {
     items: [],
@@ -69,7 +78,9 @@ function normalizeRatingDetailItem(value: RatingDetailItem | null | undefined): 
   return {
     pinId,
     serviceId,
+    serviceOrderPinId: normalizeText(value.serviceOrderPinId) || null,
     servicePaidTx: normalizeText(value.servicePaidTx) || null,
+    serviceSkills: normalizeTextList(value.serviceSkills),
     rate,
     comment: normalizeText(value.comment) || null,
     raterGlobalMetaId: normalizeText(value.raterGlobalMetaId) || null,

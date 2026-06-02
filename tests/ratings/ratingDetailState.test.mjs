@@ -28,7 +28,9 @@ test('createRatingDetailStateStore persists rating detail items in .runtime/stat
         {
           pinId: 'rating-pin-1',
           serviceId: 'service-pin-1',
+          serviceOrderPinId: 'skill-service-order-pin-1',
           servicePaidTx: 'payment-tx-1',
+          serviceSkills: ['weather-service', 'post-buzz'],
           rate: 5,
           comment: 'Precise and helpful.',
           raterGlobalMetaId: 'idq1buyer',
@@ -50,7 +52,9 @@ test('createRatingDetailStateStore persists rating detail items in .runtime/stat
         {
           pinId: 'rating-pin-1',
           serviceId: 'service-pin-1',
+          serviceOrderPinId: 'skill-service-order-pin-1',
           servicePaidTx: 'payment-tx-1',
+          serviceSkills: ['weather-service', 'post-buzz'],
           rate: 5,
           comment: 'Precise and helpful.',
           raterGlobalMetaId: 'idq1buyer',

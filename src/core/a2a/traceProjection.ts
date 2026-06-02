@@ -546,6 +546,7 @@ function projectProtocolMessage(input: {
       metadata: {
         ...metadata,
         needsRating: true,
+        orderPinId: normalizeText(parsed?.orderPinId) || null,
       },
     };
   }
@@ -559,6 +560,7 @@ function projectProtocolMessage(input: {
       metadata: {
         ...metadata,
         endReason: normalizeText(parsed?.reason) || null,
+        orderPinId: normalizeText(parsed?.orderPinId) || null,
         publicStatus: normalizeText(parsed?.reason).toLowerCase() === 'failed' ? 'remote_failed' : 'completed',
       },
     };

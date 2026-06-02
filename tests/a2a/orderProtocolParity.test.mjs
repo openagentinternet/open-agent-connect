@@ -18,9 +18,18 @@ test('scoped protocol helpers match IDBots tag syntax', () => {
   } = require('../../dist/core/a2a/protocol/orderProtocol.js');
 
   const orderTxid = 'a'.repeat(64);
+  const orderPinId = 'skill-service-order-pin-1';
   assert.equal(buildOrderStatusMessage(orderTxid, 'accepted'), `[ORDER_STATUS:${orderTxid}] accepted`);
   assert.equal(buildNeedsRatingMessage(orderTxid, 'please rate'), `[NeedsRating:${orderTxid}] please rate`);
   assert.equal(buildOrderEndMessage(orderTxid, 'rated', 'thanks'), `[ORDER_END:${orderTxid} rated] thanks`);
+  assert.equal(
+    buildNeedsRatingMessage(orderTxid, 'please rate', orderPinId),
+    `[NeedsRating:${orderTxid}] please rate\norder pin id: ${orderPinId}`
+  );
+  assert.equal(
+    buildOrderEndMessage(orderTxid, 'rated', 'thanks', { serviceOrderPinId: orderPinId }),
+    `[ORDER_END:${orderTxid} rated] thanks\norder pin id: ${orderPinId}`
+  );
 
   const delivery = buildDeliveryMessage({ paymentTxid: 'b'.repeat(64), result: '# Done' }, orderTxid);
   assert.ok(delivery.startsWith(`[DELIVERY:${orderTxid}] `));
@@ -38,12 +47,23 @@ test('scoped protocol helpers match IDBots tag syntax', () => {
     orderTxid,
     content: 'please rate',
   });
+  assert.deepEqual(parseNeedsRatingMessage(`[NeedsRating:${orderTxid}] please rate\norder pin id: ${orderPinId}`), {
+    orderTxid,
+    orderPinId,
+    content: 'please rate',
+  });
   assert.deepEqual(parseOrderStatusMessage(`[ORDER_STATUS:${orderTxid}] accepted`), {
     orderTxid,
     content: 'accepted',
   });
   assert.deepEqual(parseOrderEndMessage(`[ORDER_END:${orderTxid} rated] thanks`), {
     orderTxid,
+    reason: 'rated',
+    content: 'thanks',
+  });
+  assert.deepEqual(parseOrderEndMessage(`[ORDER_END:${orderTxid} rated] thanks\norder pin id: ${orderPinId}`), {
+    orderTxid,
+    orderPinId,
     reason: 'rated',
     content: 'thanks',
   });

@@ -640,10 +640,13 @@ async function seedBuyerTraceForRating(harness, overrides = {}) {
       orderTxids: overrides.orderTxids ?? [orderTxid],
       paymentTxid,
       orderReference: overrides.orderReference ?? null,
+      serviceOrderPinId: overrides.serviceOrderPinId ?? null,
       paymentCurrency: 'SPACE',
       paymentAmount: overrides.paymentAmount ?? '0.00001',
       paymentChain: overrides.paymentChain ?? 'mvc',
       settlementKind: overrides.settlementKind ?? 'native',
+      providerSkill: overrides.providerSkill ?? 'metabot-weather-oracle',
+      providerSkills: overrides.providerSkills ?? ['metabot-weather-oracle'],
     },
     a2a: {
       sessionId: 'session-rating-retry-1',
@@ -1165,17 +1168,23 @@ test('service rating retries skill-service-rate publish after a mempool conflict
   assert.match(published.metadata.ratingPinId, /\/protocols\/skill-service-rate-pin-/);
 });
 
-test('free service rating uses the order reference as the service paid tx', async (t) => {
+test('service rating publishes service order id, service skills, and legacy paid tx fallback', async (t) => {
   const orderTxid = '1'.repeat(64);
   const orderReference = 'a'.repeat(64);
-  const harness = await createServiceCallHarness(t);
+  const serviceOrderPinId = 'skill-service-order-free-pin-1';
+  const providerSkills = ['metabot-weather-oracle', 'metabot-post-buzz'];
+  const harness = await createServiceCallHarness(t, {
+    service: { providerSkills },
+  });
   const sessionStateStore = await seedBuyerTraceForRating(harness, {
     orderPinId: `${orderTxid}i0`,
     orderTxid,
     orderTxids: [orderTxid],
     paymentTxid: null,
     orderReference,
+    serviceOrderPinId,
     paymentAmount: '0',
+    providerSkills,
   });
 
   const result = await harness.handlers.services.rate({
@@ -1185,13 +1194,19 @@ test('free service rating uses the order reference as the service paid tx', asyn
   });
 
   assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.serviceOrderPinId, serviceOrderPinId);
   assert.equal(result.data.servicePaidTx, orderReference);
+  assert.deepEqual(result.data.serviceSkills, providerSkills);
+  assert.equal(result.data.serviceSkill, providerSkills[0]);
   assert.equal(result.data.ratingMessageSent, true);
 
   const ratingWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-rate');
   assert.ok(ratingWrite, 'expected a skill-service-rate write');
   const payload = JSON.parse(ratingWrite.payload);
+  assert.equal(payload.serviceOrderPinId, serviceOrderPinId);
   assert.equal(payload.servicePaidTx, orderReference);
+  assert.deepEqual(payload.serviceSkills, providerSkills);
+  assert.equal(payload.serviceSkill, providerSkills[0]);
   assert.equal(payload.servicePrice, '0');
 
   const sessionState = await sessionStateStore.readState();
@@ -1202,9 +1217,10 @@ test('free service rating uses the order reference as the service paid tx', asyn
   assert.match(published.metadata.ratingPinId, /\/protocols\/skill-service-rate-pin-/);
 });
 
-test('free service trace rating detail sync matches by order reference', async (t) => {
+test('free service trace rating detail sync matches by service order id', async (t) => {
   const orderTxid = '3'.repeat(64);
   const orderReference = 'c'.repeat(64);
+  const serviceOrderPinId = 'skill-service-order-trace-pin-1';
   const harness = await createServiceCallHarness(t);
   await seedBuyerTraceForRating(harness, {
     orderPinId: `${orderTxid}i0`,
@@ -1212,6 +1228,7 @@ test('free service trace rating detail sync matches by order reference', async (
     orderTxids: [orderTxid],
     paymentTxid: null,
     orderReference,
+    serviceOrderPinId,
     paymentAmount: '0',
   });
   const ratingStore = createRatingDetailStateStore(harness.homeDir);
@@ -1220,7 +1237,9 @@ test('free service trace rating detail sync matches by order reference', async (
       {
         pinId: 'free-rating-pin-1',
         serviceId: 'chain-service-pin-1',
-        servicePaidTx: orderReference,
+        serviceOrderPinId,
+        servicePaidTx: 'legacy-payment-value-that-should-not-be-needed',
+        serviceSkills: ['metabot-weather-oracle'],
         rate: 5,
         comment: 'Helpful free weather report.',
         raterGlobalMetaId: 'idq1caller',
@@ -1242,9 +1261,10 @@ test('free service trace rating detail sync matches by order reference', async (
   assert.equal(traceResult.data.ratingComment, 'Helpful free weather report.');
 });
 
-test('inbound free NeedsRating auto-rates the buyer trace with the order reference', async (t) => {
+test('inbound free NeedsRating auto-rates the buyer trace with the service order id', async (t) => {
   const orderTxid = '2'.repeat(64);
   const orderReference = 'b'.repeat(64);
+  const serviceOrderPinId = 'skill-service-order-needs-rating-pin-1';
   const harness = await createServiceCallHarness(t, {
     buyerRatingReplyRunner: async () => ({
       state: 'reply',
@@ -1257,12 +1277,13 @@ test('inbound free NeedsRating auto-rates the buyer trace with the order referen
     orderTxids: [orderTxid],
     paymentTxid: null,
     orderReference,
+    serviceOrderPinId,
     paymentAmount: '0',
   });
 
   const handled = await harness.handlers.services.handleInboundOrderProtocolMessage({
     fromGlobalMetaId: 'idq1provider',
-    content: `[NeedsRating:${orderTxid}] Please rate this free service.`,
+    content: `[NeedsRating:${orderTxid}] Please rate this free service.\norder pin id: ${serviceOrderPinId}`,
     messagePinId: 'free-needs-rating-pin',
     timestamp: 1_775_000_003_000,
   });
@@ -1273,6 +1294,7 @@ test('inbound free NeedsRating auto-rates the buyer trace with the order referen
   const ratingWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-rate');
   assert.ok(ratingWrite, 'expected an auto-published skill-service-rate write');
   const payload = JSON.parse(ratingWrite.payload);
+  assert.equal(payload.serviceOrderPinId, serviceOrderPinId);
   assert.equal(payload.servicePaidTx, orderReference);
 
   const traceResult = await harness.handlers.trace.getTrace({ traceId: 'trace-rating-retry' });
@@ -1285,7 +1307,10 @@ test('inbound free NeedsRating auto-rates the buyer trace with the order referen
   const ratingMessageWrite = harness.writes.find((entry) => entry.path === '/protocols/simplemsg');
   assert.ok(ratingMessageWrite, 'expected an ORDER_END rating follow-up write');
   const ratingMessage = decryptSimplemsgOrder(ratingMessageWrite, harness);
-  assert.equal(ratingMessage, `[ORDER_END:${orderTxid} rated] 评分：5分。免费天气结果清楚完整。`);
+  assert.equal(
+    ratingMessage,
+    `[ORDER_END:${orderTxid} rated] 评分：5分。免费天气结果清楚完整。\norder pin id: ${serviceOrderPinId}`
+  );
   assert.doesNotMatch(ratingMessage, /我的评分已记录在链上/);
 });
 
