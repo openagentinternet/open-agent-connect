@@ -263,6 +263,7 @@ test('buildMyServiceOrderDetails returns closed orders for every service version
           }),
           createOrder({
             id: 'refunded-order',
+            serviceOrderPinId: 'skill-service-order-refunded-pin',
             state: 'refunded',
             servicePinId: 'service-modify-pin',
             currentServicePinId: 'service-modify-pin',
@@ -298,9 +299,13 @@ test('buildMyServiceOrderDetails returns closed orders for every service version
 
   assert.equal(detailPage.total, 2);
   assert.equal(detailPage.items[0].id, 'refunded-order');
+  assert.equal(detailPage.items[0].serviceOrderPinId, 'skill-service-order-refunded-pin');
+  assert.equal(detailPage.items[0].paymentTxid, 'payment-refunded');
   assert.equal(detailPage.items[0].rating.rate, 5);
   assert.equal(detailPage.items[0].rating.comment, 'Handled fairly.');
   assert.equal(detailPage.items[1].id, 'old-version-order');
+  assert.equal(detailPage.items[1].serviceOrderPinId, null);
+  assert.equal(detailPage.items[1].paymentTxid, 'payment-old');
   assert.equal(detailPage.items[1].rating, null);
 });
 

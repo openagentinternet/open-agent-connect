@@ -138,6 +138,7 @@ test('buildProviderConsoleSnapshot summarizes published services and seller-side
         serviceName: 'Tarot Reading',
         providerSkill: 'tarot-rws',
         orderMessageId: 'order-message-pin-1',
+        serviceOrderPinId: 'skill-service-order-runtime-pin-1',
         orderPinId: 'order-message-pin-1',
         orderTxid: 'd'.repeat(64),
         paymentTxid: 'e'.repeat(64),
@@ -161,6 +162,8 @@ test('buildProviderConsoleSnapshot summarizes published services and seller-side
   assert.equal(snapshot.services[0].available, true);
   assert.equal(snapshot.recentOrders.length, 2);
   assert.equal(snapshot.recentOrders[0].traceId, 'trace-provider-runtime');
+  assert.equal(snapshot.recentOrders[0].serviceOrderPinId, 'skill-service-order-runtime-pin-1');
+  assert.equal(snapshot.recentOrders[0].paymentTxid, 'e'.repeat(64));
   assert.equal(snapshot.recentOrders[0].state, 'in_progress');
   assert.equal(snapshot.recentOrders[0].llmSessionId, 'llm-session-runtime');
   assert.equal(snapshot.recentOrders[0].runtimeId, 'runtime-codex');

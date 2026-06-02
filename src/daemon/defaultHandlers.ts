@@ -7348,6 +7348,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
       runtimeProvider: normalizeText(metadata.runtimeProvider) || normalizeText(runtime.provider) || null,
       sessionId: normalizeText(resultRecord.sessionId) || normalizeText(metadata.sessionId) || null,
       providerSkill: normalizeText(metadata.providerSkill) || normalizeText(providerSkill) || null,
+      providerSkills: normalizeProviderSkillList(
+        Array.isArray(metadata.providerSkills) && metadata.providerSkills.length > 0
+          ? metadata.providerSkills
+          : normalizeText(metadata.providerSkill) || normalizeText(providerSkill)
+      ),
       fallbackSelected,
     };
   }
@@ -7362,6 +7367,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     orderTxid: string;
     orderPinId?: string | null;
     orderReference?: string | null;
+    serviceOrderPinId?: string | null;
     paymentTxid?: string | null;
     paymentCommitTxid?: string | null;
     paymentAmount: string;
@@ -7396,7 +7402,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const paymentTxid = normalizeText(inputOrder.paymentTxid);
     const orderTxid = normalizeText(inputOrder.orderTxid);
     const orderReference = normalizeText(inputOrder.orderReference);
-    const stableOrderKey = orderReference || paymentTxid || orderTxid || inputOrder.traceId;
+    const serviceOrderPinId = normalizeText(inputOrder.serviceOrderPinId) || orderReference;
+    const stableOrderKey = serviceOrderPinId || orderReference || paymentTxid || orderTxid || inputOrder.traceId;
     const createdAt = inputOrder.receivedAt
       ?? inputOrder.session.createdAt
       ?? inputOrder.taskRun.createdAt
@@ -7425,6 +7432,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       orderPinId: inputOrder.orderPinId || null,
       orderTxid: orderTxid || null,
       orderReference: orderReference || null,
+      serviceOrderPinId: serviceOrderPinId || null,
       paymentTxid: paymentTxid || null,
       paymentCommitTxid: inputOrder.paymentCommitTxid || null,
       paymentAmount: inputOrder.paymentAmount,
@@ -7978,6 +7986,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     paymentTxid?: string | null;
     paymentCommitTxid?: string | null;
     orderReference?: string | null;
+    serviceOrderPinId?: string | null;
     paymentCurrency: string;
     paymentAmount: string;
     paymentChain?: string | null;
@@ -8017,6 +8026,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         paymentTxid: inputFailure.paymentTxid || null,
         paymentCommitTxid: inputFailure.paymentCommitTxid || null,
         orderReference: inputFailure.orderReference || null,
+        serviceOrderPinId: inputFailure.serviceOrderPinId || inputFailure.orderReference || null,
         paymentCurrency: inputFailure.paymentCurrency,
         paymentAmount: inputFailure.paymentAmount,
         paymentChain: inputFailure.paymentChain || null,
@@ -8024,6 +8034,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         mrc20Ticker: inputFailure.mrc20Ticker || null,
         mrc20Id: inputFailure.mrc20Id || null,
         providerSkill: inputFailure.service.providerSkill,
+        providerSkills: inputFailure.service.providerSkills,
       },
       a2a: {
         sessionId: inputFailure.session.sessionId,
@@ -8038,6 +8049,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       providerRuntime: inputFailure.providerRuntime ?? {
         providerSkill: inputFailure.service.providerSkill,
+        providerSkills: inputFailure.service.providerSkills,
       },
     });
     const artifacts = await exportSessionArtifacts({
@@ -9439,9 +9451,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
         orderTxids: [orderTxid],
         paymentTxid: paymentTxid || null,
         orderReference: orderReference || null,
+        serviceOrderPinId: orderReference || null,
         paymentCurrency: amountLine.currency || service.currency,
         paymentAmount: amountLine.amount || service.price,
         providerSkill: service.providerSkill,
+        providerSkills: service.providerSkills,
       },
       a2a: {
         sessionId: received.session.sessionId,
@@ -14144,10 +14158,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
               paymentTxid,
               paymentCommitTxid: orderPayment.paymentCommitTxid,
               orderReference,
+              serviceOrderPinId,
               paymentCurrency: orderPayment.paymentCurrency,
               paymentAmount: orderPayment.paymentAmount,
               paymentChain: orderPayment.paymentChain,
               settlementKind: orderPayment.settlementKind,
+              providerSkill: normalizeText(service.providerSkill),
+              providerSkills: normalizeProviderSkillList(service.providerSkills),
               outputType: normalizeText(service.outputType),
               requestText: request.userTask,
             },
@@ -14689,6 +14706,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           orderMessageId,
           orderTxid: '',
           orderReference: execution.payment.orderReference,
+          serviceOrderPinId: execution.payment.serviceOrderPinId,
           paymentTxid: execution.payment.paymentTxid,
           paymentAmount: execution.payment.paymentAmount || service.price,
           paymentCurrency: execution.payment.paymentCurrency || service.currency,
@@ -14715,6 +14733,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           orderMessageId,
           orderTxid: '',
           orderReference: execution.payment.orderReference,
+          serviceOrderPinId: execution.payment.serviceOrderPinId,
           paymentTxid: execution.payment.paymentTxid,
           paymentAmount: execution.payment.paymentAmount || service.price,
           paymentCurrency: execution.payment.paymentCurrency || service.currency,
@@ -14828,6 +14847,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               paymentTxid: execution.payment.paymentTxid,
               paymentCommitTxid: execution.payment.paymentCommitTxid,
               orderReference: execution.payment.orderReference,
+              serviceOrderPinId: execution.payment.serviceOrderPinId,
               paymentCurrency: execution.payment.paymentCurrency || service.currency,
               paymentAmount: execution.payment.paymentAmount || service.price,
               paymentChain: execution.payment.paymentChain,
@@ -14835,6 +14855,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               mrc20Ticker: execution.payment.mrc20Ticker,
               mrc20Id: execution.payment.mrc20Id,
               providerSkill: service.providerSkill,
+              providerSkills: service.providerSkills,
             },
             a2a: {
               sessionId: received.session.sessionId,
@@ -14893,6 +14914,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             orderMessageId,
             orderTxid: '',
             orderReference: execution.payment.orderReference,
+            serviceOrderPinId: execution.payment.serviceOrderPinId,
             paymentTxid: execution.payment.paymentTxid,
             paymentAmount: execution.payment.paymentAmount || service.price,
             paymentCurrency: execution.payment.paymentCurrency || service.currency,
@@ -15010,6 +15032,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 paymentTxid: execution.payment.paymentTxid,
                 paymentCommitTxid: execution.payment.paymentCommitTxid,
                 orderReference: execution.payment.orderReference,
+                serviceOrderPinId: execution.payment.serviceOrderPinId,
                 paymentCurrency: execution.payment.paymentCurrency || service.currency,
                 paymentAmount: execution.payment.paymentAmount || service.price,
                 paymentChain: execution.payment.paymentChain,
@@ -15017,6 +15040,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 mrc20Ticker: execution.payment.mrc20Ticker,
                 mrc20Id: execution.payment.mrc20Id,
                 providerSkill: service.providerSkill,
+                providerSkills: service.providerSkills,
               },
               a2a: {
                 sessionId: failedApplied.session.sessionId,
@@ -15075,6 +15099,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               orderMessageId,
               orderTxid: '',
               orderReference: execution.payment.orderReference,
+              serviceOrderPinId: execution.payment.serviceOrderPinId,
               paymentTxid: execution.payment.paymentTxid,
               paymentAmount: execution.payment.paymentAmount || service.price,
               paymentCurrency: execution.payment.paymentCurrency || service.currency,
@@ -15178,12 +15203,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
             paymentTxid: execution.payment.paymentTxid,
             paymentCommitTxid: execution.payment.paymentCommitTxid,
             orderReference: execution.payment.orderReference,
+            serviceOrderPinId: execution.payment.serviceOrderPinId,
             paymentCurrency: execution.payment.paymentCurrency || service.currency,
             paymentAmount: execution.payment.paymentAmount || service.price,
             paymentChain: execution.payment.paymentChain,
             settlementKind: execution.payment.settlementKind,
             mrc20Ticker: execution.payment.mrc20Ticker,
             mrc20Id: execution.payment.mrc20Id,
+            providerSkill: service.providerSkill,
+            providerSkills: service.providerSkills,
           },
           a2a: {
             sessionId: received.session.sessionId,
@@ -15248,6 +15276,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           orderMessageId,
           orderTxid: '',
           orderReference: execution.payment.orderReference,
+          serviceOrderPinId: execution.payment.serviceOrderPinId,
           paymentTxid: execution.payment.paymentTxid,
           paymentAmount: execution.payment.paymentAmount || service.price,
           paymentCurrency: execution.payment.paymentCurrency || service.currency,

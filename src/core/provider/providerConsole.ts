@@ -41,6 +41,7 @@ export interface ProviderConsoleServiceRow {
 export interface ProviderConsoleOrderRow {
   traceId: string;
   orderId: string;
+  serviceOrderPinId?: string | null;
   servicePinId: string;
   serviceName: string;
   paymentTxid: string | null;
@@ -196,6 +197,7 @@ function buildOrderRowWithRating(
   return {
     traceId: normalizeText(trace.traceId),
     orderId,
+    ...(normalizeText(order.serviceOrderPinId) ? { serviceOrderPinId: normalizeText(order.serviceOrderPinId) } : {}),
     servicePinId,
     serviceName: normalizeText(order.serviceName),
     paymentTxid,
@@ -256,6 +258,7 @@ function buildSellerOrderRowWithRating(
       paymentTxid,
       paymentCommitTxid: null,
       orderReference: normalizeText(order.orderReference) || null,
+      serviceOrderPinId: normalizeText(order.serviceOrderPinId) || null,
       paymentCurrency: normalizeText(order.paymentCurrency) || null,
       paymentAmount: normalizeText(order.paymentAmount) || null,
       paymentChain: normalizeText(order.paymentChain) || null,
@@ -298,6 +301,7 @@ function buildSellerOrderRowWithRating(
       runtimeProvider: normalizeText(order.runtimeProvider) || null,
       sessionId: normalizeText(order.llmSessionId) || null,
       providerSkill: normalizeText(order.providerSkill) || null,
+      providerSkills: normalizeText(order.providerSkill) ? [normalizeText(order.providerSkill)] : [],
       fallbackSelected: typeof order.fallbackSelected === 'boolean' ? order.fallbackSelected : null,
     },
     askMaster: null,
@@ -312,6 +316,7 @@ function buildSellerOrderRowWithRating(
   return {
     traceId: normalizeText(order.traceId),
     orderId,
+    ...(normalizeText(order.serviceOrderPinId) ? { serviceOrderPinId: normalizeText(order.serviceOrderPinId) } : {}),
     servicePinId,
     serviceName: normalizeText(order.serviceName),
     paymentTxid,

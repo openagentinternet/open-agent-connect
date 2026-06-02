@@ -73,6 +73,7 @@ export interface MyServiceOrderDetail {
   id: string;
   status: string;
   traceId: string;
+  serviceOrderPinId: string | null;
   paymentTxid: string | null;
   orderMessageTxid: string | null;
   paymentAmount: string;
@@ -408,6 +409,7 @@ export function buildMyServiceOrderDetails(input: {
         id: toSafeString(order.id),
         status: toSafeString(order.state),
         traceId: toSafeString(order.traceId),
+        serviceOrderPinId: toSafeString(order.serviceOrderPinId) || null,
         paymentTxid: paymentTxid || null,
         orderMessageTxid: toSafeString(order.orderTxid) || toSafeString(order.orderPinId) || null,
         paymentAmount: toSafeString(order.paymentAmount),

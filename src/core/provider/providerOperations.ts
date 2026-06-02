@@ -8,6 +8,7 @@ export interface SellerOrderSelector {
 
 export interface ProviderSellerOrderInspection {
   orderId: string;
+  serviceOrderPinId: string | null;
   service: {
     name: string | null;
     servicePinId: string | null;
@@ -110,6 +111,10 @@ function isZeroAmount(value: unknown): boolean {
   return Number.isFinite(numeric) && numeric === 0;
 }
 
+function resolveSellerOrderServiceOrderPinId(order: SellerOrderRecord): string | null {
+  return normalizeText(order.serviceOrderPinId) || null;
+}
+
 export function sellerOrderRequiresManualAction(order: SellerOrderRecord): boolean {
   const state = normalizeText(order.state);
   if (state === 'refund_pending' && normalizeText(order.refundRequestPinId)) {
@@ -136,7 +141,9 @@ export function findSellerOrdersBySelector(
   }
   return state.sellerOrders.filter((order) => {
     if (orderId) {
-      return normalizeText(order.id) === orderId;
+      return normalizeText(order.id) === orderId
+        || normalizeText(order.serviceOrderPinId) === orderId
+        || normalizeText(order.orderReference) === orderId;
     }
     return normalizeText(order.paymentTxid) === paymentTxid;
   });
@@ -172,6 +179,7 @@ export function buildProviderSellerOrderInspection(order: SellerOrderRecord): Pr
   const traceId = normalizeText(order.traceId);
   return {
     orderId: normalizeText(order.id),
+    serviceOrderPinId: resolveSellerOrderServiceOrderPinId(order),
     service: {
       name: normalizeText(order.serviceName) || null,
       servicePinId: normalizeText(order.servicePinId) || null,
@@ -252,7 +260,7 @@ export function buildSellerReceivedRefundItems(state: RuntimeState): SellerRecei
         ?? refundCompletedAt
         ?? createdAt;
       const item: SellerReceivedRefundItem = {
-        orderId: normalizeText(order.id),
+        orderId: resolveSellerOrderServiceOrderPinId(order) || normalizeText(order.id),
         role: 'seller',
         serviceName: normalizeText(order.serviceName) || 'Unknown service',
         paymentTxid: normalizeText(order.paymentTxid) || null,
