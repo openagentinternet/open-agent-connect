@@ -110,6 +110,37 @@ function readObject(value) {
 function readArray(value) {
     return Array.isArray(value) ? value : [];
 }
+function normalizeUnique(values) {
+    const seen = new Set();
+    const result = [];
+    for (const value of values) {
+        const normalized = normalizeText(value);
+        if (!normalized || seen.has(normalized))
+            continue;
+        seen.add(normalized);
+        result.push(normalized);
+    }
+    return result;
+}
+function normalizeProviderSkills(record) {
+    const plural = readArray(record.providerSkills).map((entry) => normalizeText(entry));
+    const legacyArray = readArray(record.providerSkill).map((entry) => normalizeText(entry));
+    const legacyString = normalizeText(record.providerSkill);
+    return normalizeUnique([...plural, ...legacyArray, legacyString]);
+}
+function normalizePaymentTiming(record) {
+    const raw = normalizeText(record.paymentTiming).toLowerCase();
+    if (raw === 'free' || raw === 'prepaid')
+        return raw;
+    const price = Number(normalizeText(record.price));
+    return Number.isFinite(price) && price === 0 ? 'free' : 'prepaid';
+}
+function formatPaymentTimingLabel(value) {
+    const timing = normalizeText(value).toLowerCase();
+    if (timing === 'free')
+        return 'Free';
+    return 'Prepaid';
+}
 function formatCount(value) {
     const numeric = normalizeNumber(value);
     return Number.isFinite(numeric) ? String(Math.trunc(numeric)) : '0';
@@ -135,6 +166,8 @@ function formatTimestamp(value) {
     ].join(' ');
 }
 function formatPrice(record) {
+    if (normalizePaymentTiming(record) === 'free')
+        return 'Free';
     const price = normalizeText(record.price);
     const currency = normalizeText(record.currency);
     return [price, currency].filter(Boolean).join(' ') || 'No price';
@@ -219,6 +252,8 @@ function buildServiceEntry(entry) {
     const currency = normalizeText(record.currency);
     const creatorName = normalizeText(record.creatorMetabotName);
     const creatorSlug = normalizeText(record.creatorMetabotSlug);
+    const providerSkills = normalizeProviderSkills(record);
+    const paymentTiming = normalizePaymentTiming(record);
     const priceLabel = formatPrice(record);
     return {
         key: currentPinId,
@@ -230,9 +265,12 @@ function buildServiceEntry(entry) {
         description: normalizeText(record.description),
         iconUri: formatServiceIconRenderUri(record.serviceIcon),
         iconLabel: formatServiceInitials(displayName, serviceName),
-        skillLabel: normalizeText(record.providerSkill) || 'Unbound skill',
+        providerSkills,
+        skillLabel: providerSkills.join(', ') || 'Unbound skill',
         outputTypeLabel: normalizeText(record.outputType) || 'text',
         priceLabel,
+        paymentTiming,
+        paymentTimingLabel: formatPaymentTimingLabel(paymentTiming),
         creatorLabel: [creatorName, creatorSlug].filter(Boolean).join(' · ') || 'Unknown MetaBot',
         updatedAtLabel: formatTimestamp(record.updatedAt),
         metrics: [
@@ -284,15 +322,20 @@ function buildOrderEntry(entry) {
 function buildEditForm(selected, rawSelected) {
     if (!selected || !rawSelected)
         return null;
+    const providerSkills = normalizeProviderSkills(rawSelected);
+    const paymentTiming = normalizePaymentTiming(rawSelected);
     return {
         serviceId: selected.currentPinId,
         displayName: selected.title,
         serviceName: selected.serviceName,
         description: selected.description,
-        providerSkill: normalizeText(rawSelected.providerSkill),
+        providerSkills,
+        providerSkill: providerSkills[0] || normalizeText(rawSelected.providerSkill),
         outputType: normalizeText(rawSelected.outputType) || 'text',
         price: normalizeText(rawSelected.price),
         currency: normalizeText(rawSelected.currency) || 'BTC',
+        paymentTiming,
+        executionReminder: normalizeText(rawSelected.executionReminder),
         serviceIconUri: normalizeText(rawSelected.serviceIcon),
         serviceIconPreviewUri: formatServiceIconRenderUri(rawSelected.serviceIcon),
     };
@@ -395,6 +438,10 @@ function buildMyServicesPageViewModelRuntimeSource() {
         formatServiceIconRenderUri,
         readObject,
         readArray,
+        normalizeUnique,
+        normalizeProviderSkills,
+        normalizePaymentTiming,
+        formatPaymentTimingLabel,
         formatCount,
         formatTimestamp,
         formatPrice,

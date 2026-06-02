@@ -391,6 +391,69 @@ body {
   font-family: var(--mono);
 }
 
+.skill-checkbox-list {
+  display: grid;
+  gap: 8px;
+}
+.skill-checkbox-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+}
+.skill-checkbox-option input { margin-top: 3px; }
+.skill-checkbox-option span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.skill-checkbox-option strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.skill-checkbox-option small,
+.skill-checkbox-option em {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.segmented-control {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 4px;
+  width: max-content;
+  max-width: 100%;
+  padding: 4px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+}
+.segmented-control label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.segmented-control label:has(input:checked) {
+  color: var(--text);
+  background: var(--accent-dim);
+}
+
 /* ── Inline status message ── */
 .status-msg {
   font-size: 12px;

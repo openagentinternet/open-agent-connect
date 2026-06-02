@@ -74,17 +74,28 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
                 <span>Description</span>
                 <textarea name="description" rows="4" required></textarea>
               </label>
-              <label>
-                <span>Provider Skill</span>
-                <select name="providerSkill" data-edit-provider-skill required></select>
-              </label>
+              <div class="wide-field">
+                <span>Provider Skills</span>
+                <div class="skill-checkbox-list" data-edit-provider-skill-list aria-label="Provider skills"></div>
+              </div>
               <label>
                 <span>Output Type</span>
                 <select name="outputType" data-edit-output-type required></select>
               </label>
+              <label class="wide-field">
+                <span>Execution Reminder</span>
+                <textarea name="executionReminder" rows="3"></textarea>
+              </label>
+              <div>
+                <span>Payment Timing</span>
+                <div class="segmented-control" data-edit-payment-timing>
+                  <label><input type="radio" name="paymentTiming" value="free" /> Free</label>
+                  <label><input type="radio" name="paymentTiming" value="prepaid" /> Prepaid</label>
+                </div>
+              </div>
               <label>
                 <span>Price</span>
-                <input name="price" inputmode="decimal" required />
+                <input name="price" data-edit-price inputmode="decimal" required />
               </label>
               <label>
                 <span>Currency</span>
@@ -149,9 +160,10 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
     ordersPageNext: document.querySelector('[data-orders-page-next]'),
     editModal: document.querySelector('[data-my-service-edit-modal]'),
     editForm: document.querySelector('[data-my-service-edit-form]'),
-    editProviderSkill: document.querySelector('[data-edit-provider-skill]'),
+    editProviderSkillList: document.querySelector('[data-edit-provider-skill-list]'),
     editOutputType: document.querySelector('[data-edit-output-type]'),
     editCurrency: document.querySelector('[data-edit-currency]'),
+    editPrice: document.querySelector('[data-edit-price]'),
     editCoverInput: document.querySelector('[data-edit-cover-input]'),
     editCoverPreview: document.querySelector('[data-edit-cover-preview]'),
     editCoverRemove: document.querySelector('[data-edit-cover-remove]'),
@@ -380,6 +392,46 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
     )).join('');
   };
 
+  const selectedEditSkillValues = () => {
+    if (!elements.editProviderSkillList) return [];
+    return Array.from(elements.editProviderSkillList.querySelectorAll('input[name="providerSkills"]:checked'))
+      .map((input) => normalizeTextClient(input.value))
+      .filter(Boolean);
+  };
+
+  const renderEditSkillList = (options, selectedValues) => {
+    if (!elements.editProviderSkillList) return;
+    const selected = new Set((selectedValues || []).map((value) => normalizeTextClient(value)).filter(Boolean));
+    if (!options.length) {
+      elements.editProviderSkillList.innerHTML = '<p class="field-hint">No primary runtime skills available.</p>';
+      return;
+    }
+    elements.editProviderSkillList.innerHTML = options.map((option) => {
+      const value = normalizeTextClient(option.value || option);
+      const label = normalizeTextClient(option.label || option) || value;
+      return '<label class="skill-checkbox-option">'
+        + '<input type="checkbox" name="providerSkills" value="' + escapeHtml(value) + '"' + (selected.has(value) ? ' checked' : '') + ' />'
+        + '<span><strong>' + escapeHtml(label) + '</strong><small>' + escapeHtml(value) + '</small></span>'
+        + '</label>';
+    }).join('');
+  };
+
+  const selectedEditPaymentTiming = () => {
+    if (!elements.editForm) return 'prepaid';
+    const formData = new FormData(elements.editForm);
+    const timing = normalizeTextClient(formData.get('paymentTiming')).toLowerCase();
+    return timing === 'free' ? 'free' : 'prepaid';
+  };
+
+  const syncEditPaymentTimingFields = () => {
+    if (!elements.editPrice) return;
+    const isFree = selectedEditPaymentTiming() === 'free';
+    if (isFree) {
+      elements.editPrice.value = '0';
+    }
+    elements.editPrice.disabled = isFree;
+  };
+
   const openEdit = async (serviceId) => {
     state.selectedServiceId = serviceId;
     state.editServiceId = serviceId;
@@ -394,10 +446,14 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
     elements.editForm.elements.displayName.value = model.editForm.displayName;
     elements.editForm.elements.serviceName.value = model.editForm.serviceName;
     elements.editForm.elements.description.value = model.editForm.description;
+    elements.editForm.elements.executionReminder.value = model.editForm.executionReminder;
     elements.editForm.elements.price.value = model.editForm.price;
+    const paymentTimingInput = elements.editForm.querySelector('input[name="paymentTiming"][value="' + model.editForm.paymentTiming + '"]');
+    if (paymentTimingInput) paymentTimingInput.checked = true;
     populateSelect(elements.editCurrency, model.currencyOptions, model.editForm.currency);
     populateSelect(elements.editOutputType, model.outputTypeOptions, model.editForm.outputType);
-    populateSelect(elements.editProviderSkill, [{ value: model.editForm.providerSkill, label: model.editForm.providerSkill }], model.editForm.providerSkill);
+    renderEditSkillList(model.editForm.providerSkills.map((skill) => ({ value: skill, label: skill })), model.editForm.providerSkills);
+    syncEditPaymentTimingFields();
     renderEditCover();
     if (elements.editModal) elements.editModal.hidden = false;
 
@@ -409,10 +465,12 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
           value: normalizeTextClient(skill && skill.skillName),
           label: normalizeTextClient(skill && (skill.title || skill.skillName)),
         })).filter((skill) => skill.value) : [];
-        if (!skills.some((skill) => skill.value === model.editForm.providerSkill)) {
-          skills.unshift({ value: model.editForm.providerSkill, label: model.editForm.providerSkill });
+        for (const providerSkill of model.editForm.providerSkills) {
+          if (!skills.some((skill) => skill.value === providerSkill)) {
+            skills.unshift({ value: providerSkill, label: providerSkill });
+          }
         }
-        populateSelect(elements.editProviderSkill, skills, model.editForm.providerSkill);
+        renderEditSkillList(skills, model.editForm.providerSkills);
       } catch (error) {
         if (elements.editCoverNote) {
           elements.editCoverNote.textContent = error instanceof Error ? error.message : String(error);
@@ -452,15 +510,18 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
     const formData = new FormData(form);
     const raw = getSelectedRawService();
     const from = normalizeTextClient(raw && raw.creatorMetabotSlug);
+    const paymentTiming = selectedEditPaymentTiming();
     const payload = {
       serviceId: state.editServiceId,
       ...(from ? { from } : {}),
       displayName: normalizeTextClient(formData.get('displayName')),
       serviceName: normalizeTextClient(formData.get('serviceName')),
       description: normalizeTextClient(formData.get('description')),
-      providerSkill: normalizeTextClient(formData.get('providerSkill')),
+      executionReminder: normalizeTextClient(formData.get('executionReminder')),
+      providerSkills: selectedEditSkillValues(),
       outputType: normalizeTextClient(formData.get('outputType')),
-      price: normalizeTextClient(formData.get('price')),
+      paymentTiming,
+      price: paymentTiming === 'free' ? '0' : normalizeTextClient(formData.get('price')),
       currency: normalizeTextClient(formData.get('currency')),
       serviceIconUri: state.editCoverDataUrl ? '' : state.editCoverUri,
       serviceIconDataUrl: state.editCoverDataUrl,
@@ -566,6 +627,12 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
 
   if (elements.editForm) {
     elements.editForm.addEventListener('submit', submitEdit);
+    elements.editForm.addEventListener('change', (event) => {
+      const target = event.target;
+      if (target && target.name === 'paymentTiming') {
+        syncEditPaymentTimingFields();
+      }
+    });
   }
   if (elements.editCoverInput) {
     elements.editCoverInput.addEventListener('change', async () => {
