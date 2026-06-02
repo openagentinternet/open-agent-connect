@@ -6644,7 +6644,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const providerSkills = normalizeProviderSkillList(selectProviderSkillSource({
       providerSkills: rawInput.providerSkills,
       providerSkill: rawInput.providerSkill,
-      fallback: currentService?.providerSkills || currentService?.providerSkill,
+      fallback: selectProviderSkillSource({
+        providerSkills: currentService?.providerSkills,
+        providerSkill: currentService?.providerSkill,
+      }),
     }));
     const providerSkill = getPrimaryProviderSkill(providerSkills) ?? '';
     const paymentTiming = normalizeText(rawInput.paymentTiming).toLowerCase()
