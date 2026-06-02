@@ -182,6 +182,8 @@ test('publish and my-services pages expose skill-service v1.1 service controls',
   assert.match(myServicesHtml, /name="executionReminder"/);
   assert.match(myServicesScript, /providerSkills/);
   assert.match(myServicesScript, /paymentTiming/);
+  assert.match(myServicesScript, /validateEditPayload/);
+  assert.match(myServicesScript, /Prepaid service price must be greater than zero/);
   assert.doesNotMatch(myServicesHtml, /data-edit-provider-skill"/);
 });
 

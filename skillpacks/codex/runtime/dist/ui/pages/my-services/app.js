@@ -371,6 +371,19 @@ function buildMyServicesPageDefinition() {
     render();
   };
 
+  const validateEditPayload = (payload) => {
+    if (payload.paymentTiming !== 'free' && payload.paymentTiming !== 'prepaid') {
+      return 'Payment timing must be free or prepaid.';
+    }
+    if (!/^\\d+(?:\\.\\d+)?$/u.test(payload.price) || !Number.isFinite(Number(payload.price)) || Number(payload.price) < 0) {
+      return 'Price must be a non-negative decimal number.';
+    }
+    if (payload.paymentTiming === 'prepaid' && Number(payload.price) <= 0) {
+      return 'Prepaid service price must be greater than zero.';
+    }
+    return '';
+  };
+
   const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ''));
@@ -528,6 +541,11 @@ function buildMyServicesPageDefinition() {
       serviceIconDataUrl: state.editCoverDataUrl,
       removeServiceIcon: state.editCoverRemoved,
     };
+    const validationError = validateEditPayload(payload);
+    if (validationError) {
+      setError(new Error(validationError));
+      return;
+    }
     try {
       state.mutationResult = await fetchJson('/api/services/owned/modify', {
         method: 'POST',
