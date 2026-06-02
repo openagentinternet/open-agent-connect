@@ -140,6 +140,23 @@ test('publish validation succeeds for multiple provider skills on the primary ru
   assert.equal(result.runtime.id, 'runtime-codex');
 });
 
+test('publish validation accepts legacy scalar providerSkills fallback from daemon callers', async () => {
+  const context = await createValidationContext();
+  const result = await validateServicePublishProviderSkills({
+    metaBotSlug: context.slug,
+    providerSkills: ' metabot-weather ',
+    runtimeStore: context.runtimeStore,
+    bindingStore: context.bindingStore,
+    systemHomeDir: context.systemHome,
+    projectRoot: context.profileRoot,
+    env: {},
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.providerSkills, ['metabot-weather']);
+  assert.equal(result.skill.skillName, 'metabot-weather');
+});
+
 test('publish validation rejects mixed unsafe provider skill lists before scanning', async () => {
   const context = await createValidationContext({ extraSkills: ['metabot-post-buzz'] });
   const result = await validateServicePublishProviderSkills({

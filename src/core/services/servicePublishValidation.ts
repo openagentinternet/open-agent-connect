@@ -68,7 +68,9 @@ function normalizeText(value: unknown): string {
 function normalizeRawProviderSkillCandidates(input: ValidateServicePublishProviderSkillsInput): string[] {
   const source = Array.isArray(input.providerSkills) && input.providerSkills.length > 0
     ? input.providerSkills
-    : [input.providerSkill];
+    : input.providerSkills !== undefined && input.providerSkills !== null
+      ? [input.providerSkills]
+      : [input.providerSkill];
   const seen = new Set<string>();
   const result: string[] = [];
 
