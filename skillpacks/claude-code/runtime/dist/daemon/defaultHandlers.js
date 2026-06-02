@@ -29,6 +29,7 @@ const servicePublishChain_1 = require("../core/services/servicePublishChain");
 const myServices_1 = require("../core/services/myServices");
 const platformSkillCatalog_1 = require("../core/services/platformSkillCatalog");
 const servicePublishValidation_1 = require("../core/services/servicePublishValidation");
+const skillServiceProtocol_1 = require("../core/services/skillServiceProtocol");
 const providerServiceRunner_1 = require("../core/a2a/provider/providerServiceRunner");
 const providerConsole_1 = require("../core/provider/providerConsole");
 const providerOperations_1 = require("../core/provider/providerOperations");
@@ -1040,6 +1041,11 @@ function summarizeService(record) {
         providerGlobalMetaId: record.providerGlobalMetaId,
         providerAddress: record.paymentAddress,
         providerSkill: record.providerSkill,
+        providerSkills: Array.isArray(record.providerSkills) ? record.providerSkills : [record.providerSkill].filter(Boolean),
+        paymentTiming: record.paymentTiming,
+        settlementKind: record.settlementKind,
+        executionReminder: record.executionReminder,
+        metadata: record.metadata,
         serviceName: record.serviceName,
         displayName: record.displayName,
         description: record.description,
@@ -5058,10 +5064,20 @@ function createDefaultMetabotDaemonHandlers(input) {
         const serviceName = normalizeText(rawInput.serviceName);
         const displayName = normalizeText(rawInput.displayName);
         const description = normalizeText(rawInput.description);
-        const providerSkill = normalizeText(rawInput.providerSkill);
-        const price = normalizeText(rawInput.price);
-        const currency = normalizeText(rawInput.currency);
+        const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)(Array.isArray(rawInput.providerSkills) && rawInput.providerSkills.length > 0
+            ? rawInput.providerSkills
+            : normalizeText(rawInput.providerSkill)
+                || currentService?.providerSkills
+                || currentService?.providerSkill);
+        const providerSkill = (0, skillServiceProtocol_1.getPrimaryProviderSkill)(providerSkills) ?? '';
+        const paymentTiming = normalizeText(rawInput.paymentTiming).toLowerCase()
+            || normalizeText(currentService?.paymentTiming)
+            || '';
+        const price = normalizeText(rawInput.price) || (paymentTiming === 'free' ? '0' : '');
+        const currency = normalizeText(rawInput.currency) || (paymentTiming === 'free' ? 'SPACE' : '');
         const outputType = normalizeText(rawInput.outputType);
+        const executionReminder = normalizeText(rawInput.executionReminder);
+        const metadata = normalizeText(rawInput.metadata);
         const serviceIconUri = rawInput.removeServiceIcon === true
             ? null
             : normalizeText(rawInput.serviceIconUri)
@@ -5095,8 +5111,12 @@ function createDefaultMetabotDaemonHandlers(input) {
                 displayName,
                 description,
                 providerSkill,
+                providerSkills,
                 price,
                 currency,
+                paymentTiming,
+                executionReminder,
+                metadata,
                 outputType,
                 serviceIconUri,
                 serviceIconDataUrl,
@@ -11136,9 +11156,11 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return draftInput.error;
                 }
                 const draft = draftInput.draft;
-                const providerSkillValidation = await (0, servicePublishValidation_1.validateServicePublishProviderSkill)({
+                const providerSkillValidation = await (0, servicePublishValidation_1.validateServicePublishProviderSkills)({
                     metaBotSlug: resolved.target.profileSlug,
-                    providerSkill: draft.providerSkill,
+                    providerSkills: Array.isArray(rawInput.providerSkills) && rawInput.providerSkills.length > 0
+                        ? rawInput.providerSkills
+                        : normalizeText(rawInput.providerSkill) || draft.providerSkills,
                     runtimeStore: resolved.target.profileHomeDir === node_path_1.default.resolve(input.homeDir)
                         ? llmRuntimeStore
                         : (0, llmRuntimeStore_1.createLlmRuntimeStore)(resolved.target.profileHomeDir),
@@ -11396,10 +11418,16 @@ function createDefaultMetabotDaemonHandlers(input) {
                 const serviceName = normalizeText(rawInput.serviceName);
                 const displayName = normalizeText(rawInput.displayName);
                 const description = normalizeText(rawInput.description);
-                const providerSkill = normalizeText(rawInput.providerSkill);
-                const price = normalizeText(rawInput.price);
-                const currency = normalizeText(rawInput.currency);
+                const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)(Array.isArray(rawInput.providerSkills) && rawInput.providerSkills.length > 0
+                    ? rawInput.providerSkills
+                    : rawInput.providerSkill);
+                const providerSkill = (0, skillServiceProtocol_1.getPrimaryProviderSkill)(providerSkills) ?? '';
+                const paymentTiming = normalizeText(rawInput.paymentTiming).toLowerCase();
+                const price = normalizeText(rawInput.price) || (paymentTiming === 'free' ? '0' : '');
+                const currency = normalizeText(rawInput.currency) || (paymentTiming === 'free' ? 'SPACE' : '');
                 const outputType = normalizeText(rawInput.outputType);
+                const executionReminder = normalizeText(rawInput.executionReminder);
+                const metadata = normalizeText(rawInput.metadata);
                 const serviceIconUri = normalizeText(rawInput.serviceIconUri) || null;
                 const serviceIconDataUrl = normalizeText(rawInput.serviceIconDataUrl) || null;
                 const skillDocument = '';
@@ -11417,9 +11445,11 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('invalid_service_payload', 'Service outputType must be one of text, image, video, audio, or other.');
                 }
                 const metaBotSlug = selectedProfile?.slug ?? node_path_1.default.basename(profileHomeDir);
-                const validation = await (0, servicePublishValidation_1.validateServicePublishProviderSkill)({
+                const validation = await (0, servicePublishValidation_1.validateServicePublishProviderSkills)({
                     metaBotSlug,
-                    providerSkill,
+                    providerSkills: Array.isArray(rawInput.providerSkills) && rawInput.providerSkills.length > 0
+                        ? rawInput.providerSkills
+                        : rawInput.providerSkill,
                     runtimeStore: profileHomeDir === input.homeDir ? llmRuntimeStore : (0, llmRuntimeStore_1.createLlmRuntimeStore)(profileHomeDir),
                     bindingStore: profileHomeDir === input.homeDir ? llmBindingStore : (0, llmBindingStore_1.createLlmBindingStore)(profileHomeDir),
                     systemHomeDir: profileRuntimeStateStore.paths.systemHomeDir,
@@ -11442,8 +11472,12 @@ function createDefaultMetabotDaemonHandlers(input) {
                             displayName,
                             description,
                             providerSkill,
+                            providerSkills,
                             price,
                             currency,
+                            paymentTiming,
+                            executionReminder,
+                            metadata,
                             outputType,
                             serviceIconUri,
                             serviceIconDataUrl,

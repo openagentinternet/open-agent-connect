@@ -16,6 +16,10 @@ test('runCli dispatches `metabot services publish --payload-file` with parsed JS
     serviceName: 'Tarot Reading',
     displayName: 'Tarot Reading',
     description: 'Performs tarot readings.',
+    providerSkills: ['metabot-weather-oracle', 'metabot-post-buzz'],
+    paymentTiming: 'free',
+    executionReminder: 'Use only the selected service skills.',
+    metadata: '{"category":"weather"}',
   }), 'utf8');
 
   const stdout = [];
@@ -42,6 +46,10 @@ test('runCli dispatches `metabot services publish --payload-file` with parsed JS
     serviceName: 'Tarot Reading',
     displayName: 'Tarot Reading',
     description: 'Performs tarot readings.',
+    providerSkills: ['metabot-weather-oracle', 'metabot-post-buzz'],
+    paymentTiming: 'free',
+    executionReminder: 'Use only the selected service skills.',
+    metadata: '{"category":"weather"}',
   }]);
   assert.deepEqual(JSON.parse(stdout.join('').trim()), {
     ok: true,

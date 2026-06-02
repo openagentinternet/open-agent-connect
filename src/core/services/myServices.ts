@@ -6,6 +6,11 @@ import {
   type PublishedServiceDraft,
   type PublishedServiceRecord,
 } from './publishService';
+import {
+  getPrimaryProviderSkill,
+  normalizeProviderSkillList,
+  resolveSkillServicePaymentTerms,
+} from './skillServiceProtocol';
 
 export type MyServiceMutationAction = 'modify' | 'revoke';
 
@@ -495,21 +500,35 @@ export function buildMyServicePayload(input: {
   draft: PublishedServiceDraft;
   providerGlobalMetaId: string;
   paymentAddress: string;
-}): Record<string, string | null> {
-  const settlement = resolvePublishedServiceSettlement(input.draft.currency);
+}): Record<string, unknown> {
+  const providerSkills = normalizeProviderSkillList(
+    Array.isArray(input.draft.providerSkills) && input.draft.providerSkills.length > 0
+      ? input.draft.providerSkills
+      : input.draft.providerSkill
+  );
+  const paymentTerms = resolveSkillServicePaymentTerms({
+    price: input.draft.price,
+    currency: input.draft.currency,
+    paymentTiming: input.draft.paymentTiming,
+    settlementKind: input.draft.settlementKind,
+  });
+  const settlement = resolvePublishedServiceSettlement(paymentTerms.currency);
   return {
     serviceName: toSafeString(input.draft.serviceName),
     displayName: toSafeString(input.draft.displayName),
     description: toSafeString(input.draft.description),
     serviceIcon: toSafeString(input.draft.serviceIconUri) || '',
     providerMetaBot: toSafeString(input.providerGlobalMetaId),
-    providerSkill: toSafeString(input.draft.providerSkill),
-    price: toSafeString(input.draft.price),
+    providerSkill: providerSkills,
+    price: paymentTerms.effectivePrice,
     currency: settlement.currency,
+    paymentTiming: paymentTerms.paymentTiming,
     paymentChain: settlement.paymentChain,
-    settlementKind: settlement.settlementKind,
+    settlementKind: paymentTerms.settlementKind,
     mrc20Ticker: settlement.mrc20Ticker,
     mrc20Id: settlement.mrc20Id,
+    executionReminder: toSafeString(input.draft.executionReminder),
+    metadata: toSafeString(input.draft.metadata),
     skillDocument: '',
     inputType: 'text',
     outputType: toSafeString(input.draft.outputType).toLowerCase() || 'text',
@@ -527,7 +546,18 @@ export function buildMyServiceModifyRecord(input: {
   payloadJson: string;
   now: number;
 }): PublishedServiceRecord {
-  const settlement = resolvePublishedServiceSettlement(input.draft.currency);
+  const providerSkills = normalizeProviderSkillList(
+    Array.isArray(input.draft.providerSkills) && input.draft.providerSkills.length > 0
+      ? input.draft.providerSkills
+      : input.draft.providerSkill
+  );
+  const paymentTerms = resolveSkillServicePaymentTerms({
+    price: input.draft.price,
+    currency: input.draft.currency,
+    paymentTiming: input.draft.paymentTiming,
+    settlementKind: input.draft.settlementKind,
+  });
+  const settlement = resolvePublishedServiceSettlement(paymentTerms.currency);
   const currentPinId = toSafeString(input.currentPinId) || toSafeString(input.service.currentPinId);
   const sourceServicePinId = toSafeString(input.service.sourceServicePinId) || toSafeString(input.service.currentPinId);
   return {
@@ -537,17 +567,21 @@ export function buildMyServiceModifyRecord(input: {
     currentPinId,
     chainPinIds: [...new Set([...getServicePinIds(input.service), currentPinId].filter(Boolean))],
     providerGlobalMetaId: toSafeString(input.providerGlobalMetaId),
-    providerSkill: toSafeString(input.draft.providerSkill),
+    providerSkill: getPrimaryProviderSkill(providerSkills) ?? toSafeString(input.draft.providerSkill),
+    providerSkills,
     serviceName: toSafeString(input.draft.serviceName),
     displayName: toSafeString(input.draft.displayName) || toSafeString(input.draft.serviceName),
     description: toSafeString(input.draft.description),
     serviceIcon: toSafeString(input.draft.serviceIconUri) || null,
-    price: toSafeString(input.draft.price),
+    price: paymentTerms.effectivePrice,
     currency: settlement.currency,
+    paymentTiming: paymentTerms.paymentTiming,
     paymentChain: settlement.paymentChain,
-    settlementKind: settlement.settlementKind,
+    settlementKind: paymentTerms.settlementKind,
     mrc20Ticker: settlement.mrc20Ticker,
     mrc20Id: settlement.mrc20Id,
+    executionReminder: toSafeString(input.draft.executionReminder),
+    metadata: toSafeString(input.draft.metadata),
     skillDocument: '',
     inputType: 'text',
     outputType: toSafeString(input.draft.outputType).toLowerCase() || 'text',

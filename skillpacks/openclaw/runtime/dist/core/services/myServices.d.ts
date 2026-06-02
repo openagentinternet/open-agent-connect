@@ -136,7 +136,7 @@ export declare function buildMyServicePayload(input: {
     draft: PublishedServiceDraft;
     providerGlobalMetaId: string;
     paymentAddress: string;
-}): Record<string, string | null>;
+}): Record<string, unknown>;
 export declare function buildMyServiceModifyRecord(input: {
     service: PublishedServiceRecord;
     currentPinId: string;

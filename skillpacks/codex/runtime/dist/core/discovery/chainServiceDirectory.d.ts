@@ -19,6 +19,10 @@ export interface ChainServiceDirectoryItem {
     mrc20Id: string | null;
     serviceIcon: string | null;
     providerSkill: string | null;
+    providerSkills: string[];
+    paymentTiming: string | null;
+    executionReminder: string;
+    metadata: string;
     skillDocument: string | null;
     inputType: string | null;
     outputType: string | null;
@@ -43,6 +47,10 @@ export interface ParsedChainServiceRow {
     mrc20Id: string | null;
     serviceIcon: string | null;
     providerSkill: string | null;
+    providerSkills: string[];
+    paymentTiming: string | null;
+    executionReminder: string;
+    metadata: string;
     skillDocument: string | null;
     inputType: string | null;
     outputType: string | null;
