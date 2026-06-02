@@ -9,9 +9,14 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const {
+  createPrivateChatReplyRunnerForProfile,
   getDefaultDaemonPort,
   refreshA2ASimplemsgListenerForIdentityProfileRegistration,
 } = require('../../dist/cli/runtime.js');
+const { createMetabotProfile, updateMetabotProfile } = require('../../dist/core/bot/metabotProfileManager.js');
+const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
+const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
+const { createLlmRuntimeResolver } = require('../../dist/core/llm/llmRuntimeResolver.js');
 const { resolveMetabotHomeSelection } = require('../../dist/core/state/homeSelection.js');
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
@@ -278,6 +283,98 @@ test('refreshA2ASimplemsgListenerForIdentityProfileRegistration restarts the lis
   ]);
   assert.equal(result.refreshed, true);
   assert.deepEqual(result.report.started.map((profile) => profile.slug), ['new-bot']);
+});
+
+test('createPrivateChatReplyRunnerForProfile wires allowed chat skills for the active profile path', async (t) => {
+  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-active-allowed-skills-'));
+  t.after(async () => {
+    await rm(systemHomeDir, { recursive: true, force: true });
+  });
+  const profile = await createMetabotProfile(systemHomeDir, { name: 'Active Bot' });
+  await updateMetabotProfile(systemHomeDir, profile.slug, {
+    allowChatSkills: ['metabot-weather'],
+  });
+  const paths = resolveMetabotPaths(profile.homeDir);
+  const runtimeStore = createLlmRuntimeStore(paths);
+  const bindingStore = createLlmBindingStore(paths);
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [createLlmRuntime('runtime-codex', 'codex')],
+  });
+  await bindingStore.write({
+    version: 1,
+    bindings: [createLlmBinding('binding-codex-primary', profile.slug, 'runtime-codex', 'primary')],
+  });
+  const skillRoot = path.join(systemHomeDir, '.codex', 'skills', 'metabot-weather');
+  await mkdir(skillRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, 'SKILL.md'), '# metabot-weather\n', 'utf8');
+  const executorCalls = [];
+  const runner = createPrivateChatReplyRunnerForProfile({
+    paths,
+    metaBotSlug: profile.slug,
+    runtimeResolver: createLlmRuntimeResolver({
+      runtimeStore,
+      bindingStore,
+      getPreferredRuntimeId: async () => null,
+    }),
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      execute: async (request) => {
+        executorCalls.push(request);
+        return 'llm-session-active-allowed';
+      },
+      getSession: async (sessionId) => ({
+        sessionId,
+        status: 'completed',
+        result: {
+          status: 'completed',
+          output: 'Weather reply.',
+          durationMs: 1,
+        },
+      }),
+    },
+    env: {},
+  });
+
+  const result = await runner({
+    conversation: {
+      conversationId: 'pc-self-peer',
+      peerGlobalMetaId: 'peer-gm-1',
+      peerName: 'PeerBot',
+      topic: null,
+      strategyId: null,
+      state: 'active',
+      turnCount: 1,
+      lastDirection: 'inbound',
+      createdAt: 1000,
+      updatedAt: 2000,
+    },
+    recentMessages: [
+      { conversationId: 'pc-self-peer', messageId: 'm1', direction: 'inbound', senderGlobalMetaId: 'peer', content: 'weather?', messagePinId: null, extensions: null, timestamp: 1000 },
+    ],
+    persona: { role: 'Local bot', soul: 'Concise', goal: 'Help peers' },
+    strategy: null,
+    inboundMessage: {
+      conversationId: 'pc-self-peer',
+      messageId: 'm1',
+      direction: 'inbound',
+      senderGlobalMetaId: 'peer',
+      content: 'weather?',
+      messagePinId: null,
+      extensions: null,
+      timestamp: 1000,
+    },
+  });
+
+  assert.deepEqual(result, {
+    state: 'reply',
+    content: 'Weather reply.',
+  });
+  assert.equal(executorCalls.length, 1);
+  assert.deepEqual(executorCalls[0].skills, ['metabot-weather']);
+  assert.match(executorCalls[0].skillSourcePaths['metabot-weather'], /\.codex[/\\]skills[/\\]metabot-weather$/);
+  assert.equal(executorCalls[0].skillIsolation, 'strict');
 });
 
 test('refreshA2ASimplemsgListenerForIdentityProfileRegistration is a no-op when disabled', async () => {

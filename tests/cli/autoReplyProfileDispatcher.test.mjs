@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -10,9 +10,97 @@ const {
   createPrivateChatAutoReplyProfileDispatcher,
   replayUnhandledA2AOrderMessagesForProfiles,
 } = require('../../dist/cli/runtime.js');
+const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
+const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { persistA2AConversationMessage } = require('../../dist/core/a2a/conversationPersistence.js');
 const { upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+
+function healthyRuntime(id = 'runtime-codex', provider = 'codex') {
+  const now = '2026-05-07T00:00:00.000Z';
+  return {
+    id,
+    provider,
+    displayName: `${provider} runtime`,
+    binaryPath: `/bin/${provider}`,
+    version: '1.0.0',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['tool-use'],
+    lastSeenAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function healthyBinding(id, slug, runtimeId, role = 'primary') {
+  const now = '2026-05-07T00:00:00.000Z';
+  return {
+    id,
+    metaBotSlug: slug,
+    llmRuntimeId: runtimeId,
+    role,
+    priority: 0,
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function chatRunnerInput() {
+  return {
+    conversation: {
+      conversationId: 'pc-self-peer',
+      peerGlobalMetaId: 'peer-gm-1',
+      peerName: 'PeerBot',
+      topic: null,
+      strategyId: null,
+      state: 'active',
+      turnCount: 1,
+      lastDirection: 'inbound',
+      createdAt: 1000,
+      updatedAt: 2000,
+    },
+    recentMessages: [
+      { conversationId: 'pc-self-peer', messageId: 'm1', direction: 'inbound', senderGlobalMetaId: 'peer', content: 'weather?', messagePinId: null, extensions: null, timestamp: 1000 },
+    ],
+    persona: { role: 'Local bot', soul: 'Concise', goal: 'Help peers' },
+    strategy: null,
+    inboundMessage: {
+      conversationId: 'pc-self-peer',
+      messageId: 'm1',
+      direction: 'inbound',
+      senderGlobalMetaId: 'peer',
+      content: 'weather?',
+      messagePinId: null,
+      extensions: null,
+      timestamp: 1000,
+    },
+  };
+}
+
+async function configureAllowedChatSkillProfile(systemHomeDir, profileHomeDir, slug) {
+  const paths = resolveMetabotPaths(profileHomeDir);
+  await mkdir(path.dirname(paths.chatSkillPolicyPath), { recursive: true });
+  await writeFile(paths.chatSkillPolicyPath, `${JSON.stringify({ allowChatSkills: ['metabot-weather'] }, null, 2)}\n`, 'utf8');
+
+  const runtimeStore = createLlmRuntimeStore(paths);
+  const bindingStore = createLlmBindingStore(paths);
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [healthyRuntime('runtime-codex', 'codex')],
+  });
+  await bindingStore.write({
+    version: 1,
+    bindings: [healthyBinding('binding-codex-primary', slug, 'runtime-codex')],
+  });
+
+  const skillRoot = path.join(systemHomeDir, '.codex', 'skills', 'metabot-weather');
+  await mkdir(skillRoot, { recursive: true });
+  await writeFile(path.join(skillRoot, 'SKILL.md'), '# metabot-weather\n', 'utf8');
+  return paths;
+}
 
 async function createProfileHome(t, slug) {
   const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-auto-reply-dispatcher-'));
@@ -193,6 +281,92 @@ test('auto-reply dispatcher routes inbound ORDER for non-active profiles to orde
     messagePinId: `${'6'.repeat(64)}i0`,
   }]);
   assert.deepEqual(genericCalls, []);
+});
+
+test('auto-reply dispatcher default runner wires allowed chat skills for non-active profiles', async (t) => {
+  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-auto-reply-allowed-skills-'));
+  const betaHomeDir = await createRegisteredProfile(t, systemHomeDir, {
+    name: 'Beta Bot',
+    slug: 'beta-bot',
+    globalMetaId: 'idq1beta00000000000000000000000000000',
+  });
+  await configureAllowedChatSkillProfile(systemHomeDir, betaHomeDir, 'beta-bot');
+  const executorCalls = [];
+
+  const dispatcher = createPrivateChatAutoReplyProfileDispatcher({
+    autoReplyConfig: {
+      enabled: true,
+      acceptPolicy: 'accept_all',
+      defaultStrategyId: null,
+    },
+    resolvePeerChatPublicKey: async () => 'peer-chat-key',
+    llmExecutor: {
+      execute: async (request) => {
+        executorCalls.push(request);
+        return 'llm-session-allowed-skills';
+      },
+      getSession: async (sessionId) => ({
+        sessionId,
+        status: 'completed',
+        result: {
+          status: 'completed',
+          output: 'Weather reply.',
+          durationMs: 1,
+        },
+      }),
+    },
+    createSignerForHome: (homeDir) => ({
+      getIdentity: async () => ({
+        globalMetaId: `identity-for-${path.basename(homeDir)}`,
+        mvcAddress: `mvc-${path.basename(homeDir)}`,
+      }),
+      getPrivateChatIdentity: async () => ({
+        globalMetaId: `identity-for-${path.basename(homeDir)}`,
+        privateKeyHex: 'private-key',
+        chatPublicKey: 'chat-public-key',
+      }),
+      writePin: async () => ({
+        txids: ['tx-1'],
+        pinId: 'pin-1',
+        totalCost: 1,
+        network: 'mvc',
+        operation: 'create',
+        path: '/protocols/simplemsg',
+        contentType: 'application/json',
+        encoding: 'utf-8',
+        globalMetaId: `identity-for-${path.basename(homeDir)}`,
+        mvcAddress: `mvc-${path.basename(homeDir)}`,
+      }),
+    }),
+    createOrchestrator: (deps) => ({
+      handleInboundMessage: async () => {
+        await deps.replyRunner(chatRunnerInput());
+      },
+    }),
+  });
+
+  await dispatcher.handleInboundMessage({
+    name: 'Beta Bot',
+    slug: 'beta-bot',
+    aliases: ['beta-bot'],
+    homeDir: betaHomeDir,
+    globalMetaId: 'idq1beta00000000000000000000000000000',
+    mvcAddress: 'mvc-beta',
+    createdAt: 1_777_000_000_000,
+    updatedAt: 1_777_000_000_000,
+  }, {
+    fromGlobalMetaId: 'idq1peer00000000000000000000000000000',
+    content: 'weather?',
+    messagePinId: 'incoming-pin-allowed',
+    fromChatPublicKey: 'peer-chat-key',
+    timestamp: 1_777_000_000_001,
+    rawMessage: null,
+  });
+
+  assert.equal(executorCalls.length, 1);
+  assert.deepEqual(executorCalls[0].skills, ['metabot-weather']);
+  assert.match(executorCalls[0].skillSourcePaths['metabot-weather'], /\.codex[/\\]skills[/\\]metabot-weather$/);
+  assert.equal(executorCalls[0].skillIsolation, 'strict');
 });
 
 test('startup recovery replays persisted inbound ORDER messages without provider sessions', async (t) => {
