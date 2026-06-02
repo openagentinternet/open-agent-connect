@@ -2,12 +2,14 @@ export type ProviderServiceRunnerTerminalState = 'completed' | 'needs_clarificat
 export interface ProviderServiceRunnerRequest {
     servicePinId: string;
     providerSkill: string;
+    providerSkills?: string[] | null;
     providerGlobalMetaId: string;
     userTask: string;
     taskContext: string;
     serviceName?: string | null;
     displayName?: string | null;
     outputType?: string | null;
+    executionReminder?: string | null;
     rawRequest?: string | null;
     metadata?: Record<string, unknown> | null;
 }

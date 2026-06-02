@@ -118,13 +118,25 @@ function sortOrdersDesc(left, right) {
         return updatedSort;
     return toSafeString(right.id).localeCompare(toSafeString(left.id));
 }
-function pickRatingDetail(ratings, paymentTxid, counterpartyGlobalMetaid) {
-    const normalizedPaymentTxid = toSafeString(paymentTxid);
-    if (!normalizedPaymentTxid)
+function pickRatingDetail(ratings, order, counterpartyGlobalMetaid) {
+    const serviceIds = [...new Set([
+            order.currentServicePinId,
+            order.servicePinId,
+        ].map(toSafeString).filter(Boolean))];
+    const serviceOrderPinId = toSafeString(order.serviceOrderPinId);
+    const paymentTxid = toSafeString(order.paymentTxid);
+    if (serviceIds.length === 0 || (!serviceOrderPinId && !paymentTxid))
         return null;
     const buyerGlobalMetaId = toSafeString(counterpartyGlobalMetaid);
-    const candidates = ratings
-        .filter((rating) => toSafeString(rating.servicePaidTx) === normalizedPaymentTxid)
+    const serviceRatings = ratings.filter((rating) => (serviceIds.includes(toSafeString(rating.serviceId))));
+    const orderPinCandidates = serviceOrderPinId
+        ? serviceRatings.filter((rating) => toSafeString(rating.serviceOrderPinId) === serviceOrderPinId)
+        : [];
+    const candidates = (orderPinCandidates.length > 0
+        ? orderPinCandidates
+        : serviceRatings.filter((rating) => (paymentTxid
+            && !toSafeString(rating.serviceOrderPinId)
+            && toSafeString(rating.servicePaidTx) === paymentTxid)))
         .sort((left, right) => toSafeNumber(right.createdAt) - toSafeNumber(left.createdAt));
     const selected = buyerGlobalMetaId
         ? candidates.find((rating) => toSafeString(rating.raterGlobalMetaId) === buyerGlobalMetaId) ?? candidates[0]
@@ -147,14 +159,14 @@ function buildRatingIndex(profile, servicePinIds) {
     return profile.ratingDetails.filter((rating) => servicePinIds.has(toSafeString(rating.serviceId)));
 }
 function buildClosedOrderRatings(ratings, orders) {
-    const seenPaymentTxids = new Set();
+    const seenOrderKeys = new Set();
     const matchedRatings = [];
     for (const order of orders) {
-        const paymentTxid = toSafeString(order.paymentTxid);
-        if (!paymentTxid || seenPaymentTxids.has(paymentTxid))
+        const orderKey = toSafeString(order.serviceOrderPinId) || toSafeString(order.paymentTxid);
+        if (!orderKey || seenOrderKeys.has(orderKey))
             continue;
-        seenPaymentTxids.add(paymentTxid);
-        const rating = pickRatingDetail(ratings, paymentTxid, order.buyerGlobalMetaId);
+        seenOrderKeys.add(orderKey);
+        const rating = pickRatingDetail(ratings, order, order.buyerGlobalMetaId);
         if (rating)
             matchedRatings.push(rating.rate);
     }
@@ -283,6 +295,7 @@ function buildMyServiceOrderDetails(input) {
                 id: toSafeString(order.id),
                 status: toSafeString(order.state),
                 traceId: toSafeString(order.traceId),
+                serviceOrderPinId: toSafeString(order.serviceOrderPinId) || null,
                 paymentTxid: paymentTxid || null,
                 orderMessageTxid: toSafeString(order.orderTxid) || toSafeString(order.orderPinId) || null,
                 paymentAmount: toSafeString(order.paymentAmount),
@@ -296,7 +309,7 @@ function buildMyServiceOrderDetails(input) {
                 runtimeId: toSafeString(order.runtimeId) || null,
                 runtimeProvider: toSafeString(order.runtimeProvider) || null,
                 llmSessionId: toSafeString(order.llmSessionId) || null,
-                rating: pickRatingDetail(ratingDetails, paymentTxid, order.buyerGlobalMetaId),
+                rating: pickRatingDetail(ratingDetails, order, order.buyerGlobalMetaId),
             });
         }
     }

@@ -19,6 +19,8 @@ export interface PersistA2AConversationMessageInput {
         timestamp?: number | null;
         chainTimestamp?: number | null;
         orderTxid?: string | null;
+        serviceOrderPinId?: string | null;
+        orderPinId?: string | null;
         paymentTxid?: string | null;
         raw?: Record<string, unknown> | null;
     };

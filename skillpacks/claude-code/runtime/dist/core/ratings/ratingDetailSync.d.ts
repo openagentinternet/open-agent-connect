@@ -37,7 +37,8 @@ export declare function fetchRatingDetailPageFromChain(input: {
 }, cursor?: string): Promise<RatingDetailListPage>;
 export declare function findRatingDetailByServicePayment(source: RatingDetailState | RatingDetailItem[], lookup: {
     serviceId: string;
-    servicePaidTx: string;
+    serviceOrderPinId?: string | null;
+    servicePaidTx?: string | null;
 }): RatingDetailItem | null;
 export declare function refreshRatingDetailCache(input: RefreshRatingDetailCacheInput): Promise<RefreshRatingDetailCacheResult>;
 export declare function refreshRatingDetailCacheFromChain(input: RefreshRatingDetailCacheFromChainInput): Promise<RefreshRatingDetailCacheResult>;

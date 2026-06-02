@@ -59,6 +59,7 @@ export interface MyServiceOrderDetail {
     id: string;
     status: string;
     traceId: string;
+    serviceOrderPinId: string | null;
     paymentTxid: string | null;
     orderMessageTxid: string | null;
     paymentAmount: string;

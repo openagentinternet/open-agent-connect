@@ -7,12 +7,14 @@ import { type ProviderServiceRunnerResult } from './serviceRunnerContracts';
 export interface ProviderServiceOrderInput {
     servicePinId: string;
     providerSkill: string;
+    providerSkills?: string[] | null;
     providerGlobalMetaId: string;
     userTask: string;
     taskContext: string;
     serviceName?: string | null;
     displayName?: string | null;
     outputType?: string | null;
+    executionReminder?: string | null;
     rawRequest?: string | null;
     metadata?: Record<string, unknown> | null;
 }
@@ -32,6 +34,7 @@ export interface ProviderServiceRunnerDependencies {
 export interface ProviderServiceRunnerSelection {
     runtime: LlmRuntime;
     skill: PlatformSkillCatalogEntry;
+    skills: PlatformSkillCatalogEntry[];
     rootDiagnostics: PlatformSkillRootDiagnostic[];
     fallbackSelected: boolean;
 }
@@ -44,9 +47,11 @@ export declare function buildProviderServiceOrderPrompt(input: {
     serviceName?: string | null;
     displayName?: string | null;
     providerSkill: string;
+    providerSkills?: string[] | null;
     outputType?: string | null;
     userTask: string;
     taskContext: string;
+    executionReminder?: string | null;
 }): string;
 export declare function createProviderServiceRunner(input: ProviderServiceRunnerDependencies): {
     execute(order: ProviderServiceOrderInput): Promise<ProviderServiceRunnerResultWithRuntime>;

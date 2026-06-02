@@ -63,6 +63,7 @@ function createSellerOrderRecord(input) {
         orderPinId: normalizeText(input.orderPinId) || null,
         orderTxid: normalizeText(input.orderTxid) || null,
         orderReference: normalizeText(input.orderReference) || null,
+        serviceOrderPinId: normalizeText(input.serviceOrderPinId) || null,
         paymentTxid: normalizeText(input.paymentTxid) || null,
         paymentCommitTxid: normalizeText(input.paymentCommitTxid) || null,
         paymentAmount: normalizeText(input.paymentAmount) || null,

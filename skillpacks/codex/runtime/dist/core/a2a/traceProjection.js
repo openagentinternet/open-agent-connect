@@ -156,8 +156,13 @@ function findLatestCallerOrderSession(conversation) {
 function messageBelongsToServiceOrder(message, session) {
     const sessionId = normalizeText(session.sessionId);
     const orderTxid = normalizeText(session.orderTxid);
+    const serviceOrderPinId = normalizeText(session.serviceOrderPinId)
+        || normalizeText(session.orderPinId);
     const paymentTxid = normalizeText(session.paymentTxid);
+    const messageServiceOrderPinId = normalizeText(message.serviceOrderPinId)
+        || normalizeText(message.orderPinId);
     return Boolean(normalizeText(message.orderSessionId) === sessionId
+        || (serviceOrderPinId && messageServiceOrderPinId === serviceOrderPinId)
         || (orderTxid && normalizeText(message.orderTxid) === orderTxid)
         || (paymentTxid && normalizeText(message.paymentTxid) === paymentTxid));
 }
@@ -350,6 +355,7 @@ function projectProtocolMessage(input) {
             metadata: {
                 ...metadata,
                 needsRating: true,
+                orderPinId: normalizeText(parsed?.orderPinId) || null,
             },
         };
     }
@@ -362,6 +368,7 @@ function projectProtocolMessage(input) {
             metadata: {
                 ...metadata,
                 endReason: normalizeText(parsed?.reason) || null,
+                orderPinId: normalizeText(parsed?.orderPinId) || null,
                 publicStatus: normalizeText(parsed?.reason).toLowerCase() === 'failed' ? 'remote_failed' : 'completed',
             },
         };
@@ -457,6 +464,9 @@ function buildProjectedOrder(input) {
     return {
         orderPinId: findOrderPinId(conversation.messages, selectedOrderSession),
         orderTxid: normalizeText(selectedOrderSession.orderTxid) || null,
+        serviceOrderPinId: normalizeText(selectedOrderSession.serviceOrderPinId)
+            || normalizeText(selectedOrderSession.orderPinId)
+            || null,
         paymentTxid: normalizeText(selectedOrderSession.paymentTxid) || null,
         serviceId: normalizeText(selectedOrderSession.servicePinId) || null,
         servicePinId: normalizeText(selectedOrderSession.servicePinId) || null,

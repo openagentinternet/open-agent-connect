@@ -28,6 +28,7 @@ export interface ProviderConsoleServiceRow {
 export interface ProviderConsoleOrderRow {
     traceId: string;
     orderId: string;
+    serviceOrderPinId?: string | null;
     servicePinId: string;
     serviceName: string;
     paymentTxid: string | null;

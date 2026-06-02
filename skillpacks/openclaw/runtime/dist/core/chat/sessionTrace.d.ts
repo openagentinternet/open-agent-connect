@@ -21,6 +21,7 @@ export interface SessionTraceOrderInput {
     paymentTxid?: string | null;
     paymentCommitTxid?: string | null;
     orderReference?: string | null;
+    serviceOrderPinId?: string | null;
     paymentCurrency?: string | null;
     paymentAmount?: string | null;
     paymentChain?: string | null;
@@ -28,6 +29,7 @@ export interface SessionTraceOrderInput {
     mrc20Ticker?: string | null;
     mrc20Id?: string | null;
     providerSkill?: string | null;
+    providerSkills?: string[] | null;
     outputType?: string | null;
     requestText?: string | null;
     status?: string | null;
@@ -61,6 +63,7 @@ export interface SessionTraceProviderRuntimeInput {
     runtimeProvider?: string | null;
     sessionId?: string | null;
     providerSkill?: string | null;
+    providerSkills?: string[] | null;
     fallbackSelected?: boolean | null;
 }
 export interface SessionTraceArtifacts {
@@ -99,6 +102,7 @@ export interface SessionTraceProviderRuntimeRecord {
     runtimeProvider: string | null;
     sessionId: string | null;
     providerSkill: string | null;
+    providerSkills: string[];
     fallbackSelected: boolean | null;
 }
 export interface SessionTraceAskMasterInput extends AskMasterTraceMetadata {
@@ -165,6 +169,7 @@ export interface SessionTraceRecord {
         paymentTxid: string | null;
         paymentCommitTxid: string | null;
         orderReference: string | null;
+        serviceOrderPinId: string | null;
         paymentCurrency: string | null;
         paymentAmount: string | null;
         paymentChain: string | null;
@@ -172,6 +177,7 @@ export interface SessionTraceRecord {
         mrc20Ticker: string | null;
         mrc20Id: string | null;
         providerSkill?: string | null;
+        providerSkills?: string[];
         outputType: string | null;
         requestText: string | null;
         status: string | null;

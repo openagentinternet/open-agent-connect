@@ -11,14 +11,17 @@ export interface DeliveryMessagePayload {
 }
 export interface ParsedOrderStatusMessage {
     orderTxid?: string;
+    orderPinId?: string;
     content: string;
 }
 export interface ParsedNeedsRatingMessage {
     orderTxid?: string;
+    orderPinId?: string;
     content: string;
 }
 export interface ParsedOrderEndMessage {
     orderTxid?: string;
+    orderPinId?: string;
     reason: string;
     content: string;
 }
@@ -27,9 +30,9 @@ export type ParsedOrderProtocolMessage = ParsedOrderStatusMessage | ParsedDelive
 export declare function normalizeOrderProtocolTxid(value: unknown): string;
 export declare function buildOrderStatusMessage(orderTxid: string, content: string): string;
 export declare function parseOrderStatusMessage(content: string): ParsedOrderStatusMessage | null;
-export declare function buildNeedsRatingMessage(orderTxid: string, content: string): string;
+export declare function buildNeedsRatingMessage(orderTxid: string, content: string, orderPinId?: unknown): string;
 export declare function parseNeedsRatingMessage(content: string): ParsedNeedsRatingMessage | null;
-export declare function buildOrderEndMessage(orderTxid: string, reason?: string, content?: string): string;
+export declare function buildOrderEndMessage(orderTxid: string, reason?: string, content?: string, orderPinId?: unknown): string;
 export declare function parseOrderEndMessage(content: string): ParsedOrderEndMessage | null;
 export declare function buildDeliveryMessage(payload: DeliveryMessagePayload, orderTxid?: string | null): string;
 export declare function parseDeliveryMessage(content: string): ParsedDeliveryMessage | null;
