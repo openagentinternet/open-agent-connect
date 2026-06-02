@@ -29,14 +29,21 @@ import {
   type RuntimeState,
 } from '../core/state/runtimeStateStore';
 import { resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
-import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
-import { createLlmBindingStore } from '../core/llm/llmBindingStore';
+import { createLlmRuntimeStore, type LlmRuntimeStore } from '../core/llm/llmRuntimeStore';
+import { createLlmBindingStore, type LlmBindingStore } from '../core/llm/llmBindingStore';
 import { discoverLlmRuntimes, testLlmRuntimeReadiness } from '../core/llm/llmRuntimeDiscovery';
 import {
   isLlmProvider,
   normalizeLlmBinding,
 } from '../core/llm/llmTypes';
-import type { LlmBindingRole, LlmProvider, LlmRuntime } from '../core/llm/llmTypes';
+import type {
+  LlmBinding,
+  LlmBindingRole,
+  LlmBindingsState,
+  LlmProvider,
+  LlmRuntime,
+  LlmRuntimesState,
+} from '../core/llm/llmTypes';
 import type { LlmExecutor, LlmExecutionRequest } from '../core/llm/executor';
 import {
   buildMetabotProfileDraftFromIdentity,
@@ -1199,6 +1206,110 @@ async function applyDefaultMetabotCreateProviders(input: {
 function buildDefaultBindingId(slug: string, runtimeId: string, role: 'primary' | 'fallback'): string {
   const safeRuntime = runtimeId.replace(/[^a-zA-Z0-9._-]+/g, '_');
   return `lb_${slug}_${safeRuntime}_${role}`;
+}
+
+function sortRoleBindings(bindings: LlmBinding[]): LlmBinding[] {
+  return [...bindings].sort((left, right) => {
+    if (left.priority !== right.priority) {
+      return left.priority - right.priority;
+    }
+    if (left.updatedAt !== right.updatedAt) {
+      return right.updatedAt.localeCompare(left.updatedAt);
+    }
+    return left.id.localeCompare(right.id);
+  });
+}
+
+function selectVisibleRoleBinding(bindings: LlmBinding[]): LlmBinding | undefined {
+  return sortRoleBindings(bindings.filter((binding) => binding.enabled)).at(0)
+    ?? sortRoleBindings(bindings).at(0);
+}
+
+function createMemoryRuntimeStore(state: LlmRuntimesState): LlmRuntimeStore {
+  return {
+    read: async () => state,
+    write: async () => state,
+    upsertRuntime: async () => state,
+    removeRuntime: async () => state,
+    markSeen: async () => state,
+    updateHealth: async () => state,
+  };
+}
+
+function createMemoryBindingStore(state: LlmBindingsState): LlmBindingStore {
+  return {
+    read: async () => state,
+    write: async () => state,
+    upsertBinding: async () => state,
+    removeBinding: async () => state,
+    updateLastUsed: async () => state,
+    listByMetaBotSlug: async (slug) => state.bindings.filter((binding) => binding.metaBotSlug === slug),
+    listEnabledByMetaBotSlug: async (slug) => (
+      state.bindings.filter((binding) => binding.metaBotSlug === slug && binding.enabled)
+    ),
+  };
+}
+
+function buildBindingForRuntime(input: {
+  slug: string;
+  runtime: LlmRuntime;
+  role: 'primary' | 'fallback';
+  existing?: LlmBinding;
+  now: string;
+}): LlmBinding {
+  return {
+    id: input.existing?.id ?? buildDefaultBindingId(input.slug, input.runtime.id, input.role),
+    metaBotSlug: input.slug,
+    llmRuntimeId: input.runtime.id,
+    role: input.role,
+    priority: 0,
+    enabled: true,
+    lastUsedAt: input.existing?.lastUsedAt,
+    createdAt: input.existing?.createdAt ?? input.now,
+    updatedAt: input.now,
+  };
+}
+
+function buildProspectivePrimaryBindingState(input: {
+  profile: MetabotProfileFull;
+  runtimeState: LlmRuntimesState;
+  bindingState: LlmBindingsState;
+  primaryProvider?: LlmProvider | null;
+}): LlmBindingsState {
+  if (input.primaryProvider === undefined) {
+    return input.bindingState;
+  }
+
+  let nextBindings = [...input.bindingState.bindings];
+  const existing = selectVisibleRoleBinding(nextBindings.filter((binding) => (
+    binding.metaBotSlug === input.profile.slug && binding.role === 'primary'
+  )));
+  if (input.primaryProvider === null) {
+    return {
+      ...input.bindingState,
+      bindings: existing ? nextBindings.filter((binding) => binding.id !== existing.id) : nextBindings,
+    };
+  }
+
+  const runtime = selectRuntimeForProvider(input.runtimeState.runtimes, input.primaryProvider);
+  const binding = normalizeLlmBinding(buildBindingForRuntime({
+    slug: input.profile.slug,
+    runtime,
+    role: 'primary',
+    existing,
+    now: new Date().toISOString(),
+  }));
+  if (!binding) {
+    return input.bindingState;
+  }
+  nextBindings = existing
+    ? nextBindings.map((entry) => entry.id === existing.id ? binding : entry)
+    : [...nextBindings, binding];
+
+  return {
+    ...input.bindingState,
+    bindings: nextBindings,
+  };
 }
 
 function sameStringArray(left: string[] = [], right: string[] = []): boolean {
@@ -16350,12 +16461,35 @@ export function createDefaultMetabotDaemonHandlers(input: {
               return commandFailed('name_taken', `MetaBot name already exists: ${update.name}`);
             }
           }
-          if (update.allowChatSkills !== undefined && update.allowChatSkills.length > 0) {
+          await validateMetabotProviderAvailability(current, update);
+          const effectiveAllowChatSkills = update.allowChatSkills !== undefined
+            ? update.allowChatSkills
+            : current.allowChatSkills;
+          const primaryProviderChanged = (
+            update.primaryProvider !== undefined
+            && update.primaryProvider !== (current.primaryProvider ?? null)
+          );
+          if (
+            effectiveAllowChatSkills.length > 0
+            && (update.allowChatSkills !== undefined || primaryProviderChanged)
+          ) {
+            const runtimeStore = createLlmRuntimeStore(current.homeDir);
+            const bindingStore = createLlmBindingStore(current.homeDir);
+            const [runtimeState, bindingState] = await Promise.all([
+              runtimeStore.read(),
+              bindingStore.read(),
+            ]);
+            const prospectiveBindingState = buildProspectivePrimaryBindingState({
+              profile: current,
+              runtimeState,
+              bindingState,
+              primaryProvider: update.primaryProvider,
+            });
             const validation = await validateAllowChatSkills({
               metaBotSlug: current.slug,
-              allowChatSkills: update.allowChatSkills,
-              runtimeStore: createLlmRuntimeStore(current.homeDir),
-              bindingStore: createLlmBindingStore(current.homeDir),
+              allowChatSkills: effectiveAllowChatSkills,
+              runtimeStore: createMemoryRuntimeStore(runtimeState),
+              bindingStore: createMemoryBindingStore(prospectiveBindingState),
               systemHomeDir: normalizedSystemHomeDir,
               projectRoot: current.homeDir,
               env: process.env,
@@ -16364,7 +16498,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
               throw new Error(validation.message);
             }
           }
-          await validateMetabotProviderAvailability(current, update);
         } catch (error) {
           return commandFailed('invalid_metabot_profile_update', error instanceof Error ? error.message : String(error));
         }

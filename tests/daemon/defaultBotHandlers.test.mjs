@@ -1510,6 +1510,158 @@ test('default bot updateProfile rejects unavailable allowChatSkills without call
   assert.deepEqual(signerCalls, []);
 });
 
+test('default bot updateProfile rejects preserved allowChatSkills when primaryProvider changes to a runtime without them', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const profile = await createMetabotProfile(systemHomeDir, { name: 'Chat Skill Provider Switch Bot' });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-chat-skill-provider-switch-bot',
+    mvcAddress: 'addr-chat-skill-provider-switch-bot',
+  });
+  await createLlmRuntimeStore(profile.homeDir).write({
+    version: 1,
+    runtimes: [
+      runtime('codex', 'runtime-codex', 'healthy'),
+      runtime('claude-code', 'runtime-claude', 'healthy'),
+    ],
+  });
+  await createLlmBindingStore(profile.homeDir).write({
+    version: 1,
+    bindings: [
+      {
+        id: 'binding-provider-switch-codex-primary',
+        metaBotSlug: profile.slug,
+        llmRuntimeId: 'runtime-codex',
+        role: 'primary',
+        priority: 0,
+        enabled: true,
+        createdAt: '2026-05-06T00:00:00.000Z',
+        updatedAt: '2026-05-06T00:00:00.000Z',
+      },
+      {
+        id: 'binding-provider-switch-claude-primary',
+        metaBotSlug: profile.slug,
+        llmRuntimeId: 'runtime-claude',
+        role: 'primary',
+        priority: 1,
+        enabled: true,
+        createdAt: '2026-05-06T00:00:00.000Z',
+        updatedAt: '2026-05-06T00:00:00.000Z',
+      },
+    ],
+  });
+  await writeProfileSkill(profile.homeDir, 'metabot-help');
+  await updateMetabotProfile(systemHomeDir, profile.slug, {
+    primaryProvider: 'codex',
+    allowChatSkills: ['metabot-help'],
+  });
+  const signerCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async (input) => {
+      signerCalls.push(input);
+      throw new Error('signer should not be called for allowChatSkills unavailable on the new primary provider');
+    }),
+  });
+
+  const result = await handlers.bot.updateProfile({
+    slug: profile.slug,
+    primaryProvider: 'claude-code',
+  });
+  const afterFailure = await getMetabotProfile(systemHomeDir, profile.slug);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_metabot_profile_update');
+  assert.match(result.message, /not installed in the selected MetaBot primary runtime skill roots/i);
+  assert.equal(afterFailure.primaryProvider, 'codex');
+  assert.deepEqual(afterFailure.allowChatSkills, ['metabot-help']);
+  assert.deepEqual(signerCalls, []);
+});
+
+test('default bot updateProfile validates new allowChatSkills against the requested primaryProvider', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const profile = await createMetabotProfile(systemHomeDir, { name: 'Chat Skill Combined Update Bot' });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-chat-skill-combined-update-bot',
+    mvcAddress: 'addr-chat-skill-combined-update-bot',
+  });
+  await createLlmRuntimeStore(profile.homeDir).write({
+    version: 1,
+    runtimes: [
+      runtime('codex', 'runtime-codex', 'healthy'),
+      runtime('claude-code', 'runtime-claude', 'healthy'),
+    ],
+  });
+  await createLlmBindingStore(profile.homeDir).write({
+    version: 1,
+    bindings: [
+      {
+        id: 'binding-combined-update-codex-primary',
+        metaBotSlug: profile.slug,
+        llmRuntimeId: 'runtime-codex',
+        role: 'primary',
+        priority: 0,
+        enabled: true,
+        createdAt: '2026-05-06T00:00:00.000Z',
+        updatedAt: '2026-05-06T00:00:00.000Z',
+      },
+      {
+        id: 'binding-combined-update-claude-primary',
+        metaBotSlug: profile.slug,
+        llmRuntimeId: 'runtime-claude',
+        role: 'primary',
+        priority: 1,
+        enabled: true,
+        createdAt: '2026-05-06T00:00:00.000Z',
+        updatedAt: '2026-05-06T00:00:00.000Z',
+      },
+    ],
+  });
+  await writeProfileSkill(profile.homeDir, 'metabot-help');
+  await updateMetabotProfile(systemHomeDir, profile.slug, {
+    primaryProvider: 'codex',
+  });
+  const signerCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async (input) => {
+      signerCalls.push(input);
+      throw new Error('signer should not be called for allowChatSkills unavailable on the requested primary provider');
+    }),
+  });
+
+  const result = await handlers.bot.updateProfile({
+    slug: profile.slug,
+    primaryProvider: 'claude-code',
+    allowChatSkills: ['metabot-help'],
+  });
+  const afterFailure = await getMetabotProfile(systemHomeDir, profile.slug);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_metabot_profile_update');
+  assert.match(result.message, /not installed in the selected MetaBot primary runtime skill roots/i);
+  assert.equal(afterFailure.primaryProvider, 'codex');
+  assert.deepEqual(afterFailure.allowChatSkills, []);
+  assert.deepEqual(signerCalls, []);
+});
+
 test('default bot updateProfile writes an avatar clear to chain before removing the local avatar', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-');
   t.after(async () => {
