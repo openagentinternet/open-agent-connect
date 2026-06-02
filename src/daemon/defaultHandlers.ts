@@ -8817,12 +8817,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const runnerResult = await providerRunner.execute({
       servicePinId: service.currentPinId,
       providerSkill: service.providerSkill,
+      providerSkills: service.providerSkills,
       providerGlobalMetaId: state.identity.globalMetaId,
       userTask,
       taskContext: '',
       serviceName: service.serviceName,
       displayName: service.displayName,
       outputType: service.outputType,
+      executionReminder: service.executionReminder,
       metadata: {
         traceId,
         orderTxid,
@@ -14752,12 +14754,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const runnerResult = await providerRunner.execute({
           servicePinId: service.currentPinId,
           providerSkill: service.providerSkill,
+          providerSkills: service.providerSkills,
           providerGlobalMetaId: execution.providerGlobalMetaId,
           userTask: execution.request.userTask,
           taskContext: execution.request.taskContext,
           serviceName: service.serviceName,
           displayName: service.displayName,
           outputType: service.outputType,
+          executionReminder: service.executionReminder,
           metadata: {
             traceId,
             externalConversationId: execution.externalConversationId || null,

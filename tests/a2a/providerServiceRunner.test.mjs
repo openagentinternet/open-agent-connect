@@ -136,6 +136,23 @@ test('buildProviderServiceOrderPrompt includes paid-order guidance and required 
   assert.match(prompt, /do not include.*daemon/i);
 });
 
+test('buildProviderServiceOrderPrompt includes ordered provider skills and execution reminder', () => {
+  const prompt = buildProviderServiceOrderPrompt({
+    serviceName: 'Weather Buzz',
+    displayName: 'Weather Buzz',
+    userTask: 'Forecast tomorrow and post the result.',
+    taskContext: 'Focus on Shanghai.',
+    providerSkill: 'weather.oracle',
+    providerSkills: ['weather.oracle', 'metabot-post-buzz'],
+    executionReminder: 'Use weather.oracle first, then use metabot-post-buzz only after the forecast is ready.',
+    outputType: 'text',
+  });
+
+  assert.match(prompt, /Required provider skills in order: weather\.oracle, metabot-post-buzz/);
+  assert.match(prompt, /Use weather\.oracle first, then use metabot-post-buzz/);
+  assert.doesNotMatch(prompt, /only the injected local skill/i);
+});
+
 test('createProviderServiceRunner uses fallback only before execution starts', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   const sessionExecutorCalls = [];
@@ -184,6 +201,58 @@ test('createProviderServiceRunner uses fallback only before execution starts', a
   assert.equal(result.runtimeId, 'runtime-fallback');
   assert.equal(sessionExecutorCalls.length, 1);
   assert.deepEqual(sessionExecutorCalls[0].skills, ['weather.oracle']);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner injects ordered provider skills and execution reminder', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+  await bindingStore.write({
+    version: 1,
+    bindings: [
+      binding('binding-primary', 'alice', 'runtime-primary', 'primary'),
+    ],
+  });
+  await fs.mkdir(path.join(systemHomeDir, '.codex', 'skills', 'metabot-post-buzz'), { recursive: true });
+  await fs.writeFile(path.join(systemHomeDir, '.codex', 'skills', 'metabot-post-buzz', 'SKILL.md'), '# Post Buzz\n', 'utf8');
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'Forecast posted to buzz.',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({
+    providerSkills: ['weather.oracle', 'metabot-post-buzz'],
+    executionReminder: 'Query weather first. Post the final forecast only after weather is known.',
+  }));
+
+  assert.equal(result.state, 'completed');
+  assert.deepEqual(calls[0].skills, ['weather.oracle', 'metabot-post-buzz']);
+  assert.equal(
+    calls[0].skillSourcePaths['weather.oracle'],
+    path.join(systemHomeDir, '.codex', 'skills', 'weather.oracle'),
+  );
+  assert.equal(
+    calls[0].skillSourcePaths['metabot-post-buzz'],
+    path.join(systemHomeDir, '.codex', 'skills', 'metabot-post-buzz'),
+  );
+  assert.match(calls[0].systemPrompt, /Query weather first/);
+  assert.doesNotMatch(calls[0].systemPrompt, /only the injected local skill/i);
+  assert.deepEqual(result.metadata.providerSkills, ['weather.oracle', 'metabot-post-buzz']);
   await cleanupProfileHome(homeDir);
 });
 

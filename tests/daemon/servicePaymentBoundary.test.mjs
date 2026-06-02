@@ -90,16 +90,21 @@ function createIdentity(chatPublicKey) {
 }
 
 function createService(overrides = {}) {
+  const providerSkill = overrides.providerSkill ?? 'metabot-weather-oracle';
   return {
     id: overrides.currentPinId ?? 'chain-service-pin-1',
     sourceServicePinId: overrides.currentPinId ?? 'chain-service-pin-1',
     currentPinId: overrides.currentPinId ?? 'chain-service-pin-1',
     creatorMetabotId: 2,
     providerGlobalMetaId: overrides.providerGlobalMetaId ?? 'idq1provider',
-    providerSkill: 'metabot-weather-oracle',
+    providerSkill,
+    providerSkills: Array.isArray(overrides.providerSkills) && overrides.providerSkills.length > 0
+      ? overrides.providerSkills
+      : [providerSkill],
     serviceName: 'weather-oracle',
     displayName: 'Weather Oracle',
     description: 'Returns tomorrow weather.',
+    executionReminder: overrides.executionReminder ?? '',
     serviceIcon: null,
     price: overrides.price ?? '0.00001',
     currency: overrides.currency ?? 'SPACE',
@@ -134,6 +139,7 @@ function createRuntime(overrides = {}) {
 }
 
 async function prepareProviderRuntimeSkill(homeDir, skillName = 'metabot-weather-oracle') {
+  const skillNames = Array.isArray(skillName) && skillName.length > 0 ? skillName : [skillName];
   const runtimeStore = createLlmRuntimeStore(homeDir);
   const bindingStore = createLlmBindingStore(homeDir);
   await runtimeStore.write({
@@ -155,8 +161,10 @@ async function prepareProviderRuntimeSkill(homeDir, skillName = 'metabot-weather
       },
     ],
   });
-  await mkdir(path.join(homeDir, '.codex', 'skills', skillName), { recursive: true });
-  await writeFile(path.join(homeDir, '.codex', 'skills', skillName, 'SKILL.md'), '# Weather Oracle\n', 'utf8');
+  for (const name of skillNames) {
+    await mkdir(path.join(homeDir, '.codex', 'skills', name), { recursive: true });
+    await writeFile(path.join(homeDir, '.codex', 'skills', name, 'SKILL.md'), `# ${name}\n`, 'utf8');
+  }
 }
 
 async function writeProviderOutputFile(homeDir, fileName, contents = 'provider artifact bytes') {
@@ -307,7 +315,7 @@ async function createInboundProviderOrderHarness(t, options = {}) {
     services: [service],
     traces: [],
   });
-  await prepareProviderRuntimeSkill(homeDir, service.providerSkill);
+  await prepareProviderRuntimeSkill(homeDir, service.providerSkills);
 
   const writes = [];
   const llmCalls = [];
@@ -2556,10 +2564,16 @@ test('private chat local A2A store failure does not mask successful chain broadc
 test('inbound provider ORDER executes through runner and sends delivery plus rating request once', async (t) => {
   const orderTxid = 'a'.repeat(64);
   const paymentTxid = 'b'.repeat(64);
+  const providerSkills = ['metabot-weather-oracle', 'metabot-post-buzz'];
+  const executionReminder = 'Check weather first, then post the concise forecast to buzz.';
   const protocolReplyCalls = [];
   const customAcknowledgement = 'Weather Oracle here: I have your Shanghai forecast order and will read the sky now.';
   const customRatingRequest = 'The forecast is delivered in my Weather Oracle voice; rate it if it helped.';
   const harness = await createInboundProviderOrderHarness(t, {
+    service: {
+      providerSkills,
+      executionReminder,
+    },
     rawTxs: {
       [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
     },
@@ -2593,7 +2607,12 @@ test('inbound provider ORDER executes through runner and sends delivery plus rat
   assert.equal(second.data.duplicate, true);
   assert.equal(harness.llmCalls.length, 1);
   assert.deepEqual(harness.fetchRawTxCalls, [paymentTxid]);
-  assert.deepEqual(harness.llmCalls[0].skills, [harness.service.providerSkill]);
+  assert.deepEqual(harness.llmCalls[0].skills, providerSkills);
+  assert.equal(
+    harness.llmCalls[0].skillSourcePaths['metabot-post-buzz'],
+    path.join(harness.homeDir, '.codex', 'skills', 'metabot-post-buzz'),
+  );
+  assert.match(harness.llmCalls[0].systemPrompt, /Check weather first/);
 
   const simplemsgWrites = harness.writes.filter((entry) => entry.path === '/protocols/simplemsg');
   assert.equal(simplemsgWrites.length, 3);
