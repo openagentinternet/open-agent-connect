@@ -52,6 +52,7 @@ test('seller order state list includes every Phase 5 lifecycle state', () => {
 
 test('createSellerOrderRecord stores required provider, service, order, payment, trace, and runtime fields', () => {
   const record = createSellerOrderRecord(createBaseInput({
+    serviceOrderPinId: 'skill-service-order-pin-1',
     llmSessionId: 'llm-session-1',
     runtimeId: 'runtime-codex',
     runtimeProvider: 'codex',
@@ -66,6 +67,7 @@ test('createSellerOrderRecord stores required provider, service, order, payment,
   assert.equal(record.currentServicePinId, 'service-pin-1');
   assert.equal(record.providerSkill, 'metabot-weather-oracle');
   assert.equal(record.orderMessageId, 'order-message-pin-1');
+  assert.equal(record.serviceOrderPinId, 'skill-service-order-pin-1');
   assert.equal(record.paymentTxid, 'b'.repeat(64));
   assert.equal(record.traceId, 'trace-provider-1');
   assert.equal(record.a2aSessionId, 'a2a-order-session-1');

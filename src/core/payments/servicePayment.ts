@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { LocalIdentitySecrets, SecretStore } from '../secrets/secretStore';
 import { executeTransfer } from '../signing/localMnemonicSigner';
 import type { ChainAdapterRegistry } from '../chain/adapters/types';
@@ -11,6 +11,9 @@ export interface A2AOrderPaymentResult {
   paymentCurrency: string;
   settlementKind: 'native' | 'free';
   orderReference?: string | null;
+  serviceOrderPinId?: string | null;
+  serviceOrderTxid?: string | null;
+  serviceOrderTxids?: string[];
   totalCost?: number | null;
   network?: string | null;
 }
@@ -62,10 +65,6 @@ function normalizeAmount(value: unknown): string {
     throw new Error('service_payment_invalid_amount: Service payment amount must be a non-negative number.');
   }
   return amount;
-}
-
-function buildFreeOrderReference(): string {
-  return randomBytes(32).toString('hex');
 }
 
 function decimalAmountToSatoshis(value: string): number {
@@ -165,7 +164,7 @@ export async function executeServiceOrderPayment(
       paymentAmount: amount,
       paymentCurrency: currency === 'MVC' ? 'SPACE' : currency,
       settlementKind: 'native',
-      orderReference: buildFreeOrderReference(),
+      orderReference: null,
       totalCost: 0,
       network: resolvePaymentChain(currency),
     };

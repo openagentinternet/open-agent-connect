@@ -79,7 +79,13 @@ import {
   type MyServicesProfileInput,
 } from '../core/services/myServices';
 import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
-import { validateServicePublishProviderSkill } from '../core/services/servicePublishValidation';
+import { validateServicePublishProviderSkills } from '../core/services/servicePublishValidation';
+import {
+  buildSkillServiceOrderPayload,
+  getPrimaryProviderSkill,
+  normalizeProviderSkillList,
+  selectProviderSkillSource,
+} from '../core/services/skillServiceProtocol';
 import { createProviderServiceRunner } from '../core/a2a/provider/providerServiceRunner';
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
 import {
@@ -107,7 +113,10 @@ import {
 } from '../core/orders/serviceRefundSettlement';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
-import { refreshRatingDetailCacheFromChain } from '../core/ratings/ratingDetailSync';
+import {
+  findRatingDetailByServicePayment,
+  refreshRatingDetailCacheFromChain,
+} from '../core/ratings/ratingDetailSync';
 import { planRemoteCall } from '../core/delegation/remoteCall';
 import { buildSessionTrace } from '../core/chat/sessionTrace';
 import type { SessionTraceProviderRuntimeInput, SessionTraceRecord } from '../core/chat/sessionTrace';
@@ -1436,6 +1445,11 @@ function summarizeService(record: ReturnType<typeof buildPublishedService>['reco
     providerGlobalMetaId: record.providerGlobalMetaId,
     providerAddress: record.paymentAddress,
     providerSkill: record.providerSkill,
+    providerSkills: Array.isArray(record.providerSkills) ? record.providerSkills : [record.providerSkill].filter(Boolean),
+    paymentTiming: record.paymentTiming,
+    settlementKind: record.settlementKind,
+    executionReminder: record.executionReminder,
+    metadata: record.metadata,
     serviceName: record.serviceName,
     displayName: record.displayName,
     description: record.description,
@@ -2411,6 +2425,10 @@ function readExecuteServiceRequest(rawInput: Record<string, unknown>) {
   const buyer = readObject(rawInput.buyer) ?? {};
   const request = readObject(rawInput.request) ?? {};
   const payment = readObject(rawInput.payment) ?? {};
+  const serviceOrderPinId = normalizeText(payment.serviceOrderPinId) || normalizeText(payment.orderReference);
+  const serviceOrderTxids = Array.isArray(payment.serviceOrderTxids)
+    ? payment.serviceOrderTxids.map((entry) => normalizeText(entry)).filter(Boolean)
+    : [];
   return {
     traceId: normalizeText(rawInput.traceId),
     externalConversationId: normalizeText(rawInput.externalConversationId),
@@ -2434,7 +2452,10 @@ function readExecuteServiceRequest(rawInput: Record<string, unknown>) {
       settlementKind: normalizeText(payment.settlementKind) || null,
       mrc20Ticker: normalizeText(payment.mrc20Ticker) || null,
       mrc20Id: normalizeText(payment.mrc20Id) || null,
-      orderReference: normalizeText(payment.orderReference) || null,
+      orderReference: normalizeText(payment.orderReference) || serviceOrderPinId || null,
+      serviceOrderPinId: serviceOrderPinId || null,
+      serviceOrderTxid: normalizeText(payment.serviceOrderTxid) || serviceOrderTxids[0] || null,
+      serviceOrderTxids,
     },
   };
 }
@@ -2823,6 +2844,9 @@ async function executeRemoteServiceCall(input: {
           paymentCurrency: input.payment.paymentCurrency,
           settlementKind: input.payment.settlementKind,
           orderReference: input.payment.orderReference || null,
+          serviceOrderPinId: input.payment.serviceOrderPinId || null,
+          serviceOrderTxid: input.payment.serviceOrderTxid || null,
+          serviceOrderTxids: input.payment.serviceOrderTxids || [],
         },
         request: input.request,
       }),
@@ -3180,6 +3204,9 @@ function extractRatingPinIdFromText(value: unknown): string | null {
 
 function stripRatingReceiptText(value: unknown): string {
   return stripOrderProtocolBubblePrefix(normalizeText(value))
+    .split(/\r?\n/u)
+    .filter((line) => !/^\s*order\s+pin\s+id\s*[:：=]/iu.test(line))
+    .join('\n')
     .replace(/\n+\s*我的评分已记录在链上[\s\S]*$/u, '')
     .trim();
 }
@@ -3230,9 +3257,11 @@ function transcriptItemMatchesTraceOrder(
       : '')
     || '';
   const paymentTxid = normalizeText(trace.order?.paymentTxid);
+  const serviceOrderPinId = normalizeText(trace.order?.serviceOrderPinId)
+    || normalizeText(trace.order?.orderReference);
   const servicePinId = normalizeText(trace.order?.serviceId)
     || normalizeText(trace.a2a?.servicePinId);
-  if (!orderTxid && !paymentTxid && !servicePinId) {
+  if (!orderTxid && !serviceOrderPinId && !paymentTxid && !servicePinId) {
     return true;
   }
 
@@ -3249,6 +3278,12 @@ function transcriptItemMatchesTraceOrder(
     || normalizeChainTxid(needsRating?.orderTxid)
     || normalizeChainTxid(orderEnd?.orderTxid)
     || normalizeChainTxid(status?.orderTxid);
+  const itemServiceOrderPinId = normalizeText(metadata.serviceOrderPinId)
+    || normalizeText(metadata.orderPinId)
+    || normalizeText(delivery?.serviceOrderPinId)
+    || normalizeText(needsRating?.orderPinId)
+    || normalizeText(orderEnd?.orderPinId)
+    || normalizeText(status?.orderPinId);
   const itemPaymentTxid = normalizeText(metadata.paymentTxid)
     || normalizeText(delivery?.paymentTxid)
     || readTranscriptNestedMetadataValue(item, 'deliveryPayload', 'paymentTxid');
@@ -3257,7 +3292,8 @@ function transcriptItemMatchesTraceOrder(
     || readTranscriptNestedMetadataValue(item, 'deliveryPayload', 'servicePinId');
 
   return Boolean(
-    (orderTxid && itemOrderTxid === orderTxid)
+    (serviceOrderPinId && itemServiceOrderPinId === serviceOrderPinId)
+    || (orderTxid && itemOrderTxid === orderTxid)
     || (paymentTxid && itemPaymentTxid === paymentTxid)
     || (!orderTxid && !paymentTxid && servicePinId && itemServicePinId === servicePinId)
   );
@@ -3626,6 +3662,11 @@ function projectPrivateHistorySimpleMessageToTranscript(input: {
   const parsedPaymentTxid = normalizeText(input.paymentTxid)
     || normalizeText(delivery?.paymentTxid)
     || (protocolTag === 'ORDER' ? extractOrderLineValue(rawContent, 'txid') : '');
+  const parsedServiceOrderPinId = normalizeText(delivery?.serviceOrderPinId)
+    || normalizeText(needsRating?.orderPinId)
+    || normalizeText(orderEnd?.orderPinId)
+    || normalizeText(status?.orderPinId)
+    || (protocolTag === 'ORDER' ? extractOrderLineValue(rawContent, 'order pin id') : '');
   const parsedServicePinId = normalizeText(input.servicePinId)
     || normalizeText(delivery?.servicePinId)
     || (protocolTag === 'ORDER' ? (
@@ -3647,6 +3688,8 @@ function projectPrivateHistorySimpleMessageToTranscript(input: {
     chain: normalizeText(input.message.chain) || null,
     rawContent,
     orderTxid: parsedOrderTxid || null,
+    serviceOrderPinId: parsedServiceOrderPinId || null,
+    orderPinId: parsedServiceOrderPinId || null,
     paymentTxid: parsedPaymentTxid || null,
     servicePinId: parsedServicePinId || null,
     fromGlobalMetaId: input.message.fromGlobalMetaId,
@@ -3691,11 +3734,13 @@ function projectPrivateHistorySimpleMessageToTranscript(input: {
     type = 'needs_rating';
     content = normalizeText(needsRating?.content) || content;
     metadata.needsRating = true;
+    metadata.orderPinId = parsedServiceOrderPinId || null;
   } else if (protocolTag === 'ORDER_END') {
     type = 'order_end';
     content = normalizeText(orderEnd?.content) || content;
     const endReason = normalizeText(orderEnd?.reason);
     metadata.endReason = normalizeText(orderEnd?.reason) || null;
+    metadata.orderPinId = parsedServiceOrderPinId || null;
     metadata.orderEnd = true;
     metadata.endState = isRemoteFailureReason(orderEnd?.reason) ? 'remote_failed' : 'completed';
     if (endReason.toLowerCase() === 'rated') {
@@ -3856,13 +3901,16 @@ async function buildTraceInspectorPayload(input: {
     chainApiBaseUrl: input.chainApiBaseUrl,
   });
   const serviceId = normalizeText(input.trace.order?.serviceId);
+  const serviceOrderPinId = normalizeText(input.trace.order?.serviceOrderPinId)
+    || normalizeText(input.trace.order?.orderReference);
   const servicePaidTx = normalizeText(input.trace.order?.paymentTxid)
     || normalizeText(input.trace.order?.orderReference);
-  const ratingDetail = serviceId && servicePaidTx
-    ? ratingSnapshot.ratingDetails.find((entry) => (
-        normalizeText(entry.serviceId) === serviceId
-        && normalizeText(entry.servicePaidTx) === servicePaidTx
-      )) ?? null
+  const ratingDetail = serviceId && (serviceOrderPinId || servicePaidTx)
+    ? findRatingDetailByServicePayment(ratingSnapshot.ratingDetails, {
+        serviceId,
+        serviceOrderPinId,
+        servicePaidTx,
+      })
     : null;
   const ratingClosure = extractTraceRatingClosure({
     trace: input.trace,
@@ -5325,6 +5373,10 @@ async function persistCallerCompletedReplyConversationBestEffort(input: {
         : '')
       || null;
     const paymentTxid = normalizeText(input.trace.order?.paymentTxid) || null;
+    const serviceOrderPinId = normalizeText(input.trace.order?.serviceOrderPinId)
+      || normalizeText(input.trace.order?.orderReference)
+      || normalizeText(input.reply.ratingRequestOrderPinId)
+      || null;
     const servicePinId = normalizeText(input.session.servicePinId)
       || normalizeText(input.trace.a2a?.servicePinId)
       || normalizeText(input.trace.order?.serviceId)
@@ -5378,6 +5430,7 @@ async function persistCallerCompletedReplyConversationBestEffort(input: {
         chain: 'mvc',
         orderTxid,
         paymentTxid,
+        serviceOrderPinId,
         timestamp: deliveredAt,
         raw: input.reply.rawMessage,
       },
@@ -5386,6 +5439,7 @@ async function persistCallerCompletedReplyConversationBestEffort(input: {
         state: ratingRequestText ? 'rating_pending' : 'completed',
         orderTxid,
         paymentTxid,
+        serviceOrderPinId,
         servicePinId,
         serviceName,
         outputType,
@@ -5424,13 +5478,14 @@ async function persistCallerCompletedReplyConversationBestEffort(input: {
       message: {
         messageId: ratingMessageId,
         direction: 'incoming',
-        content: buildNeedsRatingMessage(orderTxid || '', ratingRequestText),
+        content: buildNeedsRatingMessage(orderTxid || '', ratingRequestText, serviceOrderPinId),
         pinId: ratingChainRefs.pinId,
         txid: ratingChainRefs.txid,
         txids: ratingChainRefs.txids,
         chain: 'mvc',
         orderTxid,
         paymentTxid,
+        serviceOrderPinId,
         replyPinId: chainRefs.pinId,
         timestamp: ratingRequestedAt,
         raw: ratingRaw,
@@ -5440,6 +5495,7 @@ async function persistCallerCompletedReplyConversationBestEffort(input: {
         state: 'rating_pending',
         orderTxid,
         paymentTxid,
+        serviceOrderPinId,
         servicePinId,
         serviceName,
         outputType,
@@ -6585,10 +6641,30 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const serviceName = normalizeText(rawInput.serviceName);
     const displayName = normalizeText(rawInput.displayName);
     const description = normalizeText(rawInput.description);
-    const providerSkill = normalizeText(rawInput.providerSkill);
-    const price = normalizeText(rawInput.price);
-    const currency = normalizeText(rawInput.currency);
+    const providerSkills = normalizeProviderSkillList(selectProviderSkillSource({
+      providerSkills: rawInput.providerSkills,
+      providerSkill: rawInput.providerSkill,
+      fallback: selectProviderSkillSource({
+        providerSkills: currentService?.providerSkills,
+        providerSkill: currentService?.providerSkill,
+      }),
+    }));
+    const providerSkill = getPrimaryProviderSkill(providerSkills) ?? '';
+    const paymentTiming = normalizeText(rawInput.paymentTiming).toLowerCase()
+      || normalizeText(currentService?.paymentTiming)
+      || '';
+    const settlementKind = normalizeText(rawInput.settlementKind).toLowerCase()
+      || normalizeText(currentService?.settlementKind).toLowerCase()
+      || '';
+    const price = normalizeText(rawInput.price) || (paymentTiming === 'free' ? '0' : '');
+    const currency = normalizeText(rawInput.currency) || (paymentTiming === 'free' ? 'SPACE' : '');
     const outputType = normalizeText(rawInput.outputType);
+    const executionReminder = hasOwnField(rawInput, 'executionReminder')
+      ? normalizeText(rawInput.executionReminder)
+      : normalizeText(currentService?.executionReminder);
+    const metadata = hasOwnField(rawInput, 'metadata')
+      ? normalizeText(rawInput.metadata)
+      : normalizeText(currentService?.metadata);
     const serviceIconUri = rawInput.removeServiceIcon === true
       ? null
       : normalizeText(rawInput.serviceIconUri)
@@ -6624,8 +6700,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
         displayName,
         description,
         providerSkill,
+        providerSkills,
         price,
         currency,
+        paymentTiming,
+        settlementKind,
+        executionReminder,
+        metadata,
         outputType,
         serviceIconUri,
         serviceIconDataUrl,
@@ -6873,13 +6954,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const serviceId = normalizeText(trace.order?.serviceId);
     const servicePrice = normalizeText(trace.order?.paymentAmount);
     const serviceCurrency = normalizeText(trace.order?.paymentCurrency);
+    const serviceOrderPinId = normalizeText(trace.order?.serviceOrderPinId)
+      || normalizeText(trace.order?.orderReference);
     const servicePaidTx = normalizeText(trace.order?.paymentTxid)
       || normalizeText(trace.order?.orderReference);
     const serverBot = normalizeText(trace.session.peerGlobalMetaId ?? trace.a2a?.providerGlobalMetaId);
-    if (!serviceId || !servicePrice || !serviceCurrency || !servicePaidTx || !serverBot) {
+    if (!serviceId || !servicePrice || !serviceCurrency || (!serviceOrderPinId && !servicePaidTx) || !serverBot) {
       return commandFailed(
         'service_rating_trace_incomplete',
-        'Trace is missing service or payment metadata required for skill-service-rate.'
+        'Trace is missing service or order metadata required for skill-service-rate.'
       );
     }
 
@@ -6900,9 +6983,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
         rate: String(existingClosure.ratingValue ?? request.rate),
         comment: existingClosure.ratingComment ?? request.comment,
         serviceId,
+        serviceOrderPinId: serviceOrderPinId || null,
         servicePaidTx,
         serverBot,
         serviceSkill: normalizeText(trace.order?.serviceName),
+        serviceSkills: normalizeProviderSkillList(trace.order?.providerSkills),
         ratingMessageSent: existingClosure.ratingMessageSent ?? false,
         ratingMessagePinId: existingClosure.ratingMessagePinId,
         ratingMessageError: existingClosure.ratingMessageError,
@@ -6934,11 +7019,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
       ?? matchedService?.serviceName
       ?? trace.order?.serviceName
     );
+    const serviceSkills = normalizeProviderSkillList(
+      Array.isArray(trace.order?.providerSkills) && trace.order.providerSkills.length > 0
+        ? trace.order.providerSkills
+        : matchedService?.providerSkills
+          ?? serviceSkill
+    );
     const payload = {
       serviceID: serviceId,
+      ...(serviceOrderPinId ? { serviceOrderPinId } : {}),
       servicePrice,
       serviceCurrency,
       servicePaidTx,
+      serviceSkills,
       serviceSkill: serviceSkill || normalizeText(trace.order?.serviceName),
       serverBot,
       rate: String(request.rate),
@@ -6973,8 +7066,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
       || '';
     const combinedBody = buildServiceRatingFollowupMessage(request.comment);
     const combinedMessage = orderTxid
-      ? buildOrderEndMessage(orderTxid, 'rated', combinedBody)
-      : buildOrderEndMessage('', 'rated', combinedBody);
+      ? buildOrderEndMessage(orderTxid, 'rated', combinedBody, serviceOrderPinId)
+      : buildOrderEndMessage('', 'rated', combinedBody, serviceOrderPinId);
 
     let ratingMessageSent = false;
     let ratingMessagePinId: string | null = null;
@@ -7051,6 +7144,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           chain: request.network ?? 'mvc',
           orderTxid: orderTxid || normalizeText(trace.order?.orderTxid) || null,
           paymentTxid: servicePaidTx,
+          serviceOrderPinId: serviceOrderPinId || null,
           timestamp: Date.now(),
           raw: {
             ratingPinId: ratingWrite.pinId ?? null,
@@ -7061,6 +7155,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           state: 'completed',
           orderTxid: orderTxid || normalizeText(trace.order?.orderTxid) || null,
           paymentTxid: servicePaidTx,
+          serviceOrderPinId: serviceOrderPinId || null,
           servicePinId: serviceId,
           serviceName: normalizeText(trace.order?.serviceName) || null,
           outputType: null,
@@ -7113,6 +7208,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             protocolTag: ratingMessageSent ? 'ORDER_END' : null,
             orderTxid: orderTxid || normalizeText(trace.order?.orderTxid) || null,
             paymentTxid: servicePaidTx,
+            serviceOrderPinId: serviceOrderPinId || null,
             ratingPinId: ratingWrite.pinId ?? null,
             ratingMessagePinId,
             ratingMessageError,
@@ -7137,9 +7233,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
       rate: String(request.rate),
       comment: request.comment,
       serviceId,
+      serviceOrderPinId: serviceOrderPinId || null,
       servicePaidTx,
       serverBot,
       serviceSkill: payload.serviceSkill,
+      serviceSkills,
       ratingMessageSent,
       ratingMessagePinId,
       ratingMessageError,
@@ -7225,10 +7323,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
     traces: SessionTraceRecord[];
     providerGlobalMetaId: string;
     orderTxid?: string | null;
+    serviceOrderPinId?: string | null;
     paymentTxid?: string | null;
   }): SessionTraceRecord | null {
     const providerGlobalMetaId = normalizeText(input.providerGlobalMetaId);
     const orderTxid = normalizeOrderProtocolReference(input.orderTxid);
+    const serviceOrderPinId = normalizeText(input.serviceOrderPinId);
     const paymentTxid = normalizeText(input.paymentTxid);
     return input.traces.find((trace) => {
       if (normalizeText(trace.order?.role) !== 'buyer') {
@@ -7246,6 +7346,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
           : '')
         || '';
       const tracePaymentTxid = normalizeText(trace.order?.paymentTxid);
+      const traceServiceOrderPinId = normalizeText(trace.order?.serviceOrderPinId)
+        || normalizeText(trace.order?.orderReference);
+      if (serviceOrderPinId) {
+        return traceServiceOrderPinId === serviceOrderPinId;
+      }
       return Boolean(
         (orderTxid && traceOrderTxid === orderTxid)
         || (paymentTxid && tracePaymentTxid === paymentTxid)
@@ -7312,6 +7417,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
       runtimeProvider: normalizeText(metadata.runtimeProvider) || normalizeText(runtime.provider) || null,
       sessionId: normalizeText(resultRecord.sessionId) || normalizeText(metadata.sessionId) || null,
       providerSkill: normalizeText(metadata.providerSkill) || normalizeText(providerSkill) || null,
+      providerSkills: normalizeProviderSkillList(
+        Array.isArray(metadata.providerSkills) && metadata.providerSkills.length > 0
+          ? metadata.providerSkills
+          : normalizeText(metadata.providerSkill) || normalizeText(providerSkill)
+      ),
       fallbackSelected,
     };
   }
@@ -7326,6 +7436,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     orderTxid: string;
     orderPinId?: string | null;
     orderReference?: string | null;
+    serviceOrderPinId?: string | null;
     paymentTxid?: string | null;
     paymentCommitTxid?: string | null;
     paymentAmount: string;
@@ -7360,7 +7471,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const paymentTxid = normalizeText(inputOrder.paymentTxid);
     const orderTxid = normalizeText(inputOrder.orderTxid);
     const orderReference = normalizeText(inputOrder.orderReference);
-    const stableOrderKey = paymentTxid || orderTxid || orderReference || inputOrder.traceId;
+    const serviceOrderPinId = normalizeText(inputOrder.serviceOrderPinId) || orderReference;
+    const stableOrderKey = serviceOrderPinId || orderReference || paymentTxid || orderTxid || inputOrder.traceId;
     const createdAt = inputOrder.receivedAt
       ?? inputOrder.session.createdAt
       ?? inputOrder.taskRun.createdAt
@@ -7389,6 +7501,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       orderPinId: inputOrder.orderPinId || null,
       orderTxid: orderTxid || null,
       orderReference: orderReference || null,
+      serviceOrderPinId: serviceOrderPinId || null,
       paymentTxid: paymentTxid || null,
       paymentCommitTxid: inputOrder.paymentCommitTxid || null,
       paymentAmount: inputOrder.paymentAmount,
@@ -7942,6 +8055,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     paymentTxid?: string | null;
     paymentCommitTxid?: string | null;
     orderReference?: string | null;
+    serviceOrderPinId?: string | null;
     paymentCurrency: string;
     paymentAmount: string;
     paymentChain?: string | null;
@@ -7981,6 +8095,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         paymentTxid: inputFailure.paymentTxid || null,
         paymentCommitTxid: inputFailure.paymentCommitTxid || null,
         orderReference: inputFailure.orderReference || null,
+        serviceOrderPinId: inputFailure.serviceOrderPinId || inputFailure.orderReference || null,
         paymentCurrency: inputFailure.paymentCurrency,
         paymentAmount: inputFailure.paymentAmount,
         paymentChain: inputFailure.paymentChain || null,
@@ -7988,6 +8103,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         mrc20Ticker: inputFailure.mrc20Ticker || null,
         mrc20Id: inputFailure.mrc20Id || null,
         providerSkill: inputFailure.service.providerSkill,
+        providerSkills: inputFailure.service.providerSkills,
       },
       a2a: {
         sessionId: inputFailure.session.sessionId,
@@ -8002,6 +8118,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       providerRuntime: inputFailure.providerRuntime ?? {
         providerSkill: inputFailure.service.providerSkill,
+        providerSkills: inputFailure.service.providerSkills,
       },
     });
     const artifacts = await exportSessionArtifacts({
@@ -8781,12 +8898,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const runnerResult = await providerRunner.execute({
       servicePinId: service.currentPinId,
       providerSkill: service.providerSkill,
+      providerSkills: service.providerSkills,
       providerGlobalMetaId: state.identity.globalMetaId,
       userTask,
       taskContext: '',
       serviceName: service.serviceName,
       displayName: service.displayName,
       outputType: service.outputType,
+      executionReminder: service.executionReminder,
       metadata: {
         traceId,
         orderTxid,
@@ -9109,7 +9228,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       responseText,
       stage: 'rating_request',
     });
-    const needsRatingMessage = buildNeedsRatingMessage(orderTxid, ratingRequestText);
+    const needsRatingMessage = buildNeedsRatingMessage(orderTxid, ratingRequestText, orderReference);
     let deliveryWrite: { pinId: string | null; txids: string[] };
     try {
       deliveryWrite = await sendProviderOrderPrivateMessage({
@@ -9401,9 +9520,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
         orderTxids: [orderTxid],
         paymentTxid: paymentTxid || null,
         orderReference: orderReference || null,
+        serviceOrderPinId: orderReference || null,
         paymentCurrency: amountLine.currency || service.currency,
         paymentAmount: amountLine.amount || service.price,
         providerSkill: service.providerSkill,
+        providerSkills: service.providerSkills,
       },
       a2a: {
         sessionId: received.session.sessionId,
@@ -9574,6 +9695,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       traces: runtimeState.traces,
       providerGlobalMetaId: inputMessage.fromGlobalMetaId,
       orderTxid: delivery?.orderTxid ?? needsRating?.orderTxid ?? null,
+      serviceOrderPinId: normalizeText(delivery?.serviceOrderPinId) || normalizeText(needsRating?.orderPinId),
       paymentTxid: delivery?.paymentTxid ?? null,
     });
     if (!trace) {
@@ -13347,9 +13469,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return draftInput.error;
         }
         const draft = draftInput.draft!;
-        const providerSkillValidation = await validateServicePublishProviderSkill({
+        const providerSkillValidation = await validateServicePublishProviderSkills({
           metaBotSlug: resolved.target.profileSlug,
-          providerSkill: draft.providerSkill,
+          providerSkills: selectProviderSkillSource({
+            providerSkills: rawInput.providerSkills,
+            providerSkill: rawInput.providerSkill,
+            fallback: draft.providerSkills,
+          }),
           runtimeStore: resolved.target.profileHomeDir === path.resolve(input.homeDir)
             ? llmRuntimeStore
             : createLlmRuntimeStore(resolved.target.profileHomeDir),
@@ -13625,10 +13751,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const serviceName = normalizeText(rawInput.serviceName);
         const displayName = normalizeText(rawInput.displayName);
         const description = normalizeText(rawInput.description);
-        const providerSkill = normalizeText(rawInput.providerSkill);
-        const price = normalizeText(rawInput.price);
-        const currency = normalizeText(rawInput.currency);
+        const providerSkills = normalizeProviderSkillList(selectProviderSkillSource({
+          providerSkills: rawInput.providerSkills,
+          providerSkill: rawInput.providerSkill,
+        }));
+        const providerSkill = getPrimaryProviderSkill(providerSkills) ?? '';
+        const paymentTiming = normalizeText(rawInput.paymentTiming).toLowerCase();
+        const settlementKind = normalizeText(rawInput.settlementKind).toLowerCase();
+        const price = normalizeText(rawInput.price) || (paymentTiming === 'free' ? '0' : '');
+        const currency = normalizeText(rawInput.currency) || (paymentTiming === 'free' ? 'SPACE' : '');
         const outputType = normalizeText(rawInput.outputType);
+        const executionReminder = normalizeText(rawInput.executionReminder);
+        const metadata = normalizeText(rawInput.metadata);
         const serviceIconUri = normalizeText(rawInput.serviceIconUri) || null;
         const serviceIconDataUrl = normalizeText(rawInput.serviceIconDataUrl) || null;
         const skillDocument = '';
@@ -13648,9 +13782,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const metaBotSlug = selectedProfile?.slug ?? path.basename(profileHomeDir);
-        const validation = await validateServicePublishProviderSkill({
+        const validation = await validateServicePublishProviderSkills({
           metaBotSlug,
-          providerSkill,
+          providerSkills: selectProviderSkillSource({
+            providerSkills: rawInput.providerSkills,
+            providerSkill: rawInput.providerSkill,
+          }),
           runtimeStore: profileHomeDir === input.homeDir ? llmRuntimeStore : createLlmRuntimeStore(profileHomeDir),
           bindingStore: profileHomeDir === input.homeDir ? llmBindingStore : createLlmBindingStore(profileHomeDir),
           systemHomeDir: profileRuntimeStateStore.paths.systemHomeDir,
@@ -13674,8 +13811,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
               displayName,
               description,
               providerSkill,
+              providerSkills,
               price,
               currency,
+              paymentTiming,
+              settlementKind,
+              executionReminder,
+              metadata,
               outputType,
               serviceIconUri,
               serviceIconDataUrl,
@@ -13873,6 +14015,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
         let orderPayment: A2AOrderPaymentResult | null = null;
         let paymentTxid = '';
         let orderReference = '';
+        let serviceOrderPinId: string | null = null;
+        let serviceOrderTxid: string | null = null;
+        let serviceOrderTxids: string[] = [];
+        const applyOrderPayment = (payment: A2AOrderPaymentResult) => {
+          orderPayment = payment;
+          paymentTxid = orderPayment.paymentTxid || '';
+          orderReference = orderPayment.orderReference || '';
+          serviceOrderPinId = orderPayment.serviceOrderPinId || orderReference || null;
+          serviceOrderTxid = orderPayment.serviceOrderTxid || null;
+          serviceOrderTxids = Array.isArray(orderPayment.serviceOrderTxids)
+            ? orderPayment.serviceOrderTxids.map((entry) => normalizeText(entry)).filter(Boolean)
+            : [];
+        };
         const paymentMempoolRetryDelays = DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS;
         const createOrderPayment = async (): Promise<
           { ok: true; payment: A2AOrderPaymentResult }
@@ -13901,6 +14056,77 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 await sleep(delayMs);
               }
             }
+          }
+        };
+        const publishServiceOrderRecord = async (payment: A2AOrderPaymentResult): Promise<
+          { ok: true; payment: A2AOrderPaymentResult }
+          | { ok: false; failure: MetabotCommandResult<never> }
+        > => {
+          const payload = buildSkillServiceOrderPayload({
+            servicePinId: plan.service.servicePinId,
+            paymentTxid: payment.paymentTxid,
+            price: payment.paymentAmount || plan.payment.amount,
+            currency: payment.paymentCurrency || plan.payment.currency,
+            settlementKind: payment.settlementKind,
+            metadata: '',
+          });
+          if (!payload.servicePinId) {
+            return {
+              ok: false,
+              failure: commandFailed(
+                'skill_service_order_service_missing',
+                'Skill service order requires a servicePinId.'
+              ),
+            };
+          }
+          try {
+            const write = await writePinRetryingMempoolConflict({
+              signer,
+              retryDelaysMs: DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS,
+              request: {
+                operation: 'create',
+                path: '/protocols/skill-service-order',
+                encryption: '0',
+                version: '1.0.0',
+                contentType: 'application/json',
+                payload: JSON.stringify(payload),
+                encoding: 'utf-8',
+                network: 'mvc',
+              },
+            });
+            const pinId = normalizeText(write.pinId);
+            if (!pinId) {
+              return {
+                ok: false,
+                failure: commandFailed(
+                  'skill_service_order_pin_missing',
+                  'Skill service order write did not return a pin id.'
+                ),
+              };
+            }
+            const txids = Array.isArray(write.txids)
+              ? write.txids.map((entry) => normalizeText(entry)).filter(Boolean)
+              : [];
+            const txid = (
+              normalizeOrderProtocolReference(txids[0])
+              || normalizeOrderProtocolReference(pinId)
+              || txids[0]
+              || null
+            );
+            return {
+              ok: true,
+              payment: {
+                ...payment,
+                orderReference: pinId,
+                serviceOrderPinId: pinId,
+                serviceOrderTxid: txid,
+                serviceOrderTxids: txids,
+              },
+            };
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const code = readErrorCode(error, 'skill_service_order_publish_failed');
+            return { ok: false, failure: commandFailed(code, message) };
           }
         };
 
@@ -13949,6 +14175,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 orderTxid,
                 paymentTxid: paymentTxid || null,
                 orderReference: orderReference || null,
+                serviceOrderPinId,
+                serviceOrderTxid,
+                serviceOrderTxids,
                 rawContent: callerChainContent || null,
               },
             },
@@ -13971,6 +14200,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 orderTxids,
                 paymentTxid: paymentTxid || null,
                 orderReference: orderReference || null,
+                serviceOrderPinId,
+                serviceOrderTxid,
+                serviceOrderTxids,
                 failureCode: failure?.code || null,
               },
             },
@@ -14000,10 +14232,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
               paymentTxid,
               paymentCommitTxid: orderPayment.paymentCommitTxid,
               orderReference,
+              serviceOrderPinId,
               paymentCurrency: orderPayment.paymentCurrency,
               paymentAmount: orderPayment.paymentAmount,
               paymentChain: orderPayment.paymentChain,
               settlementKind: orderPayment.settlementKind,
+              providerSkill: normalizeText(service.providerSkill),
+              providerSkills: normalizeProviderSkillList(service.providerSkills),
               outputType: normalizeText(service.outputType),
               requestText: request.userTask,
             },
@@ -14054,6 +14289,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
                     orderTxids,
                     paymentTxid: paymentTxid || null,
                     orderReference: orderReference || null,
+                    serviceOrderPinId,
+                    serviceOrderTxid,
+                    serviceOrderTxids,
                     failureCode: failure?.code || null,
                   },
                 },
@@ -14070,9 +14308,28 @@ export function createDefaultMetabotDaemonHandlers(input: {
           if (!paymentResult.ok) {
             return paymentResult.failure;
           }
-          orderPayment = paymentResult.payment;
-          paymentTxid = orderPayment.paymentTxid || '';
-          orderReference = orderPayment.orderReference || '';
+          applyOrderPayment(paymentResult.payment);
+          const serviceOrderResult = await publishServiceOrderRecord(paymentResult.payment);
+          if (!serviceOrderResult.ok) {
+            const persisted = await persistCallerTraceSnapshot({
+              code: normalizeText(serviceOrderResult.failure.code) || 'skill_service_order_publish_failed',
+              message: normalizeText(serviceOrderResult.failure.message) || 'Skill service order publish failed.',
+            });
+            await ensureBuyerRefundRequestForTrace({
+              trace: persisted.trace,
+              failureReason: normalizeText(serviceOrderResult.failure.code) || 'skill_service_order_publish_failed',
+              failedAt: Date.now(),
+              evidencePinIds: uniqueNonEmpty([
+                normalizeText(serviceOrderPinId),
+                normalizeText(serviceOrderTxid),
+                normalizeText(orderPinId),
+                normalizeText(orderTxid),
+              ]),
+            });
+            return serviceOrderResult.failure;
+          }
+          const preparedOrderPayment = serviceOrderResult.payment;
+          applyOrderPayment(preparedOrderPayment);
 
           const execution = await executeRemoteServiceCall({
             providerDaemonBaseUrl: request.providerDaemonBaseUrl,
@@ -14081,7 +14338,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             servicePinId: plan.service.servicePinId,
             providerGlobalMetaId: plan.service.providerGlobalMetaId,
             buyer: state.identity,
-            payment: orderPayment,
+            payment: preparedOrderPayment,
             request: {
               userTask: request.userTask,
               taskContext: request.taskContext,
@@ -14146,9 +14403,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
           if (!paymentResult.ok) {
             return paymentResult.failure;
           }
-          orderPayment = paymentResult.payment;
-          paymentTxid = orderPayment.paymentTxid || '';
-          orderReference = orderPayment.orderReference || '';
+          applyOrderPayment(paymentResult.payment);
+          const serviceOrderResult = await publishServiceOrderRecord(paymentResult.payment);
+          if (!serviceOrderResult.ok) {
+            await persistCallerTraceSnapshot({
+              code: normalizeText(serviceOrderResult.failure.code) || 'skill_service_order_publish_failed',
+              message: normalizeText(serviceOrderResult.failure.message) || 'Skill service order publish failed.',
+            });
+            return serviceOrderResult.failure;
+          }
+          const preparedOrderPayment = serviceOrderResult.payment;
+          applyOrderPayment(preparedOrderPayment);
 
           const callerGeneratedOrderText = await generateCallerOrderProtocolText({
             textGenerator: callerOrderTextGenerator,
@@ -14159,8 +14424,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
             rawRequest: request.rawRequest || request.userTask,
             userTask: request.userTask,
             taskContext: request.taskContext,
-            paymentAmount: orderPayment.paymentAmount,
-            paymentCurrency: orderPayment.paymentCurrency,
+            paymentAmount: preparedOrderPayment.paymentAmount,
+            paymentCurrency: preparedOrderPayment.paymentCurrency,
             paymentTxid,
             orderReference,
             outputType: normalizeText(service.outputType),
@@ -14174,12 +14439,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
             providerSkill: normalizeText(service.providerSkill) || normalizeText(service.serviceName),
             servicePinId: plan.service.servicePinId,
             paymentTxid,
-            paymentCommitTxid: orderPayment.paymentCommitTxid,
-            paymentChain: orderPayment.paymentChain,
-            settlementKind: orderPayment.settlementKind,
+            paymentCommitTxid: preparedOrderPayment.paymentCommitTxid,
+            paymentChain: preparedOrderPayment.paymentChain,
+            settlementKind: preparedOrderPayment.settlementKind,
             orderReference,
-            price: orderPayment.paymentAmount,
-            currency: orderPayment.paymentCurrency,
+            price: preparedOrderPayment.paymentAmount,
+            currency: preparedOrderPayment.paymentCurrency,
             outputType: normalizeText(service.outputType),
           });
           orderPayloadForTrace = orderPayload;
@@ -14343,6 +14608,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 confirmation: plan.confirmation,
                 paymentTxid: paymentTxid || null,
                 orderReference: orderReference || null,
+                serviceOrderPinId,
+                serviceOrderTxid,
+                serviceOrderTxids,
                 orderPinId,
                 orderTxid,
                 orderTxids,
@@ -14377,6 +14645,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           confirmation: plan.confirmation,
           paymentTxid: paymentTxid || null,
           orderReference: orderReference || null,
+          serviceOrderPinId,
+          serviceOrderTxid,
+          serviceOrderTxids,
           orderPinId,
           orderTxid,
           orderTxids,
@@ -14490,10 +14761,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
               publicStatus: receivedStatus.status,
               paymentTxid: execution.payment.paymentTxid,
               orderReference: execution.payment.orderReference,
+              serviceOrderPinId: execution.payment.serviceOrderPinId,
             },
           },
         ]);
-        const orderMessageId = execution.payment.paymentTxid || execution.payment.orderReference || traceId;
+        const orderMessageId = (
+          execution.payment.serviceOrderPinId
+          || execution.payment.orderReference
+          || execution.payment.paymentTxid
+          || traceId
+        );
         await upsertProviderSellerOrderRecord({
           state,
           service,
@@ -14503,6 +14780,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           orderMessageId,
           orderTxid: '',
           orderReference: execution.payment.orderReference,
+          serviceOrderPinId: execution.payment.serviceOrderPinId,
           paymentTxid: execution.payment.paymentTxid,
           paymentAmount: execution.payment.paymentAmount || service.price,
           paymentCurrency: execution.payment.paymentCurrency || service.currency,
@@ -14529,6 +14807,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           orderMessageId,
           orderTxid: '',
           orderReference: execution.payment.orderReference,
+          serviceOrderPinId: execution.payment.serviceOrderPinId,
           paymentTxid: execution.payment.paymentTxid,
           paymentAmount: execution.payment.paymentAmount || service.price,
           paymentCurrency: execution.payment.paymentCurrency || service.currency,
@@ -14568,12 +14847,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const runnerResult = await providerRunner.execute({
           servicePinId: service.currentPinId,
           providerSkill: service.providerSkill,
+          providerSkills: service.providerSkills,
           providerGlobalMetaId: execution.providerGlobalMetaId,
           userTask: execution.request.userTask,
           taskContext: execution.request.taskContext,
           serviceName: service.serviceName,
           displayName: service.displayName,
           outputType: service.outputType,
+          executionReminder: service.executionReminder,
           metadata: {
             traceId,
             externalConversationId: execution.externalConversationId || null,
@@ -14640,6 +14921,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               paymentTxid: execution.payment.paymentTxid,
               paymentCommitTxid: execution.payment.paymentCommitTxid,
               orderReference: execution.payment.orderReference,
+              serviceOrderPinId: execution.payment.serviceOrderPinId,
               paymentCurrency: execution.payment.paymentCurrency || service.currency,
               paymentAmount: execution.payment.paymentAmount || service.price,
               paymentChain: execution.payment.paymentChain,
@@ -14647,6 +14929,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               mrc20Ticker: execution.payment.mrc20Ticker,
               mrc20Id: execution.payment.mrc20Id,
               providerSkill: service.providerSkill,
+              providerSkills: service.providerSkills,
             },
             a2a: {
               sessionId: received.session.sessionId,
@@ -14705,6 +14988,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             orderMessageId,
             orderTxid: '',
             orderReference: execution.payment.orderReference,
+            serviceOrderPinId: execution.payment.serviceOrderPinId,
             paymentTxid: execution.payment.paymentTxid,
             paymentAmount: execution.payment.paymentAmount || service.price,
             paymentCurrency: execution.payment.paymentCurrency || service.currency,
@@ -14822,6 +15106,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 paymentTxid: execution.payment.paymentTxid,
                 paymentCommitTxid: execution.payment.paymentCommitTxid,
                 orderReference: execution.payment.orderReference,
+                serviceOrderPinId: execution.payment.serviceOrderPinId,
                 paymentCurrency: execution.payment.paymentCurrency || service.currency,
                 paymentAmount: execution.payment.paymentAmount || service.price,
                 paymentChain: execution.payment.paymentChain,
@@ -14829,6 +15114,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 mrc20Ticker: execution.payment.mrc20Ticker,
                 mrc20Id: execution.payment.mrc20Id,
                 providerSkill: service.providerSkill,
+                providerSkills: service.providerSkills,
               },
               a2a: {
                 sessionId: failedApplied.session.sessionId,
@@ -14887,6 +15173,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               orderMessageId,
               orderTxid: '',
               orderReference: execution.payment.orderReference,
+              serviceOrderPinId: execution.payment.serviceOrderPinId,
               paymentTxid: execution.payment.paymentTxid,
               paymentAmount: execution.payment.paymentAmount || service.price,
               paymentCurrency: execution.payment.paymentCurrency || service.currency,
@@ -14990,12 +15277,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
             paymentTxid: execution.payment.paymentTxid,
             paymentCommitTxid: execution.payment.paymentCommitTxid,
             orderReference: execution.payment.orderReference,
+            serviceOrderPinId: execution.payment.serviceOrderPinId,
             paymentCurrency: execution.payment.paymentCurrency || service.currency,
             paymentAmount: execution.payment.paymentAmount || service.price,
             paymentChain: execution.payment.paymentChain,
             settlementKind: execution.payment.settlementKind,
             mrc20Ticker: execution.payment.mrc20Ticker,
             mrc20Id: execution.payment.mrc20Id,
+            providerSkill: service.providerSkill,
+            providerSkills: service.providerSkills,
           },
           a2a: {
             sessionId: received.session.sessionId,
@@ -15029,6 +15319,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   buyerGlobalMetaId: execution.buyer.globalMetaId || null,
                   paymentTxid: execution.payment.paymentTxid,
                   orderReference: execution.payment.orderReference,
+                  serviceOrderPinId: execution.payment.serviceOrderPinId,
                 },
               },
               {
@@ -15059,6 +15350,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           orderMessageId,
           orderTxid: '',
           orderReference: execution.payment.orderReference,
+          serviceOrderPinId: execution.payment.serviceOrderPinId,
           paymentTxid: execution.payment.paymentTxid,
           paymentAmount: execution.payment.paymentAmount || service.price,
           paymentCurrency: execution.payment.paymentCurrency || service.currency,
@@ -15096,6 +15388,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           providerGlobalMetaId: state.identity.globalMetaId,
           servicePinId: service.currentPinId,
           serviceName: service.displayName,
+          serviceOrderPinId: execution.payment.serviceOrderPinId,
+          serviceOrderTxid: execution.payment.serviceOrderTxid,
+          serviceOrderTxids: execution.payment.serviceOrderTxids,
           traceJsonPath: artifacts.traceJsonPath,
           traceMarkdownPath: artifacts.traceMarkdownPath,
           transcriptMarkdownPath: artifacts.transcriptMarkdownPath,

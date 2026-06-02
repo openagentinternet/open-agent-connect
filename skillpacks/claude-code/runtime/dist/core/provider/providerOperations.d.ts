@@ -6,6 +6,7 @@ export interface SellerOrderSelector {
 }
 export interface ProviderSellerOrderInspection {
     orderId: string;
+    serviceOrderPinId: string | null;
     service: {
         name: string | null;
         servicePinId: string | null;

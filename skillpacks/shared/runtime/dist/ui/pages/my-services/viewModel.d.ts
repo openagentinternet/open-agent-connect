@@ -20,9 +20,12 @@ export interface MyServiceListEntryViewModel {
     description: string;
     iconUri: string;
     iconLabel: string;
+    providerSkills: string[];
     skillLabel: string;
     outputTypeLabel: string;
     priceLabel: string;
+    paymentTiming: string;
+    paymentTimingLabel: string;
     creatorLabel: string;
     updatedAtLabel: string;
     metrics: MyServiceMetricViewModel[];
@@ -53,10 +56,14 @@ export interface MyServiceEditFormViewModel {
     displayName: string;
     serviceName: string;
     description: string;
+    providerSkills: string[];
     providerSkill: string;
     outputType: string;
     price: string;
     currency: string;
+    paymentTiming: string;
+    settlementKind: string;
+    executionReminder: string;
     serviceIconUri: string;
     serviceIconPreviewUri: string;
 }

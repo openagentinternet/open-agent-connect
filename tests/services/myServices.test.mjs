@@ -103,6 +103,10 @@ test('buildMyServiceSummaries aggregates services across local profiles with cha
   const profileAService = createService({
     currentPinId: 'service-modify-pin',
     chainPinIds: ['service-create-pin', 'service-modify-pin'],
+    providerSkills: ['tarot-reading', 'metabot-post-buzz'],
+    paymentTiming: 'free',
+    executionReminder: 'Use tarot-reading first; post a buzz only when the buyer asks.',
+    metadata: '{"category":"tarot"}',
     updatedAt: 1_775_000_030_000,
   });
   const profileBService = createService({
@@ -221,6 +225,11 @@ test('buildMyServiceSummaries aggregates services across local profiles with cha
   assert.equal(page.items[0].id, 'service-modify-pin');
   assert.equal(page.items[0].creatorMetabotSlug, 'seller');
   assert.deepEqual(page.items[0].chainPinIds, ['service-create-pin', 'service-modify-pin']);
+  assert.deepEqual(page.items[0].providerSkills, ['tarot-reading', 'metabot-post-buzz']);
+  assert.equal(page.items[0].providerSkill, 'tarot-reading');
+  assert.equal(page.items[0].paymentTiming, 'free');
+  assert.equal(page.items[0].executionReminder, 'Use tarot-reading first; post a buzz only when the buyer asks.');
+  assert.equal(page.items[0].metadata, '{"category":"tarot"}');
   assert.equal(page.items[0].successCount, 1);
   assert.equal(page.items[0].refundCount, 1);
   assert.equal(page.items[0].grossRevenue, '0.0001');
@@ -263,6 +272,7 @@ test('buildMyServiceOrderDetails returns closed orders for every service version
           }),
           createOrder({
             id: 'refunded-order',
+            serviceOrderPinId: 'skill-service-order-refunded-pin',
             state: 'refunded',
             servicePinId: 'service-modify-pin',
             currentServicePinId: 'service-modify-pin',
@@ -282,12 +292,26 @@ test('buildMyServiceOrderDetails returns closed orders for every service version
           {
             pinId: 'rating-refunded',
             serviceId: 'service-modify-pin',
-            servicePaidTx: 'payment-refunded',
+            serviceOrderPinId: 'skill-service-order-refunded-pin',
+            servicePaidTx: 'legacy-payment-value-that-differs',
+            serviceSkills: ['tarot-rws'],
             rate: 5,
             comment: 'Handled fairly.',
             raterGlobalMetaId: 'idq1buyer',
             raterMetaId: null,
             createdAt: 1_775_000_061_000,
+          },
+          {
+            pinId: 'rating-payment-fallback-different-order',
+            serviceId: 'service-modify-pin',
+            serviceOrderPinId: 'different-skill-service-order-pin',
+            servicePaidTx: 'payment-refunded',
+            serviceSkills: ['tarot-rws'],
+            rate: 1,
+            comment: 'This newer legacy payment match must not override the order pin match.',
+            raterGlobalMetaId: 'idq1buyer',
+            raterMetaId: null,
+            createdAt: 1_775_000_062_000,
           },
         ],
       },
@@ -298,10 +322,69 @@ test('buildMyServiceOrderDetails returns closed orders for every service version
 
   assert.equal(detailPage.total, 2);
   assert.equal(detailPage.items[0].id, 'refunded-order');
+  assert.equal(detailPage.items[0].serviceOrderPinId, 'skill-service-order-refunded-pin');
+  assert.equal(detailPage.items[0].paymentTxid, 'payment-refunded');
   assert.equal(detailPage.items[0].rating.rate, 5);
   assert.equal(detailPage.items[0].rating.comment, 'Handled fairly.');
   assert.equal(detailPage.items[1].id, 'old-version-order');
+  assert.equal(detailPage.items[1].serviceOrderPinId, null);
+  assert.equal(detailPage.items[1].paymentTxid, 'payment-old');
   assert.equal(detailPage.items[1].rating, null);
+});
+
+test('buildMyServiceOrderDetails ignores payment fallback ratings from another service order', () => {
+  const detailPage = buildMyServiceOrderDetails({
+    serviceId: 'service-modify-pin',
+    profiles: [
+      {
+        slug: 'seller',
+        name: 'Seller Bot',
+        homeDir: '/tmp/seller',
+        identity: {
+          metabotId: 7,
+          name: 'Seller Bot',
+          globalMetaId: 'idq1seller',
+          mvcAddress: '1seller',
+          addresses: { mvc: '1seller' },
+        },
+        services: [
+          createService({
+            currentPinId: 'service-modify-pin',
+            chainPinIds: ['service-create-pin', 'service-modify-pin'],
+          }),
+        ],
+        sellerOrders: [
+          createOrder({
+            id: 'current-v11-order',
+            serviceOrderPinId: 'skill-service-order-current-pin',
+            servicePinId: 'service-modify-pin',
+            currentServicePinId: 'service-modify-pin',
+            paymentTxid: 'payment-shared',
+          }),
+        ],
+        ratingDetails: [
+          {
+            pinId: 'rating-for-different-v11-order',
+            serviceId: 'service-modify-pin',
+            serviceOrderPinId: 'skill-service-order-other-pin',
+            servicePaidTx: 'payment-shared',
+            serviceSkills: ['tarot-rws'],
+            rate: 1,
+            comment: 'This rating belongs to a different service order.',
+            raterGlobalMetaId: 'idq1buyer',
+            raterMetaId: null,
+            createdAt: 1_775_000_062_000,
+          },
+        ],
+      },
+    ],
+    page: 1,
+    pageSize: 10,
+  });
+
+  assert.equal(detailPage.total, 1);
+  assert.equal(detailPage.items[0].id, 'current-v11-order');
+  assert.equal(detailPage.items[0].rating, null);
 });
 
 test('mutation helpers build MetaID writes and local modify/revoke records', () => {

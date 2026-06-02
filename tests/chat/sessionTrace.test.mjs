@@ -139,6 +139,43 @@ test('buildSessionTrace preserves nullable refund order fields as null', () => {
   assert.equal(trace.order.updatedAt, null);
 });
 
+test('buildSessionTrace preserves service order pin and provider skill list metadata', () => {
+  const homeDir = createProfileHome('metabot-chat-trace-');
+  const paths = resolveMetabotPaths(homeDir);
+  const trace = buildSessionTrace({
+    traceId: 'trace-v1-1-order-fields',
+    channel: 'a2a',
+    session: {
+      id: 'session-v1-1-order-fields',
+      title: 'Weather Buzz',
+      type: 'a2a',
+    },
+    order: {
+      id: 'order-v1-1-order-fields',
+      role: 'seller',
+      serviceId: 'service-weather-buzz',
+      serviceName: 'Weather Buzz',
+      serviceOrderPinId: 'skill-service-order-pin-1',
+      orderReference: 'skill-service-order-pin-1',
+      paymentTxid: 'd'.repeat(64),
+      paymentCurrency: 'SPACE',
+      paymentAmount: '0.0001',
+      providerSkill: 'weather.oracle',
+      providerSkills: ['weather.oracle', 'metabot-post-buzz'],
+    },
+    providerRuntime: {
+      providerSkill: 'weather.oracle',
+      providerSkills: ['weather.oracle', 'metabot-post-buzz'],
+    },
+    exportRoot: paths.exportsRoot,
+  });
+
+  assert.equal(trace.order.serviceOrderPinId, 'skill-service-order-pin-1');
+  assert.deepEqual(trace.order.providerSkills, ['weather.oracle', 'metabot-post-buzz']);
+  assert.equal(trace.providerRuntime.providerSkill, 'weather.oracle');
+  assert.deepEqual(trace.providerRuntime.providerSkills, ['weather.oracle', 'metabot-post-buzz']);
+});
+
 test('exportSessionArtifacts writes transcript markdown under exports/chats', async () => {
   const homeDir = createProfileHome('metabot-chat-trace-');
   const paths = resolveMetabotPaths(homeDir);

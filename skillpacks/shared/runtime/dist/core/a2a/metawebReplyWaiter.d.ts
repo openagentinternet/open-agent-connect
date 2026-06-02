@@ -17,6 +17,7 @@ export type AwaitMetaWebServiceReplyResult = {
     rawMessage: Record<string, unknown> | null;
     artifacts: A2ADeliveryArtifact[];
     ratingRequestText?: string | null;
+    ratingRequestOrderPinId?: string | null;
     ratingRequestPinId?: string | null;
     ratingRequestObservedAt?: number | null;
     ratingRawMessage?: Record<string, unknown> | null;

@@ -25,6 +25,7 @@
       "displayName": "Weather Oracle",
       "description": "Provides tomorrow weather predictions.",
       "providerSkill": "metabot-weather-oracle",
+      "providerSkills": ["metabot-weather-oracle"],
       "price": "0.0001",
       "currency": "SPACE",
       "outputType": "text",

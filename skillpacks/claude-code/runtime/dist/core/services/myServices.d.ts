@@ -31,7 +31,11 @@ export interface MyServiceSummary {
     paymentAddress: string;
     serviceIcon: string | null;
     providerSkill: string | null;
+    providerSkills: string[];
+    paymentTiming: string;
     outputType: string | null;
+    executionReminder: string;
+    metadata: string;
     creatorMetabotId: number | null;
     creatorMetabotSlug: string;
     creatorMetabotName: string;
@@ -59,6 +63,7 @@ export interface MyServiceOrderDetail {
     id: string;
     status: string;
     traceId: string;
+    serviceOrderPinId: string | null;
     paymentTxid: string | null;
     orderMessageTxid: string | null;
     paymentAmount: string;
@@ -136,7 +141,7 @@ export declare function buildMyServicePayload(input: {
     draft: PublishedServiceDraft;
     providerGlobalMetaId: string;
     paymentAddress: string;
-}): Record<string, string | null>;
+}): Record<string, unknown>;
 export declare function buildMyServiceModifyRecord(input: {
     service: PublishedServiceRecord;
     currentPinId: string;

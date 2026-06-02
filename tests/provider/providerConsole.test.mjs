@@ -138,6 +138,7 @@ test('buildProviderConsoleSnapshot summarizes published services and seller-side
         serviceName: 'Tarot Reading',
         providerSkill: 'tarot-rws',
         orderMessageId: 'order-message-pin-1',
+        serviceOrderPinId: 'skill-service-order-runtime-pin-1',
         orderPinId: 'order-message-pin-1',
         orderTxid: 'd'.repeat(64),
         paymentTxid: 'e'.repeat(64),
@@ -161,6 +162,8 @@ test('buildProviderConsoleSnapshot summarizes published services and seller-side
   assert.equal(snapshot.services[0].available, true);
   assert.equal(snapshot.recentOrders.length, 2);
   assert.equal(snapshot.recentOrders[0].traceId, 'trace-provider-runtime');
+  assert.equal(snapshot.recentOrders[0].serviceOrderPinId, 'skill-service-order-runtime-pin-1');
+  assert.equal(snapshot.recentOrders[0].paymentTxid, 'e'.repeat(64));
   assert.equal(snapshot.recentOrders[0].state, 'in_progress');
   assert.equal(snapshot.recentOrders[0].llmSessionId, 'llm-session-runtime');
   assert.equal(snapshot.recentOrders[0].runtimeId, 'runtime-codex');
@@ -210,6 +213,40 @@ test('buildProviderConsoleSnapshot joins a matching on-chain rating onto the sel
     ratingPinId: 'rating-pin-1',
     ratingCreatedAt: 1_775_000_020_000,
   });
+});
+
+test('buildProviderConsoleSnapshot joins ratings by service order id before legacy payment tx', () => {
+  const snapshot = buildProviderConsoleSnapshot({
+    services: [createServiceRecord()],
+    traces: [
+      createSellerTrace({
+        order: {
+          ...createSellerTrace().order,
+          serviceOrderPinId: 'skill-service-order-rating-pin-1',
+          paymentTxid: 'payment-tx-that-should-not-match',
+        },
+      }),
+    ],
+    ratingDetails: [
+      {
+        pinId: 'rating-pin-by-order',
+        serviceId: 'service-pin-1',
+        serviceOrderPinId: 'skill-service-order-rating-pin-1',
+        servicePaidTx: 'legacy-payment-tx-that-differs',
+        serviceSkills: ['tarot-rws'],
+        rate: 5,
+        comment: 'Order id match.',
+        raterGlobalMetaId: 'idq1buyer',
+        raterMetaId: 'buyer-meta-id',
+        createdAt: 1_775_000_021_000,
+      },
+    ],
+  });
+
+  assert.equal(snapshot.recentOrders[0].serviceOrderPinId, 'skill-service-order-rating-pin-1');
+  assert.equal(snapshot.recentOrders[0].ratingStatus, 'rated_on_chain');
+  assert.equal(snapshot.recentOrders[0].ratingPinId, 'rating-pin-by-order');
+  assert.equal(snapshot.recentOrders[0].ratingValue, 5);
 });
 
 test('buildProviderConsoleSnapshot marks a rated seller order as follow-up unconfirmed when provider delivery was not confirmed', () => {

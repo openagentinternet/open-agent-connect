@@ -10,6 +10,7 @@ exports.buildMyServiceModifyRecord = buildMyServiceModifyRecord;
 exports.buildMyServiceRevokeRecord = buildMyServiceRevokeRecord;
 exports.resolveMyServicePaymentAddress = resolveMyServicePaymentAddress;
 const publishService_1 = require("./publishService");
+const skillServiceProtocol_1 = require("./skillServiceProtocol");
 const DECIMAL_SCALE = 8n;
 const DECIMAL_MULTIPLIER = 10n ** DECIMAL_SCALE;
 const CLOSED_ORDER_STATES = new Set(['completed', 'refunded']);
@@ -117,13 +118,25 @@ function sortOrdersDesc(left, right) {
         return updatedSort;
     return toSafeString(right.id).localeCompare(toSafeString(left.id));
 }
-function pickRatingDetail(ratings, paymentTxid, counterpartyGlobalMetaid) {
-    const normalizedPaymentTxid = toSafeString(paymentTxid);
-    if (!normalizedPaymentTxid)
+function pickRatingDetail(ratings, order, counterpartyGlobalMetaid) {
+    const serviceIds = [...new Set([
+            order.currentServicePinId,
+            order.servicePinId,
+        ].map(toSafeString).filter(Boolean))];
+    const serviceOrderPinId = toSafeString(order.serviceOrderPinId);
+    const paymentTxid = toSafeString(order.paymentTxid);
+    if (serviceIds.length === 0 || (!serviceOrderPinId && !paymentTxid))
         return null;
     const buyerGlobalMetaId = toSafeString(counterpartyGlobalMetaid);
-    const candidates = ratings
-        .filter((rating) => toSafeString(rating.servicePaidTx) === normalizedPaymentTxid)
+    const serviceRatings = ratings.filter((rating) => (serviceIds.includes(toSafeString(rating.serviceId))));
+    const orderPinCandidates = serviceOrderPinId
+        ? serviceRatings.filter((rating) => toSafeString(rating.serviceOrderPinId) === serviceOrderPinId)
+        : [];
+    const candidates = (orderPinCandidates.length > 0
+        ? orderPinCandidates
+        : serviceRatings.filter((rating) => (paymentTxid
+            && !toSafeString(rating.serviceOrderPinId)
+            && toSafeString(rating.servicePaidTx) === paymentTxid)))
         .sort((left, right) => toSafeNumber(right.createdAt) - toSafeNumber(left.createdAt));
     const selected = buyerGlobalMetaId
         ? candidates.find((rating) => toSafeString(rating.raterGlobalMetaId) === buyerGlobalMetaId) ?? candidates[0]
@@ -146,14 +159,14 @@ function buildRatingIndex(profile, servicePinIds) {
     return profile.ratingDetails.filter((rating) => servicePinIds.has(toSafeString(rating.serviceId)));
 }
 function buildClosedOrderRatings(ratings, orders) {
-    const seenPaymentTxids = new Set();
+    const seenOrderKeys = new Set();
     const matchedRatings = [];
     for (const order of orders) {
-        const paymentTxid = toSafeString(order.paymentTxid);
-        if (!paymentTxid || seenPaymentTxids.has(paymentTxid))
+        const orderKey = toSafeString(order.serviceOrderPinId) || toSafeString(order.paymentTxid);
+        if (!orderKey || seenOrderKeys.has(orderKey))
             continue;
-        seenPaymentTxids.add(paymentTxid);
-        const rating = pickRatingDetail(ratings, paymentTxid, order.buyerGlobalMetaId);
+        seenOrderKeys.add(orderKey);
+        const rating = pickRatingDetail(ratings, order, order.buyerGlobalMetaId);
         if (rating)
             matchedRatings.push(rating.rate);
     }
@@ -207,6 +220,16 @@ function buildMyServiceSummaries(input) {
                 : 0;
             const currentPinId = toSafeString(service.currentPinId) || toSafeString(service.id);
             const sourceServicePinId = toSafeString(service.sourceServicePinId) || currentPinId;
+            const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)((0, skillServiceProtocol_1.selectProviderSkillSource)({
+                providerSkills: service.providerSkills,
+                providerSkill: service.providerSkill,
+            }));
+            const paymentTerms = (0, skillServiceProtocol_1.resolveSkillServicePaymentTerms)({
+                price: service.price,
+                currency: service.currency,
+                paymentTiming: service.paymentTiming,
+                settlementKind: service.settlementKind,
+            });
             const creatorMetabotId = Number.isFinite(service.creatorMetabotId) && service.creatorMetabotId > 0
                 ? Math.trunc(service.creatorMetabotId)
                 : null;
@@ -238,8 +261,12 @@ function buildMyServiceSummaries(input) {
                 providerAddress: toSafeString(service.paymentAddress),
                 paymentAddress: toSafeString(service.paymentAddress),
                 serviceIcon: toSafeString(service.serviceIcon) || null,
-                providerSkill: toSafeString(service.providerSkill) || null,
+                providerSkill: (0, skillServiceProtocol_1.getPrimaryProviderSkill)(providerSkills) ?? null,
+                providerSkills,
+                paymentTiming: paymentTerms.paymentTiming,
                 outputType: toSafeString(service.outputType) || null,
+                executionReminder: toSafeString(service.executionReminder),
+                metadata: toSafeString(service.metadata),
                 creatorMetabotId,
                 creatorMetabotSlug: toSafeString(profile.slug),
                 creatorMetabotName: toSafeString(profile.name) || toSafeString(identity?.name),
@@ -282,6 +309,7 @@ function buildMyServiceOrderDetails(input) {
                 id: toSafeString(order.id),
                 status: toSafeString(order.state),
                 traceId: toSafeString(order.traceId),
+                serviceOrderPinId: toSafeString(order.serviceOrderPinId) || null,
                 paymentTxid: paymentTxid || null,
                 orderMessageTxid: toSafeString(order.orderTxid) || toSafeString(order.orderPinId) || null,
                 paymentAmount: toSafeString(order.paymentAmount),
@@ -295,7 +323,7 @@ function buildMyServiceOrderDetails(input) {
                 runtimeId: toSafeString(order.runtimeId) || null,
                 runtimeProvider: toSafeString(order.runtimeProvider) || null,
                 llmSessionId: toSafeString(order.llmSessionId) || null,
-                rating: pickRatingDetail(ratingDetails, paymentTxid, order.buyerGlobalMetaId),
+                rating: pickRatingDetail(ratingDetails, order, order.buyerGlobalMetaId),
             });
         }
     }
@@ -355,20 +383,30 @@ function buildMyServiceRevokeChainWrite(input) {
     };
 }
 function buildMyServicePayload(input) {
-    const settlement = (0, publishService_1.resolvePublishedServiceSettlement)(input.draft.currency);
+    const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)((0, skillServiceProtocol_1.selectProviderSkillSource)(input.draft));
+    const paymentTerms = (0, skillServiceProtocol_1.resolveSkillServicePaymentTerms)({
+        price: input.draft.price,
+        currency: input.draft.currency,
+        paymentTiming: input.draft.paymentTiming,
+        settlementKind: input.draft.settlementKind,
+    });
+    const settlement = (0, publishService_1.resolvePublishedServiceSettlement)(paymentTerms.currency);
     return {
         serviceName: toSafeString(input.draft.serviceName),
         displayName: toSafeString(input.draft.displayName),
         description: toSafeString(input.draft.description),
         serviceIcon: toSafeString(input.draft.serviceIconUri) || '',
         providerMetaBot: toSafeString(input.providerGlobalMetaId),
-        providerSkill: toSafeString(input.draft.providerSkill),
-        price: toSafeString(input.draft.price),
+        providerSkill: providerSkills,
+        price: paymentTerms.effectivePrice,
         currency: settlement.currency,
+        paymentTiming: paymentTerms.paymentTiming,
         paymentChain: settlement.paymentChain,
-        settlementKind: settlement.settlementKind,
+        settlementKind: paymentTerms.settlementKind,
         mrc20Ticker: settlement.mrc20Ticker,
         mrc20Id: settlement.mrc20Id,
+        executionReminder: toSafeString(input.draft.executionReminder),
+        metadata: toSafeString(input.draft.metadata),
         skillDocument: '',
         inputType: 'text',
         outputType: toSafeString(input.draft.outputType).toLowerCase() || 'text',
@@ -377,7 +415,14 @@ function buildMyServicePayload(input) {
     };
 }
 function buildMyServiceModifyRecord(input) {
-    const settlement = (0, publishService_1.resolvePublishedServiceSettlement)(input.draft.currency);
+    const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)((0, skillServiceProtocol_1.selectProviderSkillSource)(input.draft));
+    const paymentTerms = (0, skillServiceProtocol_1.resolveSkillServicePaymentTerms)({
+        price: input.draft.price,
+        currency: input.draft.currency,
+        paymentTiming: input.draft.paymentTiming,
+        settlementKind: input.draft.settlementKind,
+    });
+    const settlement = (0, publishService_1.resolvePublishedServiceSettlement)(paymentTerms.currency);
     const currentPinId = toSafeString(input.currentPinId) || toSafeString(input.service.currentPinId);
     const sourceServicePinId = toSafeString(input.service.sourceServicePinId) || toSafeString(input.service.currentPinId);
     return {
@@ -387,17 +432,21 @@ function buildMyServiceModifyRecord(input) {
         currentPinId,
         chainPinIds: [...new Set([...getServicePinIds(input.service), currentPinId].filter(Boolean))],
         providerGlobalMetaId: toSafeString(input.providerGlobalMetaId),
-        providerSkill: toSafeString(input.draft.providerSkill),
+        providerSkill: (0, skillServiceProtocol_1.getPrimaryProviderSkill)(providerSkills) ?? toSafeString(input.draft.providerSkill),
+        providerSkills,
         serviceName: toSafeString(input.draft.serviceName),
         displayName: toSafeString(input.draft.displayName) || toSafeString(input.draft.serviceName),
         description: toSafeString(input.draft.description),
         serviceIcon: toSafeString(input.draft.serviceIconUri) || null,
-        price: toSafeString(input.draft.price),
+        price: paymentTerms.effectivePrice,
         currency: settlement.currency,
+        paymentTiming: paymentTerms.paymentTiming,
         paymentChain: settlement.paymentChain,
-        settlementKind: settlement.settlementKind,
+        settlementKind: paymentTerms.settlementKind,
         mrc20Ticker: settlement.mrc20Ticker,
         mrc20Id: settlement.mrc20Id,
+        executionReminder: toSafeString(input.draft.executionReminder),
+        metadata: toSafeString(input.draft.metadata),
         skillDocument: '',
         inputType: 'text',
         outputType: toSafeString(input.draft.outputType).toLowerCase() || 'text',

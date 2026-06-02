@@ -2180,6 +2180,73 @@ test('projection derives completed state from NeedsRating messages written by th
   assert.equal(detail.order.serviceId, 'service-pin-1');
 });
 
+test('projection matches service-order protocol messages by serviceOrderPinId', async () => {
+  const { homeDir, profile } = await createProfileFixture();
+  const serviceOrderPinId = 'skill-service-order-projection-pin';
+  const serviceOrderSessionId = `a2a-order-${serviceOrderPinId}`;
+  const store = createA2AConversationStore({
+    homeDir,
+    local: {
+      profileSlug: 'alice',
+      globalMetaId: LOCAL_GLOBAL_META_ID,
+      name: 'Alice',
+      avatar: 'https://example.test/alice.png',
+    },
+    peer: {
+      globalMetaId: PEER_GLOBAL_META_ID,
+      name: 'Remote Bot',
+      avatar: 'https://example.test/remote.png',
+      chatPublicKey: 'remote-chat-public-key',
+    },
+  });
+
+  await store.upsertSession({
+    sessionId: PEER_SESSION_ID,
+    type: 'peer',
+    state: 'active',
+    createdAt: BASE_TIME,
+    updatedAt: BASE_TIME + 10,
+    latestMessageId: 'needs-rating-service-order-pin',
+  });
+  await store.upsertSession({
+    sessionId: serviceOrderSessionId,
+    type: 'service_order',
+    role: 'caller',
+    state: 'awaiting_delivery',
+    serviceOrderPinId,
+    servicePinId: 'service-pin-1',
+    serviceName: 'Weather Oracle',
+    outputType: 'markdown',
+    createdAt: BASE_TIME,
+    updatedAt: BASE_TIME + 10,
+  });
+  await store.appendMessages([
+    createMessage(20, {
+      messageId: 'needs-rating-service-order-pin',
+      direction: 'incoming',
+      kind: 'order_protocol',
+      protocolTag: 'NeedsRating',
+      serviceOrderPinId,
+      orderPinId: serviceOrderPinId,
+      content: `[NeedsRating] Please rate this service.\norder pin id: ${serviceOrderPinId}`,
+      pinId: 'needs-rating-service-order-pin',
+      txid: 'needs-rating-service-order-tx',
+      txids: ['needs-rating-service-order-tx'],
+      timestamp: BASE_TIME + 10,
+    }),
+  ]);
+
+  const detail = await getUnifiedA2ATraceSessionForProfile({
+    profile,
+    sessionId: serviceOrderSessionId,
+  });
+
+  assert.ok(detail);
+  assert.equal(detail.a2a.publicStatus, 'completed');
+  assert.equal(detail.ratingRequestText, 'Please rate this service.');
+  assert.equal(detail.order.serviceOrderPinId, serviceOrderPinId);
+});
+
 test('projection derives failed state from ORDER_END failure messages written by the real persistence path', async () => {
   const { homeDir, profile } = await createProfileFixture();
   const local = {

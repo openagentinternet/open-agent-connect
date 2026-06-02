@@ -142,7 +142,7 @@ function buildPublishPageViewModel(input) {
         availability = {
             canPublish: true,
             reasonCode: 'ready',
-            message: 'Ready to publish with the selected primary runtime skill.',
+            message: 'Ready to publish with selected primary runtime skills.',
         };
     }
     const runtimeSummary = errorCode

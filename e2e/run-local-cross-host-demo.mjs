@@ -232,6 +232,7 @@ async function publishWeatherOracle(homeDir) {
     displayName: 'Weather Oracle',
     description: 'Returns tomorrow weather from the local MetaBot runtime.',
     providerSkill: 'metabot-weather-oracle',
+    providerSkills: ['metabot-weather-oracle'],
     price: '0.00001',
     currency: 'SPACE',
     outputType: 'text',

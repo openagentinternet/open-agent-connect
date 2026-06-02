@@ -13,6 +13,27 @@ const platformRegistry_1 = require("../../platform/platformRegistry");
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
+function normalizeProviderSkillNames(order) {
+    const rawSkills = Array.isArray(order.providerSkills) && order.providerSkills.length > 0
+        ? order.providerSkills
+        : [order.providerSkill];
+    const seen = new Set();
+    const skills = [];
+    for (const rawSkill of rawSkills) {
+        const skill = normalizeText(rawSkill);
+        if (!skill) {
+            continue;
+        }
+        if (!(0, platformSkillCatalog_1.isSafeProviderSkillName)(skill)) {
+            return { skills: [], invalidSkill: skill };
+        }
+        if (!seen.has(skill)) {
+            seen.add(skill);
+            skills.push(skill);
+        }
+    }
+    return { skills, invalidSkill: null };
+}
 function sanitizeWorkspaceSegment(value, fallback) {
     const normalized = normalizeText(value)
         .replace(/[^a-zA-Z0-9._-]+/g, '-')
@@ -106,13 +127,25 @@ async function defaultCanStartRuntime(runtime) {
     }
 }
 function buildPaidOrderSystemPrompt(input) {
-    const providerSkill = normalizeText(input.providerSkill);
+    const normalizedProviderSkills = normalizeProviderSkillNames(input).skills;
+    const providerSkill = normalizedProviderSkills[0] ?? normalizeText(input.providerSkill);
+    const skillInstructions = normalizedProviderSkills.length > 1
+        ? [
+            `Allowed provider skills: ${normalizedProviderSkills.join(', ')}.`,
+            'Choose the allowed skills needed for the buyer request; not every allowed skill is required.',
+            'Do not use skills outside this injected provider skill list.',
+        ]
+        : [
+            `Required provider skill: ${providerSkill}.`,
+            `You must use only the injected local skill "${providerSkill}" to complete this paid order.`,
+        ];
+    const executionReminder = normalizeText(input.executionReminder);
     return [
         'You are the provider-side service executor for this paid service order, already paid and inbound.',
         `Service: ${normalizeText(input.serviceName) || normalizeText(input.displayName) || 'Service Order'}.`,
-        `Required provider skill: ${providerSkill}.`,
-        `You must use only the injected local skill "${providerSkill}" to complete this paid order.`,
+        ...skillInstructions,
         'Treat the selected skill as the local service implementation, even when the runtime and skill source came from different platforms.',
+        executionReminder ? `Execution reminder from service publisher: ${executionReminder}` : '',
         `Expected output type: ${normalizeText(input.outputType) || 'text'}.`,
         'The buyer has already selected and paid for this service. Do not call any remote service, run metabot services call, act as a buyer, or discover services.',
         'The final answer must contain only the deliverable the buyer requested.',
@@ -154,6 +187,9 @@ function withRuntimeMetadata(result, input) {
             runtimeProvider: input.runtime.provider,
             sessionId: sessionId || null,
             providerSkill: input.providerSkill,
+            providerSkills: Array.isArray(input.providerSkills) && input.providerSkills.length > 0
+                ? input.providerSkills
+                : [input.providerSkill],
             fallbackSelected: selection?.fallbackSelected ?? null,
             selection,
         },
@@ -171,7 +207,7 @@ function isRetryableProviderRuntimeFailure(code) {
         || code === 'provider_execution_timeout'
         || code === 'provider_execution_cancelled';
 }
-function buildSessionFailure(run, providerSkill) {
+function buildSessionFailure(run, providerSkill, providerSkills) {
     const { session, sessionId, runtime, selection } = run;
     if (session?.status === 'failed' || session?.status === 'cancelled' || session?.status === 'timeout') {
         const sessionError = session.error;
@@ -184,6 +220,7 @@ function buildSessionFailure(run, providerSkill) {
             result: createRuntimeFailedResult(code, normalizeText(sessionError) || 'Provider execution did not complete successfully.', {
                 runtime,
                 providerSkill,
+                providerSkills,
                 sessionId,
                 selection,
             }),
@@ -196,6 +233,7 @@ function buildSessionFailure(run, providerSkill) {
             result: createRuntimeFailedResult(code, 'The provider runtime did not produce a terminal session result before timeout.', {
                 runtime,
                 providerSkill,
+                providerSkills,
                 sessionId,
                 selection,
             }),
@@ -212,6 +250,7 @@ function buildSessionFailure(run, providerSkill) {
             result: createRuntimeFailedResult(code, session.result.error || 'Provider execution did not complete successfully.', {
                 runtime,
                 providerSkill,
+                providerSkills,
                 sessionId,
                 selection,
             }),
@@ -266,17 +305,19 @@ async function readRuntimeSelection(deps, runtime, providerSkill, fallbackSelect
             catch {
                 continue;
             }
+            const skill = {
+                skillName: providerSkill,
+                platformId: runtime.provider,
+                platformDisplayName: platform.displayName,
+                rootId: root.id,
+                rootKind: root.kind,
+                absolutePath: node_path_1.default.join(absolutePath, skillDir.name),
+                skillDocumentPath,
+            };
             return {
                 runtime,
-                skill: {
-                    skillName: providerSkill,
-                    platformId: runtime.provider,
-                    platformDisplayName: platform.displayName,
-                    rootId: root.id,
-                    rootKind: root.kind,
-                    absolutePath: node_path_1.default.join(absolutePath, skillDir.name),
-                    skillDocumentPath,
-                },
+                skill,
+                skills: [skill],
                 rootDiagnostics,
                 fallbackSelected,
             };
@@ -327,17 +368,19 @@ async function readPortableSkillSelection(deps, runtime, providerSkill, fallback
             const platformDisplayName = (0, platformRegistry_1.isPlatformId)(root.platformId)
                 ? (0, platformRegistry_1.getPlatformDefinition)(root.platformId).displayName
                 : 'Shared Agents';
+            const skill = {
+                skillName: providerSkill,
+                platformId: sourcePlatformId,
+                platformDisplayName,
+                rootId: root.id,
+                rootKind: root.kind,
+                absolutePath: node_path_1.default.join(absolutePath, providerSkill),
+                skillDocumentPath,
+            };
             return {
                 runtime,
-                skill: {
-                    skillName: providerSkill,
-                    platformId: sourcePlatformId,
-                    platformDisplayName,
-                    rootId: root.id,
-                    rootKind: root.kind,
-                    absolutePath: node_path_1.default.join(absolutePath, providerSkill),
-                    skillDocumentPath,
-                },
+                skill,
+                skills: [skill],
                 rootDiagnostics,
                 fallbackSelected,
             };
@@ -355,6 +398,29 @@ async function readPortableSkillSelection(deps, runtime, providerSkill, fallback
     }
     return null;
 }
+async function readProviderSkillsSelection(deps, runtime, providerSkills, fallbackSelected) {
+    if (providerSkills.length === 0) {
+        return null;
+    }
+    const skills = [];
+    const rootDiagnostics = [];
+    for (const providerSkill of providerSkills) {
+        const selection = await readRuntimeSelection(deps, runtime, providerSkill, fallbackSelected)
+            ?? await readPortableSkillSelection(deps, runtime, providerSkill, fallbackSelected);
+        if (!selection) {
+            return null;
+        }
+        skills.push(selection.skill);
+        rootDiagnostics.push(...selection.rootDiagnostics);
+    }
+    return {
+        runtime,
+        skill: skills[0],
+        skills,
+        rootDiagnostics,
+        fallbackSelected,
+    };
+}
 function isInjectableSkillRuntime(runtime) {
     return (0, platformRegistry_1.isPlatformId)(runtime.provider) && Boolean(normalizeText(runtime.binaryPath)) && runtime.health !== 'unavailable';
 }
@@ -365,14 +431,10 @@ async function canRunInjectedSkillRuntime(deps, runtime) {
     const canStartRuntime = deps.canStartRuntime ?? defaultCanStartRuntime;
     return canStartRuntime(runtime);
 }
-async function readFallbackSelection(deps, fallbackRuntime, providerSkill, sourceSelection) {
-    const fallbackSelection = await readRuntimeSelection(deps, fallbackRuntime, providerSkill, true);
+async function readFallbackSelection(deps, fallbackRuntime, providerSkills, sourceSelection) {
+    const fallbackSelection = await readProviderSkillsSelection(deps, fallbackRuntime, providerSkills, true);
     if (fallbackSelection) {
         return fallbackSelection;
-    }
-    const portableFallbackSelection = await readPortableSkillSelection(deps, fallbackRuntime, providerSkill, true);
-    if (portableFallbackSelection) {
-        return portableFallbackSelection;
     }
     if (!await canRunInjectedSkillRuntime(deps, fallbackRuntime)) {
         return null;
@@ -380,6 +442,7 @@ async function readFallbackSelection(deps, fallbackRuntime, providerSkill, sourc
     return {
         runtime: fallbackRuntime,
         skill: sourceSelection.skill,
+        skills: sourceSelection.skills,
         rootDiagnostics: sourceSelection.rootDiagnostics,
         fallbackSelected: true,
     };
@@ -425,12 +488,11 @@ async function resolveFallbackRuntimeCandidates(deps, primaryRuntime, configured
     }
     return candidates;
 }
-async function readFallbackSelectionCandidates(deps, candidates, providerSkill, sourceSelection) {
+async function readFallbackSelectionCandidates(deps, candidates, providerSkills, sourceSelection) {
     for (const candidate of candidates) {
         const selection = sourceSelection
-            ? await readFallbackSelection(deps, candidate, providerSkill, sourceSelection)
-            : await readRuntimeSelection(deps, candidate, providerSkill, true)
-                ?? await readPortableSkillSelection(deps, candidate, providerSkill, true);
+            ? await readFallbackSelection(deps, candidate, providerSkills, sourceSelection)
+            : await readProviderSkillsSelection(deps, candidate, providerSkills, true);
         if (selection) {
             return selection;
         }
@@ -442,9 +504,11 @@ function buildProviderServiceOrderPrompt(input) {
         serviceName: input.serviceName ?? '',
         displayName: input.displayName ?? '',
         providerSkill: input.providerSkill,
+        providerSkills: input.providerSkills,
         outputType: input.outputType ?? '',
         userTask: input.userTask,
         taskContext: input.taskContext,
+        executionReminder: input.executionReminder,
     });
 }
 function createProviderServiceRunner(input) {
@@ -452,34 +516,41 @@ function createProviderServiceRunner(input) {
     const pollIntervalMs = input.pollIntervalMs ?? 500;
     return {
         async execute(order) {
-            if (!(0, platformSkillCatalog_1.isSafeProviderSkillName)(order.providerSkill)) {
-                return (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)('invalid_provider_skill', 'Provider skill name is unsafe.');
+            const normalizedProviderSkillNames = normalizeProviderSkillNames(order);
+            if (normalizedProviderSkillNames.invalidSkill) {
+                return (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)('invalid_provider_skill', `Provider skill name is unsafe: ${normalizedProviderSkillNames.invalidSkill}`);
             }
+            const providerSkills = normalizedProviderSkillNames.skills;
+            if (providerSkills.length === 0) {
+                return (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)('invalid_provider_skill', 'Provider skill name is required.');
+            }
+            const providerSkill = providerSkills[0];
             const resolutionState = await readRuntimeResolutionState(input);
             const primaryRuntime = resolutionState.primaryRuntime;
-            const primarySelection = primaryRuntime ? await readRuntimeSelection(input, primaryRuntime, order.providerSkill, false) : null;
+            const primarySelection = primaryRuntime ? await readProviderSkillsSelection(input, primaryRuntime, providerSkills, false) : null;
             let runtime = primaryRuntime;
-            let selection = primarySelection
-                ?? (primaryRuntime ? await readPortableSkillSelection(input, primaryRuntime, order.providerSkill, false) : null);
+            let selection = primarySelection;
             if (!runtime || !selection) {
                 const fallbackCandidates = await resolveFallbackRuntimeCandidates(input, primaryRuntime, resolutionState.fallbackRuntime, resolutionState.runtimes);
-                selection = await readFallbackSelectionCandidates(input, fallbackCandidates, order.providerSkill, null);
+                selection = await readFallbackSelectionCandidates(input, fallbackCandidates, providerSkills, null);
                 runtime = selection?.runtime ?? null;
                 if (!runtime && fallbackCandidates.length === 0) {
                     return (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)('provider_runtime_unavailable', 'No primary or fallback runtime was available before provider execution started.');
                 }
                 if (!selection) {
-                    return (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)('provider_skill_missing', `providerSkill is not installed in any selected runtime skill root: ${order.providerSkill}`);
+                    return (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)('provider_skill_missing', `providerSkills are not installed in any selected runtime skill root: ${providerSkills.join(', ')}`);
                 }
             }
             const initialRuntime = selection.runtime;
             const systemPrompt = buildPaidOrderSystemPrompt({
                 serviceName: order.serviceName ?? '',
                 displayName: order.displayName ?? '',
-                providerSkill: order.providerSkill,
+                providerSkill,
+                providerSkills,
                 outputType: order.outputType ?? 'text',
                 userTask: order.userTask,
                 taskContext: order.taskContext,
+                executionReminder: order.executionReminder,
             });
             const runNonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
             let attemptIndex = 0;
@@ -488,16 +559,16 @@ function createProviderServiceRunner(input) {
                 attemptIndex += 1;
                 const executionCwd = await createProviderExecutionWorkspace(input, order, selectedRuntime, runNonce, attemptIndex);
                 const attemptWorkspaceCwd = await node_fs_1.promises.realpath(executionCwd);
+                const selectedSkills = selectedSelection.skills.length > 0 ? selectedSelection.skills : [selectedSelection.skill];
+                const skillSourcePaths = Object.fromEntries(selectedSkills.map((skill) => [skill.skillName, skill.absolutePath]));
                 const sessionId = await input.llmExecutor.execute({
                     runtimeId: selectedRuntime.id,
                     runtime: selectedRuntime,
                     prompt: buildPaidOrderUserPrompt(order),
                     systemPrompt,
                     cwd: executionCwd,
-                    skills: [order.providerSkill],
-                    skillSourcePaths: {
-                        [order.providerSkill]: selectedSelection.skill.absolutePath,
-                    },
+                    skills: providerSkills,
+                    skillSourcePaths,
                     metaBotSlug: input.metaBotSlug,
                     timeout: sessionTimeoutMs,
                 });
@@ -515,11 +586,12 @@ function createProviderServiceRunner(input) {
                     return null;
                 }
                 const fallbackCandidates = (await resolveFallbackRuntimeCandidates(input, primaryRuntime, resolutionState.fallbackRuntime, resolutionState.runtimes)).filter((candidate) => candidate.id !== failedRuntime.id);
-                return readFallbackSelectionCandidates(input, fallbackCandidates, order.providerSkill, failedSelection);
+                return readFallbackSelectionCandidates(input, fallbackCandidates, providerSkills, failedSelection);
             };
             const executionFailure = (error, failedRuntime, failedSelection) => createRuntimeFailedResult('provider_execution_failed', error instanceof Error ? error.message : String(error), {
                 runtime: failedRuntime,
-                providerSkill: order.providerSkill,
+                providerSkill,
+                providerSkills,
                 selection: failedSelection,
             });
             let run;
@@ -538,13 +610,13 @@ function createProviderServiceRunner(input) {
                     return executionFailure(fallbackError, fallbackSelection.runtime, fallbackSelection);
                 }
             }
-            let failure = buildSessionFailure(run, order.providerSkill);
+            let failure = buildSessionFailure(run, providerSkill, providerSkills);
             if (failure?.retryable) {
                 const fallbackSelection = await resolveFallbackSelection(run.runtime, run.selection);
                 if (fallbackSelection) {
                     try {
                         const fallbackRun = await executeWithSelection(fallbackSelection);
-                        const fallbackFailure = buildSessionFailure(fallbackRun, order.providerSkill);
+                        const fallbackFailure = buildSessionFailure(fallbackRun, providerSkill, providerSkills);
                         if (fallbackFailure) {
                             return fallbackFailure.result;
                         }
@@ -563,13 +635,13 @@ function createProviderServiceRunner(input) {
             selection = run.selection;
             let sessionId = run.sessionId;
             let session = run.session;
-            let responseText = sanitizeProviderDeliverableText(session?.result?.output ?? '', order.providerSkill);
+            let responseText = sanitizeProviderDeliverableText(session?.result?.output ?? '', providerSkill);
             if (!responseText) {
                 const fallbackSelection = await resolveFallbackSelection(runtime, selection);
                 if (fallbackSelection) {
                     try {
                         const fallbackRun = await executeWithSelection(fallbackSelection);
-                        const fallbackFailure = buildSessionFailure(fallbackRun, order.providerSkill);
+                        const fallbackFailure = buildSessionFailure(fallbackRun, providerSkill, providerSkills);
                         if (fallbackFailure) {
                             return fallbackFailure.result;
                         }
@@ -578,7 +650,7 @@ function createProviderServiceRunner(input) {
                         selection = run.selection;
                         sessionId = run.sessionId;
                         session = run.session;
-                        responseText = sanitizeProviderDeliverableText(session?.result?.output ?? '', order.providerSkill);
+                        responseText = sanitizeProviderDeliverableText(session?.result?.output ?? '', providerSkill);
                     }
                     catch (fallbackError) {
                         return executionFailure(fallbackError, fallbackSelection.runtime, fallbackSelection);
@@ -588,7 +660,8 @@ function createProviderServiceRunner(input) {
             if (!responseText) {
                 return createRuntimeFailedResult('provider_execution_empty', 'The provider runtime returned an empty result.', {
                     runtime,
-                    providerSkill: order.providerSkill,
+                    providerSkill,
+                    providerSkills,
                     sessionId,
                     selection,
                 });
@@ -599,7 +672,8 @@ function createProviderServiceRunner(input) {
                 metadata: {
                     runtimeId: runtime.id,
                     sessionId,
-                    providerSkill: order.providerSkill,
+                    providerSkill,
+                    providerSkills,
                     outputType: normalizeText(order.outputType) || 'text',
                     sessionCwd: await resolveCompletedSessionCwd(session?.cwd, run.executionCwd),
                     attemptWorkspaceCwd: run.attemptWorkspaceCwd,

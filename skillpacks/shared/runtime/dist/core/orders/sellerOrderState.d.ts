@@ -15,6 +15,7 @@ export interface SellerOrderRecord {
     orderPinId: string | null;
     orderTxid: string | null;
     orderReference: string | null;
+    serviceOrderPinId: string | null;
     paymentTxid: string | null;
     paymentCommitTxid: string | null;
     paymentAmount: string | null;

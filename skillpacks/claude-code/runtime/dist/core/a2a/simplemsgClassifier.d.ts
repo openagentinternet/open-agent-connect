@@ -5,6 +5,7 @@ export type SimplemsgClassification = {
     kind: 'order_protocol';
     tag: SimplemsgOrderProtocolTag;
     orderTxid: string | null;
+    orderPinId: string | null;
     reason: string | null;
 };
 export declare function classifySimplemsgContent(content: unknown): SimplemsgClassification;

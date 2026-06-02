@@ -23,6 +23,9 @@ function isZeroAmount(value) {
     const numeric = Number(text);
     return Number.isFinite(numeric) && numeric === 0;
 }
+function resolveSellerOrderServiceOrderPinId(order) {
+    return normalizeText(order.serviceOrderPinId) || null;
+}
 function sellerOrderRequiresManualAction(order) {
     const state = normalizeText(order.state);
     if (state === 'refund_pending' && normalizeText(order.refundRequestPinId)) {
@@ -43,7 +46,9 @@ function findSellerOrdersBySelector(state, selector) {
     }
     return state.sellerOrders.filter((order) => {
         if (orderId) {
-            return normalizeText(order.id) === orderId;
+            return normalizeText(order.id) === orderId
+                || normalizeText(order.serviceOrderPinId) === orderId
+                || normalizeText(order.orderReference) === orderId;
         }
         return normalizeText(order.paymentTxid) === paymentTxid;
     });
@@ -70,6 +75,7 @@ function buildProviderSellerOrderInspection(order) {
     const traceId = normalizeText(order.traceId);
     return {
         orderId: normalizeText(order.id),
+        serviceOrderPinId: resolveSellerOrderServiceOrderPinId(order),
         service: {
             name: normalizeText(order.serviceName) || null,
             servicePinId: normalizeText(order.servicePinId) || null,
@@ -147,7 +153,7 @@ function buildSellerReceivedRefundItems(state) {
             ?? refundCompletedAt
             ?? createdAt;
         const item = {
-            orderId: normalizeText(order.id),
+            orderId: resolveSellerOrderServiceOrderPinId(order) || normalizeText(order.id),
             role: 'seller',
             serviceName: normalizeText(order.serviceName) || 'Unknown service',
             paymentTxid: normalizeText(order.paymentTxid) || null,

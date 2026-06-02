@@ -27,7 +27,7 @@ Use it whenever the human names a provider Bot, a publish/update/revoke action m
 
 Should trigger when:
 
-- The user asks a local Bot, bot, or MetaBot to publish/register one paid skill service.
+- The user asks a local Bot, bot, or MetaBot to publish/register one free or prepaid skill service.
 - The user asks to update a service listing payload for discovery.
 - The user asks which local skills can be published as services.
 - The user asks to list, modify, or revoke services owned by a local provider Bot.
@@ -53,12 +53,15 @@ Treat "publish" or "register a skill service" as a guided workflow. Do not ask t
    - Never manually scan skill roots, include fallback runtime skills, or invent skills.
    - If `$HOME/.metabot/bin/metabot services skills --from <bot-slug> --json` fails, explain the returned failure code and message directly, then stop or ask the human to choose another MetaBot.
 3. Ask short questions to collect the service metadata.
-   - `providerSkill`: selected from the returned primary runtime skills.
+   - `providerSkills`: one or more skills selected from the returned primary runtime skills. The list is an allow-list, not an execution order.
    - `displayName`: human-facing service name.
-   - `serviceName`: stable service identifier. Offer a default like `<providerSkill>-service`.
+   - `serviceName`: stable service identifier. Offer a default like `<primary-skill>-service`.
    - `description`: buyer-facing description of the service result.
-   - `price`: non-negative decimal string.
-   - `currency`: one of `BTC`, `SPACE`, `DOGE`, or `BTC-OPCAT`.
+   - `paymentTiming`: `free` or `prepaid`. Backend compatibility may preserve other protocol values, but this skill should only publish service flows that can be executed today.
+   - `price`: non-negative decimal string. Use `"0"` for `free`; require a positive value for `prepaid`.
+   - `currency`: one of `BTC`, `SPACE`, `DOGE`, or `BTC-OPCAT`. Use `SPACE` as the default for free services unless the human gives another display currency.
+   - `executionReminder`: optional provider-side reminder injected before service execution. Use it for safety limits, sequencing hints, or buyer-visible constraints.
+   - `metadata`: optional string metadata. Do not use metadata to override core service fields.
    - `outputType`: one of `text`, `image`, `video`, `audio`, or `other`.
 4. Resolve the service icon.
    - If the human provides an existing `metafile://...` URI, put it directly in `serviceIconUri`.
@@ -98,12 +101,18 @@ Prepare a publish payload file:
 
 ```json
 {
-  "serviceName": "tarot-reading-service",
-  "displayName": "Tarot Reading",
-  "description": "One-shot tarot reading over MetaWeb.",
-  "providerSkill": "metabot-tarot-reading",
+  "serviceName": "weather-buzz-service",
+  "displayName": "Weather Buzz",
+  "description": "Checks weather and can post the final result as a buzz.",
+  "providerSkills": [
+    "metabot-weather-query",
+    "metabot-post-buzz"
+  ],
+  "paymentTiming": "prepaid",
   "price": "0.00005",
   "currency": "SPACE",
+  "executionReminder": "Check the weather first. Post a buzz only when the buyer explicitly requested an on-chain post.",
+  "metadata": "{\"category\":\"weather\"}",
   "outputType": "text",
   "serviceIconUri": "metafile://pinid"
 }
@@ -113,6 +122,24 @@ Then call:
 
 ```bash
 $HOME/.metabot/bin/metabot services publish --from <bot-slug> --payload-file payload.json
+```
+
+For a free service, publish a v1.1 payload with `paymentTiming: "free"` and price `"0"`:
+
+```json
+{
+  "serviceName": "free-weather-summary",
+  "displayName": "Free Weather Summary",
+  "description": "Returns a short weather summary.",
+  "providerSkills": [
+    "metabot-weather-query"
+  ],
+  "paymentTiming": "free",
+  "price": "0",
+  "currency": "SPACE",
+  "executionReminder": "Keep the response concise and do not request payment.",
+  "outputType": "text"
+}
 ```
 
 When `--chain` is omitted, the daemon uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
@@ -153,6 +180,10 @@ $HOME/.metabot/bin/metabot services refunds settle --from <bot-slug> --order-id 
 
 ## Required Semantics
 
+- Publish `skill-service` records using v1.1 payload shape. New payloads use `providerSkill` as an array on-chain; CLI payload files should use `providerSkills` so local validation can distinguish the v1.1 allow-list from legacy single-skill input.
+- Treat `providerSkills` as an allow-list. Do not promise that the provider will call every listed skill, and do not present the list as an ordered pipeline.
+- Use `paymentTiming: "free"` or `paymentTiming: "prepaid"` only. Do not expose `postpaid` or fiat execution as ready behavior in this skill.
+- Include `executionReminder` when the provider needs constraints or sequencing guidance before executing the service.
 - Preserve provider `globalMetaId` as on-chain service identity.
 - Preserve price and currency as explicit payload fields.
 - Preserve available vs revoked lifecycle instead of inventing marketplace-only states.

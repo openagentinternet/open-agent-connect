@@ -30,7 +30,6 @@ const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretSto
 
 const MVC_PAYMENT_ADDRESS = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 const MVC_OTHER_ADDRESS = '1dice8EMZmqKvrGE4Qc9bUFf9PX3xaYDp';
-const LOWER_HEX_64_RE = /^[0-9a-f]{64}$/;
 const IMAGE_REPLY_ARTIFACT = {
   uri: 'metafile://buyer-image-pin.png',
   pinId: 'buyer-image-pin',
@@ -91,16 +90,21 @@ function createIdentity(chatPublicKey) {
 }
 
 function createService(overrides = {}) {
+  const providerSkill = overrides.providerSkill ?? 'metabot-weather-oracle';
   return {
     id: overrides.currentPinId ?? 'chain-service-pin-1',
     sourceServicePinId: overrides.currentPinId ?? 'chain-service-pin-1',
     currentPinId: overrides.currentPinId ?? 'chain-service-pin-1',
     creatorMetabotId: 2,
     providerGlobalMetaId: overrides.providerGlobalMetaId ?? 'idq1provider',
-    providerSkill: 'metabot-weather-oracle',
+    providerSkill,
+    providerSkills: Array.isArray(overrides.providerSkills) && overrides.providerSkills.length > 0
+      ? overrides.providerSkills
+      : [providerSkill],
     serviceName: 'weather-oracle',
     displayName: 'Weather Oracle',
     description: 'Returns tomorrow weather.',
+    executionReminder: overrides.executionReminder ?? '',
     serviceIcon: null,
     price: overrides.price ?? '0.00001',
     currency: overrides.currency ?? 'SPACE',
@@ -135,6 +139,7 @@ function createRuntime(overrides = {}) {
 }
 
 async function prepareProviderRuntimeSkill(homeDir, skillName = 'metabot-weather-oracle') {
+  const skillNames = Array.isArray(skillName) && skillName.length > 0 ? skillName : [skillName];
   const runtimeStore = createLlmRuntimeStore(homeDir);
   const bindingStore = createLlmBindingStore(homeDir);
   await runtimeStore.write({
@@ -156,8 +161,10 @@ async function prepareProviderRuntimeSkill(homeDir, skillName = 'metabot-weather
       },
     ],
   });
-  await mkdir(path.join(homeDir, '.codex', 'skills', skillName), { recursive: true });
-  await writeFile(path.join(homeDir, '.codex', 'skills', skillName, 'SKILL.md'), '# Weather Oracle\n', 'utf8');
+  for (const name of skillNames) {
+    await mkdir(path.join(homeDir, '.codex', 'skills', name), { recursive: true });
+    await writeFile(path.join(homeDir, '.codex', 'skills', name, 'SKILL.md'), `# ${name}\n`, 'utf8');
+  }
 }
 
 async function writeProviderOutputFile(homeDir, fileName, contents = 'provider artifact bytes') {
@@ -308,7 +315,7 @@ async function createInboundProviderOrderHarness(t, options = {}) {
     services: [service],
     traces: [],
   });
-  await prepareProviderRuntimeSkill(homeDir, service.providerSkill);
+  await prepareProviderRuntimeSkill(homeDir, service.providerSkills);
 
   const writes = [];
   const llmCalls = [];
@@ -633,10 +640,13 @@ async function seedBuyerTraceForRating(harness, overrides = {}) {
       orderTxids: overrides.orderTxids ?? [orderTxid],
       paymentTxid,
       orderReference: overrides.orderReference ?? null,
+      serviceOrderPinId: overrides.serviceOrderPinId ?? null,
       paymentCurrency: 'SPACE',
       paymentAmount: overrides.paymentAmount ?? '0.00001',
       paymentChain: overrides.paymentChain ?? 'mvc',
       settlementKind: overrides.settlementKind ?? 'native',
+      providerSkill: overrides.providerSkill ?? 'metabot-weather-oracle',
+      providerSkills: overrides.providerSkills ?? ['metabot-weather-oracle'],
     },
     a2a: {
       sessionId: 'session-rating-retry-1',
@@ -873,7 +883,7 @@ test('services call --from pays with the selected profile wallet instead of the 
   assert.equal(selectedState.traces.at(-1).order.paymentTxid, selectedPaymentTxid);
 });
 
-test('free simplemsg service orders use an order reference instead of a payment txid', async (t) => {
+test('free simplemsg service orders use skill-service-order pin id instead of a payment txid', async (t) => {
   const harness = await createServiceCallHarness(t, {
     service: { price: '0', currency: 'SPACE' },
     servicePaymentExecutor: {
@@ -899,7 +909,21 @@ test('free simplemsg service orders use an order reference instead of a payment 
   assert.equal(called.ok, false);
   assert.equal(called.state, 'waiting');
   assert.equal(called.data.paymentTxid, null);
-  assert.match(called.data.orderReference, LOWER_HEX_64_RE);
+  assert.equal(called.data.serviceOrderPinId, '/protocols/skill-service-order-pin-1');
+  assert.equal(called.data.orderReference, called.data.serviceOrderPinId);
+
+  const serviceOrderWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-order');
+  assert.ok(serviceOrderWrite, 'expected a skill-service-order write');
+  const serviceOrderPayload = JSON.parse(serviceOrderWrite.payload);
+  assert.deepEqual(serviceOrderPayload, {
+    servicePinId: 'chain-service-pin-1',
+    paymentTxid: '',
+    price: '0',
+    currency: 'SPACE',
+    settlementKind: 'native',
+    metadata: '',
+  });
+  assert.equal(Object.hasOwn(serviceOrderPayload, 'orderId'), false);
 
   const simplemsgWrite = harness.writes.find((entry) => entry.path === '/protocols/simplemsg');
   assert.ok(simplemsgWrite, 'expected a simplemsg order write');
@@ -908,14 +932,14 @@ test('free simplemsg service orders use an order reference instead of a payment 
   assert.match(plaintext, /\n支付金额 0 SPACE/i);
   assert.doesNotMatch(plaintext, /\ntxid:/i);
   assert.doesNotMatch(plaintext, /free-order-/i);
-  assert.match(plaintext, new RegExp(`\\norder id:\\s*${called.data.orderReference}`, 'i'));
+  assert.ok(plaintext.includes(`\norder id: ${called.data.serviceOrderPinId}`));
   assert.match(plaintext, /\nsettlement kind:\s*native/i);
 
   const state = await harness.runtimeStateStore.readState();
   const trace = state.traces.find((entry) => entry.traceId === called.data.traceId);
   assert.ok(trace, 'expected caller trace to be persisted');
   assert.equal(trace.order.paymentTxid, null);
-  assert.match(trace.order.orderReference, LOWER_HEX_64_RE);
+  assert.equal(trace.order.orderReference, called.data.serviceOrderPinId);
 });
 
 test('simplemsg service orders use caller-generated natural request copy', async (t) => {
@@ -952,6 +976,20 @@ test('simplemsg service orders use caller-generated natural request copy', async
   assert.match(plaintext, /^\[ORDER\] 我来请你查一下上海明天的天气，按天气预报结果返回就好/);
   assert.match(plaintext, new RegExp(`<raw_request>\\n${generatedOrderText}\\n</raw_request>`));
   assert.doesNotMatch(plaintext, /用户请求 Weather Oracle|Weather Oracle 的用户/);
+  assert.equal(called.data.serviceOrderPinId, '/protocols/skill-service-order-pin-1');
+  assert.equal(called.data.orderReference, called.data.serviceOrderPinId);
+  const serviceOrderWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-order');
+  assert.ok(serviceOrderWrite, 'expected a skill-service-order write');
+  const serviceOrderPayload = JSON.parse(serviceOrderWrite.payload);
+  assert.deepEqual(serviceOrderPayload, {
+    servicePinId: 'chain-service-pin-1',
+    paymentTxid: 'b'.repeat(64),
+    price: '0.00001',
+    currency: 'SPACE',
+    settlementKind: 'native',
+    metadata: '',
+  });
+  assert.ok(plaintext.includes(`\norder id: ${called.data.serviceOrderPinId}`));
   assert.match(plaintext, /\ntxid:\s*b{64}/i);
   assert.match(plaintext, /\nservice id:\s*chain-service-pin-1/i);
   assert.match(plaintext, /\nskill name:\s*metabot-weather-oracle/i);
@@ -1130,17 +1168,23 @@ test('service rating retries skill-service-rate publish after a mempool conflict
   assert.match(published.metadata.ratingPinId, /\/protocols\/skill-service-rate-pin-/);
 });
 
-test('free service rating uses the order reference as the service paid tx', async (t) => {
+test('service rating publishes service order id, service skills, and legacy paid tx fallback', async (t) => {
   const orderTxid = '1'.repeat(64);
   const orderReference = 'a'.repeat(64);
-  const harness = await createServiceCallHarness(t);
+  const serviceOrderPinId = 'skill-service-order-free-pin-1';
+  const providerSkills = ['metabot-weather-oracle', 'metabot-post-buzz'];
+  const harness = await createServiceCallHarness(t, {
+    service: { providerSkills },
+  });
   const sessionStateStore = await seedBuyerTraceForRating(harness, {
     orderPinId: `${orderTxid}i0`,
     orderTxid,
     orderTxids: [orderTxid],
     paymentTxid: null,
     orderReference,
+    serviceOrderPinId,
     paymentAmount: '0',
+    providerSkills,
   });
 
   const result = await harness.handlers.services.rate({
@@ -1150,13 +1194,19 @@ test('free service rating uses the order reference as the service paid tx', asyn
   });
 
   assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.serviceOrderPinId, serviceOrderPinId);
   assert.equal(result.data.servicePaidTx, orderReference);
+  assert.deepEqual(result.data.serviceSkills, providerSkills);
+  assert.equal(result.data.serviceSkill, providerSkills[0]);
   assert.equal(result.data.ratingMessageSent, true);
 
   const ratingWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-rate');
   assert.ok(ratingWrite, 'expected a skill-service-rate write');
   const payload = JSON.parse(ratingWrite.payload);
+  assert.equal(payload.serviceOrderPinId, serviceOrderPinId);
   assert.equal(payload.servicePaidTx, orderReference);
+  assert.deepEqual(payload.serviceSkills, providerSkills);
+  assert.equal(payload.serviceSkill, providerSkills[0]);
   assert.equal(payload.servicePrice, '0');
 
   const sessionState = await sessionStateStore.readState();
@@ -1167,9 +1217,10 @@ test('free service rating uses the order reference as the service paid tx', asyn
   assert.match(published.metadata.ratingPinId, /\/protocols\/skill-service-rate-pin-/);
 });
 
-test('free service trace rating detail sync matches by order reference', async (t) => {
+test('free service trace rating detail sync matches by service order id', async (t) => {
   const orderTxid = '3'.repeat(64);
   const orderReference = 'c'.repeat(64);
+  const serviceOrderPinId = 'skill-service-order-trace-pin-1';
   const harness = await createServiceCallHarness(t);
   await seedBuyerTraceForRating(harness, {
     orderPinId: `${orderTxid}i0`,
@@ -1177,6 +1228,7 @@ test('free service trace rating detail sync matches by order reference', async (
     orderTxids: [orderTxid],
     paymentTxid: null,
     orderReference,
+    serviceOrderPinId,
     paymentAmount: '0',
   });
   const ratingStore = createRatingDetailStateStore(harness.homeDir);
@@ -1185,7 +1237,9 @@ test('free service trace rating detail sync matches by order reference', async (
       {
         pinId: 'free-rating-pin-1',
         serviceId: 'chain-service-pin-1',
-        servicePaidTx: orderReference,
+        serviceOrderPinId,
+        servicePaidTx: 'legacy-payment-value-that-should-not-be-needed',
+        serviceSkills: ['metabot-weather-oracle'],
         rate: 5,
         comment: 'Helpful free weather report.',
         raterGlobalMetaId: 'idq1caller',
@@ -1207,9 +1261,10 @@ test('free service trace rating detail sync matches by order reference', async (
   assert.equal(traceResult.data.ratingComment, 'Helpful free weather report.');
 });
 
-test('inbound free NeedsRating auto-rates the buyer trace with the order reference', async (t) => {
+test('inbound free NeedsRating auto-rates the buyer trace with the service order id', async (t) => {
   const orderTxid = '2'.repeat(64);
   const orderReference = 'b'.repeat(64);
+  const serviceOrderPinId = 'skill-service-order-needs-rating-pin-1';
   const harness = await createServiceCallHarness(t, {
     buyerRatingReplyRunner: async () => ({
       state: 'reply',
@@ -1222,12 +1277,13 @@ test('inbound free NeedsRating auto-rates the buyer trace with the order referen
     orderTxids: [orderTxid],
     paymentTxid: null,
     orderReference,
+    serviceOrderPinId,
     paymentAmount: '0',
   });
 
   const handled = await harness.handlers.services.handleInboundOrderProtocolMessage({
     fromGlobalMetaId: 'idq1provider',
-    content: `[NeedsRating:${orderTxid}] Please rate this free service.`,
+    content: `[NeedsRating:${orderTxid}] Please rate this free service.\norder pin id: ${serviceOrderPinId}`,
     messagePinId: 'free-needs-rating-pin',
     timestamp: 1_775_000_003_000,
   });
@@ -1238,6 +1294,7 @@ test('inbound free NeedsRating auto-rates the buyer trace with the order referen
   const ratingWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-rate');
   assert.ok(ratingWrite, 'expected an auto-published skill-service-rate write');
   const payload = JSON.parse(ratingWrite.payload);
+  assert.equal(payload.serviceOrderPinId, serviceOrderPinId);
   assert.equal(payload.servicePaidTx, orderReference);
 
   const traceResult = await harness.handlers.trace.getTrace({ traceId: 'trace-rating-retry' });
@@ -1250,7 +1307,10 @@ test('inbound free NeedsRating auto-rates the buyer trace with the order referen
   const ratingMessageWrite = harness.writes.find((entry) => entry.path === '/protocols/simplemsg');
   assert.ok(ratingMessageWrite, 'expected an ORDER_END rating follow-up write');
   const ratingMessage = decryptSimplemsgOrder(ratingMessageWrite, harness);
-  assert.equal(ratingMessage, `[ORDER_END:${orderTxid} rated] 评分：5分。免费天气结果清楚完整。`);
+  assert.equal(
+    ratingMessage,
+    `[ORDER_END:${orderTxid} rated] 评分：5分。免费天气结果清楚完整。\norder pin id: ${serviceOrderPinId}`
+  );
   assert.doesNotMatch(ratingMessage, /我的评分已记录在链上/);
 });
 
@@ -1375,6 +1435,7 @@ test('paid simplemsg service payment finishes before the order is broadcast', as
   assert.deepEqual(harness.events, [
     'payment_started',
     'payment_finished',
+    'write:/protocols/skill-service-order',
     'write:/protocols/simplemsg',
   ]);
 });
@@ -1420,6 +1481,7 @@ test('paid simplemsg service payment retries after MVC missing-input stale fundi
   assert.deepEqual(harness.events, [
     'payment_attempt_1',
     'payment_attempt_2',
+    'write:/protocols/skill-service-order',
     'write:/protocols/simplemsg',
   ]);
 });
@@ -2238,7 +2300,8 @@ test('buyer-side provider daemon execution failure creates a refund request afte
       },
     },
   });
-  globalThis.fetch = async (url) => {
+  const executeRequests = [];
+  globalThis.fetch = async (url, options = {}) => {
     const href = String(url);
     if (href.includes('/api/network/services')) {
       return new Response(JSON.stringify({
@@ -2266,6 +2329,7 @@ test('buyer-side provider daemon execution failure creates a refund request afte
         headers: { 'content-type': 'application/json' },
       });
     }
+    executeRequests.push(JSON.parse(String(options.body || '{}')));
     return new Response(JSON.stringify({
       ok: false,
       state: 'failed',
@@ -2293,6 +2357,19 @@ test('buyer-side provider daemon execution failure creates a refund request afte
 
   assert.equal(called.ok, false);
   assert.equal(called.code, 'provider_execution_failed');
+  const serviceOrderWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-order');
+  assert.ok(serviceOrderWrite, 'expected provider daemon execution to publish a skill-service-order');
+  const serviceOrderPayload = JSON.parse(serviceOrderWrite.payload);
+  assert.deepEqual(serviceOrderPayload, {
+    servicePinId: 'chain-service-pin-1',
+    paymentTxid,
+    price: '0.00001',
+    currency: 'SPACE',
+    settlementKind: 'native',
+    metadata: '',
+  });
+  assert.equal(executeRequests[0].payment.serviceOrderPinId, '/protocols/skill-service-order-pin-1');
+  assert.equal(executeRequests[0].payment.orderReference, executeRequests[0].payment.serviceOrderPinId);
 
   const refundWrite = harness.writes.find((entry) => entry.path === '/protocols/service-refund-request');
   assert.ok(refundWrite, 'expected provider daemon execution failure to publish a refund request');
@@ -2386,8 +2463,22 @@ test('paid simplemsg service broadcast failure keeps a trace with payment proven
         };
       },
     },
-    writePin: async () => {
-      throw new Error('simulated chain outage');
+    writePin: async (input, { writes, identity }) => {
+      if (input.path === '/protocols/simplemsg') {
+        throw new Error('simulated chain outage');
+      }
+      return {
+        txids: [`${input.path}-tx-${writes.length}`],
+        pinId: `${input.path}-pin-${writes.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      };
     },
   });
 
@@ -2498,10 +2589,16 @@ test('private chat local A2A store failure does not mask successful chain broadc
 test('inbound provider ORDER executes through runner and sends delivery plus rating request once', async (t) => {
   const orderTxid = 'a'.repeat(64);
   const paymentTxid = 'b'.repeat(64);
+  const providerSkills = ['metabot-weather-oracle', 'metabot-post-buzz'];
+  const executionReminder = 'Check weather first, then post the concise forecast to buzz.';
   const protocolReplyCalls = [];
   const customAcknowledgement = 'Weather Oracle here: I have your Shanghai forecast order and will read the sky now.';
   const customRatingRequest = 'The forecast is delivered in my Weather Oracle voice; rate it if it helped.';
   const harness = await createInboundProviderOrderHarness(t, {
+    service: {
+      providerSkills,
+      executionReminder,
+    },
     rawTxs: {
       [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
     },
@@ -2535,7 +2632,12 @@ test('inbound provider ORDER executes through runner and sends delivery plus rat
   assert.equal(second.data.duplicate, true);
   assert.equal(harness.llmCalls.length, 1);
   assert.deepEqual(harness.fetchRawTxCalls, [paymentTxid]);
-  assert.deepEqual(harness.llmCalls[0].skills, [harness.service.providerSkill]);
+  assert.deepEqual(harness.llmCalls[0].skills, providerSkills);
+  assert.equal(
+    harness.llmCalls[0].skillSourcePaths['metabot-post-buzz'],
+    path.join(harness.homeDir, '.codex', 'skills', 'metabot-post-buzz'),
+  );
+  assert.match(harness.llmCalls[0].systemPrompt, /Check weather first/);
 
   const simplemsgWrites = harness.writes.filter((entry) => entry.path === '/protocols/simplemsg');
   assert.equal(simplemsgWrites.length, 3);
@@ -3035,8 +3137,16 @@ test('inbound provider ORDER fallback protocol copy stays concise and service-or
 });
 
 test('/api services.execute persists seller lifecycle state and provider runtime diagnostics', async (t) => {
-  const harness = await createInboundProviderOrderHarness(t);
+  const providerSkills = ['metabot-weather-oracle', 'metabot-post-buzz'];
+  const executionReminder = 'Use the weather skill first, then publish the concise summary to buzz.';
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: {
+      providerSkills,
+      executionReminder,
+    },
+  });
   const paymentTxid = '9'.repeat(64);
+  const serviceOrderPinId = 'skill-service-order-direct-pin-1';
 
   const result = await harness.handlers.services.execute({
     traceId: 'trace-provider-direct-execute',
@@ -3058,11 +3168,19 @@ test('/api services.execute persists seller lifecycle state and provider runtime
       paymentAmount: harness.service.price,
       paymentCurrency: harness.service.currency,
       settlementKind: 'native',
+      orderReference: serviceOrderPinId,
+      serviceOrderPinId,
     },
   });
 
   assert.equal(result.ok, true);
   assert.equal(harness.llmCalls.length, 1);
+  assert.deepEqual(harness.llmCalls[0].skills, providerSkills);
+  assert.equal(
+    harness.llmCalls[0].skillSourcePaths['metabot-post-buzz'],
+    path.join(harness.homeDir, '.codex', 'skills', 'metabot-post-buzz'),
+  );
+  assert.match(harness.llmCalls[0].systemPrompt, /Use the weather skill first/);
 
   const state = await harness.runtimeStateStore.readState();
   const trace = state.traces.find((entry) => entry.traceId === 'trace-provider-direct-execute');
@@ -3080,6 +3198,12 @@ test('/api services.execute persists seller lifecycle state and provider runtime
   assert.equal(sellerOrder.traceId, 'trace-provider-direct-execute');
   assert.equal(sellerOrder.a2aSessionId, trace.a2a.sessionId);
   assert.equal(sellerOrder.llmSessionId, 'provider-llm-session-1');
+  assert.equal(sellerOrder.id, `seller-order-${serviceOrderPinId}`);
+  const inspected = await harness.handlers.provider.inspectOrder({
+    orderId: sellerOrder.id,
+  });
+  assert.equal(inspected.ok, true, JSON.stringify(inspected));
+  assert.equal(inspected.data.order.orderId, sellerOrder.id);
 });
 
 test('/api services.execute resolves non-text provider artifacts into direct traces', async (t) => {

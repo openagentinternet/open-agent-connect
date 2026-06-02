@@ -63,9 +63,11 @@ function buildOrderRowWithRating(trace, ratingDetails, ratingSyncState) {
         return null;
     }
     const paymentTxid = normalizeText(order.paymentTxid) || null;
-    const ratingDetail = servicePinId && paymentTxid
+    const serviceOrderPinId = normalizeText(order.serviceOrderPinId) || null;
+    const ratingDetail = servicePinId && (serviceOrderPinId || paymentTxid)
         ? (0, ratingDetailSync_1.findRatingDetailByServicePayment)(ratingDetails, {
             serviceId: servicePinId,
+            serviceOrderPinId,
             servicePaidTx: paymentTxid,
         })
         : null;
@@ -73,6 +75,7 @@ function buildOrderRowWithRating(trace, ratingDetails, ratingSyncState) {
     return {
         traceId: normalizeText(trace.traceId),
         orderId,
+        ...(serviceOrderPinId ? { serviceOrderPinId } : {}),
         servicePinId,
         serviceName: normalizeText(order.serviceName),
         paymentTxid,
@@ -97,9 +100,11 @@ function buildSellerOrderRowWithRating(order, ratingDetails, ratingSyncState) {
         return null;
     }
     const paymentTxid = normalizeText(order.paymentTxid) || null;
-    const ratingDetail = servicePinId && paymentTxid
+    const serviceOrderPinId = normalizeText(order.serviceOrderPinId) || null;
+    const ratingDetail = servicePinId && (serviceOrderPinId || paymentTxid)
         ? (0, ratingDetailSync_1.findRatingDetailByServicePayment)(ratingDetails, {
             serviceId: servicePinId,
+            serviceOrderPinId,
             servicePaidTx: paymentTxid,
         })
         : null;
@@ -127,6 +132,7 @@ function buildSellerOrderRowWithRating(order, ratingDetails, ratingSyncState) {
             paymentTxid,
             paymentCommitTxid: null,
             orderReference: normalizeText(order.orderReference) || null,
+            serviceOrderPinId: normalizeText(order.serviceOrderPinId) || null,
             paymentCurrency: normalizeText(order.paymentCurrency) || null,
             paymentAmount: normalizeText(order.paymentAmount) || null,
             paymentChain: normalizeText(order.paymentChain) || null,
@@ -169,6 +175,7 @@ function buildSellerOrderRowWithRating(order, ratingDetails, ratingSyncState) {
             runtimeProvider: normalizeText(order.runtimeProvider) || null,
             sessionId: normalizeText(order.llmSessionId) || null,
             providerSkill: normalizeText(order.providerSkill) || null,
+            providerSkills: normalizeText(order.providerSkill) ? [normalizeText(order.providerSkill)] : [],
             fallbackSelected: typeof order.fallbackSelected === 'boolean' ? order.fallbackSelected : null,
         },
         askMaster: null,
@@ -182,6 +189,7 @@ function buildSellerOrderRowWithRating(order, ratingDetails, ratingSyncState) {
     return {
         traceId: normalizeText(order.traceId),
         orderId,
+        ...(serviceOrderPinId ? { serviceOrderPinId } : {}),
         servicePinId,
         serviceName: normalizeText(order.serviceName),
         paymentTxid,

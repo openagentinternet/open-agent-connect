@@ -20,12 +20,10 @@ function buildPublishPageDefinition() {
 
           <form class="publish-form" data-publish-form>
             <div class="publish-form-grid">
-              <label class="publish-field">
-                <span>Provider Skill</span>
-                <select name="providerSkill" data-provider-skill-select required disabled>
-                  <option value="">Select a primary runtime skill</option>
-                </select>
-              </label>
+              <div class="publish-field publish-field-wide">
+                <span>Provider Skills</span>
+                <div class="skill-checkbox-list" data-provider-skill-list aria-label="Provider skills"></div>
+              </div>
 
               <label class="publish-field">
                 <span>Provider MetaBot</span>
@@ -49,9 +47,22 @@ function buildPublishPageDefinition() {
                 <textarea name="description" rows="4" placeholder="Describe exactly what the service does for buyers." required></textarea>
               </label>
 
+              <label class="publish-field publish-field-wide">
+                <span>Execution Reminder</span>
+                <textarea name="executionReminder" rows="3" placeholder="Optional reminder inserted into the provider runtime before execution."></textarea>
+              </label>
+
+              <div class="publish-field">
+                <span>Payment Timing</span>
+                <div class="segmented-control" data-payment-timing>
+                  <label><input type="radio" name="paymentTiming" value="free" /> Free</label>
+                  <label><input type="radio" name="paymentTiming" value="prepaid" checked /> Prepaid</label>
+                </div>
+              </div>
+
               <label class="publish-field">
                 <span>Price</span>
-                <input name="price" inputmode="decimal" placeholder="0.00001" required />
+                <input name="price" data-price-input inputmode="decimal" placeholder="0.00001" required />
               </label>
 
               <label class="publish-field">
@@ -161,12 +172,13 @@ function buildPublishPageDefinition() {
     status: document.querySelector('[data-publish-status]'),
     availability: document.querySelector('[data-publish-availability]'),
     metaBotSelect: document.querySelector('[data-metabot-select]'),
-    skillSelect: document.querySelector('[data-provider-skill-select]'),
+    skillList: document.querySelector('[data-provider-skill-list]'),
     skillSummary: document.querySelector('[data-publish-skill-summary]'),
     providerCard: document.querySelector('[data-publish-provider-card]'),
     runtimeCard: document.querySelector('[data-publish-runtime-card]'),
     displayNameInput: document.querySelector('[data-display-name-input]'),
     serviceNameInput: document.querySelector('[data-service-name-input]'),
+    priceInput: document.querySelector('[data-price-input]'),
     iconInput: document.querySelector('[data-service-icon-input]'),
     iconTrigger: document.querySelector('[data-service-icon-trigger]'),
     iconRemove: document.querySelector('[data-service-icon-remove]'),
@@ -284,11 +296,26 @@ function buildPublishPageDefinition() {
   };
 
   const selectedMetaBotSlug = () => elements.metaBotSelect ? normalizeText(elements.metaBotSelect.value) : state.selectedMetaBotSlug;
-  const selectedSkillValue = () => elements.skillSelect ? normalizeText(elements.skillSelect.value) : '';
-  const selectedSkill = () => {
+  const selectedSkillValues = () => {
+    if (!elements.skillList) return [];
+    return Array.from(elements.skillList.querySelectorAll('input[name="providerSkills"]:checked'))
+      .map((input) => normalizeText(input.value))
+      .filter(Boolean);
+  };
+  const selectedSkills = () => {
     if (!currentModel || !Array.isArray(currentModel.skills)) return null;
-    const value = selectedSkillValue();
-    return currentModel.skills.find((skill) => skill.value === value) || null;
+    const values = new Set(selectedSkillValues());
+    return currentModel.skills.filter((skill) => values.has(skill.value));
+  };
+  const selectedPrimarySkill = () => {
+    const skills = selectedSkills();
+    return skills && skills.length ? skills[0] : null;
+  };
+  const selectedPaymentTiming = () => {
+    if (!elements.form) return 'prepaid';
+    const formData = new FormData(elements.form);
+    const timing = normalizeText(formData.get('paymentTiming')).toLowerCase();
+    return timing === 'free' ? 'free' : 'prepaid';
   };
 
   const skillExists = (value) => Boolean(
@@ -341,41 +368,37 @@ function buildPublishPageDefinition() {
     elements.metaBotSelect.disabled = busy || model.metabots.length === 0;
   };
 
-  const renderSkillSelect = (model) => {
-    if (!elements.skillSelect) return;
-    const previous = selectedSkillValue();
-    elements.skillSelect.innerHTML = '';
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = model.skills.length ? 'Select a primary runtime skill' : 'No primary runtime skills available';
-    elements.skillSelect.appendChild(placeholder);
-
-    for (const skill of model.skills) {
-      const option = document.createElement('option');
-      option.value = skill.value;
-      option.textContent = skill.title ? skill.value + ' - ' + skill.title : skill.value;
-      option.dataset.description = skill.description || '';
-      elements.skillSelect.appendChild(option);
+  const renderSkillList = (model) => {
+    if (!elements.skillList) return;
+    const previous = selectedSkillValues().filter((value) => model.skills.some((skill) => skill.value === value));
+    const selected = new Set(previous.length ? previous : (model.skills[0] ? [model.skills[0].value] : []));
+    const disabled = busy || !model.availability.canPublish || model.skills.length === 0;
+    if (!model.skills.length) {
+      elements.skillList.innerHTML = '<p class="field-hint">No primary runtime skills available.</p>';
+      return;
     }
-
-    if (previous && skillExists(previous)) {
-      elements.skillSelect.value = previous;
-    } else if (model.skills.length > 0) {
-      elements.skillSelect.value = model.skills[0].value;
-    } else {
-      elements.skillSelect.value = '';
-    }
-    elements.skillSelect.disabled = busy || !model.availability.canPublish || model.skills.length === 0;
+    elements.skillList.innerHTML = model.skills.map((skill) => (
+      '<label class="skill-checkbox-option">'
+      + '<input type="checkbox" name="providerSkills" value="' + escapeHtml(skill.value) + '"' + (selected.has(skill.value) ? ' checked' : '') + (disabled ? ' disabled' : '') + ' />'
+      + '<span><strong>' + escapeHtml(skill.title || skill.value) + '</strong><small>' + escapeHtml(skill.value) + '</small>'
+      + (skill.description ? '<em>' + escapeHtml(skill.description) + '</em>' : '')
+      + '</span></label>'
+    )).join('');
   };
 
   const renderSkillSummary = () => {
     if (!elements.skillSummary || !currentModel) return;
-    const skill = selectedSkill();
-    if (!skill) {
+    const skills = selectedSkills() || [];
+    if (!skills.length) {
       elements.skillSummary.textContent = currentModel.availability.message;
       return;
     }
-    elements.skillSummary.textContent = skill.description || skill.title || skill.value;
+    if (skills.length === 1) {
+      const skill = skills[0];
+      elements.skillSummary.textContent = skill.description || skill.title || skill.value;
+      return;
+    }
+    elements.skillSummary.textContent = skills.length + ' skills selected: ' + skills.map((skill) => skill.value).join(', ');
   };
 
   const renderAvailability = (model) => {
@@ -412,6 +435,15 @@ function buildPublishPageDefinition() {
     }
   };
 
+  const syncPaymentTimingFields = () => {
+    if (!elements.priceInput) return;
+    const isFree = selectedPaymentTiming() === 'free';
+    if (isFree) {
+      elements.priceInput.value = '0';
+    }
+    elements.priceInput.disabled = isFree || busy || statusPanelOpen;
+  };
+
   const syncFormDisabled = () => {
     if (!elements.form) return;
     const forcedDisabled = busy || statusPanelOpen;
@@ -427,19 +459,24 @@ function buildPublishPageDefinition() {
     if (elements.metaBotSelect) {
       elements.metaBotSelect.disabled = !currentModel || !Array.isArray(currentModel.metabots) || currentModel.metabots.length === 0;
     }
-    if (elements.skillSelect) {
-      elements.skillSelect.disabled = !currentModel || !currentModel.availability.canPublish || currentModel.skills.length === 0;
+    if (elements.skillList) {
+      const skillsDisabled = !currentModel || !currentModel.availability.canPublish || currentModel.skills.length === 0;
+      elements.skillList.querySelectorAll('input[name="providerSkills"]').forEach((input) => {
+        input.disabled = skillsDisabled;
+      });
     }
+    syncPaymentTimingFields();
   };
 
   const isFormReady = () => {
     if (!currentModel || !currentModel.availability || !currentModel.availability.canPublish) return false;
-    const skill = selectedSkillValue();
-    if (!skill || !skillExists(skill)) return false;
+    const skills = selectedSkillValues();
+    if (!skills.length || !skills.every((skill) => skillExists(skill))) return false;
     if (!selectedMetaBotSlug()) return false;
     if (!elements.form) return false;
     const formData = new FormData(elements.form);
-    const price = normalizeText(formData.get('price'));
+    const paymentTiming = selectedPaymentTiming();
+    const price = paymentTiming === 'free' ? '0' : normalizeText(formData.get('price'));
     const outputType = normalizeText(formData.get('outputType')).toLowerCase();
     return Boolean(
       normalizeText(formData.get('displayName'))
@@ -447,6 +484,7 @@ function buildPublishPageDefinition() {
       && normalizeText(formData.get('description'))
       && /^\\d+(?:\\.\\d+)?$/u.test(price)
       && Number(price) >= 0
+      && (paymentTiming === 'free' || Number(price) > 0)
       && OUTPUT_TYPES.has(outputType)
     );
   };
@@ -462,7 +500,7 @@ function buildPublishPageDefinition() {
   };
 
   const applySkillDefaults = () => {
-    const skill = selectedSkill();
+    const skill = selectedPrimarySkill();
     if (!skill) {
       updateSubmitState();
       return;
@@ -487,7 +525,7 @@ function buildPublishPageDefinition() {
     renderCard(elements.providerCard, currentModel.providerCard, 'No selected provider identity is available.');
     renderCard(elements.runtimeCard, currentModel.runtimeCard, 'No primary runtime diagnostics are available.');
     renderMetaBotSelect(currentModel);
-    renderSkillSelect(currentModel);
+    renderSkillList(currentModel);
     renderSkillSummary();
     renderAvailability(currentModel);
     renderIconPreview();
@@ -595,12 +633,18 @@ function buildPublishPageDefinition() {
 
   const validateClientPayload = (payload) => {
     if (!payload.from) return 'Provider MetaBot is required.';
-    if (!payload.providerSkill) return 'Provider skill is required.';
+    if (!Array.isArray(payload.providerSkills) || payload.providerSkills.length === 0) return 'At least one provider skill is required.';
     if (!payload.displayName) return 'Display name is required.';
     if (!payload.serviceName) return 'Service name is required.';
     if (!payload.description) return 'Description is required.';
+    if (payload.paymentTiming !== 'free' && payload.paymentTiming !== 'prepaid') {
+      return 'Payment timing must be free or prepaid.';
+    }
     if (!/^\\d+(?:\\.\\d+)?$/u.test(payload.price) || !Number.isFinite(Number(payload.price)) || Number(payload.price) < 0) {
       return 'Price must be a non-negative decimal number.';
+    }
+    if (payload.paymentTiming === 'prepaid' && Number(payload.price) <= 0) {
+      return 'Prepaid service price must be greater than zero.';
     }
     if (['BTC', 'SPACE', 'DOGE', 'BTC-OPCAT'].indexOf(payload.currency) < 0) {
       return 'Settlement currency must be BTC, SPACE, DOGE, or BTC-OPCAT.';
@@ -613,13 +657,17 @@ function buildPublishPageDefinition() {
 
   const buildSubmitPayload = () => {
     const formData = new FormData(elements.form);
+    const paymentTiming = selectedPaymentTiming();
     const payload = {
       from: selectedMetaBotSlug(),
-      providerSkill: selectedSkillValue(),
+      providerSkills: selectedSkillValues(),
       displayName: normalizeText(formData.get('displayName')),
       serviceName: normalizeText(formData.get('serviceName')),
       description: normalizeText(formData.get('description')),
-      price: normalizeText(formData.get('price')),
+      executionReminder: normalizeText(formData.get('executionReminder')),
+      paymentTiming,
+      settlementKind: 'native',
+      price: paymentTiming === 'free' ? '0' : normalizeText(formData.get('price')),
       currency: normalizeText(formData.get('currency')).toUpperCase(),
       inputType: 'text',
       outputType: normalizeText(formData.get('outputType')).toLowerCase(),
@@ -641,9 +689,18 @@ function buildPublishPageDefinition() {
     });
   }
 
-  if (elements.skillSelect) {
-    elements.skillSelect.addEventListener('change', () => {
+  if (elements.skillList) {
+    elements.skillList.addEventListener('change', () => {
       applySkillDefaults();
+    });
+  }
+
+  if (elements.form) {
+    elements.form.querySelectorAll('input[name="paymentTiming"]').forEach((input) => {
+      input.addEventListener('change', () => {
+        syncPaymentTimingFields();
+        updateSubmitState();
+      });
     });
   }
 

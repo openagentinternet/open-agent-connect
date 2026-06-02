@@ -25,6 +25,7 @@ test('buildOrderPayload includes IDBots-compatible service payment metadata', ()
     price: '0.01',
     currency: 'SPACE',
     paymentTxid,
+    orderReference: 'skill-service-order-pin-1',
     paymentChain: 'mvc',
     settlementKind: 'native',
     serviceId: 'service-pin',
@@ -35,6 +36,7 @@ test('buildOrderPayload includes IDBots-compatible service payment metadata', ()
   assert.match(payload, /^\[ORDER\] generate a release note/m);
   assert.match(payload, /<raw_request>\ngenerate a release note\n<\/raw_request>/);
   assert.match(payload, /支付金额 0\.01 SPACE/);
+  assert.match(payload, /order id: skill-service-order-pin-1/);
   assert.match(payload, new RegExp(`txid: ${paymentTxid}`));
   assert.match(payload, /payment chain: mvc/);
   assert.match(payload, /settlement kind: native/);

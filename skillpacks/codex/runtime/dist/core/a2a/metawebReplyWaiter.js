@@ -211,6 +211,7 @@ function createSocketIoMetaWebReplyWaiter() {
                                 state: 'completed',
                                 ...pendingDelivery,
                                 ratingRequestText: ratingRequest.content,
+                                ratingRequestOrderPinId: ratingRequest.orderPinId ?? null,
                                 ratingRequestPinId: pinIdFromMessage(message),
                                 ratingRequestObservedAt: typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)
                                     ? message.timestamp

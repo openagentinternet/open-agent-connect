@@ -8,6 +8,9 @@ export interface A2AOrderPaymentResult {
     paymentCurrency: string;
     settlementKind: 'native' | 'free';
     orderReference?: string | null;
+    serviceOrderPinId?: string | null;
+    serviceOrderTxid?: string | null;
+    serviceOrderTxids?: string[];
     totalCost?: number | null;
     network?: string | null;
 }

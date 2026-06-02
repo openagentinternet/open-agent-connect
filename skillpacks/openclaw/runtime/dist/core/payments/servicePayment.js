@@ -26,9 +26,6 @@ function normalizeAmount(value) {
     }
     return amount;
 }
-function buildFreeOrderReference() {
-    return (0, node_crypto_1.randomBytes)(32).toString('hex');
-}
 function decimalAmountToSatoshis(value) {
     const amount = normalizeText(value);
     if (!/^\d+(?:\.\d{1,8})?$/.test(amount)) {
@@ -113,7 +110,7 @@ async function executeServiceOrderPayment(input) {
             paymentAmount: amount,
             paymentCurrency: currency === 'MVC' ? 'SPACE' : currency,
             settlementKind: 'native',
-            orderReference: buildFreeOrderReference(),
+            orderReference: null,
             totalCost: 0,
             network: resolvePaymentChain(currency),
         };

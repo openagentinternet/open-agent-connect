@@ -11,6 +11,12 @@ const node_path_1 = __importDefault(require("node:path"));
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
+function normalizeTextList(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return [...new Set(value.map((entry) => normalizeText(entry)).filter(Boolean))];
+}
 function normalizeOptionalNumber(value) {
     if (value === null || value === undefined || normalizeText(value) === '') {
         return null;
@@ -50,9 +56,10 @@ function buildProviderRuntimeTraceRecord(input) {
         runtimeProvider: normalizeText(input.runtimeProvider) || null,
         sessionId: normalizeText(input.sessionId) || null,
         providerSkill: normalizeText(input.providerSkill) || null,
+        providerSkills: normalizeTextList(input.providerSkills),
         fallbackSelected: typeof input.fallbackSelected === 'boolean' ? input.fallbackSelected : null,
     };
-    return Object.values(record).some((value) => value !== null && value !== '') ? record : null;
+    return Object.values(record).some((value) => (Array.isArray(value) ? value.length > 0 : value !== null && value !== '')) ? record : null;
 }
 function buildAskMasterTraceRecord(input) {
     if (!input || typeof input !== 'object') {
@@ -213,6 +220,7 @@ function buildSessionTrace(input) {
                 paymentTxid: normalizeText(input.order.paymentTxid) || null,
                 paymentCommitTxid: normalizeText(input.order.paymentCommitTxid) || null,
                 orderReference: normalizeText(input.order.orderReference) || null,
+                serviceOrderPinId: normalizeText(input.order.serviceOrderPinId) || null,
                 paymentCurrency: normalizeText(input.order.paymentCurrency) || null,
                 paymentAmount: normalizeText(input.order.paymentAmount) || null,
                 paymentChain: normalizeText(input.order.paymentChain) || null,
@@ -220,6 +228,7 @@ function buildSessionTrace(input) {
                 mrc20Ticker: normalizeText(input.order.mrc20Ticker) || null,
                 mrc20Id: normalizeText(input.order.mrc20Id) || null,
                 providerSkill: normalizeText(input.order.providerSkill) || null,
+                providerSkills: normalizeTextList(input.order.providerSkills),
                 outputType: normalizeText(input.order.outputType) || null,
                 requestText: normalizeText(input.order.requestText) || null,
                 status: normalizeText(input.order.status) || null,

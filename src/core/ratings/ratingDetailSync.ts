@@ -53,6 +53,15 @@ function normalizeNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeTextList(value: unknown): string[] {
+  const rawItems = Array.isArray(value)
+    ? value
+    : toSafeString(value)
+      ? [value]
+      : [];
+  return [...new Set(rawItems.map((entry) => toSafeString(entry)).filter(Boolean))];
+}
+
 function normalizeTimestampMs(value: unknown, fallbackNow: () => number): number {
   const parsed = normalizeNumber(value);
   if (parsed === null || parsed <= 0) {
@@ -155,7 +164,11 @@ export function parseRatingDetailItem(
   return {
     pinId,
     serviceId,
+    serviceOrderPinId: toSafeString(summary.serviceOrderPinId) || null,
     servicePaidTx: toSafeString(summary.servicePaidTx) || null,
+    serviceSkills: normalizeTextList(summary.serviceSkills).length > 0
+      ? normalizeTextList(summary.serviceSkills)
+      : normalizeTextList(summary.serviceSkill),
     rate,
     comment,
     raterGlobalMetaId: toSafeString(item.globalMetaId) || null,
@@ -191,18 +204,32 @@ export function findRatingDetailByServicePayment(
   source: RatingDetailState | RatingDetailItem[],
   lookup: {
     serviceId: string;
-    servicePaidTx: string;
+    serviceOrderPinId?: string | null;
+    servicePaidTx?: string | null;
   }
 ): RatingDetailItem | null {
   const serviceId = toSafeString(lookup.serviceId);
+  const serviceOrderPinId = toSafeString(lookup.serviceOrderPinId);
   const servicePaidTx = toSafeString(lookup.servicePaidTx);
-  if (!serviceId || !servicePaidTx) {
+  if (!serviceId || (!serviceOrderPinId && !servicePaidTx)) {
     return null;
   }
 
   const items = Array.isArray(source) ? source : source.items;
-  return items.find((item) => (
+  const matchingServiceItems = items.filter((item) => (
     toSafeString(item.serviceId) === serviceId
+  ));
+  if (serviceOrderPinId) {
+    const orderMatch = matchingServiceItems.find((item) => (
+      toSafeString(item.serviceOrderPinId) === serviceOrderPinId
+    ));
+    if (orderMatch) return orderMatch;
+  }
+  if (!servicePaidTx) {
+    return null;
+  }
+  return matchingServiceItems.find((item) => (
+    !toSafeString(item.serviceOrderPinId)
     && toSafeString(item.servicePaidTx) === servicePaidTx
   )) ?? null;
 }

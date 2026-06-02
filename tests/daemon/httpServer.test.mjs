@@ -2618,7 +2618,10 @@ test('GET /ui/publish serves the primary-runtime-aware publish console', async (
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /Publish Service/);
   assert.match(html, /data-metabot-select/);
-  assert.match(html, /data-provider-skill-select/);
+  assert.match(html, /data-provider-skill-list/);
+  assert.match(html, /name="paymentTiming"[^>]+value="free"/);
+  assert.match(html, /name="paymentTiming"[^>]+value="prepaid"/);
+  assert.match(html, /name="executionReminder"/);
   assert.match(html, /\/api\/services\/skills\?from=/);
   assert.match(html, /name="inputType"/);
   assert.match(html, /value="BTC-OPCAT"/);
@@ -2659,6 +2662,10 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.match(html, /data-orders-page-prev/);
   assert.match(html, /data-orders-page-next/);
   assert.match(html, /data-my-service-edit-modal/);
+  assert.match(html, /data-edit-provider-skill-list/);
+  assert.match(html, /name="paymentTiming"[^>]+value="free"/);
+  assert.match(html, /name="paymentTiming"[^>]+value="prepaid"/);
+  assert.match(html, /name="executionReminder"/);
   assert.match(html, /data-my-service-revoke-modal/);
   assert.match(html, /Details/);
   assert.match(html, /Edit/);

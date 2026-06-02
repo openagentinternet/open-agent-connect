@@ -1,4 +1,9 @@
 import { normalizeComparableGlobalMetaId } from './serviceDirectory';
+import {
+  getPrimaryProviderSkill,
+  normalizeProviderSkillList,
+  resolveSkillServicePaymentTerms,
+} from '../services/skillServiceProtocol';
 
 const UNIX_SECONDS_MAX = 10_000_000_000;
 
@@ -24,6 +29,10 @@ export interface ChainServiceDirectoryItem {
   mrc20Id: string | null;
   serviceIcon: string | null;
   providerSkill: string | null;
+  providerSkills: string[];
+  paymentTiming: string | null;
+  executionReminder: string;
+  metadata: string;
   skillDocument: string | null;
   inputType: string | null;
   outputType: string | null;
@@ -49,6 +58,10 @@ export interface ParsedChainServiceRow {
   mrc20Id: string | null;
   serviceIcon: string | null;
   providerSkill: string | null;
+  providerSkills: string[];
+  paymentTiming: string | null;
+  executionReminder: string;
+  metadata: string;
   skillDocument: string | null;
   inputType: string | null;
   outputType: string | null;
@@ -254,6 +267,10 @@ export function parseChainServiceItem(item: Record<string, unknown>): ParsedChai
       mrc20Id: null,
       serviceIcon: null,
       providerSkill: null,
+      providerSkills: [],
+      paymentTiming: null,
+      executionReminder: '',
+      metadata: '',
       skillDocument: null,
       inputType: null,
       outputType: null,
@@ -273,6 +290,13 @@ export function parseChainServiceItem(item: Record<string, unknown>): ParsedChai
   if (!serviceName || !providerMetaId || !providerAddress) {
     return null;
   }
+  const providerSkills = normalizeProviderSkillList(summary.providerSkill);
+  const paymentTerms = resolveSkillServicePaymentTerms({
+    price: summary.price,
+    currency: summary.currency ?? summary.priceUnit,
+    paymentTiming: summary.paymentTiming,
+    settlementKind: summary.settlementKind,
+  });
 
   return {
     pinId: pinId || sourceServicePinId || serviceName,
@@ -282,14 +306,18 @@ export function parseChainServiceItem(item: Record<string, unknown>): ParsedChai
     serviceName,
     displayName: toSafeString(summary.displayName) || serviceName || 'Service',
     description: toSafeString(summary.description),
-    price: toSafeString(summary.price),
-    currency: toSafeString(summary.currency ?? summary.priceUnit),
+    price: paymentTerms.effectivePrice,
+    currency: paymentTerms.currency,
     paymentChain: toSafeString(summary.paymentChain) || null,
-    settlementKind: toSafeString(summary.settlementKind) || null,
+    settlementKind: paymentTerms.settlementKind,
     mrc20Ticker: toSafeString(summary.mrc20Ticker) || null,
     mrc20Id: toSafeString(summary.mrc20Id) || null,
     serviceIcon: toSafeString(summary.serviceIcon) || null,
-    providerSkill: toSafeString(summary.providerSkill) || null,
+    providerSkill: getPrimaryProviderSkill(providerSkills),
+    providerSkills,
+    paymentTiming: paymentTerms.paymentTiming,
+    executionReminder: toSafeString(summary.executionReminder),
+    metadata: typeof summary.metadata === 'string' ? summary.metadata.trim() : '',
     skillDocument: toSafeString(summary.skillDocument) || null,
     inputType: toSafeString(summary.inputType) || null,
     outputType: toSafeString(summary.outputType) || null,
@@ -359,6 +387,10 @@ export function resolveCurrentChainServices(
         mrc20Id: currentRow.mrc20Id,
         serviceIcon: currentRow.serviceIcon,
         providerSkill: currentRow.providerSkill,
+        providerSkills: currentRow.providerSkills,
+        paymentTiming: currentRow.paymentTiming,
+        executionReminder: currentRow.executionReminder,
+        metadata: currentRow.metadata,
         skillDocument: currentRow.skillDocument,
         inputType: currentRow.inputType,
         outputType: currentRow.outputType,

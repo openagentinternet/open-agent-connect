@@ -4,7 +4,9 @@ import vm from 'node:vm';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
+const { buildPublishPageDefinition } = require('../../dist/ui/pages/publish/app.js');
 const { buildPublishPageViewModel } = require('../../dist/ui/pages/publish/viewModel.js');
+const { buildMyServicesPageDefinition } = require('../../dist/ui/pages/my-services/app.js');
 const {
   buildMyServicesPageViewModel,
   buildMyServicesPageViewModelRuntimeSource,
@@ -157,8 +159,34 @@ test('buildPublishPageViewModel exposes primary runtime catalog availability for
   assert.deepEqual(model.availability, {
     canPublish: true,
     reasonCode: 'ready',
-    message: 'Ready to publish with the selected primary runtime skill.',
+    message: 'Ready to publish with selected primary runtime skills.',
   });
+});
+
+test('publish and my-services pages expose skill-service v1.1 service controls', () => {
+  const publishHtml = buildPublishPageDefinition().contentHtml;
+  const publishScript = buildPublishPageDefinition().script;
+  assert.match(publishHtml, /data-provider-skill-list/);
+  assert.match(publishHtml, /name="paymentTiming"[^>]+value="free"/);
+  assert.match(publishHtml, /name="paymentTiming"[^>]+value="prepaid"/);
+  assert.match(publishHtml, /name="executionReminder"/);
+  assert.match(publishScript, /providerSkills/);
+  assert.match(publishScript, /paymentTiming/);
+  assert.match(publishScript, /settlementKind/);
+  assert.doesNotMatch(publishHtml, /data-provider-skill-select/);
+
+  const myServicesHtml = buildMyServicesPageDefinition().contentHtml;
+  const myServicesScript = buildMyServicesPageDefinition().script;
+  assert.match(myServicesHtml, /data-edit-provider-skill-list/);
+  assert.match(myServicesHtml, /name="paymentTiming"[^>]+value="free"/);
+  assert.match(myServicesHtml, /name="paymentTiming"[^>]+value="prepaid"/);
+  assert.match(myServicesHtml, /name="executionReminder"/);
+  assert.match(myServicesScript, /providerSkills/);
+  assert.match(myServicesScript, /paymentTiming/);
+  assert.match(myServicesScript, /settlementKind/);
+  assert.match(myServicesScript, /validateEditPayload/);
+  assert.match(myServicesScript, /Prepaid service price must be greater than zero/);
+  assert.doesNotMatch(myServicesHtml, /data-edit-provider-skill"/);
 });
 
 test('buildPublishPageViewModel disables publishing when primary runtime or skill roots are unavailable', () => {
@@ -248,6 +276,8 @@ test('buildMyServicesPageViewModel renders IDBots-style local service rows with 
           price: '0.00004',
           currency: 'BTC-OPCAT',
           providerSkill: 'metabot-weather-oracle',
+          providerSkills: ['metabot-weather-oracle', 'metabot-post-buzz'],
+          paymentTiming: 'prepaid',
           outputType: 'text',
           creatorMetabotName: 'Alice Bot',
           creatorMetabotSlug: 'alice-bot',
@@ -276,9 +306,12 @@ test('buildMyServicesPageViewModel renders IDBots-style local service rows with 
     description: 'Returns a concise forecast.',
     iconUri: '',
     iconLabel: 'WO',
-    skillLabel: 'metabot-weather-oracle',
+    providerSkills: ['metabot-weather-oracle', 'metabot-post-buzz'],
+    skillLabel: 'metabot-weather-oracle, metabot-post-buzz',
     outputTypeLabel: 'text',
     priceLabel: '0.00004 BTC-OPCAT',
+    paymentTiming: 'prepaid',
+    paymentTimingLabel: 'Prepaid',
     creatorLabel: 'Alice Bot · alice-bot',
     updatedAtLabel: '2026-03-31 23:33',
     metrics: [
@@ -324,6 +357,10 @@ test('buildMyServicesPageViewModel renders selected service details, closed orde
           price: '0.00004',
           currency: 'BTC',
           providerSkill: 'metabot-weather-oracle',
+          providerSkills: ['metabot-weather-oracle', 'metabot-post-buzz'],
+          paymentTiming: 'free',
+          settlementKind: 'fiat',
+          executionReminder: 'Check the weather result before posting a buzz.',
           outputType: 'image',
           creatorMetabotName: 'Alice Bot',
           creatorMetabotSlug: 'alice-bot',
@@ -399,10 +436,14 @@ test('buildMyServicesPageViewModel renders selected service details, closed orde
     displayName: 'Weather Oracle',
     serviceName: 'weather-oracle',
     description: 'Returns a concise forecast.',
+    providerSkills: ['metabot-weather-oracle', 'metabot-post-buzz'],
     providerSkill: 'metabot-weather-oracle',
     outputType: 'image',
     price: '0.00004',
     currency: 'BTC',
+    paymentTiming: 'free',
+    settlementKind: 'fiat',
+    executionReminder: 'Check the weather result before posting a buzz.',
     serviceIconUri: 'metafile://cover-pin',
     serviceIconPreviewUri: '/api/file/avatar?ref=cover-pin',
   });

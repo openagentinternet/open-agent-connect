@@ -2,7 +2,9 @@ import { type MetabotPaths } from '../state/paths';
 export interface RatingDetailItem {
     pinId: string;
     serviceId: string;
+    serviceOrderPinId: string | null;
     servicePaidTx: string | null;
+    serviceSkills: string[];
     rate: number;
     comment: string | null;
     raterGlobalMetaId: string | null;

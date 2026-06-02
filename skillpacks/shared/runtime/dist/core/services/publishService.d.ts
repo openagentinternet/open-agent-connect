@@ -1,10 +1,16 @@
+import { type SkillServicePaymentTiming, type SkillServiceSettlementKind } from './skillServiceProtocol';
 export interface PublishedServiceDraft {
     serviceName: string;
     displayName: string;
     description: string;
     providerSkill: string;
+    providerSkills?: string[] | null;
     price: string;
     currency: string;
+    paymentTiming?: string | null;
+    settlementKind?: string | null;
+    executionReminder?: string | null;
+    metadata?: string | null;
     outputType: string;
     serviceIconUri?: string | null;
     serviceIconDataUrl?: string | null;
@@ -17,16 +23,20 @@ export interface PublishedServiceRecord {
     creatorMetabotId: number;
     providerGlobalMetaId: string;
     providerSkill: string;
+    providerSkills: string[];
     serviceName: string;
     displayName: string;
     description: string;
     serviceIcon: string | null;
     price: string;
     currency: string;
+    paymentTiming: SkillServicePaymentTiming;
     paymentChain: string | null;
-    settlementKind: string | null;
+    settlementKind: SkillServiceSettlementKind | string | null;
     mrc20Ticker: string | null;
     mrc20Id: string | null;
+    executionReminder: string;
+    metadata: string;
     skillDocument: string;
     inputType: 'text';
     outputType: string;
@@ -55,7 +65,7 @@ export declare function buildPublishedService(input: {
     skillDocument: string;
     now: number;
 }): {
-    payload: Record<string, string | null>;
+    payload: Record<string, unknown>;
     record: PublishedServiceRecord;
 };
 export declare function buildRevokedPublishedService(input: {
@@ -64,16 +74,20 @@ export declare function buildRevokedPublishedService(input: {
     creatorMetabotId: number;
     providerGlobalMetaId: string;
     providerSkill: string;
+    providerSkills?: string[] | null;
     serviceName: string;
     displayName: string;
     description: string;
     serviceIcon?: string | null;
     price: string;
     currency: string;
+    paymentTiming?: string | null;
     paymentChain?: string | null;
     settlementKind?: string | null;
     mrc20Ticker?: string | null;
     mrc20Id?: string | null;
+    executionReminder?: string | null;
+    metadata?: string | null;
     skillDocument: string;
     now: number;
 }): PublishedServiceRecord;

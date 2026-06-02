@@ -25,6 +25,8 @@ export interface A2AConversationMessage {
   kind: A2AConversationMessageKind;
   protocolTag?: A2AConversationProtocolTag | null;
   orderTxid?: string | null;
+  serviceOrderPinId?: string | null;
+  orderPinId?: string | null;
   paymentTxid?: string | null;
   content: string;
   contentType?: string | null;
@@ -62,6 +64,8 @@ export interface A2AOrderConversationSession {
   role?: 'caller' | 'seller' | 'provider' | string | null;
   state: string;
   orderTxid?: string | null;
+  serviceOrderPinId?: string | null;
+  orderPinId?: string | null;
   paymentTxid?: string | null;
   servicePinId?: string | null;
   serviceName?: string | null;

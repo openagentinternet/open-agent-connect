@@ -24,6 +24,7 @@ export interface SessionTraceOrderInput {
   paymentTxid?: string | null;
   paymentCommitTxid?: string | null;
   orderReference?: string | null;
+  serviceOrderPinId?: string | null;
   paymentCurrency?: string | null;
   paymentAmount?: string | null;
   paymentChain?: string | null;
@@ -31,6 +32,7 @@ export interface SessionTraceOrderInput {
   mrc20Ticker?: string | null;
   mrc20Id?: string | null;
   providerSkill?: string | null;
+  providerSkills?: string[] | null;
   outputType?: string | null;
   requestText?: string | null;
   status?: string | null;
@@ -66,6 +68,7 @@ export interface SessionTraceProviderRuntimeInput {
   runtimeProvider?: string | null;
   sessionId?: string | null;
   providerSkill?: string | null;
+  providerSkills?: string[] | null;
   fallbackSelected?: boolean | null;
 }
 
@@ -108,6 +111,7 @@ export interface SessionTraceProviderRuntimeRecord {
   runtimeProvider: string | null;
   sessionId: string | null;
   providerSkill: string | null;
+  providerSkills: string[];
   fallbackSelected: boolean | null;
 }
 
@@ -176,6 +180,7 @@ export interface SessionTraceRecord {
     paymentTxid: string | null;
     paymentCommitTxid: string | null;
     orderReference: string | null;
+    serviceOrderPinId: string | null;
     paymentCurrency: string | null;
     paymentAmount: string | null;
     paymentChain: string | null;
@@ -183,6 +188,7 @@ export interface SessionTraceRecord {
     mrc20Ticker: string | null;
     mrc20Id: string | null;
     providerSkill?: string | null;
+    providerSkills?: string[];
     outputType: string | null;
     requestText: string | null;
     status: string | null;
@@ -234,6 +240,13 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function normalizeTextList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [...new Set(value.map((entry) => normalizeText(entry)).filter(Boolean))];
+}
+
 function normalizeOptionalNumber(value: unknown): number | null {
   if (value === null || value === undefined || normalizeText(value) === '') {
     return null;
@@ -278,9 +291,12 @@ function buildProviderRuntimeTraceRecord(input?: SessionTraceProviderRuntimeInpu
     runtimeProvider: normalizeText(input.runtimeProvider) || null,
     sessionId: normalizeText(input.sessionId) || null,
     providerSkill: normalizeText(input.providerSkill) || null,
+    providerSkills: normalizeTextList(input.providerSkills),
     fallbackSelected: typeof input.fallbackSelected === 'boolean' ? input.fallbackSelected : null,
   };
-  return Object.values(record).some((value) => value !== null && value !== '') ? record : null;
+  return Object.values(record).some((value) => (
+    Array.isArray(value) ? value.length > 0 : value !== null && value !== ''
+  )) ? record : null;
 }
 
 function buildAskMasterTraceRecord(input?: SessionTraceAskMasterInput | null): SessionTraceAskMasterRecord | null {
@@ -461,6 +477,7 @@ export function buildSessionTrace(input: BuildSessionTraceInput): SessionTraceRe
           paymentTxid: normalizeText(input.order.paymentTxid) || null,
           paymentCommitTxid: normalizeText(input.order.paymentCommitTxid) || null,
           orderReference: normalizeText(input.order.orderReference) || null,
+          serviceOrderPinId: normalizeText(input.order.serviceOrderPinId) || null,
           paymentCurrency: normalizeText(input.order.paymentCurrency) || null,
           paymentAmount: normalizeText(input.order.paymentAmount) || null,
           paymentChain: normalizeText(input.order.paymentChain) || null,
@@ -468,6 +485,7 @@ export function buildSessionTrace(input: BuildSessionTraceInput): SessionTraceRe
           mrc20Ticker: normalizeText(input.order.mrc20Ticker) || null,
           mrc20Id: normalizeText(input.order.mrc20Id) || null,
           providerSkill: normalizeText(input.order.providerSkill) || null,
+          providerSkills: normalizeTextList(input.order.providerSkills),
           outputType: normalizeText(input.order.outputType) || null,
           requestText: normalizeText(input.order.requestText) || null,
           status: normalizeText(input.order.status) || null,

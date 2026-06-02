@@ -44,6 +44,8 @@ export interface PersistA2AConversationMessageInput {
     timestamp?: number | null;
     chainTimestamp?: number | null;
     orderTxid?: string | null;
+    serviceOrderPinId?: string | null;
+    orderPinId?: string | null;
     paymentTxid?: string | null;
     raw?: Record<string, unknown> | null;
   };
@@ -222,6 +224,10 @@ export async function persistA2AConversationMessage(
     ? classification.orderTxid
     : null;
   const orderTxid = normalizeText(input.message.orderTxid) || classifiedOrderTxid || null;
+  const serviceOrderPinId = normalizeText(input.message.serviceOrderPinId)
+    || normalizeText(input.message.orderPinId)
+    || (classification.kind === 'order_protocol' ? normalizeText(classification.orderPinId) : '')
+    || null;
   const orderSessionId = orderTxid ? buildA2AOrderSessionId(orderTxid) : null;
   const sender = normalizeActor(input.message.direction === 'outgoing' ? local : peer);
   const recipient = normalizeActor(input.message.direction === 'outgoing' ? peer : local);
@@ -241,6 +247,8 @@ export async function persistA2AConversationMessage(
     kind: classification.kind,
     protocolTag: classification.kind === 'order_protocol' ? classification.tag : null,
     orderTxid,
+    serviceOrderPinId,
+    orderPinId: serviceOrderPinId,
     paymentTxid: normalizeText(input.message.paymentTxid) || null,
     content: String(input.message.content ?? ''),
     contentType: normalizeText(input.message.contentType) || 'text/plain',
@@ -293,6 +301,18 @@ export async function persistA2AConversationMessage(
         classification,
       }),
       orderTxid,
+      serviceOrderPinId: normalizeText(input.orderSession?.serviceOrderPinId)
+        || normalizeText(input.orderSession?.orderPinId)
+        || serviceOrderPinId
+        || normalizeText(existingOrderSession?.serviceOrderPinId)
+        || normalizeText(existingOrderSession?.orderPinId)
+        || null,
+      orderPinId: normalizeText(input.orderSession?.orderPinId)
+        || normalizeText(input.orderSession?.serviceOrderPinId)
+        || serviceOrderPinId
+        || normalizeText(existingOrderSession?.orderPinId)
+        || normalizeText(existingOrderSession?.serviceOrderPinId)
+        || null,
       paymentTxid: normalizeText(input.orderSession?.paymentTxid)
         || message.paymentTxid
         || normalizeText(existingOrderSession?.paymentTxid)

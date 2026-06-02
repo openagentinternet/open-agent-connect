@@ -14,6 +14,12 @@ function normalizeNumber(value) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
 }
+function normalizeTextList(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return [...new Set(value.map((entry) => normalizeText(entry)).filter(Boolean))];
+}
 function createEmptyRatingDetailState() {
     return {
         items: [],
@@ -35,7 +41,9 @@ function normalizeRatingDetailItem(value) {
     return {
         pinId,
         serviceId,
+        serviceOrderPinId: normalizeText(value.serviceOrderPinId) || null,
         servicePaidTx: normalizeText(value.servicePaidTx) || null,
+        serviceSkills: normalizeTextList(value.serviceSkills),
         rate,
         comment: normalizeText(value.comment) || null,
         raterGlobalMetaId: normalizeText(value.raterGlobalMetaId) || null,
