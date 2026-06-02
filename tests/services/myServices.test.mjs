@@ -323,6 +323,61 @@ test('buildMyServiceOrderDetails returns closed orders for every service version
   assert.equal(detailPage.items[1].rating, null);
 });
 
+test('buildMyServiceOrderDetails ignores payment fallback ratings from another service order', () => {
+  const detailPage = buildMyServiceOrderDetails({
+    serviceId: 'service-modify-pin',
+    profiles: [
+      {
+        slug: 'seller',
+        name: 'Seller Bot',
+        homeDir: '/tmp/seller',
+        identity: {
+          metabotId: 7,
+          name: 'Seller Bot',
+          globalMetaId: 'idq1seller',
+          mvcAddress: '1seller',
+          addresses: { mvc: '1seller' },
+        },
+        services: [
+          createService({
+            currentPinId: 'service-modify-pin',
+            chainPinIds: ['service-create-pin', 'service-modify-pin'],
+          }),
+        ],
+        sellerOrders: [
+          createOrder({
+            id: 'current-v11-order',
+            serviceOrderPinId: 'skill-service-order-current-pin',
+            servicePinId: 'service-modify-pin',
+            currentServicePinId: 'service-modify-pin',
+            paymentTxid: 'payment-shared',
+          }),
+        ],
+        ratingDetails: [
+          {
+            pinId: 'rating-for-different-v11-order',
+            serviceId: 'service-modify-pin',
+            serviceOrderPinId: 'skill-service-order-other-pin',
+            servicePaidTx: 'payment-shared',
+            serviceSkills: ['tarot-rws'],
+            rate: 1,
+            comment: 'This rating belongs to a different service order.',
+            raterGlobalMetaId: 'idq1buyer',
+            raterMetaId: null,
+            createdAt: 1_775_000_062_000,
+          },
+        ],
+      },
+    ],
+    page: 1,
+    pageSize: 10,
+  });
+
+  assert.equal(detailPage.total, 1);
+  assert.equal(detailPage.items[0].id, 'current-v11-order');
+  assert.equal(detailPage.items[0].rating, null);
+});
+
 test('mutation helpers build MetaID writes and local modify/revoke records', () => {
   const service = createService({
     currentPinId: 'service-modify-pin',

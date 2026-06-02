@@ -229,7 +229,8 @@ export function findRatingDetailByServicePayment(
     return null;
   }
   return matchingServiceItems.find((item) => (
-    toSafeString(item.servicePaidTx) === servicePaidTx
+    !toSafeString(item.serviceOrderPinId)
+    && toSafeString(item.servicePaidTx) === servicePaidTx
   )) ?? null;
 }
 

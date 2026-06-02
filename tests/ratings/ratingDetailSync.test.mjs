@@ -212,16 +212,28 @@ test('findRatingDetailByServicePayment prefers serviceOrderPinId and falls back 
       createdAt: 1_775_000_010_000,
     },
     {
-      pinId: 'rating-by-payment',
+      pinId: 'rating-by-payment-different-order',
       serviceId: 'service-pin-1',
       serviceOrderPinId: 'skill-service-order-pin-other',
       servicePaidTx: 'payment-shared',
       serviceSkills: [],
       rate: 3,
-      comment: 'Legacy payment match.',
+      comment: 'V1.1 rating for a different service order.',
       raterGlobalMetaId: 'idq1buyer',
       raterMetaId: 'buyer-meta-id',
       createdAt: 1_775_000_009_000,
+    },
+    {
+      pinId: 'rating-by-legacy-payment',
+      serviceId: 'service-pin-1',
+      serviceOrderPinId: null,
+      servicePaidTx: 'payment-shared',
+      serviceSkills: [],
+      rate: 4,
+      comment: 'Legacy payment match.',
+      raterGlobalMetaId: 'idq1buyer',
+      raterMetaId: 'buyer-meta-id',
+      createdAt: 1_775_000_008_000,
     },
   ];
 
@@ -233,6 +245,12 @@ test('findRatingDetailByServicePayment prefers serviceOrderPinId and falls back 
 
   assert.equal(findRatingDetailByServicePayment(ratings, {
     serviceId: 'service-pin-1',
+    serviceOrderPinId: 'skill-service-order-pin-missing',
     servicePaidTx: 'payment-shared',
-  })?.pinId, 'rating-by-payment');
+  })?.pinId, 'rating-by-legacy-payment');
+
+  assert.equal(findRatingDetailByServicePayment(ratings, {
+    serviceId: 'service-pin-1',
+    servicePaidTx: 'payment-shared',
+  })?.pinId, 'rating-by-legacy-payment');
 });

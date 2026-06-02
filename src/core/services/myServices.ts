@@ -254,7 +254,11 @@ function pickRatingDetail(
     : [];
   const candidates = (orderPinCandidates.length > 0
     ? orderPinCandidates
-    : serviceRatings.filter((rating) => paymentTxid && toSafeString(rating.servicePaidTx) === paymentTxid))
+    : serviceRatings.filter((rating) => (
+        paymentTxid
+        && !toSafeString(rating.serviceOrderPinId)
+        && toSafeString(rating.servicePaidTx) === paymentTxid
+      )))
     .sort((left, right) => toSafeNumber(right.createdAt) - toSafeNumber(left.createdAt));
   const selected = buyerGlobalMetaId
     ? candidates.find((rating) => toSafeString(rating.raterGlobalMetaId) === buyerGlobalMetaId) ?? candidates[0]
