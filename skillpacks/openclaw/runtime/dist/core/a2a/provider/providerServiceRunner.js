@@ -131,8 +131,8 @@ function buildPaidOrderSystemPrompt(input) {
     const providerSkill = normalizedProviderSkills[0] ?? normalizeText(input.providerSkill);
     const skillInstructions = normalizedProviderSkills.length > 1
         ? [
-            `Required provider skills in order: ${normalizedProviderSkills.join(', ')}.`,
-            'Use the injected local skills in the listed order when the service task requires multiple steps.',
+            `Allowed provider skills: ${normalizedProviderSkills.join(', ')}.`,
+            'Choose the allowed skills needed for the buyer request; not every allowed skill is required.',
             'Do not use skills outside this injected provider skill list.',
         ]
         : [

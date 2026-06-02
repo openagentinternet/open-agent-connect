@@ -136,7 +136,7 @@ test('buildProviderServiceOrderPrompt includes paid-order guidance and required 
   assert.match(prompt, /do not include.*daemon/i);
 });
 
-test('buildProviderServiceOrderPrompt includes ordered provider skills and execution reminder', () => {
+test('buildProviderServiceOrderPrompt describes multiple provider skills as an allow list', () => {
   const prompt = buildProviderServiceOrderPrompt({
     serviceName: 'Weather Buzz',
     displayName: 'Weather Buzz',
@@ -148,9 +148,13 @@ test('buildProviderServiceOrderPrompt includes ordered provider skills and execu
     outputType: 'text',
   });
 
-  assert.match(prompt, /Required provider skills in order: weather\.oracle, metabot-post-buzz/);
+  assert.match(prompt, /Allowed provider skills: weather\.oracle, metabot-post-buzz/);
+  assert.match(prompt, /Choose the allowed skills needed for the buyer request/i);
+  assert.match(prompt, /not every allowed skill is required/i);
   assert.match(prompt, /Use weather\.oracle first, then use metabot-post-buzz/);
   assert.doesNotMatch(prompt, /only the injected local skill/i);
+  assert.doesNotMatch(prompt, /Required provider skills in order/i);
+  assert.doesNotMatch(prompt, /listed order/i);
 });
 
 test('createProviderServiceRunner uses fallback only before execution starts', async () => {
@@ -204,7 +208,7 @@ test('createProviderServiceRunner uses fallback only before execution starts', a
   await cleanupProfileHome(homeDir);
 });
 
-test('createProviderServiceRunner injects ordered provider skills and execution reminder', async () => {
+test('createProviderServiceRunner injects allowed provider skills and execution reminder', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   await runtimeStore.write({
     version: 1,
@@ -251,7 +255,11 @@ test('createProviderServiceRunner injects ordered provider skills and execution 
     path.join(systemHomeDir, '.codex', 'skills', 'metabot-post-buzz'),
   );
   assert.match(calls[0].systemPrompt, /Query weather first/);
+  assert.match(calls[0].systemPrompt, /Allowed provider skills: weather\.oracle, metabot-post-buzz/);
+  assert.match(calls[0].systemPrompt, /not every allowed skill is required/i);
   assert.doesNotMatch(calls[0].systemPrompt, /only the injected local skill/i);
+  assert.doesNotMatch(calls[0].systemPrompt, /Required provider skills in order/i);
+  assert.doesNotMatch(calls[0].systemPrompt, /listed order/i);
   assert.deepEqual(result.metadata.providerSkills, ['weather.oracle', 'metabot-post-buzz']);
   await cleanupProfileHome(homeDir);
 });
