@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.normalizeProviderSkillList = normalizeProviderSkillList;
+exports.selectProviderSkillSource = selectProviderSkillSource;
 exports.getPrimaryProviderSkill = getPrimaryProviderSkill;
 exports.normalizeSkillServicePaymentTiming = normalizeSkillServicePaymentTiming;
 exports.normalizeSkillServiceSettlementKind = normalizeSkillServiceSettlementKind;
@@ -43,6 +44,20 @@ function normalizeProviderSkillList(value) {
         skills.push(skillName);
     }
     return skills;
+}
+function selectProviderSkillSource(input) {
+    if (Array.isArray(input.providerSkills) && input.providerSkills.length > 0) {
+        return input.providerSkills;
+    }
+    const scalarProviderSkills = normalizeText(input.providerSkills);
+    if (scalarProviderSkills) {
+        return scalarProviderSkills;
+    }
+    const scalarProviderSkill = normalizeText(input.providerSkill);
+    if (scalarProviderSkill) {
+        return scalarProviderSkill;
+    }
+    return input.fallback;
 }
 function getPrimaryProviderSkill(value) {
     return normalizeProviderSkillList(value)[0] ?? null;

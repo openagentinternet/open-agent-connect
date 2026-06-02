@@ -27,6 +27,11 @@ export interface SkillServiceOrderPayload {
     metadata: string;
 }
 export declare function normalizeProviderSkillList(value: unknown): string[];
+export declare function selectProviderSkillSource(input: {
+    providerSkills?: unknown;
+    providerSkill?: unknown;
+    fallback?: unknown;
+}): unknown;
 export declare function getPrimaryProviderSkill(value: unknown): string | null;
 export declare function normalizeSkillServicePaymentTiming(value: unknown, price: unknown): SkillServicePaymentTiming;
 export declare function normalizeSkillServiceSettlementKind(value: unknown): SkillServiceSettlementKind;

@@ -59,9 +59,7 @@ function resolvePublishedServiceSettlement(value) {
     };
 }
 function normalizeDraft(draft) {
-    const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)(Array.isArray(draft.providerSkills) && draft.providerSkills.length > 0
-        ? draft.providerSkills
-        : draft.providerSkill);
+    const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)((0, skillServiceProtocol_1.selectProviderSkillSource)(draft));
     const paymentTerms = (0, skillServiceProtocol_1.resolveSkillServicePaymentTerms)({
         price: draft.price,
         currency: draft.currency,
@@ -148,9 +146,7 @@ function buildPublishedService(input) {
 }
 function buildRevokedPublishedService(input) {
     const settlement = resolvePublishedServiceSettlement(input.currency);
-    const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)(Array.isArray(input.providerSkills) && input.providerSkills.length > 0
-        ? input.providerSkills
-        : input.providerSkill);
+    const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)((0, skillServiceProtocol_1.selectProviderSkillSource)(input));
     const paymentTerms = (0, skillServiceProtocol_1.resolveSkillServicePaymentTerms)({
         price: input.price,
         currency: input.currency,

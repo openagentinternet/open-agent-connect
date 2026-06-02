@@ -5108,11 +5108,14 @@ function createDefaultMetabotDaemonHandlers(input) {
         const serviceName = normalizeText(rawInput.serviceName);
         const displayName = normalizeText(rawInput.displayName);
         const description = normalizeText(rawInput.description);
-        const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)(Array.isArray(rawInput.providerSkills) && rawInput.providerSkills.length > 0
-            ? rawInput.providerSkills
-            : normalizeText(rawInput.providerSkill)
-                || currentService?.providerSkills
-                || currentService?.providerSkill);
+        const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)((0, skillServiceProtocol_1.selectProviderSkillSource)({
+            providerSkills: rawInput.providerSkills,
+            providerSkill: rawInput.providerSkill,
+            fallback: (0, skillServiceProtocol_1.selectProviderSkillSource)({
+                providerSkills: currentService?.providerSkills,
+                providerSkill: currentService?.providerSkill,
+            }),
+        }));
         const providerSkill = (0, skillServiceProtocol_1.getPrimaryProviderSkill)(providerSkills) ?? '';
         const paymentTiming = normalizeText(rawInput.paymentTiming).toLowerCase()
             || normalizeText(currentService?.paymentTiming)
@@ -11236,9 +11239,11 @@ function createDefaultMetabotDaemonHandlers(input) {
                 const draft = draftInput.draft;
                 const providerSkillValidation = await (0, servicePublishValidation_1.validateServicePublishProviderSkills)({
                     metaBotSlug: resolved.target.profileSlug,
-                    providerSkills: Array.isArray(rawInput.providerSkills) && rawInput.providerSkills.length > 0
-                        ? rawInput.providerSkills
-                        : normalizeText(rawInput.providerSkill) || draft.providerSkills,
+                    providerSkills: (0, skillServiceProtocol_1.selectProviderSkillSource)({
+                        providerSkills: rawInput.providerSkills,
+                        providerSkill: rawInput.providerSkill,
+                        fallback: draft.providerSkills,
+                    }),
                     runtimeStore: resolved.target.profileHomeDir === node_path_1.default.resolve(input.homeDir)
                         ? llmRuntimeStore
                         : (0, llmRuntimeStore_1.createLlmRuntimeStore)(resolved.target.profileHomeDir),
@@ -11496,9 +11501,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                 const serviceName = normalizeText(rawInput.serviceName);
                 const displayName = normalizeText(rawInput.displayName);
                 const description = normalizeText(rawInput.description);
-                const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)(Array.isArray(rawInput.providerSkills) && rawInput.providerSkills.length > 0
-                    ? rawInput.providerSkills
-                    : rawInput.providerSkill);
+                const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)((0, skillServiceProtocol_1.selectProviderSkillSource)({
+                    providerSkills: rawInput.providerSkills,
+                    providerSkill: rawInput.providerSkill,
+                }));
                 const providerSkill = (0, skillServiceProtocol_1.getPrimaryProviderSkill)(providerSkills) ?? '';
                 const paymentTiming = normalizeText(rawInput.paymentTiming).toLowerCase();
                 const price = normalizeText(rawInput.price) || (paymentTiming === 'free' ? '0' : '');
@@ -11525,9 +11531,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                 const metaBotSlug = selectedProfile?.slug ?? node_path_1.default.basename(profileHomeDir);
                 const validation = await (0, servicePublishValidation_1.validateServicePublishProviderSkills)({
                     metaBotSlug,
-                    providerSkills: Array.isArray(rawInput.providerSkills) && rawInput.providerSkills.length > 0
-                        ? rawInput.providerSkills
-                        : rawInput.providerSkill,
+                    providerSkills: (0, skillServiceProtocol_1.selectProviderSkillSource)({
+                        providerSkills: rawInput.providerSkills,
+                        providerSkill: rawInput.providerSkill,
+                    }),
                     runtimeStore: profileHomeDir === input.homeDir ? llmRuntimeStore : (0, llmRuntimeStore_1.createLlmRuntimeStore)(profileHomeDir),
                     bindingStore: profileHomeDir === input.homeDir ? llmBindingStore : (0, llmBindingStore_1.createLlmBindingStore)(profileHomeDir),
                     systemHomeDir: profileRuntimeStateStore.paths.systemHomeDir,

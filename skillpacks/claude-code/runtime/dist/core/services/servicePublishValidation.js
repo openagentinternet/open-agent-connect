@@ -8,9 +8,11 @@ function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
 function normalizeRawProviderSkillCandidates(input) {
-    const source = Array.isArray(input.providerSkills) && input.providerSkills.length > 0
-        ? input.providerSkills
-        : [input.providerSkill];
+    const selectedSource = (0, skillServiceProtocol_1.selectProviderSkillSource)({
+        providerSkills: input.providerSkills,
+        providerSkill: input.providerSkill,
+    });
+    const source = Array.isArray(selectedSource) ? selectedSource : [selectedSource];
     const seen = new Set();
     const result = [];
     for (const candidate of source) {

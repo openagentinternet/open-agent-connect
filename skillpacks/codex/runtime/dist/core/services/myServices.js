@@ -369,9 +369,7 @@ function buildMyServiceRevokeChainWrite(input) {
     };
 }
 function buildMyServicePayload(input) {
-    const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)(Array.isArray(input.draft.providerSkills) && input.draft.providerSkills.length > 0
-        ? input.draft.providerSkills
-        : input.draft.providerSkill);
+    const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)((0, skillServiceProtocol_1.selectProviderSkillSource)(input.draft));
     const paymentTerms = (0, skillServiceProtocol_1.resolveSkillServicePaymentTerms)({
         price: input.draft.price,
         currency: input.draft.currency,
@@ -403,9 +401,7 @@ function buildMyServicePayload(input) {
     };
 }
 function buildMyServiceModifyRecord(input) {
-    const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)(Array.isArray(input.draft.providerSkills) && input.draft.providerSkills.length > 0
-        ? input.draft.providerSkills
-        : input.draft.providerSkill);
+    const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)((0, skillServiceProtocol_1.selectProviderSkillSource)(input.draft));
     const paymentTerms = (0, skillServiceProtocol_1.resolveSkillServicePaymentTerms)({
         price: input.draft.price,
         currency: input.draft.currency,
