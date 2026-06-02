@@ -534,6 +534,7 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
       providerSkills: selectedEditSkillValues(),
       outputType: normalizeTextClient(formData.get('outputType')),
       paymentTiming,
+      settlementKind: normalizeTextClient(raw && raw.settlementKind).toLowerCase() || 'native',
       price: paymentTiming === 'free' ? '0' : normalizeTextClient(formData.get('price')),
       currency: normalizeTextClient(formData.get('currency')),
       serviceIconUri: state.editCoverDataUrl ? '' : state.editCoverUri,

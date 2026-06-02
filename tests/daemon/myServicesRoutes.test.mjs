@@ -369,6 +369,7 @@ test('default my-services modify writes a modify pin and updates local profile s
       description: 'Updated forecast service.',
       providerSkills: ['metabot-weather-oracle', 'metabot-post-buzz'],
       paymentTiming: 'prepaid',
+      settlementKind: 'fiat',
       price: '0.00004',
       currency: 'BTC-OPCAT',
       outputType: 'image',
@@ -386,6 +387,7 @@ test('default my-services modify writes a modify pin and updates local profile s
   assert.equal(payload.currency, 'BTC-OPCAT');
   assert.deepEqual(payload.providerSkill, ['metabot-weather-oracle', 'metabot-post-buzz']);
   assert.equal(payload.paymentTiming, 'prepaid');
+  assert.equal(payload.settlementKind, 'fiat');
   assert.equal(payload.executionReminder, 'Check weather first; post a buzz only when the buyer asks for it.');
   assert.equal(payload.metadata, '{"category":"weather"}');
   assert.equal(payload.paymentAddress, 'alpha-bot-opcat-address');
@@ -398,6 +400,7 @@ test('default my-services modify writes a modify pin and updates local profile s
   assert.deepEqual(state.services[0].providerSkills, ['metabot-weather-oracle', 'metabot-post-buzz']);
   assert.equal(state.services[0].providerSkill, 'metabot-weather-oracle');
   assert.equal(state.services[0].paymentTiming, 'prepaid');
+  assert.equal(state.services[0].settlementKind, 'fiat');
   assert.equal(state.services[0].executionReminder, 'Check weather first; post a buzz only when the buyer asks for it.');
   assert.equal(state.services[0].metadata, '{"category":"weather"}');
   assert.equal(state.services[0].currency, 'BTC-OPCAT');
@@ -483,6 +486,7 @@ test('default my-services modify falls back to legacy providerSkill when stored 
       ...createService({ providerGlobalMetaId: identity.globalMetaId }),
       providerSkills: [],
       providerSkill: 'metabot-weather-oracle',
+      settlementKind: 'fiat',
     }],
     traces: [],
     sellerOrders: [],
@@ -535,10 +539,12 @@ test('default my-services modify falls back to legacy providerSkill when stored 
   assert.equal(response.payload.ok, true);
   const payload = JSON.parse(writes[0].payload);
   assert.deepEqual(payload.providerSkill, ['metabot-weather-oracle']);
+  assert.equal(payload.settlementKind, 'fiat');
 
   const state = await createRuntimeStateStore(homeDir).readState();
   assert.deepEqual(state.services[0].providerSkills, ['metabot-weather-oracle']);
   assert.equal(state.services[0].providerSkill, 'metabot-weather-oracle');
+  assert.equal(state.services[0].settlementKind, 'fiat');
 });
 
 test('default services publish accepts v1.1 multi-skill payloads', async (t) => {
@@ -591,6 +597,7 @@ test('default services publish accepts v1.1 multi-skill payloads', async (t) => 
       description: 'Checks weather and posts a buzz.',
       providerSkills: ['metabot-weather-oracle', 'metabot-post-buzz'],
       paymentTiming: 'free',
+      settlementKind: 'fiat',
       price: '10',
       currency: 'SPACE',
       outputType: 'text',
@@ -607,6 +614,7 @@ test('default services publish accepts v1.1 multi-skill payloads', async (t) => 
   const payload = JSON.parse(writes[0].payload);
   assert.deepEqual(payload.providerSkill, ['metabot-weather-oracle', 'metabot-post-buzz']);
   assert.equal(payload.paymentTiming, 'free');
+  assert.equal(payload.settlementKind, 'fiat');
   assert.equal(payload.price, '0');
   assert.equal(payload.executionReminder, 'Check weather before posting the final buzz.');
   assert.equal(payload.metadata, '{"category":"weather"}');
@@ -615,6 +623,7 @@ test('default services publish accepts v1.1 multi-skill payloads', async (t) => 
   assert.deepEqual(state.services[0].providerSkills, ['metabot-weather-oracle', 'metabot-post-buzz']);
   assert.equal(state.services[0].providerSkill, 'metabot-weather-oracle');
   assert.equal(state.services[0].paymentTiming, 'free');
+  assert.equal(state.services[0].settlementKind, 'fiat');
   assert.equal(state.services[0].price, '0');
   assert.equal(state.services[0].executionReminder, 'Check weather before posting the final buzz.');
   assert.equal(state.services[0].metadata, '{"category":"weather"}');

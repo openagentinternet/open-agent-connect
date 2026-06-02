@@ -665,6 +665,7 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
       description: normalizeText(formData.get('description')),
       executionReminder: normalizeText(formData.get('executionReminder')),
       paymentTiming,
+      settlementKind: 'native',
       price: paymentTiming === 'free' ? '0' : normalizeText(formData.get('price')),
       currency: normalizeText(formData.get('currency')).toUpperCase(),
       inputType: 'text',

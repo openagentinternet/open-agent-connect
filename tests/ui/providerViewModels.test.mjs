@@ -172,6 +172,7 @@ test('publish and my-services pages expose skill-service v1.1 service controls',
   assert.match(publishHtml, /name="executionReminder"/);
   assert.match(publishScript, /providerSkills/);
   assert.match(publishScript, /paymentTiming/);
+  assert.match(publishScript, /settlementKind/);
   assert.doesNotMatch(publishHtml, /data-provider-skill-select/);
 
   const myServicesHtml = buildMyServicesPageDefinition().contentHtml;
@@ -182,6 +183,7 @@ test('publish and my-services pages expose skill-service v1.1 service controls',
   assert.match(myServicesHtml, /name="executionReminder"/);
   assert.match(myServicesScript, /providerSkills/);
   assert.match(myServicesScript, /paymentTiming/);
+  assert.match(myServicesScript, /settlementKind/);
   assert.match(myServicesScript, /validateEditPayload/);
   assert.match(myServicesScript, /Prepaid service price must be greater than zero/);
   assert.doesNotMatch(myServicesHtml, /data-edit-provider-skill"/);
@@ -357,6 +359,7 @@ test('buildMyServicesPageViewModel renders selected service details, closed orde
           providerSkill: 'metabot-weather-oracle',
           providerSkills: ['metabot-weather-oracle', 'metabot-post-buzz'],
           paymentTiming: 'free',
+          settlementKind: 'fiat',
           executionReminder: 'Check the weather result before posting a buzz.',
           outputType: 'image',
           creatorMetabotName: 'Alice Bot',
@@ -439,6 +442,7 @@ test('buildMyServicesPageViewModel renders selected service details, closed orde
     price: '0.00004',
     currency: 'BTC',
     paymentTiming: 'free',
+    settlementKind: 'fiat',
     executionReminder: 'Check the weather result before posting a buzz.',
     serviceIconUri: 'metafile://cover-pin',
     serviceIconPreviewUri: '/api/file/avatar?ref=cover-pin',

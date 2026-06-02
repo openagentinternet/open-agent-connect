@@ -6653,6 +6653,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const paymentTiming = normalizeText(rawInput.paymentTiming).toLowerCase()
       || normalizeText(currentService?.paymentTiming)
       || '';
+    const settlementKind = normalizeText(rawInput.settlementKind).toLowerCase()
+      || normalizeText(currentService?.settlementKind).toLowerCase()
+      || '';
     const price = normalizeText(rawInput.price) || (paymentTiming === 'free' ? '0' : '');
     const currency = normalizeText(rawInput.currency) || (paymentTiming === 'free' ? 'SPACE' : '');
     const outputType = normalizeText(rawInput.outputType);
@@ -6697,6 +6700,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         price,
         currency,
         paymentTiming,
+        settlementKind,
         executionReminder,
         metadata,
         outputType,
@@ -13749,6 +13753,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }));
         const providerSkill = getPrimaryProviderSkill(providerSkills) ?? '';
         const paymentTiming = normalizeText(rawInput.paymentTiming).toLowerCase();
+        const settlementKind = normalizeText(rawInput.settlementKind).toLowerCase();
         const price = normalizeText(rawInput.price) || (paymentTiming === 'free' ? '0' : '');
         const currency = normalizeText(rawInput.currency) || (paymentTiming === 'free' ? 'SPACE' : '');
         const outputType = normalizeText(rawInput.outputType);
@@ -13806,6 +13811,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               price,
               currency,
               paymentTiming,
+              settlementKind,
               executionReminder,
               metadata,
               outputType,

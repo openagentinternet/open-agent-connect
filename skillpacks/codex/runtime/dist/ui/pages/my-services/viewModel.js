@@ -335,6 +335,7 @@ function buildEditForm(selected, rawSelected) {
         price: normalizeText(rawSelected.price),
         currency: normalizeText(rawSelected.currency) || 'BTC',
         paymentTiming,
+        settlementKind: normalizeText(rawSelected.settlementKind).toLowerCase() || 'native',
         executionReminder: normalizeText(rawSelected.executionReminder),
         serviceIconUri: normalizeText(rawSelected.serviceIcon),
         serviceIconPreviewUri: formatServiceIconRenderUri(rawSelected.serviceIcon),

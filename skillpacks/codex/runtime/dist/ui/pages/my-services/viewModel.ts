@@ -66,6 +66,7 @@ export interface MyServiceEditFormViewModel {
   price: string;
   currency: string;
   paymentTiming: string;
+  settlementKind: string;
   executionReminder: string;
   serviceIconUri: string;
   serviceIconPreviewUri: string;
@@ -443,6 +444,7 @@ function buildEditForm(selected: MyServiceListEntryViewModel | null, rawSelected
     price: normalizeText(rawSelected.price),
     currency: normalizeText(rawSelected.currency) || 'BTC',
     paymentTiming,
+    settlementKind: normalizeText(rawSelected.settlementKind).toLowerCase() || 'native',
     executionReminder: normalizeText(rawSelected.executionReminder),
     serviceIconUri: normalizeText(rawSelected.serviceIcon),
     serviceIconPreviewUri: formatServiceIconRenderUri(rawSelected.serviceIcon),

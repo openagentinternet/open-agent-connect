@@ -62,6 +62,7 @@ export interface MyServiceEditFormViewModel {
     price: string;
     currency: string;
     paymentTiming: string;
+    settlementKind: string;
     executionReminder: string;
     serviceIconUri: string;
     serviceIconPreviewUri: string;
