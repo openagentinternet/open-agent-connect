@@ -16,6 +16,54 @@
 
 ---
 
+## Implementation Status (2026-06-02)
+
+This branch has implemented the planned `skill-service` v1.1 upgrade on `codex/skill-service-v1-1-upgrade`.
+
+Completed protocol and business changes:
+- `skill-service` publish and modify payloads emit v1.1 fields: `providerSkill` arrays, `paymentTiming`, `settlementKind`, `executionReminder`, and `metadata`.
+- Readers preserve v1.0 compatibility by accepting legacy scalar `providerSkill`, legacy payment fields, and old rating records.
+- Publish validation accepts multiple safe provider skills, accepts scalar compatibility input from older callers, and falls back to legacy `providerSkill` when a stored `providerSkills` array is empty.
+- The publish and my-services UI expose multi-skill selection, free/prepaid controls, execution reminder input, and v1.1 edit defaults.
+- Buyer service calls create a `/protocols/skill-service-order` pin for both free and prepaid services, use that pin id as the order id, and keep payment txids only as payment evidence.
+- Seller order state, provider summaries, trace projections, refund settlement, and my-services order detail prefer `serviceOrderPinId` while retaining legacy payment-tx fallback where appropriate.
+- Provider-side service execution accepts multiple allowed skills and injects `executionReminder` into the provider execution prompt.
+- `skill-service-rate` publishing and rating-detail sync include `serviceOrderPinId` and `serviceSkills`, with legacy fallback limited to legacy records that have no service order id.
+- E2E fixtures and generated skillpack artifacts were updated to the v1.1 skill-service contract.
+
+Implementation commit sequence:
+- `22ca5e33` `feat: add skill service v1.1 protocol helpers`
+- `8e261417` `feat: support skill service v1.1 publish records`
+- `cc2fd580` `feat: publish skill services with v1.1 cli payloads`
+- `a643f272` `feat: update service ui for skill service v1.1`
+- `4b90b742` `fix: validate prepaid service edit prices`
+- `3716300e` `feat: create skill service orders for service calls`
+- `b1711bde` `fix: key seller orders by service order pin`
+- `11d47100` `feat: run skill services with multiple provider skills`
+- `4a922b53` `test: cover direct multi-skill service execution`
+- `ea2ca9e0` `feat: surface service order ids in service state`
+- `437034cd` `test: cover service order pin refund settlement`
+- `e33ed2b3` `feat: rate services by service order id`
+- `79e86336` `fix: restrict rating payment fallback to legacy records`
+- `528045fc` `test: align e2e fixtures with skill service v1.1`
+- `ac1ee1b1` `chore: sync skill service v1.1 skillpack artifacts`
+- `868d4bce` `fix: accept scalar provider skills validation input`
+- `62d6bf1c` `fix: normalize scalar provider skill selections`
+- `0e8e6808` `fix: preserve legacy provider skill fallback on modify`
+
+Verification completed on the current branch:
+- Focused protocol, publish, modify, call-flow, provider execution, seller-order, refund, rating, UI, fixture, and skillpack tests were run at the relevant implementation checkpoints.
+- Final full-suite rerun after the latest follow-up fix passed:
+  - Non-runtime suite: `1933/1933` passing.
+  - Runtime suite: `81/81` passing.
+
+Review status:
+- Scoped subagent reviews were run for the later implementation and follow-up checkpoints, including rating fallback, fixture alignment, skillpack regeneration, scalar provider-skill compatibility, and empty stored `providerSkills` fallback.
+- The latest follow-up review for `0e8e6808` reported no findings.
+- A final full-branch review and acceptance subagent must still run before this branch is considered ready to merge.
+
+---
+
 ## File Structure
 
 ### New files
@@ -542,4 +590,3 @@ Each task above is an independent, verifiable unit. Commit immediately after its
 - Any compatibility caveats.
 
 Do not merge back to `main` until the implementation is complete and verified. If this branch is merged, use `git merge --no-ff` from `main`.
-
