@@ -487,6 +487,8 @@ test('default my-services modify falls back to legacy providerSkill when stored 
       providerSkills: [],
       providerSkill: 'metabot-weather-oracle',
       settlementKind: 'fiat',
+      executionReminder: 'Preserve this reminder when the edit form does not submit one.',
+      metadata: '{"category":"weather","source":"stored"}',
     }],
     traces: [],
     sellerOrders: [],
@@ -540,11 +542,15 @@ test('default my-services modify falls back to legacy providerSkill when stored 
   const payload = JSON.parse(writes[0].payload);
   assert.deepEqual(payload.providerSkill, ['metabot-weather-oracle']);
   assert.equal(payload.settlementKind, 'fiat');
+  assert.equal(payload.executionReminder, 'Preserve this reminder when the edit form does not submit one.');
+  assert.equal(payload.metadata, '{"category":"weather","source":"stored"}');
 
   const state = await createRuntimeStateStore(homeDir).readState();
   assert.deepEqual(state.services[0].providerSkills, ['metabot-weather-oracle']);
   assert.equal(state.services[0].providerSkill, 'metabot-weather-oracle');
   assert.equal(state.services[0].settlementKind, 'fiat');
+  assert.equal(state.services[0].executionReminder, 'Preserve this reminder when the edit form does not submit one.');
+  assert.equal(state.services[0].metadata, '{"category":"weather","source":"stored"}');
 });
 
 test('default services publish accepts v1.1 multi-skill payloads', async (t) => {

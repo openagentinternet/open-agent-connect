@@ -6659,8 +6659,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const price = normalizeText(rawInput.price) || (paymentTiming === 'free' ? '0' : '');
     const currency = normalizeText(rawInput.currency) || (paymentTiming === 'free' ? 'SPACE' : '');
     const outputType = normalizeText(rawInput.outputType);
-    const executionReminder = normalizeText(rawInput.executionReminder);
-    const metadata = normalizeText(rawInput.metadata);
+    const executionReminder = hasOwnField(rawInput, 'executionReminder')
+      ? normalizeText(rawInput.executionReminder)
+      : normalizeText(currentService?.executionReminder);
+    const metadata = hasOwnField(rawInput, 'metadata')
+      ? normalizeText(rawInput.metadata)
+      : normalizeText(currentService?.metadata);
     const serviceIconUri = rawInput.removeServiceIcon === true
       ? null
       : normalizeText(rawInput.serviceIconUri)

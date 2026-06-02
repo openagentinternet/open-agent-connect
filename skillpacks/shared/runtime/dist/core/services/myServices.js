@@ -220,6 +220,16 @@ function buildMyServiceSummaries(input) {
                 : 0;
             const currentPinId = toSafeString(service.currentPinId) || toSafeString(service.id);
             const sourceServicePinId = toSafeString(service.sourceServicePinId) || currentPinId;
+            const providerSkills = (0, skillServiceProtocol_1.normalizeProviderSkillList)((0, skillServiceProtocol_1.selectProviderSkillSource)({
+                providerSkills: service.providerSkills,
+                providerSkill: service.providerSkill,
+            }));
+            const paymentTerms = (0, skillServiceProtocol_1.resolveSkillServicePaymentTerms)({
+                price: service.price,
+                currency: service.currency,
+                paymentTiming: service.paymentTiming,
+                settlementKind: service.settlementKind,
+            });
             const creatorMetabotId = Number.isFinite(service.creatorMetabotId) && service.creatorMetabotId > 0
                 ? Math.trunc(service.creatorMetabotId)
                 : null;
@@ -251,8 +261,12 @@ function buildMyServiceSummaries(input) {
                 providerAddress: toSafeString(service.paymentAddress),
                 paymentAddress: toSafeString(service.paymentAddress),
                 serviceIcon: toSafeString(service.serviceIcon) || null,
-                providerSkill: toSafeString(service.providerSkill) || null,
+                providerSkill: (0, skillServiceProtocol_1.getPrimaryProviderSkill)(providerSkills) ?? null,
+                providerSkills,
+                paymentTiming: paymentTerms.paymentTiming,
                 outputType: toSafeString(service.outputType) || null,
+                executionReminder: toSafeString(service.executionReminder),
+                metadata: toSafeString(service.metadata),
                 creatorMetabotId,
                 creatorMetabotSlug: toSafeString(profile.slug),
                 creatorMetabotName: toSafeString(profile.name) || toSafeString(identity?.name),

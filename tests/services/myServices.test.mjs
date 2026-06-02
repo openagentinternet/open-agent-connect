@@ -103,6 +103,10 @@ test('buildMyServiceSummaries aggregates services across local profiles with cha
   const profileAService = createService({
     currentPinId: 'service-modify-pin',
     chainPinIds: ['service-create-pin', 'service-modify-pin'],
+    providerSkills: ['tarot-reading', 'metabot-post-buzz'],
+    paymentTiming: 'free',
+    executionReminder: 'Use tarot-reading first; post a buzz only when the buyer asks.',
+    metadata: '{"category":"tarot"}',
     updatedAt: 1_775_000_030_000,
   });
   const profileBService = createService({
@@ -221,6 +225,11 @@ test('buildMyServiceSummaries aggregates services across local profiles with cha
   assert.equal(page.items[0].id, 'service-modify-pin');
   assert.equal(page.items[0].creatorMetabotSlug, 'seller');
   assert.deepEqual(page.items[0].chainPinIds, ['service-create-pin', 'service-modify-pin']);
+  assert.deepEqual(page.items[0].providerSkills, ['tarot-reading', 'metabot-post-buzz']);
+  assert.equal(page.items[0].providerSkill, 'tarot-reading');
+  assert.equal(page.items[0].paymentTiming, 'free');
+  assert.equal(page.items[0].executionReminder, 'Use tarot-reading first; post a buzz only when the buyer asks.');
+  assert.equal(page.items[0].metadata, '{"category":"tarot"}');
   assert.equal(page.items[0].successCount, 1);
   assert.equal(page.items[0].refundCount, 1);
   assert.equal(page.items[0].grossRevenue, '0.0001');

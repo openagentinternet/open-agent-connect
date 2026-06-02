@@ -31,7 +31,11 @@ export interface MyServiceSummary {
     paymentAddress: string;
     serviceIcon: string | null;
     providerSkill: string | null;
+    providerSkills: string[];
+    paymentTiming: string;
     outputType: string | null;
+    executionReminder: string;
+    metadata: string;
     creatorMetabotId: number | null;
     creatorMetabotSlug: string;
     creatorMetabotName: string;
