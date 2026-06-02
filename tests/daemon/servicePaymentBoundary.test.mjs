@@ -30,7 +30,6 @@ const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretSto
 
 const MVC_PAYMENT_ADDRESS = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 const MVC_OTHER_ADDRESS = '1dice8EMZmqKvrGE4Qc9bUFf9PX3xaYDp';
-const LOWER_HEX_64_RE = /^[0-9a-f]{64}$/;
 const IMAGE_REPLY_ARTIFACT = {
   uri: 'metafile://buyer-image-pin.png',
   pinId: 'buyer-image-pin',
@@ -873,7 +872,7 @@ test('services call --from pays with the selected profile wallet instead of the 
   assert.equal(selectedState.traces.at(-1).order.paymentTxid, selectedPaymentTxid);
 });
 
-test('free simplemsg service orders use an order reference instead of a payment txid', async (t) => {
+test('free simplemsg service orders use skill-service-order pin id instead of a payment txid', async (t) => {
   const harness = await createServiceCallHarness(t, {
     service: { price: '0', currency: 'SPACE' },
     servicePaymentExecutor: {
@@ -899,7 +898,21 @@ test('free simplemsg service orders use an order reference instead of a payment 
   assert.equal(called.ok, false);
   assert.equal(called.state, 'waiting');
   assert.equal(called.data.paymentTxid, null);
-  assert.match(called.data.orderReference, LOWER_HEX_64_RE);
+  assert.equal(called.data.serviceOrderPinId, '/protocols/skill-service-order-pin-1');
+  assert.equal(called.data.orderReference, called.data.serviceOrderPinId);
+
+  const serviceOrderWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-order');
+  assert.ok(serviceOrderWrite, 'expected a skill-service-order write');
+  const serviceOrderPayload = JSON.parse(serviceOrderWrite.payload);
+  assert.deepEqual(serviceOrderPayload, {
+    servicePinId: 'chain-service-pin-1',
+    paymentTxid: '',
+    price: '0',
+    currency: 'SPACE',
+    settlementKind: 'native',
+    metadata: '',
+  });
+  assert.equal(Object.hasOwn(serviceOrderPayload, 'orderId'), false);
 
   const simplemsgWrite = harness.writes.find((entry) => entry.path === '/protocols/simplemsg');
   assert.ok(simplemsgWrite, 'expected a simplemsg order write');
@@ -908,14 +921,14 @@ test('free simplemsg service orders use an order reference instead of a payment 
   assert.match(plaintext, /\n支付金额 0 SPACE/i);
   assert.doesNotMatch(plaintext, /\ntxid:/i);
   assert.doesNotMatch(plaintext, /free-order-/i);
-  assert.match(plaintext, new RegExp(`\\norder id:\\s*${called.data.orderReference}`, 'i'));
+  assert.ok(plaintext.includes(`\norder id: ${called.data.serviceOrderPinId}`));
   assert.match(plaintext, /\nsettlement kind:\s*native/i);
 
   const state = await harness.runtimeStateStore.readState();
   const trace = state.traces.find((entry) => entry.traceId === called.data.traceId);
   assert.ok(trace, 'expected caller trace to be persisted');
   assert.equal(trace.order.paymentTxid, null);
-  assert.match(trace.order.orderReference, LOWER_HEX_64_RE);
+  assert.equal(trace.order.orderReference, called.data.serviceOrderPinId);
 });
 
 test('simplemsg service orders use caller-generated natural request copy', async (t) => {
@@ -952,6 +965,20 @@ test('simplemsg service orders use caller-generated natural request copy', async
   assert.match(plaintext, /^\[ORDER\] 我来请你查一下上海明天的天气，按天气预报结果返回就好/);
   assert.match(plaintext, new RegExp(`<raw_request>\\n${generatedOrderText}\\n</raw_request>`));
   assert.doesNotMatch(plaintext, /用户请求 Weather Oracle|Weather Oracle 的用户/);
+  assert.equal(called.data.serviceOrderPinId, '/protocols/skill-service-order-pin-1');
+  assert.equal(called.data.orderReference, called.data.serviceOrderPinId);
+  const serviceOrderWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-order');
+  assert.ok(serviceOrderWrite, 'expected a skill-service-order write');
+  const serviceOrderPayload = JSON.parse(serviceOrderWrite.payload);
+  assert.deepEqual(serviceOrderPayload, {
+    servicePinId: 'chain-service-pin-1',
+    paymentTxid: 'b'.repeat(64),
+    price: '0.00001',
+    currency: 'SPACE',
+    settlementKind: 'native',
+    metadata: '',
+  });
+  assert.ok(plaintext.includes(`\norder id: ${called.data.serviceOrderPinId}`));
   assert.match(plaintext, /\ntxid:\s*b{64}/i);
   assert.match(plaintext, /\nservice id:\s*chain-service-pin-1/i);
   assert.match(plaintext, /\nskill name:\s*metabot-weather-oracle/i);
@@ -1375,6 +1402,7 @@ test('paid simplemsg service payment finishes before the order is broadcast', as
   assert.deepEqual(harness.events, [
     'payment_started',
     'payment_finished',
+    'write:/protocols/skill-service-order',
     'write:/protocols/simplemsg',
   ]);
 });
@@ -1420,6 +1448,7 @@ test('paid simplemsg service payment retries after MVC missing-input stale fundi
   assert.deepEqual(harness.events, [
     'payment_attempt_1',
     'payment_attempt_2',
+    'write:/protocols/skill-service-order',
     'write:/protocols/simplemsg',
   ]);
 });
@@ -2238,7 +2267,8 @@ test('buyer-side provider daemon execution failure creates a refund request afte
       },
     },
   });
-  globalThis.fetch = async (url) => {
+  const executeRequests = [];
+  globalThis.fetch = async (url, options = {}) => {
     const href = String(url);
     if (href.includes('/api/network/services')) {
       return new Response(JSON.stringify({
@@ -2266,6 +2296,7 @@ test('buyer-side provider daemon execution failure creates a refund request afte
         headers: { 'content-type': 'application/json' },
       });
     }
+    executeRequests.push(JSON.parse(String(options.body || '{}')));
     return new Response(JSON.stringify({
       ok: false,
       state: 'failed',
@@ -2293,6 +2324,19 @@ test('buyer-side provider daemon execution failure creates a refund request afte
 
   assert.equal(called.ok, false);
   assert.equal(called.code, 'provider_execution_failed');
+  const serviceOrderWrite = harness.writes.find((entry) => entry.path === '/protocols/skill-service-order');
+  assert.ok(serviceOrderWrite, 'expected provider daemon execution to publish a skill-service-order');
+  const serviceOrderPayload = JSON.parse(serviceOrderWrite.payload);
+  assert.deepEqual(serviceOrderPayload, {
+    servicePinId: 'chain-service-pin-1',
+    paymentTxid,
+    price: '0.00001',
+    currency: 'SPACE',
+    settlementKind: 'native',
+    metadata: '',
+  });
+  assert.equal(executeRequests[0].payment.serviceOrderPinId, '/protocols/skill-service-order-pin-1');
+  assert.equal(executeRequests[0].payment.orderReference, executeRequests[0].payment.serviceOrderPinId);
 
   const refundWrite = harness.writes.find((entry) => entry.path === '/protocols/service-refund-request');
   assert.ok(refundWrite, 'expected provider daemon execution failure to publish a refund request');
@@ -2386,8 +2430,22 @@ test('paid simplemsg service broadcast failure keeps a trace with payment proven
         };
       },
     },
-    writePin: async () => {
-      throw new Error('simulated chain outage');
+    writePin: async (input, { writes, identity }) => {
+      if (input.path === '/protocols/simplemsg') {
+        throw new Error('simulated chain outage');
+      }
+      return {
+        txids: [`${input.path}-tx-${writes.length}`],
+        pinId: `${input.path}-pin-${writes.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      };
     },
   });
 

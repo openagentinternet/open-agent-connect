@@ -80,10 +80,11 @@ export function buildOrderPayload(input: {
   const metadataLines = [
     `支付金额 ${String(input?.price || '').trim()} ${String(input?.currency || '').trim()}`,
   ];
+  if (orderReference) {
+    metadataLines.push(`order id: ${orderReference}`);
+  }
   if (paymentTxid) {
     metadataLines.push(`txid: ${paymentTxid}`);
-  } else if (orderReference) {
-    metadataLines.push(`order id: ${orderReference}`);
   }
   if (paymentCommitTxid) {
     metadataLines.push(`commit txid: ${paymentCommitTxid}`);
