@@ -61,6 +61,7 @@ test('createMetabotProfile creates a profile workspace with editable persona def
   assert.equal(created.goal, 'Help users accomplish their tasks effectively.');
   assert.equal(created.primaryProvider, null);
   assert.equal(created.fallbackProvider, null);
+  assert.deepEqual(created.allowChatSkills, []);
 
   for (const relativePath of ['ROLE.md', 'SOUL.md', 'GOAL.md', 'llmbindings.json']) {
     const target = path.join(created.homeDir, relativePath);
@@ -229,6 +230,74 @@ test('updateMetabotProfile persists persona, avatar, and primary/fallback provid
   assert.equal(cleared.fallbackProvider, null);
 });
 
+test('updateMetabotProfile persists allowChatSkills under runtime state after update', async () => {
+  const systemHomeDir = await createSystemHome();
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Policy Bot' });
+  const paths = resolveMetabotPaths(created.homeDir);
+
+  const updated = await updateMetabotProfile(systemHomeDir, created.slug, {
+    allowChatSkills: [' metabot-help ', '', 'metabot-help', 'metabot-wallet-manage'],
+  });
+
+  assert.deepEqual(updated.allowChatSkills, ['metabot-help', 'metabot-wallet-manage']);
+  const persisted = JSON.parse(await readFile(paths.chatSkillPolicyPath, 'utf8'));
+  assert.deepEqual(persisted.allowChatSkills, ['metabot-help', 'metabot-wallet-manage']);
+  assert.equal(typeof persisted.updatedAt, 'string');
+});
+
+test('updateMetabotProfile preserves allowChatSkills when omitted and clears when explicitly empty', async () => {
+  const systemHomeDir = await createSystemHome();
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Policy Preserve Bot' });
+
+  await updateMetabotProfile(systemHomeDir, created.slug, {
+    allowChatSkills: ['metabot-help'],
+  });
+  const renamed = await updateMetabotProfile(systemHomeDir, created.slug, {
+    name: 'Policy Preserve Bot Renamed',
+  });
+  assert.deepEqual(renamed.allowChatSkills, ['metabot-help']);
+
+  const cleared = await updateMetabotProfile(systemHomeDir, created.slug, {
+    allowChatSkills: [],
+  });
+  assert.deepEqual(cleared.allowChatSkills, []);
+});
+
+test('getMetabotProfile ignores invalid persisted allowChatSkills policy', async () => {
+  const systemHomeDir = await createSystemHome();
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Invalid Policy Bot' });
+  const paths = resolveMetabotPaths(created.homeDir);
+  await mkdir(path.dirname(paths.chatSkillPolicyPath), { recursive: true });
+  await writeFile(paths.chatSkillPolicyPath, JSON.stringify({
+    allowChatSkills: '../unsafe',
+  }), 'utf8');
+
+  const loaded = await getMetabotProfile(systemHomeDir, created.slug);
+  assert.deepEqual(loaded.allowChatSkills, []);
+});
+
+test('updateMetabotProfile validates allowChatSkills before writing local profile fields', async () => {
+  const systemHomeDir = await createSystemHome();
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Atomic Policy Bot' });
+  const paths = resolveMetabotPaths(created.homeDir);
+
+  await assert.rejects(
+    () => updateMetabotProfile(systemHomeDir, created.slug, {
+      role: 'Should not persist.',
+      allowChatSkills: ['../unsafe'],
+    }),
+    /safe skill directory names/,
+  );
+
+  const afterFailure = await getMetabotProfile(systemHomeDir, created.slug);
+  assert.equal(await readFile(paths.roleMdPath, 'utf8'), 'I am a helpful AI assistant.\n');
+  assert.deepEqual(afterFailure.allowChatSkills, []);
+  await assert.rejects(
+    () => readFile(paths.chatSkillPolicyPath, 'utf8'),
+    { code: 'ENOENT' },
+  );
+});
+
 test('updateMetabotProfile validates provider changes before writing local profile fields', async () => {
   const systemHomeDir = await createSystemHome();
   const created = await createMetabotProfile(systemHomeDir, { name: 'Atomic Bot' });
@@ -390,6 +459,7 @@ test('syncMetabotInfoToChain writes name, avatar, and bio pins in chain-first or
     avatarDataUrl: 'data:image/png;base64,ZmFrZQ==',
     primaryProvider: 'claude-code',
     fallbackProvider: 'codex',
+    allowChatSkills: ['metabot-help', 'metabot-wallet-manage'],
   }, ['name', 'avatar', 'role', 'primaryProvider'], { delayMs: 0 });
 
   assert.deepEqual(calls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/bio']);
@@ -401,6 +471,7 @@ test('syncMetabotInfoToChain writes name, avatar, and bio pins in chain-first or
   assert.equal(calls[1].payload, 'ZmFrZQ==');
   assert.equal(calls[1].encoding, 'base64');
   assert.equal(JSON.parse(calls[2].payload).primaryProvider, 'claude-code');
+  assert.deepEqual(JSON.parse(calls[2].payload).allowChatSkills, ['metabot-help', 'metabot-wallet-manage']);
   assert.equal(results.length, 3);
 });
 
@@ -425,6 +496,7 @@ test('syncMetabotInfoToChain skips local-only profiles without a globalMetaId', 
     goal: '',
     primaryProvider: null,
     fallbackProvider: null,
+    allowChatSkills: [],
   }, ['name']);
 
   assert.deepEqual(results, []);

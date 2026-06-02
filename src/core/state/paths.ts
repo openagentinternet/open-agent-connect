@@ -42,6 +42,7 @@ export interface MetabotPaths {
   directorySeedsPath: string;
   privateChatStatePath: string;
   chatStrategiesPath: string;
+  chatSkillPolicyPath: string;
   soulMdPath: string;
   goalMdPath: string;
   roleMdPath: string;
@@ -124,6 +125,7 @@ function buildMetabotPaths(input: {
   directorySeedsPath: string;
   privateChatStatePath: string;
   chatStrategiesPath: string;
+  chatSkillPolicyPath: string;
   soulMdPath: string;
   goalMdPath: string;
   roleMdPath: string;
@@ -189,6 +191,7 @@ function buildMetabotPaths(input: {
     directorySeedsPath: input.directorySeedsPath,
     privateChatStatePath: input.privateChatStatePath,
     chatStrategiesPath: input.chatStrategiesPath,
+    chatSkillPolicyPath: input.chatSkillPolicyPath,
     soulMdPath: input.soulMdPath,
     goalMdPath: input.goalMdPath,
     roleMdPath: input.roleMdPath,
@@ -252,6 +255,7 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     directorySeedsPath: path.join(stateRoot, 'directory-seeds.json'),
     privateChatStatePath: path.join(stateRoot, 'private-chat-state.json'),
     chatStrategiesPath: path.join(stateRoot, 'chat-strategies.json'),
+    chatSkillPolicyPath: path.join(stateRoot, 'chat-skill-policy.json'),
     soulMdPath: path.join(profileRoot, 'SOUL.md'),
     goalMdPath: path.join(profileRoot, 'GOAL.md'),
     roleMdPath: path.join(profileRoot, 'ROLE.md'),
