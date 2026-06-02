@@ -7396,7 +7396,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const paymentTxid = normalizeText(inputOrder.paymentTxid);
     const orderTxid = normalizeText(inputOrder.orderTxid);
     const orderReference = normalizeText(inputOrder.orderReference);
-    const stableOrderKey = paymentTxid || orderTxid || orderReference || inputOrder.traceId;
+    const stableOrderKey = orderReference || paymentTxid || orderTxid || inputOrder.traceId;
     const createdAt = inputOrder.receivedAt
       ?? inputOrder.session.createdAt
       ?? inputOrder.taskRun.createdAt

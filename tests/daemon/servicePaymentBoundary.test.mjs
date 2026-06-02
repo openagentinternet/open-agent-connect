@@ -3095,6 +3095,7 @@ test('inbound provider ORDER fallback protocol copy stays concise and service-or
 test('/api services.execute persists seller lifecycle state and provider runtime diagnostics', async (t) => {
   const harness = await createInboundProviderOrderHarness(t);
   const paymentTxid = '9'.repeat(64);
+  const serviceOrderPinId = 'skill-service-order-direct-pin-1';
 
   const result = await harness.handlers.services.execute({
     traceId: 'trace-provider-direct-execute',
@@ -3116,6 +3117,8 @@ test('/api services.execute persists seller lifecycle state and provider runtime
       paymentAmount: harness.service.price,
       paymentCurrency: harness.service.currency,
       settlementKind: 'native',
+      orderReference: serviceOrderPinId,
+      serviceOrderPinId,
     },
   });
 
@@ -3138,6 +3141,12 @@ test('/api services.execute persists seller lifecycle state and provider runtime
   assert.equal(sellerOrder.traceId, 'trace-provider-direct-execute');
   assert.equal(sellerOrder.a2aSessionId, trace.a2a.sessionId);
   assert.equal(sellerOrder.llmSessionId, 'provider-llm-session-1');
+  assert.equal(sellerOrder.id, `seller-order-${serviceOrderPinId}`);
+  const inspected = await harness.handlers.provider.inspectOrder({
+    orderId: sellerOrder.id,
+  });
+  assert.equal(inspected.ok, true, JSON.stringify(inspected));
+  assert.equal(inspected.data.order.orderId, sellerOrder.id);
 });
 
 test('/api services.execute resolves non-text provider artifacts into direct traces', async (t) => {
