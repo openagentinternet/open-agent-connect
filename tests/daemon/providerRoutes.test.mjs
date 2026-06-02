@@ -479,6 +479,7 @@ test('POST /api/provider/refund/confirm settles a sellerOrder with transfer and 
 
   const sellerOrder = createSellerOrderRecord({
     id: 'seller-order-refund-1',
+    serviceOrderPinId: 'service-order-refund-pin-1',
     state: 'refund_pending',
     localMetabotId: 1,
     localMetabotSlug: path.basename(app.homeDir),
@@ -491,6 +492,7 @@ test('POST /api/provider/refund/confirm settles a sellerOrder with transfer and 
     orderMessageId: 'order-message-pin-1',
     orderPinId: 'order-message-pin-1',
     orderTxid: 'c'.repeat(64),
+    orderReference: 'service-order-refund-pin-1',
     paymentTxid: 'd'.repeat(64),
     paymentAmount: '0.00001',
     paymentCurrency: 'SPACE',
@@ -518,12 +520,14 @@ test('POST /api/provider/refund/confirm settles a sellerOrder with transfer and 
 
   const confirmed = await fetchJson(app.baseUrl, '/api/provider/refund/confirm', {
     method: 'POST',
-    body: { orderId: 'seller-order-refund-1' },
+    body: { orderId: 'service-order-refund-pin-1' },
   });
 
   assert.equal(confirmed.status, 200);
   assert.equal(confirmed.payload.ok, true);
   assert.equal(confirmed.payload.data.orderId, 'seller-order-refund-1');
+  assert.equal(confirmed.payload.data.order.orderId, 'seller-order-refund-1');
+  assert.equal(confirmed.payload.data.order.serviceOrderPinId, 'service-order-refund-pin-1');
   assert.equal(confirmed.payload.data.traceId, 'trace-provider-seller-order-refund');
   assert.equal(confirmed.payload.data.state, 'refunded');
   assert.equal(confirmed.payload.data.refundTxid, 'refund-transfer-txid-1');
