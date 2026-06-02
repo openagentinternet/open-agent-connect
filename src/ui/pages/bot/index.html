@@ -509,6 +509,51 @@
         font-size: 12px;
         color: var(--muted);
       }
+      .chat-skills-field {
+        display: grid;
+        gap: 8px;
+      }
+      .chat-skill-picker {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+      }
+      .chat-skill-picker select {
+        min-height: 36px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text);
+        padding: 7px 9px;
+        font-size: 12px;
+        min-width: 0;
+      }
+      .chat-skill-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        min-height: 28px;
+        align-items: center;
+      }
+      .skill-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        max-width: 100%;
+        min-height: 28px;
+        padding: 3px 4px 3px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        color: var(--text);
+      }
+      .skill-chip code {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        font-size: 11px;
+      }
 
       .settings-form {
         max-width: 520px;
