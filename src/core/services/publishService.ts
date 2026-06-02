@@ -2,6 +2,7 @@ import {
   getPrimaryProviderSkill,
   normalizeProviderSkillList,
   resolveSkillServicePaymentTerms,
+  selectProviderSkillSource,
   type SkillServicePaymentTiming,
   type SkillServiceSettlementKind,
 } from './skillServiceProtocol';
@@ -125,11 +126,7 @@ function normalizeDraft(draft: PublishedServiceDraft): PublishedServiceDraft & {
   executionReminder: string;
   metadata: string;
 } {
-  const providerSkills = normalizeProviderSkillList(
-    Array.isArray(draft.providerSkills) && draft.providerSkills.length > 0
-      ? draft.providerSkills
-      : draft.providerSkill
-  );
+  const providerSkills = normalizeProviderSkillList(selectProviderSkillSource(draft));
   const paymentTerms = resolveSkillServicePaymentTerms({
     price: draft.price,
     currency: draft.currency,
@@ -254,11 +251,7 @@ export function buildRevokedPublishedService(input: {
   now: number;
 }): PublishedServiceRecord {
   const settlement = resolvePublishedServiceSettlement(input.currency);
-  const providerSkills = normalizeProviderSkillList(
-    Array.isArray(input.providerSkills) && input.providerSkills.length > 0
-      ? input.providerSkills
-      : input.providerSkill
-  );
+  const providerSkills = normalizeProviderSkillList(selectProviderSkillSource(input));
   const paymentTerms = resolveSkillServicePaymentTerms({
     price: input.price,
     currency: input.currency,

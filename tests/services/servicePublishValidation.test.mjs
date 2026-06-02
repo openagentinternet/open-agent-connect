@@ -157,6 +157,24 @@ test('publish validation accepts legacy scalar providerSkills fallback from daem
   assert.equal(result.skill.skillName, 'metabot-weather');
 });
 
+test('publish validation falls back to providerSkill when providerSkills is an empty array', async () => {
+  const context = await createValidationContext();
+  const result = await validateServicePublishProviderSkills({
+    metaBotSlug: context.slug,
+    providerSkills: [],
+    providerSkill: ' metabot-weather ',
+    runtimeStore: context.runtimeStore,
+    bindingStore: context.bindingStore,
+    systemHomeDir: context.systemHome,
+    projectRoot: context.profileRoot,
+    env: {},
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.providerSkills, ['metabot-weather']);
+  assert.equal(result.skill.skillName, 'metabot-weather');
+});
+
 test('publish validation rejects mixed unsafe provider skill lists before scanning', async () => {
   const context = await createValidationContext({ extraSkills: ['metabot-post-buzz'] });
   const result = await validateServicePublishProviderSkills({

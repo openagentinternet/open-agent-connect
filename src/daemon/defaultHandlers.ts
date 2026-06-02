@@ -84,6 +84,7 @@ import {
   buildSkillServiceOrderPayload,
   getPrimaryProviderSkill,
   normalizeProviderSkillList,
+  selectProviderSkillSource,
 } from '../core/services/skillServiceProtocol';
 import { createProviderServiceRunner } from '../core/a2a/provider/providerServiceRunner';
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
@@ -6640,13 +6641,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const serviceName = normalizeText(rawInput.serviceName);
     const displayName = normalizeText(rawInput.displayName);
     const description = normalizeText(rawInput.description);
-    const providerSkills = normalizeProviderSkillList(
-      Array.isArray(rawInput.providerSkills) && rawInput.providerSkills.length > 0
-        ? rawInput.providerSkills
-        : normalizeText(rawInput.providerSkill)
-          || currentService?.providerSkills
-          || currentService?.providerSkill
-    );
+    const providerSkills = normalizeProviderSkillList(selectProviderSkillSource({
+      providerSkills: rawInput.providerSkills,
+      providerSkill: rawInput.providerSkill,
+      fallback: currentService?.providerSkills || currentService?.providerSkill,
+    }));
     const providerSkill = getPrimaryProviderSkill(providerSkills) ?? '';
     const paymentTiming = normalizeText(rawInput.paymentTiming).toLowerCase()
       || normalizeText(currentService?.paymentTiming)
@@ -13461,9 +13460,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const draft = draftInput.draft!;
         const providerSkillValidation = await validateServicePublishProviderSkills({
           metaBotSlug: resolved.target.profileSlug,
-          providerSkills: Array.isArray(rawInput.providerSkills) && rawInput.providerSkills.length > 0
-            ? rawInput.providerSkills
-            : normalizeText(rawInput.providerSkill) || draft.providerSkills,
+          providerSkills: selectProviderSkillSource({
+            providerSkills: rawInput.providerSkills,
+            providerSkill: rawInput.providerSkill,
+            fallback: draft.providerSkills,
+          }),
           runtimeStore: resolved.target.profileHomeDir === path.resolve(input.homeDir)
             ? llmRuntimeStore
             : createLlmRuntimeStore(resolved.target.profileHomeDir),
@@ -13739,11 +13740,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const serviceName = normalizeText(rawInput.serviceName);
         const displayName = normalizeText(rawInput.displayName);
         const description = normalizeText(rawInput.description);
-        const providerSkills = normalizeProviderSkillList(
-          Array.isArray(rawInput.providerSkills) && rawInput.providerSkills.length > 0
-            ? rawInput.providerSkills
-            : rawInput.providerSkill
-        );
+        const providerSkills = normalizeProviderSkillList(selectProviderSkillSource({
+          providerSkills: rawInput.providerSkills,
+          providerSkill: rawInput.providerSkill,
+        }));
         const providerSkill = getPrimaryProviderSkill(providerSkills) ?? '';
         const paymentTiming = normalizeText(rawInput.paymentTiming).toLowerCase();
         const price = normalizeText(rawInput.price) || (paymentTiming === 'free' ? '0' : '');
@@ -13772,9 +13772,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const metaBotSlug = selectedProfile?.slug ?? path.basename(profileHomeDir);
         const validation = await validateServicePublishProviderSkills({
           metaBotSlug,
-          providerSkills: Array.isArray(rawInput.providerSkills) && rawInput.providerSkills.length > 0
-            ? rawInput.providerSkills
-            : rawInput.providerSkill,
+          providerSkills: selectProviderSkillSource({
+            providerSkills: rawInput.providerSkills,
+            providerSkill: rawInput.providerSkill,
+          }),
           runtimeStore: profileHomeDir === input.homeDir ? llmRuntimeStore : createLlmRuntimeStore(profileHomeDir),
           bindingStore: profileHomeDir === input.homeDir ? llmBindingStore : createLlmBindingStore(profileHomeDir),
           systemHomeDir: profileRuntimeStateStore.paths.systemHomeDir,

@@ -6,7 +6,7 @@ import {
   type PlatformSkillCatalogEntry,
   type PlatformSkillRootDiagnostic,
 } from './platformSkillCatalog';
-import { normalizeProviderSkillList } from './skillServiceProtocol';
+import { normalizeProviderSkillList, selectProviderSkillSource } from './skillServiceProtocol';
 import type { LlmRuntime } from '../llm/llmTypes';
 import type { PlatformDefinition } from '../platform/platformRegistry';
 
@@ -66,11 +66,11 @@ function normalizeText(value: unknown): string {
 }
 
 function normalizeRawProviderSkillCandidates(input: ValidateServicePublishProviderSkillsInput): string[] {
-  const source = Array.isArray(input.providerSkills) && input.providerSkills.length > 0
-    ? input.providerSkills
-    : input.providerSkills !== undefined && input.providerSkills !== null
-      ? [input.providerSkills]
-      : [input.providerSkill];
+  const selectedSource = selectProviderSkillSource({
+    providerSkills: input.providerSkills,
+    providerSkill: input.providerSkill,
+  });
+  const source = Array.isArray(selectedSource) ? selectedSource : [selectedSource];
   const seen = new Set<string>();
   const result: string[] = [];
 

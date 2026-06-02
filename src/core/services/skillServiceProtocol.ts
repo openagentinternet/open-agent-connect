@@ -72,6 +72,25 @@ export function normalizeProviderSkillList(value: unknown): string[] {
   return skills;
 }
 
+export function selectProviderSkillSource(input: {
+  providerSkills?: unknown;
+  providerSkill?: unknown;
+  fallback?: unknown;
+}): unknown {
+  if (Array.isArray(input.providerSkills) && input.providerSkills.length > 0) {
+    return input.providerSkills;
+  }
+  const scalarProviderSkills = normalizeText(input.providerSkills);
+  if (scalarProviderSkills) {
+    return scalarProviderSkills;
+  }
+  const scalarProviderSkill = normalizeText(input.providerSkill);
+  if (scalarProviderSkill) {
+    return scalarProviderSkill;
+  }
+  return input.fallback;
+}
+
 export function getPrimaryProviderSkill(value: unknown): string | null {
   return normalizeProviderSkillList(value)[0] ?? null;
 }

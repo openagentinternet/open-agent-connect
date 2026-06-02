@@ -404,6 +404,73 @@ test('default my-services modify writes a modify pin and updates local profile s
   assert.equal(state.services[0].available, 1);
 });
 
+test('default my-services modify accepts scalar providerSkills input', async (t) => {
+  const homeDir = await createProfileHome('metabot-my-services-modify-scalar-', 'alpha-bot');
+  t.after(async () => cleanupProfileHome(homeDir));
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const identity = createIdentity({ slug: 'alpha-bot', metabotId: 1, name: 'Alpha Bot', globalMetaId: 'idq1alphabot' });
+  await upsertIdentityProfile({ systemHomeDir, name: identity.name, homeDir, globalMetaId: identity.globalMetaId, mvcAddress: identity.mvcAddress });
+  await createRuntimeStateStore(homeDir).writeState({
+    identity,
+    services: [createService({ providerGlobalMetaId: identity.globalMetaId })],
+    traces: [],
+    sellerOrders: [],
+  });
+  await prepareProviderRuntimeSkill(homeDir, ['metabot-weather-oracle', 'metabot-post-buzz']);
+
+  const writes = [];
+  const app = await startServer(createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: {
+      async getIdentity() {
+        return identity;
+      },
+      async writePin(input) {
+        writes.push(input);
+        return {
+          txids: [`tx-${writes.length}`],
+          pinId: `pin-${writes.length}`,
+          totalCost: 10,
+          network: input.network ?? 'mvc',
+          operation: input.operation,
+          path: input.path,
+          contentType: input.contentType,
+          encoding: input.encoding ?? 'utf-8',
+          globalMetaId: identity.globalMetaId,
+          mvcAddress: identity.mvcAddress,
+        };
+      },
+    },
+  }));
+  t.after(async () => app.close());
+
+  const response = await fetchJson(app.baseUrl, '/api/services/owned/modify', {
+    method: 'POST',
+    body: {
+      serviceId: 'alpha-service-v2',
+      serviceName: 'weather-pro',
+      displayName: 'Weather Pro',
+      description: 'Updated forecast service.',
+      providerSkills: ' metabot-post-buzz ',
+      paymentTiming: 'free',
+      price: '0',
+      currency: 'SPACE',
+      outputType: 'text',
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.ok, true);
+  const payload = JSON.parse(writes[0].payload);
+  assert.deepEqual(payload.providerSkill, ['metabot-post-buzz']);
+
+  const state = await createRuntimeStateStore(homeDir).readState();
+  assert.deepEqual(state.services[0].providerSkills, ['metabot-post-buzz']);
+  assert.equal(state.services[0].providerSkill, 'metabot-post-buzz');
+});
+
 test('default services publish accepts v1.1 multi-skill payloads', async (t) => {
   const homeDir = await createProfileHome('metabot-services-publish-v11-', 'alpha-bot');
   t.after(async () => cleanupProfileHome(homeDir));
@@ -481,6 +548,72 @@ test('default services publish accepts v1.1 multi-skill payloads', async (t) => 
   assert.equal(state.services[0].price, '0');
   assert.equal(state.services[0].executionReminder, 'Check weather before posting the final buzz.');
   assert.equal(state.services[0].metadata, '{"category":"weather"}');
+});
+
+test('default services publish accepts scalar providerSkills input', async (t) => {
+  const homeDir = await createProfileHome('metabot-services-publish-scalar-', 'alpha-bot');
+  t.after(async () => cleanupProfileHome(homeDir));
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const identity = createIdentity({ slug: 'alpha-bot', metabotId: 1, name: 'Alpha Bot', globalMetaId: 'idq1alphabot' });
+  await upsertIdentityProfile({ systemHomeDir, name: identity.name, homeDir, globalMetaId: identity.globalMetaId, mvcAddress: identity.mvcAddress });
+  await createRuntimeStateStore(homeDir).writeState({
+    identity,
+    services: [],
+    traces: [],
+    sellerOrders: [],
+  });
+  await prepareProviderRuntimeSkill(homeDir, ['metabot-weather-oracle']);
+
+  const writes = [];
+  const app = await startServer(createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: {
+      async getIdentity() {
+        return identity;
+      },
+      async writePin(input) {
+        writes.push(input);
+        return {
+          txids: [`publish-tx-${writes.length}`],
+          pinId: `publish-pin-${writes.length}`,
+          totalCost: 10,
+          network: input.network ?? 'mvc',
+          operation: input.operation,
+          path: input.path,
+          contentType: input.contentType,
+          encoding: input.encoding ?? 'utf-8',
+          globalMetaId: identity.globalMetaId,
+          mvcAddress: identity.mvcAddress,
+        };
+      },
+    },
+  }));
+  t.after(async () => app.close());
+
+  const response = await fetchJson(app.baseUrl, '/api/services/publish', {
+    method: 'POST',
+    body: {
+      serviceName: 'weather-scalar',
+      displayName: 'Weather Scalar',
+      description: 'Checks weather with one scalar-selected skill.',
+      providerSkills: ' metabot-weather-oracle ',
+      paymentTiming: 'free',
+      price: '0',
+      currency: 'SPACE',
+      outputType: 'text',
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.ok, true);
+  const payload = JSON.parse(writes[0].payload);
+  assert.deepEqual(payload.providerSkill, ['metabot-weather-oracle']);
+
+  const state = await createRuntimeStateStore(homeDir).readState();
+  assert.deepEqual(state.services[0].providerSkills, ['metabot-weather-oracle']);
+  assert.equal(state.services[0].providerSkill, 'metabot-weather-oracle');
 });
 
 test('default my-services revoke writes a revoke pin and hides the service from active list', async (t) => {

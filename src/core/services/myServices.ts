@@ -10,6 +10,7 @@ import {
   getPrimaryProviderSkill,
   normalizeProviderSkillList,
   resolveSkillServicePaymentTerms,
+  selectProviderSkillSource,
 } from './skillServiceProtocol';
 
 export type MyServiceMutationAction = 'modify' | 'revoke';
@@ -524,11 +525,7 @@ export function buildMyServicePayload(input: {
   providerGlobalMetaId: string;
   paymentAddress: string;
 }): Record<string, unknown> {
-  const providerSkills = normalizeProviderSkillList(
-    Array.isArray(input.draft.providerSkills) && input.draft.providerSkills.length > 0
-      ? input.draft.providerSkills
-      : input.draft.providerSkill
-  );
+  const providerSkills = normalizeProviderSkillList(selectProviderSkillSource(input.draft));
   const paymentTerms = resolveSkillServicePaymentTerms({
     price: input.draft.price,
     currency: input.draft.currency,
@@ -569,11 +566,7 @@ export function buildMyServiceModifyRecord(input: {
   payloadJson: string;
   now: number;
 }): PublishedServiceRecord {
-  const providerSkills = normalizeProviderSkillList(
-    Array.isArray(input.draft.providerSkills) && input.draft.providerSkills.length > 0
-      ? input.draft.providerSkills
-      : input.draft.providerSkill
-  );
+  const providerSkills = normalizeProviderSkillList(selectProviderSkillSource(input.draft));
   const paymentTerms = resolveSkillServicePaymentTerms({
     price: input.draft.price,
     currency: input.draft.currency,
