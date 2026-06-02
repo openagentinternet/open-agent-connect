@@ -128,6 +128,39 @@ test('executeServiceOrderPayment leaves free service order id to skill-service-o
   assert.equal(payment.settlementKind, 'native');
 });
 
+test('executeServiceOrderPayment lets free unsupported-currency services reach order publishing', async () => {
+  const {
+    executeServiceOrderPayment,
+  } = require('../../dist/core/payments/servicePayment.js');
+
+  for (const currency of ['DOGE', 'BTC-OPCAT']) {
+    let called = false;
+    const payment = await executeServiceOrderPayment({
+      servicePinId: `free-${currency.toLowerCase()}-service-pin`,
+      providerGlobalMetaId: 'seller-gmid',
+      paymentAddress: '',
+      amount: '0',
+      currency,
+      traceId: `trace-free-${currency.toLowerCase()}-1`,
+      executor: {
+        execute: async () => {
+          called = true;
+          throw new Error('must not be called for free services');
+        },
+      },
+    });
+
+    assert.equal(called, false);
+    assert.equal(payment.paymentTxid, null);
+    assert.equal(payment.orderReference, null);
+    assert.equal(payment.paymentAmount, '0');
+    assert.equal(payment.paymentCurrency, currency);
+    assert.equal(payment.settlementKind, 'native');
+    assert.equal(payment.paymentChain, null);
+    assert.equal(payment.network, null);
+  }
+});
+
 test('executeServiceOrderPayment rejects unsupported settlement before order send', async () => {
   const {
     executeServiceOrderPayment,

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { evaluateSpendCap, normalizeSpendCurrency, type SpendCap } from './spendPolicy';
 import { evaluateDelegationPolicy } from '../a2a/delegationPolicy';
 import type { DelegationPolicyDecision } from '../a2a/sessionTypes';
+import { resolveSkillServicePaymentTerms } from '../services/skillServiceProtocol';
 
 export interface DelegationRequest {
   servicePinId: string;
@@ -24,6 +25,8 @@ export interface RemoteServiceDescriptor {
   description?: string | null;
   price?: string | null;
   currency?: string | null;
+  paymentTiming?: string | null;
+  settlementKind?: string | null;
   ratingAvg?: number | null;
   ratingCount?: number | null;
   providerName?: string | null;
@@ -53,9 +56,9 @@ export type RemoteCallPlanResult =
         providerGlobalMetaId: string;
         serviceName: string;
         price: string;
-        currency: 'SPACE' | 'BTC' | 'DOGE' | '';
+        currency: string;
       };
-      payment: { amount: string; currency: 'SPACE' | 'BTC' | 'DOGE' | '' };
+      payment: { amount: string; currency: string };
       traceId: string;
       confirmation: DelegationPolicyDecision;
     }
@@ -245,7 +248,12 @@ export function buildRemoteServicesPrompt(availableServices: RemoteServiceDescri
         `<service_name>${normalizeText(svc.displayName) || normalizeText(svc.serviceName)}</service_name>` +
         `<description>${normalizeText(svc.description)}</description>` +
         `<price_amount>${normalizeText(svc.price)}</price_amount>` +
-        `<price_currency>${normalizeSpendCurrency(svc.currency)}</price_currency>` +
+        `<price_currency>${resolveSkillServicePaymentTerms({
+          price: svc.price,
+          currency: svc.currency,
+          paymentTiming: svc.paymentTiming,
+          settlementKind: svc.settlementKind,
+        }).currency}</price_currency>` +
         `<rating_avg>${svc.ratingAvg ?? 'N/A'}</rating_avg>` +
         `<rating_count>${svc.ratingCount ?? 0}</rating_count>` +
         `<updated_at>${svc.updatedAt ?? ''}</updated_at>` +
@@ -309,14 +317,33 @@ export function planRemoteCall(input: {
   }
 
   const normalizedTerms = normalizeDelegationPaymentTerms(service.price, service.currency);
-  const normalizedCurrency = normalizeSpendCurrency(normalizedTerms.currency);
+  const paymentTerms = resolveSkillServicePaymentTerms({
+    price: normalizedTerms.price,
+    currency: normalizedTerms.currency,
+    paymentTiming: service.paymentTiming,
+    settlementKind: service.settlementKind,
+  });
+  const hasExplicitFreeTiming = normalizeCaseInsensitive(service.paymentTiming) === 'free';
+  const paymentAmount = hasExplicitFreeTiming ? paymentTerms.effectivePrice : normalizedTerms.price;
+  const paymentCurrency = paymentTerms.currency;
+  const normalizedCurrency = normalizeSpendCurrency(paymentCurrency);
   const confirmation = evaluateDelegationPolicy({
     policyMode: input.request.policyMode,
-    estimatedCostAmount: normalizedTerms.price,
+    estimatedCostAmount: paymentAmount,
     estimatedCostCurrency: normalizedCurrency,
   });
+  if (!paymentTerms.isExecutable) {
+    return {
+      ok: false,
+      state: 'blocked',
+      code: 'unsupported_payment_terms',
+      message: 'Remote service payment terms are not executable by this local runtime.',
+      traceId,
+      confirmation,
+    };
+  }
   const spendDecision = evaluateSpendCap({
-    price: normalizedTerms.price,
+    price: paymentAmount,
     currency: normalizedCurrency,
     spendCap: input.request.spendCap,
   });
@@ -350,12 +377,12 @@ export function planRemoteCall(input: {
       servicePinId: resolveServiceIdentity(service).servicePinId,
       providerGlobalMetaId: resolveServiceIdentity(service).providerGlobalMetaId,
       serviceName: normalizeText(service.displayName) || normalizeText(service.serviceName),
-      price: normalizedTerms.price,
-      currency: normalizedCurrency,
+      price: paymentAmount,
+      currency: paymentCurrency,
     },
     payment: {
-      amount: normalizedTerms.price,
-      currency: normalizedCurrency,
+      amount: paymentAmount,
+      currency: paymentCurrency,
     },
     traceId,
     confirmation,

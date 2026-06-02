@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { LocalIdentitySecrets, SecretStore } from '../secrets/secretStore';
 import { executeTransfer } from '../signing/localMnemonicSigner';
 import type { ChainAdapterRegistry } from '../chain/adapters/types';
+import { normalizeSkillServiceCurrency } from '../services/skillServiceProtocol';
 
 export interface A2AOrderPaymentResult {
   paymentTxid: string | null;
@@ -152,22 +153,26 @@ export async function executeServiceOrderPayment(
 ): Promise<A2AOrderPaymentResult> {
   const amount = normalizeAmount(input.amount);
   const numericAmount = Number(amount);
-  const currency = normalizeCurrency(input.currency);
-  if (!currency) {
-    throw new Error('service_payment_unsupported_settlement: Only native SPACE/MVC and BTC service payments are supported.');
-  }
 
   if (numericAmount === 0) {
+    const paymentCurrency = normalizeSkillServiceCurrency(input.currency);
+    const nativeCurrency = normalizeCurrency(paymentCurrency);
+    const paymentChain = nativeCurrency ? resolvePaymentChain(nativeCurrency) : null;
     return {
       paymentTxid: null,
-      paymentChain: resolvePaymentChain(currency),
+      paymentChain,
       paymentAmount: amount,
-      paymentCurrency: currency === 'MVC' ? 'SPACE' : currency,
+      paymentCurrency,
       settlementKind: 'native',
       orderReference: null,
       totalCost: 0,
-      network: resolvePaymentChain(currency),
+      network: paymentChain,
     };
+  }
+
+  const currency = normalizeCurrency(input.currency);
+  if (!currency) {
+    throw new Error('service_payment_unsupported_settlement: Only native SPACE/MVC and BTC service payments are supported.');
   }
 
   const paymentAddress = normalizeText(input.paymentAddress);

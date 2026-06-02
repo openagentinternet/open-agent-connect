@@ -88,6 +88,31 @@ test('planRemoteCall rejects unpriced services instead of treating them as free'
   assert.equal(result.confirmation.requiresConfirmation, true);
 });
 
+test('planRemoteCall blocks unsupported v1.1 payment terms before execution', () => {
+  const result = planRemoteCall({
+    request: {
+      servicePinId: 'service-weather',
+      providerGlobalMetaId: 'seller-global-metaid',
+      userTask: 'check tomorrow weather',
+      taskContext: 'Shanghai tomorrow weather',
+      policyMode: 'confirm_paid_only',
+    },
+    availableServices: [
+      createAvailableService({
+        paymentTiming: 'postpaid',
+        settlementKind: 'fiat',
+        price: '1',
+        currency: 'SPACE',
+      }),
+    ],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'blocked');
+  assert.equal(result.code, 'unsupported_payment_terms');
+  assert.equal(result.confirmation.requiresConfirmation, true);
+});
+
 test('planRemoteCall returns offline when the requested remote service is not available', () => {
   const result = planRemoteCall({
     request: {
