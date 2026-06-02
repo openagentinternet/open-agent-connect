@@ -23,6 +23,7 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-omni-reader',
   'metabot-post-buzz',
   'metabot-post-skillservice',
+  'metabot-create-wiki',
   'metabot-loom-wish2task',
   'metabot-metaapp-publish',
   'metabot-upload-file',
@@ -58,8 +59,16 @@ function sharedSkillFile(root, skillName) {
   return path.join(sharedPackRoot(root), 'skills', skillName, 'SKILL.md');
 }
 
+function sharedSkillPath(root, skillName, ...segments) {
+  return path.join(sharedPackRoot(root), 'skills', skillName, ...segments);
+}
+
 function hostWrapperSharedSkillFile(root, host, skillName) {
   return path.join(root, host, 'runtime', 'shared-skills', skillName, 'SKILL.md');
+}
+
+function hostWrapperSharedSkillPath(root, host, skillName, ...segments) {
+  return path.join(root, host, 'runtime', 'shared-skills', skillName, ...segments);
 }
 
 function sourceSkillFile(skillName) {
@@ -264,6 +273,30 @@ test('buildAgentConnectSkillpacks includes the MetaApp publish/share workflow sk
   assert.match(content, /metaapp view/);
   assert.match(content, /metaapp comment/);
   assert.match(content, /publish\/update.*explicit confirmation.*--confirm/i);
+});
+
+test('buildAgentConnectSkillpacks includes the Wiki creator as a self-contained scripted skill', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-create-wiki'), 'utf8');
+  assert.match(content, /^name:\s*metabot-create-wiki$/m);
+  assert.match(content, /dedicated local Wiki skill/i);
+  assert.match(content, /~\/\.metabot\/skills/);
+  assert.match(content, /host bind/i);
+
+  for (const relativePath of [
+    ['scripts', 'scaffold-wiki-skill.js'],
+    ['scripts', 'self-test.js'],
+    ['assets', 'wiki-skill', 'scripts', 'index.js.template'],
+    ['assets', 'metabot-llm-wiki-runtime', 'SKILL.md'],
+    ['assets', 'metabot-llm-wiki-runtime', 'scripts', 'index.js'],
+    ['assets', 'metabot-llm-wiki-runtime', 'references', 'payload-schema-v1.json'],
+  ]) {
+    await assertFileExists(sharedSkillPath(outputRoot, 'metabot-create-wiki', ...relativePath));
+    for (const host of HOSTS) {
+      await assertFileExists(hostWrapperSharedSkillPath(outputRoot, host, 'metabot-create-wiki', ...relativePath));
+    }
+  }
 });
 
 test('buildAgentConnectSkillpacks renders shared skills without host-specific adapter sections or host override flags', async () => {

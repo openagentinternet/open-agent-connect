@@ -19,6 +19,7 @@ const EXPECTED_NPM_SKILLS = [
   'metabot-omni-reader',
   'metabot-post-buzz',
   'metabot-post-skillservice',
+  'metabot-create-wiki',
   'metabot-upload-file',
   'metabot-upload-largefile',
   'metabot-wallet-manage',
@@ -108,6 +109,12 @@ test('npm package includes runtime install inputs and excludes generated/develop
   for (const skillName of EXPECTED_NPM_SKILLS) {
     assertIncludes(paths, `SKILLs/${skillName}/SKILL.md`);
   }
+  assertIncludes(paths, 'SKILLs/metabot-create-wiki/scripts/scaffold-wiki-skill.js');
+  assertIncludes(paths, 'SKILLs/metabot-create-wiki/scripts/self-test.js');
+  assertIncludes(paths, 'SKILLs/metabot-create-wiki/assets/wiki-skill/scripts/index.js.template');
+  assertIncludes(paths, 'SKILLs/metabot-create-wiki/assets/metabot-llm-wiki-runtime/SKILL.md');
+  assertIncludes(paths, 'SKILLs/metabot-create-wiki/assets/metabot-llm-wiki-runtime/scripts/index.js');
+  assertIncludes(paths, 'SKILLs/metabot-create-wiki/assets/metabot-llm-wiki-runtime/references/payload-schema-v1.json');
   assertIncludes(paths, 'skillpacks/common/templates/system-routing.md');
   assertIncludes(paths, 'scripts/oac-dev-mode.sh');
   assertIncludes(paths, 'docs/install/open-agent-connect.md');

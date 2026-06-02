@@ -23,6 +23,7 @@ const METABOT_SKILLS = [
   'metabot-omni-reader',
   'metabot-post-buzz',
   'metabot-post-skillservice',
+  'metabot-create-wiki',
   'metabot-loom-wish2task',
   'metabot-metaapp-publish',
   'metabot-upload-file',
@@ -436,6 +437,23 @@ async function renderHostSkill(options) {
   });
 }
 
+async function copySkillDirectory(repoRoot, legacySkillName, targetDir) {
+  const sourceRoot = path.join(repoRoot, 'SKILLs', legacySkillName);
+  await fs.rm(targetDir, { recursive: true, force: true });
+  await fs.mkdir(path.dirname(targetDir), { recursive: true });
+  await fs.cp(sourceRoot, targetDir, {
+    recursive: true,
+    filter: (sourcePath) => {
+      const relativePath = path.relative(sourceRoot, sourcePath);
+      if (!relativePath) return true;
+      const segments = relativePath.split(path.sep);
+      if (segments.includes('evals')) return false;
+      return !GENERATED_JUNK_FILENAMES.has(path.basename(sourcePath));
+    },
+  });
+  await sanitizeGeneratedTree(targetDir);
+}
+
 function isLikelyTextBuffer(buffer) {
   if (buffer.includes(0)) {
     return false;
@@ -649,7 +667,9 @@ export async function buildAgentConnectSkillpacks(options = {}) {
       templates,
     });
     sharedRenderedSkills.set(legacySkillName, renderedSharedSkill);
-    await writeFile(path.join(sharedRoot, 'skills', legacySkillName, 'SKILL.md'), renderedSharedSkill);
+    const sharedSkillDir = path.join(sharedRoot, 'skills', legacySkillName);
+    await copySkillDirectory(repoRoot, legacySkillName, sharedSkillDir);
+    await writeFile(path.join(sharedSkillDir, 'SKILL.md'), renderedSharedSkill);
   }
 
   for (const hostKey of hostKeys) {
@@ -684,8 +704,10 @@ export async function buildAgentConnectSkillpacks(options = {}) {
     );
 
     for (const legacySkillName of METABOT_SKILLS) {
+      const hostSkillDir = path.join(hostRoot, HOST_WRAPPER_SHARED_SKILLS_ROOT, legacySkillName);
+      await copySkillDirectory(repoRoot, legacySkillName, hostSkillDir);
       await writeFile(
-        path.join(hostRoot, HOST_WRAPPER_SHARED_SKILLS_ROOT, legacySkillName, 'SKILL.md'),
+        path.join(hostSkillDir, 'SKILL.md'),
         sharedRenderedSkills.get(legacySkillName)
       );
     }

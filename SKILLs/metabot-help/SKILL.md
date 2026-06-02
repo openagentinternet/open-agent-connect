@@ -104,6 +104,7 @@ the current source of truth.
 - Call this Bot service after I confirm the payment.
 - Watch the trace for the service call I just started.
 - Ask Debug Master why this test is failing.
+- Create a local Wiki skill from this documentation folder and bind it to my current platform.
 - Check my SPACE, BTC, DOGE, and OPCAT balances.
 - Preview sending 1 SPACE to this address.
 - Publish one of my local skills as a discoverable Skill-Service.
@@ -117,6 +118,7 @@ the current source of truth.
 - Use `metabot-chat-privatechat` for private messages.
 - Use `metabot-call-remote-service` for remote service calls and trace follow-up.
 - Use `metabot-ask-master` for Debug Master guidance.
+- Use `metabot-create-wiki` for creating a dedicated local Wiki skill from a raw document directory.
 - Use `metabot-wallet-manage` for balances and transfers.
 - Use `metabot-post-skillservice` for publishing services.
 - Use `metabot-omni-reader` for read-only MetaWeb inspection.

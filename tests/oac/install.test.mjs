@@ -94,8 +94,10 @@ test('runOac installs shared skills, metabot shim, and codex host bindings for a
 
   const sharedSkillPath = path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master');
   const sharedSkillFile = path.join(sharedSkillPath, 'SKILL.md');
+  const wikiCreatorSkillPath = path.join(systemHome, '.metabot', 'skills', 'metabot-create-wiki');
   const metabotShimPath = path.join(systemHome, '.metabot', 'bin', 'metabot');
   const hostSkillPath = path.join(systemHome, '.codex', 'skills', 'metabot-ask-master');
+  const wikiCreatorHostSkillPath = path.join(systemHome, '.codex', 'skills', 'metabot-create-wiki');
   const evalsPath = path.join(
     systemHome,
     '.metabot',
@@ -110,6 +112,7 @@ test('runOac installs shared skills, metabot shim, and codex host bindings for a
   assert.equal(result.payload.data.host, 'codex');
   assert.equal(result.payload.data.metabotShimPath, metabotShimPath);
   assert.ok(result.payload.data.installedSkills.includes('metabot-ask-master'));
+  assert.ok(result.payload.data.installedSkills.includes('metabot-create-wiki'));
   assert.ok(result.payload.data.boundRoots.some((root) =>
     root.platformId === 'codex'
       && root.status === 'bound'
@@ -129,7 +132,10 @@ test('runOac installs shared skills, metabot shim, and codex host bindings for a
   assert.match(shim, /Node\.js >=20 <25/);
   assert.match(shim, /exec "\$NODE_BIN"/);
   assert.doesNotMatch(shim, /exec node /);
+  await fs.stat(path.join(wikiCreatorSkillPath, 'scripts', 'scaffold-wiki-skill.js'));
+  await fs.stat(path.join(wikiCreatorSkillPath, 'assets', 'metabot-llm-wiki-runtime', 'scripts', 'index.js'));
   await assertSymlinkPointsTo(hostSkillPath, sharedSkillPath);
+  await assertSymlinkPointsTo(wikiCreatorHostSkillPath, wikiCreatorSkillPath);
   await assert.rejects(fs.stat(evalsPath), { code: 'ENOENT' });
 });
 

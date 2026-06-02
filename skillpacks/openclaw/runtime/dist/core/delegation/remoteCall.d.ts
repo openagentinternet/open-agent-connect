@@ -20,6 +20,8 @@ export interface RemoteServiceDescriptor {
     description?: string | null;
     price?: string | null;
     currency?: string | null;
+    paymentTiming?: string | null;
+    settlementKind?: string | null;
     ratingAvg?: number | null;
     ratingCount?: number | null;
     providerName?: string | null;
@@ -46,11 +48,11 @@ export type RemoteCallPlanResult = {
         providerGlobalMetaId: string;
         serviceName: string;
         price: string;
-        currency: 'SPACE' | 'BTC' | 'DOGE' | '';
+        currency: string;
     };
     payment: {
         amount: string;
-        currency: 'SPACE' | 'BTC' | 'DOGE' | '';
+        currency: string;
     };
     traceId: string;
     confirmation: DelegationPolicyDecision;

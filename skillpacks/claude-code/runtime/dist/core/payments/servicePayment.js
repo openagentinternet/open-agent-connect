@@ -5,6 +5,7 @@ exports.createWalletServicePaymentExecutor = createWalletServicePaymentExecutor;
 exports.executeServiceOrderPayment = executeServiceOrderPayment;
 const node_crypto_1 = require("node:crypto");
 const localMnemonicSigner_1 = require("../signing/localMnemonicSigner");
+const skillServiceProtocol_1 = require("../services/skillServiceProtocol");
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -99,21 +100,24 @@ function createWalletServicePaymentExecutor(input) {
 async function executeServiceOrderPayment(input) {
     const amount = normalizeAmount(input.amount);
     const numericAmount = Number(amount);
-    const currency = normalizeCurrency(input.currency);
-    if (!currency) {
-        throw new Error('service_payment_unsupported_settlement: Only native SPACE/MVC and BTC service payments are supported.');
-    }
     if (numericAmount === 0) {
+        const paymentCurrency = (0, skillServiceProtocol_1.normalizeSkillServiceCurrency)(input.currency);
+        const nativeCurrency = normalizeCurrency(paymentCurrency);
+        const paymentChain = nativeCurrency ? resolvePaymentChain(nativeCurrency) : null;
         return {
             paymentTxid: null,
-            paymentChain: resolvePaymentChain(currency),
+            paymentChain,
             paymentAmount: amount,
-            paymentCurrency: currency === 'MVC' ? 'SPACE' : currency,
+            paymentCurrency,
             settlementKind: 'native',
             orderReference: null,
             totalCost: 0,
-            network: resolvePaymentChain(currency),
+            network: paymentChain,
         };
+    }
+    const currency = normalizeCurrency(input.currency);
+    if (!currency) {
+        throw new Error('service_payment_unsupported_settlement: Only native SPACE/MVC and BTC service payments are supported.');
     }
     const paymentAddress = normalizeText(input.paymentAddress);
     if (!paymentAddress) {
