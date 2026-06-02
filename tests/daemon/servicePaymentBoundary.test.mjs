@@ -3112,7 +3112,14 @@ test('inbound provider ORDER fallback protocol copy stays concise and service-or
 });
 
 test('/api services.execute persists seller lifecycle state and provider runtime diagnostics', async (t) => {
-  const harness = await createInboundProviderOrderHarness(t);
+  const providerSkills = ['metabot-weather-oracle', 'metabot-post-buzz'];
+  const executionReminder = 'Use the weather skill first, then publish the concise summary to buzz.';
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: {
+      providerSkills,
+      executionReminder,
+    },
+  });
   const paymentTxid = '9'.repeat(64);
   const serviceOrderPinId = 'skill-service-order-direct-pin-1';
 
@@ -3143,6 +3150,12 @@ test('/api services.execute persists seller lifecycle state and provider runtime
 
   assert.equal(result.ok, true);
   assert.equal(harness.llmCalls.length, 1);
+  assert.deepEqual(harness.llmCalls[0].skills, providerSkills);
+  assert.equal(
+    harness.llmCalls[0].skillSourcePaths['metabot-post-buzz'],
+    path.join(harness.homeDir, '.codex', 'skills', 'metabot-post-buzz'),
+  );
+  assert.match(harness.llmCalls[0].systemPrompt, /Use the weather skill first/);
 
   const state = await harness.runtimeStateStore.readState();
   const trace = state.traces.find((entry) => entry.traceId === 'trace-provider-direct-execute');
