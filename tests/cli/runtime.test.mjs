@@ -6,6 +6,8 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
+import { cleanupProfileHome } from '../helpers/profileHome.mjs';
+
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const {
@@ -2004,8 +2006,8 @@ test('provider summary refreshes rating detail from chain and exposes rated sell
   t.after(async () => stopDaemon(providerHome));
   t.after(async () => stopDaemon(callerHome));
   t.after(async () => chainApi.close());
-  t.after(async () => rm(deriveSystemHome(providerHome), { recursive: true, force: true }));
-  t.after(async () => rm(deriveSystemHome(callerHome), { recursive: true, force: true }));
+  t.after(async () => cleanupProfileHome(providerHome));
+  t.after(async () => cleanupProfileHome(callerHome));
 
   const providerIdentity = await runCommand(providerHome, ['identity', 'create', '--name', 'Provider Bot']);
   assert.equal(providerIdentity.exitCode, 0);
