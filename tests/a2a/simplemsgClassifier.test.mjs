@@ -20,6 +20,7 @@ test('simplemsg classifier recognizes the ORDER start tag', () => {
     kind: 'order_protocol',
     tag: 'ORDER',
     orderTxid: null,
+    orderPinId: null,
     reason: null,
   });
 });
@@ -29,24 +30,28 @@ test('simplemsg classifier recognizes scoped IDBots order protocol tags', () => 
     kind: 'order_protocol',
     tag: 'ORDER_STATUS',
     orderTxid: ORDER_TXID,
+    orderPinId: null,
     reason: null,
   });
   assert.deepEqual(classifySimplemsgContent(`[DELIVERY:${ORDER_TXID}] {"result":"ok"}`), {
     kind: 'order_protocol',
     tag: 'DELIVERY',
     orderTxid: ORDER_TXID,
+    orderPinId: null,
     reason: null,
   });
   assert.deepEqual(classifySimplemsgContent(`[NeedsRating:${ORDER_TXID}] please rate`), {
     kind: 'order_protocol',
     tag: 'NeedsRating',
     orderTxid: ORDER_TXID,
+    orderPinId: null,
     reason: null,
   });
   assert.deepEqual(classifySimplemsgContent(`[ORDER_END:${ORDER_TXID} rated] done`), {
     kind: 'order_protocol',
     tag: 'ORDER_END',
     orderTxid: ORDER_TXID,
+    orderPinId: null,
     reason: 'rated',
   });
 });
@@ -56,12 +61,14 @@ test('simplemsg classifier keeps legacy delivery and needs-rating compatible', (
     kind: 'order_protocol',
     tag: 'DELIVERY',
     orderTxid: null,
+    orderPinId: null,
     reason: null,
   });
   assert.deepEqual(classifySimplemsgContent('[NEEDSRATING] please rate'), {
     kind: 'order_protocol',
     tag: 'NeedsRating',
     orderTxid: null,
+    orderPinId: null,
     reason: null,
   });
 });
