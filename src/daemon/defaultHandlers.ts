@@ -86,6 +86,10 @@ import {
   normalizeProviderSkillList,
   selectProviderSkillSource,
 } from '../core/services/skillServiceProtocol';
+import {
+  normalizeAllowChatSkills,
+  validateAllowChatSkills,
+} from '../core/services/chatSkillPolicy';
 import { createProviderServiceRunner } from '../core/a2a/provider/providerServiceRunner';
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
 import {
@@ -1109,6 +1113,9 @@ function buildMetabotUpdateInput(input: Record<string, unknown>): UpdateMetabotI
   if (hasOwnField(input, 'fallbackProvider')) {
     update.fallbackProvider = normalizeMetabotProviderInput(input.fallbackProvider);
   }
+  if (hasOwnField(input, 'allowChatSkills')) {
+    update.allowChatSkills = normalizeAllowChatSkills(input.allowChatSkills);
+  }
   return update;
 }
 
@@ -1139,6 +1146,12 @@ function buildMetabotCreateInput(input: Record<string, unknown>): CreateMetabotI
   }
   if (hasOwnField(input, 'fallbackProvider')) {
     createInput.fallbackProvider = normalizeMetabotProviderInput(input.fallbackProvider);
+  }
+  if (hasOwnField(input, 'allowChatSkills')) {
+    const allowChatSkills = normalizeAllowChatSkills(input.allowChatSkills);
+    if (allowChatSkills.length > 0) {
+      throw new Error('allowChatSkills can be configured after MetaBot creation from the Bot detail page.');
+    }
   }
   return createInput;
 }
@@ -1188,6 +1201,10 @@ function buildDefaultBindingId(slug: string, runtimeId: string, role: 'primary' 
   return `lb_${slug}_${safeRuntime}_${role}`;
 }
 
+function sameStringArray(left: string[] = [], right: string[] = []): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 function calculateMetabotChangedFields(
   current: MetabotProfileFull,
   update: UpdateMetabotInfoInput,
@@ -1205,6 +1222,12 @@ function calculateMetabotChangedFields(
   }
   if (update.fallbackProvider !== undefined && update.fallbackProvider !== (current.fallbackProvider ?? null)) {
     changedFields.push('fallbackProvider');
+  }
+  if (
+    update.allowChatSkills !== undefined
+    && !sameStringArray(update.allowChatSkills, current.allowChatSkills)
+  ) {
+    changedFields.push('allowChatSkills');
   }
   return changedFields;
 }
@@ -1224,6 +1247,7 @@ function buildMetabotChainProfile(
       : {}),
     primaryProvider: update.primaryProvider !== undefined ? update.primaryProvider : (current.primaryProvider ?? null),
     fallbackProvider: update.fallbackProvider !== undefined ? update.fallbackProvider : (current.fallbackProvider ?? null),
+    allowChatSkills: update.allowChatSkills !== undefined ? update.allowChatSkills : current.allowChatSkills,
   };
 }
 
@@ -16324,6 +16348,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
             const duplicate = resolveProfileNameMatch(update.name, profiles.filter((profile) => profile.slug !== current.slug));
             if (duplicate.status === 'matched' && duplicate.matchType !== 'ranked') {
               return commandFailed('name_taken', `MetaBot name already exists: ${update.name}`);
+            }
+          }
+          if (update.allowChatSkills !== undefined && update.allowChatSkills.length > 0) {
+            const validation = await validateAllowChatSkills({
+              metaBotSlug: current.slug,
+              allowChatSkills: update.allowChatSkills,
+              runtimeStore: createLlmRuntimeStore(current.homeDir),
+              bindingStore: createLlmBindingStore(current.homeDir),
+              systemHomeDir: normalizedSystemHomeDir,
+              projectRoot: current.homeDir,
+              env: process.env,
+            });
+            if (!validation.ok) {
+              throw new Error(validation.message);
             }
           }
           await validateMetabotProviderAvailability(current, update);
