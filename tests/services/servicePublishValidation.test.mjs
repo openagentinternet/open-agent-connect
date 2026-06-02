@@ -11,6 +11,7 @@ const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.j
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const {
   validateServicePublishProviderSkill,
+  validateServicePublishProviderSkills,
 } = require('../../dist/core/services/servicePublishValidation.js');
 
 async function createProfileHome(slug = 'provider-profile') {
@@ -94,6 +95,9 @@ async function createValidationContext(options = {}) {
   if (options.withSkill !== false) {
     await writeSkill(path.join(systemHome, '.codex', 'skills'), 'metabot-weather');
   }
+  for (const skillName of options.extraSkills || []) {
+    await writeSkill(path.join(systemHome, '.codex', 'skills'), skillName);
+  }
   return { systemHome, profileRoot, slug, runtimeStore, bindingStore };
 }
 
@@ -115,6 +119,59 @@ test('publish validation succeeds for a matching primary runtime skill', async (
   assert.equal(result.platform.id, 'codex');
   assert.equal(Array.isArray(result.rootDiagnostics), true);
   assert.equal(result.rootDiagnostics.some((entry) => entry.absolutePath.includes('.claude')), false);
+});
+
+test('publish validation succeeds for multiple provider skills on the primary runtime', async () => {
+  const context = await createValidationContext({ extraSkills: ['metabot-post-buzz'] });
+  const result = await validateServicePublishProviderSkills({
+    metaBotSlug: context.slug,
+    providerSkills: [' metabot-weather ', 'metabot-post-buzz', 'metabot-weather'],
+    runtimeStore: context.runtimeStore,
+    bindingStore: context.bindingStore,
+    systemHomeDir: context.systemHome,
+    projectRoot: context.profileRoot,
+    env: {},
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.providerSkills, ['metabot-weather', 'metabot-post-buzz']);
+  assert.deepEqual(result.skills.map((entry) => entry.skillName), ['metabot-weather', 'metabot-post-buzz']);
+  assert.equal(result.skill.skillName, 'metabot-weather');
+  assert.equal(result.runtime.id, 'runtime-codex');
+});
+
+test('publish validation rejects mixed unsafe provider skill lists before scanning', async () => {
+  const context = await createValidationContext({ extraSkills: ['metabot-post-buzz'] });
+  const result = await validateServicePublishProviderSkills({
+    metaBotSlug: context.slug,
+    providerSkills: ['metabot-weather', '../metabot-post-buzz'],
+    runtimeStore: context.runtimeStore,
+    bindingStore: context.bindingStore,
+    systemHomeDir: context.systemHome,
+    projectRoot: context.profileRoot,
+    env: {},
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_provider_skill');
+});
+
+test('publish validation reports every missing selected provider skill', async () => {
+  const context = await createValidationContext();
+  const result = await validateServicePublishProviderSkills({
+    metaBotSlug: context.slug,
+    providerSkills: ['metabot-weather', 'missing-skill', 'another-missing-skill'],
+    runtimeStore: context.runtimeStore,
+    bindingStore: context.bindingStore,
+    systemHomeDir: context.systemHome,
+    projectRoot: context.profileRoot,
+    env: {},
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'provider_skill_missing');
+  assert.match(result.message, /missing-skill/);
+  assert.match(result.message, /another-missing-skill/);
 });
 
 test('publish validation rejects unsafe providerSkill names before scanning', async () => {

@@ -60,6 +60,10 @@ test('parseChainServiceItem + resolveCurrentChainServices keep IDBots create pay
     mrc20Id: null,
     serviceIcon: null,
     providerSkill: 'metabot-weather-oracle',
+    providerSkills: ['metabot-weather-oracle'],
+    paymentTiming: 'prepaid',
+    executionReminder: '',
+    metadata: '',
     skillDocument: '# Weather Oracle',
     inputType: 'text',
     outputType: 'text',
@@ -68,6 +72,50 @@ test('parseChainServiceItem + resolveCurrentChainServices keep IDBots create pay
     available: true,
     updatedAt: 1_775_000_000_000,
   });
+});
+
+test('parseChainServiceItem normalizes v1.1 provider skill arrays and new service fields', () => {
+  const row = parseChainServiceItem({
+    id: 'service-pin-v11',
+    metaid: 'metaid-provider',
+    address: 'mvc-provider-address',
+    timestamp: 1_775_001_000,
+    status: 0,
+    operation: 'create',
+    path: '/protocols/skill-service',
+    contentSummary: JSON.stringify({
+      serviceName: 'weather-buzz',
+      displayName: 'Weather Buzz',
+      description: 'Checks weather and posts a buzz.',
+      providerMetaBot: 'idq1provider',
+      providerSkill: ['weather-query', 'metabot-post-buzz'],
+      price: '0',
+      currency: 'SPACE',
+      paymentTiming: 'free',
+      settlementKind: 'native',
+      executionReminder: 'Use only the selected service skills for this order.',
+      metadata: '{"category":"weather"}',
+      skillDocument: '# Weather Buzz',
+      inputType: 'text',
+      outputType: 'markdown',
+      endpoint: 'simplemsg',
+      paymentAddress: 'mvc-payment-address',
+    }),
+  });
+
+  assert.equal(row.providerSkill, 'weather-query');
+  assert.deepEqual(row.providerSkills, ['weather-query', 'metabot-post-buzz']);
+  assert.equal(row.paymentTiming, 'free');
+  assert.equal(row.executionReminder, 'Use only the selected service skills for this order.');
+  assert.equal(row.metadata, '{"category":"weather"}');
+
+  const services = resolveCurrentChainServices([row]);
+  assert.equal(services.length, 1);
+  assert.equal(services[0].providerSkill, 'weather-query');
+  assert.deepEqual(services[0].providerSkills, ['weather-query', 'metabot-post-buzz']);
+  assert.equal(services[0].paymentTiming, 'free');
+  assert.equal(services[0].executionReminder, 'Use only the selected service skills for this order.');
+  assert.equal(services[0].metadata, '{"category":"weather"}');
 });
 
 test('resolveCurrentChainServices keeps the latest modify row as the active service state', () => {

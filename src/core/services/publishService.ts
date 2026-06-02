@@ -1,10 +1,23 @@
+import {
+  getPrimaryProviderSkill,
+  normalizeProviderSkillList,
+  resolveSkillServicePaymentTerms,
+  type SkillServicePaymentTiming,
+  type SkillServiceSettlementKind,
+} from './skillServiceProtocol';
+
 export interface PublishedServiceDraft {
   serviceName: string;
   displayName: string;
   description: string;
   providerSkill: string;
+  providerSkills?: string[] | null;
   price: string;
   currency: string;
+  paymentTiming?: string | null;
+  settlementKind?: string | null;
+  executionReminder?: string | null;
+  metadata?: string | null;
   outputType: string;
   serviceIconUri?: string | null;
   serviceIconDataUrl?: string | null;
@@ -18,16 +31,20 @@ export interface PublishedServiceRecord {
   creatorMetabotId: number;
   providerGlobalMetaId: string;
   providerSkill: string;
+  providerSkills: string[];
   serviceName: string;
   displayName: string;
   description: string;
   serviceIcon: string | null;
   price: string;
   currency: string;
+  paymentTiming: SkillServicePaymentTiming;
   paymentChain: string | null;
-  settlementKind: string | null;
+  settlementKind: SkillServiceSettlementKind | string | null;
   mrc20Ticker: string | null;
   mrc20Id: string | null;
+  executionReminder: string;
+  metadata: string;
   skillDocument: string;
   inputType: 'text';
   outputType: string;
@@ -101,14 +118,36 @@ export function resolvePublishedServiceSettlement(value: string): {
   };
 }
 
-function normalizeDraft(draft: PublishedServiceDraft): PublishedServiceDraft {
+function normalizeDraft(draft: PublishedServiceDraft): PublishedServiceDraft & {
+  providerSkills: string[];
+  paymentTiming: SkillServicePaymentTiming;
+  settlementKind: SkillServiceSettlementKind;
+  executionReminder: string;
+  metadata: string;
+} {
+  const providerSkills = normalizeProviderSkillList(
+    Array.isArray(draft.providerSkills) && draft.providerSkills.length > 0
+      ? draft.providerSkills
+      : draft.providerSkill
+  );
+  const paymentTerms = resolveSkillServicePaymentTerms({
+    price: draft.price,
+    currency: draft.currency,
+    paymentTiming: draft.paymentTiming,
+    settlementKind: draft.settlementKind,
+  });
   return {
     serviceName: normalizeText(draft.serviceName),
     displayName: normalizeText(draft.displayName),
     description: normalizeText(draft.description),
-    providerSkill: normalizeText(draft.providerSkill),
-    price: normalizeText(draft.price),
-    currency: normalizePublishedServiceCurrency(draft.currency),
+    providerSkill: getPrimaryProviderSkill(providerSkills) ?? normalizeText(draft.providerSkill),
+    providerSkills,
+    price: paymentTerms.effectivePrice,
+    currency: paymentTerms.currency,
+    paymentTiming: paymentTerms.paymentTiming,
+    settlementKind: paymentTerms.settlementKind,
+    executionReminder: normalizeText(draft.executionReminder),
+    metadata: normalizeText(draft.metadata),
     outputType: normalizeText(draft.outputType).toLowerCase() || 'text',
     serviceIconUri: normalizeText(draft.serviceIconUri) || null,
   };
@@ -124,7 +163,7 @@ export function buildPublishedService(input: {
   skillDocument: string;
   now: number;
 }): {
-  payload: Record<string, string | null>;
+  payload: Record<string, unknown>;
   record: PublishedServiceRecord;
 } {
   const draft = normalizeDraft(input.draft);
@@ -135,13 +174,16 @@ export function buildPublishedService(input: {
     description: draft.description,
     serviceIcon: draft.serviceIconUri || '',
     providerMetaBot: normalizeText(input.providerGlobalMetaId),
-    providerSkill: draft.providerSkill,
+    providerSkill: draft.providerSkills,
     price: draft.price,
     currency: settlement.currency,
+    paymentTiming: draft.paymentTiming,
     paymentChain: settlement.paymentChain,
-    settlementKind: settlement.settlementKind,
+    settlementKind: draft.settlementKind,
     mrc20Ticker: settlement.mrc20Ticker,
     mrc20Id: settlement.mrc20Id,
+    executionReminder: draft.executionReminder,
+    metadata: draft.metadata,
     skillDocument: '',
     inputType: 'text',
     outputType: draft.outputType || 'text',
@@ -160,16 +202,20 @@ export function buildPublishedService(input: {
     creatorMetabotId: input.creatorMetabotId,
     providerGlobalMetaId: normalizeText(input.providerGlobalMetaId),
     providerSkill: draft.providerSkill,
+    providerSkills: draft.providerSkills,
     serviceName: draft.serviceName,
     displayName: draft.displayName,
     description: draft.description,
     serviceIcon: draft.serviceIconUri || null,
     price: draft.price,
     currency: settlement.currency,
+    paymentTiming: draft.paymentTiming,
     paymentChain: settlement.paymentChain,
-    settlementKind: settlement.settlementKind,
+    settlementKind: draft.settlementKind,
     mrc20Ticker: settlement.mrc20Ticker,
     mrc20Id: settlement.mrc20Id,
+    executionReminder: draft.executionReminder,
+    metadata: draft.metadata,
     skillDocument: '',
     inputType: 'text',
     outputType: draft.outputType || 'text',
@@ -190,20 +236,35 @@ export function buildRevokedPublishedService(input: {
   creatorMetabotId: number;
   providerGlobalMetaId: string;
   providerSkill: string;
+  providerSkills?: string[] | null;
   serviceName: string;
   displayName: string;
   description: string;
   serviceIcon?: string | null;
   price: string;
   currency: string;
+  paymentTiming?: string | null;
   paymentChain?: string | null;
   settlementKind?: string | null;
   mrc20Ticker?: string | null;
   mrc20Id?: string | null;
+  executionReminder?: string | null;
+  metadata?: string | null;
   skillDocument: string;
   now: number;
 }): PublishedServiceRecord {
   const settlement = resolvePublishedServiceSettlement(input.currency);
+  const providerSkills = normalizeProviderSkillList(
+    Array.isArray(input.providerSkills) && input.providerSkills.length > 0
+      ? input.providerSkills
+      : input.providerSkill
+  );
+  const paymentTerms = resolveSkillServicePaymentTerms({
+    price: input.price,
+    currency: input.currency,
+    paymentTiming: input.paymentTiming,
+    settlementKind: input.settlementKind,
+  });
   return {
     id: normalizeText(input.sourceServicePinId),
     sourceServicePinId: normalizeText(input.sourceServicePinId),
@@ -214,17 +275,21 @@ export function buildRevokedPublishedService(input: {
     ].filter(Boolean))],
     creatorMetabotId: input.creatorMetabotId,
     providerGlobalMetaId: normalizeText(input.providerGlobalMetaId),
-    providerSkill: normalizeText(input.providerSkill),
+    providerSkill: getPrimaryProviderSkill(providerSkills) ?? normalizeText(input.providerSkill),
+    providerSkills,
     serviceName: normalizeText(input.serviceName),
     displayName: normalizeText(input.displayName) || normalizeText(input.serviceName),
     description: normalizeText(input.description),
     serviceIcon: normalizeText(input.serviceIcon) || null,
-    price: normalizeText(input.price),
+    price: paymentTerms.effectivePrice,
     currency: settlement.currency,
+    paymentTiming: paymentTerms.paymentTiming,
     paymentChain: normalizeText(input.paymentChain) || settlement.paymentChain,
-    settlementKind: normalizeText(input.settlementKind) || settlement.settlementKind,
+    settlementKind: normalizeText(input.settlementKind) || paymentTerms.settlementKind || settlement.settlementKind,
     mrc20Ticker: normalizeText(input.mrc20Ticker) || settlement.mrc20Ticker,
     mrc20Id: normalizeText(input.mrc20Id) || settlement.mrc20Id,
+    executionReminder: normalizeText(input.executionReminder),
+    metadata: normalizeText(input.metadata),
     skillDocument: '',
     inputType: 'text',
     outputType: 'text',

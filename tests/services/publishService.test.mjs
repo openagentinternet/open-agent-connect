@@ -43,13 +43,16 @@ test('buildPublishedService preserves payload content and provider identity sema
     description: 'Performs tarot readings.',
     serviceIcon: 'data:image/png;base64,icon-data',
     providerMetaBot: 'seller-global-metaid',
-    providerSkill: 'tarot-reading',
+    providerSkill: ['tarot-reading'],
     price: '0.00005',
     currency: 'SPACE',
+    paymentTiming: 'prepaid',
     paymentChain: 'mvc',
     settlementKind: 'native',
     mrc20Ticker: null,
     mrc20Id: null,
+    executionReminder: '',
+    metadata: '',
     skillDocument: '',
     inputType: 'text',
     outputType: 'text',
@@ -64,10 +67,46 @@ test('buildPublishedService preserves payload content and provider identity sema
   assert.equal('skillRootPath' in result.payload, false);
   assert.equal(result.record.available, 1);
   assert.equal(result.record.providerGlobalMetaId, 'seller-global-metaid');
+  assert.deepEqual(result.record.providerSkills, ['tarot-reading']);
+  assert.equal(result.record.providerSkill, 'tarot-reading');
+  assert.equal(result.record.paymentTiming, 'prepaid');
+  assert.equal(result.record.executionReminder, '');
+  assert.equal(result.record.metadata, '');
   assert.equal(result.record.skillDocument, '');
   assert.equal(result.record.paymentChain, 'mvc');
   assert.equal(result.record.settlementKind, 'native');
   assert.equal(result.record.serviceIcon, 'data:image/png;base64,icon-data');
+});
+
+test('buildPublishedService emits v1.1 multi-skill free service metadata', () => {
+  const result = buildPublishedService({
+    sourceServicePinId: 'service-weather-buzz',
+    currentPinId: 'service-weather-buzz',
+    creatorMetabotId: 7,
+    providerGlobalMetaId: 'seller-global-metaid',
+    paymentAddress: '1seller-payment-address',
+    draft: createDraft({
+      providerSkills: ['weather-query', 'metabot-post-buzz'],
+      paymentTiming: 'free',
+      price: '10',
+      currency: 'DOGE',
+      executionReminder: 'Check weather first, then post the final buzz if requested.',
+      metadata: '{"category":"weather"}',
+    }),
+    skillDocument: '# Weather Buzz',
+    now: 1_744_444_444_000,
+  });
+
+  assert.deepEqual(result.payload.providerSkill, ['weather-query', 'metabot-post-buzz']);
+  assert.equal(result.payload.price, '0');
+  assert.equal(result.payload.currency, 'DOGE');
+  assert.equal(result.payload.paymentTiming, 'free');
+  assert.equal(result.payload.executionReminder, 'Check weather first, then post the final buzz if requested.');
+  assert.equal(result.payload.metadata, '{"category":"weather"}');
+  assert.deepEqual(result.record.providerSkills, ['weather-query', 'metabot-post-buzz']);
+  assert.equal(result.record.providerSkill, 'weather-query');
+  assert.equal(result.record.price, '0');
+  assert.equal(result.record.paymentTiming, 'free');
 });
 
 test('buildPublishedService maps DOGE and BTC-OPCAT settlement metadata into the IDBots-compatible payload', () => {
@@ -165,13 +204,16 @@ test('publishServiceToChain writes the skill-service protocol and persists the r
       description: 'Performs tarot readings.',
       serviceIcon: 'data:image/png;base64,icon-data',
       providerMetaBot: 'seller-global-metaid',
-      providerSkill: 'tarot-reading',
+      providerSkill: ['tarot-reading'],
       price: '0.00005',
       currency: 'SPACE',
+      paymentTiming: 'prepaid',
       paymentChain: 'mvc',
       settlementKind: 'native',
       mrc20Ticker: null,
       mrc20Id: null,
+      executionReminder: '',
+      metadata: '',
       skillDocument: '',
       inputType: 'text',
       outputType: 'text',

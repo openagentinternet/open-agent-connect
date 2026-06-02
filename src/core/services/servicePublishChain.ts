@@ -23,7 +23,7 @@ function normalizeText(value: unknown): string {
 }
 
 export function buildServicePublishChainWrite(input: {
-  payload: Record<string, string | null>;
+  payload: Record<string, unknown>;
   network?: string;
 }) {
   return {
@@ -36,7 +36,7 @@ export function buildServicePublishChainWrite(input: {
 }
 
 export interface PublishServiceToChainResult {
-  payload: Record<string, string | null>;
+  payload: Record<string, unknown>;
   record: PublishedServiceRecord;
   serviceIconUpload?: ChainWriteResult;
   chainWrite: ChainWriteResult;
