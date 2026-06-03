@@ -209,12 +209,16 @@ function sellerOrderPins(order: SellerOrderRecord): string[] {
   ].filter(Boolean);
 }
 
+function isBuyerOrderTrace(trace: SessionTraceRecord): boolean {
+  return Boolean(trace.order) && normalizeLower(trace.order?.role) === 'buyer';
+}
+
 function findBuyerTraceForRequest(
   traces: SessionTraceRecord[],
   request: RequestContext,
 ): UniqueMatch<SessionTraceRecord> {
   return uniqueByPriority(
-    traces.filter((trace) => Boolean(trace.order)),
+    traces.filter(isBuyerOrderTrace),
     [
       (trace) => Boolean(request.pinId) && normalizeText(trace.order?.refundRequestPinId) === request.pinId,
       (trace) => Boolean(request.paymentTxid) && normalizeText(trace.order?.paymentTxid) === request.paymentTxid,
@@ -262,7 +266,7 @@ function findBuyerTraceForFinalize(
   finalize: FinalizeContext,
 ): UniqueMatch<SessionTraceRecord> {
   return uniqueByPriority(
-    traces.filter((trace) => Boolean(trace.order)),
+    traces.filter(isBuyerOrderTrace),
     [
       (trace) => Boolean(finalize.refundRequestPinId) && normalizeText(trace.order?.refundRequestPinId) === finalize.refundRequestPinId,
       (trace) => Boolean(finalize.paymentTxid) && normalizeText(trace.order?.paymentTxid) === finalize.paymentTxid,

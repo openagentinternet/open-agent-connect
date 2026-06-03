@@ -301,6 +301,36 @@ test('applyServiceRefundRequestsToState does not match ambiguous local records',
   assert.equal(result.skipped, 1);
 });
 
+test('applyServiceRefundRequestsToState does not update seller role traces through buyer matching', () => {
+  const sellerTrace = createBuyerTrace({
+    traceId: 'trace-seller-role-request-sync',
+    order: {
+      role: 'seller',
+      status: 'failed',
+    },
+    a2a: {
+      role: 'provider',
+    },
+  });
+
+  const result = applyServiceRefundRequestsToState({
+    state: createState({
+      traces: [sellerTrace],
+    }),
+    requests: [createRequest()],
+    identity,
+    nowMs: NOW,
+  });
+
+  assert.equal(result.applied.buyerRequests, 0);
+  assert.equal(result.applied.synthesizedSellerOrders, 1);
+  assert.equal(result.nextState.sellerOrders.length, 1);
+  assert.equal(result.nextState.traces[0].order.status, 'failed');
+  assert.equal(result.nextState.traces[0].order.refundRequestPinId, null);
+  assert.equal(result.nextState.traces[0].order.refundRequestedAt, null);
+  assert.equal(result.nextState.traces[0].order.updatedAt, NOW - 20_000);
+});
+
 test('applyServiceRefundFinalizationsToState applies verified finalize pin to both local views', async () => {
   const pending = applyServiceRefundRequestsToState({
     state: createState({
@@ -352,6 +382,37 @@ test('applyServiceRefundFinalizationsToState leaves non-native unsupported refun
   assert.equal(order.state, 'refund_pending');
   assert.equal(order.refundBlockingReason, 'refund_settlement_unsupported');
   assert.equal(order.refundFinalizePinId, null);
+});
+
+test('applyServiceRefundFinalizationsToState does not refund seller role traces through buyer matching', async () => {
+  const sellerTrace = createBuyerTrace({
+    traceId: 'trace-seller-role-finalize-sync',
+    order: {
+      role: 'seller',
+      status: 'refund_pending',
+      refundRequestPinId: 'refund-request-pin-1',
+    },
+    a2a: {
+      role: 'provider',
+    },
+  });
+
+  const result = await applyServiceRefundFinalizationsToState({
+    state: createState({
+      traces: [sellerTrace],
+    }),
+    finalizations: [createFinalize()],
+    identity,
+    nowMs: NOW,
+    verifyFinalize: () => true,
+  });
+
+  assert.equal(result.applied.finalizations, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(result.nextState.traces[0].order.status, 'refund_pending');
+  assert.equal(result.nextState.traces[0].order.refundFinalizePinId, null);
+  assert.equal(result.nextState.traces[0].order.refundTxid, null);
+  assert.equal(result.nextState.traces[0].order.refundedAt, null);
 });
 
 test('applyServiceRefundRequestsToState is idempotent and produces no duplicate seller orders', () => {
