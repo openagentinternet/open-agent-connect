@@ -624,6 +624,48 @@ test('applyServiceRefundFinalizationsToState skips already-refunded paid finaliz
   assert.deepEqual(result.nextState, refundedState);
 });
 
+test('applyServiceRefundFinalizationsToState does not block terminal proof row when another match is pending', async () => {
+  const terminalBuyerTrace = createBuyerTrace({
+    order: {
+      status: 'refunded',
+      refundRequestPinId: 'refund-request-pin-1',
+      refundFinalizePinId: 'refund-finalize-pin-1',
+      refundTxid: 'refund-transfer-txid-1',
+      refundedAt: NOW - 5_000,
+      refundCompletedAt: NOW - 5_000,
+      refundBlockingReason: null,
+      updatedAt: NOW - 5_000,
+    },
+  });
+  const pendingSellerOrder = createSellerOrder({
+    state: 'refund_pending',
+    refundRequestPinId: 'refund-request-pin-1',
+    refundFinalizePinId: null,
+    refundTxid: null,
+    refundedAt: null,
+    refundCompletedAt: null,
+    refundBlockingReason: null,
+    updatedAt: NOW - 10_000,
+  });
+
+  const result = await applyServiceRefundFinalizationsToState({
+    state: createState({
+      traces: [terminalBuyerTrace],
+      sellerOrders: [pendingSellerOrder],
+    }),
+    finalizations: [createFinalize()],
+    identity,
+    nowMs: NOW,
+  });
+
+  assert.equal(result.applied.finalizations, 0);
+  assert.equal(result.blocked, 1);
+  assert.deepEqual(result.nextState.traces[0], terminalBuyerTrace);
+  assert.equal(result.nextState.sellerOrders[0].state, 'refund_pending');
+  assert.equal(result.nextState.sellerOrders[0].refundBlockingReason, 'refund_finalize_verification_pending');
+  assert.equal(result.nextState.sellerOrders[0].updatedAt, NOW);
+});
+
 test('mergeServiceRefundSyncState preserves newer settled refund proof over stale sync state', () => {
   const staleSyncedState = createState({
     sellerOrders: [

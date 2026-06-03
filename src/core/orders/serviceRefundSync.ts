@@ -732,6 +732,7 @@ export async function applyServiceRefundFinalizationsToState(
         state: nextState,
         trace: matchedTrace,
         order: matchedOrder,
+        finalize,
         reason: 'refund_settlement_unsupported',
         nowMs: input.nowMs,
       });
@@ -743,6 +744,7 @@ export async function applyServiceRefundFinalizationsToState(
         state: nextState,
         trace: matchedTrace,
         order: matchedOrder,
+        finalize,
         reason: 'refund_finalize_txid_missing',
         nowMs: input.nowMs,
       });
@@ -756,6 +758,7 @@ export async function applyServiceRefundFinalizationsToState(
           state: nextState,
           trace: matchedTrace,
           order: matchedOrder,
+          finalize,
           reason: verification.reason,
           nowMs: input.nowMs,
         });
@@ -797,11 +800,12 @@ function blockFinalizeMatches(input: {
   state: RuntimeState;
   trace: SessionTraceRecord | null;
   order: SellerOrderRecord | null;
+  finalize: FinalizeContext;
   reason: string;
   nowMs: number;
 }): RuntimeState {
   let nextState = input.state;
-  if (input.trace) {
+  if (input.trace && !traceAlreadyRefundedWithFinalizeProof(input.trace, input.finalize)) {
     nextState = {
       ...nextState,
       traces: nextState.traces.map((trace) => (
@@ -811,7 +815,7 @@ function blockFinalizeMatches(input: {
       )),
     };
   }
-  if (input.order) {
+  if (input.order && !sellerOrderAlreadyRefundedWithFinalizeProof(input.order, input.finalize)) {
     nextState = {
       ...nextState,
       sellerOrders: nextState.sellerOrders.map((order) => (
