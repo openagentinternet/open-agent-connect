@@ -1911,7 +1911,15 @@ export async function replayUnhandledA2AOrderMessagesForProfiles(
         continue;
       }
       try {
-        await handler(replayMessage);
+        const handled = await handler(replayMessage);
+        if (!handled.ok) {
+          result.failed += 1;
+          input.logWarning?.(
+            '[A2A order replay handler]',
+            new Error(`${handled.code || handled.state}: ${handled.message || 'ORDER handler returned a non-success result.'}`),
+          );
+          continue;
+        }
         result.replayed += 1;
       } catch (error) {
         result.failed += 1;

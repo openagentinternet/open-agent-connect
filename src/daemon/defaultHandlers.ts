@@ -3638,8 +3638,14 @@ function stripOrderProtocolBubblePrefix(content: string): string {
 
 function extractOrderLineValue(content: string, label: string): string {
   const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-  const match = String(content || '').match(new RegExp(`(?:^|\\n)\\s*${escapedLabel}\\s*:\\s*([^\\n]+)`, 'iu'));
+  const match = String(content || '').match(new RegExp(`(?:^|\\n)\\s*${escapedLabel}\\s*[:：=]\\s*([^\\n]+)`, 'iu'));
   return normalizeText(match?.[1]);
+}
+
+function extractOrderReferenceLineValue(content: string): string {
+  return normalizeText(extractOrderLineValue(content, 'order id'))
+    || normalizeText(extractOrderLineValue(content, 'order reference'))
+    || normalizeText(extractOrderLineValue(content, 'order pin id'));
 }
 
 function extractOrderAmountLine(content: string): { amount: string; currency: string } {
@@ -8206,7 +8212,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const matchingMessage = conversation.messages.find((message) => (
           message.kind === 'order_protocol'
           && message.protocolTag === 'ORDER'
-          && normalizeText(extractOrderLineValue(message.content, 'order id')) === orderReference
+          && extractOrderReferenceLineValue(message.content) === orderReference
         ));
         const messageOrderTxid = normalizeText(matchingMessage?.orderTxid);
         const messageSession = messageOrderTxid
@@ -8406,6 +8412,274 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }));
   }
 
+  async function failInboundProviderOrderValidation(inputFailure: {
+    state: RuntimeState;
+    service?: RuntimeState['services'][number] | null;
+    buyerGlobalMetaId: string;
+    content: string;
+    orderTxid: string;
+    orderMessageId?: string | null;
+    orderPinId?: string | null;
+    paymentTxid?: string | null;
+    paymentCommitTxid?: string | null;
+    orderReference?: string | null;
+    servicePinId?: string | null;
+    providerSkill?: string | null;
+    outputType?: string | null;
+    paymentCurrency?: string | null;
+    paymentAmount?: string | null;
+    paymentChain?: string | null;
+    settlementKind?: string | null;
+    mrc20Ticker?: string | null;
+    mrc20Id?: string | null;
+    userTask: string;
+    timestamp: number;
+    code: string;
+    message: string;
+  }): Promise<MetabotCommandResult<Record<string, unknown>>> {
+    const state = inputFailure.state;
+    const service = inputFailure.service ?? null;
+    const orderTxid = normalizeText(inputFailure.orderTxid);
+    const orderReference = normalizeText(inputFailure.orderReference);
+    const paymentTxid = normalizeText(inputFailure.paymentTxid);
+    const servicePinId = normalizeText(service?.currentPinId)
+      || normalizeText(inputFailure.servicePinId);
+    const serviceName = normalizeText(service?.displayName)
+      || normalizeText(service?.serviceName)
+      || null;
+    const outputType = normalizeText(inputFailure.outputType)
+      || normalizeText(service?.outputType);
+    const orderMessageId = normalizeText(inputFailure.orderMessageId)
+      || normalizeText(inputFailure.orderPinId)
+      || orderTxid
+      || orderReference
+      || `validation-${inputFailure.timestamp}`;
+    const failureText = normalizeText(inputFailure.message) || 'Inbound ORDER failed validation.';
+    const traceId = orderTxid
+      ? `trace-provider-${sanitizeServiceSegment(orderTxid.slice(0, 16))}`
+      : `trace-provider-${sanitizeServiceSegment(orderMessageId.slice(0, 16))}`;
+
+    let peerChatPublicKey = '';
+    try {
+      peerChatPublicKey = await resolvePeerChatPublicKey(inputFailure.buyerGlobalMetaId) ?? '';
+    } catch {
+      peerChatPublicKey = '';
+    }
+
+    const orderEndContent = buildOrderEndMessage(orderTxid, 'failed', failureText, orderReference || null);
+    let orderEndWrite: { pinId: string | null; txids: string[] } | null = null;
+    let orderEndSendFailure: string | null = null;
+    if (peerChatPublicKey) {
+      try {
+        orderEndWrite = await sendProviderOrderPrivateMessage({
+          toGlobalMetaId: inputFailure.buyerGlobalMetaId,
+          peerChatPublicKey,
+          content: orderEndContent,
+        });
+      } catch (error) {
+        orderEndSendFailure = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    await persistA2AConversationMessageBestEffort({
+      paths: runtimeStateStore.paths,
+      local: {
+        profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+        globalMetaId: state.identity!.globalMetaId,
+        name: state.identity!.name,
+        chatPublicKey: state.identity!.chatPublicKey,
+      },
+      peer: {
+        globalMetaId: inputFailure.buyerGlobalMetaId,
+        chatPublicKey: peerChatPublicKey || null,
+      },
+      message: {
+        messageId: normalizeText(inputFailure.orderPinId) || orderMessageId,
+        direction: 'incoming',
+        content: inputFailure.content,
+        pinId: normalizeText(inputFailure.orderPinId) || null,
+        txid: orderTxid || normalizeText(inputFailure.orderPinId) || null,
+        txids: orderTxid ? [orderTxid] : [],
+        chain: 'mvc',
+        orderTxid: orderTxid || null,
+        serviceOrderPinId: orderReference || null,
+        paymentTxid: paymentTxid || null,
+        timestamp: inputFailure.timestamp,
+        raw: {
+          protocol: 'ORDER',
+          validationFailure: inputFailure.code,
+        },
+      },
+      orderSession: orderTxid ? {
+        role: 'provider',
+        state: 'received',
+        orderTxid,
+        serviceOrderPinId: orderReference || null,
+        paymentTxid: paymentTxid || null,
+        servicePinId: servicePinId || null,
+        serviceName,
+        outputType: outputType || null,
+        createdAt: inputFailure.timestamp,
+      } : null,
+    }, a2aConversationPersister);
+
+    await persistA2AConversationMessageBestEffort({
+      paths: runtimeStateStore.paths,
+      local: {
+        profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+        globalMetaId: state.identity!.globalMetaId,
+        name: state.identity!.name,
+        chatPublicKey: state.identity!.chatPublicKey,
+      },
+      peer: {
+        globalMetaId: inputFailure.buyerGlobalMetaId,
+        chatPublicKey: peerChatPublicKey || null,
+      },
+      message: {
+        direction: 'outgoing',
+        content: orderEndContent,
+        pinId: orderEndWrite?.pinId ?? null,
+        txid: orderEndWrite?.txids?.[0] ?? orderEndWrite?.pinId ?? null,
+        txids: orderEndWrite?.txids ?? [],
+        chain: 'mvc',
+        orderTxid: orderTxid || null,
+        serviceOrderPinId: orderReference || null,
+        paymentTxid: paymentTxid || null,
+        timestamp: Date.now(),
+        raw: orderEndSendFailure ? { sendFailure: orderEndSendFailure } : null,
+      },
+      orderSession: orderTxid ? {
+        role: 'provider',
+        state: 'failed',
+        orderTxid,
+        serviceOrderPinId: orderReference || null,
+        paymentTxid: paymentTxid || null,
+        servicePinId: servicePinId || null,
+        serviceName,
+        outputType: outputType || null,
+        endedAt: Date.now(),
+        endReason: inputFailure.code,
+        failureReason: failureText,
+      } : null,
+    }, a2aConversationPersister);
+
+    if (service && orderTxid) {
+      const received = sessionEngine.receiveProviderTask({
+        traceId,
+        servicePinId: service.currentPinId,
+        callerGlobalMetaId: inputFailure.buyerGlobalMetaId,
+        providerGlobalMetaId: state.identity!.globalMetaId,
+        userTask: inputFailure.userTask,
+        taskContext: '',
+      });
+      const receivedStatus = await persistSessionMutation(sessionStateStore, received);
+      const failedResult = createServiceRunnerFailedResult(inputFailure.code, failureText);
+      const failedApplied = sessionEngine.applyProviderRunnerResult({
+        session: received.session,
+        taskRun: received.taskRun,
+        result: failedResult,
+      });
+      const failedStatus = await persistSessionMutation(sessionStateStore, failedApplied);
+      await appendA2ATranscriptItems(sessionStateStore, [
+        {
+          id: `${traceId}-provider-order-received`,
+          sessionId: received.session.sessionId,
+          taskRunId: received.taskRun.runId,
+          timestamp: received.session.createdAt,
+          type: 'order',
+          sender: 'caller',
+          content: inputFailure.content,
+          metadata: {
+            protocolTag: 'ORDER',
+            orderTxid,
+            orderPinId: inputFailure.orderPinId || null,
+            paymentTxid: paymentTxid || null,
+            orderReference: orderReference || null,
+            servicePinId: service.currentPinId,
+            providerSkill: service.providerSkill,
+            publicStatus: receivedStatus.status,
+          },
+        },
+        {
+          id: `${traceId}-provider-validation-failure`,
+          sessionId: received.session.sessionId,
+          taskRunId: failedApplied.taskRun.runId,
+          timestamp: failedApplied.session.updatedAt,
+          type: 'failure',
+          sender: 'system',
+          content: failureText,
+          metadata: {
+            publicStatus: failedStatus.status,
+            event: failedApplied.event,
+            runnerState: 'failed',
+            orderTxid,
+            paymentTxid: paymentTxid || null,
+            refundRequired: Boolean(paymentTxid),
+          },
+        },
+        {
+          id: orderEndWrite?.pinId || `${traceId}-provider-order-end-failed`,
+          sessionId: received.session.sessionId,
+          taskRunId: failedApplied.taskRun.runId,
+          timestamp: Date.now(),
+          type: 'order_end',
+          sender: 'provider',
+          content: failureText,
+          metadata: {
+            protocolTag: 'ORDER_END',
+            orderTxid,
+            paymentTxid: paymentTxid || null,
+            orderEndReason: 'failed',
+            orderEndPinId: orderEndWrite?.pinId ?? null,
+            txids: orderEndWrite?.txids ?? [],
+            publicStatus: failedStatus.status,
+            event: failedApplied.event,
+            refundRequired: Boolean(paymentTxid),
+            sendFailure: orderEndSendFailure,
+          },
+        },
+      ]);
+      await persistProviderFailureTrace({
+        traceId,
+        state,
+        service,
+        buyerGlobalMetaId: inputFailure.buyerGlobalMetaId,
+        orderTxid,
+        orderMessageId,
+        orderPinId: inputFailure.orderPinId || null,
+        paymentTxid: paymentTxid || null,
+        paymentCommitTxid: inputFailure.paymentCommitTxid || null,
+        orderReference: orderReference || null,
+        serviceOrderPinId: orderReference || null,
+        paymentCurrency: normalizeText(inputFailure.paymentCurrency) || service.currency,
+        paymentAmount: normalizeText(inputFailure.paymentAmount) || service.price,
+        paymentChain: inputFailure.paymentChain || null,
+        settlementKind: inputFailure.settlementKind || null,
+        mrc20Ticker: inputFailure.mrc20Ticker || null,
+        mrc20Id: inputFailure.mrc20Id || null,
+        session: failedApplied.session,
+        taskRun: failedApplied.taskRun,
+        publicStatus: failedStatus,
+        latestEvent: failedApplied.event,
+        userTask: inputFailure.userTask,
+        failureText,
+        failureCode: inputFailure.code,
+      });
+    }
+
+    const data: Record<string, unknown> = {
+      handled: true,
+      notified: Boolean(orderEndWrite?.pinId || orderEndWrite?.txids?.length),
+      orderTxid: orderTxid || null,
+      paymentTxid: paymentTxid || null,
+      orderReference: orderReference || null,
+    };
+    if (orderEndSendFailure) {
+      data.notificationError = orderEndSendFailure;
+    }
+    return commandFailed(inputFailure.code, failureText, { data });
+  }
+
   async function handleInboundProviderOrderMessage(inputMessage: {
     fromGlobalMetaId: string;
     content: string;
@@ -8420,6 +8694,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const content = normalizeText(inputMessage.content);
     const orderTxid = normalizeOrderProtocolReference(inputMessage.messagePinId)
       || normalizeOrderProtocolReference(extractOrderLineValue(content, 'order id'))
+      || normalizeOrderProtocolReference(extractOrderLineValue(content, 'order pin id'))
       || '';
     const paymentTxid = normalizeText(extractOrderLineValue(content, 'txid'));
     const paymentCommitTxid = normalizeText(extractOrderLineValue(content, 'commit txid'));
@@ -8432,7 +8707,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       mrc20Ticker: mrc20Ticker || null,
       mrc20Id: mrc20Id || null,
     };
-    const orderReference = normalizeText(extractOrderLineValue(content, 'order id'));
+    const orderReference = extractOrderReferenceLineValue(content);
     const servicePinId = normalizeText(extractOrderLineValue(content, 'service id'))
       || normalizeText(extractOrderLineValue(content, 'serviceId'))
       || normalizeText(extractOrderLineValue(content, 'service pin id'));
@@ -8443,42 +8718,49 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const amountLine = extractOrderAmountLine(content);
     const userTask = extractOrderRawRequest(content) || extractOrderDisplaySummary(content);
     const timestamp = Number.isFinite(inputMessage.timestamp) ? Number(inputMessage.timestamp) : Date.now();
+    const orderMessageId = normalizeText(inputMessage.messagePinId) || orderTxid || orderReference;
+    const paymentChain = normalizeText(extractOrderLineValue(content, 'payment chain')).toLowerCase();
+    const service = servicePinId
+      ? state.services.find((entry) => (
+        entry.available === 1
+        && entry.providerGlobalMetaId === state.identity!.globalMetaId
+        && (entry.currentPinId === servicePinId || entry.sourceServicePinId === servicePinId)
+      )) ?? null
+      : null;
+    const failValidation = (code: string, message: string) => failInboundProviderOrderValidation({
+      state,
+      service,
+      buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+      content,
+      orderTxid,
+      orderMessageId,
+      orderPinId: inputMessage.messagePinId || null,
+      paymentTxid: paymentTxid || null,
+      orderReference: orderReference || null,
+      servicePinId: servicePinId || null,
+      providerSkill: providerSkill || null,
+      outputType: outputType || null,
+      paymentCurrency: amountLine.currency || service?.currency || null,
+      paymentAmount: amountLine.amount || service?.price || null,
+      paymentChain: paymentChain || null,
+      ...orderPaymentMetadata,
+      userTask,
+      timestamp,
+      code,
+      message,
+    });
 
     if (!orderTxid) {
-      return commandFailed('order_reference_missing', 'Inbound ORDER must include a chain order txid or pin id.');
+      return failValidation('order_reference_missing', 'Inbound ORDER must include a chain order txid or pin id.');
     }
     if (!servicePinId) {
-      return commandFailed('order_service_missing', 'Inbound ORDER must include a service id.');
+      return failValidation('order_service_missing', 'Inbound ORDER must include a service id.');
     }
-    if (!paymentTxid && !orderReference) {
-      return commandFailed('order_payment_unverified', 'Inbound ORDER is missing payment txid or free order reference.');
-    }
-
-    const service = state.services.find((entry) => (
-      entry.available === 1
-      && entry.providerGlobalMetaId === state.identity!.globalMetaId
-      && (entry.currentPinId === servicePinId || entry.sourceServicePinId === servicePinId)
-    ));
     if (!service) {
-      return commandFailed('service_not_found', `Published service was not found: ${servicePinId}`);
+      return failValidation('service_not_found', `Published service was not found: ${servicePinId}`);
     }
     if (providerSkill && providerSkill !== service.providerSkill) {
-      return commandFailed('order_provider_skill_mismatch', 'Inbound ORDER provider skill does not match the local service.');
-    }
-    const serviceAmount = normalizePaymentAmountForCompare(service.price);
-    const orderAmount = normalizePaymentAmountForCompare(amountLine.amount);
-    const serviceCurrency = normalizePublishedServiceCurrency(service.currency);
-    const orderCurrency = normalizePublishedServiceCurrency(amountLine.currency);
-    const serviceIsFree = Number(serviceAmount || '0') === 0;
-    if (serviceIsFree) {
-      if (!orderReference || paymentTxid) {
-        return commandFailed('order_payment_unverified', 'Free inbound ORDER must use an order reference instead of payment txid.');
-      }
-    } else if (!paymentTxid) {
-      return commandFailed('order_payment_unverified', 'Paid inbound ORDER must include a payment txid.');
-    }
-    if (!orderAmount || orderAmount !== serviceAmount || !orderCurrency || orderCurrency !== serviceCurrency) {
-      return commandFailed('order_payment_unverified', 'Inbound ORDER payment terms do not match the local service.');
+      return failValidation('order_provider_skill_mismatch', 'Inbound ORDER provider skill does not match the local service.');
     }
 
     const existingOrderSession = await findExistingProviderOrderSession({
@@ -8499,13 +8781,31 @@ export function createDefaultMetabotDaemonHandlers(input: {
       });
     }
 
-    const paymentChain = normalizeText(extractOrderLineValue(content, 'payment chain')).toLowerCase();
+    if (!paymentTxid && !orderReference) {
+      return failValidation('order_payment_unverified', 'Inbound ORDER is missing payment txid or free order reference.');
+    }
+
+    const serviceAmount = normalizePaymentAmountForCompare(service.price);
+    const orderAmount = normalizePaymentAmountForCompare(amountLine.amount);
+    const serviceCurrency = normalizePublishedServiceCurrency(service.currency);
+    const orderCurrency = normalizePublishedServiceCurrency(amountLine.currency);
+    const serviceIsFree = Number(serviceAmount || '0') === 0;
+    if (serviceIsFree) {
+      if (!orderReference || paymentTxid) {
+        return failValidation('order_payment_unverified', 'Free inbound ORDER must use an order reference instead of payment txid.');
+      }
+    } else if (!paymentTxid) {
+      return failValidation('order_payment_unverified', 'Paid inbound ORDER must include a payment txid.');
+    }
+    if (!orderAmount || orderAmount !== serviceAmount || !orderCurrency || orderCurrency !== serviceCurrency) {
+      return failValidation('order_payment_unverified', 'Inbound ORDER payment terms do not match the local service.');
+    }
+
     if (!serviceIsFree && !paymentChain) {
-      return commandFailed('order_payment_unverified', 'Paid inbound ORDER must include payment chain metadata.');
+      return failValidation('order_payment_unverified', 'Paid inbound ORDER must include payment chain metadata.');
     }
 
     const traceId = `trace-provider-${sanitizeServiceSegment(orderTxid.slice(0, 16))}`;
-    const orderMessageId = normalizeText(inputMessage.messagePinId) || orderTxid || orderReference;
 
     const paymentVerification = await verifyServiceOrderPayment({
       adapters,
@@ -8517,186 +8817,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       currency: serviceCurrency,
     }).catch(() => null);
     if (!paymentVerification?.verified) {
-      if (paymentVerification && paymentVerification.failureKind !== 'payment_not_found') {
-        return commandFailed('order_payment_unverified', 'Inbound ORDER payment could not be verified on chain.');
-      }
-      const failureText = 'Inbound ORDER payment could not be verified on chain.';
-      const received = sessionEngine.receiveProviderTask({
-        traceId,
-        servicePinId: service.currentPinId,
-        callerGlobalMetaId: inputMessage.fromGlobalMetaId,
-        providerGlobalMetaId: state.identity.globalMetaId,
-        userTask,
-        taskContext: '',
-      });
-      const receivedStatus = await persistSessionMutation(sessionStateStore, received);
-      await appendA2ATranscriptItems(sessionStateStore, [
-        {
-          id: `${traceId}-provider-order-received`,
-          sessionId: received.session.sessionId,
-          taskRunId: received.taskRun.runId,
-          timestamp: received.session.createdAt,
-          type: 'order',
-          sender: 'caller',
-          content,
-          metadata: {
-            protocolTag: 'ORDER',
-            orderTxid,
-            orderPinId: inputMessage.messagePinId || null,
-            paymentTxid: paymentTxid || null,
-            orderReference: orderReference || null,
-            servicePinId: service.currentPinId,
-            providerSkill: service.providerSkill,
-            publicStatus: receivedStatus.status,
-          },
-        },
-      ]);
-
-      let peerChatPublicKey = '';
-      try {
-        peerChatPublicKey = await resolvePeerChatPublicKey(inputMessage.fromGlobalMetaId) ?? '';
-      } catch {
-        peerChatPublicKey = '';
-      }
-
-      await persistA2AConversationMessageBestEffort({
-        paths: runtimeStateStore.paths,
-        local: {
-          profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
-          globalMetaId: state.identity.globalMetaId,
-          name: state.identity.name,
-          chatPublicKey: state.identity.chatPublicKey,
-        },
-        peer: {
-          globalMetaId: inputMessage.fromGlobalMetaId,
-          chatPublicKey: peerChatPublicKey || null,
-        },
-        message: {
-          messageId: normalizeText(inputMessage.messagePinId) || orderTxid,
-          direction: 'incoming',
-          content,
-          pinId: normalizeText(inputMessage.messagePinId) || null,
-          txid: orderTxid,
-          txids: [orderTxid],
-          chain: 'mvc',
-          orderTxid,
-          paymentTxid: paymentTxid || null,
-          timestamp,
-          raw: {
-            protocol: 'ORDER',
-          },
-        },
-        orderSession: {
-          role: 'provider',
-          state: 'received',
-          orderTxid,
-          paymentTxid: paymentTxid || null,
-          servicePinId: service.currentPinId,
-          serviceName: normalizeText(service.displayName) || normalizeText(service.serviceName),
-          outputType: outputType || service.outputType,
-          createdAt: timestamp,
-        },
-      }, a2aConversationPersister);
-
-      const failedResult = createServiceRunnerFailedResult('order_payment_unverified', failureText);
-      const failedApplied = sessionEngine.applyProviderRunnerResult({
-        session: received.session,
-        taskRun: received.taskRun,
-        result: failedResult,
-      });
-      const failedStatus = await persistSessionMutation(sessionStateStore, failedApplied);
-      await appendA2ATranscriptItems(sessionStateStore, [
-        {
-          id: `${traceId}-provider-payment-unverified`,
-          sessionId: failedApplied.session.sessionId,
-          taskRunId: failedApplied.taskRun.runId,
-          timestamp: failedApplied.session.updatedAt,
-          type: 'failure',
-          sender: 'system',
-          content: failureText,
-          metadata: {
-            publicStatus: failedStatus.status,
-            event: failedApplied.event,
-            runnerState: 'failed',
-            orderTxid,
-            paymentTxid: paymentTxid || null,
-            refundRequired: false,
-          },
-        },
-      ]);
-
-      let orderEndWrite: { pinId: string | null; txids: string[] } | null = null;
-      const orderEndContent = buildOrderEndMessage(orderTxid, 'failed', failureText);
-      if (peerChatPublicKey) {
-        try {
-          orderEndWrite = await sendProviderOrderPrivateMessage({
-            toGlobalMetaId: inputMessage.fromGlobalMetaId,
-            peerChatPublicKey,
-            content: orderEndContent,
-          });
-        } catch {
-          orderEndWrite = null;
-        }
-      }
-      await persistA2AConversationMessageBestEffort({
-        paths: runtimeStateStore.paths,
-        local: {
-          profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
-          globalMetaId: state.identity.globalMetaId,
-          name: state.identity.name,
-          chatPublicKey: state.identity.chatPublicKey,
-        },
-        peer: {
-          globalMetaId: inputMessage.fromGlobalMetaId,
-          chatPublicKey: peerChatPublicKey || null,
-        },
-        message: {
-          direction: 'outgoing',
-          content: orderEndContent,
-          pinId: orderEndWrite?.pinId ?? null,
-          txid: orderEndWrite?.txids?.[0] ?? orderEndWrite?.pinId ?? null,
-          txids: orderEndWrite?.txids ?? [],
-          chain: 'mvc',
-          orderTxid,
-          paymentTxid: paymentTxid || null,
-          timestamp: Date.now(),
-        },
-        orderSession: {
-          role: 'provider',
-          state: 'failed',
-          orderTxid,
-          paymentTxid: paymentTxid || null,
-          servicePinId: service.currentPinId,
-          serviceName: normalizeText(service.displayName) || normalizeText(service.serviceName),
-          outputType: outputType || service.outputType,
-          endedAt: Date.now(),
-          endReason: 'order_payment_unverified',
-          failureReason: failureText,
-        },
-      }, a2aConversationPersister);
-      await persistProviderFailureTrace({
-        traceId,
-        state,
-        service,
-        buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
-        orderTxid,
-        orderMessageId,
-        orderPinId: inputMessage.messagePinId || null,
-        paymentTxid: paymentTxid || null,
-        orderReference: orderReference || null,
-        paymentCurrency: amountLine.currency || service.currency,
-        paymentAmount: amountLine.amount || service.price,
-        paymentChain: paymentChain || null,
-        ...orderPaymentMetadata,
-        session: failedApplied.session,
-        taskRun: failedApplied.taskRun,
-        publicStatus: failedStatus,
-        latestEvent: failedApplied.event,
-        userTask,
-        failureText,
-        failureCode: 'order_payment_unverified',
-      });
-      return commandFailed('order_payment_unverified', 'Inbound ORDER payment could not be verified on chain.');
+      return failValidation('order_payment_unverified', 'Inbound ORDER payment could not be verified on chain.');
     }
 
     let peerChatPublicKey = '';
@@ -9865,10 +9986,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
     if (/^\[ORDER\]/iu.test(content)) {
       const orderTxid = normalizeOrderProtocolReference(inputMessage.messagePinId)
         || normalizeOrderProtocolReference(extractOrderLineValue(content, 'order id'))
+        || normalizeOrderProtocolReference(extractOrderLineValue(content, 'order pin id'))
         || '';
       const paymentTxid = normalizeText(extractOrderLineValue(content, 'txid'));
-      const orderReference = normalizeText(extractOrderLineValue(content, 'order id'))
-        || normalizeText(extractOrderLineValue(content, 'order reference'));
+      const orderReference = extractOrderReferenceLineValue(content);
       const pendingOrderReference = paymentTxid || orderReference || orderTxid || normalizeText(inputMessage.messagePinId);
       const pendingKey = [
         paymentTxid ? 'payment' : 'order',

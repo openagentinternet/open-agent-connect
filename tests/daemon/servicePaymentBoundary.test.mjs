@@ -1074,6 +1074,52 @@ test('concurrent inbound free provider ORDER replay with same order reference do
   assert.equal(deliveryCount, 1);
 });
 
+test('inbound free provider ORDER accepts order pin id as the free order reference', async (t) => {
+  const orderTxid = '5'.repeat(64);
+  const serviceOrderPinId = `${'6'.repeat(64)}i0`;
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { price: '0', currency: 'SPACE' },
+  });
+  const content = harness.makeOrderContent({
+    paymentTxid: '',
+    orderReference: serviceOrderPinId,
+  }).replace(/\norder id:/i, '\norder pin id:');
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content,
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.delivered, true);
+  assert.deepEqual(harness.fetchRawTxCalls, []);
+  assert.equal(harness.llmCalls.length, 1);
+
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  const deliveryMessage = contents.find((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`));
+  const ratingMessage = contents.find((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`));
+  assert.equal(contents.some((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`)), true);
+  assert.ok(deliveryMessage, 'expected a DELIVERY message for the free order');
+  assert.ok(ratingMessage, 'expected a NeedsRating message for the free order');
+  assert.equal(parseDeliveryMessage(deliveryMessage).paymentTxid, null);
+  assert.match(ratingMessage, new RegExp(`order pin id: ${serviceOrderPinId}`));
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.order?.orderTxid === orderTxid);
+  assert.ok(trace, 'expected seller trace for inbound free order');
+  assert.equal(trace.order.paymentTxid, null);
+  assert.equal(trace.order.orderReference, serviceOrderPinId);
+  assert.equal(trace.order.serviceOrderPinId, serviceOrderPinId);
+  const sellerOrder = state.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.ok(sellerOrder, 'expected seller order for inbound free order');
+  assert.equal(sellerOrder.orderReference, serviceOrderPinId);
+  assert.equal(sellerOrder.serviceOrderPinId, serviceOrderPinId);
+});
+
 test('service rating retries provider follow-up simplemsg after a mempool conflict', async (t) => {
   let simplemsgAttempts = 0;
   const harness = await createServiceCallHarness(t, {
@@ -3494,7 +3540,7 @@ test('/api services.execute persists failed seller lifecycle state with provider
   assert.equal(manualAction.kind, 'refund');
 });
 
-test('inbound provider ORDER without payment metadata does not execute or deliver', async (t) => {
+test('inbound provider ORDER without payment metadata notifies the buyer and does not execute', async (t) => {
   const harness = await createInboundProviderOrderHarness(t);
   const orderTxid = 'c'.repeat(64);
   const content = harness.makeOrderContent({ paymentTxid: '' }).replace(/\ntxid:\s*[^\n]+/i, '');
@@ -3509,10 +3555,23 @@ test('inbound provider ORDER without payment metadata does not execute or delive
   assert.equal(result.ok, false);
   assert.equal(result.code, 'order_payment_unverified');
   assert.equal(harness.llmCalls.length, 0);
-  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/simplemsg'), false);
+  const simplemsgContents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[ORDER_END:${orderTxid} failed]`)), true);
+
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.ok(sellerOrder, 'expected failed seller order for missing payment metadata');
+  assert.equal(sellerOrder.state, 'failed');
+  assert.equal(sellerOrder.endReason, 'order_payment_unverified');
+  assert.match(sellerOrder.failureReason, /missing payment txid or free order reference/i);
 });
 
-test('inbound provider ORDER with mismatched payment terms does not execute or deliver', async (t) => {
+test('inbound provider ORDER with mismatched payment terms notifies the buyer and does not execute', async (t) => {
   const orderTxid = 'd'.repeat(64);
   const paymentTxid = 'e'.repeat(64);
   const harness = await createInboundProviderOrderHarness(t, {
@@ -3533,10 +3592,16 @@ test('inbound provider ORDER with mismatched payment terms does not execute or d
   assert.equal(result.ok, false);
   assert.equal(result.code, 'order_payment_unverified');
   assert.equal(harness.llmCalls.length, 0);
-  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/simplemsg'), false);
+  const simplemsgContents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[ORDER_END:${orderTxid} failed]`)), true);
 });
 
-test('inbound provider ORDER with forged txid does not execute or deliver before chain payment verification', async (t) => {
+test('inbound provider ORDER with forged txid notifies the buyer and does not execute before chain payment verification', async (t) => {
   const orderTxid = '1'.repeat(64);
   const paymentTxid = '2'.repeat(64);
   const harness = await createInboundProviderOrderHarness(t, {
@@ -3556,7 +3621,13 @@ test('inbound provider ORDER with forged txid does not execute or deliver before
   assert.equal(result.code, 'order_payment_unverified');
   assert.deepEqual(harness.fetchRawTxCalls, [paymentTxid]);
   assert.equal(harness.llmCalls.length, 0);
-  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/simplemsg'), false);
+  const simplemsgContents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[ORDER_END:${orderTxid} failed]`)), true);
 });
 
 test('inbound provider ORDER records and reports payment verification failure without executing', async (t) => {
@@ -3650,7 +3721,7 @@ test('inbound provider ORDER accepts MVC payment when raw tx lookup falls back t
   assert.equal(contents.filter((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)).length, 1);
 });
 
-test('inbound provider ORDER without payment chain metadata does not execute or fetch payment tx', async (t) => {
+test('inbound provider ORDER without payment chain metadata notifies the buyer and does not fetch payment tx', async (t) => {
   const orderTxid = '7'.repeat(64);
   const paymentTxid = '1'.repeat(64);
   const harness = await createInboundProviderOrderHarness(t, {
@@ -3672,7 +3743,13 @@ test('inbound provider ORDER without payment chain metadata does not execute or 
   assert.equal(result.code, 'order_payment_unverified');
   assert.deepEqual(harness.fetchRawTxCalls, []);
   assert.equal(harness.llmCalls.length, 0);
-  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/simplemsg'), false);
+  const simplemsgContents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
+  assert.equal(simplemsgContents.some((entry) => entry.startsWith(`[ORDER_END:${orderTxid} failed]`)), true);
 });
 
 test('inbound provider ORDER persists manual-action state when buyer chat public key is missing', async (t) => {

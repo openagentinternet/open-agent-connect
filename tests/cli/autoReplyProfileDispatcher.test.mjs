@@ -441,6 +441,72 @@ test('startup recovery replays persisted inbound ORDER messages without provider
   assert.equal(calls[0].messagePinId, `${orderTxid}i0`);
 });
 
+test('startup recovery counts failed ORDER handler envelopes as replay failures', async (t) => {
+  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-a2a-order-replay-'));
+  const didiGlobalMetaId = 'idq1didi00000000000000000000000000000';
+  const ericGlobalMetaId = 'idq1eric00000000000000000000000000000';
+  const didiHomeDir = await createRegisteredProfile(t, systemHomeDir, {
+    name: 'didi',
+    slug: 'didi',
+    globalMetaId: didiGlobalMetaId,
+  });
+  const ericHomeDir = await createRegisteredProfile(t, systemHomeDir, {
+    name: 'eric',
+    slug: 'eric',
+    globalMetaId: ericGlobalMetaId,
+  });
+  const orderTxid = 'b'.repeat(64);
+  const content = [
+    '[ORDER] missing payment metadata',
+    '支付金额 0.00001 SPACE',
+    'service id: service-pin-1',
+    'skill name: metabot-weather-oracle',
+  ].join('\n');
+
+  await persistA2AConversationMessage({
+    homeDir: ericHomeDir,
+    local: {
+      profileSlug: 'eric',
+      globalMetaId: ericGlobalMetaId,
+      name: 'eric',
+      chatPublicKey: 'eric-chat-key',
+    },
+    peer: {
+      globalMetaId: didiGlobalMetaId,
+      name: 'didi',
+      chatPublicKey: 'didi-chat-key',
+    },
+    message: {
+      messageId: `${orderTxid}i0`,
+      direction: 'incoming',
+      content,
+      pinId: `${orderTxid}i0`,
+      txid: orderTxid,
+      timestamp: 1_777_000_000,
+      raw: { protocol: '/protocols/simplemsg' },
+    },
+  });
+
+  const warnings = [];
+  const result = await replayUnhandledA2AOrderMessagesForProfiles({
+    systemHomeDir,
+    activeHomeDir: didiHomeDir,
+    handleOrderProtocolMessage: async () => ({
+      ok: false,
+      state: 'failed',
+      code: 'order_payment_unverified',
+      message: 'Inbound ORDER is missing payment txid or free order reference.',
+    }),
+    logWarning: (label, error) => warnings.push([label, error]),
+  });
+
+  assert.equal(result.replayed, 0);
+  assert.equal(result.failed, 1);
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0][0], '[A2A order replay handler]');
+  assert.match(String(warnings[0][1]), /order_payment_unverified/);
+});
+
 test('startup recovery skips persisted ORDER messages that already have provider sessions', async (t) => {
   const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-a2a-order-replay-'));
   const didiGlobalMetaId = 'idq1didi00000000000000000000000000000';
