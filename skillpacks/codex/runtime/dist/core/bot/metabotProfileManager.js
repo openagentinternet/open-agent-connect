@@ -3,8 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.validateAvatarDataUrl = void 0;
 exports.readTextFile = readTextFile;
-exports.validateAvatarDataUrl = validateAvatarDataUrl;
 exports.selectRuntimeForProvider = selectRuntimeForProvider;
 exports.selectDefaultMetabotProviders = selectDefaultMetabotProviders;
 exports.listMetabotProfiles = listMetabotProfiles;
@@ -27,27 +27,20 @@ const llmRuntimeStore_1 = require("../llm/llmRuntimeStore");
 const fileSecretStore_1 = require("../secrets/fileSecretStore");
 const runtimeStateStore_1 = require("../state/runtimeStateStore");
 const llmTypes_1 = require("../llm/llmTypes");
+const chatSkillPolicy_1 = require("../services/chatSkillPolicy");
+const avatarChainWrite_1 = require("../identity/avatarChainWrite");
 const DEFAULT_ROLE = 'I am a helpful AI assistant.';
 const DEFAULT_SOUL = 'Friendly and professional.';
 const DEFAULT_GOAL = 'Help users accomplish their tasks effectively.';
-const MAX_AVATAR_BYTES = 200 * 1024;
 const CHAIN_SYNC_DELAY_MS = 3_000;
-const BIO_FIELDS = new Set(['role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider']);
+const BIO_FIELDS = new Set(['role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills']);
+var avatarChainWrite_2 = require("../identity/avatarChainWrite");
+Object.defineProperty(exports, "validateAvatarDataUrl", { enumerable: true, get: function () { return avatarChainWrite_2.validateAvatarDataUrl; } });
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
 function resolveAvatarPath(homeDir) {
     return node_path_1.default.join(node_path_1.default.resolve(homeDir), 'avatar.txt');
-}
-function parseAvatarDataUrl(dataUrl) {
-    const match = normalizeText(dataUrl).match(/^data:([^;,]+);base64,([A-Za-z0-9+/=\s]+)$/i);
-    if (!match)
-        return null;
-    const mimeType = match[1].toLowerCase();
-    const base64 = match[2].replace(/\s+/g, '');
-    if (!base64)
-        return null;
-    return { mimeType, base64 };
 }
 function isSafeLocalFileStem(value) {
     if (!value || value === '.' || value === '..')
@@ -55,11 +48,6 @@ function isSafeLocalFileStem(value) {
     if (value.includes('/') || value.includes('\\'))
         return false;
     return node_path_1.default.basename(value) === value;
-}
-function estimateDataUrlBytes(dataUrl) {
-    const commaIndex = dataUrl.indexOf(',');
-    const base64 = commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl;
-    return Math.ceil(base64.length * 0.75);
 }
 async function sleep(ms) {
     if (ms <= 0)
@@ -93,24 +81,21 @@ async function readTextFile(filePath) {
         throw error;
     }
 }
-function validateAvatarDataUrl(dataUrl, maxBytes = MAX_AVATAR_BYTES) {
-    const normalized = normalizeText(dataUrl);
-    if (!normalized) {
-        return { valid: true };
+async function readChatSkillPolicy(filePath) {
+    try {
+        const parsed = JSON.parse(await node_fs_1.promises.readFile(filePath, 'utf8'));
+        return (0, chatSkillPolicy_1.normalizeAllowChatSkills)(parsed?.allowChatSkills);
     }
-    if (!/^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=\s]+$/i.test(normalized)) {
-        return {
-            valid: false,
-            error: 'Avatar must be a PNG, JPEG, WebP, or GIF data URL.',
-        };
+    catch {
+        return [];
     }
-    if (estimateDataUrlBytes(normalized) > maxBytes) {
-        return {
-            valid: false,
-            error: `Avatar must be ${maxBytes} bytes or smaller.`,
-        };
-    }
-    return { valid: true };
+}
+async function writeChatSkillPolicy(filePath, allowChatSkills) {
+    await node_fs_1.promises.mkdir(node_path_1.default.dirname(filePath), { recursive: true });
+    await node_fs_1.promises.writeFile(filePath, `${JSON.stringify({
+        allowChatSkills,
+        updatedAt: new Date().toISOString(),
+    }, null, 2)}\n`, 'utf8');
 }
 function validateProvider(value) {
     if (value === null)
@@ -246,12 +231,13 @@ async function readProfileProviderBindings(profile) {
 }
 async function buildMetabotProfileFull(profile) {
     const paths = (0, paths_1.resolveMetabotPaths)(profile.homeDir);
-    const [role, soul, goal, avatarDataUrl, providerBindings] = await Promise.all([
+    const [role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills] = await Promise.all([
         readTextFile(paths.roleMdPath),
         readTextFile(paths.soulMdPath),
         readTextFile(paths.goalMdPath),
         readTextFile(resolveAvatarPath(profile.homeDir)),
         readProfileProviderBindings(profile),
+        readChatSkillPolicy(paths.chatSkillPolicyPath),
     ]);
     return {
         ...profile,
@@ -261,6 +247,7 @@ async function buildMetabotProfileFull(profile) {
         ...(avatarDataUrl ? { avatarDataUrl } : {}),
         primaryProvider: providerBindings.primaryProvider,
         fallbackProvider: providerBindings.fallbackProvider,
+        allowChatSkills,
     };
 }
 async function listMetabotProfiles(systemHomeDir) {
@@ -288,7 +275,7 @@ async function createMetabotProfile(systemHomeDir, input) {
     }
     const avatar = input.avatarDataUrl !== undefined ? normalizeText(input.avatarDataUrl) : undefined;
     if (avatar !== undefined) {
-        const validation = validateAvatarDataUrl(avatar);
+        const validation = (0, avatarChainWrite_1.validateAvatarDataUrl)(avatar);
         if (!validation.valid) {
             throw new Error(validation.error);
         }
@@ -351,7 +338,7 @@ function buildMetabotProfileDraftFromIdentity(input) {
     }
     const avatar = input.avatarDataUrl !== undefined ? normalizeText(input.avatarDataUrl) : undefined;
     if (avatar !== undefined) {
-        const validation = validateAvatarDataUrl(avatar);
+        const validation = (0, avatarChainWrite_1.validateAvatarDataUrl)(avatar);
         if (!validation.valid) {
             throw new Error(validation.error);
         }
@@ -372,6 +359,7 @@ function buildMetabotProfileDraftFromIdentity(input) {
         ...(avatar ? { avatarDataUrl: avatar } : {}),
         primaryProvider: input.primaryProvider === undefined ? null : validateProvider(input.primaryProvider),
         fallbackProvider: input.fallbackProvider === undefined ? null : validateProvider(input.fallbackProvider),
+        allowChatSkills: [],
     };
 }
 async function createMetabotProfileFromIdentity(systemHomeDir, input) {
@@ -575,11 +563,14 @@ async function updateMetabotProfile(systemHomeDir, slug, input) {
     }
     const avatar = input.avatarDataUrl !== undefined ? normalizeText(input.avatarDataUrl) : undefined;
     if (avatar) {
-        const validation = validateAvatarDataUrl(avatar);
+        const validation = (0, avatarChainWrite_1.validateAvatarDataUrl)(avatar);
         if (!validation.valid) {
             throw new Error(validation.error);
         }
     }
+    const allowChatSkills = input.allowChatSkills === undefined
+        ? undefined
+        : (0, chatSkillPolicy_1.normalizeAllowChatSkills)(input.allowChatSkills);
     const writeProviderBindings = await buildProviderBindingWrite({
         profile: current,
         primaryProvider: input.primaryProvider === undefined
@@ -621,6 +612,9 @@ async function updateMetabotProfile(systemHomeDir, slug, input) {
             await writeTextFile(resolveAvatarPath(current.homeDir), avatar);
         }
     }
+    if (allowChatSkills !== undefined) {
+        await writeChatSkillPolicy(paths.chatSkillPolicyPath, allowChatSkills);
+    }
     if (writeProviderBindings) {
         await writeProviderBindings();
     }
@@ -654,21 +648,11 @@ async function syncMetabotInfoToChain(signer, profile, changedFields, options = 
         if (results.length > 0) {
             await sleep(delayMs);
         }
-        const avatarPayload = normalizeText(profile.avatarDataUrl);
-        const avatarData = avatarPayload ? parseAvatarDataUrl(avatarPayload) : null;
-        if (avatarPayload && !avatarData) {
-            throw new Error('Invalid avatar data URL.');
-        }
-        results.push(await signer.writePin({
+        results.push(await signer.writePin((0, avatarChainWrite_1.buildAvatarChainWriteRequest)({
             operation,
-            path: '/info/avatar',
-            encryption: '0',
-            version: '1.0',
-            contentType: avatarData ? `${avatarData.mimeType};binary` : 'text/plain',
-            payload: avatarData ? avatarData.base64 : '',
-            encoding: avatarData ? 'base64' : 'utf-8',
+            avatarDataUrl: profile.avatarDataUrl ?? '',
             network: 'mvc',
-        }));
+        })));
     }
     if (changedFields.some((field) => BIO_FIELDS.has(field))) {
         if (results.length > 0) {
@@ -686,6 +670,7 @@ async function syncMetabotInfoToChain(signer, profile, changedFields, options = 
                 goal: profile.goal,
                 primaryProvider: profile.primaryProvider ?? null,
                 fallbackProvider: profile.fallbackProvider ?? null,
+                allowChatSkills: (0, chatSkillPolicy_1.normalizeAllowChatSkills)(profile.allowChatSkills),
             }),
             encoding: 'utf-8',
             network: 'mvc',

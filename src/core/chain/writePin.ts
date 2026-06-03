@@ -1,3 +1,5 @@
+import { validateAvatarChainWriteRequest } from '../identity/avatarChainWrite';
+
 export type ChainWriteOperation = 'init' | 'create' | 'modify' | 'revoke';
 export type ChainWriteEncryption = '0' | '1' | '2';
 export type ChainWriteEncoding = 'utf-8' | 'base64';
@@ -72,14 +74,16 @@ export function normalizeChainWriteRequest(input: ChainWriteRequest): Normalized
     throw new Error('Chain write payload must be a string.');
   }
 
-  return {
-    operation,
+  const request: NormalizedChainWriteRequest = {
+    operation: operation as ChainWriteOperation,
     path,
-    encryption,
+    encryption: encryption as ChainWriteEncryption,
     version: normalizeText(input.version) || '1.0',
     contentType: normalizeText(input.contentType) || 'application/json',
     payload: input.payload,
-    encoding,
-    network,
+    encoding: encoding as ChainWriteEncoding,
+    network: network as ChainWriteNetwork,
   };
+  validateAvatarChainWriteRequest(request);
+  return request;
 }

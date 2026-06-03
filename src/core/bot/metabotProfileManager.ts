@@ -21,6 +21,10 @@ import {
   normalizeLlmBinding,
 } from '../llm/llmTypes';
 import { normalizeAllowChatSkills } from '../services/chatSkillPolicy';
+import {
+  buildAvatarChainWriteRequest,
+  validateAvatarDataUrl,
+} from '../identity/avatarChainWrite';
 import type {
   LlmBinding,
   LlmBindingRole,
@@ -33,9 +37,10 @@ import type { Signer } from '../signing/signer';
 const DEFAULT_ROLE = 'I am a helpful AI assistant.';
 const DEFAULT_SOUL = 'Friendly and professional.';
 const DEFAULT_GOAL = 'Help users accomplish their tasks effectively.';
-const MAX_AVATAR_BYTES = 200 * 1024;
 const CHAIN_SYNC_DELAY_MS = 3_000;
 const BIO_FIELDS = new Set(['role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills']);
+
+export { validateAvatarDataUrl } from '../identity/avatarChainWrite';
 
 export interface MetabotProfileFull extends IdentityProfileRecord {
   role: string;
@@ -109,25 +114,10 @@ function resolveAvatarPath(homeDir: string): string {
   return path.join(path.resolve(homeDir), 'avatar.txt');
 }
 
-function parseAvatarDataUrl(dataUrl: string): { mimeType: string; base64: string } | null {
-  const match = normalizeText(dataUrl).match(/^data:([^;,]+);base64,([A-Za-z0-9+/=\s]+)$/i);
-  if (!match) return null;
-  const mimeType = match[1].toLowerCase();
-  const base64 = match[2].replace(/\s+/g, '');
-  if (!base64) return null;
-  return { mimeType, base64 };
-}
-
 function isSafeLocalFileStem(value: string): boolean {
   if (!value || value === '.' || value === '..') return false;
   if (value.includes('/') || value.includes('\\')) return false;
   return path.basename(value) === value;
-}
-
-function estimateDataUrlBytes(dataUrl: string): number {
-  const commaIndex = dataUrl.indexOf(',');
-  const base64 = commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl;
-  return Math.ceil(base64.length * 0.75);
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -178,26 +168,6 @@ async function writeChatSkillPolicy(filePath: string, allowChatSkills: string[])
     allowChatSkills,
     updatedAt: new Date().toISOString(),
   }, null, 2)}\n`, 'utf8');
-}
-
-export function validateAvatarDataUrl(dataUrl: string, maxBytes = MAX_AVATAR_BYTES): { valid: boolean; error?: string } {
-  const normalized = normalizeText(dataUrl);
-  if (!normalized) {
-    return { valid: true };
-  }
-  if (!/^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=\s]+$/i.test(normalized)) {
-    return {
-      valid: false,
-      error: 'Avatar must be a PNG, JPEG, WebP, or GIF data URL.',
-    };
-  }
-  if (estimateDataUrlBytes(normalized) > maxBytes) {
-    return {
-      valid: false,
-      error: `Avatar must be ${maxBytes} bytes or smaller.`,
-    };
-  }
-  return { valid: true };
 }
 
 function validateProvider(value: unknown): LlmProvider | null {
@@ -837,21 +807,11 @@ export async function syncMetabotInfoToChain(
     if (results.length > 0) {
       await sleep(delayMs);
     }
-    const avatarPayload = normalizeText(profile.avatarDataUrl);
-    const avatarData = avatarPayload ? parseAvatarDataUrl(avatarPayload) : null;
-    if (avatarPayload && !avatarData) {
-      throw new Error('Invalid avatar data URL.');
-    }
-    results.push(await signer.writePin({
+    results.push(await signer.writePin(buildAvatarChainWriteRequest({
       operation,
-      path: '/info/avatar',
-      encryption: '0',
-      version: '1.0',
-      contentType: avatarData ? `${avatarData.mimeType};binary` : 'text/plain',
-      payload: avatarData ? avatarData.base64 : '',
-      encoding: avatarData ? 'base64' : 'utf-8',
+      avatarDataUrl: profile.avatarDataUrl ?? '',
       network: 'mvc',
-    }));
+    })));
   }
 
   if (changedFields.some((field) => BIO_FIELDS.has(field))) {

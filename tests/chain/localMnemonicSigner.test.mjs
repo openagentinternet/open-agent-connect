@@ -154,6 +154,32 @@ test('createLocalMnemonicSigner writes an MVC pin through the adapter', async ()
   assert.equal(result.totalCost >= 0, true);
 });
 
+test('createLocalMnemonicSigner rejects malformed avatar writes before adapter inscription', async () => {
+  let inscriptionCalls = 0;
+  const mockAdapter = createMockMvcAdapter({
+    buildInscription: async () => {
+      inscriptionCalls += 1;
+      return { signedRawTxs: ['raw-inscription-hex'], revealIndices: [0], totalCost: 100 };
+    },
+  });
+  const signer = createLocalMnemonicSigner({
+    secretStore: createSecretStore(),
+    adapters: makeAdapterRegistry([mockAdapter]),
+  });
+
+  await assert.rejects(
+    () => signer.writePin({
+      path: '/info/avatar',
+      payload: 'data:image/png;base64,ZmFrZQ==',
+      contentType: 'image/png;binary',
+      encoding: 'base64',
+      network: 'mvc',
+    }),
+    /Avatar payload must be raw image base64 without a data URL prefix/u,
+  );
+  assert.equal(inscriptionCalls, 0);
+});
+
 test('MVC chain writes can spend local pending change after a just-broadcast payment', async () => {
   __clearPendingMvcSpentOutpointsForTests?.();
   try {

@@ -1,3 +1,5 @@
+import { buildAvatarMetaidData } from '../utils/avatar-chain.js';
+
 /**
  * id-connect-button - Web Component for connecting Metalet wallet
  * Uses Shadow DOM with CSS Variables for theming
@@ -551,22 +553,16 @@ class IdConnectButton extends HTMLElement {
       });
     }
     if (userData.avatar) {
-      var avatarContentType = 'image/jpeg;binary';
-      if (userData.avatarContentType) {
-        var mime = (userData.avatarContentType + '').split('/').pop();
-        if (mime === 'png') avatarContentType = 'image/png;binary';
-        else if (mime === 'jpeg' || mime === 'jpg') avatarContentType = 'image/jpeg;binary';
-        else avatarContentType = userData.avatarContentType + ';binary';
-      }
-      metaDatas.push({
-        metaidData: {
-          operation: oldUserData.avatarId ? 'modify' : 'create',
-          body: userData.avatar,
-          path: oldUserData.avatarId ? '@' + oldUserData.avatarId : '/info/avatar',
-          encoding: 'base64',
-          contentType: avatarContentType
-        }
+      var avatarMetaidData = buildAvatarMetaidData({
+        avatarBase64: userData.avatar,
+        avatarContentType: userData.avatarContentType,
+        avatarId: oldUserData.avatarId,
       });
+      if (avatarMetaidData) {
+        metaDatas.push({
+          metaidData: avatarMetaidData
+        });
+      }
     }
     if (userData.chatpubkey != null && userData.chatpubkey !== '' && oldUserData && !oldUserData.chatpubkey) {
       var chatpubkeyPath = oldUserData.chatpubkeyId ? '@' + oldUserData.chatpubkeyId : '/info/chatpubkey';
@@ -1006,7 +1002,7 @@ class IdConnectButton extends HTMLElement {
         var b64 = await this._fileToBase64(this._selectedAvatarFile, 500);
         if (b64) {
           userData.avatar = b64;
-          userData.avatarContentType = this._selectedAvatarFile.type;
+          userData.avatarContentType = 'image/png';
         }
       }
 

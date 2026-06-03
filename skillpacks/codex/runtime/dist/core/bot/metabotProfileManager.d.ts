@@ -2,6 +2,7 @@ import type { IdentityProfileRecord } from '../identity/identityProfiles';
 import type { LlmProvider, LlmRuntime } from '../llm/llmTypes';
 import type { ChainWriteResult } from '../chain/writePin';
 import type { Signer } from '../signing/signer';
+export { validateAvatarDataUrl } from '../identity/avatarChainWrite';
 export interface MetabotProfileFull extends IdentityProfileRecord {
     role: string;
     soul: string;
@@ -9,6 +10,7 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
     avatarDataUrl?: string;
     primaryProvider?: LlmProvider | null;
     fallbackProvider?: LlmProvider | null;
+    allowChatSkills: string[];
 }
 export interface CreateMetabotInput {
     name: string;
@@ -32,6 +34,7 @@ export interface UpdateMetabotInfoInput {
     avatarDataUrl?: string;
     primaryProvider?: LlmProvider | null;
     fallbackProvider?: LlmProvider | null;
+    allowChatSkills?: string[];
 }
 export interface SyncMetabotInfoToChainOptions {
     delayMs?: number;
@@ -57,10 +60,6 @@ export interface DeleteMetabotProfileResult {
     removedExecutorSessions: string[];
 }
 export declare function readTextFile(filePath: string): Promise<string>;
-export declare function validateAvatarDataUrl(dataUrl: string, maxBytes?: number): {
-    valid: boolean;
-    error?: string;
-};
 export declare function selectRuntimeForProvider(runtimes: LlmRuntime[], provider: LlmProvider): LlmRuntime;
 export declare function selectDefaultMetabotProviders(input: {
     runtimes: LlmRuntime[];

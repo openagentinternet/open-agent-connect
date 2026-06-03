@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.normalizeChainWriteRequest = normalizeChainWriteRequest;
+const avatarChainWrite_1 = require("../identity/avatarChainWrite");
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -28,14 +29,16 @@ function normalizeChainWriteRequest(input) {
     if (typeof input.payload !== 'string') {
         throw new Error('Chain write payload must be a string.');
     }
-    return {
-        operation,
+    const request = {
+        operation: operation,
         path,
-        encryption,
+        encryption: encryption,
         version: normalizeText(input.version) || '1.0',
         contentType: normalizeText(input.contentType) || 'application/json',
         payload: input.payload,
-        encoding,
-        network,
+        encoding: encoding,
+        network: network,
     };
+    (0, avatarChainWrite_1.validateAvatarChainWriteRequest)(request);
+    return request;
 }

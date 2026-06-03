@@ -150,6 +150,10 @@ Never invent a local UI URL; use the `localUiUrl` returned by the CLI.
 
 For `/info/avatar`, write the avatar bytes directly to chain.
 Do not write a `metafile://...` URI as text payload.
+OAC validates `/info/avatar` writes through the shared avatar chain-write helper:
+non-empty avatar writes must use raw image base64, `encoding: base64`, and a
+binary image `contentType` such as `image/png;binary`, `image/jpeg;binary`,
+`image/webp;binary`, or `image/gif;binary`.
 
 Generate a chain-write request from a local image file:
 
