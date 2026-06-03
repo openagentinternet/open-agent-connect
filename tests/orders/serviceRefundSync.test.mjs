@@ -295,6 +295,8 @@ test('applyServiceRefundRequestsToState does not match ambiguous local records',
   });
 
   assert.equal(result.applied.buyerRequests, 0);
+  assert.equal(result.applied.synthesizedSellerOrders, 0);
+  assert.equal(result.nextState.sellerOrders.length, 0);
   assert.equal(result.nextState.traces.every((trace) => trace.order.refundRequestPinId === null), true);
   assert.equal(result.skipped, 1);
 });

@@ -431,7 +431,16 @@ export function applyServiceRefundRequestsToState(
     const buyerMatch = findBuyerTraceForRequest(nextState.traces, request);
     if (buyerMatch.status === 'ambiguous') {
       result.skipped += 1;
-    } else if (buyerMatch.status === 'found' && buyerMatch.item) {
+      continue;
+    }
+
+    const sellerMatch = findSellerOrderForRequest(nextState.sellerOrders, request);
+    if (sellerMatch.status === 'ambiguous') {
+      result.skipped += 1;
+      continue;
+    }
+
+    if (buyerMatch.status === 'found' && buyerMatch.item) {
       const patched = patchBuyerRequestTrace(buyerMatch.item, request, input.nowMs);
       if (patched.changed) {
         nextState = {
@@ -444,11 +453,6 @@ export function applyServiceRefundRequestsToState(
       }
     }
 
-    const sellerMatch = findSellerOrderForRequest(nextState.sellerOrders, request);
-    if (sellerMatch.status === 'ambiguous') {
-      result.skipped += 1;
-      continue;
-    }
     if (sellerMatch.status === 'found' && sellerMatch.item) {
       const patched = patchSellerRequestOrder(sellerMatch.item, request, input.nowMs);
       if (patched.changed) {
