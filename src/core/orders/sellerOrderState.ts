@@ -49,6 +49,7 @@ export interface SellerOrderRecord {
   endReason: string | null;
   refundRequestPinId: string | null;
   refundRequestTxid: string | null;
+  refundRequestedAt: number | null;
   refundTxid: string | null;
   refundFinalizePinId: string | null;
   refundBlockingReason: string | null;
@@ -155,6 +156,7 @@ export function createSellerOrderRecord(input: SellerOrderRecordInput): SellerOr
     endReason: normalizeText(input.endReason) || null,
     refundRequestPinId: normalizeText(input.refundRequestPinId) || null,
     refundRequestTxid: normalizeText(input.refundRequestTxid) || null,
+    refundRequestedAt: normalizeNumber(input.refundRequestedAt),
     refundTxid: normalizeText(input.refundTxid) || null,
     refundFinalizePinId: normalizeText(input.refundFinalizePinId) || null,
     refundBlockingReason: normalizeText(input.refundBlockingReason) || null,
@@ -192,6 +194,7 @@ export function transitionSellerOrderRecord(
     ratingRequestedAt: patch.ratingRequestedAt ?? current.ratingRequestedAt,
     endedAt: patch.endedAt ?? current.endedAt,
     refundedAt: patch.refundedAt ?? current.refundedAt,
+    refundRequestedAt: patch.refundRequestedAt ?? current.refundRequestedAt,
     refundCompletedAt: patch.refundCompletedAt ?? current.refundCompletedAt,
   });
 }

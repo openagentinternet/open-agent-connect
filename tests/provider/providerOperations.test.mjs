@@ -35,6 +35,7 @@ function createSellerOrder(overrides = {}) {
     traceId: 'trace-provider-1',
     a2aSessionId: 'a2a-order-session-1',
     refundRequestPinId: 'refund-request-pin-1',
+    refundRequestedAt: 1_775_000_000_500,
     createdAt: 1_775_000_000_000,
     updatedAt: 1_775_000_001_000,
     ...overrides,
@@ -58,6 +59,7 @@ test('provider seller order lookup and refund projection accept service order pi
   assert.equal(selected.order.id, 'seller-order-payment-txid-1');
   assert.equal(buildProviderSellerOrderInspection(selected.order).serviceOrderPinId, 'skill-service-order-pin-1');
   assert.equal(buildSellerReceivedRefundItems(state)[0].orderId, 'skill-service-order-pin-1');
+  assert.equal(buildSellerReceivedRefundItems(state)[0].refundRequestedAt, 1_775_000_000_500);
 });
 
 test('provider refund manual action distinguishes unsupported and retryable blockers', () => {

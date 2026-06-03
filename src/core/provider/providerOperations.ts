@@ -276,7 +276,7 @@ export function buildSellerReceivedRefundItems(state: RuntimeState): SellerRecei
         refundTxid: normalizeText(order.refundTxid) || null,
         refundFinalizePinId: normalizeText(order.refundFinalizePinId) || null,
         blockingReason: normalizeText(order.refundBlockingReason) || null,
-        refundRequestedAt: null,
+        refundRequestedAt: normalizeNumber(order.refundRequestedAt),
         refundCompletedAt,
         counterpartyGlobalMetaId: normalizeText(order.buyerGlobalMetaId) || null,
         counterpartyName: null,

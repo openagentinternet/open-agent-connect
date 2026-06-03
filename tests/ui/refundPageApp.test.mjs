@@ -240,6 +240,7 @@ test('provider pending actionable row renders Confirm refund button and posts se
 
   const sellerList = elements['[data-refund-seller-list]'];
   await waitFor(() => sellerList.buttons.length === 1, 'seller refund button render');
+  assert.match(sellerList.innerHTML, new RegExp(escapeRegExp(new Date(1_775_000_010_000).toLocaleString())));
   const button = sellerList.buttons[0];
   assert.equal(button.textContent, 'Confirm refund');
   const click = button.listeners.get('click');
@@ -254,6 +255,10 @@ test('provider pending actionable row renders Confirm refund button and posts se
     from: 'seller-bot',
   });
 });
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
 
 test('caller initiated row does not render a confirm button', async () => {
   const fetchImpl = createFetch({

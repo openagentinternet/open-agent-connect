@@ -12,6 +12,7 @@ const { createSellerOrderRecord } = require('../../dist/core/orders/sellerOrderS
 const { buildSellerReceivedRefundItems } = require('../../dist/core/provider/providerOperations.js');
 
 const NOW = 1_775_000_000_000;
+const REQUESTED_AT = NOW - 10_000;
 const BUYER = 'idq1buyer';
 const PROVIDER = 'idq1provider';
 const OTHER_PROVIDER = 'idq1otherprovider';
@@ -159,7 +160,7 @@ function createRequest(overrides = {}) {
       sellerGlobalMetaId: PROVIDER,
       refundAddress: 'buyer-mvc-address',
       reason: 'delivery_timeout',
-      requestedAt: new Date(NOW - 10_000).toISOString(),
+      requestedAt: new Date(REQUESTED_AT).toISOString(),
       ...payloadOverrides,
     },
   };
@@ -232,7 +233,9 @@ test('applyServiceRefundRequestsToState attaches request pin to existing seller 
   assert.equal(result.applied.sellerRequests, 1);
   assert.equal(order.state, 'refund_pending');
   assert.equal(order.refundRequestPinId, 'refund-request-pin-1');
+  assert.equal(order.refundRequestedAt, REQUESTED_AT);
   assert.equal(order.updatedAt, NOW);
+  assert.equal(buildSellerReceivedRefundItems(result.nextState)[0].refundRequestedAt, REQUESTED_AT);
   assert.equal(buildSellerReceivedRefundItems(result.nextState)[0].manualActionRequired, true);
 });
 
@@ -262,8 +265,11 @@ test('applyServiceRefundRequestsToState synthesizes provider seller order from c
   assert.equal(order.paymentChain, 'mvc');
   assert.equal(order.settlementKind, 'native');
   assert.equal(order.refundRequestPinId, 'refund-request-pin-1');
+  assert.equal(order.refundRequestedAt, REQUESTED_AT);
   assert.equal(order.traceId, 'seller-refund-trace-refund-request-pin-1');
-  assert.equal(buildSellerReceivedRefundItems(result.nextState).length, 1);
+  const refundItems = buildSellerReceivedRefundItems(result.nextState);
+  assert.equal(refundItems.length, 1);
+  assert.equal(refundItems[0].refundRequestedAt, REQUESTED_AT);
 });
 
 test('applyServiceRefundRequestsToState synthesizes unsupported provider seller order with visible blocker', () => {
@@ -392,6 +398,33 @@ test('applyServiceRefundRequestsToState converges stale seller metadata for alre
   assert.equal(order.mrc20Id, 'mrc20-test-id');
   assert.equal(order.refundBlockingReason, 'refund_settlement_unsupported');
   assert.equal(buildSellerReceivedRefundItems(result.nextState)[0].manualActionRequired, false);
+});
+
+test('applyServiceRefundRequestsToState preserves existing seller request time when chain timestamp is invalid', () => {
+  const existingRequestedAt = REQUESTED_AT - 5_000;
+  const result = applyServiceRefundRequestsToState({
+    state: createState({
+      sellerOrders: [
+        createSellerOrder({
+          state: 'refund_pending',
+          refundRequestPinId: 'refund-request-pin-1',
+          refundRequestedAt: existingRequestedAt,
+        }),
+      ],
+    }),
+    requests: [
+      createRequest({
+        payload: {
+          requestedAt: 'not-a-date',
+        },
+      }),
+    ],
+    identity,
+    nowMs: NOW,
+  });
+
+  assert.equal(result.nextState.sellerOrders[0].refundRequestedAt, existingRequestedAt);
+  assert.equal(buildSellerReceivedRefundItems(result.nextState)[0].refundRequestedAt, existingRequestedAt);
 });
 
 test('applyServiceRefundRequestsToState does not match ambiguous local records', () => {

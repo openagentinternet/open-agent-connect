@@ -85,6 +85,11 @@ function normalizeLower(value: unknown): string {
   return normalizeText(value).toLowerCase();
 }
 
+function parseRequestTimestamp(value: unknown): number | null {
+  const timestamp = Date.parse(normalizeText(value));
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 function canonicalAsset(value: unknown): string {
   const asset = normalizeText(value).toUpperCase();
   return asset === 'MVC' ? 'SPACE' : asset;
@@ -349,8 +354,10 @@ function patchSellerRequestOrder(
   const alreadyApplied = normalizeText(order.refundRequestPinId) === request.pinId;
   const blockingReason = requestBlockingReason(request);
   const failureReason = normalizeText(order.failureReason) || request.reason || order.failureReason;
+  const refundRequestedAt = parseRequestTimestamp(request.payload.requestedAt);
   const patch = {
     refundRequestPinId: request.pinId || order.refundRequestPinId,
+    refundRequestedAt: order.refundRequestedAt ?? refundRequestedAt,
     failureReason,
     paymentCurrency: request.paymentAsset || order.paymentCurrency,
     paymentChain: request.paymentChain || order.paymentChain,
@@ -371,6 +378,7 @@ function patchSellerRequestOrder(
     || normalizeText(order.mrc20Id) !== normalizeText(patch.mrc20Id)
     || normalizeText(order.refundBlockingReason) !== normalizeText(patch.refundBlockingReason)
     || normalizeText(order.latestEvent) !== normalizeText(patch.latestEvent)
+    || order.refundRequestedAt !== patch.refundRequestedAt
   );
 
   if (order.state === 'refunded' || order.state === 'ended') {
@@ -403,6 +411,7 @@ function synthesizeSellerOrder(
 ): SellerOrderRecord {
   const serviceOrderPinId = request.serviceOrderPinId || request.pinId;
   const servicePinId = request.servicePinId || '';
+  const refundRequestedAt = parseRequestTimestamp(request.payload.requestedAt) ?? nowMs;
   return createSellerOrderRecord({
     id: `seller-refund-${request.pinId}`,
     state: 'refund_pending',
@@ -431,6 +440,7 @@ function synthesizeSellerOrder(
     failureReason: request.reason,
     latestEvent: 'refund_request_discovered',
     refundRequestPinId: request.pinId,
+    refundRequestedAt,
     refundBlockingReason: requestBlockingReason(request),
     createdAt: nowMs,
     updatedAt: nowMs,
