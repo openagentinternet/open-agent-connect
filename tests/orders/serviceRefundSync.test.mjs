@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const {
   applyServiceRefundFinalizationsToState,
   applyServiceRefundRequestsToState,
+  mergeServiceRefundSyncState,
 } = require('../../dist/core/orders/serviceRefundSync.js');
 const { createSellerOrderRecord } = require('../../dist/core/orders/sellerOrderState.js');
 const { buildSellerReceivedRefundItems } = require('../../dist/core/provider/providerOperations.js');
@@ -578,4 +579,90 @@ test('applyServiceRefundFinalizationsToState is idempotent when finalize was alr
   assert.equal(second.nextState.traces[0].order.status, 'refunded');
   assert.equal(second.nextState.sellerOrders[0].state, 'refunded');
   assert.equal(second.nextState.sellerOrders[0].refundFinalizePinId, 'refund-finalize-pin-1');
+});
+
+test('applyServiceRefundFinalizationsToState skips already-refunded paid finalization without verifier', async () => {
+  const refundedState = createState({
+    traces: [
+      createBuyerTrace({
+        order: {
+          status: 'refunded',
+          refundRequestPinId: 'refund-request-pin-1',
+          refundFinalizePinId: 'refund-finalize-pin-1',
+          refundTxid: 'refund-transfer-txid-1',
+          refundedAt: NOW - 5_000,
+          refundCompletedAt: NOW - 5_000,
+          refundBlockingReason: null,
+          updatedAt: NOW - 5_000,
+        },
+      }),
+    ],
+    sellerOrders: [
+      createSellerOrder({
+        state: 'refunded',
+        refundRequestPinId: 'refund-request-pin-1',
+        refundFinalizePinId: 'refund-finalize-pin-1',
+        refundTxid: 'refund-transfer-txid-1',
+        refundedAt: NOW - 5_000,
+        refundCompletedAt: NOW - 5_000,
+        refundBlockingReason: null,
+        latestEvent: 'refund_finalized',
+        updatedAt: NOW - 5_000,
+      }),
+    ],
+  });
+
+  const result = await applyServiceRefundFinalizationsToState({
+    state: refundedState,
+    finalizations: [createFinalize()],
+    identity,
+    nowMs: NOW,
+  });
+
+  assert.equal(result.applied.finalizations, 0);
+  assert.equal(result.blocked, 0);
+  assert.deepEqual(result.nextState, refundedState);
+});
+
+test('mergeServiceRefundSyncState preserves newer settled refund proof over stale sync state', () => {
+  const staleSyncedState = createState({
+    sellerOrders: [
+      createSellerOrder({
+        state: 'refund_pending',
+        refundRequestPinId: 'refund-request-pin-1',
+        refundBlockingReason: 'refund_finalize_verification_pending',
+        refundFinalizePinId: null,
+        refundTxid: null,
+        refundedAt: null,
+        refundCompletedAt: null,
+        updatedAt: NOW,
+      }),
+    ],
+  });
+  const currentState = createState({
+    sellerOrders: [
+      createSellerOrder({
+        state: 'refunded',
+        refundRequestPinId: 'refund-request-pin-1',
+        refundFinalizePinId: 'refund-finalize-pin-1',
+        refundTxid: 'refund-transfer-txid-1',
+        refundedAt: NOW + 1_000,
+        refundCompletedAt: NOW + 1_000,
+        refundBlockingReason: null,
+        latestEvent: 'refund_finalized',
+        updatedAt: NOW + 1_000,
+      }),
+    ],
+  });
+
+  const merged = mergeServiceRefundSyncState({
+    currentState,
+    syncedState: staleSyncedState,
+  });
+
+  assert.equal(merged.sellerOrders[0].state, 'refunded');
+  assert.equal(merged.sellerOrders[0].refundFinalizePinId, 'refund-finalize-pin-1');
+  assert.equal(merged.sellerOrders[0].refundTxid, 'refund-transfer-txid-1');
+  assert.equal(merged.sellerOrders[0].refundBlockingReason, null);
+  assert.equal(merged.sellerOrders[0].updatedAt, NOW + 1_000);
 });

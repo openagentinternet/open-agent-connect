@@ -532,6 +532,36 @@ function rowSettlementKind(trace?: SessionTraceRecord | null, order?: SellerOrde
   return normalizeLower(order?.settlementKind) || normalizeLower(trace?.order?.settlementKind) || 'native';
 }
 
+function hasMatchingPaidRefundProof(rowRefundTxid: unknown, finalize: FinalizeContext): boolean {
+  const rowTxid = normalizeText(rowRefundTxid);
+  return Boolean(rowTxid) && (!finalize.refundTxid || rowTxid === finalize.refundTxid);
+}
+
+function traceAlreadyRefundedWithFinalizeProof(trace: SessionTraceRecord, finalize: FinalizeContext): boolean {
+  if (!trace.order) return false;
+  return trace.order.status === 'refunded'
+    && normalizeText(trace.order.refundFinalizePinId) === finalize.pinId
+    && hasMatchingPaidRefundProof(trace.order.refundTxid, finalize);
+}
+
+function sellerOrderAlreadyRefundedWithFinalizeProof(order: SellerOrderRecord, finalize: FinalizeContext): boolean {
+  return order.state === 'refunded'
+    && normalizeText(order.refundFinalizePinId) === finalize.pinId
+    && hasMatchingPaidRefundProof(order.refundTxid, finalize);
+}
+
+function finalizeAlreadyAppliedWithPaidProof(
+  finalize: FinalizeContext,
+  trace?: SessionTraceRecord | null,
+  order?: SellerOrderRecord | null,
+): boolean {
+  const matchedRows = [
+    trace ? traceAlreadyRefundedWithFinalizeProof(trace, finalize) : null,
+    order ? sellerOrderAlreadyRefundedWithFinalizeProof(order, finalize) : null,
+  ].filter((value): value is boolean => value !== null);
+  return matchedRows.length > 0 && matchedRows.every(Boolean);
+}
+
 function patchBuyerFinalizeTrace(
   trace: SessionTraceRecord,
   finalize: FinalizeContext,
@@ -694,6 +724,9 @@ export async function applyServiceRefundFinalizationsToState(
     const matchedOrder = sellerMatch.item;
     const freeFinalize = finalizeIsFree(finalize, matchedTrace, matchedOrder);
     const settlementKind = rowSettlementKind(matchedTrace, matchedOrder);
+    if (!freeFinalize && finalizeAlreadyAppliedWithPaidProof(finalize, matchedTrace, matchedOrder)) {
+      continue;
+    }
     if (!isNativeOrFree(settlementKind, finalize.paymentAmount)) {
       nextState = blockFinalizeMatches({
         state: nextState,
@@ -789,4 +822,106 @@ function blockFinalizeMatches(input: {
     };
   }
   return nextState;
+}
+
+function buyerTraceHasTerminalRefundProof(trace: SessionTraceRecord): boolean {
+  return trace.order?.status === 'refunded'
+    && Boolean(normalizeText(trace.order.refundFinalizePinId))
+    && Boolean(normalizeText(trace.order.refundTxid));
+}
+
+function sellerOrderHasTerminalRefundProof(order: SellerOrderRecord): boolean {
+  return order.state === 'refunded'
+    && Boolean(normalizeText(order.refundFinalizePinId))
+    && Boolean(normalizeText(order.refundTxid));
+}
+
+function sharedNormalizedValue(left: Array<unknown>, right: Array<unknown>): boolean {
+  const rightValues = new Set(right.map(normalizeText).filter(Boolean));
+  return left.map(normalizeText).filter(Boolean).some((value) => rightValues.has(value));
+}
+
+function buyerTraceRefundMatchValues(trace: SessionTraceRecord): Array<unknown> {
+  return [
+    trace.traceId,
+    trace.order?.id,
+    trace.order?.refundRequestPinId,
+    trace.order?.refundFinalizePinId,
+    trace.order?.paymentTxid,
+    trace.order?.serviceOrderPinId,
+    trace.order?.orderPinId,
+    trace.order?.orderReference,
+  ];
+}
+
+function sellerOrderRefundMatchValues(order: SellerOrderRecord): Array<unknown> {
+  return [
+    order.id,
+    order.refundRequestPinId,
+    order.refundFinalizePinId,
+    order.paymentTxid,
+    order.serviceOrderPinId,
+    order.orderPinId,
+    order.orderMessageId,
+    order.orderReference,
+  ];
+}
+
+function mergeTerminalRefundedTraces(
+  currentTraces: SessionTraceRecord[],
+  syncedTraces: SessionTraceRecord[],
+): SessionTraceRecord[] {
+  const terminalCurrent = currentTraces.filter(buyerTraceHasTerminalRefundProof);
+  const usedCurrentTraceIds = new Set<string>();
+  const merged = syncedTraces.map((syncedTrace) => {
+    const matched = terminalCurrent.find((currentTrace) => (
+      sharedNormalizedValue(buyerTraceRefundMatchValues(currentTrace), buyerTraceRefundMatchValues(syncedTrace))
+    ));
+    if (!matched) return syncedTrace;
+    usedCurrentTraceIds.add(matched.traceId);
+    return matched;
+  });
+
+  const missingCurrent = terminalCurrent.filter((currentTrace) => (
+    !usedCurrentTraceIds.has(currentTrace.traceId)
+    && !syncedTraces.some((syncedTrace) => (
+      sharedNormalizedValue(buyerTraceRefundMatchValues(currentTrace), buyerTraceRefundMatchValues(syncedTrace))
+    ))
+  ));
+  return [...merged, ...missingCurrent];
+}
+
+function mergeTerminalRefundedSellerOrders(
+  currentOrders: SellerOrderRecord[],
+  syncedOrders: SellerOrderRecord[],
+): SellerOrderRecord[] {
+  const terminalCurrent = currentOrders.filter(sellerOrderHasTerminalRefundProof);
+  const usedCurrentOrderIds = new Set<string>();
+  const merged = syncedOrders.map((syncedOrder) => {
+    const matched = terminalCurrent.find((currentOrder) => (
+      sharedNormalizedValue(sellerOrderRefundMatchValues(currentOrder), sellerOrderRefundMatchValues(syncedOrder))
+    ));
+    if (!matched) return syncedOrder;
+    usedCurrentOrderIds.add(matched.id);
+    return matched;
+  });
+
+  const missingCurrent = terminalCurrent.filter((currentOrder) => (
+    !usedCurrentOrderIds.has(currentOrder.id)
+    && !syncedOrders.some((syncedOrder) => (
+      sharedNormalizedValue(sellerOrderRefundMatchValues(currentOrder), sellerOrderRefundMatchValues(syncedOrder))
+    ))
+  ));
+  return [...merged, ...missingCurrent];
+}
+
+export function mergeServiceRefundSyncState(input: {
+  currentState: RuntimeState;
+  syncedState: RuntimeState;
+}): RuntimeState {
+  return {
+    ...input.syncedState,
+    traces: mergeTerminalRefundedTraces(input.currentState.traces, input.syncedState.traces),
+    sellerOrders: mergeTerminalRefundedSellerOrders(input.currentState.sellerOrders, input.syncedState.sellerOrders),
+  };
 }
