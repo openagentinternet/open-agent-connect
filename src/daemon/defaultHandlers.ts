@@ -5922,6 +5922,83 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const providerOrderTextGenerator = input.providerOrderTextGenerator ?? null;
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const getDaemonRecord = input.getDaemonRecord;
+  const CHAIN_AVATAR_FETCH_TIMEOUT_MS = 4500;
+
+  function extractChainAvatarPinId(reference: string): string {
+    const normalized = normalizeText(reference);
+    if (!normalized || /^(data:|blob:)/iu.test(normalized)) return '';
+    if (/^metafile:\/\//iu.test(normalized)) {
+      const pinId = normalized.slice('metafile://'.length).split(/[?#]/u)[0]?.trim() || '';
+      return /^[0-9a-f]{64}(?:i\d+)?$/iu.test(pinId) ? pinId : '';
+    }
+    const pathStr = (() => {
+      if (/^https?:\/\//iu.test(normalized)) {
+        try { return new URL(normalized).pathname; } catch { return ''; }
+      }
+      return normalized;
+    })();
+    const patterns = [
+      /^\/content\/([^/?#]+)/iu,
+      /^\/metafile-indexer\/content\/([^/?#]+)/iu,
+      /^\/metafile-indexer\/api\/v1\/files\/content\/([^/?#]+)/iu,
+      /^\/metafile-indexer\/api\/v1\/users\/avatar\/accelerate\/([^/?#]+)/iu,
+    ];
+    for (const pattern of patterns) {
+      const match = pathStr.match(pattern);
+      if (match?.[1]) {
+        const pinId = decodeURIComponent((match[1].split(/[?#]/u)[0] || '').trim());
+        if (/^[0-9a-f]{64}(?:i\d+)?$/iu.test(pinId)) return pinId;
+      }
+    }
+    const bare = normalized.split(/[?#]/u)[0]?.trim() || '';
+    if (!bare.includes('/') && /^[0-9a-f]{64}(?:i\d+)?$/iu.test(bare)) return bare;
+    return '';
+  }
+
+  async function resolveChainAvatarDataUrl(globalMetaId: string): Promise<string> {
+    const gmid = normalizeText(globalMetaId);
+    if (!gmid) return '';
+    try {
+      const resp = await fetch(`https://file.metaid.io/metafile-indexer/api/v1/info/globalmetaid/${encodeURIComponent(gmid)}`);
+      if (!resp.ok) return '';
+      const json = await resp.json();
+      const data: Record<string, unknown> = json?.data || json || {};
+      const rawAvatar = normalizeText(data.avatar)
+        || normalizeText(data.avatarUrl)
+        || normalizeText(data.avatarId)
+        || normalizeText(data.avatarImage)
+        || normalizeText(data.avatarUri)
+        || normalizeText(data.avatar_uri);
+      if (!rawAvatar) return '';
+      const pinId = extractChainAvatarPinId(rawAvatar);
+      if (!pinId) return '';
+      const encodedPinId = encodeURIComponent(pinId);
+      const contentUrls = [
+        `http://localhost:7281/content/${encodedPinId}`,
+        `https://file.metaid.io/metafile-indexer/content/${encodedPinId}`,
+        `https://file.metaid.io/metafile-indexer/api/v1/users/avatar/accelerate/${encodedPinId}?process=thumbnail`,
+        `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/${encodedPinId}?process=thumbnail`,
+        `https://file.metaid.io/metafile-indexer/api/v1/files/content/${encodedPinId}`,
+      ];
+      for (const contentUrl of contentUrls) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), CHAIN_AVATAR_FETCH_TIMEOUT_MS);
+        try {
+          const contentResp = await fetch(contentUrl, { signal: controller.signal });
+          if (!contentResp.ok) continue;
+          const contentType = normalizeText(contentResp.headers.get('content-type') || '').split(';')[0]?.trim() || 'application/octet-stream';
+          if (/^text\//iu.test(contentType) || /(?:application\/json|[+/]json)(?:\s*;|$)/iu.test(contentType)) continue;
+          const buffer = Buffer.from(await contentResp.arrayBuffer());
+          if (!buffer.length) continue;
+          return `data:${contentType};base64,${buffer.toString('base64')}`;
+        } catch { /* try next URL */ }
+        finally { clearTimeout(timeout); }
+      }
+      return '';
+    } catch {
+      return '';
+    }
+  }
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
   const pendingProviderOrderExecutions = new Map<string, Promise<MetabotCommandResult<Record<string, unknown>>>>();
@@ -16307,12 +16384,26 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       listProfiles: async () => {
         const profiles = await listMetabotProfiles(normalizedSystemHomeDir);
+        await Promise.all(profiles.map(async (profile) => {
+          if (!profile.avatarDataUrl && profile.globalMetaId) {
+            const chainAvatar = await resolveChainAvatarDataUrl(profile.globalMetaId);
+            if (chainAvatar) {
+              profile.avatarDataUrl = chainAvatar;
+            }
+          }
+        }));
         return commandSuccess({ profiles });
       },
       getProfile: async ({ slug }) => {
         const profile = await getMetabotProfile(normalizedSystemHomeDir, slug);
         if (!profile) {
           return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+        }
+        if (!profile.avatarDataUrl && profile.globalMetaId) {
+          const chainAvatar = await resolveChainAvatarDataUrl(profile.globalMetaId);
+          if (chainAvatar) {
+            profile.avatarDataUrl = chainAvatar;
+          }
         }
         return commandSuccess({ profile });
       },
