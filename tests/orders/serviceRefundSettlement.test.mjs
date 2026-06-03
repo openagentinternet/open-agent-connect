@@ -228,6 +228,19 @@ test('processSellerRefundSettlement finalizes with the refund request service pi
   assert.equal(finalizeWrites[0].payload.servicePinId, 'service-pin-original');
 });
 
+test('processSellerRefundSettlement accepts canonical refundAddress from parsed request payloads', async () => {
+  const { result, transferCalls } = await settle({
+    payloadOverrides: {
+      refundAddress: 'buyer-canonical-mvc-address',
+      refundToAddress: undefined,
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(transferCalls.length, 1);
+  assert.equal(transferCalls[0].refundToAddress, 'buyer-canonical-mvc-address');
+});
+
 test('processSellerRefundSettlement rejects refund request payload mismatches before transfer', async () => {
   const cases = [
     ['refund_request_payment_mismatch', { paymentTxid: 'x'.repeat(64) }],

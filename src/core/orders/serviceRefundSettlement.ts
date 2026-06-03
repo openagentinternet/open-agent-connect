@@ -149,6 +149,10 @@ function readRefundCurrency(payload: Record<string, unknown>): string {
   return normalizeText(payload.refundCurrency) || normalizeText(payload.currency);
 }
 
+function readRefundAddress(payload: Record<string, unknown>): string {
+  return normalizeText(payload.refundAddress) || normalizeText(payload.refundToAddress);
+}
+
 function matchesPaymentKey(order: SellerOrderRecord, candidate: {
   paymentTxid?: string | null;
   orderReference?: string | null;
@@ -577,7 +581,7 @@ export async function processSellerRefundSettlement(
     });
   }
 
-  const refundToAddress = normalizeText(refundRequestPayload.refundToAddress);
+  const refundToAddress = readRefundAddress(refundRequestPayload);
   if (!refundToAddress) {
     return blockSettlement({
       state: input.state,
