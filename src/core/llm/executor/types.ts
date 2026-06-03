@@ -20,6 +20,7 @@ export interface LlmExecutionRequest {
   cwd?: string;
   skills?: string[];
   skillSourcePaths?: Record<string, string>;
+  skillIsolation?: 'strict';
   resumeSessionId?: string;
   model?: string;
   metaBotSlug?: string;

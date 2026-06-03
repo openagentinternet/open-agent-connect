@@ -20,6 +20,7 @@ import {
   isLlmProvider,
   normalizeLlmBinding,
 } from '../llm/llmTypes';
+import { normalizeAllowChatSkills } from '../services/chatSkillPolicy';
 import type {
   LlmBinding,
   LlmBindingRole,
@@ -34,7 +35,7 @@ const DEFAULT_SOUL = 'Friendly and professional.';
 const DEFAULT_GOAL = 'Help users accomplish their tasks effectively.';
 const MAX_AVATAR_BYTES = 200 * 1024;
 const CHAIN_SYNC_DELAY_MS = 3_000;
-const BIO_FIELDS = new Set(['role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider']);
+const BIO_FIELDS = new Set(['role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills']);
 
 export interface MetabotProfileFull extends IdentityProfileRecord {
   role: string;
@@ -43,6 +44,7 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
   avatarDataUrl?: string;
   primaryProvider?: LlmProvider | null;
   fallbackProvider?: LlmProvider | null;
+  allowChatSkills: string[];
 }
 
 export interface CreateMetabotInput {
@@ -69,6 +71,7 @@ export interface UpdateMetabotInfoInput {
   avatarDataUrl?: string;
   primaryProvider?: LlmProvider | null;
   fallbackProvider?: LlmProvider | null;
+  allowChatSkills?: string[];
 }
 
 export interface SyncMetabotInfoToChainOptions {
@@ -158,6 +161,23 @@ export async function readTextFile(filePath: string): Promise<string> {
     }
     throw error;
   }
+}
+
+async function readChatSkillPolicy(filePath: string): Promise<string[]> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(filePath, 'utf8')) as { allowChatSkills?: unknown };
+    return normalizeAllowChatSkills(parsed?.allowChatSkills);
+  } catch {
+    return [];
+  }
+}
+
+async function writeChatSkillPolicy(filePath: string, allowChatSkills: string[]): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, `${JSON.stringify({
+    allowChatSkills,
+    updatedAt: new Date().toISOString(),
+  }, null, 2)}\n`, 'utf8');
 }
 
 export function validateAvatarDataUrl(dataUrl: string, maxBytes = MAX_AVATAR_BYTES): { valid: boolean; error?: string } {
@@ -353,12 +373,13 @@ async function readProfileProviderBindings(profile: IdentityProfileRecord): Prom
 
 async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<MetabotProfileFull> {
   const paths = resolveMetabotPaths(profile.homeDir);
-  const [role, soul, goal, avatarDataUrl, providerBindings] = await Promise.all([
+  const [role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills] = await Promise.all([
     readTextFile(paths.roleMdPath),
     readTextFile(paths.soulMdPath),
     readTextFile(paths.goalMdPath),
     readTextFile(resolveAvatarPath(profile.homeDir)),
     readProfileProviderBindings(profile),
+    readChatSkillPolicy(paths.chatSkillPolicyPath),
   ]);
 
   return {
@@ -369,6 +390,7 @@ async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<
     ...(avatarDataUrl ? { avatarDataUrl } : {}),
     primaryProvider: providerBindings.primaryProvider,
     fallbackProvider: providerBindings.fallbackProvider,
+    allowChatSkills,
   };
 }
 
@@ -488,6 +510,7 @@ export function buildMetabotProfileDraftFromIdentity(input: CreateMetabotFromIde
     ...(avatar ? { avatarDataUrl: avatar } : {}),
     primaryProvider: input.primaryProvider === undefined ? null : validateProvider(input.primaryProvider),
     fallbackProvider: input.fallbackProvider === undefined ? null : validateProvider(input.fallbackProvider),
+    allowChatSkills: [],
   };
 }
 
@@ -722,6 +745,9 @@ export async function updateMetabotProfile(
       throw new Error(validation.error);
     }
   }
+  const allowChatSkills = input.allowChatSkills === undefined
+    ? undefined
+    : normalizeAllowChatSkills(input.allowChatSkills);
   const writeProviderBindings = await buildProviderBindingWrite({
     profile: current,
     primaryProvider: input.primaryProvider === undefined
@@ -763,6 +789,9 @@ export async function updateMetabotProfile(
     } else {
       await writeTextFile(resolveAvatarPath(current.homeDir), avatar);
     }
+  }
+  if (allowChatSkills !== undefined) {
+    await writeChatSkillPolicy(paths.chatSkillPolicyPath, allowChatSkills);
   }
 
   if (writeProviderBindings) {
@@ -841,6 +870,7 @@ export async function syncMetabotInfoToChain(
         goal: profile.goal,
         primaryProvider: profile.primaryProvider ?? null,
         fallbackProvider: profile.fallbackProvider ?? null,
+        allowChatSkills: normalizeAllowChatSkills(profile.allowChatSkills),
       }),
       encoding: 'utf-8',
       network: 'mvc',

@@ -112,6 +112,7 @@ import { createPrivateChatAutoReplyBackfillLoop } from '../core/chat/privateChat
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
+import { createPrivateChatAllowedSkillsResolver } from '../core/chat/privateChatAllowedSkills';
 import { createLlmOrderProtocolTextGenerator } from '../core/a2a/orderProtocolTextGenerator';
 import type {
   ChatReplyRunner,
@@ -1609,6 +1610,8 @@ export interface PrivateChatAutoReplyProfileDispatcherOptions {
     paths: MetabotPaths;
     metaBotSlug: string;
     runtimeResolver: ReturnType<typeof createLlmRuntimeResolver>;
+    runtimeStore: ReturnType<typeof createLlmRuntimeStore>;
+    bindingStore: ReturnType<typeof createLlmBindingStore>;
     llmExecutor: Pick<LlmExecutor, 'execute' | 'getSession'>;
   }) => ChatReplyRunner;
   createOrchestrator?: (
@@ -1620,6 +1623,32 @@ export interface PrivateChatAutoReplyProfileDispatcherOptions {
 type A2ARecoveredOrderProtocolMessage = A2ASimplemsgInboundDispatcherMessage & {
   localProfileSlug?: string | null;
 };
+
+export function createPrivateChatReplyRunnerForProfile(input: {
+  paths: MetabotPaths;
+  metaBotSlug: string;
+  runtimeResolver: ReturnType<typeof createLlmRuntimeResolver>;
+  runtimeStore: ReturnType<typeof createLlmRuntimeStore>;
+  bindingStore: ReturnType<typeof createLlmBindingStore>;
+  llmExecutor: Pick<LlmExecutor, 'execute' | 'getSession'>;
+  env?: NodeJS.ProcessEnv;
+  logWarning?: (scope: string, message: string) => void;
+}): ChatReplyRunner {
+  return createHostLlmChatReplyRunner({
+    runtimeResolver: input.runtimeResolver,
+    llmExecutor: input.llmExecutor,
+    metaBotSlug: input.metaBotSlug,
+    allowedChatSkillsResolver: createPrivateChatAllowedSkillsResolver({
+      paths: input.paths,
+      metaBotSlug: input.metaBotSlug,
+      runtimeStore: input.runtimeStore,
+      bindingStore: input.bindingStore,
+      env: input.env,
+      logWarning: input.logWarning,
+    }),
+    logWarning: input.logWarning,
+  });
+}
 
 export interface A2AUnhandledOrderReplayResult {
   profiles: number;
@@ -1936,12 +1965,19 @@ export function createPrivateChatAutoReplyProfileDispatcher(
         paths: profilePaths,
         metaBotSlug,
         runtimeResolver: profileRuntimeResolver,
+        runtimeStore: profileRuntimeStoreForLlm,
+        bindingStore: profileBindingStore,
         llmExecutor: input.llmExecutor,
       })
-      : createHostLlmChatReplyRunner({
-        runtimeResolver: profileRuntimeResolver,
-        llmExecutor: input.llmExecutor,
+      : createPrivateChatReplyRunnerForProfile({
+        paths: profilePaths,
         metaBotSlug,
+        runtimeResolver: profileRuntimeResolver,
+        runtimeStore: profileRuntimeStoreForLlm,
+        bindingStore: profileBindingStore,
+        llmExecutor: input.llmExecutor,
+        env: process.env,
+        logWarning: (scope, message) => console.warn(scope, message),
       });
     const profileGlobalMetaId = normalizeEnvText(profile.globalMetaId);
     const orchestrator = createOrchestrator({
@@ -3999,10 +4035,15 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       return state.identity?.globalMetaId ?? null;
     },
     resolvePeerChatPublicKey,
-    replyRunner: createHostLlmChatReplyRunner({
-      runtimeResolver: llmResolver,
-      llmExecutor,
+    replyRunner: createPrivateChatReplyRunnerForProfile({
+      paths,
       metaBotSlug,
+      runtimeResolver: llmResolver,
+      runtimeStore: llmRuntimeStore,
+      bindingStore: llmBindingStore,
+      llmExecutor,
+      env: process.env,
+      logWarning: (scope, message) => console.warn(scope, message),
     }),
   }, sharedAutoReplyConfig);
   const chatAutoReplyBackfill = createPrivateChatAutoReplyBackfillLoop({

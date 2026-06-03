@@ -6,6 +6,7 @@ import { stringifyError } from './backends/backend';
 import { createFileSessionManager, type SessionManager } from './session-manager';
 import { injectSkills } from './skill-injector';
 import type { LlmExecutionEvent, LlmExecutionRequest, LlmExecutionResult, LlmSessionRecord } from './types';
+import { getPlatformSkillRoots, isPlatformId, type PlatformSkillRoot } from '../../platform/platformRegistry';
 
 interface LlmExecutorOptions {
   sessionsRoot: string;
@@ -27,6 +28,13 @@ interface RunningSession {
   controller: AbortController;
 }
 
+interface StrictSkillIsolationScope {
+  root: string;
+  cwd: string;
+  systemHomeDir: string;
+  env: Record<string, string>;
+}
+
 function createSessionId(): string {
   return `llm_${randomUUID()}`;
 }
@@ -37,6 +45,87 @@ function nowIso(): string {
 
 function isTerminalStatus(status: string): boolean {
   return ['completed', 'failed', 'timeout', 'cancelled'].includes(status);
+}
+
+function mergeStringEnvValues(
+  ...sources: Array<Record<string, string | undefined> | undefined>
+): Record<string, string> {
+  const merged: Record<string, string> = {};
+  for (const source of sources) {
+    if (!source) continue;
+    for (const [key, value] of Object.entries(source)) {
+      if (typeof value === 'string') {
+        merged[key] = value;
+      }
+    }
+  }
+  return merged;
+}
+
+function platformHomeEnvParent(root: PlatformSkillRoot, isolatedHome: string): string {
+  if (!root.path.startsWith('~/')) {
+    return isolatedHome;
+  }
+
+  const relativePath = root.path.slice(2);
+  const segments = relativePath.split('/').filter(Boolean);
+  if (segments[segments.length - 1] === 'skills') {
+    segments.pop();
+  }
+  return segments.length > 0 ? path.resolve(isolatedHome, ...segments) : isolatedHome;
+}
+
+function buildStrictSkillIsolationEnv(input: {
+  provider: string;
+  isolatedHome: string;
+  isolatedCwd: string;
+  baseEnv?: NodeJS.ProcessEnv;
+  requestEnv?: Record<string, string>;
+}): Record<string, string> {
+  const env = mergeStringEnvValues(input.baseEnv, input.requestEnv);
+  env.HOME = input.isolatedHome;
+  env.PWD = input.isolatedCwd;
+  env.XDG_CONFIG_HOME = path.join(input.isolatedHome, '.config');
+  if (isPlatformId(input.provider)) {
+    for (const root of getPlatformSkillRoots(input.provider)) {
+      if (root.homeEnv) {
+        env[root.homeEnv] = platformHomeEnvParent(root, input.isolatedHome);
+      }
+    }
+  }
+  return env;
+}
+
+async function createStrictSkillIsolationScope(input: {
+  sessionsRoot: string;
+  provider: string;
+  baseEnv?: NodeJS.ProcessEnv;
+  requestEnv?: Record<string, string>;
+}): Promise<StrictSkillIsolationScope> {
+  await fs.mkdir(input.sessionsRoot, { recursive: true });
+  const root = await fs.mkdtemp(path.join(input.sessionsRoot, 'skill-scope-'));
+  const cwd = path.join(root, 'work');
+  const systemHomeDir = path.join(root, 'home');
+  await fs.mkdir(cwd, { recursive: true });
+  await fs.mkdir(systemHomeDir, { recursive: true });
+  await fs.mkdir(path.join(systemHomeDir, '.config'), { recursive: true });
+  return {
+    root,
+    cwd,
+    systemHomeDir,
+    env: buildStrictSkillIsolationEnv({
+      provider: input.provider,
+      isolatedHome: systemHomeDir,
+      isolatedCwd: cwd,
+      baseEnv: input.baseEnv,
+      requestEnv: input.requestEnv,
+    }),
+  };
+}
+
+async function removeStrictSkillIsolationScope(scope: StrictSkillIsolationScope | null): Promise<void> {
+  if (!scope) return;
+  await fs.rm(scope.root, { recursive: true, force: true });
 }
 
 export class LlmExecutor {
@@ -182,67 +271,90 @@ export class LlmExecutor {
     binaryPath: string,
     controller: AbortController,
   ): Promise<void> {
-    const startedAt = nowIso();
-    const cwd = request.cwd ?? process.cwd();
-    await this.sessionManager.update(sessionId, { status: 'running', startedAt, cwd });
+    let isolationScope: StrictSkillIsolationScope | null = null;
+    try {
+      const startedAt = nowIso();
+      const strictSkillIsolation = request.skillIsolation === 'strict';
+      isolationScope = strictSkillIsolation
+        ? await createStrictSkillIsolationScope({
+          sessionsRoot: this.sessionsRoot,
+          provider: request.runtime.provider,
+          baseEnv: this.env,
+          requestEnv: request.env,
+        })
+        : null;
+      const cwd = isolationScope?.cwd ?? request.cwd ?? process.cwd();
+      const requestEnv = isolationScope?.env ?? request.env;
+      const backendRequest: LlmExecutionRequest = { ...request, cwd, env: requestEnv };
+      await this.sessionManager.update(sessionId, { status: 'running', startedAt, cwd });
 
-    if (request.skills && request.skills.length > 0) {
-      const injection = await injectSkills({
-        skills: request.skills,
-        skillsRoot: this.skillsRoot,
-        skillSourcePaths: request.skillSourcePaths,
-        provider: request.runtime.provider,
-        cwd,
-        systemHomeDir: this.systemHomeDir,
-        env: this.env,
+      if (request.skills && request.skills.length > 0) {
+        const injection = await injectSkills({
+          skills: request.skills,
+          skillsRoot: this.skillsRoot,
+          skillSourcePaths: request.skillSourcePaths,
+          provider: request.runtime.provider,
+          cwd,
+          systemHomeDir: isolationScope?.systemHomeDir ?? this.systemHomeDir,
+          env: requestEnv ?? this.env,
+        });
+        for (const error of injection.errors) {
+          this.pushEvent(sessionId, {
+            type: 'log',
+            level: 'warning',
+            message: `Skill injection failed for ${error.skill}: ${error.error}`,
+          });
+        }
+      }
+
+      const backend = factory(binaryPath, requestEnv);
+      let accumulatedOutput = '';
+      const emitter = {
+        emit: (event: LlmExecutionEvent) => {
+          if (event.type === 'text') {
+            accumulatedOutput += event.content;
+          }
+          if (event.type === 'status' && event.sessionId) {
+            void this.sessionManager.update(sessionId, { providerSessionId: event.sessionId }).catch(() => undefined);
+          }
+          this.pushEvent(sessionId, event);
+        },
+      };
+
+      let result: LlmExecutionResult;
+      try {
+        result = await backend.execute(backendRequest, emitter, controller.signal);
+        if (!result.output && accumulatedOutput) {
+          result = { ...result, output: accumulatedOutput };
+        }
+      } catch (error) {
+        result = {
+          status: controller.signal.aborted ? 'cancelled' : 'failed',
+          output: accumulatedOutput,
+          error: stringifyError(error),
+          durationMs: Date.now() - Date.parse(startedAt),
+        };
+      }
+
+      await this.sessionManager.update(sessionId, {
+        status: result.status,
+        providerSessionId: result.providerSessionId,
+        result,
+        completedAt: nowIso(),
       });
-      for (const error of injection.errors) {
+      this.running.delete(sessionId);
+      await removeStrictSkillIsolationScope(isolationScope).catch((error) => {
         this.pushEvent(sessionId, {
           type: 'log',
           level: 'warning',
-          message: `Skill injection failed for ${error.skill}: ${error.error}`,
+          message: `Strict skill isolation cleanup failed: ${stringifyError(error)}`,
         });
-      }
+      });
+      this.pushEvent(sessionId, { type: 'result', result });
+      this.closeStream(sessionId);
+    } finally {
+      await removeStrictSkillIsolationScope(isolationScope).catch(() => undefined);
     }
-
-    const backend = factory(binaryPath, request.env);
-    let accumulatedOutput = '';
-    const emitter = {
-      emit: (event: LlmExecutionEvent) => {
-        if (event.type === 'text') {
-          accumulatedOutput += event.content;
-        }
-        if (event.type === 'status' && event.sessionId) {
-          void this.sessionManager.update(sessionId, { providerSessionId: event.sessionId }).catch(() => undefined);
-        }
-        this.pushEvent(sessionId, event);
-      },
-    };
-
-    let result: LlmExecutionResult;
-    try {
-      result = await backend.execute({ ...request, cwd }, emitter, controller.signal);
-      if (!result.output && accumulatedOutput) {
-        result = { ...result, output: accumulatedOutput };
-      }
-    } catch (error) {
-      result = {
-        status: controller.signal.aborted ? 'cancelled' : 'failed',
-        output: accumulatedOutput,
-        error: stringifyError(error),
-        durationMs: Date.now() - Date.parse(startedAt),
-      };
-    }
-
-    await this.sessionManager.update(sessionId, {
-      status: result.status,
-      providerSessionId: result.providerSessionId,
-      result,
-      completedAt: nowIso(),
-    });
-    this.running.delete(sessionId);
-    this.pushEvent(sessionId, { type: 'result', result });
-    this.closeStream(sessionId);
   }
 
   private async failSession(sessionId: string, message: string): Promise<void> {

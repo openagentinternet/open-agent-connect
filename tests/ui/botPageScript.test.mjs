@@ -232,6 +232,319 @@ test('bot page renders provider pickers with icons and only exposes none for fal
   assert.doesNotMatch(fallbackPicker, /data-provider-icon="openclaw"/);
 });
 
+test('bot page loads chat skill options for the selected bot and renders selected chips', async () => {
+  const infoRoot = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-info-content]': infoRoot,
+    },
+    fetch: (url) => {
+      assert.equal(url, '/api/services/skills?from=alice-bot');
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            skills: [
+              { skillName: 'weather.lookup', title: 'Weather Lookup', description: 'Check current weather.' },
+              { skillName: 'orders.create', title: 'Create Order', description: 'Create a new order.' },
+            ],
+          },
+        }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{
+    slug: 'alice-bot',
+    name: 'Alice',
+    allowChatSkills: ['weather.lookup'],
+  }];
+  context.renderInfoTab();
+
+  await context.loadChatSkillOptions('alice-bot');
+
+  assert.match(infoRoot.innerHTML, /Chat Allowed Skills/);
+  assert.match(infoRoot.innerHTML, /data-field="chatSkillSelect"/);
+  assert.match(infoRoot.innerHTML, /value="weather\.lookup"/);
+  assert.match(infoRoot.innerHTML, /Weather Lookup/);
+  assert.match(infoRoot.innerHTML, /value="orders\.create"/);
+  assert.match(infoRoot.innerHTML, /data-chat-skill-chip="weather\.lookup"/);
+});
+
+test('bot page chat skill add and remove controls update selected chip state', () => {
+  const addButton = field();
+  const removeButton = field();
+  addButton.addEventListener = (_event, handler) => {
+    addButton.click = handler;
+  };
+  removeButton.addEventListener = (_event, handler) => {
+    removeButton.click = handler;
+  };
+  removeButton.getAttribute = (name) => (name === 'data-skill' ? 'weather.lookup' : null);
+  const select = field('orders.create');
+  const context = {
+    document: {
+      querySelector: (selector) => (selector === '[data-field="chatSkillSelect"]' ? select : null),
+      querySelectorAll: (selector) => {
+        if (selector === '[data-act="add-chat-skill"]') return [addButton];
+        if (selector === '[data-act="remove-chat-skill"]') return [removeButton];
+        return [];
+      },
+      addEventListener: () => {},
+    },
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{ slug: 'alice-bot', allowChatSkills: ['weather.lookup'] }];
+  context.state.chatAllowedSkillsBySlug['alice-bot'] = ['weather.lookup'];
+  context.renderInfoTab = () => {};
+
+  context.wireChatSkillControls();
+  addButton.click({ preventDefault: () => {} });
+  assert.deepEqual(Array.from(context.state.chatAllowedSkillsBySlug['alice-bot']), ['weather.lookup', 'orders.create']);
+
+  context.wireChatSkillControls();
+  removeButton.click({ preventDefault: () => {} });
+  assert.deepEqual(Array.from(context.state.chatAllowedSkillsBySlug['alice-bot']), ['orders.create']);
+});
+
+test('bot page preserves info form drafts when chat skill controls rerender the tab', () => {
+  const root = { innerHTML: '' };
+  const activeInfoPanel = {
+    getAttribute: (name) => (name === 'data-info-profile-slug' ? 'alice-bot' : null),
+  };
+  const primaryProvider = field('claude-code');
+  primaryProvider.setAttribute('data-provider-touched', '1');
+  const fallbackProvider = field('');
+  fallbackProvider.setAttribute('data-provider-touched', '1');
+  const fields = {
+    '[data-info-content]': root,
+    '[data-info-profile-slug]': activeInfoPanel,
+    '[data-field="name"]': field('Alice Draft'),
+    '[data-field="role"]': field('Draft role'),
+    '[data-field="soul"]': field('Draft soul'),
+    '[data-field="goal"]': field('Draft goal'),
+    '[data-field="primaryProvider"]': primaryProvider,
+    '[data-field="fallbackProvider"]': fallbackProvider,
+  };
+  const context = createBotScriptContext({
+    elements: fields,
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{
+    slug: 'alice-bot',
+    name: 'Alice Saved',
+    role: 'Saved role',
+    soul: 'Saved soul',
+    goal: 'Saved goal',
+    primaryProvider: 'codex',
+    fallbackProvider: 'gemini',
+    allowChatSkills: ['weather.lookup'],
+  }];
+  context.state.runtimes = [
+    {
+      id: 'runtime-claude',
+      provider: 'claude-code',
+      displayName: 'Claude Code',
+      logoPath: '/ui/assets/platforms/claude-code.svg',
+      health: 'healthy',
+    },
+  ];
+
+  context.renderInfoTab();
+
+  assert.match(root.innerHTML, /value="Alice Draft"/);
+  assert.match(root.innerHTML, /Draft role/);
+  assert.match(root.innerHTML, /Draft soul/);
+  assert.match(root.innerHTML, /Draft goal/);
+  assert.match(root.innerHTML, /data-field="primaryProvider" value="claude-code" data-provider-touched="1"/);
+  assert.match(root.innerHTML, /data-field="fallbackProvider" value="" data-provider-touched="1"/);
+  assert.doesNotMatch(root.innerHTML, /Alice Saved/);
+  assert.doesNotMatch(root.innerHTML, /Saved role/);
+});
+
+test('bot page saveInfo sends normalized allowChatSkills only after selected chips change', async () => {
+  const fields = {
+    '[data-save-status]': field(),
+    '[data-act="save-info"]': field(),
+    '[data-field="name"]': field('Alice'),
+    '[data-field="role"]': field('Original role'),
+    '[data-field="soul"]': field('Original soul'),
+    '[data-field="goal"]': field('Original goal'),
+    '[data-field="primaryProvider"]': field('codex'),
+    '[data-field="fallbackProvider"]': field(''),
+  };
+  let requestBody = null;
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'alice-bot',
+              name: 'Alice',
+              role: 'Original role',
+              soul: 'Original soul',
+              goal: 'Original goal',
+              primaryProvider: 'codex',
+              fallbackProvider: null,
+              allowChatSkills: ['orders.create', 'weather.lookup'],
+            },
+          },
+        }),
+      });
+    },
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{ slug: 'alice-bot', name: 'Alice' }];
+  context.state.originalProfile = {
+    slug: 'alice-bot',
+    name: 'Alice',
+    role: 'Original role',
+    soul: 'Original soul',
+    goal: 'Original goal',
+    primaryProvider: 'codex',
+    fallbackProvider: null,
+    allowChatSkills: ['weather.lookup'],
+  };
+  context.state.chatAllowedSkillsBySlug['alice-bot'] = ['orders.create', 'orders.create', ' ', 'weather.lookup'];
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderInfoTab = () => {};
+  context.renderStats = () => {};
+  context.loadStats = () => Promise.resolve();
+  context.showChainSuccessModal = () => {};
+
+  await context.saveInfo();
+
+  assert.deepEqual(requestBody, { allowChatSkills: ['orders.create', 'weather.lookup'] });
+  assert.deepEqual(Array.from(context.state.chatAllowedSkillsBySlug['alice-bot']), ['orders.create', 'weather.lookup']);
+});
+
+test('bot page saveInfo omits allowChatSkills when selected chips are unchanged', async () => {
+  const fields = {
+    '[data-save-status]': field(),
+    '[data-act="save-info"]': field(),
+    '[data-field="name"]': field('Alice Updated'),
+    '[data-field="role"]': field('Original role'),
+    '[data-field="soul"]': field('Original soul'),
+    '[data-field="goal"]': field('Original goal'),
+    '[data-field="primaryProvider"]': field('codex'),
+    '[data-field="fallbackProvider"]': field(''),
+  };
+  let requestBody = null;
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'alice-bot',
+              name: 'Alice Updated',
+              role: 'Original role',
+              soul: 'Original soul',
+              goal: 'Original goal',
+              primaryProvider: 'codex',
+              fallbackProvider: null,
+              allowChatSkills: ['weather.lookup'],
+            },
+          },
+        }),
+      });
+    },
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{ slug: 'alice-bot', name: 'Alice' }];
+  context.state.originalProfile = {
+    slug: 'alice-bot',
+    name: 'Alice',
+    role: 'Original role',
+    soul: 'Original soul',
+    goal: 'Original goal',
+    primaryProvider: 'codex',
+    fallbackProvider: null,
+    allowChatSkills: ['weather.lookup'],
+  };
+  context.state.chatAllowedSkillsBySlug['alice-bot'] = ['weather.lookup'];
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderInfoTab = () => {};
+  context.renderStats = () => {};
+  context.loadStats = () => Promise.resolve();
+  context.showChainSuccessModal = () => {};
+
+  await context.saveInfo();
+
+  assert.deepEqual(requestBody, { name: 'Alice Updated' });
+});
+
+test('bot page create flow keeps the new bot request free of chat skill settings', async () => {
+  const fields = {
+    '[data-field="new-name"]': field('Fanny'),
+    '[data-add-status]': field(),
+    '[data-act="confirm-add"]': field(),
+  };
+  let requestBody = null;
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'fanny',
+              name: 'Fanny',
+            },
+          },
+        }),
+      });
+    },
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.chatAllowedSkillsBySlug.fanny = ['weather.lookup'];
+  context.closeAddModal = () => {};
+  context.loadProfiles = () => Promise.resolve();
+  context.showChainSuccessModal = () => {};
+
+  await context.createMetabot();
+
+  assert.deepEqual(requestBody, { name: 'Fanny', creationSource: 'ui' });
+});
+
 test('bot page runtime modal renders healthy and detected runtimes only', () => {
   const context = createBotScriptContext();
 

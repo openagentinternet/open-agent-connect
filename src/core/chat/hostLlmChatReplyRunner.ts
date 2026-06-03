@@ -1,6 +1,11 @@
 import { createDefaultChatReplyRunner } from './defaultChatReplyRunner';
 import type { LlmRuntimeResolver } from '../llm/llmRuntimeResolver';
 import type { LlmExecutionRequest, LlmSessionRecord } from '../llm/executor';
+import {
+  emptyPrivateChatAllowedSkillScope,
+  type PrivateChatAllowedSkillScope,
+  type PrivateChatAllowedSkillsResolver,
+} from './privateChatAllowedSkills';
 import type {
   ChatReplyRunner,
   ChatReplyRunnerInput,
@@ -45,7 +50,10 @@ function canonicalizeFinalByeLine(value: string): string {
   return lines.join('\n').trim();
 }
 
-function buildChatPrompt(input: ChatReplyRunnerInput): string {
+function buildChatPrompt(
+  input: ChatReplyRunnerInput,
+  allowedSkillScope: PrivateChatAllowedSkillScope = emptyPrivateChatAllowedSkillScope(),
+): string {
   const { conversation, recentMessages, persona, strategy } = input;
   const maxTurns = strategy?.maxTurns ?? 30;
 
@@ -93,6 +101,15 @@ function buildChatPrompt(input: ChatReplyRunnerInput): string {
   ];
   sections.push(exitLines.join('\n'));
 
+  if (allowedSkillScope.skills.length > 0) {
+    sections.push([
+      '## Available Private Chat Skills',
+      'These are the only skills available for this private chat turn.',
+      'Use them only when they help answer or complete the sender request.',
+      ...allowedSkillScope.skills.map((skillName) => `- ${skillName}`),
+    ].join('\n'));
+  }
+
   sections.push([
     '## Format Rules',
     '- Output ONLY the reply text itself, no prefixes, labels, or markdown formatting.',
@@ -139,6 +156,8 @@ async function tryExecute(
   timeoutMs: number,
   pollIntervalMs: number,
   excludeRuntimeIds: Set<string>,
+  allowedSkillScope: PrivateChatAllowedSkillScope,
+  enforceSkillScope: boolean,
 ): Promise<{ result: ChatReplyRunnerResult; bindingId?: string } | null> {
   const resolved = await resolver.resolveRuntime({
     metaBotSlug,
@@ -152,13 +171,22 @@ async function tryExecute(
   }
 
   try {
-    const sessionId = await llmExecutor.execute({
+    const request: LlmExecutionRequest = {
       runtimeId: resolved.runtime.id,
       runtime: resolved.runtime,
       prompt,
       timeout: timeoutMs,
       metaBotSlug,
-    });
+    };
+    if (enforceSkillScope) {
+      request.skillIsolation = 'strict';
+    }
+    if (allowedSkillScope.skills.length > 0) {
+      request.skills = allowedSkillScope.skills;
+      request.skillSourcePaths = allowedSkillScope.skillSourcePaths;
+    }
+
+    const sessionId = await llmExecutor.execute(request);
 
     const deadline = Date.now() + timeoutMs;
     while (Date.now() <= deadline) {
@@ -202,12 +230,17 @@ export function createHostLlmChatReplyRunner(options?: {
   metaBotSlug?: string;
   timeoutMs?: number;
   pollIntervalMs?: number;
+  allowedChatSkillsResolver?: PrivateChatAllowedSkillsResolver;
+  logWarning?: (scope: string, message: string) => void;
 }): ChatReplyRunner {
   const runtimeResolver = options?.runtimeResolver;
   const llmExecutor = options?.llmExecutor;
   const metaBotSlug = options?.metaBotSlug;
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const pollIntervalMs = options?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const allowedChatSkillsResolver = options?.allowedChatSkillsResolver;
+  const enforceSkillScope = Boolean(allowedChatSkillsResolver);
+  const logWarning = options?.logWarning;
   const fallbackRunner = createDefaultChatReplyRunner();
 
   // If no resolver provided, fall back to template-only replies.
@@ -216,12 +249,31 @@ export function createHostLlmChatReplyRunner(options?: {
   }
 
   return async (input: ChatReplyRunnerInput): Promise<ChatReplyRunnerResult> => {
-    const prompt = buildChatPrompt(input);
+    let allowedSkillScope = emptyPrivateChatAllowedSkillScope();
+    if (allowedChatSkillsResolver) {
+      try {
+        allowedSkillScope = await allowedChatSkillsResolver();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logWarning?.('[private chat allowed skills]', message);
+      }
+    }
+    const prompt = buildChatPrompt(input, allowedSkillScope);
     const excludeRuntimeIds = new Set<string>();
 
     // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
     for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
-      const outcome = await tryExecute(runtimeResolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds);
+      const outcome = await tryExecute(
+        runtimeResolver,
+        llmExecutor,
+        metaBotSlug,
+        prompt,
+        timeoutMs,
+        pollIntervalMs,
+        excludeRuntimeIds,
+        allowedSkillScope,
+        enforceSkillScope,
+      );
       if (outcome) {
         // Track lastUsedAt on the binding that was successfully used.
         if (outcome.bindingId) {

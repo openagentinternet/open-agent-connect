@@ -15,7 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},selectedSlug:'',selectedTab:'info',originalProfile:null,_pendingAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'info',originalProfile:null,_pendingAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null};
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -126,14 +126,14 @@ function uniqueProviderRuntimes(){
   availableRuntimes().forEach(function(r){if(!r.provider||seen[r.provider])return;seen[r.provider]=true;rows.push(r)});
   return rows;
 }
-function providerPickerMarkup(field,label,selected,allowNone){
+function providerPickerMarkup(field,label,selected,allowNone,touched){
   var current=selected||'';var rows=uniqueProviderRuntimes();
   var active=rows.find(function(r){return r.provider===current});
   var buttonLabel=active?runtimeLabel(active):(current?'Provider unavailable: '+current:'(none)');
   var buttonIcon=current?providerIconMarkup(current):providerIconMarkup('generic');
   var html='<div class="field provider-field"><label>'+esc(label)+'</label>'+
     '<div class="provider-picker" data-provider-picker="'+esc(field)+'">'+
-    '<input type="hidden" data-field="'+esc(field)+'" value="'+esc(current)+'" />'+
+    '<input type="hidden" data-field="'+esc(field)+'" value="'+esc(current)+'"'+(touched?' data-provider-touched="1"':'')+' />'+
     '<button type="button" class="provider-trigger" data-provider-toggle="'+esc(field)+'">'+buttonIcon+'<span>'+esc(buttonLabel)+'</span><span class="provider-caret">v</span></button>'+
     '<div class="provider-menu" data-provider-menu="'+esc(field)+'" hidden>';
   if(allowNone){
@@ -172,6 +172,133 @@ function wireProviderPickers(){
       var menu=q('[data-provider-menu="'+field+'"]');if(menu)menu.setAttribute('hidden','');
     });
   });
+}
+function normalizeChatSkillList(value){
+  var seen={};var out=[];
+  if(!Array.isArray(value))return out;
+  value.forEach(function(item){
+    var skill=String(item==null?'':item).trim();
+    if(!skill||seen[skill])return;
+    seen[skill]=true;out.push(skill);
+  });
+  return out;
+}
+function sameChatSkillList(left,right){
+  left=normalizeChatSkillList(left);right=normalizeChatSkillList(right);
+  if(left.length!==right.length)return false;
+  for(var i=0;i<left.length;i++){if(left[i]!==right[i])return false}
+  return true;
+}
+function selectedChatSkills(profile){
+  var slug=profile&&profile.slug||state.selectedSlug;
+  if(slug&&Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,slug)){
+    return normalizeChatSkillList(state.chatAllowedSkillsBySlug[slug]);
+  }
+  return normalizeChatSkillList(profile&&profile.allowChatSkills);
+}
+function ensureSelectedChatSkills(profile){
+  var slug=profile&&profile.slug;
+  if(!slug)return [];
+  if(!Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,slug)){
+    state.chatAllowedSkillsBySlug[slug]=normalizeChatSkillList(profile.allowChatSkills);
+  }
+  return selectedChatSkills(profile);
+}
+function loadChatSkillOptions(slug){
+  slug=String(slug||'').trim();
+  if(!slug)return Promise.resolve([]);
+  state.chatSkillOptionsStatusBySlug[slug]='loading';
+  state.chatSkillOptionsErrorBySlug[slug]='';
+  if(slug===state.selectedSlug&&state.selectedTab==='info')renderInfoTab();
+  return api('/api/services/skills?from='+encodeURIComponent(slug)).then(function(r){
+    var data=r&&r.data?r.data:r;
+    var skills=Array.isArray(data&&data.skills)?data.skills:[];
+    var rows=[];var seen={};
+    skills.forEach(function(skill){
+      var skillName=String(skill&&skill.skillName||'').trim();
+      if(!skillName||seen[skillName])return;
+      seen[skillName]=true;
+      rows.push({
+        skillName:skillName,
+        title:String(skill&&skill.title||skillName).trim()||skillName,
+        description:String(skill&&skill.description||'').trim(),
+      });
+    });
+    state.chatSkillOptionsBySlug[slug]=rows;
+    state.chatSkillOptionsStatusBySlug[slug]='loaded';
+    if(slug===state.selectedSlug&&state.selectedTab==='info')renderInfoTab();
+    return rows;
+  }).catch(function(error){
+    state.chatSkillOptionsBySlug[slug]=[];
+    state.chatSkillOptionsStatusBySlug[slug]='error';
+    state.chatSkillOptionsErrorBySlug[slug]=error&&error.message?error.message:String(error||'Failed to load chat skills');
+    if(slug===state.selectedSlug&&state.selectedTab==='info')renderInfoTab();
+    return [];
+  });
+}
+function chatAllowedSkillsMarkup(profile){
+  var slug=profile&&profile.slug||'';
+  var selected=ensureSelectedChatSkills(profile);
+  var options=state.chatSkillOptionsBySlug[slug]||[];
+  var status=state.chatSkillOptionsStatusBySlug[slug]||'';
+  var error=state.chatSkillOptionsErrorBySlug[slug]||'';
+  var chips=selected.length?selected.map(function(skill){
+    return '<span class="skill-chip" data-chat-skill-chip="'+esc(skill)+'"><code>'+esc(skill)+'</code><button type="button" class="icon-btn" data-act="remove-chat-skill" data-skill="'+esc(skill)+'" aria-label="Remove '+esc(skill)+'">x</button></span>';
+  }).join(''):'<div class="provider-empty">No chat skills allowed yet.</div>';
+  var optionHtml='<option value="">Select a skill</option>'+options.map(function(skill){
+    var label=skill.title&&skill.title!==skill.skillName?skill.title+' ('+skill.skillName+')':skill.skillName;
+    return '<option value="'+esc(skill.skillName)+'">'+esc(label)+'</option>';
+  }).join('');
+  var note=status==='loading'?'<div class="save-status saving">Loading chat skills...</div>':(status==='error'?'<div class="save-status error">'+esc(error||'Failed to load chat skills')+'</div>':'');
+  return '<div class="field field-full chat-skills-field"><label>Chat Allowed Skills</label>'+
+    '<div class="chat-skill-chips">'+chips+'</div>'+
+    '<div class="chat-skill-picker"><select data-field="chatSkillSelect"'+(status==='loading'?' disabled':'')+'>'+optionHtml+'</select><button type="button" class="btn btn-sm" data-act="add-chat-skill"'+(status==='loading'?' disabled':'')+'>Add</button></div>'+
+    note+
+  '</div>';
+}
+function wireChatSkillControls(){
+  qq('[data-act="add-chat-skill"]').forEach(function(el){
+    el.addEventListener('click',function(event){
+      event.preventDefault();
+      var profile=selectedProfile();if(!profile)return;
+      var select=q('[data-field="chatSkillSelect"]');var skill=String(select&&select.value||'').trim();
+      if(!skill)return;
+      state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(selectedChatSkills(profile).concat([skill]));
+      renderInfoTab();
+    });
+  });
+  qq('[data-act="remove-chat-skill"]').forEach(function(el){
+    el.addEventListener('click',function(event){
+      event.preventDefault();
+      var profile=selectedProfile();if(!profile)return;
+      var skill=this.getAttribute('data-skill')||'';
+      state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(selectedChatSkills(profile).filter(function(item){return item!==skill}));
+      renderInfoTab();
+    });
+  });
+}
+function infoFieldValue(field,fallback){
+  var el=q('[data-field="'+field+'"]');
+  return el?el.value:fallback;
+}
+function infoProviderTouched(field){
+  var el=q('[data-field="'+field+'"]');
+  return Boolean(el&&el.getAttribute&&el.getAttribute('data-provider-touched')==='1');
+}
+function currentInfoFormDraft(profile){
+  if(!profile||!profile.slug)return null;
+  var panel=q('[data-info-profile-slug]');
+  if(!panel||!panel.getAttribute||panel.getAttribute('data-info-profile-slug')!==profile.slug)return null;
+  return {
+    name:infoFieldValue('name',profile.name||''),
+    role:infoFieldValue('role',profile.role||''),
+    soul:infoFieldValue('soul',profile.soul||''),
+    goal:infoFieldValue('goal',profile.goal||''),
+    primaryProvider:infoFieldValue('primaryProvider',profile.primaryProvider||''),
+    primaryProviderTouched:infoProviderTouched('primaryProvider'),
+    fallbackProvider:infoFieldValue('fallbackProvider',profile.fallbackProvider||''),
+    fallbackProviderTouched:infoProviderTouched('fallbackProvider'),
+  };
 }
 
 function renderStats(){
@@ -240,13 +367,22 @@ function renderCurrentTab(){
   switchTab(state.selectedTab||'info',true);
 }
 
-function renderInfoTab(){
+function renderInfoTab(options){
+  options=options||{};
   var profile=selectedProfile();var root=q('[data-info-content]');if(!root)return;
   if(!profile){root.innerHTML='';return}
   state.originalProfile=profile;
+  var draft=options.preserveDraft===false?null:currentInfoFormDraft(profile);
+  var nameValue=draft?draft.name:(profile.name||'');
+  var roleValue=draft?draft.role:(profile.role||'');
+  var soulValue=draft?draft.soul:(profile.soul||'');
+  var goalValue=draft?draft.goal:(profile.goal||'');
+  var primaryProviderValue=draft?draft.primaryProvider:(profile.primaryProvider||'');
+  var fallbackProviderValue=draft?draft.fallbackProvider:(profile.fallbackProvider||'');
   var avatar=state._pendingAvatar!==undefined?state._pendingAvatar:profile.avatarDataUrl;
-  root.innerHTML='<div class="info-avatar-section">'+
-    '<div class="info-avatar-preview" data-avatar-preview>'+avatarMarkup({name:profile.name,avatarDataUrl:avatar},true)+'</div>'+
+  root.innerHTML='<div class="info-edit-panel" data-info-profile-slug="'+esc(profile.slug)+'">'+
+    '<div class="info-avatar-section">'+
+    '<div class="info-avatar-preview" data-avatar-preview>'+avatarMarkup({name:nameValue,avatarDataUrl:avatar},true)+'</div>'+
     '<div class="info-avatar-actions">'+
       '<button class="btn btn-sm" data-act="upload-avatar">Upload</button>'+
       '<button class="btn btn-sm btn-danger" data-act="remove-avatar"'+(avatar?'':' hidden')+'>Remove</button>'+
@@ -255,19 +391,22 @@ function renderInfoTab(){
     '</div></div>'+
     '<div class="info-id-row"><code>'+esc(profile.globalMetaId||'-')+'</code><button class="icon-btn" data-act="copy-profile-gmid" title="Copy GlobalMetaID" aria-label="Copy GlobalMetaID">⧉</button></div>'+
     '<div class="info-form-grid">'+
-      '<div class="field"><label for="bot-name">Name</label><input id="bot-name" data-field="name" value="'+esc(profile.name||'')+'" /></div>'+
-      providerPickerMarkup('primaryProvider','Primary Provider',profile.primaryProvider||'',false)+
-      '<div class="field field-full"><label for="bot-role">Role</label><textarea id="bot-role" data-field="role">'+esc(profile.role||'')+'</textarea></div>'+
-      '<div class="field field-full"><label for="bot-soul">Soul</label><textarea id="bot-soul" data-field="soul">'+esc(profile.soul||'')+'</textarea></div>'+
-      '<div class="field field-full"><label for="bot-goal">Goal</label><textarea id="bot-goal" data-field="goal">'+esc(profile.goal||'')+'</textarea></div>'+
-      providerPickerMarkup('fallbackProvider','Fallback Provider',profile.fallbackProvider||'',true)+
+      '<div class="field"><label for="bot-name">Name</label><input id="bot-name" data-field="name" value="'+esc(nameValue)+'" /></div>'+
+      providerPickerMarkup('primaryProvider','Primary Provider',primaryProviderValue,false,draft&&draft.primaryProviderTouched)+
+      '<div class="field field-full"><label for="bot-role">Role</label><textarea id="bot-role" data-field="role">'+esc(roleValue)+'</textarea></div>'+
+      '<div class="field field-full"><label for="bot-soul">Soul</label><textarea id="bot-soul" data-field="soul">'+esc(soulValue)+'</textarea></div>'+
+      '<div class="field field-full"><label for="bot-goal">Goal</label><textarea id="bot-goal" data-field="goal">'+esc(goalValue)+'</textarea></div>'+
+      providerPickerMarkup('fallbackProvider','Fallback Provider',fallbackProviderValue,true,draft&&draft.fallbackProviderTouched)+
+      chatAllowedSkillsMarkup(profile)+
     '</div>'+
-    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-info">Save Changes</button><span class="save-status" data-save-status></span></div>';
+    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-info">Save Changes</button><span class="save-status" data-save-status></span></div></div>';
   var input=q('[data-avatar-input]');
   var upload=q('[data-act="upload-avatar"]');if(upload&&input)upload.addEventListener('click',function(){input.click()});
   var remove=q('[data-act="remove-avatar"]');if(remove)remove.addEventListener('click',function(){state._pendingAvatar='';renderAvatarPreview('');this.hidden=true});
   if(input)input.addEventListener('change',function(){var file=this.files&&this.files[0];if(file)handleAvatarUpload(file)});
   wireProviderPickers();
+  wireChatSkillControls();
+  if(!state.chatSkillOptionsStatusBySlug[profile.slug])loadChatSkillOptions(profile.slug);
   var copy=q('[data-act="copy-profile-gmid"]');if(copy)copy.addEventListener('click',function(){copyToClipboard(profile.globalMetaId||'')});
   var save=q('[data-act="save-info"]');if(save)save.addEventListener('click',saveInfo);
 }
@@ -592,18 +731,21 @@ function saveInfo(){
   var primaryEl=q('[data-field="primaryProvider"]');var fallbackEl=q('[data-field="fallbackProvider"]');
   if(primaryEl&&primaryEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'primaryProvider',primaryEl.value||null,profile.primaryProvider||null);
   if(fallbackEl&&fallbackEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'fallbackProvider',fallbackEl.value||null,profile.fallbackProvider||null);
+  var nextChatSkills=selectedChatSkills(profile);
+  if(!sameChatSkillList(nextChatSkills,profile.allowChatSkills||[]))payload.allowChatSkills=nextChatSkills;
   if(state._pendingAvatar!==undefined)changedValue(payload,'avatarDataUrl',state._pendingAvatar,profile.avatarDataUrl||'');
   if(!Object.keys(payload).length){if(status){status.textContent='No changes';status.className='save-status'}return}
   if(status){status.textContent='Saving...';status.className='save-status saving'}
   if(btn)btn.disabled=true;
   return api('/api/bot/profiles/'+encodeURIComponent(state.selectedSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
     var updated=r.data.profile;
+    state.chatAllowedSkillsBySlug[updated.slug]=normalizeChatSkillList(updated.allowChatSkills!==undefined?updated.allowChatSkills:(payload.allowChatSkills!==undefined?payload.allowChatSkills:profile.allowChatSkills));
     state.profiles=state.profiles.map(function(p){return p.slug===updated.slug?updated:p});
     state.originalProfile=updated;
     state._pendingAvatar=undefined;
     renderMetabotList();
     renderDetailHeader(updated);
-    renderInfoTab();
+    renderInfoTab({preserveDraft:false});
     renderStats();
     status=q('[data-save-status]');if(status){status.textContent='On-chain update confirmed.';status.className='save-status success'}
     showChainSuccessModal({
@@ -680,7 +822,7 @@ function switchTab(tab,silent){
 }
 
 function loadStats(){return api('/api/bot/stats').then(function(r){state.stats=r.data||{};renderStats()}).catch(function(){renderStats()})}
-function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];if(!state.selectedSlug&&state.profiles.length)state.selectedSlug=state.profiles[0].slug;if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))state.selectedSlug=state.profiles[0]&&state.profiles[0].slug||'';state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
+function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];state.profiles.forEach(function(profile){if(profile&&profile.slug&&!Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,profile.slug))state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(profile.allowChatSkills)});if(!state.selectedSlug&&state.profiles.length)state.selectedSlug=state.profiles[0].slug;if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))state.selectedSlug=state.profiles[0]&&state.profiles[0].slug||'';state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
 function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()}).catch(function(){state.runtimes=[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()})}
 function loadSessions(slug){var activeSlug=slug||state.selectedSlug;if(!activeSlug){state.sessions=[];renderHistoryTab();renderStats();return Promise.resolve()}return api('/api/bot/sessions?slug='+encodeURIComponent(activeSlug)+'&limit=50').then(function(r){if(activeSlug!==state.selectedSlug)return;state.sessions=(r.data&&r.data.sessions)||[];renderHistoryTab();renderStats()}).catch(function(){if(activeSlug!==state.selectedSlug)return;state.sessions=[];renderHistoryTab();renderStats()})}
 function loadSelectedProfileConfig(force){

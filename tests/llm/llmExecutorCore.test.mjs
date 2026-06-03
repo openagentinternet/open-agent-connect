@@ -58,6 +58,15 @@ async function assertSameRealpath(actualPath, expectedPath) {
   assert.equal(await fs.realpath(actualPath), await fs.realpath(expectedPath));
 }
 
+async function pathExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function fakeAcpServerSource() {
   return `#!/usr/bin/env node
 const fs = require('node:fs');
@@ -646,6 +655,147 @@ test('LlmExecutor starts a session, streams events, injects skills, and persists
 
   const injected = await fs.readFile(path.join(cwd, '.agent_context', 'skills', 'metabot-test-skill', 'SKILL.md'), 'utf8');
   assert.match(injected, /Test Skill/);
+});
+
+test('LlmExecutor strict skill isolation exposes only requested skills to the backend', async () => {
+  const base = await createTempDir();
+  const sourceRoot = path.join(base, 'source-skills');
+  const originalCwd = path.join(base, 'work');
+  const originalHome = path.join(base, 'home');
+  const originalCodexHome = path.join(originalHome, '.codex');
+  const originalXdgConfigHome = path.join(base, 'xdg-config');
+  const allowedSource = path.join(sourceRoot, 'metabot-weather');
+  await fs.mkdir(allowedSource, { recursive: true });
+  await fs.writeFile(path.join(allowedSource, 'SKILL.md'), '# Weather\n', 'utf8');
+  await fs.mkdir(path.join(originalCwd, '.codex', 'skills', 'metabot-secret'), { recursive: true });
+  await fs.writeFile(path.join(originalCwd, '.codex', 'skills', 'metabot-secret', 'SKILL.md'), '# Secret\n', 'utf8');
+  await fs.mkdir(path.join(originalCodexHome, 'skills', 'metabot-secret'), { recursive: true });
+  await fs.writeFile(path.join(originalCodexHome, 'skills', 'metabot-secret', 'SKILL.md'), '# Global Secret\n', 'utf8');
+  await fs.mkdir(path.join(originalXdgConfigHome, 'opencode', 'skills', 'metabot-secret'), { recursive: true });
+  await fs.writeFile(path.join(originalXdgConfigHome, 'opencode', 'skills', 'metabot-secret', 'SKILL.md'), '# XDG Secret\n', 'utf8');
+
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: sourceRoot,
+    systemHomeDir: originalHome,
+    env: {
+      HOME: originalHome,
+      CODEX_HOME: originalCodexHome,
+      XDG_CONFIG_HOME: originalXdgConfigHome,
+      PWD: originalCwd,
+    },
+    backends: {
+      codex: () => ({
+        provider: 'codex',
+        async execute(request) {
+          assert.notEqual(path.resolve(request.cwd), path.resolve(originalCwd));
+          assert.notEqual(path.resolve(request.env.HOME), path.resolve(originalHome));
+          assert.notEqual(path.resolve(request.env.CODEX_HOME), path.resolve(originalCodexHome));
+          assert.notEqual(path.resolve(request.env.XDG_CONFIG_HOME), path.resolve(originalXdgConfigHome));
+          assert.equal(path.resolve(request.env.PWD), path.resolve(request.cwd));
+          assert.equal(
+            await pathExists(path.join(request.cwd, '.codex', 'skills', 'metabot-weather', 'SKILL.md')),
+            true,
+          );
+          assert.equal(
+            await pathExists(path.join(request.cwd, '.codex', 'skills', 'metabot-secret', 'SKILL.md')),
+            false,
+          );
+          assert.equal(
+            await pathExists(path.join(request.env.CODEX_HOME, 'skills', 'metabot-secret', 'SKILL.md')),
+            false,
+          );
+          assert.equal(
+            await pathExists(path.join(request.env.XDG_CONFIG_HOME, 'opencode', 'skills', 'metabot-secret', 'SKILL.md')),
+            false,
+          );
+          return {
+            status: 'completed',
+            output: 'isolated',
+            durationMs: 1,
+          };
+        },
+      }),
+    },
+  });
+
+  const sessionId = await executor.execute({
+    runtimeId: 'runtime-codex',
+    runtime: { ...runtime, provider: 'codex', binaryPath: '/bin/codex' },
+    prompt: 'Use weather only',
+    cwd: originalCwd,
+    skills: ['metabot-weather'],
+    skillSourcePaths: {
+      'metabot-weather': allowedSource,
+    },
+    skillIsolation: 'strict',
+  });
+
+  await collectEvents(executor.streamEvents(sessionId));
+  const session = await executor.getSession(sessionId);
+  assert.equal(session.result.status, 'completed');
+  assert.equal(session.result.output, 'isolated');
+});
+
+test('LlmExecutor strict skill isolation with no requested skills exposes no original skill roots', async () => {
+  const base = await createTempDir();
+  const originalCwd = path.join(base, 'work');
+  const originalHome = path.join(base, 'home');
+  const originalCodexHome = path.join(originalHome, '.codex');
+  await fs.mkdir(path.join(originalCwd, '.codex', 'skills', 'metabot-secret'), { recursive: true });
+  await fs.writeFile(path.join(originalCwd, '.codex', 'skills', 'metabot-secret', 'SKILL.md'), '# Secret\n', 'utf8');
+  await fs.mkdir(path.join(originalCodexHome, 'skills', 'metabot-secret'), { recursive: true });
+  await fs.writeFile(path.join(originalCodexHome, 'skills', 'metabot-secret', 'SKILL.md'), '# Global Secret\n', 'utf8');
+
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: path.join(base, 'source-skills'),
+    systemHomeDir: originalHome,
+    env: {
+      HOME: originalHome,
+      CODEX_HOME: originalCodexHome,
+      PWD: originalCwd,
+    },
+    backends: {
+      codex: () => ({
+        provider: 'codex',
+        async execute(request) {
+          assert.notEqual(path.resolve(request.cwd), path.resolve(originalCwd));
+          assert.notEqual(path.resolve(request.env.HOME), path.resolve(originalHome));
+          assert.notEqual(path.resolve(request.env.CODEX_HOME), path.resolve(originalCodexHome));
+          assert.equal(path.resolve(request.env.PWD), path.resolve(request.cwd));
+          assert.equal(
+            await pathExists(path.join(request.cwd, '.codex', 'skills', 'metabot-secret', 'SKILL.md')),
+            false,
+          );
+          assert.equal(
+            await pathExists(path.join(request.env.CODEX_HOME, 'skills', 'metabot-secret', 'SKILL.md')),
+            false,
+          );
+          return {
+            status: 'completed',
+            output: 'isolated-empty',
+            durationMs: 1,
+          };
+        },
+      }),
+    },
+  });
+
+  const sessionId = await executor.execute({
+    runtimeId: 'runtime-codex',
+    runtime: { ...runtime, provider: 'codex', binaryPath: '/bin/codex' },
+    prompt: 'No skills are configured',
+    cwd: originalCwd,
+    skillIsolation: 'strict',
+  });
+
+  await collectEvents(executor.streamEvents(sessionId));
+  const session = await executor.getSession(sessionId);
+  assert.equal(session.result.status, 'completed');
+  assert.equal(session.result.output, 'isolated-empty');
 });
 
 test('LlmExecutor preserves the provided system prompt and single-item skills array', async () => {

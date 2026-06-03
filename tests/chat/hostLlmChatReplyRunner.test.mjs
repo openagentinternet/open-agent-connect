@@ -254,6 +254,123 @@ test('host LLM chat runner executes through the injected LLM executor', async ()
   assert.deepEqual(resolverCalls.markBindingUsed, ['binding-1']);
 });
 
+test('host LLM chat runner injects only resolved allowed chat skills', async () => {
+  const runtime = {
+    id: 'llm-runtime-1',
+    provider: 'codex',
+    displayName: 'Codex',
+    binaryPath: '/bin/codex',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  const executorCalls = [];
+  const llmExecutor = {
+    async execute(request) {
+      executorCalls.push(request);
+      return 'llm-session-allowed';
+    },
+    async getSession(sessionId) {
+      return {
+        sessionId,
+        status: 'completed',
+        result: {
+          status: 'completed',
+          output: 'The weather skill is available for this turn.',
+          durationMs: 12,
+        },
+      };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime),
+    llmExecutor,
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+    allowedChatSkillsResolver: async () => ({
+      skills: ['metabot-weather'],
+      skillSourcePaths: { 'metabot-weather': '/tmp/metabot-weather' },
+      skippedSkills: [],
+      warning: null,
+    }),
+  });
+
+  const result = await runner(makeInput());
+
+  assert.deepEqual(result, {
+    state: 'reply',
+    content: 'The weather skill is available for this turn.',
+  });
+  assert.equal(executorCalls.length, 1);
+  assert.deepEqual(executorCalls[0].skills, ['metabot-weather']);
+  assert.deepEqual(executorCalls[0].skillSourcePaths, { 'metabot-weather': '/tmp/metabot-weather' });
+  assert.equal(executorCalls[0].skillIsolation, 'strict');
+  assert.match(executorCalls[0].prompt, /only skills available for this private chat turn/);
+  assert.match(executorCalls[0].prompt, /metabot-weather/);
+});
+
+test('host LLM chat runner does not inject skills when resolver returns none', async () => {
+  const runtime = {
+    id: 'llm-runtime-1',
+    provider: 'codex',
+    displayName: 'Codex',
+    binaryPath: '/bin/codex',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  const executorCalls = [];
+  const llmExecutor = {
+    async execute(request) {
+      executorCalls.push(request);
+      return 'llm-session-empty-scope';
+    },
+    async getSession(sessionId) {
+      return {
+        sessionId,
+        status: 'completed',
+        result: {
+          status: 'completed',
+          output: 'No skills were needed.',
+          durationMs: 12,
+        },
+      };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime),
+    llmExecutor,
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+    allowedChatSkillsResolver: async () => ({
+      skills: [],
+      skillSourcePaths: {},
+      skippedSkills: ['metabot-missing'],
+      warning: 'Configured chat skills are not currently available: metabot-missing',
+    }),
+  });
+
+  const result = await runner(makeInput());
+
+  assert.deepEqual(result, {
+    state: 'reply',
+    content: 'No skills were needed.',
+  });
+  assert.equal(executorCalls.length, 1);
+  assert.equal(Object.hasOwn(executorCalls[0], 'skills'), false);
+  assert.equal(Object.hasOwn(executorCalls[0], 'skillSourcePaths'), false);
+  assert.equal(executorCalls[0].skillIsolation, 'strict');
+  assert.doesNotMatch(executorCalls[0].prompt, /metabot-missing/);
+});
+
 test('host LLM chat runner falls back when the injected executor fails', async () => {
   const runtime = {
     id: 'llm-runtime-1',
