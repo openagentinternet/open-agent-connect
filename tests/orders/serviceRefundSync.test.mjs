@@ -350,6 +350,49 @@ test('applyServiceRefundRequestsToState blocks existing seller order for unsuppo
   assert.equal(buildSellerReceivedRefundItems(result.nextState)[0].manualActionRequired, false);
 });
 
+test('applyServiceRefundRequestsToState converges stale seller metadata for already applied unsupported request', () => {
+  const result = applyServiceRefundRequestsToState({
+    state: createState({
+      sellerOrders: [
+        createSellerOrder({
+          state: 'refund_pending',
+          refundRequestPinId: 'refund-request-pin-1',
+          settlementKind: 'native',
+          paymentCurrency: 'SPACE',
+          paymentChain: 'mvc',
+          mrc20Ticker: null,
+          mrc20Id: null,
+          refundBlockingReason: null,
+        }),
+      ],
+    }),
+    requests: [
+      createRequest({
+        payload: {
+          settlementKind: 'mrc20',
+          mrc20Ticker: 'TEST',
+          mrc20Id: 'mrc20-test-id',
+          paymentAsset: 'OPCAT',
+          paymentChain: 'opcat',
+        },
+      }),
+    ],
+    identity,
+    nowMs: NOW,
+  });
+
+  const order = result.nextState.sellerOrders[0];
+  assert.equal(result.applied.sellerRequests, 1);
+  assert.equal(order.state, 'refund_pending');
+  assert.equal(order.settlementKind, 'mrc20');
+  assert.equal(order.paymentCurrency, 'OPCAT');
+  assert.equal(order.paymentChain, 'opcat');
+  assert.equal(order.mrc20Ticker, 'TEST');
+  assert.equal(order.mrc20Id, 'mrc20-test-id');
+  assert.equal(order.refundBlockingReason, 'refund_settlement_unsupported');
+  assert.equal(buildSellerReceivedRefundItems(result.nextState)[0].manualActionRequired, false);
+});
+
 test('applyServiceRefundRequestsToState does not match ambiguous local records', () => {
   const result = applyServiceRefundRequestsToState({
     state: createState({

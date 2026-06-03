@@ -348,9 +348,10 @@ function patchSellerRequestOrder(
 ): { order: SellerOrderRecord; changed: boolean } {
   const alreadyApplied = normalizeText(order.refundRequestPinId) === request.pinId;
   const blockingReason = requestBlockingReason(request);
+  const failureReason = normalizeText(order.failureReason) || request.reason || order.failureReason;
   const patch = {
     refundRequestPinId: request.pinId || order.refundRequestPinId,
-    failureReason: normalizeText(order.failureReason) || request.reason || order.failureReason,
+    failureReason,
     paymentCurrency: request.paymentAsset || order.paymentCurrency,
     paymentChain: request.paymentChain || order.paymentChain,
     settlementKind: request.settlementKind || order.settlementKind,
@@ -360,6 +361,17 @@ function patchSellerRequestOrder(
     latestEvent: 'refund_request_discovered',
     updatedAt: nowMs,
   };
+  const changesPatchFields = (
+    normalizeText(order.refundRequestPinId) !== normalizeText(patch.refundRequestPinId)
+    || normalizeText(order.failureReason) !== normalizeText(patch.failureReason)
+    || normalizeText(order.paymentCurrency) !== normalizeText(patch.paymentCurrency)
+    || normalizeText(order.paymentChain) !== normalizeText(patch.paymentChain)
+    || normalizeText(order.settlementKind) !== normalizeText(patch.settlementKind)
+    || normalizeText(order.mrc20Ticker) !== normalizeText(patch.mrc20Ticker)
+    || normalizeText(order.mrc20Id) !== normalizeText(patch.mrc20Id)
+    || normalizeText(order.refundBlockingReason) !== normalizeText(patch.refundBlockingReason)
+    || normalizeText(order.latestEvent) !== normalizeText(patch.latestEvent)
+  );
 
   if (order.state === 'refunded' || order.state === 'ended') {
     return {
@@ -369,7 +381,7 @@ function patchSellerRequestOrder(
         state: order.state,
         createdAt: order.createdAt,
       }),
-      changed: !alreadyApplied,
+      changed: !alreadyApplied || changesPatchFields,
     };
   }
 
@@ -380,7 +392,7 @@ function patchSellerRequestOrder(
   });
   return {
     order: next,
-    changed: !alreadyApplied || order.state !== 'refund_pending',
+    changed: !alreadyApplied || order.state !== 'refund_pending' || changesPatchFields,
   };
 }
 
