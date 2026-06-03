@@ -2623,8 +2623,13 @@ test('GET /ui/publish serves the primary-runtime-aware publish console', async (
   assert.match(html, /data-provider-skill-add/);
   assert.match(html, /data-provider-skill-chips/);
   assert.doesNotMatch(html, /skill-checkbox-list/);
-  assert.match(html, /name="paymentTiming"[^>]+value="free"/);
+  assert.match(html, /name="paymentTiming"[^>]+value="free"[^>]+checked/);
   assert.match(html, /name="paymentTiming"[^>]+value="prepaid"/);
+  assert.doesNotMatch(html, /name="paymentTiming"[^>]+value="prepaid"[^>]+checked/);
+  assert.match(html, /data-payment-timing-field/);
+  assert.match(html, /data-price-currency-row[^>]+hidden/);
+  assert.match(html, /data-currency-select/);
+  assert.match(html, /data-io-type-row/);
   assert.match(html, /name="executionReminder"/);
   assert.match(html, /\/api\/services\/skills\?from=/);
   assert.match(html, /name="inputType"/);

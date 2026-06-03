@@ -170,13 +170,28 @@ test('publish and my-services pages expose skill-service v1.1 service controls',
   assert.match(publishHtml, /data-provider-skill-select/);
   assert.match(publishHtml, /data-provider-skill-add/);
   assert.match(publishHtml, /data-provider-skill-chips/);
-  assert.match(publishHtml, /name="paymentTiming"[^>]+value="free"/);
+  assert.ok(
+    publishHtml.indexOf('data-metabot-select') < publishHtml.indexOf('data-provider-skill-picker'),
+    'Provider Skills should render after Provider MetaBot',
+  );
+  assert.ok(
+    publishHtml.indexOf('data-display-name-input') < publishHtml.indexOf('data-provider-skill-picker'),
+    'Provider Skills should render after Display Name',
+  );
+  assert.match(publishHtml, /name="paymentTiming"[^>]+value="free"[^>]+checked/);
   assert.match(publishHtml, /name="paymentTiming"[^>]+value="prepaid"/);
+  assert.doesNotMatch(publishHtml, /name="paymentTiming"[^>]+value="prepaid"[^>]+checked/);
+  assert.match(publishHtml, /data-payment-timing-field/);
+  assert.match(publishHtml, /data-price-currency-row[^>]+hidden/);
+  assert.match(publishHtml, /data-currency-select/);
+  assert.match(publishHtml, /data-io-type-row/);
   assert.match(publishHtml, /name="executionReminder"/);
   assert.match(publishScript, /providerSkills/);
   assert.match(publishScript, /renderSkillPicker/);
   assert.match(publishScript, /paymentTiming/);
   assert.match(publishScript, /settlementKind/);
+  assert.doesNotMatch(publishScript, /providerSkillSelectionInitialized/);
+  assert.doesNotMatch(publishScript, /model\.skills\[0\]/);
   assert.doesNotMatch(publishHtml, /skill-checkbox-list/);
   assert.doesNotMatch(publishScript, /input\[name="providerSkills"\]:checked/);
 

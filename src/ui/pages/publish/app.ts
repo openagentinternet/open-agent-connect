@@ -19,6 +19,18 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
 
           <form class="publish-form" data-publish-form>
             <div class="publish-form-grid">
+              <label class="publish-field">
+                <span>Provider MetaBot</span>
+                <select name="from" data-metabot-select required disabled>
+                  <option value="">Loading MetaBots...</option>
+                </select>
+              </label>
+
+              <label class="publish-field">
+                <span>Display Name</span>
+                <input name="displayName" data-display-name-input placeholder="Weather Oracle" required />
+              </label>
+
               <div class="publish-field publish-field-wide">
                 <span>Provider Skills</span>
                 <div class="skill-picker" data-provider-skill-picker aria-label="Provider skills">
@@ -35,18 +47,6 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
               </div>
 
               <label class="publish-field">
-                <span>Provider MetaBot</span>
-                <select name="from" data-metabot-select required disabled>
-                  <option value="">Loading MetaBots...</option>
-                </select>
-              </label>
-
-              <label class="publish-field">
-                <span>Display Name</span>
-                <input name="displayName" data-display-name-input placeholder="Weather Oracle" required />
-              </label>
-
-              <label class="publish-field">
                 <span>Service Name</span>
                 <input name="serviceName" data-service-name-input placeholder="weather-oracle-service" required />
               </label>
@@ -61,44 +61,48 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
                 <textarea name="executionReminder" rows="3" placeholder="Optional reminder inserted into the provider runtime before execution."></textarea>
               </label>
 
-              <div class="publish-field">
+              <div class="publish-field publish-field-wide" data-payment-timing-field>
                 <span>Payment Timing</span>
                 <div class="segmented-control" data-payment-timing>
-                  <label><input type="radio" name="paymentTiming" value="free" /> Free</label>
-                  <label><input type="radio" name="paymentTiming" value="prepaid" checked /> Prepaid</label>
+                  <label><input type="radio" name="paymentTiming" value="free" checked /> Free</label>
+                  <label><input type="radio" name="paymentTiming" value="prepaid" /> Prepaid</label>
                 </div>
               </div>
 
-              <label class="publish-field">
-                <span>Price</span>
-                <input name="price" data-price-input inputmode="decimal" placeholder="0.00001" required />
-              </label>
+              <div class="publish-inline-row publish-field-wide" data-price-currency-row hidden>
+                <label class="publish-field" data-price-field>
+                  <span>Price</span>
+                  <input name="price" data-price-input inputmode="decimal" placeholder="0.00001" required />
+                </label>
 
-              <label class="publish-field">
-                <span>Settlement Currency</span>
-                <select name="currency" required>
-                  <option value="BTC" selected>BTC</option>
-                  <option value="SPACE">SPACE</option>
-                  <option value="DOGE">DOGE</option>
-                  <option value="BTC-OPCAT">BTC-OPCAT</option>
-                </select>
-              </label>
+                <label class="publish-field" data-currency-field>
+                  <span>Settlement Currency</span>
+                  <select name="currency" data-currency-select required>
+                    <option value="BTC" selected>BTC</option>
+                    <option value="SPACE">SPACE</option>
+                    <option value="DOGE">DOGE</option>
+                    <option value="BTC-OPCAT">BTC-OPCAT</option>
+                  </select>
+                </label>
+              </div>
 
-              <label class="publish-field">
-                <span>Input Type</span>
-                <input name="inputType" value="text" readonly aria-readonly="true" />
-              </label>
+              <div class="publish-inline-row publish-field-wide" data-io-type-row>
+                <label class="publish-field">
+                  <span>Input Type</span>
+                  <input name="inputType" value="text" readonly aria-readonly="true" />
+                </label>
 
-              <label class="publish-field">
-                <span>Output Type</span>
-                <select name="outputType" required>
-                  <option value="text">text</option>
-                  <option value="image">image</option>
-                  <option value="video">video</option>
-                  <option value="audio">audio</option>
-                  <option value="other">other</option>
-                </select>
-              </label>
+                <label class="publish-field">
+                  <span>Output Type</span>
+                  <select name="outputType" required>
+                    <option value="text">text</option>
+                    <option value="image">image</option>
+                    <option value="video">video</option>
+                    <option value="audio">audio</option>
+                    <option value="other">other</option>
+                  </select>
+                </label>
+              </div>
 
               <div class="publish-field publish-field-wide publish-icon-field">
                 <span>Service Cover</span>
@@ -189,7 +193,9 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     runtimeCard: document.querySelector('[data-publish-runtime-card]'),
     displayNameInput: document.querySelector('[data-display-name-input]'),
     serviceNameInput: document.querySelector('[data-service-name-input]'),
+    priceCurrencyRow: document.querySelector('[data-price-currency-row]'),
     priceInput: document.querySelector('[data-price-input]'),
+    currencySelect: document.querySelector('[data-currency-select]'),
     iconInput: document.querySelector('[data-service-icon-input]'),
     iconTrigger: document.querySelector('[data-service-icon-trigger]'),
     iconRemove: document.querySelector('[data-service-icon-remove]'),
@@ -217,7 +223,6 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     serviceIconDataUrl: '',
     selectedProviderSkillValues: [],
     candidateProviderSkillValue: '',
-    providerSkillSelectionInitialized: false,
   };
   let currentModel = null;
   let busy = false;
@@ -334,7 +339,7 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     return skills && skills.length ? skills[0] : null;
   };
   const selectedPaymentTiming = () => {
-    if (!elements.form) return 'prepaid';
+    if (!elements.form) return 'free';
     const formData = new FormData(elements.form);
     const timing = normalizeText(formData.get('paymentTiming')).toLowerCase();
     return timing === 'free' ? 'free' : 'prepaid';
@@ -394,10 +399,7 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     if (!elements.skillSelect || !elements.skillAdd || !elements.skillChips) return;
     if (!model || !Array.isArray(model.skills)) return;
     const availableValues = new Set(model.skills.map((skill) => skill.value));
-    const previous = selectedSkillValues().filter((value) => availableValues.has(value));
-    const selectedValues = previous.length
-      ? previous
-      : (!state.providerSkillSelectionInitialized && model.skills[0] ? [model.skills[0].value] : []);
+    const selectedValues = selectedSkillValues().filter((value) => availableValues.has(value));
     const selected = new Set(selectedValues);
     state.selectedProviderSkillValues = selectedValues;
     const disabled = busy || !model.availability.canPublish || model.skills.length === 0;
@@ -408,7 +410,6 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
       elements.skillChips.innerHTML = '<p class="field-hint">No primary runtime skills available.</p>';
       return;
     }
-    state.providerSkillSelectionInitialized = true;
 
     const addableSkills = model.skills.filter((skill) => !selected.has(skill.value));
     if (!addableSkills.some((skill) => skill.value === state.candidateProviderSkillValue)) {
@@ -438,7 +439,9 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     if (!elements.skillSummary || !currentModel) return;
     const skills = selectedSkills() || [];
     if (!skills.length) {
-      elements.skillSummary.textContent = currentModel.availability.message;
+      elements.skillSummary.textContent = currentModel.availability && currentModel.availability.canPublish
+        ? 'No skill selected.'
+        : currentModel.availability.message;
       return;
     }
     if (skills.length === 1) {
@@ -486,6 +489,9 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
   const syncPaymentTimingFields = () => {
     if (!elements.priceInput) return;
     const isFree = selectedPaymentTiming() === 'free';
+    if (elements.priceCurrencyRow) {
+      elements.priceCurrencyRow.hidden = isFree;
+    }
     if (isFree) {
       elements.priceInput.value = '0';
     }
@@ -741,7 +747,6 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
       displayNameDirty = false;
       state.selectedProviderSkillValues = [];
       state.candidateProviderSkillValue = '';
-      state.providerSkillSelectionInitialized = false;
       if (elements.displayNameInput) elements.displayNameInput.value = '';
       if (elements.serviceNameInput) elements.serviceNameInput.value = '';
       void loadPublishSkills(state.selectedMetaBotSlug);
