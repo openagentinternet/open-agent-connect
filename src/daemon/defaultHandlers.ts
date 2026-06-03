@@ -194,7 +194,12 @@ import {
   searchOnlineServiceCacheServices,
 } from '../core/discovery/onlineServiceCache';
 import { readOnlineMetaBotsFromSocketPresence } from '../core/discovery/socketPresenceDirectory';
-import { createSessionStateStore, type A2ATranscriptItemRecord } from '../core/a2a/sessionStateStore';
+import {
+  createSessionStateStore,
+  type A2APublicStatusSnapshot,
+  type A2ASessionStoreState,
+  type A2ATranscriptItemRecord,
+} from '../core/a2a/sessionStateStore';
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/sessionEngine';
@@ -5362,6 +5367,53 @@ export async function rebuildTraceArtifactsFromSessionState(input: {
     trace: nextTrace,
     artifacts,
   };
+}
+
+function findLatestTerminalPublicStatusSnapshot(input: {
+  traceId: string;
+  sessionState: A2ASessionStoreState;
+}): { status: PublicStatus } | null {
+  const sessionIds = new Set(
+    input.sessionState.sessions
+      .filter((entry) => entry.traceId === input.traceId)
+      .map((entry) => entry.sessionId),
+  );
+  if (!sessionIds.size) {
+    return null;
+  }
+
+  return input.sessionState.publicStatusSnapshots
+    .filter((entry) => sessionIds.has(entry.sessionId))
+    .filter((entry): entry is A2APublicStatusSnapshot & { status: PublicStatus } => (
+      entry.status !== null && isTerminalTraceWatchStatus(entry.status)
+    ))
+    .sort((left, right) => normalizeTraceTimestamp(left.resolvedAt) - normalizeTraceTimestamp(right.resolvedAt))
+    .at(-1) ?? null;
+}
+
+async function refreshStaleTerminalTraceArtifacts(input: {
+  trace: SessionTraceRecord;
+  sessionState: A2ASessionStoreState;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  sessionStateStore: ReturnType<typeof createSessionStateStore>;
+}): Promise<SessionTraceRecord> {
+  const latestTerminalSnapshot = findLatestTerminalPublicStatusSnapshot({
+    traceId: input.trace.traceId,
+    sessionState: input.sessionState,
+  });
+  if (!latestTerminalSnapshot) {
+    return input.trace;
+  }
+  if (normalizeText(input.trace.a2a?.publicStatus) === latestTerminalSnapshot.status) {
+    return input.trace;
+  }
+
+  const rebuilt = await rebuildTraceArtifactsFromSessionState({
+    baseTrace: input.trace,
+    runtimeStateStore: input.runtimeStateStore,
+    sessionStateStore: input.sessionStateStore,
+  });
+  return rebuilt.trace;
 }
 
 async function loadCallerContinuationState(input: {
@@ -16412,18 +16464,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('trace_not_found', `Trace not found: ${traceId}`);
         }
         const sessionState = await sessionStateStore.readState();
+        const currentTrace = await refreshStaleTerminalTraceArtifacts({
+          trace,
+          sessionState,
+          runtimeStateStore,
+          sessionStateStore,
+        });
         const selectedSession = sessionState.sessions
           .filter((entry) => entry.traceId === traceId)
           .sort((left, right) => left.updatedAt - right.updatedAt)
           .at(-1) ?? null;
         const orderHistoryProjection = await buildTraceOrderHistoryProjection({
-          trace,
+          trace: currentTrace,
           selectedSession,
         });
         return commandSuccess(
           await buildTraceInspectorPayload({
             traceId,
-            trace,
+            trace: currentTrace,
             sessionStateStore,
             ratingDetailStateStore,
             chainApiBaseUrl: input.chainApiBaseUrl,
@@ -16660,29 +16718,35 @@ export function createDefaultMetabotDaemonHandlers(input: {
               : session.callerGlobalMetaId;
             const traceId = normalizeText(session.traceId);
             let trace: SessionTraceRecord | null = null;
+            const profileRuntimeStateStore = createRuntimeStateStore(profile.homeDir);
             try {
-              const profileRuntimeStateStore = createRuntimeStateStore(profile.homeDir);
               const runtimeState = await profileRuntimeStateStore.readState();
               trace = runtimeState.traces.find((entry) => entry.traceId === traceId) ?? null;
             } catch {
               trace = null;
             }
             if (trace) {
+              const currentTrace = await refreshStaleTerminalTraceArtifacts({
+                trace,
+                sessionState: state,
+                runtimeStateStore: profileRuntimeStateStore,
+                sessionStateStore: store,
+              });
               const privateHistoryProjection = await buildScopedPrivateHistoryProjectionForTrace({
                 profile,
-                trace,
+                trace: currentTrace,
                 session,
                 peerGlobalMetaId,
               }).catch(() => null);
               const orderHistoryProjection = await buildTraceOrderHistoryProjection({
-                trace,
+                trace: currentTrace,
                 selectedSession: session,
                 profile,
                 includePrivateHistory: false,
               });
               const payload = await buildTraceInspectorPayload({
                 traceId,
-                trace,
+                trace: currentTrace,
                 sessionStateStore: store,
                 ratingDetailStateStore: createRatingDetailStateStore(profile.homeDir),
                 chainApiBaseUrl: input.chainApiBaseUrl,
