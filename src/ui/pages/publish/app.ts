@@ -21,7 +21,17 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
             <div class="publish-form-grid">
               <div class="publish-field publish-field-wide">
                 <span>Provider Skills</span>
-                <div class="skill-checkbox-list" data-provider-skill-list aria-label="Provider skills"></div>
+                <div class="skill-picker" data-provider-skill-picker aria-label="Provider skills">
+                  <div class="skill-picker-row">
+                    <select data-provider-skill-select aria-label="Provider skill to add" disabled>
+                      <option value="">Loading skills...</option>
+                    </select>
+                    <button class="btn" type="button" data-provider-skill-add disabled>Add</button>
+                  </div>
+                  <div class="skill-chip-list" data-provider-skill-chips aria-live="polite">
+                    <p class="field-hint">No skill selected.</p>
+                  </div>
+                </div>
               </div>
 
               <label class="publish-field">
@@ -171,7 +181,9 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     status: document.querySelector('[data-publish-status]'),
     availability: document.querySelector('[data-publish-availability]'),
     metaBotSelect: document.querySelector('[data-metabot-select]'),
-    skillList: document.querySelector('[data-provider-skill-list]'),
+    skillSelect: document.querySelector('[data-provider-skill-select]'),
+    skillAdd: document.querySelector('[data-provider-skill-add]'),
+    skillChips: document.querySelector('[data-provider-skill-chips]'),
     skillSummary: document.querySelector('[data-publish-skill-summary]'),
     providerCard: document.querySelector('[data-publish-provider-card]'),
     runtimeCard: document.querySelector('[data-publish-runtime-card]'),
@@ -203,6 +215,9 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     publishSkillsError: null,
     publishResult: null,
     serviceIconDataUrl: '',
+    selectedProviderSkillValues: [],
+    candidateProviderSkillValue: '',
+    providerSkillSelectionInitialized: false,
   };
   let currentModel = null;
   let busy = false;
@@ -295,16 +310,24 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
   };
 
   const selectedMetaBotSlug = () => elements.metaBotSelect ? normalizeText(elements.metaBotSelect.value) : state.selectedMetaBotSlug;
-  const selectedSkillValues = () => {
-    if (!elements.skillList) return [];
-    return Array.from(elements.skillList.querySelectorAll('input[name="providerSkills"]:checked'))
-      .map((input) => normalizeText(input.value))
-      .filter(Boolean);
+  const normalizeSkillValues = (values) => {
+    const seen = new Set();
+    const normalized = [];
+    for (const value of Array.isArray(values) ? values : [values]) {
+      const skillValue = normalizeText(value);
+      if (!skillValue || seen.has(skillValue)) continue;
+      seen.add(skillValue);
+      normalized.push(skillValue);
+    }
+    return normalized;
   };
+  const selectedSkillValues = () => normalizeSkillValues(state.selectedProviderSkillValues);
   const selectedSkills = () => {
     if (!currentModel || !Array.isArray(currentModel.skills)) return null;
-    const values = new Set(selectedSkillValues());
-    return currentModel.skills.filter((skill) => values.has(skill.value));
+    const skillByValue = new Map(currentModel.skills.map((skill) => [skill.value, skill]));
+    return selectedSkillValues()
+      .map((value) => skillByValue.get(value))
+      .filter(Boolean);
   };
   const selectedPrimarySkill = () => {
     const skills = selectedSkills();
@@ -367,22 +390,48 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     elements.metaBotSelect.disabled = busy || model.metabots.length === 0;
   };
 
-  const renderSkillList = (model) => {
-    if (!elements.skillList) return;
-    const previous = selectedSkillValues().filter((value) => model.skills.some((skill) => skill.value === value));
-    const selected = new Set(previous.length ? previous : (model.skills[0] ? [model.skills[0].value] : []));
+  const renderSkillPicker = (model) => {
+    if (!elements.skillSelect || !elements.skillAdd || !elements.skillChips) return;
+    if (!model || !Array.isArray(model.skills)) return;
+    const availableValues = new Set(model.skills.map((skill) => skill.value));
+    const previous = selectedSkillValues().filter((value) => availableValues.has(value));
+    const selectedValues = previous.length
+      ? previous
+      : (!state.providerSkillSelectionInitialized && model.skills[0] ? [model.skills[0].value] : []);
+    const selected = new Set(selectedValues);
+    state.selectedProviderSkillValues = selectedValues;
     const disabled = busy || !model.availability.canPublish || model.skills.length === 0;
     if (!model.skills.length) {
-      elements.skillList.innerHTML = '<p class="field-hint">No primary runtime skills available.</p>';
+      elements.skillSelect.innerHTML = '<option value="">No primary runtime skills available</option>';
+      elements.skillSelect.disabled = true;
+      elements.skillAdd.disabled = true;
+      elements.skillChips.innerHTML = '<p class="field-hint">No primary runtime skills available.</p>';
       return;
     }
-    elements.skillList.innerHTML = model.skills.map((skill) => (
-      '<label class="skill-checkbox-option">'
-      + '<input type="checkbox" name="providerSkills" value="' + escapeHtml(skill.value) + '"' + (selected.has(skill.value) ? ' checked' : '') + (disabled ? ' disabled' : '') + ' />'
-      + '<span><strong>' + escapeHtml(skill.title || skill.value) + '</strong><small>' + escapeHtml(skill.value) + '</small>'
-      + (skill.description ? '<em>' + escapeHtml(skill.description) + '</em>' : '')
-      + '</span></label>'
+    state.providerSkillSelectionInitialized = true;
+
+    const addableSkills = model.skills.filter((skill) => !selected.has(skill.value));
+    if (!addableSkills.some((skill) => skill.value === state.candidateProviderSkillValue)) {
+      state.candidateProviderSkillValue = '';
+    }
+    elements.skillSelect.innerHTML = '<option value="">Select a skill to add</option>' + addableSkills.map((skill) => (
+      '<option value="' + escapeHtml(skill.value) + '">' + escapeHtml(skill.title || skill.value) + '</option>'
     )).join('');
+    elements.skillSelect.value = state.candidateProviderSkillValue;
+    elements.skillSelect.disabled = disabled || addableSkills.length === 0;
+    elements.skillAdd.disabled = disabled || !state.candidateProviderSkillValue;
+
+    const selectedSkills = selectedValues
+      .map((value) => model.skills.find((skill) => skill.value === value))
+      .filter(Boolean);
+    elements.skillChips.innerHTML = selectedSkills.length
+      ? selectedSkills.map((skill) => (
+          '<span class="skill-chip">'
+          + '<span title="' + escapeHtml(skill.value) + '">' + escapeHtml(skill.title || skill.value) + '</span>'
+          + '<button type="button" aria-label="Remove ' + escapeHtml(skill.value) + '" title="Remove" data-provider-skill-remove="' + escapeHtml(skill.value) + '"' + (disabled ? ' disabled' : '') + '>x</button>'
+          + '</span>'
+        )).join('')
+      : '<p class="field-hint">No skill selected.</p>';
   };
 
   const renderSkillSummary = () => {
@@ -458,11 +507,19 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     if (elements.metaBotSelect) {
       elements.metaBotSelect.disabled = !currentModel || !Array.isArray(currentModel.metabots) || currentModel.metabots.length === 0;
     }
-    if (elements.skillList) {
+    if (elements.skillSelect && elements.skillAdd) {
       const skillsDisabled = !currentModel || !currentModel.availability.canPublish || currentModel.skills.length === 0;
-      elements.skillList.querySelectorAll('input[name="providerSkills"]').forEach((input) => {
-        input.disabled = skillsDisabled;
-      });
+      const selected = new Set(selectedSkillValues());
+      const addableSkills = currentModel && Array.isArray(currentModel.skills)
+        ? currentModel.skills.filter((skill) => !selected.has(skill.value))
+        : [];
+      elements.skillSelect.disabled = skillsDisabled || addableSkills.length === 0;
+      elements.skillAdd.disabled = skillsDisabled || !state.candidateProviderSkillValue;
+      if (elements.skillChips) {
+        elements.skillChips.querySelectorAll('[data-provider-skill-remove]').forEach((button) => {
+          button.disabled = skillsDisabled;
+        });
+      }
     }
     syncPaymentTimingFields();
   };
@@ -524,7 +581,7 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     renderCard(elements.providerCard, currentModel.providerCard, 'No selected provider identity is available.');
     renderCard(elements.runtimeCard, currentModel.runtimeCard, 'No primary runtime diagnostics are available.');
     renderMetaBotSelect(currentModel);
-    renderSkillList(currentModel);
+    renderSkillPicker(currentModel);
     renderSkillSummary();
     renderAvailability(currentModel);
     renderIconPreview();
@@ -682,14 +739,41 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
       state.selectedMetaBotSlug = selectedMetaBotSlug();
       serviceNameDirty = false;
       displayNameDirty = false;
+      state.selectedProviderSkillValues = [];
+      state.candidateProviderSkillValue = '';
+      state.providerSkillSelectionInitialized = false;
       if (elements.displayNameInput) elements.displayNameInput.value = '';
       if (elements.serviceNameInput) elements.serviceNameInput.value = '';
       void loadPublishSkills(state.selectedMetaBotSlug);
     });
   }
 
-  if (elements.skillList) {
-    elements.skillList.addEventListener('change', () => {
+  if (elements.skillSelect) {
+    elements.skillSelect.addEventListener('change', () => {
+      state.candidateProviderSkillValue = normalizeText(elements.skillSelect.value);
+      renderSkillPicker(currentModel);
+      updateSubmitState();
+    });
+  }
+
+  if (elements.skillAdd) {
+    elements.skillAdd.addEventListener('click', () => {
+      const candidate = normalizeText(state.candidateProviderSkillValue);
+      if (!candidate || !skillExists(candidate) || selectedSkillValues().includes(candidate)) return;
+      state.selectedProviderSkillValues = normalizeSkillValues([...selectedSkillValues(), candidate]);
+      state.candidateProviderSkillValue = '';
+      renderSkillPicker(currentModel);
+      applySkillDefaults();
+    });
+  }
+
+  if (elements.skillChips) {
+    elements.skillChips.addEventListener('click', (event) => {
+      const target = event.target instanceof Element ? event.target.closest('[data-provider-skill-remove]') : null;
+      if (!target) return;
+      const skillValue = normalizeText(target.getAttribute('data-provider-skill-remove'));
+      state.selectedProviderSkillValues = selectedSkillValues().filter((value) => value !== skillValue);
+      renderSkillPicker(currentModel);
       applySkillDefaults();
     });
   }

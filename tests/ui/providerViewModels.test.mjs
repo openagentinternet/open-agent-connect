@@ -166,27 +166,37 @@ test('buildPublishPageViewModel exposes primary runtime catalog availability for
 test('publish and my-services pages expose skill-service v1.1 service controls', () => {
   const publishHtml = buildPublishPageDefinition().contentHtml;
   const publishScript = buildPublishPageDefinition().script;
-  assert.match(publishHtml, /data-provider-skill-list/);
+  assert.match(publishHtml, /data-provider-skill-picker/);
+  assert.match(publishHtml, /data-provider-skill-select/);
+  assert.match(publishHtml, /data-provider-skill-add/);
+  assert.match(publishHtml, /data-provider-skill-chips/);
   assert.match(publishHtml, /name="paymentTiming"[^>]+value="free"/);
   assert.match(publishHtml, /name="paymentTiming"[^>]+value="prepaid"/);
   assert.match(publishHtml, /name="executionReminder"/);
   assert.match(publishScript, /providerSkills/);
+  assert.match(publishScript, /renderSkillPicker/);
   assert.match(publishScript, /paymentTiming/);
   assert.match(publishScript, /settlementKind/);
-  assert.doesNotMatch(publishHtml, /data-provider-skill-select/);
+  assert.doesNotMatch(publishHtml, /skill-checkbox-list/);
+  assert.doesNotMatch(publishScript, /input\[name="providerSkills"\]:checked/);
 
   const myServicesHtml = buildMyServicesPageDefinition().contentHtml;
   const myServicesScript = buildMyServicesPageDefinition().script;
-  assert.match(myServicesHtml, /data-edit-provider-skill-list/);
+  assert.match(myServicesHtml, /data-edit-provider-skill-picker/);
+  assert.match(myServicesHtml, /data-edit-provider-skill-select/);
+  assert.match(myServicesHtml, /data-edit-provider-skill-add/);
+  assert.match(myServicesHtml, /data-edit-provider-skill-chips/);
   assert.match(myServicesHtml, /name="paymentTiming"[^>]+value="free"/);
   assert.match(myServicesHtml, /name="paymentTiming"[^>]+value="prepaid"/);
   assert.match(myServicesHtml, /name="executionReminder"/);
   assert.match(myServicesScript, /providerSkills/);
+  assert.match(myServicesScript, /renderEditSkillPicker/);
   assert.match(myServicesScript, /paymentTiming/);
   assert.match(myServicesScript, /settlementKind/);
   assert.match(myServicesScript, /validateEditPayload/);
   assert.match(myServicesScript, /Prepaid service price must be greater than zero/);
-  assert.doesNotMatch(myServicesHtml, /data-edit-provider-skill"/);
+  assert.doesNotMatch(myServicesHtml, /skill-checkbox-list/);
+  assert.doesNotMatch(myServicesScript, /input\[name="providerSkills"\]:checked/);
 });
 
 test('buildPublishPageViewModel disables publishing when primary runtime or skill roots are unavailable', () => {

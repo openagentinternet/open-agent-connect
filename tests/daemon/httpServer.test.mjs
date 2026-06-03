@@ -2618,7 +2618,11 @@ test('GET /ui/publish serves the primary-runtime-aware publish console', async (
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /Publish Service/);
   assert.match(html, /data-metabot-select/);
-  assert.match(html, /data-provider-skill-list/);
+  assert.match(html, /data-provider-skill-picker/);
+  assert.match(html, /data-provider-skill-select/);
+  assert.match(html, /data-provider-skill-add/);
+  assert.match(html, /data-provider-skill-chips/);
+  assert.doesNotMatch(html, /skill-checkbox-list/);
   assert.match(html, /name="paymentTiming"[^>]+value="free"/);
   assert.match(html, /name="paymentTiming"[^>]+value="prepaid"/);
   assert.match(html, /name="executionReminder"/);
@@ -2662,7 +2666,11 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.match(html, /data-orders-page-prev/);
   assert.match(html, /data-orders-page-next/);
   assert.match(html, /data-my-service-edit-modal/);
-  assert.match(html, /data-edit-provider-skill-list/);
+  assert.match(html, /data-edit-provider-skill-picker/);
+  assert.match(html, /data-edit-provider-skill-select/);
+  assert.match(html, /data-edit-provider-skill-add/);
+  assert.match(html, /data-edit-provider-skill-chips/);
+  assert.doesNotMatch(html, /skill-checkbox-list/);
   assert.match(html, /name="paymentTiming"[^>]+value="free"/);
   assert.match(html, /name="paymentTiming"[^>]+value="prepaid"/);
   assert.match(html, /name="executionReminder"/);
