@@ -126,6 +126,9 @@ import {
   SERVICE_REFUND_REQUEST_PATH,
   buildServiceRefundRequestPayload,
 } from '../core/orders/serviceRefundProtocol';
+import {
+  runBuyerRefundRequestLifecycle,
+} from '../core/orders/serviceRefundLifecycle';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
 import {
@@ -8126,6 +8129,29 @@ export function createDefaultMetabotDaemonHandlers(input: {
         refundApplyRetryCount: normalizeRefundCounter(order.refundApplyRetryCount) + 1,
       });
     }
+  }
+
+  async function runBuyerRefundRequestLifecycleForDueTraces(nowMs = Date.now()) {
+    const state = await runtimeStateStore.readState();
+    return runBuyerRefundRequestLifecycle({
+      traces: state.traces,
+      nowMs,
+      localGlobalMetaId: state.identity?.globalMetaId,
+      writer: {
+        async writeRefundRequest(traceId, context) {
+          const trace = state.traces.find((entry) => entry.traceId === traceId) ?? context?.trace;
+          if (!trace) {
+            throw new Error(`Buyer refund trace not found: ${traceId}`);
+          }
+          const nextTrace = await ensureBuyerRefundRequestForTrace({
+            trace,
+            failureReason: context?.failureReason || normalizeText(trace.order?.failureReason) || 'delivery_timeout',
+            failedAt: nowMs,
+          });
+          return { trace: nextTrace };
+        },
+      },
+    });
   }
 
   async function findExistingProviderOrderSession(inputOrder: {
