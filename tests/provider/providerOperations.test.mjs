@@ -7,6 +7,7 @@ const {
   findSellerOrderBySelector,
   buildProviderSellerOrderInspection,
   buildSellerReceivedRefundItems,
+  sellerOrderRequiresManualAction,
 } = require('../../dist/core/provider/providerOperations.js');
 
 function createSellerOrder(overrides = {}) {
@@ -57,4 +58,29 @@ test('provider seller order lookup and refund projection accept service order pi
   assert.equal(selected.order.id, 'seller-order-payment-txid-1');
   assert.equal(buildProviderSellerOrderInspection(selected.order).serviceOrderPinId, 'skill-service-order-pin-1');
   assert.equal(buildSellerReceivedRefundItems(state)[0].orderId, 'skill-service-order-pin-1');
+});
+
+test('provider refund manual action distinguishes unsupported and retryable blockers', () => {
+  const unsupportedOrder = createSellerOrder({
+    refundBlockingReason: 'refund_settlement_unsupported',
+  });
+  const retryableOrder = createSellerOrder({
+    id: 'seller-order-insufficient-balance',
+    serviceOrderPinId: 'skill-service-order-pin-2',
+    orderReference: 'skill-service-order-pin-2',
+    refundBlockingReason: 'insufficient_balance',
+  });
+  const state = {
+    identity: null,
+    services: [],
+    traces: [],
+    sellerOrders: [unsupportedOrder, retryableOrder],
+  };
+
+  assert.equal(sellerOrderRequiresManualAction(unsupportedOrder), false);
+  assert.equal(sellerOrderRequiresManualAction(retryableOrder), true);
+
+  const items = buildSellerReceivedRefundItems(state);
+  assert.equal(items.find((item) => item.orderId === unsupportedOrder.serviceOrderPinId)?.manualActionRequired, false);
+  assert.equal(items.find((item) => item.orderId === retryableOrder.serviceOrderPinId)?.manualActionRequired, true);
 });

@@ -116,7 +116,7 @@ function resolveSellerOrderServiceOrderPinId(order: SellerOrderRecord): string |
 }
 
 export function sellerOrderRequiresManualAction(order: SellerOrderRecord): boolean {
-  if (normalizeText(order.refundBlockingReason)) {
+  if (normalizeText(order.refundBlockingReason) === 'refund_settlement_unsupported') {
     return false;
   }
   const state = normalizeText(order.state);
