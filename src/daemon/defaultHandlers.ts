@@ -125,6 +125,8 @@ import {
   SERVICE_REFUND_FINALIZE_PATH,
   SERVICE_REFUND_REQUEST_PATH,
   buildServiceRefundRequestPayload,
+  parseRefundProtocolContent,
+  type ParsedServiceRefundFinalize,
 } from '../core/orders/serviceRefundProtocol';
 import {
   runBuyerRefundRequestLifecycle,
@@ -8226,6 +8228,81 @@ export function createDefaultMetabotDaemonHandlers(input: {
     };
   }
 
+  function normalizeRefundAsset(value: unknown): string {
+    const asset = normalizeText(value).toUpperCase();
+    return asset === 'MVC' ? 'SPACE' : asset;
+  }
+
+  function normalizeRefundAmount(value: unknown): string {
+    const text = normalizeText(value);
+    if (!text) {
+      return '';
+    }
+    const numeric = Number(text);
+    if (!Number.isFinite(numeric)) {
+      return text;
+    }
+    return numeric.toFixed(8).replace(/\.?0+$/u, '');
+  }
+
+  async function verifyServiceRefundFinalizeTransfer(finalize: ParsedServiceRefundFinalize): Promise<boolean> {
+    const refundRequestPinId = normalizeText(finalize.payload.refundRequestPinId);
+    const refundTxid = normalizeText(finalize.payload.refundTxid);
+    if (!refundRequestPinId || !refundTxid) {
+      return false;
+    }
+
+    let refundRequestDetail: { content: unknown };
+    try {
+      refundRequestDetail = await fetchProtocolPinDetail({
+        pinId: refundRequestPinId,
+        chainApiBaseUrl: input.chainApiBaseUrl,
+      });
+    } catch {
+      return false;
+    }
+
+    const refundRequestPayload = parseRefundProtocolContent(refundRequestDetail.content);
+    if (!refundRequestPayload) {
+      return false;
+    }
+
+    const expectedAmount = normalizeRefundAmount(
+      refundRequestPayload.refundAmount
+      ?? refundRequestPayload.amount
+      ?? refundRequestPayload.paymentAmount
+    );
+    const expectedAsset = normalizeRefundAsset(
+      refundRequestPayload.refundCurrency
+      ?? refundRequestPayload.currency
+      ?? refundRequestPayload.paymentAsset
+    );
+    const finalizeAmount = normalizeRefundAmount(finalize.payload.paymentAmount);
+    const finalizeAsset = normalizeRefundAsset(finalize.payload.paymentAsset);
+    if (
+      !expectedAmount
+      || !expectedAsset
+      || (finalizeAmount && finalizeAmount !== expectedAmount)
+      || (finalizeAsset && finalizeAsset !== expectedAsset)
+    ) {
+      return false;
+    }
+
+    const refundAddress = normalizeText(refundRequestPayload.refundAddress)
+      || normalizeText(refundRequestPayload.refundToAddress);
+    const verification = await verifyServiceOrderPayment({
+      adapters,
+      paymentTxid: refundTxid,
+      paymentChain: normalizeText(refundRequestPayload.paymentChain),
+      settlementKind: normalizeText(refundRequestPayload.settlementKind),
+      paymentAddress: refundAddress,
+      amount: expectedAmount,
+      currency: expectedAsset,
+    }).catch(() => ({ verified: false }));
+
+    return verification.verified === true;
+  }
+
   async function syncServiceRefundsForCurrentProfile(nowMs = Date.now()): Promise<ServiceRefundSyncResponse> {
     return withRefundMutationLock(input.homeDir, async () => {
       const lifecycle = await runBuyerRefundRequestLifecycleForDueTraces(nowMs);
@@ -8254,6 +8331,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         finalizations: finalizePins,
         identity,
         nowMs,
+        verifyFinalize: verifyServiceRefundFinalizeTransfer,
       });
 
       if (requestSync.nextState !== stateAfterLifecycle || finalizeSync.nextState !== requestSync.nextState) {
