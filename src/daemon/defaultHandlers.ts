@@ -118,10 +118,14 @@ import {
   isSelfDirectedPair,
 } from '../core/orders/orderLifecycle';
 import {
-  SERVICE_REFUND_FINALIZE_PATH,
   processSellerRefundSettlement,
   type RefundTransferInput,
 } from '../core/orders/serviceRefundSettlement';
+import {
+  SERVICE_REFUND_FINALIZE_PATH,
+  SERVICE_REFUND_REQUEST_PATH,
+  buildServiceRefundRequestPayload,
+} from '../core/orders/serviceRefundProtocol';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
 import {
@@ -350,7 +354,6 @@ const DEFAULT_MASTER_HOST_MODE = 'codex';
 const DEFAULT_NETWORK_BOT_LIST_LIMIT = 20;
 const MAX_NETWORK_BOT_LIST_LIMIT = 100;
 const DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS = [1_500, 5_000, 10_000];
-const SERVICE_REFUND_REQUEST_PATH = '/protocols/service-refund-request';
 const LOOM_DRAFT_LLM_TIMEOUT_MS = 120_000;
 const LOOM_DEV_ROUND_LLM_TIMEOUT_MS = 900_000;
 const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
@@ -7901,10 +7904,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const paymentChain = inferRefundPaymentChain(order);
     const refundAmount = normalizeText(order.paymentAmount);
     const refundCurrency = normalizeText(order.paymentCurrency);
-    return {
-      version: '1.0.0',
+    const serviceOrderPinId = normalizeText(order.orderPinId);
+    const corePayload = buildServiceRefundRequestPayload({
+      version: 1,
+      serviceOrderPinId,
+      servicePinId: normalizeText(order.serviceId),
       paymentTxid: normalizeText(order.paymentTxid),
-      servicePinId: normalizeText(order.serviceId) || null,
+      paymentAmount: refundAmount,
+      paymentAsset: refundCurrency,
+      buyerGlobalMetaId: inputRefund.identity.globalMetaId,
+      sellerGlobalMetaId: normalizeText(inputRefund.trace.session.peerGlobalMetaId)
+        || normalizeText(inputRefund.trace.a2a?.providerGlobalMetaId),
+      refundAddress: resolveRefundAddress(inputRefund.identity, paymentChain),
+      reason: inputRefund.failureReason,
+      requestedAt: new Date(inputRefund.failedAt).toISOString(),
+    });
+    return {
+      ...corePayload,
       serviceName: normalizeText(order.serviceName),
       refundAmount,
       refundCurrency,
@@ -7915,11 +7931,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
       mrc20Ticker: normalizeText(order.mrc20Ticker) || null,
       mrc20Id: normalizeText(order.mrc20Id) || null,
       paymentCommitTxid: normalizeText(order.paymentCommitTxid) || null,
-      refundToAddress: resolveRefundAddress(inputRefund.identity, paymentChain),
-      buyerGlobalMetaId: inputRefund.identity.globalMetaId,
-      sellerGlobalMetaId: normalizeText(inputRefund.trace.session.peerGlobalMetaId)
-        || normalizeText(inputRefund.trace.a2a?.providerGlobalMetaId),
-      orderMessagePinId: normalizeText(order.orderPinId) || null,
+      refundToAddress: corePayload.refundAddress ?? '',
+      orderMessagePinId: serviceOrderPinId || null,
       failureReason: inputRefund.failureReason,
       failureDetectedAt: Math.floor(inputRefund.failedAt / 1000),
       reasonComment: inputRefund.failureReason === 'invalid_deliverable'

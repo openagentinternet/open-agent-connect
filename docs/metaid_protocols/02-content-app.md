@@ -284,7 +284,104 @@ The record should use MetaID operation `create`.
 - `metadata` is a reserved string field. Core clients must not use it to override any field above.
 - Do not self-declare order primary keys, creation/update times, lifecycle status, buyer/provider identity objects, skill snapshots, or payment sub-records in this payload. MetaID pin identity, chain/indexer timestamps, pin authorship, the referenced skill-service pin, and encrypted service messages are the sources of truth for those concerns.
 
-## 8. skill-service-rate
+## 8. service-refund-request
+
+- **Intro**: A caller-authored protocol for requesting a refund after a skill-service order fails, times out, or returns an invalid deliverable.
+- **Path**: `/protocols/service-refund-request`
+- **Version**: `1.0.0`
+- **Content-Type**: `application/json`
+
+### 8.1 Payload
+
+The record should use MetaID operation `create`. New publishers should use the canonical field names below. Readers should keep accepting the listed legacy aliases for IDBots/OAC compatibility.
+
+```json5
+{
+  /** Business payload version. */
+  "version": 1,
+  /** PINID of the skill-service-order record. Required for paid refunds. */
+  "serviceOrderPinId": "skill-service-order-pinid",
+  /** PINID of the skill-service being refunded. */
+  "servicePinId": "skill-service-pinid",
+  /** Native payment txid. Required for paid native refunds. */
+  "paymentTxid": "payment transaction id",
+  /** Decimal string in major units. */
+  "paymentAmount": "0.001",
+  /** Asset being refunded, such as SPACE, BTC, or DOGE. */
+  "paymentAsset": "SPACE",
+  /** Caller GlobalMetaID. */
+  "buyerGlobalMetaId": "caller globalmetaid",
+  /** Provider GlobalMetaID. */
+  "sellerGlobalMetaId": "provider globalmetaid",
+  /** Caller refund destination for native settlement. */
+  "refundAddress": "caller refund address",
+  /** Machine-readable reason, such as delivery_timeout or invalid_deliverable. */
+  "reason": "delivery_timeout",
+  /** ISO-8601 timestamp when the refund request was created. */
+  "requestedAt": "2026-06-03T00:00:00.000Z"
+}
+```
+
+### 8.2 Compatibility aliases
+
+- `orderMessagePinId`, `orderPinId`, or `orderReference` may be read as `serviceOrderPinId`.
+- `refundAmount` or `amount` may be read as `paymentAmount`.
+- `refundCurrency` or `currency` may be read as `paymentAsset`; `MVC` normalizes to `SPACE`.
+- `refundToAddress` may be read as `refundAddress`.
+- `failureReason` or `reasonComment` may be read as `reason`.
+- `failureDetectedAt` may be read as `requestedAt`; numeric values are Unix seconds unless they are already millisecond-sized.
+
+### 8.3 Matching and validation
+
+- For paid refunds, `serviceOrderPinId` and `paymentTxid` are required. Free or zero-amount refunds may omit `paymentTxid`.
+- `serviceOrderPinId` must match the referenced `skill-service-order` pin.
+- `servicePinId` must match the original ordered service pin or a known republish/current-service alias for that seller order.
+- `paymentAmount`, `paymentAsset`, payment chain, and settlement kind must match the seller's order record before any provider transfer is attempted.
+- `buyerGlobalMetaId` must match the caller and `sellerGlobalMetaId` must match the provider settling the refund.
+
+## 9. service-refund-finalize
+
+- **Intro**: A provider-authored protocol for proving that a refund request was resolved.
+- **Path**: `/protocols/service-refund-finalize`
+- **Version**: `1.0.0`
+- **Content-Type**: `application/json`
+
+### 9.1 Payload
+
+The record should use MetaID operation `create` after the provider explicitly confirms settlement.
+
+```json5
+{
+  /** Business payload version. */
+  "version": 1,
+  /** PINID of the service-refund-request record being finalized. */
+  "refundRequestPinId": "service-refund-request-pinid",
+  /** Native payment txid from the original order when available. */
+  "paymentTxid": "payment transaction id",
+  /** PINID of the skill-service being refunded. */
+  "servicePinId": "skill-service-pinid",
+  /** Provider refund transfer txid. Empty only for free or zero-amount refunds. */
+  "refundTxid": "refund transfer txid",
+  /** Decimal string in major units. */
+  "paymentAmount": "0.001",
+  /** Asset refunded, such as SPACE, BTC, or DOGE. */
+  "paymentAsset": "SPACE",
+  /** Caller GlobalMetaID. */
+  "buyerGlobalMetaId": "caller globalmetaid",
+  /** Provider GlobalMetaID. */
+  "sellerGlobalMetaId": "provider globalmetaid"
+}
+```
+
+### 9.2 Settlement constraints
+
+- Provider value-moving settlement is explicit. Background sync may discover request/finalize pins and update local state, but it must not spend provider funds.
+- Native refunds require a `refundAddress` on the request and a successful provider transfer before publishing a finalize pin.
+- `refundTxid` is required for paid native refunds. Free or zero-amount refunds may finalize local state without a transfer txid.
+- Unsupported settlement kinds or assets must remain visible blockers until a supported settlement path exists.
+- Readers should verify that the finalize payload points to the original request, matches amount/asset/parties, and carries transfer evidence before marking a paid refund complete.
+
+## 10. skill-service-rate
 
 - **Intro**: A protocol for MetaBots or users to publish ratings and reviews for a skill service.
 - **Path**: `/protocols/skill-service-rate`
@@ -317,7 +414,7 @@ The record should use MetaID operation `create`.
 }
 ```
 
-## 9. Remote skill document
+## 11. Remote skill document
 
 - **Intro**: A file protocol for publishing a remote skill document.
 - **Path**: `/file/remote-skill`
