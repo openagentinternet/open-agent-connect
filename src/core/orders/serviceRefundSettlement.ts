@@ -142,11 +142,15 @@ function isZeroAmount(value: unknown): boolean {
 }
 
 function readRefundAmount(payload: Record<string, unknown>): string {
-  return normalizeText(payload.refundAmount) || normalizeText(payload.amount);
+  return normalizeText(payload.refundAmount)
+    || normalizeText(payload.amount)
+    || normalizeText(payload.paymentAmount);
 }
 
 function readRefundCurrency(payload: Record<string, unknown>): string {
-  return normalizeText(payload.refundCurrency) || normalizeText(payload.currency);
+  return normalizeText(payload.refundCurrency)
+    || normalizeText(payload.currency)
+    || normalizeText(payload.paymentAsset);
 }
 
 function readRefundAddress(payload: Record<string, unknown>): string {
@@ -290,11 +294,11 @@ function validatePayloadMatchesOrder(input: {
     return { ok: false, code: 'refund_request_currency_mismatch', message: 'Refund request currency does not match the seller order.' };
   }
 
-  if (canonicalChain(payload.paymentChain) !== canonicalChain(order.paymentChain, order.paymentCurrency)) {
+  if (canonicalChain(payload.paymentChain, readRefundCurrency(payload)) !== canonicalChain(order.paymentChain, order.paymentCurrency)) {
     return { ok: false, code: 'refund_request_chain_mismatch', message: 'Refund request payment chain does not match the seller order.' };
   }
 
-  if (canonicalSettlementKind(payload.settlementKind) !== canonicalSettlementKind(order.settlementKind, order.paymentAmount)) {
+  if (canonicalSettlementKind(payload.settlementKind, readRefundAmount(payload)) !== canonicalSettlementKind(order.settlementKind, order.paymentAmount)) {
     return { ok: false, code: 'refund_request_settlement_mismatch', message: 'Refund request settlement kind does not match the seller order.' };
   }
 
@@ -545,7 +549,7 @@ export async function processSellerRefundSettlement(
 
   const refundAmount = readRefundAmount(refundRequestPayload) || normalizeText(order.paymentAmount);
   const refundCurrency = canonicalCurrency(readRefundCurrency(refundRequestPayload) || order.paymentCurrency);
-  const paymentChain = canonicalChain(refundRequestPayload.paymentChain, order.paymentCurrency);
+  const paymentChain = canonicalChain(refundRequestPayload.paymentChain, readRefundCurrency(refundRequestPayload) || order.paymentCurrency);
   const settlementKind = canonicalSettlementKind(refundRequestPayload.settlementKind, order.paymentAmount);
   if (isZeroAmount(refundAmount) || settlementKind === 'free') {
     const nextState = markStateRefunded({
