@@ -77,16 +77,12 @@ function isZeroPaymentAmount(value: unknown): boolean {
   return Number.isFinite(numeric) && numeric === 0;
 }
 
-function isPaidBuyerRefundTrace(trace: SessionTraceRecord): boolean {
+function isNonFreeBuyerRefundTrace(trace: SessionTraceRecord): boolean {
   const order = trace.order;
   if (!order) {
     return false;
   }
-  return Boolean(
-    normalizeText(order.paymentTxid)
-    && normalizeText(order.paymentAmount)
-    && !isZeroPaymentAmount(order.paymentAmount),
-  );
+  return !isZeroPaymentAmount(order.paymentAmount);
 }
 
 function isSelfDirectedBuyerTrace(input: {
@@ -145,6 +141,27 @@ function retryFailureForTrace(input: {
   };
 }
 
+function persistedFailureForTrace(input: {
+  trace: SessionTraceRecord;
+  fallbackTrace: SessionTraceRecord;
+  nowMs: number;
+  error: string;
+}): BuyerRefundRequestLifecycleFailure {
+  const persistedRetryCount = normalizeRetryCount(input.trace.order?.refundApplyRetryCount);
+  const persistedNextRetryAt = normalizeTimestamp(input.trace.order?.nextRetryAt);
+  const synthesized = retryFailureForTrace({
+    trace: input.fallbackTrace,
+    nowMs: input.nowMs,
+    error: input.error,
+  });
+  return {
+    traceId: input.trace.traceId,
+    error: input.error,
+    retryCount: persistedRetryCount || synthesized.retryCount,
+    nextRetryAt: persistedNextRetryAt ?? synthesized.nextRetryAt,
+  };
+}
+
 export function selectDueBuyerRefundRequests(input: SelectDueBuyerRefundRequestsInput): SessionTraceRecord[] {
   return input.traces.filter((trace) => {
     const order = trace.order;
@@ -158,7 +175,7 @@ export function selectDueBuyerRefundRequests(input: SelectDueBuyerRefundRequests
     if (normalizeText(order.refundRequestPinId)) {
       return false;
     }
-    if (!isPaidBuyerRefundTrace(trace)) {
+    if (!isNonFreeBuyerRefundTrace(trace)) {
       return false;
     }
     if (isSelfDirectedBuyerTrace({
@@ -188,10 +205,12 @@ export async function runBuyerRefundRequestLifecycle(
       if (writeResultIsPending(result)) {
         succeeded += 1;
       } else {
-        failures.push(retryFailureForTrace({
-          trace: resultTraceFromWriteResult(result) ?? trace,
+        const resultTrace = resultTraceFromWriteResult(result);
+        failures.push(persistedFailureForTrace({
+          trace: resultTrace ?? trace,
+          fallbackTrace: trace,
           nowMs: input.nowMs,
-          error: readFailureReason(resultTraceFromWriteResult(result) ?? trace),
+          error: readFailureReason(resultTrace ?? trace),
         }));
       }
     } catch (error) {

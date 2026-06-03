@@ -134,16 +134,26 @@ test('selectDueBuyerRefundRequests skips already pending and refunded traces', (
   assert.deepEqual(selected, []);
 });
 
-test('selectDueBuyerRefundRequests skips free orders and paid orders without payment txid', () => {
+test('selectDueBuyerRefundRequests selects due paid retry marker without payment txid', () => {
+  const selected = selectDueBuyerRefundRequests({
+    traces: [
+      createBuyerTrace({
+        traceId: 'trace-missing-payment-txid',
+        order: { paymentTxid: null },
+      }),
+    ],
+    nowMs: NOW,
+  });
+
+  assert.deepEqual(selected.map((trace) => trace.traceId), ['trace-missing-payment-txid']);
+});
+
+test('selectDueBuyerRefundRequests skips free orders', () => {
   const selected = selectDueBuyerRefundRequests({
     traces: [
       createBuyerTrace({
         traceId: 'trace-free',
         order: { paymentAmount: '0', paymentTxid: null },
-      }),
-      createBuyerTrace({
-        traceId: 'trace-missing-payment-txid',
-        order: { paymentTxid: null },
       }),
     ],
     nowMs: NOW,
@@ -167,6 +177,38 @@ test('selectDueBuyerRefundRequests skips self-directed buyer traces', () => {
   });
 
   assert.deepEqual(selected, []);
+});
+
+test('runBuyerRefundRequestLifecycle reports retry metadata from returned failed trace', async () => {
+  const trace = createBuyerTrace({
+    order: { refundApplyRetryCount: 2 },
+  });
+  const returnedTrace = {
+    ...trace,
+    order: {
+      ...trace.order,
+      refundApplyRetryCount: 3,
+      nextRetryAt: NOW + 12_345,
+    },
+  };
+
+  const result = await runBuyerRefundRequestLifecycle({
+    traces: [trace],
+    nowMs: NOW,
+    writer: {
+      async writeRefundRequest() {
+        return { trace: returnedTrace };
+      },
+    },
+  });
+
+  assert.equal(result.attempted, 1);
+  assert.equal(result.succeeded, 0);
+  assert.equal(result.failed, 1);
+  assert.equal(result.failures.length, 1);
+  assert.equal(result.failures[0].traceId, trace.traceId);
+  assert.equal(result.failures[0].retryCount, 3);
+  assert.equal(result.failures[0].nextRetryAt, NOW + 12_345);
 });
 
 test('runBuyerRefundRequestLifecycle records retry error and next retry when request write fails', async () => {
