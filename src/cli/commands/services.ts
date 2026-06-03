@@ -281,6 +281,22 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
       });
     }
 
+    if (refundsSubcommand === 'sync') {
+      const handler = context.dependencies.services?.syncRefunds;
+      if (!handler) {
+        return commandFailed('not_implemented', 'Services refund sync handler is not configured.');
+      }
+      const from = readFromFlag(refundsArgs);
+      const all = hasFlag(refundsArgs, '--all');
+      if (from && all) {
+        return commandFailed('invalid_flag', 'Use either --from <bot-slug> or --all for refund sync, not both.');
+      }
+      return handler({
+        ...(from ? { from } : {}),
+        all,
+      });
+    }
+
     return commandUnknownSubcommand(`services refunds ${refundsArgs.join(' ')}`.trim());
   }
 

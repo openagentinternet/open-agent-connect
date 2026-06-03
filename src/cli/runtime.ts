@@ -158,6 +158,7 @@ const CHAIN_NET = 'livenet';
 export const LOOM_DRAFT_LLM_TIMEOUT_MS = 120_000;
 export const LOOM_DEV_ROUND_LLM_TIMEOUT_MS = 900_000;
 const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
+const DEFAULT_SERVICE_REFUND_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 let cachedDaemonRuntimeFingerprint: string | null = null;
 
 type A2ASimplemsgInboundDispatcherMessage = Pick<
@@ -229,6 +230,65 @@ export async function refreshA2ASimplemsgListenerForIdentityProfileRegistration(
   return {
     refreshed: true,
     report,
+  };
+}
+
+type ServiceRefundSyncIntervalHandle = {
+  unref?: () => void;
+};
+
+export interface ServiceRefundSyncLoop {
+  runOnce: () => Promise<void>;
+  stop: () => void;
+}
+
+export function createServiceRefundSyncLoop(input: {
+  syncRefunds: () => Promise<unknown>;
+  intervalMs?: number;
+  setIntervalFn?: (
+    callback: () => Promise<void>,
+    intervalMs: number,
+  ) => ServiceRefundSyncIntervalHandle;
+  clearIntervalFn?: (handle: ServiceRefundSyncIntervalHandle) => void;
+  logWarning?: (message: string) => void;
+}): ServiceRefundSyncLoop {
+  const intervalMs = Math.max(60_000, Math.floor(input.intervalMs ?? DEFAULT_SERVICE_REFUND_SYNC_INTERVAL_MS));
+  const setIntervalFn = input.setIntervalFn
+    ?? ((callback, nextIntervalMs) => setInterval(callback, nextIntervalMs) as ServiceRefundSyncIntervalHandle);
+  const clearIntervalFn = input.clearIntervalFn
+    ?? ((handle) => clearInterval(handle as ReturnType<typeof setInterval>));
+  const logWarning = input.logWarning ?? ((message) => console.warn(message));
+  let running = false;
+  let stopped = false;
+  let cleared = false;
+
+  const runOnce = async () => {
+    if (running || stopped) {
+      return;
+    }
+    running = true;
+    try {
+      await input.syncRefunds();
+    } catch (error) {
+      logWarning(`[service refund sync] ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      running = false;
+    }
+  };
+
+  const handle = setIntervalFn(runOnce, intervalMs);
+  handle.unref?.();
+
+  return {
+    runOnce,
+    stop() {
+      stopped = true;
+      if (cleared) {
+        return;
+      }
+      cleared = true;
+      clearIntervalFn(handle);
+    },
   };
 }
 
@@ -2746,6 +2806,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         query.set('kind', input.kind);
         return requestJson(context, 'GET', `/api/services/refunds?${query.toString()}`);
       },
+      syncRefunds: async (input) => requestJson(context, 'POST', '/api/services/refunds/sync', input),
       settleRefund: async (input) => requestJson(context, 'POST', '/api/services/refunds/settle', input),
       inspectOrder: async (input) => {
         const query = new URLSearchParams();
@@ -4005,6 +4066,15 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     });
   }, DEFAULT_ONLINE_SERVICE_CACHE_SYNC_INTERVAL_MS);
   onlineServiceCacheInterval.unref?.();
+  const serviceRefundSyncLoop = createServiceRefundSyncLoop({
+    syncRefunds: async () => {
+      const result = await handlers.services?.syncRefunds?.({});
+      if (result && !result.ok) {
+        throw new Error(result.message ?? result.code ?? 'service_refund_sync_failed');
+      }
+    },
+    logWarning: (message) => console.warn(message),
+  });
 
   // ---- LLM runtime discovery and resolver ----
   const llmRuntimeStore = createLlmRuntimeStore(paths);
@@ -4184,6 +4254,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     simplemsgListener.stop();
     chatAutoReplyBackfill.stop();
     clearInterval(onlineServiceCacheInterval);
+    serviceRefundSyncLoop.stop();
     await runtimeStore.clearDaemon(process.pid);
     await daemon.close();
     process.exit(exitCode);

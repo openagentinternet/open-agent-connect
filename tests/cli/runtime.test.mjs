@@ -11,6 +11,7 @@ import { cleanupProfileHome } from '../helpers/profileHome.mjs';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const {
+  createServiceRefundSyncLoop,
   createPrivateChatReplyRunnerForProfile,
   getDefaultDaemonPort,
   refreshA2ASimplemsgListenerForIdentityProfileRegistration,
@@ -285,6 +286,55 @@ test('refreshA2ASimplemsgListenerForIdentityProfileRegistration restarts the lis
   ]);
   assert.equal(result.refreshed, true);
   assert.deepEqual(result.report.started.map((profile) => profile.slug), ['new-bot']);
+});
+
+test('service refund sync loop prevents overlapping runs and clears its interval', async () => {
+  const warnings = [];
+  const scheduled = [];
+  const cleared = [];
+  let calls = 0;
+  let releaseFirstRun;
+
+  const loop = createServiceRefundSyncLoop({
+    intervalMs: 1000,
+    syncRefunds: async () => {
+      calls += 1;
+      if (calls === 1) {
+        await new Promise((resolve) => {
+          releaseFirstRun = resolve;
+        });
+      }
+    },
+    setIntervalFn: (callback, intervalMs) => {
+      const handle = { intervalMs, unrefCalled: false, unref() { this.unrefCalled = true; } };
+      scheduled.push({ callback, handle });
+      return handle;
+    },
+    clearIntervalFn: (handle) => {
+      cleared.push(handle);
+    },
+    logWarning: (message) => {
+      warnings.push(message);
+    },
+  });
+
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0].handle.intervalMs, 60_000);
+  assert.equal(scheduled[0].handle.unrefCalled, true);
+
+  const firstRun = scheduled[0].callback();
+  const overlappingRun = scheduled[0].callback();
+  assert.equal(calls, 1);
+  releaseFirstRun();
+  await firstRun;
+  await overlappingRun;
+
+  assert.equal(calls, 1);
+  assert.deepEqual(warnings, []);
+
+  loop.stop();
+  loop.stop();
+  assert.deepEqual(cleared, [scheduled[0].handle]);
 });
 
 test('createPrivateChatReplyRunnerForProfile wires allowed chat skills for the active profile path', async (t) => {

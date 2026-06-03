@@ -64,7 +64,7 @@ import type {
   MetabotProfileFull,
   UpdateMetabotInfoInput,
 } from '../core/bot/metabotProfileManager';
-import type { MetabotDaemonHttpHandlers } from './routes/types';
+import type { MetabotDaemonHttpHandlers, ServiceRefundSyncResponse } from './routes/types';
 import {
   buildPublishedService,
   normalizePublishedServiceCurrency,
@@ -129,6 +129,13 @@ import {
 import {
   runBuyerRefundRequestLifecycle,
 } from '../core/orders/serviceRefundLifecycle';
+import {
+  createServiceRefundChainReader,
+} from '../core/orders/serviceRefundChainReader';
+import {
+  applyServiceRefundFinalizationsToState,
+  applyServiceRefundRequestsToState,
+} from '../core/orders/serviceRefundSync';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
 import {
@@ -8154,6 +8161,98 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
+  function emptyServiceRefundSyncResponse(): ServiceRefundSyncResponse {
+    return {
+      scanned: {
+        requestPins: 0,
+        finalizePins: 0,
+        buyerRetryCandidates: 0,
+      },
+      applied: {
+        buyerRequests: 0,
+        sellerRequests: 0,
+        synthesizedSellerOrders: 0,
+        finalizations: 0,
+      },
+      skipped: 0,
+      blocked: 0,
+    };
+  }
+
+  function mergeServiceRefundSyncResponses(
+    left: ServiceRefundSyncResponse,
+    right: ServiceRefundSyncResponse,
+  ): ServiceRefundSyncResponse {
+    return {
+      scanned: {
+        requestPins: left.scanned.requestPins + right.scanned.requestPins,
+        finalizePins: left.scanned.finalizePins + right.scanned.finalizePins,
+        buyerRetryCandidates: left.scanned.buyerRetryCandidates + right.scanned.buyerRetryCandidates,
+      },
+      applied: {
+        buyerRequests: left.applied.buyerRequests + right.applied.buyerRequests,
+        sellerRequests: left.applied.sellerRequests + right.applied.sellerRequests,
+        synthesizedSellerOrders: left.applied.synthesizedSellerOrders + right.applied.synthesizedSellerOrders,
+        finalizations: left.applied.finalizations + right.applied.finalizations,
+      },
+      skipped: left.skipped + right.skipped,
+      blocked: left.blocked + right.blocked,
+    };
+  }
+
+  async function syncServiceRefundsForCurrentProfile(nowMs = Date.now()): Promise<ServiceRefundSyncResponse> {
+    const lifecycle = await runBuyerRefundRequestLifecycleForDueTraces(nowMs);
+    const stateAfterLifecycle = await runtimeStateStore.readState();
+    const reader = createServiceRefundChainReader({
+      chainApiBaseUrl: input.chainApiBaseUrl,
+    });
+    const [requestPins, finalizePins] = await Promise.all([
+      reader.listRefundRequests({}),
+      reader.listRefundFinalizations({}),
+    ]);
+
+    const requestSync = applyServiceRefundRequestsToState({
+      state: stateAfterLifecycle,
+      requests: requestPins,
+      identity: {
+        localMetabotId: stateAfterLifecycle.identity?.metabotId ?? 0,
+        localMetabotSlug: path.basename(path.resolve(input.homeDir)),
+        localGlobalMetaId: normalizeText(stateAfterLifecycle.identity?.globalMetaId),
+      },
+      nowMs,
+    });
+    const finalizeSync = await applyServiceRefundFinalizationsToState({
+      state: requestSync.nextState,
+      finalizations: finalizePins,
+      identity: {
+        localMetabotId: stateAfterLifecycle.identity?.metabotId ?? 0,
+        localMetabotSlug: path.basename(path.resolve(input.homeDir)),
+        localGlobalMetaId: normalizeText(stateAfterLifecycle.identity?.globalMetaId),
+      },
+      nowMs,
+    });
+
+    if (requestSync.nextState !== stateAfterLifecycle || finalizeSync.nextState !== requestSync.nextState) {
+      await runtimeStateStore.writeState(finalizeSync.nextState);
+    }
+
+    return {
+      scanned: {
+        requestPins: requestPins.length,
+        finalizePins: finalizePins.length,
+        buyerRetryCandidates: lifecycle.attempted,
+      },
+      applied: {
+        buyerRequests: lifecycle.succeeded + requestSync.applied.buyerRequests,
+        sellerRequests: requestSync.applied.sellerRequests,
+        synthesizedSellerOrders: requestSync.applied.synthesizedSellerOrders,
+        finalizations: finalizeSync.applied.finalizations,
+      },
+      skipped: requestSync.skipped + finalizeSync.skipped,
+      blocked: requestSync.blocked + finalizeSync.blocked,
+    };
+  }
+
   async function findExistingProviderOrderSession(inputOrder: {
     state: RuntimeState;
     buyerGlobalMetaId?: string | null;
@@ -14029,6 +14128,44 @@ export function createDefaultMetabotDaemonHandlers(input: {
           });
         }
         return commandSuccess(payload);
+      },
+      syncRefunds: async (request = {}) => {
+        const requestedFrom = normalizeText(request.from);
+        const scoped = await resolveScopedServicesForActor(request.from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.services?.syncRefunds) {
+          return scoped.services.syncRefunds({ from: requestedFrom });
+        }
+        if (!requestedFrom && request.all === true) {
+          const records = await listMyServicesProfileRecords();
+          let merged = emptyServiceRefundSyncResponse();
+          for (const profile of records) {
+            const profileHomeDir = path.resolve(profile.homeDir);
+            if (profileHomeDir === path.resolve(input.homeDir)) {
+              merged = mergeServiceRefundSyncResponses(merged, await syncServiceRefundsForCurrentProfile());
+              continue;
+            }
+            const scopedHandlers = createDefaultMetabotDaemonHandlers({
+              ...input,
+              homeDir: profileHomeDir,
+              secretStore: createFileSecretStore(profileHomeDir),
+              signer: createSignerForProfileHome(profileHomeDir),
+              servicePaymentExecutor: undefined,
+            });
+            const result = await scopedHandlers.services?.syncRefunds?.({});
+            if (!result?.ok) {
+              return commandFailed(
+                result?.code ?? 'service_refund_sync_failed',
+                result?.message ?? `Failed to sync refunds for profile: ${profile.slug}`,
+              );
+            }
+            merged = mergeServiceRefundSyncResponses(merged, result.data);
+          }
+          return commandSuccess(merged);
+        }
+        return commandSuccess(await syncServiceRefundsForCurrentProfile());
       },
       inspectOrder: async ({ from, orderId, paymentTxid }) => {
         const scoped = await resolveScopedProviderForActor(from);

@@ -840,6 +840,17 @@ test('runCli prints services order and refund lifecycle help', async () => {
   assert.match(listOutput, /^Usage:\s+metabot services refunds list \[--from <bot-slug> \| --all\] \[--kind <all\|initiated\|received> \| --initiated \| --received\]/m);
   assert.match(listOutput, /--kind <all\|initiated\|received>\s+Select all refunds, buyer-side initiated refunds, or seller-side received refund requests\./m);
 
+  const syncStdout = [];
+  const syncExitCode = await runCli(['services', 'refunds', 'sync', '--help'], {
+    stdout: { write: (chunk) => { syncStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(syncExitCode, 0);
+  const syncOutput = syncStdout.join('');
+  assert.match(syncOutput, /^Usage:\s+metabot services refunds sync \[--from <bot-slug> \| --all\]/m);
+  assert.match(syncOutput, /Read refund request and finalize pins, retry due buyer requests, and update local refund state\./m);
+
   const orderStdout = [];
   const orderExitCode = await runCli(['services', 'orders', 'inspect', '--help'], {
     stdout: { write: (chunk) => { orderStdout.push(String(chunk)); return true; } },
