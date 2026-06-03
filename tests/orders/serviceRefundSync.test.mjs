@@ -265,6 +265,39 @@ test('applyServiceRefundRequestsToState synthesizes provider seller order from c
   assert.equal(buildSellerReceivedRefundItems(result.nextState).length, 1);
 });
 
+test('applyServiceRefundRequestsToState synthesizes unsupported provider seller order with visible blocker', () => {
+  const result = applyServiceRefundRequestsToState({
+    state: createState(),
+    requests: [
+      createRequest({
+        pinId: 'refund-request-pin-mrc20',
+        payload: {
+          paymentAmount: '10',
+          paymentAsset: 'OPCAT',
+          paymentChain: 'opcat',
+          settlementKind: 'mrc20',
+          mrc20Ticker: 'TEST',
+          mrc20Id: 'mrc20-test-id',
+        },
+      }),
+    ],
+    identity,
+    nowMs: NOW,
+  });
+
+  assert.equal(result.applied.synthesizedSellerOrders, 1);
+  const order = result.nextState.sellerOrders[0];
+  assert.equal(order.state, 'refund_pending');
+  assert.equal(order.settlementKind, 'mrc20');
+  assert.equal(order.mrc20Ticker, 'TEST');
+  assert.equal(order.mrc20Id, 'mrc20-test-id');
+  assert.equal(order.paymentCurrency, 'OPCAT');
+  assert.equal(order.paymentChain, 'opcat');
+  assert.equal(order.refundRequestPinId, 'refund-request-pin-mrc20');
+  assert.equal(order.refundBlockingReason, 'refund_settlement_unsupported');
+  assert.equal(buildSellerReceivedRefundItems(result.nextState)[0].manualActionRequired, false);
+});
+
 test('applyServiceRefundRequestsToState does not synthesize when local profile is not the provider', () => {
   const result = applyServiceRefundRequestsToState({
     state: createState(),
@@ -279,6 +312,42 @@ test('applyServiceRefundRequestsToState does not synthesize when local profile i
   assert.equal(result.applied.synthesizedSellerOrders, 0);
   assert.equal(result.nextState.sellerOrders.length, 0);
   assert.equal(result.skipped, 1);
+});
+
+test('applyServiceRefundRequestsToState blocks existing seller order for unsupported request', () => {
+  const result = applyServiceRefundRequestsToState({
+    state: createState({
+      sellerOrders: [
+        createSellerOrder({
+          settlementKind: 'native',
+          mrc20Ticker: null,
+          mrc20Id: null,
+        }),
+      ],
+    }),
+    requests: [
+      createRequest({
+        payload: {
+          settlementKind: 'mrc20',
+          mrc20Ticker: 'TEST',
+          mrc20Id: 'mrc20-test-id',
+          paymentAsset: 'OPCAT',
+          paymentChain: 'opcat',
+        },
+      }),
+    ],
+    identity,
+    nowMs: NOW,
+  });
+
+  const order = result.nextState.sellerOrders[0];
+  assert.equal(result.applied.sellerRequests, 1);
+  assert.equal(order.state, 'refund_pending');
+  assert.equal(order.settlementKind, 'mrc20');
+  assert.equal(order.mrc20Ticker, 'TEST');
+  assert.equal(order.mrc20Id, 'mrc20-test-id');
+  assert.equal(order.refundBlockingReason, 'refund_settlement_unsupported');
+  assert.equal(buildSellerReceivedRefundItems(result.nextState)[0].manualActionRequired, false);
 });
 
 test('applyServiceRefundRequestsToState does not match ambiguous local records', () => {

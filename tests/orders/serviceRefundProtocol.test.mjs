@@ -80,6 +80,35 @@ test('parseServiceRefundRequestPin parses IDBots-compatible request payload alia
   });
 });
 
+test('parseServiceRefundRequestPin preserves unsupported settlement metadata from request payloads', () => {
+  const parsed = parseServiceRefundRequestPin({
+    pinId: 'refund-request-pin-mrc20',
+    path: SERVICE_REFUND_REQUEST_PATH,
+    content: {
+      version: 1,
+      serviceOrderPinId: 'skill-service-order-pin-1',
+      servicePinId: 'skill-service-pin-1',
+      paymentTxid: 'b'.repeat(64),
+      paymentAmount: '10',
+      paymentAsset: 'OPCAT',
+      paymentChain: 'opcat',
+      settlementKind: 'mrc20',
+      mrc20Ticker: 'TEST',
+      mrc20Id: 'mrc20-test-id',
+      buyerGlobalMetaId: 'idq1buyer',
+      sellerGlobalMetaId: 'idq1seller',
+      refundAddress: 'buyer-opcat-address',
+      reason: 'delivery_timeout',
+      requestedAt: '2026-06-03T00:00:00.000Z',
+    },
+  });
+
+  assert.equal(parsed?.payload.settlementKind, 'mrc20');
+  assert.equal(parsed?.payload.mrc20Ticker, 'TEST');
+  assert.equal(parsed?.payload.mrc20Id, 'mrc20-test-id');
+  assert.equal(parsed?.payload.paymentChain, 'opcat');
+});
+
 test('parseServiceRefundRequestPin rejects missing order or payment identity for paid refunds', () => {
   const basePayload = {
     version: 1,

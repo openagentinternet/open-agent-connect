@@ -110,6 +110,16 @@ function inferSettlementKind(payload: Record<string, unknown>, amount: unknown):
   return isZeroAmount(amount) ? 'free' : 'native';
 }
 
+function requestBlockingReason(request: RequestContext): string | null {
+  if (request.settlementKind === 'native' || request.settlementKind === 'free') {
+    return null;
+  }
+  if (isZeroAmount(request.paymentAmount)) {
+    return null;
+  }
+  return 'refund_settlement_unsupported';
+}
+
 function emptyCounters(state: RuntimeState): ServiceRefundSyncResult {
   return {
     nextState: state,
@@ -337,10 +347,16 @@ function patchSellerRequestOrder(
   nowMs: number,
 ): { order: SellerOrderRecord; changed: boolean } {
   const alreadyApplied = normalizeText(order.refundRequestPinId) === request.pinId;
+  const blockingReason = requestBlockingReason(request);
   const patch = {
     refundRequestPinId: request.pinId || order.refundRequestPinId,
     failureReason: normalizeText(order.failureReason) || request.reason || order.failureReason,
-    refundBlockingReason: null,
+    paymentCurrency: request.paymentAsset || order.paymentCurrency,
+    paymentChain: request.paymentChain || order.paymentChain,
+    settlementKind: request.settlementKind || order.settlementKind,
+    mrc20Ticker: normalizeText(request.payload.mrc20Ticker) || order.mrc20Ticker,
+    mrc20Id: normalizeText(request.payload.mrc20Id) || order.mrc20Id,
+    refundBlockingReason: blockingReason,
     latestEvent: 'refund_request_discovered',
     updatedAt: nowMs,
   };
@@ -403,6 +419,7 @@ function synthesizeSellerOrder(
     failureReason: request.reason,
     latestEvent: 'refund_request_discovered',
     refundRequestPinId: request.pinId,
+    refundBlockingReason: requestBlockingReason(request),
     createdAt: nowMs,
     updatedAt: nowMs,
   });

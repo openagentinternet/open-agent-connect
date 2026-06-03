@@ -8,6 +8,10 @@ export interface ServiceRefundRequestPayload {
   paymentTxid?: string;
   paymentAmount?: string;
   paymentAsset?: string;
+  paymentChain?: string;
+  settlementKind?: string;
+  mrc20Ticker?: string;
+  mrc20Id?: string;
   buyerGlobalMetaId?: string;
   sellerGlobalMetaId?: string;
   refundAddress?: string;
@@ -157,6 +161,10 @@ export function buildServiceRefundRequestPayload(
     ...(normalizeText(input.paymentTxid) ? { paymentTxid: normalizeText(input.paymentTxid) } : {}),
     ...(normalizeText(input.paymentAmount) ? { paymentAmount: normalizeText(input.paymentAmount) } : {}),
     ...(canonicalAsset(input.paymentAsset) ? { paymentAsset: canonicalAsset(input.paymentAsset) } : {}),
+    ...(normalizeText(input.paymentChain) ? { paymentChain: normalizeText(input.paymentChain).toLowerCase() } : {}),
+    ...(normalizeText(input.settlementKind) ? { settlementKind: normalizeText(input.settlementKind).toLowerCase() } : {}),
+    ...(normalizeText(input.mrc20Ticker) ? { mrc20Ticker: normalizeText(input.mrc20Ticker) } : {}),
+    ...(normalizeText(input.mrc20Id) ? { mrc20Id: normalizeText(input.mrc20Id) } : {}),
     ...(normalizeText(input.buyerGlobalMetaId) ? { buyerGlobalMetaId: normalizeText(input.buyerGlobalMetaId) } : {}),
     ...(normalizeText(input.sellerGlobalMetaId) ? { sellerGlobalMetaId: normalizeText(input.sellerGlobalMetaId) } : {}),
     ...(normalizeText(input.refundAddress) ? { refundAddress: normalizeText(input.refundAddress) } : {}),
@@ -193,6 +201,10 @@ export function parseServiceRefundRequestPin(pin: unknown): ParsedServiceRefundR
     paymentTxid,
     paymentAmount,
     paymentAsset: canonicalAsset(source.paymentAsset || source.refundCurrency || source.currency),
+    paymentChain: normalizeText(source.paymentChain),
+    settlementKind: normalizeText(source.settlementKind),
+    mrc20Ticker: normalizeText(source.mrc20Ticker),
+    mrc20Id: normalizeText(source.mrc20Id),
     buyerGlobalMetaId: normalizeText(source.buyerGlobalMetaId),
     sellerGlobalMetaId: normalizeText(source.sellerGlobalMetaId),
     refundAddress: normalizeText(source.refundAddress) || normalizeText(source.refundToAddress),

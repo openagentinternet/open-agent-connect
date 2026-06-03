@@ -116,6 +116,9 @@ function resolveSellerOrderServiceOrderPinId(order: SellerOrderRecord): string |
 }
 
 export function sellerOrderRequiresManualAction(order: SellerOrderRecord): boolean {
+  if (normalizeText(order.refundBlockingReason)) {
+    return false;
+  }
   const state = normalizeText(order.state);
   if (state === 'refund_pending' && normalizeText(order.refundRequestPinId)) {
     return true;
