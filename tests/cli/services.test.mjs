@@ -765,6 +765,79 @@ test('runCli dispatches `metabot services refunds list` with aggregate and kind 
   ]);
 });
 
+test('runCli dispatches `metabot services refunds sync` with actor selectors', async () => {
+  const calls = [];
+  const fromExitCode = await runCli(['services', 'refunds', 'sync', '--from', 'seller'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        syncRefunds: async (input) => {
+          calls.push(input);
+          return commandSuccess({
+            scanned: { requestPins: 0, finalizePins: 0, buyerRetryCandidates: 0 },
+            applied: { buyerRequests: 0, sellerRequests: 0, synthesizedSellerOrders: 0, finalizations: 0 },
+            skipped: 0,
+            blocked: 0,
+          });
+        },
+      },
+    },
+  });
+
+  const allExitCode = await runCli(['services', 'refunds', 'sync', '--all'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        syncRefunds: async (input) => {
+          calls.push(input);
+          return commandSuccess({
+            scanned: { requestPins: 0, finalizePins: 0, buyerRetryCandidates: 0 },
+            applied: { buyerRequests: 0, sellerRequests: 0, synthesizedSellerOrders: 0, finalizations: 0 },
+            skipped: 0,
+            blocked: 0,
+          });
+        },
+      },
+    },
+  });
+
+  assert.equal(fromExitCode, 0);
+  assert.equal(allExitCode, 0);
+  assert.deepEqual(calls, [
+    { from: 'seller', all: false },
+    { all: true },
+  ]);
+});
+
+test('runCli rejects combining `metabot services refunds sync --from` with --all', async () => {
+  const calls = [];
+  const stdout = [];
+
+  const exitCode = await runCli(['services', 'refunds', 'sync', '--from', 'seller', '--all'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      services: {
+        syncRefunds: async (input) => {
+          calls.push(input);
+          return commandSuccess({});
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(JSON.parse(stdout.join('').trim()), {
+    ok: false,
+    state: 'failed',
+    code: 'invalid_flag',
+    message: 'Use either --from <bot-slug> or --all for refund sync, not both.',
+  });
+});
+
 test('runCli rejects invalid `metabot services refunds list --kind` values', async () => {
   const calls = [];
   const stdout = [];

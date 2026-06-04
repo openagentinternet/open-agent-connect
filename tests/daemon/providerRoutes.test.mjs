@@ -714,6 +714,196 @@ test('GET /api/services/refunds returns buyer initiated and seller received refu
   assert.equal(response.payload.data.receivedByMe[1].refundFinalizePinId, 'refund-finalize-pin-2');
 });
 
+test('POST /api/services/refunds/sync calls the refund sync handler and returns counts', async (t) => {
+  const calls = [];
+  const server = createHttpServer({
+    services: {
+      syncRefunds: async (input) => {
+        calls.push(input);
+        return {
+          ok: true,
+          state: 'success',
+          data: {
+            scanned: {
+              requestPins: 2,
+              finalizePins: 1,
+              buyerRetryCandidates: 3,
+            },
+            applied: {
+              buyerRequests: 1,
+              sellerRequests: 1,
+              synthesizedSellerOrders: 1,
+              finalizations: 0,
+            },
+            skipped: 4,
+            blocked: 5,
+          },
+        };
+      },
+    },
+  });
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+
+  const response = await fetchJson(`http://127.0.0.1:${address.port}`, '/api/services/refunds/sync', {
+    method: 'POST',
+    body: { from: 'seller', all: true },
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [{ from: 'seller', all: true }]);
+  assert.deepEqual(response.payload, {
+    ok: true,
+    state: 'success',
+    data: {
+      scanned: {
+        requestPins: 2,
+        finalizePins: 1,
+        buyerRetryCandidates: 3,
+      },
+      applied: {
+        buyerRequests: 1,
+        sellerRequests: 1,
+        synthesizedSellerOrders: 1,
+        finalizations: 0,
+      },
+      skipped: 4,
+      blocked: 5,
+    },
+  });
+});
+
+test('GET /api/services/refunds?refresh=true syncs before listing refunds', async (t) => {
+  const calls = [];
+  const server = createHttpServer({
+    services: {
+      syncRefunds: async (input) => {
+        calls.push(['sync', input]);
+        return {
+          ok: true,
+          state: 'success',
+          data: {
+            scanned: { requestPins: 0, finalizePins: 0, buyerRetryCandidates: 0 },
+            applied: { buyerRequests: 0, sellerRequests: 0, synthesizedSellerOrders: 0, finalizations: 0 },
+            skipped: 0,
+            blocked: 0,
+          },
+        };
+      },
+      listRefunds: async (input) => {
+        calls.push(['list', input]);
+        return {
+          ok: true,
+          state: 'success',
+          data: {
+            initiatedByMe: [],
+            receivedByMe: [],
+            totalCount: 0,
+            pendingCount: 0,
+          },
+        };
+      },
+    },
+  });
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+
+  const response = await fetchJson(
+    `http://127.0.0.1:${address.port}`,
+    '/api/services/refunds?refresh=true&from=seller&kind=received',
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    ['sync', { from: 'seller', kind: 'received' }],
+    ['list', { from: 'seller', kind: 'received' }],
+  ]);
+  assert.equal(response.payload.ok, true);
+  assert.equal(response.payload.data.totalCount, 0);
+});
+
+test('GET /api/services/refunds without refresh does not sync before listing refunds', async (t) => {
+  const calls = [];
+  const server = createHttpServer({
+    services: {
+      syncRefunds: async (input) => {
+        calls.push(['sync', input]);
+        return {
+          ok: true,
+          state: 'success',
+          data: {
+            scanned: { requestPins: 0, finalizePins: 0, buyerRetryCandidates: 0 },
+            applied: { buyerRequests: 0, sellerRequests: 0, synthesizedSellerOrders: 0, finalizations: 0 },
+            skipped: 0,
+            blocked: 0,
+          },
+        };
+      },
+      listRefunds: async (input) => {
+        calls.push(['list', input]);
+        return {
+          ok: true,
+          state: 'success',
+          data: { initiatedByMe: [], receivedByMe: [], totalCount: 0, pendingCount: 0 },
+        };
+      },
+    },
+  });
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+
+  const response = await fetchJson(`http://127.0.0.1:${address.port}`, '/api/services/refunds?kind=received');
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [['list', { kind: 'received' }]]);
+  assert.equal(response.payload.ok, true);
+});
+
 test('GET /api/services/refunds kind=initiated all=true aggregates buyer refunds across local profiles', async (t) => {
   const app = await startProviderServer();
   t.after(async () => app.close());

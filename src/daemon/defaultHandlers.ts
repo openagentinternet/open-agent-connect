@@ -64,7 +64,7 @@ import type {
   MetabotProfileFull,
   UpdateMetabotInfoInput,
 } from '../core/bot/metabotProfileManager';
-import type { MetabotDaemonHttpHandlers } from './routes/types';
+import type { MetabotDaemonHttpHandlers, ServiceRefundSyncResponse } from './routes/types';
 import {
   buildPublishedService,
   normalizePublishedServiceCurrency,
@@ -118,10 +118,27 @@ import {
   isSelfDirectedPair,
 } from '../core/orders/orderLifecycle';
 import {
-  SERVICE_REFUND_FINALIZE_PATH,
   processSellerRefundSettlement,
   type RefundTransferInput,
 } from '../core/orders/serviceRefundSettlement';
+import {
+  SERVICE_REFUND_FINALIZE_PATH,
+  SERVICE_REFUND_REQUEST_PATH,
+  buildServiceRefundRequestPayload,
+  parseRefundProtocolContent,
+  type ParsedServiceRefundFinalize,
+} from '../core/orders/serviceRefundProtocol';
+import {
+  runBuyerRefundRequestLifecycle,
+} from '../core/orders/serviceRefundLifecycle';
+import {
+  createServiceRefundChainReader,
+} from '../core/orders/serviceRefundChainReader';
+import {
+  applyServiceRefundFinalizationsToState,
+  applyServiceRefundRequestsToState,
+  mergeServiceRefundSyncState,
+} from '../core/orders/serviceRefundSync';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
 import {
@@ -177,7 +194,12 @@ import {
   searchOnlineServiceCacheServices,
 } from '../core/discovery/onlineServiceCache';
 import { readOnlineMetaBotsFromSocketPresence } from '../core/discovery/socketPresenceDirectory';
-import { createSessionStateStore, type A2ATranscriptItemRecord } from '../core/a2a/sessionStateStore';
+import {
+  createSessionStateStore,
+  type A2APublicStatusSnapshot,
+  type A2ASessionStoreState,
+  type A2ATranscriptItemRecord,
+} from '../core/a2a/sessionStateStore';
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/sessionEngine';
@@ -350,7 +372,6 @@ const DEFAULT_MASTER_HOST_MODE = 'codex';
 const DEFAULT_NETWORK_BOT_LIST_LIMIT = 20;
 const MAX_NETWORK_BOT_LIST_LIMIT = 100;
 const DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS = [1_500, 5_000, 10_000];
-const SERVICE_REFUND_REQUEST_PATH = '/protocols/service-refund-request';
 const LOOM_DRAFT_LLM_TIMEOUT_MS = 120_000;
 const LOOM_DEV_ROUND_LLM_TIMEOUT_MS = 900_000;
 const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
@@ -5348,6 +5369,53 @@ export async function rebuildTraceArtifactsFromSessionState(input: {
   };
 }
 
+function findLatestTerminalPublicStatusSnapshot(input: {
+  traceId: string;
+  sessionState: A2ASessionStoreState;
+}): { status: PublicStatus } | null {
+  const sessionIds = new Set(
+    input.sessionState.sessions
+      .filter((entry) => entry.traceId === input.traceId)
+      .map((entry) => entry.sessionId),
+  );
+  if (!sessionIds.size) {
+    return null;
+  }
+
+  return input.sessionState.publicStatusSnapshots
+    .filter((entry) => sessionIds.has(entry.sessionId))
+    .filter((entry): entry is A2APublicStatusSnapshot & { status: PublicStatus } => (
+      entry.status !== null && isTerminalTraceWatchStatus(entry.status)
+    ))
+    .sort((left, right) => normalizeTraceTimestamp(left.resolvedAt) - normalizeTraceTimestamp(right.resolvedAt))
+    .at(-1) ?? null;
+}
+
+async function refreshStaleTerminalTraceArtifacts(input: {
+  trace: SessionTraceRecord;
+  sessionState: A2ASessionStoreState;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  sessionStateStore: ReturnType<typeof createSessionStateStore>;
+}): Promise<SessionTraceRecord> {
+  const latestTerminalSnapshot = findLatestTerminalPublicStatusSnapshot({
+    traceId: input.trace.traceId,
+    sessionState: input.sessionState,
+  });
+  if (!latestTerminalSnapshot) {
+    return input.trace;
+  }
+  if (normalizeText(input.trace.a2a?.publicStatus) === latestTerminalSnapshot.status) {
+    return input.trace;
+  }
+
+  const rebuilt = await rebuildTraceArtifactsFromSessionState({
+    baseTrace: input.trace,
+    runtimeStateStore: input.runtimeStateStore,
+    sessionStateStore: input.sessionStateStore,
+  });
+  return rebuilt.trace;
+}
+
 async function loadCallerContinuationState(input: {
   traceId: string;
   sessionId: string;
@@ -5754,6 +5822,31 @@ async function applyCallerReplyResult(input: {
   };
 }
 
+
+const refundMutationLocks = new Map<string, Promise<void>>();
+
+async function withRefundMutationLock<T>(
+  homeDir: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const key = path.resolve(homeDir);
+  const previous = refundMutationLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const chained = previous.catch(() => undefined).then(() => current);
+  refundMutationLocks.set(key, chained);
+  await previous.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (refundMutationLocks.get(key) === chained) {
+      refundMutationLocks.delete(key);
+    }
+  }
+}
 
 export function createDefaultMetabotDaemonHandlers(input: {
   homeDir: string;
@@ -7901,10 +7994,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const paymentChain = inferRefundPaymentChain(order);
     const refundAmount = normalizeText(order.paymentAmount);
     const refundCurrency = normalizeText(order.paymentCurrency);
-    return {
-      version: '1.0.0',
+    const serviceOrderPinId = normalizeText(order.orderPinId);
+    const corePayload = buildServiceRefundRequestPayload({
+      version: 1,
+      serviceOrderPinId,
+      servicePinId: normalizeText(order.serviceId),
       paymentTxid: normalizeText(order.paymentTxid),
-      servicePinId: normalizeText(order.serviceId) || null,
+      paymentAmount: refundAmount,
+      paymentAsset: refundCurrency,
+      buyerGlobalMetaId: inputRefund.identity.globalMetaId,
+      sellerGlobalMetaId: normalizeText(inputRefund.trace.session.peerGlobalMetaId)
+        || normalizeText(inputRefund.trace.a2a?.providerGlobalMetaId),
+      refundAddress: resolveRefundAddress(inputRefund.identity, paymentChain),
+      reason: inputRefund.failureReason,
+      requestedAt: new Date(inputRefund.failedAt).toISOString(),
+    });
+    return {
+      ...corePayload,
       serviceName: normalizeText(order.serviceName),
       refundAmount,
       refundCurrency,
@@ -7915,11 +8021,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
       mrc20Ticker: normalizeText(order.mrc20Ticker) || null,
       mrc20Id: normalizeText(order.mrc20Id) || null,
       paymentCommitTxid: normalizeText(order.paymentCommitTxid) || null,
-      refundToAddress: resolveRefundAddress(inputRefund.identity, paymentChain),
-      buyerGlobalMetaId: inputRefund.identity.globalMetaId,
-      sellerGlobalMetaId: normalizeText(inputRefund.trace.session.peerGlobalMetaId)
-        || normalizeText(inputRefund.trace.a2a?.providerGlobalMetaId),
-      orderMessagePinId: normalizeText(order.orderPinId) || null,
+      refundToAddress: corePayload.refundAddress ?? '',
+      orderMessagePinId: serviceOrderPinId || null,
       failureReason: inputRefund.failureReason,
       failureDetectedAt: Math.floor(inputRefund.failedAt / 1000),
       reasonComment: inputRefund.failureReason === 'invalid_deliverable'
@@ -8113,6 +8216,200 @@ export function createDefaultMetabotDaemonHandlers(input: {
         refundApplyRetryCount: normalizeRefundCounter(order.refundApplyRetryCount) + 1,
       });
     }
+  }
+
+  async function runBuyerRefundRequestLifecycleForDueTraces(nowMs = Date.now()) {
+    const state = await runtimeStateStore.readState();
+    return runBuyerRefundRequestLifecycle({
+      traces: state.traces,
+      nowMs,
+      localGlobalMetaId: state.identity?.globalMetaId,
+      writer: {
+        async writeRefundRequest(traceId, context) {
+          const trace = state.traces.find((entry) => entry.traceId === traceId) ?? context?.trace;
+          if (!trace) {
+            throw new Error(`Buyer refund trace not found: ${traceId}`);
+          }
+          const nextTrace = await ensureBuyerRefundRequestForTrace({
+            trace,
+            failureReason: context?.failureReason || normalizeText(trace.order?.failureReason) || 'delivery_timeout',
+            failedAt: nowMs,
+          });
+          return { trace: nextTrace };
+        },
+      },
+    });
+  }
+
+  function emptyServiceRefundSyncResponse(): ServiceRefundSyncResponse {
+    return {
+      scanned: {
+        requestPins: 0,
+        finalizePins: 0,
+        buyerRetryCandidates: 0,
+      },
+      applied: {
+        buyerRequests: 0,
+        sellerRequests: 0,
+        synthesizedSellerOrders: 0,
+        finalizations: 0,
+      },
+      skipped: 0,
+      blocked: 0,
+    };
+  }
+
+  function mergeServiceRefundSyncResponses(
+    left: ServiceRefundSyncResponse,
+    right: ServiceRefundSyncResponse,
+  ): ServiceRefundSyncResponse {
+    return {
+      scanned: {
+        requestPins: left.scanned.requestPins + right.scanned.requestPins,
+        finalizePins: left.scanned.finalizePins + right.scanned.finalizePins,
+        buyerRetryCandidates: left.scanned.buyerRetryCandidates + right.scanned.buyerRetryCandidates,
+      },
+      applied: {
+        buyerRequests: left.applied.buyerRequests + right.applied.buyerRequests,
+        sellerRequests: left.applied.sellerRequests + right.applied.sellerRequests,
+        synthesizedSellerOrders: left.applied.synthesizedSellerOrders + right.applied.synthesizedSellerOrders,
+        finalizations: left.applied.finalizations + right.applied.finalizations,
+      },
+      skipped: left.skipped + right.skipped,
+      blocked: left.blocked + right.blocked,
+    };
+  }
+
+  function normalizeRefundAsset(value: unknown): string {
+    const asset = normalizeText(value).toUpperCase();
+    return asset === 'MVC' ? 'SPACE' : asset;
+  }
+
+  function normalizeRefundAmount(value: unknown): string {
+    const text = normalizeText(value);
+    if (!text) {
+      return '';
+    }
+    const numeric = Number(text);
+    if (!Number.isFinite(numeric)) {
+      return text;
+    }
+    return numeric.toFixed(8).replace(/\.?0+$/u, '');
+  }
+
+  async function verifyServiceRefundFinalizeTransfer(finalize: ParsedServiceRefundFinalize): Promise<boolean> {
+    const refundRequestPinId = normalizeText(finalize.payload.refundRequestPinId);
+    const refundTxid = normalizeText(finalize.payload.refundTxid);
+    if (!refundRequestPinId || !refundTxid) {
+      return false;
+    }
+
+    let refundRequestDetail: { content: unknown };
+    try {
+      refundRequestDetail = await fetchProtocolPinDetail({
+        pinId: refundRequestPinId,
+        chainApiBaseUrl: input.chainApiBaseUrl,
+      });
+    } catch {
+      return false;
+    }
+
+    const refundRequestPayload = parseRefundProtocolContent(refundRequestDetail.content);
+    if (!refundRequestPayload) {
+      return false;
+    }
+
+    const expectedAmount = normalizeRefundAmount(
+      refundRequestPayload.refundAmount
+      ?? refundRequestPayload.amount
+      ?? refundRequestPayload.paymentAmount
+    );
+    const expectedAsset = normalizeRefundAsset(
+      refundRequestPayload.refundCurrency
+      ?? refundRequestPayload.currency
+      ?? refundRequestPayload.paymentAsset
+    );
+    const finalizeAmount = normalizeRefundAmount(finalize.payload.paymentAmount);
+    const finalizeAsset = normalizeRefundAsset(finalize.payload.paymentAsset);
+    if (
+      !expectedAmount
+      || !expectedAsset
+      || (finalizeAmount && finalizeAmount !== expectedAmount)
+      || (finalizeAsset && finalizeAsset !== expectedAsset)
+    ) {
+      return false;
+    }
+
+    const refundAddress = normalizeText(refundRequestPayload.refundAddress)
+      || normalizeText(refundRequestPayload.refundToAddress);
+    const verification = await verifyServiceOrderPayment({
+      adapters,
+      paymentTxid: refundTxid,
+      paymentChain: normalizeText(refundRequestPayload.paymentChain),
+      settlementKind: normalizeText(refundRequestPayload.settlementKind),
+      paymentAddress: refundAddress,
+      amount: expectedAmount,
+      currency: expectedAsset,
+    }).catch(() => ({ verified: false }));
+
+    return verification.verified === true;
+  }
+
+  async function syncServiceRefundsForCurrentProfile(nowMs = Date.now()): Promise<ServiceRefundSyncResponse> {
+    return withRefundMutationLock(input.homeDir, async () => {
+      const lifecycle = await runBuyerRefundRequestLifecycleForDueTraces(nowMs);
+      const stateAfterLifecycle = await runtimeStateStore.readState();
+      const reader = createServiceRefundChainReader({
+        chainApiBaseUrl: input.chainApiBaseUrl,
+      });
+      const [requestPins, finalizePins] = await Promise.all([
+        reader.listRefundRequests({}),
+        reader.listRefundFinalizations({}),
+      ]);
+
+      const identity = {
+        localMetabotId: stateAfterLifecycle.identity?.metabotId ?? 0,
+        localMetabotSlug: path.basename(path.resolve(input.homeDir)),
+        localGlobalMetaId: normalizeText(stateAfterLifecycle.identity?.globalMetaId),
+      };
+      const requestSync = applyServiceRefundRequestsToState({
+        state: stateAfterLifecycle,
+        requests: requestPins,
+        identity,
+        nowMs,
+      });
+      const finalizeSync = await applyServiceRefundFinalizationsToState({
+        state: requestSync.nextState,
+        finalizations: finalizePins,
+        identity,
+        nowMs,
+        verifyFinalize: verifyServiceRefundFinalizeTransfer,
+      });
+
+      if (requestSync.nextState !== stateAfterLifecycle || finalizeSync.nextState !== requestSync.nextState) {
+        const currentState = await runtimeStateStore.readState();
+        await runtimeStateStore.writeState(mergeServiceRefundSyncState({
+          currentState,
+          syncedState: finalizeSync.nextState,
+        }));
+      }
+
+      return {
+        scanned: {
+          requestPins: requestPins.length,
+          finalizePins: finalizePins.length,
+          buyerRetryCandidates: lifecycle.attempted,
+        },
+        applied: {
+          buyerRequests: lifecycle.succeeded + requestSync.applied.buyerRequests,
+          sellerRequests: requestSync.applied.sellerRequests,
+          synthesizedSellerOrders: requestSync.applied.synthesizedSellerOrders,
+          finalizations: finalizeSync.applied.finalizations,
+        },
+        skipped: requestSync.skipped + finalizeSync.skipped,
+        blocked: requestSync.blocked + finalizeSync.blocked,
+      };
+    });
   }
 
   async function findExistingProviderOrderSession(inputOrder: {
@@ -10758,106 +11055,108 @@ export function createDefaultMetabotDaemonHandlers(input: {
     orderId?: string | null;
     paymentTxid?: string | null;
   }): Promise<MetabotCommandResult<Record<string, unknown>>> {
-    const state = await runtimeStateStore.readState();
-    const found = findSellerOrderBySelector(state, inputRefund);
-    if (found.status !== 'found') {
-      if (found.status === 'not_found') {
+    return withRefundMutationLock(input.homeDir, async () => {
+      const state = await runtimeStateStore.readState();
+      const found = findSellerOrderBySelector(state, inputRefund);
+      if (found.status !== 'found') {
+        if (found.status === 'not_found') {
+          return {
+            ...commandManualActionRequired(
+              'order_not_found',
+              'Provider order was not found.',
+              {
+                localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/refund'),
+                data: {
+                  order: null,
+                  orderId: normalizeText(inputRefund.orderId) || null,
+                  paymentTxid: normalizeText(inputRefund.paymentTxid) || null,
+                  blockingReason: 'order_not_found',
+                },
+              },
+            ),
+          };
+        }
+        return buildSellerOrderSelectorError({
+          status: found.status,
+          matches: found.matches,
+        });
+      }
+      if (!found.order) {
+        return buildSellerOrderSelectorError({ status: 'not_found', matches: [] });
+      }
+
+      const settlement = await processSellerRefundSettlement({
+        state,
+        orderId: found.order.id,
+        fetchRefundRequestPin: (pinId) => fetchProtocolPinDetail({
+          pinId,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+        }),
+        executeRefundTransfer: executeSellerRefundTransfer,
+        persistSettlementState: (nextState) => runtimeStateStore.writeState(nextState).then(() => undefined),
+        writeRefundFinalizePin: async ({ payload }) => signer.writePin({
+          operation: 'create',
+          path: SERVICE_REFUND_FINALIZE_PATH,
+          encryption: '0',
+          version: '1.0.0',
+          contentType: 'application/json',
+          payload: JSON.stringify(payload),
+          encoding: 'utf-8',
+          network: 'mvc',
+        }),
+        resolveLocalSellerGlobalMetaId: (order) => {
+          const identity = state.identity;
+          return identity?.globalMetaId || order.providerGlobalMetaId;
+        },
+      });
+      await runtimeStateStore.writeState(settlement.nextState);
+
+      const updatedOrder = settlement.orderId
+        ? findSellerOrderBySelector(settlement.nextState, { orderId: settlement.orderId }).order
+        : null;
+      const orderInspection = updatedOrder
+        ? buildProviderSellerOrderInspection(updatedOrder)
+        : settlement.order
+          ? buildProviderSellerOrderInspection(settlement.order)
+          : null;
+
+      if (!settlement.ok) {
         return {
           ...commandManualActionRequired(
-            'order_not_found',
-            'Provider order was not found.',
+            settlement.code,
+            settlement.message,
             {
-              localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/refund'),
+              localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/refund', {
+                orderId: settlement.orderId,
+              }),
               data: {
-                order: null,
-                orderId: normalizeText(inputRefund.orderId) || null,
-                paymentTxid: normalizeText(inputRefund.paymentTxid) || null,
-                blockingReason: 'order_not_found',
+                order: orderInspection,
+                orderId: settlement.orderId,
+                paymentTxid: settlement.paymentTxid,
+                blockingReason: settlement.blockingReason,
               },
             },
           ),
         };
       }
-      return buildSellerOrderSelectorError({
-        status: found.status,
-        matches: found.matches,
-      });
-    }
-    if (!found.order) {
-      return buildSellerOrderSelectorError({ status: 'not_found', matches: [] });
-    }
 
-    const settlement = await processSellerRefundSettlement({
-      state,
-      orderId: found.order.id,
-      fetchRefundRequestPin: (pinId) => fetchProtocolPinDetail({
-        pinId,
-        chainApiBaseUrl: input.chainApiBaseUrl,
-      }),
-      executeRefundTransfer: executeSellerRefundTransfer,
-      persistSettlementState: (nextState) => runtimeStateStore.writeState(nextState).then(() => undefined),
-      writeRefundFinalizePin: async ({ payload }) => signer.writePin({
-        operation: 'create',
-        path: SERVICE_REFUND_FINALIZE_PATH,
-        encryption: '0',
-        version: '1.0.0',
-        contentType: 'application/json',
-        payload: JSON.stringify(payload),
-        encoding: 'utf-8',
-        network: 'mvc',
-      }),
-      resolveLocalSellerGlobalMetaId: (order) => {
-        const identity = state.identity;
-        return identity?.globalMetaId || order.providerGlobalMetaId;
-      },
-    });
-    await runtimeStateStore.writeState(settlement.nextState);
-
-    const updatedOrder = settlement.orderId
-      ? findSellerOrderBySelector(settlement.nextState, { orderId: settlement.orderId }).order
-      : null;
-    const orderInspection = updatedOrder
-      ? buildProviderSellerOrderInspection(updatedOrder)
-      : settlement.order
-        ? buildProviderSellerOrderInspection(settlement.order)
-        : null;
-
-    if (!settlement.ok) {
-      return {
-        ...commandManualActionRequired(
-          settlement.code,
-          settlement.message,
-          {
-            localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/refund', {
-              orderId: settlement.orderId,
-            }),
-            data: {
-              order: orderInspection,
-              orderId: settlement.orderId,
-              paymentTxid: settlement.paymentTxid,
-              blockingReason: settlement.blockingReason,
-            },
-          },
-        ),
-      };
-    }
-
-    return commandSuccess({
-      orderId: settlement.orderId,
-      traceId: normalizeText(settlement.order.traceId) || null,
-      paymentTxid: settlement.paymentTxid,
-      state: settlement.state,
-      refundTxid: settlement.refundTxid,
-      refundFinalizePinId: settlement.refundFinalizePinId,
-      noTransferReason: settlement.noTransferReason,
-      finalization: settlement.finalizePayload,
-      order: orderInspection,
-      settlement: {
+      return commandSuccess({
+        orderId: settlement.orderId,
+        traceId: normalizeText(settlement.order.traceId) || null,
+        paymentTxid: settlement.paymentTxid,
         state: settlement.state,
         refundTxid: settlement.refundTxid,
         refundFinalizePinId: settlement.refundFinalizePinId,
         noTransferReason: settlement.noTransferReason,
-      },
+        finalization: settlement.finalizePayload,
+        order: orderInspection,
+        settlement: {
+          state: settlement.state,
+          refundTxid: settlement.refundTxid,
+          refundFinalizePinId: settlement.refundFinalizePinId,
+          noTransferReason: settlement.noTransferReason,
+        },
+      });
     });
   }
 
@@ -13991,6 +14290,44 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
         return commandSuccess(payload);
       },
+      syncRefunds: async (request = {}) => {
+        const requestedFrom = normalizeText(request.from);
+        const scoped = await resolveScopedServicesForActor(request.from);
+        if (scoped.failure) {
+          return scoped.failure;
+        }
+        if (scoped.services?.syncRefunds) {
+          return scoped.services.syncRefunds({ from: requestedFrom });
+        }
+        if (!requestedFrom && request.all === true) {
+          const records = await listMyServicesProfileRecords();
+          let merged = emptyServiceRefundSyncResponse();
+          for (const profile of records) {
+            const profileHomeDir = path.resolve(profile.homeDir);
+            if (profileHomeDir === path.resolve(input.homeDir)) {
+              merged = mergeServiceRefundSyncResponses(merged, await syncServiceRefundsForCurrentProfile());
+              continue;
+            }
+            const scopedHandlers = createDefaultMetabotDaemonHandlers({
+              ...input,
+              homeDir: profileHomeDir,
+              secretStore: createFileSecretStore(profileHomeDir),
+              signer: createSignerForProfileHome(profileHomeDir),
+              servicePaymentExecutor: undefined,
+            });
+            const result = await scopedHandlers.services?.syncRefunds?.({});
+            if (!result?.ok) {
+              return commandFailed(
+                result?.code ?? 'service_refund_sync_failed',
+                result?.message ?? `Failed to sync refunds for profile: ${profile.slug}`,
+              );
+            }
+            merged = mergeServiceRefundSyncResponses(merged, result.data);
+          }
+          return commandSuccess(merged);
+        }
+        return commandSuccess(await syncServiceRefundsForCurrentProfile());
+      },
       inspectOrder: async ({ from, orderId, paymentTxid }) => {
         const scoped = await resolveScopedProviderForActor(from);
         if (scoped.failure) {
@@ -16127,18 +16464,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('trace_not_found', `Trace not found: ${traceId}`);
         }
         const sessionState = await sessionStateStore.readState();
+        const currentTrace = await refreshStaleTerminalTraceArtifacts({
+          trace,
+          sessionState,
+          runtimeStateStore,
+          sessionStateStore,
+        });
         const selectedSession = sessionState.sessions
           .filter((entry) => entry.traceId === traceId)
           .sort((left, right) => left.updatedAt - right.updatedAt)
           .at(-1) ?? null;
         const orderHistoryProjection = await buildTraceOrderHistoryProjection({
-          trace,
+          trace: currentTrace,
           selectedSession,
         });
         return commandSuccess(
           await buildTraceInspectorPayload({
             traceId,
-            trace,
+            trace: currentTrace,
             sessionStateStore,
             ratingDetailStateStore,
             chainApiBaseUrl: input.chainApiBaseUrl,
@@ -16375,29 +16718,35 @@ export function createDefaultMetabotDaemonHandlers(input: {
               : session.callerGlobalMetaId;
             const traceId = normalizeText(session.traceId);
             let trace: SessionTraceRecord | null = null;
+            const profileRuntimeStateStore = createRuntimeStateStore(profile.homeDir);
             try {
-              const profileRuntimeStateStore = createRuntimeStateStore(profile.homeDir);
               const runtimeState = await profileRuntimeStateStore.readState();
               trace = runtimeState.traces.find((entry) => entry.traceId === traceId) ?? null;
             } catch {
               trace = null;
             }
             if (trace) {
+              const currentTrace = await refreshStaleTerminalTraceArtifacts({
+                trace,
+                sessionState: state,
+                runtimeStateStore: profileRuntimeStateStore,
+                sessionStateStore: store,
+              });
               const privateHistoryProjection = await buildScopedPrivateHistoryProjectionForTrace({
                 profile,
-                trace,
+                trace: currentTrace,
                 session,
                 peerGlobalMetaId,
               }).catch(() => null);
               const orderHistoryProjection = await buildTraceOrderHistoryProjection({
-                trace,
+                trace: currentTrace,
                 selectedSession: session,
                 profile,
                 includePrivateHistory: false,
               });
               const payload = await buildTraceInspectorPayload({
                 traceId,
-                trace,
+                trace: currentTrace,
                 sessionStateStore: store,
                 ratingDetailStateStore: createRatingDetailStateStore(profile.homeDir),
                 chainApiBaseUrl: input.chainApiBaseUrl,

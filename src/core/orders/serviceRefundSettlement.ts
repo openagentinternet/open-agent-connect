@@ -4,9 +4,15 @@ import {
   type SellerOrderRecord,
 } from './sellerOrderState';
 import { SERVICE_ORDER_FREE_REFUND_SKIPPED_REASON } from './orderLifecycle';
-
-export const SERVICE_REFUND_REQUEST_PATH = '/protocols/service-refund-request';
-export const SERVICE_REFUND_FINALIZE_PATH = '/protocols/service-refund-finalize';
+export {
+  SERVICE_REFUND_FINALIZE_PATH,
+  SERVICE_REFUND_REQUEST_PATH,
+  parseRefundProtocolContent,
+} from './serviceRefundProtocol';
+import {
+  SERVICE_REFUND_REQUEST_PATH,
+  parseRefundProtocolContent,
+} from './serviceRefundProtocol';
 
 export interface RefundRequestPinDetail {
   pinId: string;
@@ -94,40 +100,6 @@ function normalizeLower(value: unknown): string {
   return normalizeText(value).toLowerCase();
 }
 
-function readObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
-function parseJsonObject(value: string): Record<string, unknown> | null {
-  try {
-    return readObject(JSON.parse(value));
-  } catch {
-    return null;
-  }
-}
-
-export function parseRefundProtocolContent(content: unknown): Record<string, unknown> | null {
-  if (typeof content === 'string') {
-    return parseJsonObject(content);
-  }
-  const object = readObject(content);
-  if (!object) {
-    return null;
-  }
-
-  const data = readObject(object.data);
-  const summary = object.contentSummary ?? data?.contentSummary ?? object.content;
-  if (typeof summary === 'string') {
-    return parseJsonObject(summary);
-  }
-  if (readObject(summary)) {
-    return summary as Record<string, unknown>;
-  }
-  return object;
-}
-
 function canonicalCurrency(value: unknown): string {
   const normalized = normalizeText(value).toUpperCase();
   return normalized === 'MVC' ? 'SPACE' : normalized;
@@ -170,11 +142,19 @@ function isZeroAmount(value: unknown): boolean {
 }
 
 function readRefundAmount(payload: Record<string, unknown>): string {
-  return normalizeText(payload.refundAmount) || normalizeText(payload.amount);
+  return normalizeText(payload.refundAmount)
+    || normalizeText(payload.amount)
+    || normalizeText(payload.paymentAmount);
 }
 
 function readRefundCurrency(payload: Record<string, unknown>): string {
-  return normalizeText(payload.refundCurrency) || normalizeText(payload.currency);
+  return normalizeText(payload.refundCurrency)
+    || normalizeText(payload.currency)
+    || normalizeText(payload.paymentAsset);
+}
+
+function readRefundAddress(payload: Record<string, unknown>): string {
+  return normalizeText(payload.refundAddress) || normalizeText(payload.refundToAddress);
 }
 
 function matchesPaymentKey(order: SellerOrderRecord, candidate: {
@@ -314,11 +294,11 @@ function validatePayloadMatchesOrder(input: {
     return { ok: false, code: 'refund_request_currency_mismatch', message: 'Refund request currency does not match the seller order.' };
   }
 
-  if (canonicalChain(payload.paymentChain) !== canonicalChain(order.paymentChain, order.paymentCurrency)) {
+  if (canonicalChain(payload.paymentChain, readRefundCurrency(payload)) !== canonicalChain(order.paymentChain, order.paymentCurrency)) {
     return { ok: false, code: 'refund_request_chain_mismatch', message: 'Refund request payment chain does not match the seller order.' };
   }
 
-  if (canonicalSettlementKind(payload.settlementKind) !== canonicalSettlementKind(order.settlementKind, order.paymentAmount)) {
+  if (canonicalSettlementKind(payload.settlementKind, readRefundAmount(payload)) !== canonicalSettlementKind(order.settlementKind, order.paymentAmount)) {
     return { ok: false, code: 'refund_request_settlement_mismatch', message: 'Refund request settlement kind does not match the seller order.' };
   }
 
@@ -569,7 +549,7 @@ export async function processSellerRefundSettlement(
 
   const refundAmount = readRefundAmount(refundRequestPayload) || normalizeText(order.paymentAmount);
   const refundCurrency = canonicalCurrency(readRefundCurrency(refundRequestPayload) || order.paymentCurrency);
-  const paymentChain = canonicalChain(refundRequestPayload.paymentChain, order.paymentCurrency);
+  const paymentChain = canonicalChain(refundRequestPayload.paymentChain, readRefundCurrency(refundRequestPayload) || order.paymentCurrency);
   const settlementKind = canonicalSettlementKind(refundRequestPayload.settlementKind, order.paymentAmount);
   if (isZeroAmount(refundAmount) || settlementKind === 'free') {
     const nextState = markStateRefunded({
@@ -605,7 +585,7 @@ export async function processSellerRefundSettlement(
     });
   }
 
-  const refundToAddress = normalizeText(refundRequestPayload.refundToAddress);
+  const refundToAddress = readRefundAddress(refundRequestPayload);
   if (!refundToAddress) {
     return blockSettlement({
       state: input.state,

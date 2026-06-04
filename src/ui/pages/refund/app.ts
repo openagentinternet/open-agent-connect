@@ -29,8 +29,12 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
               <div class="refund-eyebrow">Refund Operations</div>
               <h2>Local refund work queue</h2>
             </div>
-            <span class="refund-status" data-refund-status>Loading refunds...</span>
+            <div class="refund-toolbar">
+              <button type="button" class="refund-refresh" data-refund-refresh>Refresh</button>
+              <span class="refund-status" data-refund-status>Loading refunds...</span>
+            </div>
           </div>
+          <div class="refund-sync-status" data-refund-sync-status>Sync has not run yet.</div>
           <div class="refund-summary-grid">
             <div class="refund-summary-item">
               <div class="refund-summary-label">Total</div>
@@ -43,6 +47,14 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
             <div class="refund-summary-item">
               <div class="refund-summary-label">Manual</div>
               <div class="refund-summary-value" data-refund-manual-count>0</div>
+            </div>
+            <div class="refund-summary-item">
+              <div class="refund-summary-label">Blocked</div>
+              <div class="refund-summary-value" data-refund-blocked-count>0</div>
+            </div>
+            <div class="refund-summary-item">
+              <div class="refund-summary-label">Completed</div>
+              <div class="refund-summary-value" data-refund-completed-count>0</div>
             </div>
           </div>
         </article>
@@ -76,10 +88,14 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     totalCount: document.querySelector('[data-refund-total-count]'),
     pendingCount: document.querySelector('[data-refund-pending-count]'),
     manualCount: document.querySelector('[data-refund-manual-count]'),
+    blockedCount: document.querySelector('[data-refund-blocked-count]'),
+    completedCount: document.querySelector('[data-refund-completed-count]'),
     buyerCount: document.querySelector('[data-refund-buyer-count]'),
     sellerCount: document.querySelector('[data-refund-seller-count]'),
     buyerList: document.querySelector('[data-refund-buyer-list]'),
     sellerList: document.querySelector('[data-refund-seller-list]'),
+    syncStatus: document.querySelector('[data-refund-sync-status]'),
+    refresh: document.querySelector('[data-refund-refresh]'),
   };
   const profileCache = new Map();
 
@@ -91,6 +107,12 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     if (!elements.status) return;
     elements.status.textContent = value;
     elements.status.dataset.tone = tone || 'neutral';
+  };
+
+  const setSyncStatus = (value, tone) => {
+    if (!elements.syncStatus) return;
+    elements.syncStatus.textContent = value;
+    elements.syncStatus.dataset.tone = tone || 'neutral';
   };
 
   const escHtml = (value) => String(value || '')
@@ -164,9 +186,28 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     return { name: name || gmid, avatar: avatarUrl || getInitialsAvatar(name, gmid) };
   };
 
-  const buildStatusBadge = (status) => {
-    const tone = status === 'refunded' ? 'refunded' : status === 'failed' ? 'failed' : 'pending';
-    const label = status === 'refunded' ? 'Refunded' : status === 'failed' ? 'Blocked' : 'Pending';
+  const isUnsupportedBlocker = (item) => {
+    const blocker = String((item && (item.blockingReason || item.failureReason)) || '').trim();
+    return blocker === 'refund_settlement_unsupported';
+  };
+
+  const isBlockedRefund = (item) => Boolean(item && (item.status === 'failed' || item.blockingReason || isUnsupportedBlocker(item)));
+
+  const canConfirmRefund = (item, role) => (
+    role === 'seller'
+    && item
+    && item.role === 'seller'
+    && item.status !== 'refunded'
+    && item.manualActionRequired === true
+    && String(item.refundRequestPinId || '').trim()
+    && !isUnsupportedBlocker(item)
+  );
+
+  const buildStatusBadge = (item) => {
+    const status = item && item.status;
+    const blocked = isBlockedRefund(item);
+    const tone = status === 'refunded' ? 'refunded' : blocked ? 'failed' : 'pending';
+    const label = status === 'refunded' ? 'Refunded' : blocked ? 'Blocked' : 'Pending';
     return '<span class="refund-badge" data-tone="' + tone + '">' + label + '</span>';
   };
 
@@ -190,14 +231,21 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
       const displayName = String(providedName || profile.name || gmid || 'Unknown').trim() || 'Unknown';
       const avatarSrc = profile.avatar || getInitialsAvatar(displayName, gmid);
       const amountLabel = [item.paymentAmount, item.paymentCurrency].filter(Boolean).join(' ') || '—';
-      const primaryDateValue = item.status === 'refunded' ? item.refundCompletedAt : (item.refundRequestedAt || item.updatedAt || item.createdAt);
       const blockingReason = String(item.blockingReason || item.failureReason || '').trim();
+      const failureReason = String(item.failureReason || '').trim();
+      const providerStatus = item.status === 'refunded'
+        ? 'Finalized'
+        : canConfirmRefund(item, role)
+          ? 'Needs confirmation'
+          : blockingReason
+            ? 'Blocked'
+            : 'Waiting';
       const traceLink = item.traceHref
         ? '<a href="' + escHtml(item.traceHref) + '">Open trace</a>'
         : '';
       const localMetabotSlug = String(item.localMetabotSlug || '').trim();
-      const settleButton = role === 'seller' && item.manualActionRequired
-        ? '<button type="button" class="refund-action" data-settle-refund="' + escHtml(item.orderId) + '" data-refund-from="' + escHtml(localMetabotSlug) + '">Settle refund</button>'
+      const settleButton = canConfirmRefund(item, role)
+        ? '<button type="button" class="refund-action" data-settle-refund="' + escHtml(item.orderId) + '" data-refund-from="' + escHtml(localMetabotSlug) + '">Confirm refund</button>'
         : '';
       return ''
         + '<article class="refund-item">'
@@ -209,16 +257,20 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
         + '        <div class="mono-text">' + escHtml(gmid || 'unknown-global-metaid') + '</div>'
         + '      </div>'
         + '    </div>'
-        +      buildStatusBadge(item.status)
+        +      buildStatusBadge(item)
         + '  </div>'
         + '  <div class="refund-grid">'
         +      field('Service', item.serviceName || 'Unknown service', false)
         +      field('Amount', amountLabel, false)
-        +      field(item.status === 'refunded' ? 'Refunded at' : 'Last update', formatDate(primaryDateValue), false)
+        +      field('Order created', formatDate(item.createdAt), false)
+        +      field('Requested at', formatDate(item.refundRequestedAt), false)
+        +      field('Provider status', providerStatus, false)
+        +      field('Failure reason', failureReason, true)
         +      field('Payment Txid', item.paymentTxid, true)
         +      field('Refund request', item.refundRequestPinId, true)
         +      field('Refund txid', item.refundTxid, true)
         +      field('Finalization pin', item.refundFinalizePinId, true)
+        +      field('Refunded at', formatDate(item.refundCompletedAt), false)
         + '  </div>'
         + (blockingReason ? '<div class="refund-note">Blocking reason: ' + escHtml(blockingReason) + '</div>' : '')
         + ((traceLink || settleButton) ? '<div class="refund-actions">' + traceLink + settleButton + '</div>' : '')
@@ -229,7 +281,7 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
       button.addEventListener('click', async () => {
         const orderId = button.getAttribute('data-settle-refund') || '';
         button.disabled = true;
-        button.textContent = 'Settling...';
+        button.textContent = 'Confirming...';
         try {
           const from = button.getAttribute('data-refund-from') || '';
           const response = await fetch('/api/services/refunds/settle', {
@@ -241,7 +293,7 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
           if (!payload || payload.ok !== true) {
             throw new Error((payload && (payload.code || payload.message)) || 'Refund settlement is blocked.');
           }
-          await loadRefunds();
+          await refreshRefunds();
         } catch (error) {
           button.textContent = error instanceof Error ? error.message : String(error);
         } finally {
@@ -260,10 +312,16 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     const data = payload.data || {};
     const buyer = Array.isArray(data.initiatedByMe) ? data.initiatedByMe : [];
     const seller = Array.isArray(data.receivedByMe) ? data.receivedByMe : [];
-    const manualCount = seller.filter((entry) => entry && entry.manualActionRequired).length;
+    const allRows = buyer.concat(seller);
+    const manualCount = seller.filter((entry) => canConfirmRefund(entry, 'seller')).length;
+    const blockedCount = allRows.filter(isBlockedRefund).length;
+    const completedCount = allRows.filter((entry) => entry && entry.status === 'refunded').length;
+    const pendingCount = allRows.filter((entry) => entry && entry.status !== 'refunded' && !isBlockedRefund(entry)).length;
     setText(elements.totalCount, String(Number(data.totalCount) || buyer.length + seller.length));
-    setText(elements.pendingCount, String(Number(data.pendingCount) || buyer.concat(seller).filter((entry) => entry && entry.status !== 'refunded').length));
+    setText(elements.pendingCount, String(pendingCount));
     setText(elements.manualCount, String(manualCount));
+    setText(elements.blockedCount, String(blockedCount));
+    setText(elements.completedCount, String(completedCount));
     setText(elements.buyerCount, String(buyer.length));
     setText(elements.sellerCount, String(seller.length));
     await renderRefundRows(elements.buyerList, buyer, 'No buyer-initiated refund records were found in this local runtime.', 'buyer');
@@ -272,10 +330,31 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     return payload.data;
   };
 
-  loadRefunds().catch((error) => {
+  const syncRefunds = async () => {
+    setSyncStatus('Syncing refund requests from chain...', 'busy');
+    try {
+      const response = await fetch('/api/services/refunds/sync', {
+        method: 'POST',
+        cache: 'no-store',
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload || payload.ok !== true) {
+        throw new Error((payload && (payload.message || payload.code)) || 'Refund sync failed.');
+      }
+      setSyncStatus('Refund sync completed.', 'success');
+      return true;
+    } catch (error) {
+      setSyncStatus('Sync failed: ' + (error instanceof Error ? error.message : String(error)), 'error');
+      return false;
+    }
+  };
+
+  const showLoadError = (error) => {
     setText(elements.totalCount, '0');
     setText(elements.pendingCount, '0');
     setText(elements.manualCount, '0');
+    setText(elements.blockedCount, '0');
+    setText(elements.completedCount, '0');
     if (elements.buyerList) {
       elements.buyerList.innerHTML = '<p class="refund-empty">Failed to load buyer refund records.</p>';
     }
@@ -283,7 +362,32 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
       elements.sellerList.innerHTML = '<p class="refund-empty">Failed to load seller refund records.</p>';
     }
     setStatus(error instanceof Error ? error.message : String(error), 'error');
-  });
+  };
+
+  const refreshRefunds = async () => {
+    if (elements.refresh) {
+      elements.refresh.disabled = true;
+      elements.refresh.textContent = 'Refreshing...';
+    }
+    setStatus('Loading refunds...', 'busy');
+    await syncRefunds();
+    try {
+      await loadRefunds();
+    } catch (error) {
+      showLoadError(error);
+    } finally {
+      if (elements.refresh) {
+        elements.refresh.disabled = false;
+        elements.refresh.textContent = 'Refresh';
+      }
+    }
+  };
+
+  if (elements.refresh) {
+    elements.refresh.addEventListener('click', refreshRefunds);
+  }
+
+  refreshRefunds();
 })();`,
   };
 }

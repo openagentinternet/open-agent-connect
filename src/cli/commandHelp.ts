@@ -1870,6 +1870,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot services refunds <subcommand>',
     subcommands: [
       { name: 'list', summary: 'List initiated, received, or all service refunds.' },
+      { name: 'sync', summary: 'Sync refund request and finalize pins into local state.' },
       { name: 'settle', summary: 'Settle one pending seller refund by order id or payment txid.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
@@ -1890,6 +1891,22 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot services refunds list --from buyer --initiated',
       'metabot services refunds list --all --received',
+    ],
+  },
+  {
+    commandPath: ['services', 'refunds', 'sync'],
+    summary: 'Read refund request and finalize pins, retry due buyer requests, and update local refund state.',
+    usage: 'metabot services refunds sync [--from <bot-slug> | --all]',
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--all', description: 'Sync refunds across all local MetaBot profiles when supported by the runtime.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['scanned', 'applied', 'skipped', 'blocked'],
+    examples: [
+      'metabot services refunds sync',
+      'metabot services refunds sync --from seller',
+      'metabot services refunds sync --all',
     ],
   },
   {

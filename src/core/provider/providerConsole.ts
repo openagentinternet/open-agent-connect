@@ -277,7 +277,7 @@ function buildSellerOrderRowWithRating(
       failureReason: normalizeText(order.failureReason) || null,
       refundRequestPinId: normalizeText(order.refundRequestPinId) || null,
       refundRequestTxid: null,
-      refundRequestedAt: null,
+      refundRequestedAt: Number.isFinite(order.refundRequestedAt) ? Number(order.refundRequestedAt) : null,
       refundCompletedAt: null,
       refundFinalizePinId: normalizeText(order.refundFinalizePinId) || null,
       refundBlockingReason: normalizeText(order.refundBlockingReason) || null,

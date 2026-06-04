@@ -228,6 +228,55 @@ test('processSellerRefundSettlement finalizes with the refund request service pi
   assert.equal(finalizeWrites[0].payload.servicePinId, 'service-pin-original');
 });
 
+test('processSellerRefundSettlement accepts canonical refundAddress from parsed request payloads', async () => {
+  const { result, transferCalls } = await settle({
+    payloadOverrides: {
+      refundAddress: 'buyer-canonical-mvc-address',
+      refundToAddress: undefined,
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(transferCalls.length, 1);
+  assert.equal(transferCalls[0].refundToAddress, 'buyer-canonical-mvc-address');
+});
+
+test('processSellerRefundSettlement accepts canonical amount and asset from parsed request payloads', async () => {
+  const state = createState({
+    order: {
+      paymentCurrency: 'BTC',
+      paymentChain: 'btc',
+    },
+  });
+  const { result, transferCalls, finalizeWrites } = await settle({
+    state,
+    payload: {
+      version: 1,
+      serviceOrderPinId: 'order-message-pin-1',
+      servicePinId: 'service-pin-1',
+      paymentTxid: 'b'.repeat(64),
+      paymentAmount: '0.00001',
+      paymentAsset: 'BTC',
+      buyerGlobalMetaId: 'idq1buyer',
+      sellerGlobalMetaId: 'idq1seller',
+      refundAddress: 'buyer-btc-address',
+      reason: 'delivery_timeout',
+      requestedAt: '2026-06-04T00:00:00.000Z',
+    },
+  });
+
+  assert.equal(result.ok, true, result.ok ? '' : result.code);
+  assert.equal(transferCalls.length, 1);
+  assert.equal(transferCalls[0].refundToAddress, 'buyer-btc-address');
+  assert.equal(transferCalls[0].refundAmount, '0.00001');
+  assert.equal(transferCalls[0].refundCurrency, 'BTC');
+  assert.equal(transferCalls[0].paymentChain, 'btc');
+  assert.equal(finalizeWrites.length, 1);
+  assert.equal(finalizeWrites[0].payload.refundAmount, '0.00001');
+  assert.equal(finalizeWrites[0].payload.refundCurrency, 'BTC');
+  assert.equal(finalizeWrites[0].payload.paymentChain, 'btc');
+});
+
 test('processSellerRefundSettlement rejects refund request payload mismatches before transfer', async () => {
   const cases = [
     ['refund_request_payment_mismatch', { paymentTxid: 'x'.repeat(64) }],

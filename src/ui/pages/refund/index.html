@@ -20,6 +20,19 @@
         gap: 12px;
         margin-bottom: 18px;
       }
+      .refund-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+      .refund-refresh {
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        border-radius: var(--radius-sm);
+        padding: 7px 11px;
+        font-family: var(--mono);
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .refund-refresh:hover { border-color: var(--accent); color: var(--accent); }
+      .refund-refresh:disabled { opacity: .65; cursor: wait; }
       .refund-eyebrow {
         font-size: 11px;
         font-family: var(--mono);
@@ -33,6 +46,16 @@
       .refund-status[data-tone="busy"]    { color: var(--amber); }
       .refund-status[data-tone="error"]   { color: var(--red); }
       .refund-status[data-tone="ready"]   { color: var(--green); }
+      .refund-sync-status {
+        margin-bottom: 12px;
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .refund-sync-status[data-tone="success"] { color: var(--green); }
+      .refund-sync-status[data-tone="busy"] { color: var(--amber); }
+      .refund-sync-status[data-tone="error"] { color: var(--red); }
       .refund-section-header {
         display: flex;
         align-items: start;
@@ -48,7 +71,7 @@
         background: var(--accent-dim);
         color: var(--accent);
       }
-      .refund-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+      .refund-summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
       .refund-summary-item { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--panel); }
       .refund-summary-label { font-size: 10px; font-family: var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
       .refund-summary-value { margin-top: 4px; font-size: 18px; font-weight: 600; }

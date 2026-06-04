@@ -116,6 +116,9 @@ function resolveSellerOrderServiceOrderPinId(order: SellerOrderRecord): string |
 }
 
 export function sellerOrderRequiresManualAction(order: SellerOrderRecord): boolean {
+  if (normalizeText(order.refundBlockingReason) === 'refund_settlement_unsupported') {
+    return false;
+  }
   const state = normalizeText(order.state);
   if (state === 'refund_pending' && normalizeText(order.refundRequestPinId)) {
     return true;
@@ -273,7 +276,7 @@ export function buildSellerReceivedRefundItems(state: RuntimeState): SellerRecei
         refundTxid: normalizeText(order.refundTxid) || null,
         refundFinalizePinId: normalizeText(order.refundFinalizePinId) || null,
         blockingReason: normalizeText(order.refundBlockingReason) || null,
-        refundRequestedAt: null,
+        refundRequestedAt: normalizeNumber(order.refundRequestedAt),
         refundCompletedAt,
         counterpartyGlobalMetaId: normalizeText(order.buyerGlobalMetaId) || null,
         counterpartyName: null,

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createECDH } from 'node:crypto';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
@@ -62,6 +63,82 @@ async function waitForCondition(predicate, timeoutMs = 1000, intervalMs = 20) {
     await delay(intervalMs);
   }
   return null;
+}
+
+async function createRefundChainServer(t) {
+  const requests = new Map();
+  const finalizations = new Map();
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    let payload;
+    if (url.pathname === '/pin/path/list') {
+      const pathName = url.searchParams.get('path');
+      const source = pathName === '/protocols/service-refund-request'
+        ? requests
+        : pathName === '/protocols/service-refund-finalize'
+          ? finalizations
+          : new Map();
+      payload = {
+        data: {
+          list: [...source.values()].map((entry) => ({
+            pinId: entry.pinId,
+            path: entry.path,
+            contentSummary: JSON.stringify(entry.payload),
+          })),
+          nextCursor: null,
+        },
+      };
+    } else if (url.pathname.startsWith('/pin/')) {
+      const pinId = decodeURIComponent(url.pathname.slice('/pin/'.length));
+      const entry = requests.get(pinId) ?? finalizations.get(pinId);
+      if (!entry) {
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'not_found' }));
+        return;
+      }
+      payload = {
+        data: {
+          path: entry.path,
+          contentSummary: JSON.stringify(entry.payload),
+        },
+      };
+    } else {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not_found' }));
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(payload));
+  });
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+  });
+  const address = server.address();
+  assert.equal(typeof address, 'object');
+  assert.ok(address);
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    addRequest(pinId, payload) {
+      requests.set(pinId, {
+        pinId,
+        path: '/protocols/service-refund-request',
+        payload,
+      });
+    },
+    addFinalization(pinId, payload) {
+      finalizations.set(pinId, {
+        pinId,
+        path: '/protocols/service-refund-finalize',
+        payload,
+      });
+    },
+  };
 }
 
 function createIdentityPair() {
@@ -326,7 +403,7 @@ async function createInboundProviderOrderHarness(t, options = {}) {
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir: options.systemHomeDir ?? deriveSystemHome(homeDir),
-    chainApiBaseUrl: 'http://127.0.0.1:9',
+    chainApiBaseUrl: options.chainApiBaseUrl ?? 'http://127.0.0.1:9',
     socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
     socketPresenceFailureMode: 'assume_service_providers_online',
     getDaemonRecord: () => ({
@@ -376,7 +453,8 @@ async function createInboundProviderOrderHarness(t, options = {}) {
         };
       },
     },
-    adapters: new Map([
+    secretStore: options.secretStore,
+    adapters: options.adapters ?? new Map([
       ['mvc', {
         network: 'mvc',
         explorerBaseUrl: 'https://www.mvcscan.com',
@@ -517,7 +595,10 @@ async function createServiceCallHarness(t, options = {}) {
 
   const callerPair = createIdentityPair();
   const providerPair = createIdentityPair();
-  const identity = createIdentity(callerPair.publicKeyHex);
+  const identity = {
+    ...createIdentity(callerPair.publicKeyHex),
+    ...(options.identity ?? {}),
+  };
   const runtimeStateStore = createRuntimeStateStore(homeDir);
   await runtimeStateStore.writeState({
     identity,
@@ -530,7 +611,7 @@ async function createServiceCallHarness(t, options = {}) {
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir: options.systemHomeDir ?? deriveSystemHome(homeDir),
-    chainApiBaseUrl: 'http://127.0.0.1:9',
+    chainApiBaseUrl: options.chainApiBaseUrl ?? 'http://127.0.0.1:9',
     socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
     socketPresenceFailureMode: 'assume_service_providers_online',
     getDaemonRecord: () => ({
@@ -2492,6 +2573,196 @@ test('buyer-side BTC refund request is scheduled instead of publishing an MVC re
   assert.ok(trace, 'expected missing BTC refund address to schedule retry instead of publishing invalid payload');
   assert.equal(trace.order.failureReason, 'refund_address_missing');
   assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
+});
+
+test('service refund closed loop syncs buyer request, provider settlement, and caller finalization', async (t) => {
+  const chain = await createRefundChainServer(t);
+  const paymentTxid = 'a'.repeat(64);
+  const refundTxid = 'f'.repeat(64);
+  const refundAddress = MVC_OTHER_ADDRESS;
+  const refundRawTx = buildMvcPaymentRawTx(refundAddress, 1000);
+  const buyerFetchRawTxCalls = [];
+  const buyer = await createServiceCallHarness(t, {
+    chainApiBaseUrl: chain.baseUrl,
+    identity: {
+      mvcAddress: refundAddress,
+      addresses: {
+        mvc: refundAddress,
+      },
+    },
+    adapters: new Map([
+      ['mvc', {
+        network: 'mvc',
+        explorerBaseUrl: 'https://www.mvcscan.com',
+        feeRateUnit: 'sat/byte',
+        minTransferSatoshis: 600,
+        async deriveAddress() { return refundAddress; },
+        async fetchUtxos() { return []; },
+        async fetchBalance() {
+          return {
+            chain: 'mvc',
+            address: refundAddress,
+            totalSatoshis: 0,
+            confirmedSatoshis: 0,
+            unconfirmedSatoshis: 0,
+            utxoCount: 0,
+          };
+        },
+        async fetchFeeRate() { return 1; },
+        async fetchRawTx(txid) {
+          buyerFetchRawTxCalls.push(txid);
+          if (txid !== refundTxid) {
+            throw new Error(`unexpected refund txid: ${txid}`);
+          }
+          return refundRawTx;
+        },
+        async broadcastTx() { throw new Error('not used'); },
+        async buildTransfer() { throw new Error('not used'); },
+        async buildInscription() { throw new Error('not used'); },
+      }],
+    ]),
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return { state: 'timeout' };
+      },
+    },
+  });
+
+  const called = await buyer.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+  assert.equal(called.state, 'waiting');
+
+  const buyerTrace = await waitForCondition(async () => {
+    const state = await buyer.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.order?.status === 'refund_pending'
+      && entry.order?.refundRequestPinId
+    )) ?? null;
+  });
+  assert.ok(buyerTrace, 'expected caller trace to record a refund request');
+  const refundWrite = buyer.writes.find((entry) => entry.path === '/protocols/service-refund-request');
+  assert.ok(refundWrite, 'expected caller refund request write');
+  const refundRequestPayload = JSON.parse(refundWrite.payload);
+  assert.equal(refundRequestPayload.refundAddress, refundAddress);
+  assert.equal(refundRequestPayload.refundToAddress, refundAddress);
+  chain.addRequest(buyerTrace.order.refundRequestPinId, refundRequestPayload);
+
+  const transferCalls = [];
+  const provider = await createInboundProviderOrderHarness(t, {
+    chainApiBaseUrl: chain.baseUrl,
+    secretStore: {
+      async readIdentitySecrets() {
+        return {
+          mnemonic: 'test test test test test test test test test test test junk',
+          path: "m/44'/10001'/0'/0/0",
+        };
+      },
+    },
+    adapters: new Map([
+      ['mvc', {
+        network: 'mvc',
+        explorerBaseUrl: 'https://www.mvcscan.com',
+        feeRateUnit: 'sat/byte',
+        minTransferSatoshis: 600,
+        async deriveAddress() { return 'mvc-provider-address'; },
+        async fetchUtxos() { return []; },
+        async fetchBalance() {
+          return {
+            chain: 'mvc',
+            address: 'mvc-provider-address',
+            totalSatoshis: 0,
+            confirmedSatoshis: 0,
+            unconfirmedSatoshis: 0,
+            utxoCount: 0,
+          };
+        },
+        async fetchFeeRate() { return 1; },
+        async fetchRawTx() { throw new Error('not used'); },
+        async buildTransfer(input) {
+          transferCalls.push(input);
+          return { rawTx: 'signed-refund-transfer', fee: 1 };
+        },
+        async broadcastTx() {
+          return refundTxid;
+        },
+        async buildInscription() { throw new Error('not used'); },
+      }],
+    ]),
+  });
+
+  const providerSync = await provider.handlers.services.syncRefunds();
+  assert.equal(providerSync.ok, true, JSON.stringify(providerSync));
+  assert.equal(providerSync.data.applied.synthesizedSellerOrders, 1);
+
+  const repeatProviderSync = await provider.handlers.services.syncRefunds();
+  assert.equal(repeatProviderSync.ok, true, JSON.stringify(repeatProviderSync));
+  assert.equal(repeatProviderSync.data.applied.synthesizedSellerOrders, 0);
+  let providerState = await provider.runtimeStateStore.readState();
+  assert.equal(providerState.sellerOrders.length, 1);
+
+  const providerList = await provider.handlers.services.listRefunds({ kind: 'received' });
+  assert.equal(providerList.ok, true, JSON.stringify(providerList));
+  assert.equal(providerList.data.receivedByMe.length, 1);
+  assert.equal(providerList.data.receivedByMe[0].status, 'refund_pending');
+  assert.equal(providerList.data.receivedByMe[0].manualActionRequired, true);
+
+  const confirmed = await provider.handlers.provider.confirmRefund({
+    orderId: providerList.data.receivedByMe[0].orderId,
+  });
+  assert.equal(confirmed.ok, true, JSON.stringify(confirmed));
+  assert.equal(transferCalls.length, 1);
+  assert.equal(confirmed.data.state, 'refunded');
+  assert.equal(confirmed.data.refundTxid, refundTxid);
+  assert.ok(confirmed.data.refundFinalizePinId);
+  assert.ok(confirmed.data.finalization);
+  chain.addFinalization(confirmed.data.refundFinalizePinId, confirmed.data.finalization);
+
+  const repeatedConfirm = await provider.handlers.provider.confirmRefund({
+    orderId: providerList.data.receivedByMe[0].orderId,
+  });
+  assert.equal(repeatedConfirm.ok, true, JSON.stringify(repeatedConfirm));
+  assert.equal(repeatedConfirm.data.state, 'refunded');
+  assert.equal(repeatedConfirm.data.refundFinalizePinId, confirmed.data.refundFinalizePinId);
+  assert.equal(transferCalls.length, 1);
+
+  const callerSync = await buyer.handlers.services.syncRefunds();
+  assert.equal(callerSync.ok, true, JSON.stringify(callerSync));
+  assert.equal(callerSync.data.applied.finalizations, 1);
+  assert.deepEqual(buyerFetchRawTxCalls, [refundTxid]);
+
+  const callerState = await buyer.runtimeStateStore.readState();
+  const callerTrace = callerState.traces.find((entry) => entry.traceId === buyerTrace.traceId);
+  assert.ok(callerTrace, 'expected caller trace after sync');
+  assert.equal(callerTrace.order.status, 'refunded');
+  assert.equal(callerTrace.order.refundFinalizePinId, confirmed.data.refundFinalizePinId);
+  assert.equal(callerTrace.order.refundTxid, refundTxid);
+
+  providerState = await provider.runtimeStateStore.readState();
+  assert.equal(providerState.sellerOrders.length, 1);
+  assert.equal(providerState.sellerOrders[0].state, 'refunded');
 });
 
 test('paid simplemsg service broadcast failure keeps a trace with payment provenance', async (t) => {
