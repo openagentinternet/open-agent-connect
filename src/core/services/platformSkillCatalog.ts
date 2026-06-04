@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   getPlatformDefinition,
+  getMetabotSharedSkillRoot,
   getPlatformSkillRoots,
   isPlatformId,
   resolvePlatformSkillRootPath,
@@ -308,7 +309,10 @@ export function createPlatformSkillCatalog(options: CreatePlatformSkillCatalogOp
       }
 
       const platform = getPlatformDefinition(runtime.provider);
-      const roots = getPlatformSkillRoots(platform.id);
+      const roots = [
+        ...getPlatformSkillRoots(platform.id),
+        getMetabotSharedSkillRoot(),
+      ];
       const rootResults = await Promise.all(roots.map(async (root) => scanRoot({
         platform,
         root,

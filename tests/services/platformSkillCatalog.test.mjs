@@ -130,6 +130,45 @@ test('primary runtime catalog lists only primary provider skills and excludes fa
   assert.equal(result.rootDiagnostics.some((entry) => entry.rootId === 'codex-home' && entry.status === 'readable'), true);
 });
 
+test('primary runtime catalog includes shared MetaBot skills when host roots are not bound', async () => {
+  const { systemHome, profileRoot, slug } = await createProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const runtimeStore = createLlmRuntimeStore(paths);
+  const bindingStore = createLlmBindingStore(paths);
+  await runtimeStore.write({ version: 1, runtimes: [runtime('runtime-cursor', 'cursor')] });
+  await bindingStore.write({
+    version: 1,
+    bindings: [binding('binding-cursor-primary', slug, 'runtime-cursor', 'primary')],
+  });
+  await writeSkill(path.join(systemHome, '.metabot', 'skills'), 'metabot-help', [
+    '---',
+    'name: metabot-help',
+    'description: Explains available MetaBot commands.',
+    '---',
+    '# MetaBot Help',
+    '',
+  ].join('\n'));
+
+  const catalog = createPlatformSkillCatalog({
+    runtimeStore,
+    bindingStore,
+    systemHomeDir: systemHome,
+    projectRoot: profileRoot,
+    env: {},
+  });
+  const result = await catalog.listPrimaryRuntimeSkills({ metaBotSlug: slug });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    result.skills.map((skill) => skill.skillName),
+    ['metabot-help'],
+  );
+  const help = result.skills[0];
+  assert.equal(help.absolutePath, path.join(systemHome, '.metabot', 'skills', 'metabot-help'));
+  assert.equal(help.description, 'Explains available MetaBot commands.');
+  assert.equal(result.rootDiagnostics.some((entry) => entry.rootId === 'metabot-shared' && entry.status === 'readable'), true);
+});
+
 test('catalog deduplicates skills by deterministic root precedence', async () => {
   const { systemHome, profileRoot, slug } = await createProfileHome();
   const paths = resolveMetabotPaths(profileRoot);

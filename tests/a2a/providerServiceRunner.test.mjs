@@ -264,6 +264,52 @@ test('createProviderServiceRunner injects allowed provider skills and execution 
   await cleanupProfileHome(homeDir);
 });
 
+test('createProviderServiceRunner injects shared MetaBot skills when host roots are not bound', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'cursor', health: 'healthy' }),
+    ],
+  });
+  await bindingStore.write({
+    version: 1,
+    bindings: [
+      binding('binding-primary', 'alice', 'runtime-primary', 'primary'),
+    ],
+  });
+  await fs.mkdir(path.join(systemHomeDir, '.cursor', 'skills', 'weather.oracle'), { recursive: true });
+  await fs.writeFile(path.join(systemHomeDir, '.cursor', 'skills', 'weather.oracle', 'SKILL.md'), '# Weather Oracle\n', 'utf8');
+  await fs.mkdir(path.join(systemHomeDir, '.metabot', 'skills', 'metabot-post-buzz'), { recursive: true });
+  await fs.writeFile(path.join(systemHomeDir, '.metabot', 'skills', 'metabot-post-buzz', 'SKILL.md'), '# Post Buzz\n', 'utf8');
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'Forecast posted to buzz.',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({
+    providerSkills: ['weather.oracle', 'metabot-post-buzz'],
+  }));
+
+  assert.equal(result.state, 'completed');
+  assert.deepEqual(calls[0].skills, ['weather.oracle', 'metabot-post-buzz']);
+  assert.equal(
+    calls[0].skillSourcePaths['metabot-post-buzz'],
+    path.join(systemHomeDir, '.metabot', 'skills', 'metabot-post-buzz'),
+  );
+  await cleanupProfileHome(homeDir);
+});
+
 test('createProviderServiceRunner falls back when primary session fails after start', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   await runtimeStore.write({

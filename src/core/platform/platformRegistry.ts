@@ -75,6 +75,15 @@ const sharedAgentsSkillRoot: InstallSkillRoot = {
   sharedStandard: true,
 };
 
+const metabotSharedSkillRoot: InstallSkillRoot = {
+  platformId: 'shared-agents',
+  id: 'metabot-shared',
+  kind: 'global',
+  path: '~/.metabot/skills',
+  autoBind: 'manual',
+  sharedStandard: true,
+};
+
 export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
   {
     id: 'claude-code',
@@ -421,6 +430,14 @@ export function getInstallSkillRoots(): InstallSkillRoot[] {
       .map((root) => ({ ...root, platformId: platform.id })),
   );
   return [sharedAgentsSkillRoot, ...roots];
+}
+
+export function getMetabotSharedSkillRoot(): InstallSkillRoot {
+  return { ...metabotSharedSkillRoot };
+}
+
+export function getRuntimePortableSkillRoots(): InstallSkillRoot[] {
+  return [getMetabotSharedSkillRoot(), ...getInstallSkillRoots()];
 }
 
 function normalizeOptionalEnvPath(value: string | undefined): string {

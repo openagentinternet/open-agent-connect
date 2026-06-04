@@ -7,9 +7,9 @@ import type { LlmBinding, LlmRuntime } from '../../llm/llmTypes';
 import { isSafeProviderSkillName, type PlatformSkillCatalogEntry, type PlatformSkillRootDiagnostic } from '../../services/platformSkillCatalog';
 import { createServiceRunnerFailedResult, type ProviderServiceRunnerResult } from './serviceRunnerContracts';
 import {
-  getInstallSkillRoots,
   getPlatformDefinition,
   getPlatformSkillRoots,
+  getRuntimePortableSkillRoots,
   isPlatformId,
   resolvePlatformSkillRootPath,
   type PlatformId,
@@ -512,7 +512,7 @@ async function readPortableSkillSelection(
 
   const rootDiagnostics: PlatformSkillRootDiagnostic[] = [];
   const seenRoots = new Set<string>();
-  for (const root of getInstallSkillRoots()) {
+  for (const root of getRuntimePortableSkillRoots()) {
     const absolutePath = resolveSkillRootAbsolutePath(deps, root);
     const rootKey = path.resolve(absolutePath);
     if (seenRoots.has(rootKey)) {
