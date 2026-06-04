@@ -46,6 +46,13 @@ export interface TraceSessionListItem {
   stateTone: 'active' | 'completed' | 'failure' | 'timeout' | 'manual' | 'neutral';
   stateLabel: string;
   timeAgoMs: number;
+  refundActionRequired: boolean;
+  refundConfirmable: boolean;
+  refundOrderId: string | null;
+  refundStatus: string | null;
+  refundRequestPinId: string | null;
+  refundFinalizePinId: string | null;
+  refundHref: string | null;
 }
 
 export interface TraceSessionMessage {
@@ -76,6 +83,13 @@ export interface TraceSessionDetail {
   callerGlobalMetaId: string;
   providerGlobalMetaId: string;
   messages: TraceSessionMessage[];
+  refundActionRequired: boolean;
+  refundConfirmable: boolean;
+  refundOrderId: string | null;
+  refundStatus: string | null;
+  refundRequestPinId: string | null;
+  refundFinalizePinId: string | null;
+  refundHref: string | null;
 }
 
 function normalizeText(value: unknown): string {
@@ -163,6 +177,98 @@ function getStateLabel(state: string): string {
   }
 }
 
+function normalizeBoolean(value: unknown): boolean {
+  if (value === true || value === 1) return true;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes';
+  }
+  return false;
+}
+
+function isZeroAmount(value: unknown): boolean {
+  const text = normalizeText(value);
+  if (!text) return false;
+  const numeric = Number(text);
+  return Number.isFinite(numeric) && numeric === 0;
+}
+
+function buildRefundHref(orderId: string | null): string | null {
+  return orderId ? `/ui/refund?orderId=${encodeURIComponent(orderId)}` : '/ui/refund';
+}
+
+function resolveRefundAction(input: {
+  record: Record<string, unknown>;
+  role: A2ASessionRole;
+}): Pick<TraceSessionListItem,
+  | 'refundActionRequired'
+  | 'refundConfirmable'
+  | 'refundOrderId'
+  | 'refundStatus'
+  | 'refundRequestPinId'
+  | 'refundFinalizePinId'
+  | 'refundHref'
+> {
+  const record = input.record;
+  const order = coerceObject(record.order);
+  const refund = coerceObject(record.refund);
+  const source = order ?? refund ?? record;
+  const orderRole = normalizeText(source.role) || (input.role === 'provider' ? 'seller' : '');
+  const status = normalizeText(source.status) || normalizeText(record.refundStatus) || normalizeText(record.status);
+  const blockingReason = normalizeText(source.refundBlockingReason)
+    || normalizeText(source.blockingReason)
+    || normalizeText(record.refundBlockingReason)
+    || normalizeText(record.blockingReason);
+  const refundRequestPinId = normalizeText(source.refundRequestPinId)
+    || normalizeText(record.refundRequestPinId)
+    || null;
+  const refundFinalizePinId = normalizeText(source.refundFinalizePinId)
+    || normalizeText(record.refundFinalizePinId)
+    || null;
+  const paymentTxid = normalizeText(source.paymentTxid) || normalizeText(record.paymentTxid);
+  const paymentAmount = normalizeText(source.paymentAmount) || normalizeText(record.paymentAmount);
+  const orderId = normalizeText(source.id)
+    || normalizeText(source.serviceOrderPinId)
+    || normalizeText(source.orderReference)
+    || normalizeText(record.refundOrderId)
+    || normalizeText(record.orderId)
+    || normalizeText(record.serviceOrderPinId)
+    || null;
+  const unsupported = blockingReason === 'refund_settlement_unsupported';
+  const refunded = status === 'refunded' || Boolean(refundFinalizePinId);
+  const explicitRequired = normalizeBoolean(record.refundActionRequired)
+    || normalizeBoolean(record.manualActionRequired)
+    || normalizeBoolean(source.manualActionRequired);
+  const explicitConfirmable = normalizeBoolean(record.refundConfirmable)
+    || normalizeBoolean(source.refundConfirmable);
+  const pendingRequest = orderRole === 'seller'
+    && status === 'refund_pending'
+    && Boolean(refundRequestPinId);
+  const failedPaidOrder = orderRole === 'seller'
+    && status === 'failed'
+    && Boolean(paymentTxid)
+    && !isZeroAmount(paymentAmount);
+  const retryableBlocker = orderRole === 'seller'
+    && Boolean(blockingReason)
+    && !unsupported;
+  const refundActionRequired = !unsupported
+    && !refunded
+    && (explicitRequired || pendingRequest || failedPaidOrder || retryableBlocker);
+  const refundConfirmable = !unsupported
+    && !refunded
+    && (explicitConfirmable || (refundActionRequired && Boolean(refundRequestPinId)));
+
+  return {
+    refundActionRequired,
+    refundConfirmable,
+    refundOrderId: orderId,
+    refundStatus: status || null,
+    refundRequestPinId,
+    refundFinalizePinId,
+    refundHref: refundActionRequired ? buildRefundHref(orderId) : null,
+  };
+}
+
 function getMessageTone(
   sender: A2ATranscriptSender,
   role: A2ASessionRole,
@@ -198,6 +304,7 @@ export function buildSessionListViewModel(
       const servicePinId = normalizeText(record.servicePinId);
 
       const isStale = ACTIVE_STATES.has(state) && updatedAt > 0 && (now - updatedAt) > STALE_THRESHOLD_MS;
+      const refundAction = resolveRefundAction({ record, role });
       return {
         sessionId,
         traceId,
@@ -210,9 +317,10 @@ export function buildSessionListViewModel(
         peerGlobalMetaId,
         peerName,
         servicePinId,
-        stateTone: isStale ? 'timeout' : getStateTone(state),
-        stateLabel: isStale ? 'Timeout' : getStateLabel(state),
+        stateTone: refundAction.refundActionRequired ? 'manual' : isStale ? 'timeout' : getStateTone(state),
+        stateLabel: refundAction.refundActionRequired ? 'Refund Required' : isStale ? 'Timeout' : getStateLabel(state),
         timeAgoMs: now - updatedAt,
+        ...refundAction,
       } satisfies TraceSessionListItem;
     })
     .filter((item): item is TraceSessionListItem => item !== null);
@@ -223,20 +331,31 @@ export function buildSessionDetailViewModel(
 ): TraceSessionDetail | null {
   const session = coerceObject(payload.session);
   if (!session) return null;
+  const a2a = coerceObject(payload.a2a);
 
-  const sessionId = normalizeText(session.sessionId);
-  const traceId = normalizeText(session.traceId);
+  const sessionId = normalizeText(session.sessionId)
+    || normalizeText(payload.sessionId)
+    || normalizeText(a2a?.sessionId)
+    || normalizeText(session.id);
+  const traceId = normalizeText(session.traceId) || normalizeText(payload.traceId);
   const role = (normalizeText(session.role) || 'caller') as A2ASessionRole;
-  const state = normalizeText(session.state) as A2ASessionState;
+  const state = (normalizeText(session.state) || normalizeText(a2a?.publicStatus)) as A2ASessionState;
   const createdAt = normalizeTimestamp(session.createdAt);
   const updatedAt = normalizeTimestamp(session.updatedAt);
-  const callerGlobalMetaId = normalizeText(session.callerGlobalMetaId);
-  const providerGlobalMetaId = normalizeText(session.providerGlobalMetaId);
-  const servicePinId = normalizeText(session.servicePinId);
+  const callerGlobalMetaId = normalizeText(session.callerGlobalMetaId) || normalizeText(a2a?.callerGlobalMetaId);
+  const providerGlobalMetaId = normalizeText(session.providerGlobalMetaId) || normalizeText(a2a?.providerGlobalMetaId);
+  const servicePinId = normalizeText(session.servicePinId) || normalizeText(a2a?.servicePinId);
   const localMetabotName = normalizeText(payload.localMetabotName);
   const localMetabotGlobalMetaId = normalizeText(payload.localMetabotGlobalMetaId);
   const peerGlobalMetaId = normalizeText(payload.peerGlobalMetaId);
   const peerName = normalizeText(payload.peerName) || normalizeText(session.peerName);
+  const refundAction = resolveRefundAction({
+    record: {
+      ...session,
+      ...(payload.order ? { order: payload.order } : {}),
+    },
+    role,
+  });
 
   const topLevelItems = coerceArray(payload.transcriptItems);
   const inspector = coerceObject(payload.inspector);
@@ -286,5 +405,6 @@ export function buildSessionDetailViewModel(
     callerGlobalMetaId,
     providerGlobalMetaId,
     messages,
+    ...refundAction,
   };
 }

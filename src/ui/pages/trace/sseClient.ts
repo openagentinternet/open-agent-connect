@@ -103,6 +103,82 @@ function getStateLabel(state) {
   const map = { discovered:'Discovered', awaiting_confirmation:'Awaiting', requesting_remote:'Requesting', remote_received:'Received', remote_executing:'Executing', completed:'Completed', manual_action_required:'Manual Action', remote_failed:'Failed', timeout:'Timeout' };
   return map[state] || state;
 }
+function normalizeBoolean(value) {
+  if (value === true || value === 1) return true;
+  if (typeof value === 'string') {
+    var normalized = value.trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes';
+  }
+  return false;
+}
+function isZeroAmount(value) {
+  var text = normalizeText(value);
+  if (!text) return false;
+  var numeric = Number(text);
+  return Number.isFinite(numeric) && numeric === 0;
+}
+function buildRefundHref(orderId) {
+  return orderId ? '/ui/refund?orderId=' + encodeURIComponent(orderId) : '/ui/refund';
+}
+function resolveRefundAction(record, role) {
+  record = coerceObject(record) || {};
+  var order = coerceObject(record.order);
+  var refund = coerceObject(record.refund);
+  var source = order || refund || record;
+  var orderRole = normalizeText(source.role) || (role === 'provider' ? 'seller' : '');
+  var status = normalizeText(source.status) || normalizeText(record.refundStatus) || normalizeText(record.status);
+  var blockingReason = normalizeText(source.refundBlockingReason)
+    || normalizeText(source.blockingReason)
+    || normalizeText(record.refundBlockingReason)
+    || normalizeText(record.blockingReason);
+  var refundRequestPinId = normalizeText(source.refundRequestPinId)
+    || normalizeText(record.refundRequestPinId)
+    || null;
+  var refundFinalizePinId = normalizeText(source.refundFinalizePinId)
+    || normalizeText(record.refundFinalizePinId)
+    || null;
+  var paymentTxid = normalizeText(source.paymentTxid) || normalizeText(record.paymentTxid);
+  var paymentAmount = normalizeText(source.paymentAmount) || normalizeText(record.paymentAmount);
+  var orderId = normalizeText(source.id)
+    || normalizeText(source.serviceOrderPinId)
+    || normalizeText(source.orderReference)
+    || normalizeText(record.refundOrderId)
+    || normalizeText(record.orderId)
+    || normalizeText(record.serviceOrderPinId)
+    || null;
+  var unsupported = blockingReason === 'refund_settlement_unsupported';
+  var refunded = status === 'refunded' || Boolean(refundFinalizePinId);
+  var explicitRequired = normalizeBoolean(record.refundActionRequired)
+    || normalizeBoolean(record.manualActionRequired)
+    || normalizeBoolean(source.manualActionRequired);
+  var explicitConfirmable = normalizeBoolean(record.refundConfirmable)
+    || normalizeBoolean(source.refundConfirmable);
+  var pendingRequest = orderRole === 'seller'
+    && status === 'refund_pending'
+    && Boolean(refundRequestPinId);
+  var failedPaidOrder = orderRole === 'seller'
+    && status === 'failed'
+    && Boolean(paymentTxid)
+    && !isZeroAmount(paymentAmount);
+  var retryableBlocker = orderRole === 'seller'
+    && Boolean(blockingReason)
+    && !unsupported;
+  var refundActionRequired = !unsupported
+    && !refunded
+    && (explicitRequired || pendingRequest || failedPaidOrder || retryableBlocker);
+  var refundConfirmable = !unsupported
+    && !refunded
+    && (explicitConfirmable || (refundActionRequired && Boolean(refundRequestPinId)));
+  return {
+    refundActionRequired: refundActionRequired,
+    refundConfirmable: refundConfirmable,
+    refundOrderId: orderId,
+    refundStatus: status || null,
+    refundRequestPinId: refundRequestPinId,
+    refundFinalizePinId: refundFinalizePinId,
+    refundHref: refundActionRequired ? buildRefundHref(orderId) : null,
+  };
+}
 function getMessageTone(sender, role, type) {
   if (sender === 'system') return 'system';
   if (type === 'tool_use' || type === 'tool_result') return 'tool';
@@ -120,6 +196,7 @@ function buildSessionListViewModel(rawSessions, now) {
     var state = normalizeText(record.state);
     var updatedAt = normalizeTimestamp(record.updatedAt);
     var isStale = ACTIVE_STATES.has(state) && updatedAt > 0 && (now - updatedAt) > STALE_THRESHOLD_MS;
+    var refundAction = resolveRefundAction(record, role);
     return {
       sessionId: sessionId,
       traceId: normalizeText(record.traceId),
@@ -134,17 +211,31 @@ function buildSessionListViewModel(rawSessions, now) {
       peerName: normalizeText(record.peerName),
       peerAvatar: normalizeText(record.peerAvatar),
       servicePinId: normalizeText(record.servicePinId),
-      stateTone: isStale ? 'timeout' : getStateTone(state),
-      stateLabel: isStale ? 'Timeout' : getStateLabel(state),
+      stateTone: refundAction.refundActionRequired ? 'manual' : isStale ? 'timeout' : getStateTone(state),
+      stateLabel: refundAction.refundActionRequired ? 'Refund Required' : isStale ? 'Timeout' : getStateLabel(state),
       timeAgoMs: now - updatedAt,
+      refundActionRequired: refundAction.refundActionRequired,
+      refundConfirmable: refundAction.refundConfirmable,
+      refundOrderId: refundAction.refundOrderId,
+      refundStatus: refundAction.refundStatus,
+      refundRequestPinId: refundAction.refundRequestPinId,
+      refundFinalizePinId: refundAction.refundFinalizePinId,
+      refundHref: refundAction.refundHref,
     };
   }).filter(function(item) { return item !== null; });
 }
 function buildSessionDetailViewModel(payload) {
   var session = coerceObject(payload.session);
   if (!session) return null;
-  var sessionId = normalizeText(session.sessionId);
+  var a2a = coerceObject(payload.a2a);
+  var sessionId = normalizeText(session.sessionId)
+    || normalizeText(payload.sessionId)
+    || normalizeText(a2a && a2a.sessionId)
+    || normalizeText(session.id);
   var role = normalizeText(session.role) || 'caller';
+  var refundActionRecord = Object.assign({}, session);
+  if (payload.order) refundActionRecord.order = payload.order;
+  var refundAction = resolveRefundAction(refundActionRecord, role);
   var topLevelItems = coerceArray(payload.transcriptItems);
   var inspector = coerceObject(payload.inspector);
   var rawItems = topLevelItems.length ? topLevelItems : coerceArray(inspector && inspector.transcriptItems);
@@ -170,9 +261,9 @@ function buildSessionDetailViewModel(payload) {
     .sort(function(a, b) { return a.timestamp - b.timestamp; });
   return {
     sessionId: sessionId,
-    traceId: normalizeText(session.traceId),
+    traceId: normalizeText(session.traceId) || normalizeText(payload.traceId),
     role: role,
-    state: normalizeText(session.state),
+    state: normalizeText(session.state) || normalizeText(a2a && a2a.publicStatus),
     createdAt: normalizeTimestamp(session.createdAt),
     updatedAt: normalizeTimestamp(session.updatedAt),
     localMetabotName: normalizeText(payload.localMetabotName),
@@ -181,10 +272,17 @@ function buildSessionDetailViewModel(payload) {
     peerGlobalMetaId: normalizeText(payload.peerGlobalMetaId),
     peerName: normalizeText(payload.peerName) || normalizeText(session.peerName),
     peerAvatar: normalizeText(payload.peerAvatar) || normalizeText(session.peerAvatar),
-    servicePinId: normalizeText(session.servicePinId),
-    callerGlobalMetaId: normalizeText(session.callerGlobalMetaId),
-    providerGlobalMetaId: normalizeText(session.providerGlobalMetaId),
+    servicePinId: normalizeText(session.servicePinId) || normalizeText(a2a && a2a.servicePinId),
+    callerGlobalMetaId: normalizeText(session.callerGlobalMetaId) || normalizeText(a2a && a2a.callerGlobalMetaId),
+    providerGlobalMetaId: normalizeText(session.providerGlobalMetaId) || normalizeText(a2a && a2a.providerGlobalMetaId),
     messages: messages,
+    refundActionRequired: refundAction.refundActionRequired,
+    refundConfirmable: refundAction.refundConfirmable,
+    refundOrderId: refundAction.refundOrderId,
+    refundStatus: refundAction.refundStatus,
+    refundRequestPinId: refundAction.refundRequestPinId,
+    refundFinalizePinId: refundAction.refundFinalizePinId,
+    refundHref: refundAction.refundHref,
   };
 }
 
@@ -689,6 +787,7 @@ let detailLoadSeq = 0;
 let renderedDetailSignature = '';
 let renderedMessageCount = 0;
 let activeMediaObjectUrls = new Set();
+let refundWorkIndex = new Map();
 
 const $ = (sel) => document.querySelector(sel);
 const qAll = (sel) => [...document.querySelectorAll(sel)];
@@ -756,6 +855,13 @@ function buildDetailRenderSignature(detail, profiles) {
     peerName: detail.peerName,
     peerAvatar: detail.peerAvatar,
     servicePinId: detail.servicePinId,
+    refundActionRequired: detail.refundActionRequired,
+    refundConfirmable: detail.refundConfirmable,
+    refundOrderId: detail.refundOrderId,
+    refundStatus: detail.refundStatus,
+    refundRequestPinId: detail.refundRequestPinId,
+    refundFinalizePinId: detail.refundFinalizePinId,
+    refundHref: detail.refundHref,
     localProfile: profiles && profiles.localProfile ? profiles.localProfile : null,
     peerProfile: profiles && profiles.peerProfile ? profiles.peerProfile : null,
     messages: (detail.messages || []).map(buildMessageSignature),
@@ -778,6 +884,57 @@ function resolveInitialSessionId() {
   return matched ? matched.sessionId : '';
 }
 
+async function loadRefundWorkIndex() {
+  var index = new Map();
+  try {
+    var resp = await fetch('/api/services/refunds?all=true', { cache: 'no-store' });
+    if (!resp.ok) return index;
+    var json = await resp.json();
+    var data = json && (json.data || json) || {};
+    var sellerRows = Array.isArray(data.receivedByMe) ? data.receivedByMe : [];
+    sellerRows.forEach(function(item) {
+      var record = Object.assign({}, item, {
+        refundActionRequired: item && item.manualActionRequired === true,
+        refundOrderId: item && item.orderId,
+      });
+      var refundAction = resolveRefundAction(record, 'provider');
+      if (!refundAction.refundActionRequired) return;
+      var patch = {
+        refundActionRequired: refundAction.refundActionRequired,
+        refundConfirmable: refundAction.refundConfirmable,
+        refundOrderId: refundAction.refundOrderId,
+        refundStatus: refundAction.refundStatus,
+        refundRequestPinId: refundAction.refundRequestPinId,
+        refundFinalizePinId: refundAction.refundFinalizePinId,
+        refundHref: refundAction.refundHref,
+      };
+      var traceId = normalizeText(item && item.traceId);
+      var sessionId = normalizeText(item && (item.a2aSessionId || item.sessionId));
+      if (traceId) index.set('trace:' + traceId, patch);
+      if (sessionId) index.set('session:' + sessionId, patch);
+    });
+  } catch {
+    return index;
+  }
+  return index;
+}
+
+function mergeRefundWorkIntoSessionRecord(record, refundWorkIndex) {
+  if (!refundWorkIndex || !refundWorkIndex.size) return record;
+  var sessionId = normalizeText(record && record.sessionId);
+  var traceId = normalizeText(record && record.traceId);
+  var patch = (sessionId && refundWorkIndex.get('session:' + sessionId))
+    || (traceId && refundWorkIndex.get('trace:' + traceId));
+  return patch ? Object.assign({}, record, patch) : record;
+}
+
+function mergeRefundWorkIntoSessionDetail(detail) {
+  if (!detail || !refundWorkIndex || !refundWorkIndex.size) return detail;
+  var patch = (detail.sessionId && refundWorkIndex.get('session:' + detail.sessionId))
+    || (detail.traceId && refundWorkIndex.get('trace:' + detail.traceId));
+  return patch ? Object.assign({}, detail, patch) : detail;
+}
+
 function renderSessionList() {
   const list = $('[data-session-list]');
   if (!list) return;
@@ -795,9 +952,13 @@ function renderSessionList() {
     const localName = session.localMetabotName || session.localMetabotGlobalMetaId || '—';
     const timeAgo = session.updatedAt ? fmtTimeAgo(Date.now() - session.updatedAt) : '';
     const isSelected = session.sessionId === selectedSessionId;
+    const refundBadge = session.refundActionRequired
+      ? '<span class="session-refund-badge">' + (session.refundConfirmable ? 'Refund ready' : 'Refund required') + '</span>'
+      : '';
     return '<div class="session-item' + (isSelected ? ' selected' : '') + '" data-session-id="' + escHtml(session.sessionId) + '" role="button" tabindex="0">' +
       '<div class="session-item-header">' +
         '<span class="session-role-badge badge-' + roleBadgeTone + '">' + roleBadge + '</span>' +
+        refundBadge +
         '<span class="session-time">' + escHtml(timeAgo) + '</span>' +
       '</div>' +
       '<div class="session-item-peer" data-peer-name="' + escHtml(session.sessionId) + '">' + escHtml(peerName) + '</div>' +
@@ -882,9 +1043,18 @@ async function renderSessionDetail() {
   const messagesHtml = detail.messages.length
     ? '<div class="messages-list">' + detail.messages.map(msg => renderMessage(msg, localName, peerName, localAvatar, peerAvatar)).join('') + '</div>'
     : '<div class="messages-empty"><span class="mono">No transcript messages recorded for this session.</span></div>';
+  const refundActionHtml = detail.refundActionRequired
+    ? '<div class="detail-refund-alert">'
+      + '<div class="detail-refund-copy">'
+        + '<strong>' + (detail.refundConfirmable ? 'Provider refund is ready to confirm.' : 'Provider refund needs operator attention.') + '</strong>'
+        + '<span>' + escHtml(detail.refundOrderId ? 'Order ' + detail.refundOrderId : 'Open the refund work queue for settlement details.') + '</span>'
+      + '</div>'
+      + '<a class="detail-refund-action" href="' + escHtml(detail.refundHref || '/ui/refund') + '">' + (detail.refundConfirmable ? 'Process refund' : 'Review refund') + '</a>'
+    + '</div>'
+    : '';
 
   revokeMediaObjectUrls();
-  panel.innerHTML = headerHtml + '<div class="messages-scroll">' + messagesHtml + '</div>';
+  panel.innerHTML = headerHtml + refundActionHtml + '<div class="messages-scroll">' + messagesHtml + '</div>';
   const scroll = panel.querySelector('.messages-scroll');
   if (scroll) {
     scroll.scrollTop = shouldStickToBottom ? scroll.scrollHeight : previousScrollTop;
@@ -1117,11 +1287,19 @@ function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
 
 async function loadSessions() {
   try {
-    const resp = await fetch('/api/trace/sessions?all=true');
+    const [sessionResponse, nextRefundWorkIndex] = await Promise.all([
+      fetch('/api/trace/sessions?all=true&limit=500'),
+      loadRefundWorkIndex(),
+    ]);
+    refundWorkIndex = nextRefundWorkIndex;
+    const resp = sessionResponse;
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const json = await resp.json();
     const payload = json.data || json;
-    sessions = buildSessionListViewModel(payload.sessions || [], Date.now());
+    const rawSessions = (payload.sessions || []).map(function(record) {
+      return mergeRefundWorkIntoSessionRecord(record, refundWorkIndex);
+    });
+    sessions = buildSessionListViewModel(rawSessions, Date.now());
     stats = payload.stats || { totalCount: sessions.length, callerCount: 0, providerCount: 0, lastUpdatedAt: null };
     if (!stats.totalCount) stats.totalCount = sessions.length;
     renderStats();
@@ -1148,7 +1326,7 @@ async function loadSessionDetail(sessionId, options) {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const json = await resp.json();
     if (sequence !== detailLoadSeq) return;
-    sessionDetail = buildSessionDetailViewModel(json.data || json);
+    sessionDetail = mergeRefundWorkIntoSessionDetail(buildSessionDetailViewModel(json.data || json));
     await renderSessionDetail();
   } catch (err) {
     if (sequence !== detailLoadSeq) return;

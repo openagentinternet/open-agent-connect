@@ -64,6 +64,7 @@ function createElements() {
     '[data-refund-seller-count]': new FakeElement(),
     '[data-refund-buyer-list]': new FakeElement(),
     '[data-refund-seller-list]': new FakeElement(),
+    '[data-refund-manual-alert]': new FakeElement(),
   };
 }
 
@@ -103,6 +104,9 @@ function createFetch({ sync = [{ ok: true }], lists = [], settle = [{ ok: true, 
     calls.push(entry);
     if (entry.url === '/api/services/refunds/sync') {
       const payload = syncResponses.length ? syncResponses.shift() : { ok: true };
+      if (payload instanceof Error) {
+        throw payload;
+      }
       return {
         ok: payload.ok !== false,
         json: async () => payload,
@@ -202,6 +206,57 @@ test('sync failure still loads rows and shows status error', async () => {
   await waitFor(() => elements['[data-refund-buyer-list]'].innerHTML.includes('Seller Bot'), 'buyer refund row');
   assert.match(elements['[data-refund-sync-status]'].textContent, /chain sync failed/i);
   assert.equal(elements['[data-refund-sync-status]'].dataset.tone, 'error');
+});
+
+test('sync fetch rejection still loads local ledger and explains stale data', async () => {
+  const fetchImpl = createFetch({
+    sync: [new Error('fetch failed')],
+    lists: [{
+      ok: true,
+      data: {
+        initiatedByMe: [],
+        receivedByMe: [createRefundItem({
+          status: 'failed',
+          refundRequestPinId: null,
+          failureReason: 'Provider execution did not complete successfully.',
+          manualActionRequired: true,
+        })],
+        totalCount: 1,
+        pendingCount: 0,
+      },
+    }],
+  });
+  const elements = runRefundPage(fetchImpl);
+
+  await waitFor(() => elements['[data-refund-seller-list]'].innerHTML.includes('Provider execution did not complete successfully.'), 'seller refund row after sync rejection');
+  assert.match(elements['[data-refund-sync-status]'].textContent, /Sync failed: fetch failed/i);
+  assert.equal(elements['[data-refund-sync-status]'].dataset.tone, 'error');
+  assert.equal(elements['[data-refund-status]'].textContent, 'Refund records loaded from local ledger.');
+});
+
+test('seller manual refund work shows a prominent queue alert even before request proof exists', async () => {
+  const fetchImpl = createFetch({
+    lists: [{
+      ok: true,
+      data: {
+        initiatedByMe: [],
+        receivedByMe: [createRefundItem({
+          status: 'failed',
+          refundRequestPinId: null,
+          manualActionRequired: true,
+          traceHref: '/ui/trace?traceId=trace-provider-1',
+        })],
+        totalCount: 1,
+        pendingCount: 0,
+      },
+    }],
+  });
+  const elements = runRefundPage(fetchImpl);
+
+  await waitFor(() => elements['[data-refund-manual-alert]'].innerHTML.includes('1 seller refund needs operator attention'), 'manual refund alert');
+  assert.equal(elements['[data-refund-manual-count]'].textContent, '1');
+  assert.match(elements['[data-refund-manual-alert]'].innerHTML, /Review seller refunds/);
+  assert.match(elements['[data-refund-seller-list]'].innerHTML, /Review refund/);
 });
 
 test('refresh button repeats sync and list', async () => {

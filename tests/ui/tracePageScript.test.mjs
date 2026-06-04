@@ -7,7 +7,8 @@ import vm from 'node:vm';
 const require = createRequire(import.meta.url);
 const { buildTraceInspectorScript } = require('../../dist/ui/pages/trace/sseClient.js');
 
-const TRACE_SESSIONS_ENDPOINT = '/api/trace/sessions?all=true';
+const TRACE_SESSIONS_ENDPOINT = '/api/trace/sessions?all=true&limit=500';
+const REFUND_WORK_ENDPOINT = '/api/services/refunds?all=true';
 const IMAGE_ARTIFACT = {
   uri: 'metafile://image-pin.png',
   pinId: 'image-pin',
@@ -201,6 +202,14 @@ async function runTraceScriptWithUrl(search, options = {}) {
           }),
         };
       }
+      if (url === REFUND_WORK_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: options.refunds || { initiatedByMe: [], receivedByMe: [], totalCount: 0 },
+          }),
+        };
+      }
       if (url === '/api/trace/sessions/session-weather-1') {
         const detailData = typeof options.detailData === 'function'
           ? options.detailData(structuredClone(defaultDetailData))
@@ -242,8 +251,9 @@ test('trace page URL with sessionId auto-loads that A2A session detail', async (
     '?traceId=trace-weather-1&sessionId=session-weather-1',
   );
 
-  assert.deepEqual(fetchCalls.filter((url) => url.startsWith('/api/')).slice(0, 2), [
+  assert.deepEqual(fetchCalls.filter((url) => url.startsWith('/api/')).slice(0, 3), [
     TRACE_SESSIONS_ENDPOINT,
+    REFUND_WORK_ENDPOINT,
     '/api/trace/sessions/session-weather-1',
   ]);
   assert.match(detail.innerHTML, /Forecast detail/);
@@ -254,11 +264,59 @@ test('trace page URL with sessionId auto-loads that A2A session detail', async (
 test('trace page URL with only traceId selects the matching A2A session', async () => {
   const { fetchCalls, detail } = await runTraceScriptWithUrl('?traceId=trace-weather-1');
 
-  assert.deepEqual(fetchCalls.filter((url) => url.startsWith('/api/')).slice(0, 2), [
+  assert.deepEqual(fetchCalls.filter((url) => url.startsWith('/api/')).slice(0, 3), [
     TRACE_SESSIONS_ENDPOINT,
+    REFUND_WORK_ENDPOINT,
     '/api/trace/sessions/session-weather-1',
   ]);
   assert.match(detail.innerHTML, /Forecast detail/);
+});
+
+test('trace page marks sessions that have local seller refund work', async () => {
+  const { list } = await runTraceScriptWithUrl('', {
+    refunds: {
+      initiatedByMe: [],
+      receivedByMe: [{
+        orderId: 'seller-order-refund-1',
+        role: 'seller',
+        traceId: 'trace-weather-1',
+        status: 'failed',
+        paymentTxid: 'a'.repeat(64),
+        paymentAmount: '0.00001',
+        manualActionRequired: true,
+        refundRequestPinId: null,
+        refundFinalizePinId: null,
+      }],
+      totalCount: 1,
+    },
+  });
+
+  assert.match(list.innerHTML, /Refund required/);
+  assert.match(list.innerHTML, /status-manual/);
+});
+
+test('trace page shows refund action in session detail from local refund work', async () => {
+  const { detail } = await runTraceScriptWithUrl('?traceId=trace-weather-1&sessionId=session-weather-1', {
+    refunds: {
+      initiatedByMe: [],
+      receivedByMe: [{
+        orderId: 'seller-order-refund-1',
+        role: 'seller',
+        traceId: 'trace-weather-1',
+        status: 'failed',
+        paymentTxid: 'a'.repeat(64),
+        paymentAmount: '0.00001',
+        manualActionRequired: true,
+        refundRequestPinId: null,
+        refundFinalizePinId: null,
+      }],
+      totalCount: 1,
+    },
+  });
+
+  assert.match(detail.innerHTML, /Provider refund needs operator attention/);
+  assert.match(detail.innerHTML, /Review refund/);
+  assert.match(detail.innerHTML, /\/ui\/refund\?orderId=seller-order-refund-1/);
 });
 
 test('trace page renders markdown tables, blockquotes, and txid copy affordance in bubbles', async () => {
@@ -707,6 +765,14 @@ test('trace page background refresh keeps the current detail while the next fetc
           }),
         };
       }
+      if (url === REFUND_WORK_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: { initiatedByMe: [], receivedByMe: [], totalCount: 0 },
+          }),
+        };
+      }
       if (url === '/api/trace/sessions/session-weather-1') {
         detailFetchCount += 1;
         if (detailFetchCount > 1) {
@@ -888,6 +954,14 @@ test('trace page silent refresh recovers from a transient detail fetch error whe
           }),
         };
       }
+      if (url === REFUND_WORK_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: { initiatedByMe: [], receivedByMe: [], totalCount: 0 },
+          }),
+        };
+      }
       if (url === '/api/trace/sessions/session-weather-1') {
         detailFetchCount += 1;
         if (detailFetchCount === 2) {
@@ -979,6 +1053,14 @@ test('trace page metadata-only message refresh preserves historical scroll posit
               ],
               stats: { totalCount: 1, callerCount: 1, providerCount: 0, lastUpdatedAt: 1_777_000_001_000 },
             },
+          }),
+        };
+      }
+      if (url === REFUND_WORK_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: { initiatedByMe: [], receivedByMe: [], totalCount: 0 },
           }),
         };
       }

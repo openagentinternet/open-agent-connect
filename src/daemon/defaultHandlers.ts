@@ -16575,6 +16575,73 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return local && peer ? `${local}::${peer}` : null;
         };
 
+        const buildSellerRefundTraceSession = (
+          order: SellerOrderRecord,
+          profile: { name?: string | null; globalMetaId?: string | null },
+        ): Record<string, unknown> | null => {
+          const traceId = normalizeText(order.traceId);
+          if (!traceId) {
+            return null;
+          }
+          const orderState = normalizeText(order.state);
+          const sessionId = normalizeText(order.a2aSessionId)
+            || normalizeText(order.llmSessionId)
+            || traceId;
+          const updatedAt = normalizeTraceTimestamp(order.updatedAt)
+            || normalizeTraceTimestamp(order.refundCompletedAt)
+            || normalizeTraceTimestamp(order.refundedAt)
+            || normalizeTraceTimestamp(order.createdAt);
+          const projectedState = orderState === 'refunded'
+            ? 'completed'
+            : orderState === 'failed'
+              ? 'remote_failed'
+              : orderState === 'refund_pending'
+                ? 'manual_action_required'
+                : normalizeText(order.publicStatus) || orderState || 'manual_action_required';
+          return {
+            sessionId,
+            traceId,
+            role: 'provider',
+            state: projectedState,
+            createdAt: normalizeTraceTimestamp(order.createdAt),
+            updatedAt,
+            localMetabotName: normalizeText(profile.name),
+            localMetabotGlobalMetaId: normalizeText(profile.globalMetaId),
+            peerGlobalMetaId: normalizeText(order.buyerGlobalMetaId),
+            peerName: null,
+            servicePinId: normalizeText(order.currentServicePinId) || normalizeText(order.servicePinId),
+            serviceName: normalizeText(order.serviceName) || null,
+            order: {
+              id: normalizeText(order.serviceOrderPinId) || normalizeText(order.id) || null,
+              role: 'seller',
+              serviceId: normalizeText(order.currentServicePinId) || normalizeText(order.servicePinId) || null,
+              serviceName: normalizeText(order.serviceName) || null,
+              orderPinId: normalizeText(order.orderPinId) || null,
+              orderTxid: normalizeText(order.orderTxid) || null,
+              orderReference: normalizeText(order.orderReference) || null,
+              serviceOrderPinId: normalizeText(order.serviceOrderPinId) || null,
+              paymentTxid: normalizeText(order.paymentTxid) || null,
+              paymentCommitTxid: normalizeText(order.paymentCommitTxid) || null,
+              paymentAmount: normalizeText(order.paymentAmount) || null,
+              paymentCurrency: normalizeText(order.paymentCurrency) || null,
+              paymentChain: normalizeText(order.paymentChain) || null,
+              settlementKind: normalizeText(order.settlementKind) || null,
+              providerSkill: normalizeText(order.providerSkill) || null,
+              status: orderState || null,
+              failureReason: normalizeText(order.failureReason) || null,
+              refundRequestPinId: normalizeText(order.refundRequestPinId) || null,
+              refundRequestTxid: normalizeText(order.refundRequestTxid) || null,
+              refundRequestedAt: normalizeTraceTimestamp(order.refundRequestedAt) || null,
+              refundCompletedAt: normalizeTraceTimestamp(order.refundCompletedAt) || null,
+              refundFinalizePinId: normalizeText(order.refundFinalizePinId) || null,
+              refundBlockingReason: normalizeText(order.refundBlockingReason) || null,
+              refundTxid: normalizeText(order.refundTxid) || null,
+              refundedAt: normalizeTraceTimestamp(order.refundedAt) || null,
+              updatedAt,
+            },
+          };
+        };
+
         const pushSession = (session: unknown, options: {
           localGlobalMetaId?: string | null;
           dedupeByPeer?: boolean;
@@ -16638,6 +16705,25 @@ export function createDefaultMetabotDaemonHandlers(input: {
           } catch {
             // Skip profiles with unreadable session state
           }
+
+          try {
+            const runtimeState = await createRuntimeStateStore(profile.homeDir).readState();
+            const refundOrderIds = new Set(
+              buildSellerReceivedRefundItems(runtimeState).map((item) => normalizeText(item.orderId)),
+            );
+            for (const order of runtimeState.sellerOrders) {
+              const orderId = normalizeText(order.serviceOrderPinId) || normalizeText(order.id);
+              if (!orderId || !refundOrderIds.has(orderId)) {
+                continue;
+              }
+              pushSession(buildSellerRefundTraceSession(order, profile), {
+                localGlobalMetaId: profile.globalMetaId,
+                dedupeByPeer: false,
+              });
+            }
+          } catch {
+            // Skip profiles with unreadable provider refund traces.
+          }
         }));
 
         results.sort((a, b) => {
@@ -16700,8 +16786,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
           try {
             const store = createSessionStateStore(profile.homeDir);
             const state = await store.readState();
-            const session = state.sessions.find((s) => s.sessionId === normalizedSessionId);
-            if (!session) continue;
+            const session = state.sessions.find((s) => s.sessionId === normalizedSessionId) ?? null;
+            const profileRuntimeStateStore = createRuntimeStateStore(profile.homeDir);
+            let trace: SessionTraceRecord | null = null;
+            try {
+              const runtimeState = await profileRuntimeStateStore.readState();
+              trace = runtimeState.traces.find((entry) => (
+                normalizeText(entry.traceId) === normalizedSessionId
+                || normalizeText(entry.a2a?.sessionId) === normalizedSessionId
+                || normalizeText(entry.session?.id) === normalizedSessionId
+                || (session && normalizeText(entry.traceId) === normalizeText(session.traceId))
+              )) ?? null;
+            } catch {
+              trace = null;
+            }
+            if (!session && !trace) continue;
 
             const transcriptItems = state.transcriptItems.filter(
               (item) => item.sessionId === normalizedSessionId,
@@ -16712,19 +16811,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
             const publicStatusSnapshots = state.publicStatusSnapshots.filter(
               (snap) => snap.sessionId === normalizedSessionId,
             ).sort((left, right) => normalizeTraceTimestamp(left.resolvedAt) - normalizeTraceTimestamp(right.resolvedAt));
-            const isCallerLocal = session.role === 'caller';
-            const peerGlobalMetaId = isCallerLocal
-              ? session.providerGlobalMetaId
-              : session.callerGlobalMetaId;
-            const traceId = normalizeText(session.traceId);
-            let trace: SessionTraceRecord | null = null;
-            const profileRuntimeStateStore = createRuntimeStateStore(profile.homeDir);
-            try {
-              const runtimeState = await profileRuntimeStateStore.readState();
-              trace = runtimeState.traces.find((entry) => entry.traceId === traceId) ?? null;
-            } catch {
-              trace = null;
-            }
+            const traceRole = normalizeText(trace?.a2a?.role);
+            const isCallerLocal = session
+              ? session.role === 'caller'
+              : traceRole !== 'provider';
+            const peerGlobalMetaId = session
+              ? (isCallerLocal ? session.providerGlobalMetaId : session.callerGlobalMetaId)
+              : normalizeText(trace?.session?.peerGlobalMetaId)
+                || (isCallerLocal
+                  ? normalizeText(trace?.a2a?.providerGlobalMetaId)
+                  : normalizeText(trace?.a2a?.callerGlobalMetaId));
+            const traceId = normalizeText(session?.traceId) || normalizeText(trace?.traceId);
             if (trace) {
               const currentTrace = await refreshStaleTerminalTraceArtifacts({
                 trace,
@@ -16732,12 +16829,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 runtimeStateStore: profileRuntimeStateStore,
                 sessionStateStore: store,
               });
-              const privateHistoryProjection = await buildScopedPrivateHistoryProjectionForTrace({
-                profile,
-                trace: currentTrace,
-                session,
-                peerGlobalMetaId,
-              }).catch(() => null);
+              const privateHistoryProjection = session
+                ? await buildScopedPrivateHistoryProjectionForTrace({
+                    profile,
+                    trace: currentTrace,
+                    session,
+                    peerGlobalMetaId,
+                  }).catch(() => null)
+                : null;
               const orderHistoryProjection = await buildTraceOrderHistoryProjection({
                 trace: currentTrace,
                 selectedSession: session,
@@ -16751,7 +16850,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 ratingDetailStateStore: createRatingDetailStateStore(profile.homeDir),
                 chainApiBaseUrl: input.chainApiBaseUrl,
                 daemon: input.getDaemonRecord(),
-                selectedSessionId: normalizedSessionId,
+                selectedSessionId: session ? normalizedSessionId : normalizeText(currentTrace.a2a?.sessionId) || normalizedSessionId,
                 unifiedTranscriptItems: orderHistoryProjection.unifiedTranscriptItems,
                 chainTranscriptItems: privateHistoryProjection?.transcriptItems
                   ?? orderHistoryProjection.chainTranscriptItems,
@@ -16767,6 +16866,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 peerAvatar: privateHistoryProjection?.peerAvatar ?? null,
               });
             }
+            if (!session) continue;
             const latestStatusSnapshot = publicStatusSnapshots.at(-1) ?? null;
 
             return commandSuccess({

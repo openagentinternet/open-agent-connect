@@ -105,6 +105,33 @@ test('buildSessionListViewModel treats active sessions stale >15min as timeout',
   assert.equal(fresh.stateTone, 'active');
 });
 
+test('buildSessionListViewModel surfaces seller refund work from projected order state', () => {
+  const [item] = buildSessionListViewModel([{
+    sessionId: 'seller-session-refund-1',
+    traceId: 'trace-provider-refund-1',
+    role: 'provider',
+    state: 'completed',
+    updatedAt: NOW,
+    order: {
+      id: 'seller-order-refund-1',
+      role: 'seller',
+      status: 'refund_pending',
+      paymentTxid: 'a'.repeat(64),
+      paymentAmount: '0.00001',
+      refundRequestPinId: 'refund-request-pin-1',
+      refundFinalizePinId: null,
+    },
+  }], NOW);
+
+  assert.equal(item.refundActionRequired, true);
+  assert.equal(item.refundConfirmable, true);
+  assert.equal(item.refundOrderId, 'seller-order-refund-1');
+  assert.equal(item.refundRequestPinId, 'refund-request-pin-1');
+  assert.equal(item.refundHref, '/ui/refund?orderId=seller-order-refund-1');
+  assert.equal(item.stateTone, 'manual');
+  assert.equal(item.stateLabel, 'Refund Required');
+});
+
 test('buildSessionDetailViewModel returns null for missing session', () => {
   assert.equal(buildSessionDetailViewModel({}), null);
   assert.equal(buildSessionDetailViewModel({ session: null }), null);
@@ -176,6 +203,33 @@ test('buildSessionDetailViewModel builds session detail with messages', () => {
   assert.equal(detail.messages[0].tone, 'system');
   assert.equal(detail.messages[1].tone, 'local');   // caller in caller session
   assert.equal(detail.messages[2].tone, 'peer');    // provider in caller session
+});
+
+test('buildSessionDetailViewModel exposes seller refund action from top-level order payload', () => {
+  const detail = buildSessionDetailViewModel({
+    session: {
+      sessionId: 'seller-session-refund-detail',
+      traceId: 'trace-provider-refund-detail',
+      role: 'provider',
+      state: 'remote_failed',
+    },
+    order: {
+      id: 'seller-order-refund-detail',
+      role: 'seller',
+      status: 'failed',
+      paymentTxid: 'b'.repeat(64),
+      paymentAmount: '0.00001',
+      refundRequestPinId: null,
+      refundFinalizePinId: null,
+    },
+    transcriptItems: [],
+  });
+
+  assert.ok(detail !== null);
+  assert.equal(detail.refundActionRequired, true);
+  assert.equal(detail.refundConfirmable, false);
+  assert.equal(detail.refundOrderId, 'seller-order-refund-detail');
+  assert.equal(detail.refundHref, '/ui/refund?orderId=seller-order-refund-detail');
 });
 
 test('buildSessionDetailViewModel exposes structured artifacts from transcript items', () => {
