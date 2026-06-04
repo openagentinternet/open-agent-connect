@@ -9,12 +9,12 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     description: 'Inspect refund requests initiated by this MetaBot and refund requests received by this MetaBot as a provider.',
     panels: [
       {
-        title: 'Buyer initiated',
-        body: 'Shows refund requests this local MetaBot created after buyer-side timeout, invalid delivery, or failed artifact validation.',
+        title: 'Refunds for my action',
+        body: 'Shows provider-side refund work that this local MetaBot can process or has already finalized.',
       },
       {
-        title: 'Seller received',
-        body: 'Shows provider-side refund work, including transfer/finalization proof and any blocking reason that requires operator action.',
+        title: 'Refunds I Initiated',
+        body: 'Shows refund requests this local MetaBot created after buyer-side timeout, invalid delivery, or failed artifact validation.',
       },
       {
         title: 'Manual settlement',
@@ -60,27 +60,40 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
           </div>
         </article>
 
-        <article class="refund-card">
-          <div class="refund-section-header">
-            <div>
-              <div class="refund-eyebrow">Buyer initiated</div>
-              <h2>Refunds I requested</h2>
-            </div>
-            <span class="refund-section-count" data-refund-buyer-count>0</span>
-          </div>
-          <div class="refund-list" data-refund-buyer-list></div>
-        </article>
+        <div class="refund-tabs" role="tablist" aria-label="Refund queues">
+          <button type="button" class="refund-tab" role="tab" aria-controls="seller-refunds" data-refund-tab="action">
+            <span>Refunds for my action</span>
+            <span class="refund-tab-count" data-refund-action-tab-count>0</span>
+          </button>
+          <button type="button" class="refund-tab" role="tab" aria-controls="buyer-refunds" data-refund-tab="initiated">
+            <span>Refunds I Initiated</span>
+            <span class="refund-tab-count" data-refund-initiated-tab-count>0</span>
+          </button>
+        </div>
 
-        <article class="refund-card" id="seller-refunds">
-          <div class="refund-section-header">
-            <div>
-              <div class="refund-eyebrow">Seller received</div>
-              <h2>Refunds I need to settle</h2>
+        <section class="refund-panels">
+          <article class="refund-card refund-panel" id="seller-refunds" role="tabpanel" data-refund-panel="action">
+            <div class="refund-section-header">
+              <div>
+                <div class="refund-eyebrow">Provider side</div>
+                <h2>Refunds for my action</h2>
+              </div>
+              <span class="refund-section-count" data-refund-seller-count>0</span>
             </div>
-            <span class="refund-section-count" data-refund-seller-count>0</span>
-          </div>
-          <div class="refund-list" data-refund-seller-list></div>
-        </article>
+            <div class="refund-list" data-refund-seller-list></div>
+          </article>
+
+          <article class="refund-card refund-panel" id="buyer-refunds" role="tabpanel" data-refund-panel="initiated" hidden>
+            <div class="refund-section-header">
+              <div>
+                <div class="refund-eyebrow">Buyer initiated</div>
+                <h2>Refunds I Initiated</h2>
+              </div>
+              <span class="refund-section-count" data-refund-buyer-count>0</span>
+            </div>
+            <div class="refund-list" data-refund-buyer-list></div>
+          </article>
+        </section>
       </section>
     `,
     script: `(() => {
@@ -98,9 +111,14 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     syncStatus: document.querySelector('[data-refund-sync-status]'),
     manualAlert: document.querySelector('[data-refund-manual-alert]'),
     refresh: document.querySelector('[data-refund-refresh]'),
+    actionTabCount: document.querySelector('[data-refund-action-tab-count]'),
+    initiatedTabCount: document.querySelector('[data-refund-initiated-tab-count]'),
+    tabs: Array.from(document.querySelectorAll('[data-refund-tab]')),
+    panels: Array.from(document.querySelectorAll('[data-refund-panel]')),
   };
   const profileCache = new Map();
   let lastSyncSucceeded = false;
+  let activeRefundTab = 'action';
 
   const setText = (target, value) => {
     if (target) target.textContent = value;
@@ -124,6 +142,19 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     } catch {
       return '';
     }
+  };
+
+  const activateRefundTab = (requestedTab) => {
+    const nextTab = requestedTab === 'initiated' ? 'initiated' : 'action';
+    activeRefundTab = nextTab;
+    elements.tabs.forEach((tab) => {
+      const isActive = tab.getAttribute('data-refund-tab') === nextTab;
+      tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      tab.dataset.active = isActive ? 'true' : 'false';
+    });
+    elements.panels.forEach((panel) => {
+      panel.hidden = panel.getAttribute('data-refund-panel') !== nextTab;
+    });
   };
 
   const escHtml = (value) => String(value || '')
@@ -256,7 +287,10 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
       + '<strong>' + manualCount + ' ' + noun + ' operator attention.</strong>'
       + '<span>' + escHtml(detail) + '</span>'
       + '</div>'
-      + '<a class="refund-manual-alert-action" href="#seller-refunds">Process seller refunds</a>';
+      + '<button type="button" class="refund-manual-alert-action" data-refund-tab-jump="action">Process seller refunds</button>';
+    elements.manualAlert.querySelectorAll('[data-refund-tab-jump]').forEach((button) => {
+      button.addEventListener('click', () => activateRefundTab(button.getAttribute('data-refund-tab-jump') || 'action'));
+    });
   };
 
   const buildStatusBadge = (item, role) => {
@@ -405,9 +439,23 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     setText(elements.completedCount, String(completedCount));
     setText(elements.buyerCount, String(buyer.length));
     setText(elements.sellerCount, String(seller.length));
+    setText(elements.actionTabCount, String(seller.length));
+    setText(elements.initiatedTabCount, String(buyer.length));
     updateManualAlert(manualCount, processableCount, waitingRequestCount);
     await renderRefundRows(elements.buyerList, buyer, 'No buyer-initiated refund records were found in this local runtime.', 'buyer');
     await renderRefundRows(elements.sellerList, seller, 'No seller-received refund work is pending in this local runtime.', 'seller');
+    const focusedOrderId = getFocusedOrderId();
+    if (focusedOrderId) {
+      const sellerFocused = seller.some((entry) => String((entry && entry.orderId) || '').trim() === focusedOrderId);
+      const buyerFocused = buyer.some((entry) => String((entry && entry.orderId) || '').trim() === focusedOrderId);
+      if (sellerFocused) {
+        activateRefundTab('action');
+      } else if (buyerFocused) {
+        activateRefundTab('initiated');
+      }
+    } else if (activeRefundTab !== 'initiated') {
+      activateRefundTab('action');
+    }
     setStatus(
       buyer.length || seller.length
         ? (lastSyncSucceeded ? 'Refund records loaded.' : 'Refund records loaded from local ledger.')
@@ -483,6 +531,10 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
   if (elements.refresh) {
     elements.refresh.addEventListener('click', refreshRefunds);
   }
+  elements.tabs.forEach((tab) => {
+    tab.addEventListener('click', () => activateRefundTab(tab.getAttribute('data-refund-tab') || 'action'));
+  });
+  activateRefundTab('action');
 
   refreshRefunds();
 })();`,

@@ -7,13 +7,14 @@ const require = createRequire(import.meta.url);
 const { buildRefundPageDefinition } = require('../../dist/ui/pages/refund/app.js');
 
 class FakeElement {
-  constructor() {
+  constructor(attrs = {}) {
     this.textContent = '';
     this.dataset = {};
     this.disabled = false;
+    this.hidden = false;
     this.buttons = [];
     this.listeners = new Map();
-    this.attrs = {};
+    this.attrs = { ...attrs };
   }
 
   set innerHTML(value) {
@@ -46,6 +47,10 @@ class FakeElement {
   getAttribute(name) {
     return this.attrs[name] || '';
   }
+
+  setAttribute(name, value) {
+    this.attrs[name] = String(value);
+  }
 }
 
 function stripTags(value) {
@@ -53,6 +58,10 @@ function stripTags(value) {
 }
 
 function createElements() {
+  const actionTab = new FakeElement({ 'data-refund-tab': 'action' });
+  const initiatedTab = new FakeElement({ 'data-refund-tab': 'initiated' });
+  const actionPanel = new FakeElement({ 'data-refund-panel': 'action' });
+  const initiatedPanel = new FakeElement({ 'data-refund-panel': 'initiated' });
   return {
     '[data-refund-status]': new FakeElement(),
     '[data-refund-sync-status]': new FakeElement(),
@@ -65,6 +74,14 @@ function createElements() {
     '[data-refund-buyer-list]': new FakeElement(),
     '[data-refund-seller-list]': new FakeElement(),
     '[data-refund-manual-alert]': new FakeElement(),
+    '[data-refund-action-tab-count]': new FakeElement(),
+    '[data-refund-initiated-tab-count]': new FakeElement(),
+    __tabs: { action: actionTab, initiated: initiatedTab },
+    __panels: { action: actionPanel, initiated: initiatedPanel },
+    __querySelectorAll: {
+      '[data-refund-tab]': [actionTab, initiatedTab],
+      '[data-refund-panel]': [actionPanel, initiatedPanel],
+    },
   };
 }
 
@@ -141,6 +158,7 @@ function runRefundPage(fetchImpl, elements = createElements()) {
   vm.runInNewContext(buildRefundPageDefinition().script, {
     document: {
       querySelector: (selector) => elements[selector] || null,
+      querySelectorAll: (selector) => elements.__querySelectorAll?.[selector] || [],
     },
     fetch: fetchImpl,
     AbortController,
@@ -187,6 +205,71 @@ test('initial load calls sync before list', async () => {
     '/api/services/refunds?all=true',
   ]);
   assert.equal(JSON.parse(fetchImpl.calls[0].options.body).all, true);
+});
+
+test('refund page defines provider action and initiated refund tabs', () => {
+  const { contentHtml } = buildRefundPageDefinition();
+
+  assert.match(contentHtml, /Refunds for my action/);
+  assert.match(contentHtml, /Refunds I Initiated/);
+  assert.match(contentHtml, /data-refund-panel="action"/);
+  assert.match(contentHtml, /data-refund-panel="initiated"/);
+});
+
+test('provider action tab is the default refund workspace', async () => {
+  const fetchImpl = createFetch({
+    lists: [{
+      ok: true,
+      data: {
+        initiatedByMe: [createRefundItem({
+          orderId: 'buyer-order-1',
+          role: 'buyer',
+          counterpartyName: 'Seller Bot',
+        })],
+        receivedByMe: [createRefundItem()],
+        totalCount: 2,
+        pendingCount: 2,
+      },
+    }],
+  });
+  const elements = runRefundPage(fetchImpl);
+
+  await waitFor(() => elements['[data-refund-seller-list]'].innerHTML.includes('Weather Oracle'), 'seller action tab render');
+  assert.equal(elements.__tabs.action.getAttribute('aria-selected'), 'true');
+  assert.equal(elements.__tabs.initiated.getAttribute('aria-selected'), 'false');
+  assert.equal(elements.__panels.action.hidden, false);
+  assert.equal(elements.__panels.initiated.hidden, true);
+  assert.equal(elements['[data-refund-action-tab-count]'].textContent, '1');
+  assert.equal(elements['[data-refund-initiated-tab-count]'].textContent, '1');
+});
+
+test('initiated tab switch shows buyer initiated refund workspace', async () => {
+  const fetchImpl = createFetch({
+    lists: [{
+      ok: true,
+      data: {
+        initiatedByMe: [createRefundItem({
+          orderId: 'buyer-order-1',
+          role: 'buyer',
+          counterpartyName: 'Seller Bot',
+        })],
+        receivedByMe: [createRefundItem()],
+        totalCount: 2,
+        pendingCount: 2,
+      },
+    }],
+  });
+  const elements = runRefundPage(fetchImpl);
+
+  await waitFor(() => elements['[data-refund-buyer-list]'].innerHTML.includes('Seller Bot'), 'buyer initiated tab render');
+  const click = elements.__tabs.initiated.listeners.get('click');
+  assert.equal(typeof click, 'function');
+  click();
+
+  assert.equal(elements.__tabs.action.getAttribute('aria-selected'), 'false');
+  assert.equal(elements.__tabs.initiated.getAttribute('aria-selected'), 'true');
+  assert.equal(elements.__panels.action.hidden, true);
+  assert.equal(elements.__panels.initiated.hidden, false);
 });
 
 test('sync failure still loads rows and shows status error', async () => {
