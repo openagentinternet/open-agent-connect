@@ -159,6 +159,7 @@ async function tryExecute(
   allowedSkillScope: PrivateChatAllowedSkillScope,
   enforceSkillScope: boolean,
 ): Promise<{ result: ChatReplyRunnerResult; bindingId?: string } | null> {
+  const shouldMarkRuntimeUnavailable = !enforceSkillScope;
   const resolved = await resolver.resolveRuntime({
     metaBotSlug,
     excludeRuntimeIds: Array.from(excludeRuntimeIds),
@@ -199,26 +200,34 @@ async function tryExecute(
             return { result: parsed, bindingId: resolved.bindingId };
           }
           excludeRuntimeIds.add(resolved.runtime.id);
-          await resolver.markRuntimeUnavailable(
-            resolved.runtime.id,
-            'LLM runtime completed without returning output.',
-          ).catch(() => {});
+          if (shouldMarkRuntimeUnavailable) {
+            await resolver.markRuntimeUnavailable(
+              resolved.runtime.id,
+              'LLM runtime completed without returning output.',
+            ).catch(() => {});
+          }
           return null;
         }
         excludeRuntimeIds.add(resolved.runtime.id);
-        await resolver.markRuntimeUnavailable(resolved.runtime.id, result.error || `LLM runtime ended with status ${result.status}.`).catch(() => {});
+        if (shouldMarkRuntimeUnavailable) {
+          await resolver.markRuntimeUnavailable(resolved.runtime.id, result.error || `LLM runtime ended with status ${result.status}.`).catch(() => {});
+        }
         return null;
       }
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }
 
     excludeRuntimeIds.add(resolved.runtime.id);
-    await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => {});
+    if (shouldMarkRuntimeUnavailable) {
+      await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => {});
+    }
     return null;
   } catch {
     if (!excludeRuntimeIds.has(resolved.runtime.id)) {
       excludeRuntimeIds.add(resolved.runtime.id);
-      await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime failed while running chat reply.').catch(() => {});
+      if (shouldMarkRuntimeUnavailable) {
+        await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime failed while running chat reply.').catch(() => {});
+      }
     }
     return null;
   }

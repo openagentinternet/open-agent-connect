@@ -417,6 +417,58 @@ test('host LLM chat runner falls back when the injected executor fails', async (
   assert.deepEqual(resolverCalls.markRuntimeUnavailable, ['llm-runtime-1']);
 });
 
+test('host LLM chat runner does not globally mark a strict scoped runtime unavailable', async () => {
+  const runtime = {
+    id: 'llm-runtime-1',
+    provider: 'codex',
+    displayName: 'Codex',
+    binaryPath: '/bin/codex',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  const resolverCalls = {};
+  const llmExecutor = {
+    async execute() {
+      return 'llm-session-failed';
+    },
+    async getSession(sessionId) {
+      return {
+        sessionId,
+        status: 'failed',
+        result: {
+          status: 'failed',
+          output: '',
+          error: 'isolated CODEX_HOME missing auth',
+          durationMs: 1,
+        },
+      };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime, resolverCalls),
+    llmExecutor,
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+    allowedChatSkillsResolver: async () => ({
+      skills: [],
+      skillSourcePaths: {},
+      skippedSkills: [],
+      warning: null,
+    }),
+  });
+
+  const result = await runner(makeInput());
+
+  assert.equal(result.state, 'reply');
+  assert.match(result.content, /Thanks for/);
+  assert.deepEqual(resolverCalls.markRuntimeUnavailable ?? [], []);
+});
+
 test('host LLM chat runner treats completed empty output as unavailable and tries fallback', async () => {
   const primaryRuntime = {
     id: 'llm-runtime-primary',

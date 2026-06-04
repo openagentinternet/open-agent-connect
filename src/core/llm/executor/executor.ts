@@ -6,7 +6,12 @@ import { stringifyError } from './backends/backend';
 import { createFileSessionManager, type SessionManager } from './session-manager';
 import { injectSkills } from './skill-injector';
 import type { LlmExecutionEvent, LlmExecutionRequest, LlmExecutionResult, LlmSessionRecord } from './types';
-import { getPlatformSkillRoots, isPlatformId, type PlatformSkillRoot } from '../../platform/platformRegistry';
+import {
+  getPlatformSkillRoots,
+  isPlatformId,
+  resolvePlatformSkillRootPath,
+  type PlatformSkillRoot,
+} from '../../platform/platformRegistry';
 
 interface LlmExecutorOptions {
   sessionsRoot: string;
@@ -34,6 +39,10 @@ interface StrictSkillIsolationScope {
   systemHomeDir: string;
   env: Record<string, string>;
 }
+
+const STRICT_ISOLATION_HOME_FILES: Partial<Record<string, string[]>> = {
+  codex: ['auth.json', 'config.toml'],
+};
 
 function createSessionId(): string {
   return `llm_${randomUUID()}`;
@@ -75,6 +84,22 @@ function platformHomeEnvParent(root: PlatformSkillRoot, isolatedHome: string): s
   return segments.length > 0 ? path.resolve(isolatedHome, ...segments) : isolatedHome;
 }
 
+function skillRootParent(rootPath: string): string {
+  return path.basename(rootPath) === 'skills' ? path.dirname(rootPath) : rootPath;
+}
+
+async function copyFileIfPresent(sourcePath: string, destinationPath: string): Promise<void> {
+  let stat;
+  try {
+    stat = await fs.stat(sourcePath);
+  } catch {
+    return;
+  }
+  if (!stat.isFile()) return;
+  await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+  await fs.copyFile(sourcePath, destinationPath);
+}
+
 function buildStrictSkillIsolationEnv(input: {
   provider: string;
   isolatedHome: string;
@@ -96,6 +121,41 @@ function buildStrictSkillIsolationEnv(input: {
   return env;
 }
 
+async function prepareStrictSkillIsolationPlatformHome(input: {
+  provider: string;
+  isolatedHome: string;
+  env: Record<string, string>;
+  baseEnv?: NodeJS.ProcessEnv;
+  requestEnv?: Record<string, string>;
+}): Promise<void> {
+  if (!isPlatformId(input.provider)) return;
+
+  const supportFiles = STRICT_ISOLATION_HOME_FILES[input.provider] ?? [];
+  const sourceEnv = mergeStringEnvValues(input.baseEnv, input.requestEnv);
+  const sourceHome = sourceEnv.HOME || process.env.HOME || input.isolatedHome;
+  const preparedParents = new Set<string>();
+
+  for (const root of getPlatformSkillRoots(input.provider)) {
+    if (root.kind !== 'global') continue;
+
+    const isolatedSkillRoot = resolvePlatformSkillRootPath(root, input.isolatedHome, input.env);
+    const isolatedParent = skillRootParent(isolatedSkillRoot);
+    await fs.mkdir(isolatedParent, { recursive: true });
+
+    if (supportFiles.length === 0 || preparedParents.has(isolatedParent)) continue;
+    preparedParents.add(isolatedParent);
+
+    const sourceSkillRoot = resolvePlatformSkillRootPath(root, sourceHome, sourceEnv);
+    const sourceParent = skillRootParent(sourceSkillRoot);
+    for (const fileName of supportFiles) {
+      await copyFileIfPresent(
+        path.join(sourceParent, fileName),
+        path.join(isolatedParent, fileName),
+      );
+    }
+  }
+}
+
 async function createStrictSkillIsolationScope(input: {
   sessionsRoot: string;
   provider: string;
@@ -109,17 +169,25 @@ async function createStrictSkillIsolationScope(input: {
   await fs.mkdir(cwd, { recursive: true });
   await fs.mkdir(systemHomeDir, { recursive: true });
   await fs.mkdir(path.join(systemHomeDir, '.config'), { recursive: true });
+  const env = buildStrictSkillIsolationEnv({
+    provider: input.provider,
+    isolatedHome: systemHomeDir,
+    isolatedCwd: cwd,
+    baseEnv: input.baseEnv,
+    requestEnv: input.requestEnv,
+  });
+  await prepareStrictSkillIsolationPlatformHome({
+    provider: input.provider,
+    isolatedHome: systemHomeDir,
+    env,
+    baseEnv: input.baseEnv,
+    requestEnv: input.requestEnv,
+  });
   return {
     root,
     cwd,
     systemHomeDir,
-    env: buildStrictSkillIsolationEnv({
-      provider: input.provider,
-      isolatedHome: systemHomeDir,
-      isolatedCwd: cwd,
-      baseEnv: input.baseEnv,
-      requestEnv: input.requestEnv,
-    }),
+    env,
   };
 }
 

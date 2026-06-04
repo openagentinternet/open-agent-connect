@@ -671,6 +671,8 @@ test('LlmExecutor strict skill isolation exposes only requested skills to the ba
   await fs.writeFile(path.join(originalCwd, '.codex', 'skills', 'metabot-secret', 'SKILL.md'), '# Secret\n', 'utf8');
   await fs.mkdir(path.join(originalCodexHome, 'skills', 'metabot-secret'), { recursive: true });
   await fs.writeFile(path.join(originalCodexHome, 'skills', 'metabot-secret', 'SKILL.md'), '# Global Secret\n', 'utf8');
+  await fs.writeFile(path.join(originalCodexHome, 'auth.json'), '{"token":"codex-auth"}\n', 'utf8');
+  await fs.writeFile(path.join(originalCodexHome, 'config.toml'), 'model = "gpt-5.5"\n', 'utf8');
   await fs.mkdir(path.join(originalXdgConfigHome, 'opencode', 'skills', 'metabot-secret'), { recursive: true });
   await fs.writeFile(path.join(originalXdgConfigHome, 'opencode', 'skills', 'metabot-secret', 'SKILL.md'), '# XDG Secret\n', 'utf8');
 
@@ -694,6 +696,18 @@ test('LlmExecutor strict skill isolation exposes only requested skills to the ba
           assert.notEqual(path.resolve(request.env.CODEX_HOME), path.resolve(originalCodexHome));
           assert.notEqual(path.resolve(request.env.XDG_CONFIG_HOME), path.resolve(originalXdgConfigHome));
           assert.equal(path.resolve(request.env.PWD), path.resolve(request.cwd));
+          assert.equal(
+            await pathExists(request.env.CODEX_HOME),
+            true,
+          );
+          assert.equal(
+            await pathExists(path.join(request.env.CODEX_HOME, 'auth.json')),
+            true,
+          );
+          assert.equal(
+            await pathExists(path.join(request.env.CODEX_HOME, 'config.toml')),
+            true,
+          );
           assert.equal(
             await pathExists(path.join(request.cwd, '.codex', 'skills', 'metabot-weather', 'SKILL.md')),
             true,
