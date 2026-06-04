@@ -231,13 +231,12 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     )
   );
 
-  const canConfirmRefund = (item, role) => (
+  const canProcessRefund = (item, role) => (
     needsManualRefundWork(item, role)
-    && String(item.refundRequestPinId || '').trim()
     && !isUnsupportedBlocker(item)
   );
 
-  const updateManualAlert = (manualCount, confirmableCount, waitingRequestCount) => {
+  const updateManualAlert = (manualCount, processableCount, waitingRequestCount) => {
     if (!elements.manualAlert) return;
     if (!manualCount) {
       elements.manualAlert.hidden = true;
@@ -247,8 +246,8 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     elements.manualAlert.hidden = false;
     elements.manualAlert.dataset.tone = 'manual';
     const noun = manualCount === 1 ? 'seller refund needs' : 'seller refunds need';
-    const detail = confirmableCount
-      ? String(confirmableCount) + ' ready to confirm'
+    const detail = processableCount
+      ? String(processableCount) + ' ready to process'
       : waitingRequestCount
         ? String(waitingRequestCount) + ' waiting for refund request proof'
         : 'review the seller refund queue';
@@ -257,7 +256,7 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
       + '<strong>' + manualCount + ' ' + noun + ' operator attention.</strong>'
       + '<span>' + escHtml(detail) + '</span>'
       + '</div>'
-      + '<a class="refund-manual-alert-action" href="#seller-refunds">Review seller refunds</a>';
+      + '<a class="refund-manual-alert-action" href="#seller-refunds">Process seller refunds</a>';
   };
 
   const buildStatusBadge = (item, role) => {
@@ -292,11 +291,11 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
       const blockingReason = String(item.blockingReason || item.failureReason || '').trim();
       const failureReason = String(item.failureReason || '').trim();
       const manualWork = needsManualRefundWork(item, role);
-      const confirmable = canConfirmRefund(item, role);
+      const processable = canProcessRefund(item, role);
       const providerStatus = item.status === 'refunded'
         ? 'Finalized'
-        : confirmable
-          ? 'Ready to confirm'
+        : processable
+          ? 'Ready to process'
           : manualWork
             ? String(item.refundRequestPinId || '').trim()
               ? 'Needs operator attention'
@@ -305,15 +304,12 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
             ? 'Blocked'
             : 'Waiting';
       const traceHref = String(item.traceHref || '').trim();
-      const traceLink = traceHref && !manualWork
+      const traceLink = traceHref
         ? '<a class="refund-trace-link" href="' + escHtml(traceHref) + '">Open trace</a>'
         : '';
       const localMetabotSlug = String(item.localMetabotSlug || '').trim();
-      const settleButton = confirmable
-        ? '<button type="button" class="refund-action" data-settle-refund="' + escHtml(item.orderId) + '" data-refund-from="' + escHtml(localMetabotSlug) + '">Confirm refund</button>'
-        : '';
-      const reviewAction = manualWork && !settleButton && traceHref
-        ? '<a class="refund-action refund-action-secondary" href="' + escHtml(traceHref) + '">Review refund</a>'
+      const settleButton = processable
+        ? '<button type="button" class="refund-action" data-settle-refund="' + escHtml(item.orderId) + '" data-refund-from="' + escHtml(localMetabotSlug) + '">Process refund</button>'
         : '';
       const focused = getFocusedOrderId() && String(item.orderId || '').trim() === getFocusedOrderId();
       return ''
@@ -342,7 +338,7 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
         +      field('Refunded at', formatDate(item.refundCompletedAt), false)
         + '  </div>'
         + (blockingReason ? '<div class="refund-note">Blocking reason: ' + escHtml(blockingReason) + '</div>' : '')
-        + ((traceLink || reviewAction || settleButton) ? '<div class="refund-actions">' + traceLink + reviewAction + settleButton + '</div>' : '')
+        + ((traceLink || settleButton) ? '<div class="refund-actions">' + traceLink + settleButton + '</div>' : '')
         + '</article>';
     }));
     target.innerHTML = rows.join('');
@@ -350,7 +346,7 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
       button.addEventListener('click', async () => {
         const orderId = button.getAttribute('data-settle-refund') || '';
         button.disabled = true;
-        button.textContent = 'Confirming...';
+        button.textContent = 'Processing...';
         try {
           const from = button.getAttribute('data-refund-from') || '';
           const response = await fetch('/api/services/refunds/settle', {
@@ -383,7 +379,7 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     const seller = Array.isArray(data.receivedByMe) ? data.receivedByMe : [];
     const allRows = buyer.concat(seller);
     const manualCount = seller.filter((entry) => needsManualRefundWork(entry, 'seller')).length;
-    const confirmableCount = seller.filter((entry) => canConfirmRefund(entry, 'seller')).length;
+    const processableCount = seller.filter((entry) => canProcessRefund(entry, 'seller')).length;
     const waitingRequestCount = seller.filter((entry) => needsManualRefundWork(entry, 'seller') && !String(entry.refundRequestPinId || '').trim()).length;
     const blockedCount = allRows.filter(isBlockedRefund).length;
     const completedCount = allRows.filter((entry) => entry && entry.status === 'refunded').length;
@@ -395,7 +391,7 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     setText(elements.completedCount, String(completedCount));
     setText(elements.buyerCount, String(buyer.length));
     setText(elements.sellerCount, String(seller.length));
-    updateManualAlert(manualCount, confirmableCount, waitingRequestCount);
+    updateManualAlert(manualCount, processableCount, waitingRequestCount);
     await renderRefundRows(elements.buyerList, buyer, 'No buyer-initiated refund records were found in this local runtime.', 'buyer');
     await renderRefundRows(elements.sellerList, seller, 'No seller-received refund work is pending in this local runtime.', 'seller');
     setStatus(

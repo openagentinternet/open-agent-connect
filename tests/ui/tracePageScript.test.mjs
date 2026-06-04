@@ -47,6 +47,7 @@ function createElementStub() {
 function createDetailElementStub(options = {}) {
   const element = createElementStub();
   let html = '';
+  let buttons = [];
   let scroll = options.scroll || { scrollTop: 0, scrollHeight: 0, clientHeight: 0 };
   let renderCount = 0;
   const createScroll = (previousScroll) => ({
@@ -60,6 +61,23 @@ function createDetailElementStub(options = {}) {
     },
     set(value) {
       html = String(value || '');
+      buttons = [];
+      const buttonPattern = /<button\b([^>]*)>([\s\S]*?)<\/button>/gu;
+      for (const match of html.matchAll(buttonPattern)) {
+        const button = createElementStub();
+        button.listeners = new Map();
+        button.addEventListener = (eventName, handler) => {
+          button.listeners.set(eventName, handler);
+        };
+        const attrs = match[1] || '';
+        button.textContent = stripTags(match[2] || '').trim();
+        button.attrs = {};
+        for (const attrMatch of attrs.matchAll(/\s([a-zA-Z0-9_-]+)="([^"]*)"/gu)) {
+          button.attrs[attrMatch[1]] = attrMatch[2];
+        }
+        button.getAttribute = (name) => button.attrs[name] || '';
+        buttons.push(button);
+      }
       renderCount += 1;
       if (html.includes('messages-scroll')) {
         scroll = renderCount === 1 && options.scroll ? options.scroll : createScroll(scroll);
@@ -70,7 +88,11 @@ function createDetailElementStub(options = {}) {
     if (selector === '.messages-scroll') return scroll;
     return null;
   };
-  element.querySelectorAll = () => [];
+  element.querySelectorAll = (selector) => (
+    selector === '[data-process-refund]'
+      ? buttons.filter((button) => button.attrs && Object.prototype.hasOwnProperty.call(button.attrs, 'data-process-refund'))
+      : []
+  );
   return {
     element,
     get scroll() {
@@ -80,6 +102,10 @@ function createDetailElementStub(options = {}) {
       return renderCount;
     },
   };
+}
+
+function stripTags(value) {
+  return String(value || '').replace(/<[^>]*>/gu, '');
 }
 
 function createFakeDate(nowRef) {
@@ -176,8 +202,14 @@ async function runTraceScriptWithUrl(search, options = {}) {
         return [];
       },
     },
-    fetch: async (url) => {
+    fetch: async (url, fetchOptions = {}) => {
       fetchCalls.push(String(url));
+      if (url === '/api/services/refunds/settle') {
+        return {
+          ok: true,
+          json: async () => options.settleResponse || { ok: true, data: { orderId: 'seller-order-refund-1' } },
+        };
+      }
       if (url === TRACE_SESSIONS_ENDPOINT) {
         return {
           ok: true,
@@ -296,13 +328,14 @@ test('trace page marks sessions that have local seller refund work', async () =>
 });
 
 test('trace page shows refund action in session detail from local refund work', async () => {
-  const { detail } = await runTraceScriptWithUrl('?traceId=trace-weather-1&sessionId=session-weather-1', {
+  const { detail, fetchCalls } = await runTraceScriptWithUrl('?traceId=trace-weather-1&sessionId=session-weather-1', {
     refunds: {
       initiatedByMe: [],
       receivedByMe: [{
         orderId: 'seller-order-refund-1',
         role: 'seller',
         traceId: 'trace-weather-1',
+        localMetabotSlug: 'seller-bot',
         status: 'failed',
         paymentTxid: 'a'.repeat(64),
         paymentAmount: '0.00001',
@@ -315,8 +348,16 @@ test('trace page shows refund action in session detail from local refund work', 
   });
 
   assert.match(detail.innerHTML, /Provider refund needs operator attention/);
-  assert.match(detail.innerHTML, /Review refund/);
-  assert.match(detail.innerHTML, /\/ui\/refund\?orderId=seller-order-refund-1/);
+  assert.match(detail.innerHTML, /Process refund/);
+  assert.doesNotMatch(detail.innerHTML, /Review refund/);
+  const buttons = detail.querySelectorAll('[data-process-refund]');
+  assert.equal(buttons.length, 1);
+  assert.equal(buttons[0].getAttribute('data-process-refund'), 'seller-order-refund-1');
+  assert.equal(buttons[0].getAttribute('data-refund-from'), 'seller-bot');
+
+  await buttons[0].listeners.get('click')();
+
+  assert.ok(fetchCalls.includes('/api/services/refunds/settle'));
 });
 
 test('trace page renders markdown tables, blockquotes, and txid copy affordance in bubbles', async () => {

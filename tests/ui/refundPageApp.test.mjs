@@ -255,8 +255,8 @@ test('seller manual refund work shows a prominent queue alert even before reques
 
   await waitFor(() => elements['[data-refund-manual-alert]'].innerHTML.includes('1 seller refund needs operator attention'), 'manual refund alert');
   assert.equal(elements['[data-refund-manual-count]'].textContent, '1');
-  assert.match(elements['[data-refund-manual-alert]'].innerHTML, /Review seller refunds/);
-  assert.match(elements['[data-refund-seller-list]'].innerHTML, /Review refund/);
+  assert.match(elements['[data-refund-manual-alert]'].innerHTML, /Process seller refunds/);
+  assert.match(elements['[data-refund-seller-list]'].innerHTML, /Process refund/);
 });
 
 test('refresh button repeats sync and list', async () => {
@@ -279,7 +279,7 @@ test('refresh button repeats sync and list', async () => {
   ]);
 });
 
-test('provider pending actionable row renders Confirm refund button and posts selected seller actor', async () => {
+test('provider manual actionable row renders Process refund button and posts selected seller actor', async () => {
   const fetchImpl = createFetch({
     lists: [{
       ok: true,
@@ -297,7 +297,7 @@ test('provider pending actionable row renders Confirm refund button and posts se
   await waitFor(() => sellerList.buttons.length === 1, 'seller refund button render');
   assert.match(sellerList.innerHTML, new RegExp(escapeRegExp(new Date(1_775_000_010_000).toLocaleString())));
   const button = sellerList.buttons[0];
-  assert.equal(button.textContent, 'Confirm refund');
+  assert.equal(button.textContent, 'Process refund');
   const click = button.listeners.get('click');
   assert.equal(typeof click, 'function');
 

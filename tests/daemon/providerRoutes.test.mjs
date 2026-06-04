@@ -207,6 +207,7 @@ async function startProviderServer(options = {}) {
     chainApiBaseUrl: options.chainApiBaseUrl,
     secretStore: options.secretStore,
     signer: options.signer,
+    createSignerForHome: options.createSignerForHome,
     adapters: options.adapters,
     socketPresenceApiBaseUrl: options.socketPresenceApiBaseUrl,
     socketPresenceFailureMode: options.socketPresenceFailureMode,
@@ -619,6 +620,233 @@ test('POST /api/provider/refund/confirm preserves failed paid seller orders with
   assert.equal(state.sellerOrders[0].refundBlockingReason, 'refund_request_missing');
   assert.equal(state.sellerOrders[0].refundTxid, null);
   assert.equal(state.sellerOrders[0].refundFinalizePinId, null);
+});
+
+test('POST /api/services/refunds/settle prepares local buyer refund request proof before settling seller refund', async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const buyerWrites = [];
+  const providerWrites = [];
+  const transferBuilds = [];
+  const broadcasts = [];
+  let buyerHome = '';
+  const app = await startProviderServer({
+    chainApiBaseUrl: 'https://chain.test',
+    secretStore: {
+      async ensureLayout() { return {}; },
+      async readIdentitySecrets() {
+        return { mnemonic: 'test test test test test test test test test test test junk', path: "m/44'/10001'/0'/0/0" };
+      },
+      async writeIdentitySecrets(value) { return JSON.stringify(value); },
+      async deleteIdentitySecrets() {},
+    },
+    signer: {
+      async getIdentity() { return {}; },
+      async getPrivateChatIdentity() { return {}; },
+      async writePin(input) {
+        providerWrites.push(input);
+        return {
+          txids: ['refund-finalize-txid-auto-1'],
+          pinId: 'refund-finalize-pin-auto-1',
+          totalCost: 1,
+          network: input.network,
+          operation: input.operation,
+          path: input.path,
+          contentType: input.contentType,
+          encoding: input.encoding,
+          globalMetaId: 'idq1provider',
+          mvcAddress: 'mvc-provider-address',
+        };
+      },
+    },
+    createSignerForHome(homeDir) {
+      if (path.resolve(homeDir) !== path.resolve(buyerHome)) {
+        throw new Error(`Unexpected profile signer request: ${homeDir}`);
+      }
+      return {
+        async getIdentity() { return {}; },
+        async getPrivateChatIdentity() { return {}; },
+        async writePin(input) {
+          buyerWrites.push(input);
+          return {
+            txids: ['buyer-refund-request-txid-1'],
+            pinId: 'buyer-refund-request-pin-1',
+            totalCost: 1,
+            network: input.network,
+            operation: input.operation,
+            path: input.path,
+            contentType: input.contentType,
+            encoding: input.encoding,
+            globalMetaId: 'idq1buyer',
+            mvcAddress: 'mvc-buyer-address',
+          };
+        },
+      };
+    },
+    adapters: new Map([
+      ['mvc', {
+        network: 'mvc',
+        explorerBaseUrl: 'https://www.mvcscan.com',
+        feeRateUnit: 'sat/byte',
+        minTransferSatoshis: 600,
+        async deriveAddress() { return 'mvc-provider-address'; },
+        async fetchUtxos() { return []; },
+        async fetchBalance() {
+          return { chain: 'mvc', address: 'mvc-provider-address', totalSatoshis: 0, confirmedSatoshis: 0, unconfirmedSatoshis: 0, utxoCount: 0 };
+        },
+        async fetchFeeRate() { return 1; },
+        async fetchRawTx() { return ''; },
+        async buildTransfer(input) {
+          transferBuilds.push(input);
+          return { rawTx: 'signed-auto-refund-transfer-rawtx', fee: 42 };
+        },
+        async buildInscription() { throw new Error('not used'); },
+        async broadcastTx(rawTx) {
+          broadcasts.push(rawTx);
+          return 'auto-refund-transfer-txid-1';
+        },
+      }],
+    ]),
+  });
+  t.after(async () => app.close());
+
+  const systemHome = deriveSystemHome(app.homeDir);
+  buyerHome = path.join(systemHome, '.metabot', 'profiles', 'buyer-bot');
+  await mkdir(buyerHome, { recursive: true });
+  await upsertIdentityProfile({
+    systemHomeDir: systemHome,
+    name: 'Buyer Bot',
+    homeDir: buyerHome,
+    globalMetaId: 'idq1buyer',
+    mvcAddress: 'mvc-buyer-address',
+    now: () => 1_775_000_000_000,
+  });
+
+  const paymentTxid = '7'.repeat(64);
+  const orderTxid = '8'.repeat(64);
+  const buyerTrace = createBuyerRefundTrace();
+  buyerTrace.traceId = 'trace-buyer-auto-refund';
+  buyerTrace.session.id = 'session-buyer-auto-refund';
+  buyerTrace.session.peerGlobalMetaId = 'idq1provider';
+  buyerTrace.session.peerName = 'Provider Bot';
+  buyerTrace.order.id = 'buyer-order-auto-refund';
+  buyerTrace.order.status = null;
+  buyerTrace.order.paymentTxid = paymentTxid;
+  buyerTrace.order.orderPinId = 'order-message-pin-auto-1';
+  buyerTrace.order.orderTxid = orderTxid;
+  buyerTrace.order.orderTxids = [orderTxid];
+  buyerTrace.order.serviceId = '/protocols/skill-service-pin-1';
+  buyerTrace.order.paymentCurrency = 'SPACE';
+  buyerTrace.order.paymentAmount = '0.00001';
+  buyerTrace.order.paymentChain = 'mvc';
+  buyerTrace.order.settlementKind = 'native';
+  buyerTrace.order.failureReason = null;
+  buyerTrace.order.refundRequestPinId = null;
+  buyerTrace.order.refundRequestTxid = null;
+  buyerTrace.order.refundRequestedAt = null;
+  buyerTrace.a2a = {
+    ...buyerTrace.a2a,
+    callerGlobalMetaId: 'idq1buyer',
+    providerGlobalMetaId: 'idq1provider',
+    servicePinId: '/protocols/skill-service-pin-1',
+  };
+
+  const buyerRuntimeStateStore = createRuntimeStateStore(buyerHome);
+  await buyerRuntimeStateStore.writeState({
+    identity: {
+      ...createIdentity(),
+      name: 'Buyer Bot',
+      mvcAddress: 'mvc-buyer-address',
+      addresses: { mvc: 'mvc-buyer-address' },
+      metaId: 'metaid-buyer',
+      globalMetaId: 'idq1buyer',
+    },
+    services: [],
+    traces: [buyerTrace],
+  });
+
+  const sellerOrder = createSellerOrderRecord({
+    id: 'seller-order-auto-refund-1',
+    state: 'failed',
+    localMetabotId: 1,
+    localMetabotSlug: path.basename(app.homeDir),
+    providerGlobalMetaId: 'idq1provider',
+    buyerGlobalMetaId: 'idq1buyer',
+    servicePinId: '/protocols/skill-service-pin-1',
+    currentServicePinId: '/protocols/skill-service-pin-1',
+    serviceName: 'Tarot Reading',
+    providerSkill: 'tarot-rws',
+    orderMessageId: 'order-message-pin-auto-1',
+    orderPinId: 'order-message-pin-auto-1',
+    orderTxid,
+    paymentTxid,
+    paymentAmount: '0.00001',
+    paymentCurrency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    traceId: 'trace-provider-auto-refund',
+    a2aSessionId: 'seller-session-auto-refund',
+    a2aTaskRunId: 'seller-run-auto-refund',
+    failureReason: 'provider_execution_failed',
+    refundRequestPinId: null,
+    createdAt: 1_775_000_020_000,
+    updatedAt: 1_775_000_030_000,
+  });
+  await app.runtimeStateStore.writeState({
+    identity: createIdentity(),
+    services: [createService()],
+    traces: [],
+    sellerOrders: [sellerOrder],
+  });
+
+  globalThis.fetch = async (url, init) => {
+    const href = String(url);
+    if (href === 'https://chain.test/pin/buyer-refund-request-pin-1') {
+      assert.equal(buyerWrites.length, 1);
+      return new Response(JSON.stringify({
+        data: {
+          path: '/protocols/service-refund-request',
+          contentSummary: buyerWrites[0].payload,
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    return originalFetch(url, init);
+  };
+
+  const response = await fetchJson(app.baseUrl, '/api/services/refunds/settle', {
+    method: 'POST',
+    body: { orderId: 'seller-order-auto-refund-1' },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.ok, true);
+  assert.equal(response.payload.data.state, 'refunded');
+  assert.equal(response.payload.data.refundTxid, 'auto-refund-transfer-txid-1');
+  assert.equal(response.payload.data.refundFinalizePinId, 'refund-finalize-pin-auto-1');
+  assert.equal(buyerWrites.length, 1);
+  assert.equal(buyerWrites[0].path, '/protocols/service-refund-request');
+  assert.equal(providerWrites.length, 1);
+  assert.equal(providerWrites[0].path, '/protocols/service-refund-finalize');
+  assert.equal(transferBuilds.length, 1);
+  assert.equal(transferBuilds[0].toAddress, 'mvc-buyer-address');
+  assert.deepEqual(broadcasts, ['signed-auto-refund-transfer-rawtx']);
+
+  const buyerPayload = JSON.parse(buyerWrites[0].payload);
+  assert.equal(buyerPayload.buyerGlobalMetaId, 'idq1buyer');
+  assert.equal(buyerPayload.sellerGlobalMetaId, 'idq1provider');
+  assert.equal(buyerPayload.paymentTxid, paymentTxid);
+  assert.equal(buyerPayload.refundToAddress, 'mvc-buyer-address');
+
+  const buyerState = await buyerRuntimeStateStore.readState();
+  assert.equal(buyerState.traces[0].order.status, 'refund_pending');
+  assert.equal(buyerState.traces[0].order.refundRequestPinId, 'buyer-refund-request-pin-1');
+
+  const providerState = await app.runtimeStateStore.readState();
+  assert.equal(providerState.sellerOrders[0].state, 'refunded');
+  assert.equal(providerState.sellerOrders[0].refundRequestPinId, 'buyer-refund-request-pin-1');
 });
 
 test('GET /api/services/refunds?kind=initiated returns local buyer-side initiated refunds', async (t) => {

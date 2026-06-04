@@ -8241,6 +8241,344 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
+  function isSellerOrderEligibleForLocalBuyerRefundRequest(order: SellerOrderRecord): boolean {
+    if (normalizeText(order.refundRequestPinId)) {
+      return false;
+    }
+    const state = normalizeText(order.state);
+    if (state !== 'failed' && state !== 'refund_pending') {
+      return false;
+    }
+    if (!normalizeText(order.paymentTxid) || isZeroPaymentAmount(order.paymentAmount)) {
+      return false;
+    }
+    return Boolean(normalizeText(order.buyerGlobalMetaId));
+  }
+
+  function readBuyerTraceProviderGlobalMetaId(trace: SessionTraceRecord): string {
+    return normalizeText(trace.a2a?.providerGlobalMetaId)
+      || normalizeText(trace.session.peerGlobalMetaId);
+  }
+
+  function buyerTraceMatchesSellerOrder(inputRefund: {
+    trace: SessionTraceRecord;
+    order: SellerOrderRecord;
+  }): boolean {
+    const trace = inputRefund.trace;
+    const order = inputRefund.order;
+    const traceOrder = (trace.order ?? {}) as Record<string, unknown>;
+    if (normalizeText(traceOrder.role) !== 'buyer') {
+      return false;
+    }
+    const providerGlobalMetaId = readBuyerTraceProviderGlobalMetaId(trace);
+    if (
+      normalizeText(order.providerGlobalMetaId)
+      && providerGlobalMetaId
+      && providerGlobalMetaId !== normalizeText(order.providerGlobalMetaId)
+    ) {
+      return false;
+    }
+    const samePayment = normalizeText(order.paymentTxid)
+      && normalizeText(traceOrder.paymentTxid) === normalizeText(order.paymentTxid);
+    const sameOrderTxid = normalizeText(order.orderTxid)
+      && normalizeText(traceOrder.orderTxid) === normalizeText(order.orderTxid);
+    const sameOrderPin = normalizeText(order.orderPinId)
+      && normalizeText(traceOrder.orderPinId) === normalizeText(order.orderPinId);
+    const sameOrderReference = normalizeText(order.orderReference)
+      && normalizeText(traceOrder.orderReference) === normalizeText(order.orderReference);
+    const sameServiceOrderPin = normalizeText(order.serviceOrderPinId)
+      && normalizeText(traceOrder.serviceOrderPinId) === normalizeText(order.serviceOrderPinId);
+    return Boolean(samePayment || sameOrderTxid || sameOrderPin || sameOrderReference || sameServiceOrderPin);
+  }
+
+  function withSellerOrderFieldsForBuyerRefundTrace(inputRefund: {
+    trace: SessionTraceRecord;
+    order: SellerOrderRecord;
+  }): SessionTraceRecord {
+    const trace = inputRefund.trace;
+    const order = inputRefund.order;
+    const traceOrder = (trace.order ?? {}) as Record<string, unknown>;
+    return {
+      ...trace,
+      session: {
+        ...trace.session,
+        peerGlobalMetaId: normalizeText(trace.session.peerGlobalMetaId)
+          || normalizeText(order.providerGlobalMetaId)
+          || null,
+      },
+      order: {
+        ...(trace.order ?? {}),
+        role: 'buyer',
+        serviceId: normalizeText(traceOrder.serviceId)
+          || normalizeText(order.currentServicePinId)
+          || normalizeText(order.servicePinId)
+          || null,
+        serviceName: normalizeText(traceOrder.serviceName)
+          || normalizeText(order.serviceName)
+          || null,
+        orderPinId: normalizeText(traceOrder.orderPinId)
+          || normalizeText(order.orderPinId)
+          || normalizeText(order.orderMessageId)
+          || null,
+        orderTxid: normalizeText(traceOrder.orderTxid)
+          || normalizeText(order.orderTxid)
+          || null,
+        orderTxids: Array.isArray(trace.order?.orderTxids) && trace.order.orderTxids.length
+          ? trace.order.orderTxids
+          : uniqueNonEmpty([normalizeText(order.orderTxid)]),
+        orderReference: normalizeText(traceOrder.orderReference)
+          || normalizeText(order.orderReference)
+          || null,
+        serviceOrderPinId: normalizeText(traceOrder.serviceOrderPinId)
+          || normalizeText(order.serviceOrderPinId)
+          || null,
+        paymentTxid: normalizeText(traceOrder.paymentTxid)
+          || normalizeText(order.paymentTxid)
+          || null,
+        paymentCommitTxid: normalizeText(traceOrder.paymentCommitTxid)
+          || normalizeText(order.paymentCommitTxid)
+          || null,
+        paymentCurrency: normalizeText(traceOrder.paymentCurrency)
+          || normalizeText(order.paymentCurrency)
+          || null,
+        paymentAmount: normalizeText(traceOrder.paymentAmount)
+          || normalizeText(order.paymentAmount)
+          || null,
+        paymentChain: normalizeText(traceOrder.paymentChain)
+          || normalizeText(order.paymentChain)
+          || null,
+        settlementKind: normalizeText(traceOrder.settlementKind)
+          || normalizeText(order.settlementKind)
+          || null,
+        mrc20Ticker: normalizeText(traceOrder.mrc20Ticker)
+          || normalizeText(order.mrc20Ticker)
+          || null,
+        mrc20Id: normalizeText(traceOrder.mrc20Id)
+          || normalizeText(order.mrc20Id)
+          || null,
+        providerSkill: normalizeText(traceOrder.providerSkill)
+          || normalizeText(order.providerSkill)
+          || null,
+      } as SessionTraceRecord['order'],
+      a2a: trace.a2a
+        ? {
+          ...trace.a2a,
+          providerGlobalMetaId: normalizeText(trace.a2a.providerGlobalMetaId)
+            || normalizeText(order.providerGlobalMetaId)
+            || null,
+          servicePinId: normalizeText(trace.a2a.servicePinId)
+            || normalizeText(order.currentServicePinId)
+            || normalizeText(order.servicePinId)
+            || null,
+        }
+        : trace.a2a,
+    };
+  }
+
+  function withSellerOrderRefundRequest(inputRefund: {
+    state: RuntimeState;
+    orderId: string;
+    refundRequestPinId: string;
+    refundRequestTxid?: string | null;
+    refundRequestedAt: number;
+  }): RuntimeState {
+    const refundRequestPinId = normalizeText(inputRefund.refundRequestPinId);
+    const refundRequestTxid = normalizeText(inputRefund.refundRequestTxid) || null;
+    const nextSellerOrders = inputRefund.state.sellerOrders.map((order) => {
+      if (order.id !== inputRefund.orderId) {
+        return order;
+      }
+      return {
+        ...order,
+        state: order.state === 'failed' ? 'refund_pending' as SellerOrderState : order.state,
+        refundRequestPinId,
+        refundRequestTxid,
+        refundRequestedAt: inputRefund.refundRequestedAt,
+        refundBlockingReason: null,
+        updatedAt: inputRefund.refundRequestedAt,
+      };
+    });
+    return {
+      ...inputRefund.state,
+      sellerOrders: nextSellerOrders,
+      traces: inputRefund.state.traces.map((trace) => {
+        if (!trace.order) {
+          return trace;
+        }
+        const sameOrder = normalizeText(trace.order.id) === inputRefund.orderId
+          || normalizeText(trace.order.paymentTxid)
+            === normalizeText(nextSellerOrders.find((entry) => entry.id === inputRefund.orderId)?.paymentTxid)
+          || normalizeText(trace.traceId)
+            === normalizeText(nextSellerOrders.find((entry) => entry.id === inputRefund.orderId)?.traceId);
+        if (!sameOrder || normalizeText(trace.order.role) !== 'seller') {
+          return trace;
+        }
+        return {
+          ...trace,
+          order: {
+            ...trace.order,
+            status: trace.order.status === 'failed' ? 'refund_pending' : trace.order.status,
+            refundRequestPinId,
+            refundRequestTxid,
+            refundRequestedAt: inputRefund.refundRequestedAt,
+            refundBlockingReason: null,
+            updatedAt: inputRefund.refundRequestedAt,
+          },
+        };
+      }),
+    };
+  }
+
+  async function prepareLocalBuyerRefundRequestForSellerOrder(inputRefund: {
+    state: RuntimeState;
+    order: SellerOrderRecord;
+  }): Promise<{
+    state: RuntimeState;
+    order: SellerOrderRecord;
+    localRefundRequestDetail?: {
+      pinId: string;
+      path: string;
+      content: Record<string, unknown>;
+    };
+  }> {
+    if (!isSellerOrderEligibleForLocalBuyerRefundRequest(inputRefund.order)) {
+      return { state: inputRefund.state, order: inputRefund.order };
+    }
+
+    const buyerGlobalMetaId = normalizeText(inputRefund.order.buyerGlobalMetaId);
+    const profiles = await listMetabotProfiles(normalizedSystemHomeDir).catch(() => []);
+    for (const profile of profiles) {
+      if (path.resolve(profile.homeDir) === path.resolve(input.homeDir)) {
+        continue;
+      }
+      const buyerRuntimeStateStore = createRuntimeStateStore(profile.homeDir);
+      const buyerState = await buyerRuntimeStateStore.readState().catch(() => null);
+      const buyerIdentity = buyerState?.identity ?? null;
+      if (!buyerState || normalizeText(buyerIdentity?.globalMetaId) !== buyerGlobalMetaId) {
+        continue;
+      }
+      const buyerTrace = buyerState.traces.find((trace) => buyerTraceMatchesSellerOrder({
+        trace,
+        order: inputRefund.order,
+      }));
+      if (!buyerTrace || !buyerIdentity) {
+        continue;
+      }
+
+      const preparedTrace = withSellerOrderFieldsForBuyerRefundTrace({
+        trace: buyerTrace,
+        order: inputRefund.order,
+      });
+      const preparedOrder = (preparedTrace.order ?? {}) as Record<string, unknown>;
+      const failedAt = Date.now();
+      const failureReason = normalizeText(inputRefund.order.failureReason)
+        || normalizeText(preparedOrder.failureReason)
+        || 'provider_execution_failed';
+      const existingRefundRequestPinId = normalizeText(preparedOrder.refundRequestPinId);
+      let refundRequestPinId = existingRefundRequestPinId;
+      let refundRequestTxid = normalizeText(preparedOrder.refundRequestTxid) || null;
+      let refundRequestPayload: Record<string, unknown> | null = null;
+
+      if (refundRequestPinId) {
+        await persistTraceRecord(buyerRuntimeStateStore, withBuyerRefundOrderFields({
+          trace: preparedTrace,
+          status: 'refund_pending',
+          failedAt,
+          failureReason,
+          refundRequestPinId,
+          refundRequestTxid,
+          refundRequestedAt: normalizeTimestamp(preparedOrder.refundRequestedAt) ?? failedAt,
+        }));
+      } else {
+        refundRequestPayload = buildRefundRequestPayloadForTrace({
+          trace: preparedTrace,
+          identity: buyerIdentity,
+          failureReason,
+          failedAt,
+          evidencePinIds: uniqueNonEmpty([
+            normalizeText(inputRefund.order.orderPinId),
+            normalizeText(inputRefund.order.orderTxid),
+            normalizeText(inputRefund.order.traceId),
+          ]),
+        });
+        if (!normalizeText(refundRequestPayload.refundToAddress)) {
+          await persistTraceRecord(buyerRuntimeStateStore, withBuyerRefundOrderFields({
+            trace: preparedTrace,
+            status: 'failed',
+            failedAt,
+            failureReason: 'refund_address_missing',
+            nextRetryAt: failedAt + DEFAULT_REFUND_REQUEST_RETRY_DELAY_MS,
+            refundApplyRetryCount: normalizeRefundCounter(preparedOrder.refundApplyRetryCount) + 1,
+          }));
+          return { state: inputRefund.state, order: inputRefund.order };
+        }
+        try {
+          const buyerSigner = createSignerForProfileHome(profile.homeDir);
+          const write = await buyerSigner.writePin({
+            operation: 'create',
+            path: SERVICE_REFUND_REQUEST_PATH,
+            encryption: '0',
+            version: '1.0.0',
+            contentType: 'application/json',
+            payload: JSON.stringify(refundRequestPayload),
+            encoding: 'utf-8',
+            network: 'mvc',
+          });
+          refundRequestPinId = normalizeText(write.pinId) || normalizeText(write.txids?.[0]);
+          refundRequestTxid = normalizeText(write.txids?.[0]) || null;
+        } catch {
+          await persistTraceRecord(buyerRuntimeStateStore, withBuyerRefundOrderFields({
+            trace: preparedTrace,
+            status: 'failed',
+            failedAt,
+            failureReason,
+            nextRetryAt: failedAt + DEFAULT_REFUND_REQUEST_RETRY_DELAY_MS,
+            refundApplyRetryCount: normalizeRefundCounter(preparedOrder.refundApplyRetryCount) + 1,
+          }));
+          return { state: inputRefund.state, order: inputRefund.order };
+        }
+        if (!refundRequestPinId) {
+          return { state: inputRefund.state, order: inputRefund.order };
+        }
+        await persistTraceRecord(buyerRuntimeStateStore, withBuyerRefundOrderFields({
+          trace: preparedTrace,
+          status: 'refund_pending',
+          failedAt,
+          failureReason,
+          refundRequestPinId,
+          refundRequestTxid,
+          refundRequestedAt: failedAt,
+        }));
+      }
+
+      const nextProviderState = withSellerOrderRefundRequest({
+        state: inputRefund.state,
+        orderId: inputRefund.order.id,
+        refundRequestPinId,
+        refundRequestTxid,
+        refundRequestedAt: failedAt,
+      });
+      await runtimeStateStore.writeState(nextProviderState);
+      const nextOrder = findSellerOrderBySelector(nextProviderState, { orderId: inputRefund.order.id }).order
+        ?? inputRefund.order;
+      return {
+        state: nextProviderState,
+        order: nextOrder,
+        ...(refundRequestPayload
+          ? {
+            localRefundRequestDetail: {
+              pinId: refundRequestPinId,
+              path: SERVICE_REFUND_REQUEST_PATH,
+              content: refundRequestPayload,
+            },
+          }
+          : {}),
+      };
+    }
+
+    return { state: inputRefund.state, order: inputRefund.order };
+  }
+
   function emptyServiceRefundSyncResponse(): ServiceRefundSyncResponse {
     return {
       scanned: {
@@ -11085,13 +11423,26 @@ export function createDefaultMetabotDaemonHandlers(input: {
         return buildSellerOrderSelectorError({ status: 'not_found', matches: [] });
       }
 
-      const settlement = await processSellerRefundSettlement({
+      const prepared = await prepareLocalBuyerRefundRequestForSellerOrder({
         state,
-        orderId: found.order.id,
-        fetchRefundRequestPin: (pinId) => fetchProtocolPinDetail({
-          pinId,
-          chainApiBaseUrl: input.chainApiBaseUrl,
-        }),
+        order: found.order,
+      });
+
+      const settlement = await processSellerRefundSettlement({
+        state: prepared.state,
+        orderId: prepared.order.id,
+        fetchRefundRequestPin: async (pinId) => {
+          if (
+            prepared.localRefundRequestDetail
+            && normalizeText(pinId) === normalizeText(prepared.localRefundRequestDetail.pinId)
+          ) {
+            return prepared.localRefundRequestDetail;
+          }
+          return fetchProtocolPinDetail({
+            pinId,
+            chainApiBaseUrl: input.chainApiBaseUrl,
+          });
+        },
         executeRefundTransfer: executeSellerRefundTransfer,
         persistSettlementState: (nextState) => runtimeStateStore.writeState(nextState).then(() => undefined),
         writeRefundFinalizePin: async ({ payload }) => signer.writePin({

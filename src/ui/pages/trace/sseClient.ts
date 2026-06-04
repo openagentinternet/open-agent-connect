@@ -146,6 +146,10 @@ function resolveRefundAction(record, role) {
     || normalizeText(record.orderId)
     || normalizeText(record.serviceOrderPinId)
     || null;
+  var refundFrom = normalizeText(source.localMetabotSlug)
+    || normalizeText(record.localMetabotSlug)
+    || normalizeText(record.refundFrom)
+    || null;
   var unsupported = blockingReason === 'refund_settlement_unsupported';
   var refunded = status === 'refunded' || Boolean(refundFinalizePinId);
   var explicitRequired = normalizeBoolean(record.refundActionRequired)
@@ -176,6 +180,7 @@ function resolveRefundAction(record, role) {
     refundStatus: status || null,
     refundRequestPinId: refundRequestPinId,
     refundFinalizePinId: refundFinalizePinId,
+    refundFrom: refundFrom,
     refundHref: refundActionRequired ? buildRefundHref(orderId) : null,
   };
 }
@@ -220,6 +225,7 @@ function buildSessionListViewModel(rawSessions, now) {
       refundStatus: refundAction.refundStatus,
       refundRequestPinId: refundAction.refundRequestPinId,
       refundFinalizePinId: refundAction.refundFinalizePinId,
+      refundFrom: refundAction.refundFrom,
       refundHref: refundAction.refundHref,
     };
   }).filter(function(item) { return item !== null; });
@@ -282,6 +288,7 @@ function buildSessionDetailViewModel(payload) {
     refundStatus: refundAction.refundStatus,
     refundRequestPinId: refundAction.refundRequestPinId,
     refundFinalizePinId: refundAction.refundFinalizePinId,
+    refundFrom: refundAction.refundFrom,
     refundHref: refundAction.refundHref,
   };
 }
@@ -861,6 +868,7 @@ function buildDetailRenderSignature(detail, profiles) {
     refundStatus: detail.refundStatus,
     refundRequestPinId: detail.refundRequestPinId,
     refundFinalizePinId: detail.refundFinalizePinId,
+    refundFrom: detail.refundFrom,
     refundHref: detail.refundHref,
     localProfile: profiles && profiles.localProfile ? profiles.localProfile : null,
     peerProfile: profiles && profiles.peerProfile ? profiles.peerProfile : null,
@@ -896,6 +904,7 @@ async function loadRefundWorkIndex() {
       var record = Object.assign({}, item, {
         refundActionRequired: item && item.manualActionRequired === true,
         refundOrderId: item && item.orderId,
+        refundFrom: item && item.localMetabotSlug,
       });
       var refundAction = resolveRefundAction(record, 'provider');
       if (!refundAction.refundActionRequired) return;
@@ -906,6 +915,7 @@ async function loadRefundWorkIndex() {
         refundStatus: refundAction.refundStatus,
         refundRequestPinId: refundAction.refundRequestPinId,
         refundFinalizePinId: refundAction.refundFinalizePinId,
+        refundFrom: refundAction.refundFrom,
         refundHref: refundAction.refundHref,
       };
       var traceId = normalizeText(item && item.traceId);
@@ -933,6 +943,37 @@ function mergeRefundWorkIntoSessionDetail(detail) {
   var patch = (detail.sessionId && refundWorkIndex.get('session:' + detail.sessionId))
     || (detail.traceId && refundWorkIndex.get('trace:' + detail.traceId));
   return patch ? Object.assign({}, detail, patch) : detail;
+}
+
+async function processRefundFromDetail(button) {
+  const orderId = button.getAttribute('data-process-refund') || '';
+  if (!orderId) return;
+  const previousText = button.textContent || 'Process refund';
+  button.disabled = true;
+  button.textContent = 'Processing...';
+  try {
+    const from = button.getAttribute('data-refund-from') || '';
+    const response = await fetch('/api/services/refunds/settle', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ orderId, ...(from ? { from } : {}) }),
+    });
+    const payload = await response.json();
+    if (!payload || payload.ok !== true) {
+      throw new Error((payload && (payload.code || payload.message)) || 'Refund settlement is blocked.');
+    }
+    refundWorkIndex = await loadRefundWorkIndex();
+    await loadSessions();
+    if (selectedSessionId) {
+      await loadSessionDetail(selectedSessionId, { silent: true });
+    }
+  } catch (error) {
+    button.textContent = error instanceof Error ? error.message : String(error);
+    return;
+  } finally {
+    button.disabled = false;
+  }
+  button.textContent = previousText;
 }
 
 function renderSessionList() {
@@ -1049,7 +1090,9 @@ async function renderSessionDetail() {
         + '<strong>' + (detail.refundConfirmable ? 'Provider refund is ready to confirm.' : 'Provider refund needs operator attention.') + '</strong>'
         + '<span>' + escHtml(detail.refundOrderId ? 'Order ' + detail.refundOrderId : 'Open the refund work queue for settlement details.') + '</span>'
       + '</div>'
-      + '<a class="detail-refund-action" href="' + escHtml(detail.refundHref || '/ui/refund') + '">' + (detail.refundConfirmable ? 'Process refund' : 'Review refund') + '</a>'
+      + (detail.refundOrderId
+        ? '<button type="button" class="detail-refund-action" data-process-refund="' + escHtml(detail.refundOrderId) + '" data-refund-from="' + escHtml(detail.refundFrom || '') + '">Process refund</button>'
+        : '<a class="detail-refund-action" href="' + escHtml(detail.refundHref || '/ui/refund') + '">Open refund queue</a>')
     + '</div>'
     : '';
 
@@ -1073,6 +1116,9 @@ async function renderSessionDetail() {
   });
   panel.querySelectorAll('[data-copy-text]').forEach(btn => {
     btn.addEventListener('click', () => copyTextToClipboard(btn.dataset.copyText || ''));
+  });
+  panel.querySelectorAll('[data-process-refund]').forEach(btn => {
+    btn.addEventListener('click', () => processRefundFromDetail(btn));
   });
   hydrateMediaPlayback(panel);
 }

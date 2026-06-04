@@ -52,6 +52,7 @@ export interface TraceSessionListItem {
   refundStatus: string | null;
   refundRequestPinId: string | null;
   refundFinalizePinId: string | null;
+  refundFrom: string | null;
   refundHref: string | null;
 }
 
@@ -89,6 +90,7 @@ export interface TraceSessionDetail {
   refundStatus: string | null;
   refundRequestPinId: string | null;
   refundFinalizePinId: string | null;
+  refundFrom: string | null;
   refundHref: string | null;
 }
 
@@ -207,6 +209,7 @@ function resolveRefundAction(input: {
   | 'refundStatus'
   | 'refundRequestPinId'
   | 'refundFinalizePinId'
+  | 'refundFrom'
   | 'refundHref'
 > {
   const record = input.record;
@@ -233,6 +236,10 @@ function resolveRefundAction(input: {
     || normalizeText(record.refundOrderId)
     || normalizeText(record.orderId)
     || normalizeText(record.serviceOrderPinId)
+    || null;
+  const refundFrom = normalizeText(source.localMetabotSlug)
+    || normalizeText(record.localMetabotSlug)
+    || normalizeText(record.refundFrom)
     || null;
   const unsupported = blockingReason === 'refund_settlement_unsupported';
   const refunded = status === 'refunded' || Boolean(refundFinalizePinId);
@@ -265,6 +272,7 @@ function resolveRefundAction(input: {
     refundStatus: status || null,
     refundRequestPinId,
     refundFinalizePinId,
+    refundFrom,
     refundHref: refundActionRequired ? buildRefundHref(orderId) : null,
   };
 }
