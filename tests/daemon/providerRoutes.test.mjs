@@ -841,8 +841,10 @@ test('POST /api/services/refunds/settle prepares local buyer refund request proo
   assert.equal(buyerPayload.refundToAddress, 'mvc-buyer-address');
 
   const buyerState = await buyerRuntimeStateStore.readState();
-  assert.equal(buyerState.traces[0].order.status, 'refund_pending');
+  assert.equal(buyerState.traces[0].order.status, 'refunded');
   assert.equal(buyerState.traces[0].order.refundRequestPinId, 'buyer-refund-request-pin-1');
+  assert.equal(buyerState.traces[0].order.refundTxid, 'auto-refund-transfer-txid-1');
+  assert.equal(buyerState.traces[0].order.refundFinalizePinId, 'refund-finalize-pin-auto-1');
 
   const providerState = await app.runtimeStateStore.readState();
   assert.equal(providerState.sellerOrders[0].state, 'refunded');
@@ -1014,6 +1016,98 @@ test('POST /api/services/refunds/sync calls the refund sync handler and returns 
       blocked: 5,
     },
   });
+});
+
+test('POST /api/services/refunds/sync all=true reconciles local seller refunds back to buyer traces', async (t) => {
+  const app = await startProviderServer();
+  t.after(async () => {
+    await app.close();
+  });
+
+  const systemHome = deriveSystemHome(app.homeDir);
+  const buyerHome = path.join(systemHome, '.metabot', 'profiles', 'buyer-reconcile');
+  await mkdir(buyerHome, { recursive: true });
+  await upsertIdentityProfile({
+    systemHomeDir: systemHome,
+    name: 'Buyer Reconcile Bot',
+    homeDir: buyerHome,
+    globalMetaId: 'idq1buyer',
+    mvcAddress: 'mvc-buyer-address',
+    now: () => 1_775_000_000_000,
+  });
+
+  const paymentTxid = 'f'.repeat(64);
+  const buyerTrace = createBuyerRefundTrace();
+  buyerTrace.order.paymentTxid = paymentTxid;
+  buyerTrace.order.refundRequestPinId = 'refund-request-reconcile-1';
+  buyerTrace.session.peerGlobalMetaId = 'idq1provider';
+  buyerTrace.a2a.providerGlobalMetaId = 'idq1provider';
+  buyerTrace.a2a.callerGlobalMetaId = 'idq1buyer';
+
+  const buyerRuntimeStateStore = createRuntimeStateStore(buyerHome);
+  await buyerRuntimeStateStore.writeState({
+    identity: {
+      ...createIdentity(),
+      name: 'Buyer Reconcile Bot',
+      mvcAddress: 'mvc-buyer-address',
+      addresses: { mvc: 'mvc-buyer-address' },
+      metaId: 'metaid-buyer',
+      globalMetaId: 'idq1buyer',
+    },
+    services: [],
+    traces: [buyerTrace],
+  });
+
+  const sellerOrder = createSellerOrderRecord({
+    id: 'seller-order-reconcile-1',
+    state: 'refunded',
+    localMetabotId: 1,
+    localMetabotSlug: path.basename(app.homeDir),
+    providerGlobalMetaId: 'idq1provider',
+    buyerGlobalMetaId: 'idq1buyer',
+    servicePinId: '/protocols/skill-service-pin-1',
+    currentServicePinId: '/protocols/skill-service-pin-1',
+    serviceName: 'Tarot Reading',
+    providerSkill: 'tarot-rws',
+    orderMessageId: 'order-message-pin-reconcile-1',
+    orderPinId: 'order-message-pin-reconcile-1',
+    paymentTxid,
+    paymentAmount: '0.00001',
+    paymentCurrency: 'SPACE',
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    traceId: 'trace-provider-reconcile-1',
+    a2aSessionId: 'seller-session-reconcile-1',
+    a2aTaskRunId: 'seller-run-reconcile-1',
+    failureReason: 'provider_execution_failed',
+    refundRequestPinId: 'refund-request-reconcile-1',
+    refundTxid: 'refund-transfer-reconcile-1',
+    refundFinalizePinId: 'refund-finalize-reconcile-1',
+    refundCompletedAt: 1_775_000_090_000,
+    refundedAt: 1_775_000_090_000,
+    createdAt: 1_775_000_020_000,
+    updatedAt: 1_775_000_090_000,
+  });
+  await app.runtimeStateStore.writeState({
+    identity: createIdentity(),
+    services: [createService()],
+    traces: [],
+    sellerOrders: [sellerOrder],
+  });
+
+  const response = await fetchJson(app.baseUrl, '/api/services/refunds/sync', {
+    method: 'POST',
+    body: { all: true },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.ok, true);
+  assert.equal(response.payload.data.applied.finalizations, 1);
+
+  const buyerState = await buyerRuntimeStateStore.readState();
+  assert.equal(buyerState.traces[0].order.status, 'refunded');
+  assert.equal(buyerState.traces[0].order.refundTxid, 'refund-transfer-reconcile-1');
+  assert.equal(buyerState.traces[0].order.refundFinalizePinId, 'refund-finalize-reconcile-1');
 });
 
 test('GET /api/services/refunds?refresh=true syncs before listing refunds', async (t) => {

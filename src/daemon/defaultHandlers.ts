@@ -8429,6 +8429,136 @@ export function createDefaultMetabotDaemonHandlers(input: {
     };
   }
 
+  function sellerOrderHasLocalRefundSettlement(order: SellerOrderRecord): boolean {
+    if (normalizeText(order.state) !== 'refunded') {
+      return false;
+    }
+    if (normalizeText(order.refundTxid) || normalizeText(order.refundFinalizePinId)) {
+      return true;
+    }
+    return isZeroPaymentAmount(order.paymentAmount) || normalizeText(order.settlementKind) === 'free';
+  }
+
+  function buyerTraceAlreadyHasSellerRefundSettlement(inputRefund: {
+    trace: SessionTraceRecord;
+    order: SellerOrderRecord;
+  }): boolean {
+    const traceOrder = (inputRefund.trace.order ?? {}) as Record<string, unknown>;
+    if (normalizeText(traceOrder.status) !== 'refunded') {
+      return false;
+    }
+    const refundTxid = normalizeText(inputRefund.order.refundTxid);
+    const refundFinalizePinId = normalizeText(inputRefund.order.refundFinalizePinId);
+    return (!refundTxid || normalizeText(traceOrder.refundTxid) === refundTxid)
+      && (!refundFinalizePinId || normalizeText(traceOrder.refundFinalizePinId) === refundFinalizePinId);
+  }
+
+  function withBuyerRefundSettlementFromSellerOrder(inputRefund: {
+    trace: SessionTraceRecord;
+    order: SellerOrderRecord;
+  }): SessionTraceRecord {
+    const trace = withSellerOrderFieldsForBuyerRefundTrace(inputRefund);
+    const traceOrder = (trace.order ?? {}) as Record<string, unknown>;
+    const order = inputRefund.order;
+    const completedAt = normalizeTimestamp(order.refundCompletedAt)
+      ?? normalizeTimestamp(order.refundedAt)
+      ?? Date.now();
+    return {
+      ...trace,
+      order: {
+        ...(trace.order ?? {}),
+        status: 'refunded',
+        refundRequestPinId: normalizeText(traceOrder.refundRequestPinId)
+          || normalizeText(order.refundRequestPinId)
+          || null,
+        refundRequestTxid: normalizeText(traceOrder.refundRequestTxid)
+          || normalizeText(order.refundRequestTxid)
+          || null,
+        refundRequestedAt: normalizeTimestamp(traceOrder.refundRequestedAt)
+          ?? normalizeTimestamp(order.refundRequestedAt),
+        refundTxid: normalizeText(order.refundTxid)
+          || normalizeText(traceOrder.refundTxid)
+          || null,
+        refundFinalizePinId: normalizeText(order.refundFinalizePinId)
+          || normalizeText(traceOrder.refundFinalizePinId)
+          || null,
+        refundCompletedAt: completedAt,
+        refundedAt: completedAt,
+        failureReason: normalizeText(traceOrder.failureReason)
+          || normalizeText(order.failureReason)
+          || null,
+        refundBlockingReason: null,
+        updatedAt: completedAt,
+      } as SessionTraceRecord['order'],
+    };
+  }
+
+  async function applyLocalBuyerRefundSettlementForSellerOrder(inputRefund: {
+    order: SellerOrderRecord;
+  }): Promise<number> {
+    const order = inputRefund.order;
+    if (!sellerOrderHasLocalRefundSettlement(order)) {
+      return 0;
+    }
+
+    const buyerGlobalMetaId = normalizeText(order.buyerGlobalMetaId);
+    if (!buyerGlobalMetaId) {
+      return 0;
+    }
+
+    let updated = 0;
+    const profiles = await listMetabotProfiles(normalizedSystemHomeDir).catch(() => []);
+    for (const profile of profiles) {
+      if (path.resolve(profile.homeDir) === path.resolve(input.homeDir)) {
+        continue;
+      }
+      const buyerRuntimeStateStore = createRuntimeStateStore(profile.homeDir);
+      const buyerState = await buyerRuntimeStateStore.readState().catch(() => null);
+      if (!buyerState || normalizeText(buyerState.identity?.globalMetaId) !== buyerGlobalMetaId) {
+        continue;
+      }
+
+      const matchingTraces = buyerState.traces.filter((trace) => buyerTraceMatchesSellerOrder({
+        trace,
+        order,
+      }));
+      for (const trace of matchingTraces) {
+        if (buyerTraceAlreadyHasSellerRefundSettlement({ trace, order })) {
+          continue;
+        }
+        await persistTraceRecord(
+          buyerRuntimeStateStore,
+          withBuyerRefundSettlementFromSellerOrder({ trace, order }),
+        );
+        updated += 1;
+      }
+    }
+
+    return updated;
+  }
+
+  async function reconcileLocalRefundLedgersAcrossProfiles(): Promise<{ finalizations: number }> {
+    const records = await listMyServicesProfileRecords();
+    const sellerOrders: SellerOrderRecord[] = [];
+    for (const profile of records) {
+      const profileHomeDir = path.resolve(profile.homeDir);
+      const store = profileHomeDir === path.resolve(input.homeDir)
+        ? runtimeStateStore
+        : createRuntimeStateStore(profileHomeDir);
+      const state = await store.readState().catch(() => null);
+      if (!state) {
+        continue;
+      }
+      sellerOrders.push(...state.sellerOrders.filter(sellerOrderHasLocalRefundSettlement));
+    }
+
+    let finalizations = 0;
+    for (const order of sellerOrders) {
+      finalizations += await applyLocalBuyerRefundSettlementForSellerOrder({ order });
+    }
+    return { finalizations };
+  }
+
   async function prepareLocalBuyerRefundRequestForSellerOrder(inputRefund: {
     state: RuntimeState;
     order: SellerOrderRecord;
@@ -11461,6 +11591,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
         },
       });
       await runtimeStateStore.writeState(settlement.nextState);
+      const localBuyerRefundsUpdated = settlement.ok
+        ? await applyLocalBuyerRefundSettlementForSellerOrder({ order: settlement.order })
+        : 0;
 
       const updatedOrder = settlement.orderId
         ? findSellerOrderBySelector(settlement.nextState, { orderId: settlement.orderId }).order
@@ -11500,6 +11633,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         refundFinalizePinId: settlement.refundFinalizePinId,
         noTransferReason: settlement.noTransferReason,
         finalization: settlement.finalizePayload,
+        localBuyerRefundsUpdated,
         order: orderInspection,
         settlement: {
           state: settlement.state,
@@ -14675,6 +14809,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
             }
             merged = mergeServiceRefundSyncResponses(merged, result.data);
           }
+          const localReconcile = await reconcileLocalRefundLedgersAcrossProfiles();
+          merged = {
+            ...merged,
+            applied: {
+              ...merged.applied,
+              finalizations: merged.applied.finalizations + localReconcile.finalizations,
+            },
+          };
           return commandSuccess(merged);
         }
         return commandSuccess(await syncServiceRefundsForCurrentProfile());

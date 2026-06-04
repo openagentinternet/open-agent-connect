@@ -264,7 +264,15 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
     const blocked = isBlockedRefund(item);
     const manual = needsManualRefundWork(item, role);
     const tone = status === 'refunded' ? 'refunded' : manual ? 'manual' : blocked ? 'failed' : 'pending';
-    const label = status === 'refunded' ? 'Refunded' : manual ? 'Action required' : blocked ? 'Blocked' : 'Pending';
+    const label = status === 'refunded'
+      ? 'Refunded'
+      : role === 'buyer' && status === 'refund_pending'
+        ? 'Waiting for provider'
+        : manual
+          ? 'Action required'
+          : blocked
+            ? 'Blocked'
+            : 'Pending';
     return '<span class="refund-badge" data-tone="' + tone + '">' + label + '</span>';
   };
 
@@ -288,12 +296,14 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
       const displayName = String(providedName || profile.name || gmid || 'Unknown').trim() || 'Unknown';
       const avatarSrc = profile.avatar || getInitialsAvatar(displayName, gmid);
       const amountLabel = [item.paymentAmount, item.paymentCurrency].filter(Boolean).join(' ') || '—';
-      const blockingReason = String(item.blockingReason || item.failureReason || '').trim();
+      const blockingReason = String(item.blockingReason || '').trim();
       const failureReason = String(item.failureReason || '').trim();
       const manualWork = needsManualRefundWork(item, role);
       const processable = canProcessRefund(item, role);
       const providerStatus = item.status === 'refunded'
         ? 'Finalized'
+        : role === 'buyer' && item.status === 'refund_pending'
+          ? 'Waiting for provider refund'
         : processable
           ? 'Ready to process'
           : manualWork
@@ -303,6 +313,10 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
           : blockingReason
             ? 'Blocked'
             : 'Waiting';
+      const statusFieldLabel = role === 'buyer' ? 'Refund status' : 'Provider status';
+      const buyerWaitingNote = role === 'buyer' && item.status === 'refund_pending' && !blockingReason
+        ? '<div class="refund-note">Waiting for the provider to process this refund request.</div>'
+        : '';
       const traceHref = String(item.traceHref || '').trim();
       const traceLink = traceHref
         ? '<a class="refund-trace-link" href="' + escHtml(traceHref) + '">Open trace</a>'
@@ -329,7 +343,7 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
         +      field('Amount', amountLabel, false)
         +      field('Order created', formatDate(item.createdAt), false)
         +      field('Requested at', formatDate(item.refundRequestedAt), false)
-        +      field('Provider status', providerStatus, false)
+        +      field(statusFieldLabel, providerStatus, false)
         +      field('Failure reason', failureReason, true)
         +      field('Payment Txid', item.paymentTxid, true)
         +      field('Refund request', item.refundRequestPinId, true)
@@ -337,7 +351,7 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
         +      field('Finalization pin', item.refundFinalizePinId, true)
         +      field('Refunded at', formatDate(item.refundCompletedAt), false)
         + '  </div>'
-        + (blockingReason ? '<div class="refund-note">Blocking reason: ' + escHtml(blockingReason) + '</div>' : '')
+        + (blockingReason ? '<div class="refund-note">Blocking reason: ' + escHtml(blockingReason) + '</div>' : buyerWaitingNote)
         + ((traceLink || settleButton) ? '<div class="refund-actions">' + traceLink + settleButton + '</div>' : '')
         + '</article>';
     }));
@@ -406,10 +420,12 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
   const syncRefunds = async () => {
     setSyncStatus('Syncing refund requests from chain...', 'busy');
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    const timeout = setTimeout(() => controller.abort(), 30000);
     try {
       const response = await fetch('/api/services/refunds/sync', {
         method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ all: true }),
         cache: 'no-store',
         signal: controller.signal,
       });

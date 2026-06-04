@@ -186,6 +186,7 @@ test('initial load calls sync before list', async () => {
     '/api/services/refunds/sync',
     '/api/services/refunds?all=true',
   ]);
+  assert.equal(JSON.parse(fetchImpl.calls[0].options.body).all, true);
 });
 
 test('sync failure still loads rows and shows status error', async () => {
@@ -337,6 +338,8 @@ test('caller initiated row does not render a confirm button', async () => {
 
   await waitFor(() => elements['[data-refund-buyer-list]'].innerHTML.includes('Seller Bot'), 'buyer row render');
   assert.equal(elements['[data-refund-buyer-list]'].buttons.length, 0);
+  assert.match(elements['[data-refund-buyer-list]'].innerHTML, /Waiting for provider refund/);
+  assert.match(elements['[data-refund-buyer-list]'].innerHTML, /Waiting for the provider to process this refund request/);
 });
 
 test('blocked unsupported seller row shows blocker and no confirm button', async () => {
