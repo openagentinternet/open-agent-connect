@@ -37,12 +37,20 @@ interface StrictSkillIsolationScope {
   root: string;
   cwd: string;
   systemHomeDir: string;
+  skillSystemHomeDir: string;
   env: Record<string, string>;
 }
 
-const STRICT_ISOLATION_HOME_FILES: Partial<Record<string, string[]>> = {
+const STRICT_ISOLATION_PLATFORM_HOME_FILES: Partial<Record<string, string[]>> = {
+  'claude-code': ['config.json', 'settings.json'],
   codex: ['auth.json', 'config.toml'],
 };
+
+const STRICT_ISOLATION_USER_HOME_FILES: Partial<Record<string, string[]>> = {
+  'claude-code': ['.claude.json'],
+};
+
+const STRICT_ISOLATION_SOURCE_HOME_PROVIDERS = new Set<string>(['cursor']);
 
 function createSessionId(): string {
   return `llm_${randomUUID()}`;
@@ -88,6 +96,19 @@ function skillRootParent(rootPath: string): string {
   return path.basename(rootPath) === 'skills' ? path.dirname(rootPath) : rootPath;
 }
 
+function resolveStrictIsolationSourceHome(input: {
+  baseEnv?: NodeJS.ProcessEnv;
+  requestEnv?: Record<string, string>;
+  fallbackHome: string;
+}): string {
+  const sourceEnv = mergeStringEnvValues(input.baseEnv, input.requestEnv);
+  return sourceEnv.HOME || process.env.HOME || input.fallbackHome;
+}
+
+function shouldUseSourceHomeForStrictIsolation(provider: string): boolean {
+  return STRICT_ISOLATION_SOURCE_HOME_PROVIDERS.has(provider);
+}
+
 async function copyFileIfPresent(sourcePath: string, destinationPath: string): Promise<void> {
   let stat;
   try {
@@ -100,17 +121,45 @@ async function copyFileIfPresent(sourcePath: string, destinationPath: string): P
   await fs.copyFile(sourcePath, destinationPath);
 }
 
+async function copyStrictIsolationUserHomeFiles(input: {
+  provider: string;
+  sourceHome: string;
+  isolatedHome: string;
+}): Promise<void> {
+  const supportFiles = STRICT_ISOLATION_USER_HOME_FILES[input.provider] ?? [];
+  for (const fileName of supportFiles) {
+    await copyFileIfPresent(
+      path.join(input.sourceHome, fileName),
+      path.join(input.isolatedHome, fileName),
+    );
+  }
+}
+
+function applyOpenClawStrictIsolationEnv(env: Record<string, string>, sourceHome: string): void {
+  const stateDir = path.join(sourceHome, '.openclaw');
+  if (!env.OPENCLAW_STATE_DIR) {
+    env.OPENCLAW_STATE_DIR = stateDir;
+  }
+  if (!env.OPENCLAW_CONFIG_PATH) {
+    env.OPENCLAW_CONFIG_PATH = path.join(stateDir, 'openclaw.json');
+  }
+}
+
 function buildStrictSkillIsolationEnv(input: {
   provider: string;
+  sourceHome: string;
   isolatedHome: string;
   isolatedCwd: string;
   baseEnv?: NodeJS.ProcessEnv;
   requestEnv?: Record<string, string>;
 }): Record<string, string> {
   const env = mergeStringEnvValues(input.baseEnv, input.requestEnv);
-  env.HOME = input.isolatedHome;
+  const useSourceHome = shouldUseSourceHomeForStrictIsolation(input.provider);
+  env.HOME = useSourceHome ? input.sourceHome : input.isolatedHome;
   env.PWD = input.isolatedCwd;
-  env.XDG_CONFIG_HOME = path.join(input.isolatedHome, '.config');
+  env.XDG_CONFIG_HOME = useSourceHome
+    ? (env.XDG_CONFIG_HOME || path.join(input.sourceHome, '.config'))
+    : path.join(input.isolatedHome, '.config');
   if (isPlatformId(input.provider)) {
     for (const root of getPlatformSkillRoots(input.provider)) {
       if (root.homeEnv) {
@@ -118,11 +167,15 @@ function buildStrictSkillIsolationEnv(input: {
       }
     }
   }
+  if (input.provider === 'openclaw') {
+    applyOpenClawStrictIsolationEnv(env, input.sourceHome);
+  }
   return env;
 }
 
 async function prepareStrictSkillIsolationPlatformHome(input: {
   provider: string;
+  sourceHome: string;
   isolatedHome: string;
   env: Record<string, string>;
   baseEnv?: NodeJS.ProcessEnv;
@@ -130,9 +183,14 @@ async function prepareStrictSkillIsolationPlatformHome(input: {
 }): Promise<void> {
   if (!isPlatformId(input.provider)) return;
 
-  const supportFiles = STRICT_ISOLATION_HOME_FILES[input.provider] ?? [];
+  await copyStrictIsolationUserHomeFiles({
+    provider: input.provider,
+    sourceHome: input.sourceHome,
+    isolatedHome: input.isolatedHome,
+  });
+
+  const supportFiles = STRICT_ISOLATION_PLATFORM_HOME_FILES[input.provider] ?? [];
   const sourceEnv = mergeStringEnvValues(input.baseEnv, input.requestEnv);
-  const sourceHome = sourceEnv.HOME || process.env.HOME || input.isolatedHome;
   const preparedParents = new Set<string>();
 
   for (const root of getPlatformSkillRoots(input.provider)) {
@@ -145,7 +203,7 @@ async function prepareStrictSkillIsolationPlatformHome(input: {
     if (supportFiles.length === 0 || preparedParents.has(isolatedParent)) continue;
     preparedParents.add(isolatedParent);
 
-    const sourceSkillRoot = resolvePlatformSkillRootPath(root, sourceHome, sourceEnv);
+    const sourceSkillRoot = resolvePlatformSkillRootPath(root, input.sourceHome, sourceEnv);
     const sourceParent = skillRootParent(sourceSkillRoot);
     for (const fileName of supportFiles) {
       await copyFileIfPresent(
@@ -169,8 +227,14 @@ async function createStrictSkillIsolationScope(input: {
   await fs.mkdir(cwd, { recursive: true });
   await fs.mkdir(systemHomeDir, { recursive: true });
   await fs.mkdir(path.join(systemHomeDir, '.config'), { recursive: true });
+  const sourceHome = resolveStrictIsolationSourceHome({
+    baseEnv: input.baseEnv,
+    requestEnv: input.requestEnv,
+    fallbackHome: systemHomeDir,
+  });
   const env = buildStrictSkillIsolationEnv({
     provider: input.provider,
+    sourceHome,
     isolatedHome: systemHomeDir,
     isolatedCwd: cwd,
     baseEnv: input.baseEnv,
@@ -178,6 +242,7 @@ async function createStrictSkillIsolationScope(input: {
   });
   await prepareStrictSkillIsolationPlatformHome({
     provider: input.provider,
+    sourceHome,
     isolatedHome: systemHomeDir,
     env,
     baseEnv: input.baseEnv,
@@ -187,6 +252,7 @@ async function createStrictSkillIsolationScope(input: {
     root,
     cwd,
     systemHomeDir,
+    skillSystemHomeDir: shouldUseSourceHomeForStrictIsolation(input.provider) ? sourceHome : systemHomeDir,
     env,
   };
 }
@@ -363,7 +429,7 @@ export class LlmExecutor {
           skillSourcePaths: request.skillSourcePaths,
           provider: request.runtime.provider,
           cwd,
-          systemHomeDir: isolationScope?.systemHomeDir ?? this.systemHomeDir,
+          systemHomeDir: isolationScope?.skillSystemHomeDir ?? this.systemHomeDir,
           env: requestEnv ?? this.env,
         });
         for (const error of injection.errors) {

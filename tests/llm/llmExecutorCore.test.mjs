@@ -812,6 +812,216 @@ test('LlmExecutor strict skill isolation with no requested skills exposes no ori
   assert.equal(session.result.output, 'isolated-empty');
 });
 
+test('LlmExecutor strict skill isolation preserves Claude auth files in the isolated home', async () => {
+  const base = await createTempDir();
+  const sourceRoot = path.join(base, 'source-skills');
+  const originalCwd = path.join(base, 'work');
+  const originalHome = path.join(base, 'home');
+  const originalClaudeHome = path.join(originalHome, '.claude');
+  const allowedSource = path.join(sourceRoot, 'metabot-weather');
+  await fs.mkdir(allowedSource, { recursive: true });
+  await fs.writeFile(path.join(allowedSource, 'SKILL.md'), '# Weather\n', 'utf8');
+  await fs.mkdir(path.join(originalClaudeHome, 'skills', 'metabot-secret'), { recursive: true });
+  await fs.writeFile(path.join(originalClaudeHome, 'skills', 'metabot-secret', 'SKILL.md'), '# Secret\n', 'utf8');
+  await fs.writeFile(path.join(originalHome, '.claude.json'), '{"oauthAccount":"user@example.com"}\n', 'utf8');
+  await fs.writeFile(path.join(originalClaudeHome, 'config.json'), '{"model":"sonnet"}\n', 'utf8');
+  await fs.writeFile(path.join(originalClaudeHome, 'settings.json'), '{"permissions":{}}\n', 'utf8');
+
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: sourceRoot,
+    systemHomeDir: originalHome,
+    env: {
+      HOME: originalHome,
+      CLAUDE_HOME: originalClaudeHome,
+      PWD: originalCwd,
+    },
+    backends: {
+      'claude-code': () => ({
+        provider: 'claude-code',
+        async execute(request) {
+          assert.notEqual(path.resolve(request.cwd), path.resolve(originalCwd));
+          assert.notEqual(path.resolve(request.env.HOME), path.resolve(originalHome));
+          assert.notEqual(path.resolve(request.env.CLAUDE_HOME), path.resolve(originalClaudeHome));
+          assert.equal(path.resolve(request.env.PWD), path.resolve(request.cwd));
+          assert.equal(
+            await pathExists(path.join(request.env.HOME, '.claude.json')),
+            true,
+          );
+          assert.equal(
+            await pathExists(path.join(request.env.CLAUDE_HOME, 'config.json')),
+            true,
+          );
+          assert.equal(
+            await pathExists(path.join(request.env.CLAUDE_HOME, 'settings.json')),
+            true,
+          );
+          assert.equal(
+            await pathExists(path.join(request.cwd, '.claude', 'skills', 'metabot-weather', 'SKILL.md')),
+            true,
+          );
+          assert.equal(
+            await pathExists(path.join(request.env.CLAUDE_HOME, 'skills', 'metabot-secret', 'SKILL.md')),
+            false,
+          );
+          return {
+            status: 'completed',
+            output: 'claude-isolated',
+            durationMs: 1,
+          };
+        },
+      }),
+    },
+  });
+
+  const sessionId = await executor.execute({
+    runtimeId: 'runtime-claude',
+    runtime: { ...runtime, provider: 'claude-code', binaryPath: '/bin/claude' },
+    prompt: 'Use weather only',
+    cwd: originalCwd,
+    skills: ['metabot-weather'],
+    skillSourcePaths: {
+      'metabot-weather': allowedSource,
+    },
+    skillIsolation: 'strict',
+  });
+
+  await collectEvents(executor.streamEvents(sessionId));
+  const session = await executor.getSession(sessionId);
+  assert.equal(session.result.status, 'completed');
+  assert.equal(session.result.output, 'claude-isolated');
+});
+
+test('LlmExecutor strict skill isolation preserves OpenClaw state env while isolating home', async () => {
+  const base = await createTempDir();
+  const sourceRoot = path.join(base, 'source-skills');
+  const originalCwd = path.join(base, 'work');
+  const originalHome = path.join(base, 'home');
+  const originalOpenClawHome = path.join(originalHome, '.openclaw');
+  const allowedSource = path.join(sourceRoot, 'metabot-weather');
+  await fs.mkdir(allowedSource, { recursive: true });
+  await fs.writeFile(path.join(allowedSource, 'SKILL.md'), '# Weather\n', 'utf8');
+  await fs.mkdir(originalOpenClawHome, { recursive: true });
+  await fs.writeFile(path.join(originalOpenClawHome, 'openclaw.json'), '{"profile":"default"}\n', 'utf8');
+
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: sourceRoot,
+    systemHomeDir: originalHome,
+    env: {
+      HOME: originalHome,
+      OPENCLAW_HOME: originalOpenClawHome,
+      PWD: originalCwd,
+    },
+    backends: {
+      openclaw: () => ({
+        provider: 'openclaw',
+        async execute(request) {
+          assert.notEqual(path.resolve(request.cwd), path.resolve(originalCwd));
+          assert.notEqual(path.resolve(request.env.HOME), path.resolve(originalHome));
+          assert.notEqual(path.resolve(request.env.OPENCLAW_HOME), path.resolve(originalOpenClawHome));
+          assert.equal(path.resolve(request.env.PWD), path.resolve(request.cwd));
+          assert.equal(path.resolve(request.env.OPENCLAW_STATE_DIR), path.resolve(originalOpenClawHome));
+          assert.equal(
+            path.resolve(request.env.OPENCLAW_CONFIG_PATH),
+            path.resolve(path.join(originalOpenClawHome, 'openclaw.json')),
+          );
+          assert.equal(
+            await pathExists(path.join(request.cwd, '.openclaw', 'skills', 'metabot-weather', 'SKILL.md')),
+            true,
+          );
+          return {
+            status: 'completed',
+            output: 'openclaw-isolated',
+            durationMs: 1,
+          };
+        },
+      }),
+    },
+  });
+
+  const sessionId = await executor.execute({
+    runtimeId: 'runtime-openclaw',
+    runtime: { ...runtime, provider: 'openclaw', binaryPath: '/bin/openclaw' },
+    prompt: 'Use weather only',
+    cwd: originalCwd,
+    skills: ['metabot-weather'],
+    skillSourcePaths: {
+      'metabot-weather': allowedSource,
+    },
+    skillIsolation: 'strict',
+  });
+
+  await collectEvents(executor.streamEvents(sessionId));
+  const session = await executor.getSession(sessionId);
+  assert.equal(session.result.status, 'completed');
+  assert.equal(session.result.output, 'openclaw-isolated');
+});
+
+test('LlmExecutor strict skill isolation preserves Cursor home-backed auth while isolating cwd', async () => {
+  const base = await createTempDir();
+  const sourceRoot = path.join(base, 'source-skills');
+  const originalCwd = path.join(base, 'work');
+  const originalHome = path.join(base, 'home');
+  const originalXdgConfigHome = path.join(base, 'xdg-config');
+  const allowedSource = path.join(sourceRoot, 'metabot-weather');
+  await fs.mkdir(allowedSource, { recursive: true });
+  await fs.writeFile(path.join(allowedSource, 'SKILL.md'), '# Weather\n', 'utf8');
+  await fs.mkdir(path.join(originalHome, '.cursor', 'skills', 'metabot-secret'), { recursive: true });
+  await fs.writeFile(path.join(originalHome, '.cursor', 'skills', 'metabot-secret', 'SKILL.md'), '# Secret\n', 'utf8');
+
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: sourceRoot,
+    systemHomeDir: originalHome,
+    env: {
+      HOME: originalHome,
+      XDG_CONFIG_HOME: originalXdgConfigHome,
+      PWD: originalCwd,
+    },
+    backends: {
+      cursor: () => ({
+        provider: 'cursor',
+        async execute(request) {
+          assert.notEqual(path.resolve(request.cwd), path.resolve(originalCwd));
+          assert.equal(path.resolve(request.env.HOME), path.resolve(originalHome));
+          assert.equal(path.resolve(request.env.XDG_CONFIG_HOME), path.resolve(originalXdgConfigHome));
+          assert.equal(path.resolve(request.env.PWD), path.resolve(request.cwd));
+          assert.equal(
+            await pathExists(path.join(originalHome, '.cursor', 'skills', 'metabot-weather', 'SKILL.md')),
+            true,
+          );
+          return {
+            status: 'completed',
+            output: 'cursor-isolated',
+            durationMs: 1,
+          };
+        },
+      }),
+    },
+  });
+
+  const sessionId = await executor.execute({
+    runtimeId: 'runtime-cursor',
+    runtime: { ...runtime, provider: 'cursor', binaryPath: '/bin/cursor-agent' },
+    prompt: 'Use weather only',
+    cwd: originalCwd,
+    skills: ['metabot-weather'],
+    skillSourcePaths: {
+      'metabot-weather': allowedSource,
+    },
+    skillIsolation: 'strict',
+  });
+
+  await collectEvents(executor.streamEvents(sessionId));
+  const session = await executor.getSession(sessionId);
+  assert.equal(session.result.status, 'completed');
+  assert.equal(session.result.output, 'cursor-isolated');
+});
+
 test('LlmExecutor preserves the provided system prompt and single-item skills array', async () => {
   const base = await createTempDir();
   const executor = new LlmExecutor({
