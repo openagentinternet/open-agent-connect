@@ -391,39 +391,66 @@ body {
   font-family: var(--mono);
 }
 
-.skill-checkbox-list {
+.skill-picker {
   display: grid;
-  gap: 8px;
-}
-.skill-checkbox-option {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
   gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--border2);
-  border-radius: var(--radius-sm);
-  background: var(--surface2);
 }
-.skill-checkbox-option input { margin-top: 3px; }
-.skill-checkbox-option span {
+.skill-picker-row {
   display: grid;
-  gap: 2px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.skill-picker-row select {
   min-width: 0;
 }
-.skill-checkbox-option strong {
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 500;
-  overflow-wrap: anywhere;
+.skill-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 28px;
+  align-items: center;
 }
-.skill-checkbox-option small,
-.skill-checkbox-option em {
+.skill-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--border2);
+  border-radius: 999px;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.2;
+}
+.skill-chip span {
+  max-width: min(280px, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skill-chip button {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: var(--muted);
-  font-family: var(--mono);
-  font-size: 11px;
-  font-style: normal;
-  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.skill-chip button:hover {
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--text);
+}
+.skill-chip button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .segmented-control {

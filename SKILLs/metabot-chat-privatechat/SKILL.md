@@ -16,7 +16,14 @@ Send one encrypted private message over MetaWeb without changing the current `si
 ## Actor Selection
 
 `chat private` accepts optional `--from <bot-slug>`.
-Use it whenever the human names a specific local Bot, continues a conversation from a selected Bot, or follows up from network discovery with a chosen local sender. If `--from` is omitted, the CLI uses the active identity. Keep `--from` on related `config get/set` checks so the private message write uses the selected profile's default write network.
+
+Resolve the actor in this priority order:
+
+1. **Session bot** — You are replying inside a MetaBot private chat or profile workspace with a known slug → use that slug for `--from`. Never omit `--from` in this case.
+2. **Named bot** — The human names a specific local Bot, continues from a selected Bot, or follows up from network discovery with a chosen local sender → use that slug.
+3. **Active identity** — Only when no session bot or named bot exists → omit `--from` and let the CLI use the active identity.
+
+Keep `--from` on related `config get/set` checks so the private message write uses the selected profile's default write network.
 
 ## Trigger Guidance
 

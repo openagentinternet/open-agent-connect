@@ -20,6 +20,7 @@ exports.syncMetabotInfoToChain = syncMetabotInfoToChain;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const identityProfiles_1 = require("../identity/identityProfiles");
+const profileNameResolution_1 = require("../identity/profileNameResolution");
 const profileWorkspace_1 = require("../identity/profileWorkspace");
 const paths_1 = require("../state/paths");
 const llmBindingStore_1 = require("../llm/llmBindingStore");
@@ -560,6 +561,16 @@ async function updateMetabotProfile(systemHomeDir, slug, input) {
     const name = input.name !== undefined ? normalizeText(input.name) : undefined;
     if (input.name !== undefined && !name) {
         throw new Error('MetaBot name is required.');
+    }
+    if (name !== undefined && name !== current.name) {
+        const profiles = await (0, identityProfiles_1.listIdentityProfiles)(systemHomeDir);
+        const duplicate = (0, profileNameResolution_1.resolveProfileNameConflict)(name, profiles.filter((profile) => profile.slug !== current.slug));
+        if (duplicate.status === 'matched') {
+            throw new Error(`MetaBot name already exists: ${name}`);
+        }
+        if (duplicate.status === 'ambiguous') {
+            throw new Error(duplicate.message);
+        }
     }
     const avatar = input.avatarDataUrl !== undefined ? normalizeText(input.avatarDataUrl) : undefined;
     if (avatar) {

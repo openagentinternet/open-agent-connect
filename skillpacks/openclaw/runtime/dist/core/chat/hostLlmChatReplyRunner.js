@@ -3,11 +3,46 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createHostLlmChatReplyRunner = createHostLlmChatReplyRunner;
 exports.buildChatPrompt = buildChatPrompt;
 exports.parseRunnerOutput = parseRunnerOutput;
+exports.stripPlanningPreamble = stripPlanningPreamble;
+exports.isPlanningPreambleLine = isPlanningPreambleLine;
 const defaultChatReplyRunner_1 = require("./defaultChatReplyRunner");
+const privateChatAllowedSkills_1 = require("./privateChatAllowedSkills");
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const MAX_FALLBACK_ATTEMPTS = 5;
 const CLOSE_CONVERSATION_SIGNAL = 'Bye';
+function isPlanningPreambleLine(line) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+        return false;
+    }
+    if (/^先[读查]/u.test(trimmed) && /技能|skill|Skill|MVC|资料|视角/u.test(trimmed)) {
+        return true;
+    }
+    if (/^(?:让我先|我会先|接下来我会|我需要先)/u.test(trimmed) && /技能|skill|Skill|资料/u.test(trimmed)) {
+        return true;
+    }
+    if (/^Use (?:the )?.*skill/i.test(trimmed) && /before (?:I )?reply/i.test(trimmed)) {
+        return true;
+    }
+    return false;
+}
+function stripPlanningPreamble(value) {
+    const lines = value.split(/\r?\n/u);
+    while (lines.length > 0) {
+        const line = lines[0];
+        if (!line.trim()) {
+            lines.shift();
+            continue;
+        }
+        if (isPlanningPreambleLine(line)) {
+            lines.shift();
+            continue;
+        }
+        break;
+    }
+    return lines.join('\n').trim();
+}
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -32,9 +67,10 @@ function canonicalizeFinalByeLine(value) {
     }
     return lines.join('\n').trim();
 }
-function buildChatPrompt(input) {
+function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills_1.emptyPrivateChatAllowedSkillScope)(), options = {}) {
     const { conversation, recentMessages, persona, strategy } = input;
     const maxTurns = strategy?.maxTurns ?? 30;
+    const metaBotSlug = normalizeText(options.metaBotSlug);
     const sections = [];
     sections.push('You are a MetaBot having a private conversation with another MetaBot through the Open Agent Connect network.');
     if (persona.role) {
@@ -45,6 +81,16 @@ function buildChatPrompt(input) {
     }
     if (persona.goal) {
         sections.push(`## Your Goal\n${persona.goal}`);
+    }
+    if (metaBotSlug) {
+        sections.push([
+            '## Chain Write Actor (critical)',
+            `You are replying as local MetaBot profile \`${metaBotSlug}\`.`,
+            `- Any on-chain write MUST pass \`--from ${metaBotSlug}\` on every metabot CLI command.`,
+            '- This includes `buzz post`, `file upload`, `chain write`, and `chat private`.',
+            '- Never omit `--from` in this private chat turn; omission uses the host active identity and publishes under the wrong MetaBot.',
+            '- When a private chat skill performs uploads or config reads, keep the same `--from` slug on every related command.',
+        ].join('\n'));
     }
     const strategyLines = [
         '## Conversation Strategy',
@@ -70,9 +116,25 @@ function buildChatPrompt(input) {
         `- Approaching the turn limit (currently turn ${conversation.turnCount} of ${maxTurns})`,
     ];
     sections.push(exitLines.join('\n'));
+    if (allowedSkillScope.skills.length > 0) {
+        sections.push([
+            '## Available Private Chat Skills',
+            'These are the only skills available for this private chat turn.',
+            'Read and apply them silently when they help answer the sender request.',
+            'Never tell the user you are reading, loading, or following a skill.',
+            ...allowedSkillScope.skills.map((skillName) => `- ${skillName}`),
+        ].join('\n'));
+        sections.push([
+            '## Persona Immersion (critical)',
+            '- Stay fully in character from the very first word of your reply.',
+            '- NEVER announce plans or internal actions: no "先读/先查 skill", no workflow/Step narration, no "按角色风格回复".',
+            '- Skill reading, research, and checkpoints are invisible — output only what the persona would say.',
+        ].join('\n'));
+    }
     sections.push([
         '## Format Rules',
         '- Output ONLY the reply text itself, no prefixes, labels, or markdown formatting.',
+        '- Do NOT open with a plan sentence (for example: "先读…技能，再…"). Start directly with the in-character answer.',
         '- Reply in the same language the other party is using.',
         `- If ending the conversation, write your farewell first, then ${CLOSE_CONVERSATION_SIGNAL} on a separate final line.`,
     ].join('\n'));
@@ -89,7 +151,7 @@ function buildChatPrompt(input) {
     return sections.join('\n\n');
 }
 function parseRunnerOutput(rawOutput) {
-    const output = normalizeText(rawOutput);
+    const output = normalizeText(stripPlanningPreamble(rawOutput));
     if (!output) {
         return { state: 'skip' };
     }
@@ -100,7 +162,8 @@ function parseRunnerOutput(rawOutput) {
         content,
     };
 }
-async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds) {
+async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope) {
+    const shouldMarkRuntimeUnavailable = !enforceSkillScope;
     const resolved = await resolver.resolveRuntime({
         metaBotSlug,
         excludeRuntimeIds: Array.from(excludeRuntimeIds),
@@ -114,13 +177,21 @@ async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs,
         return null;
     }
     try {
-        const sessionId = await llmExecutor.execute({
+        const request = {
             runtimeId: resolved.runtime.id,
             runtime: resolved.runtime,
             prompt,
             timeout: timeoutMs,
             metaBotSlug,
-        });
+        };
+        if (enforceSkillScope) {
+            request.skillIsolation = 'strict';
+        }
+        if (allowedSkillScope.skills.length > 0) {
+            request.skills = allowedSkillScope.skills;
+            request.skillSourcePaths = allowedSkillScope.skillSourcePaths;
+        }
+        const sessionId = await llmExecutor.execute(request);
         const deadline = Date.now() + timeoutMs;
         while (Date.now() <= deadline) {
             const session = await llmExecutor.getSession(sessionId);
@@ -132,23 +203,31 @@ async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs,
                         return { result: parsed, bindingId: resolved.bindingId };
                     }
                     excludeRuntimeIds.add(resolved.runtime.id);
-                    await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime completed without returning output.').catch(() => { });
+                    if (shouldMarkRuntimeUnavailable) {
+                        await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime completed without returning output.').catch(() => { });
+                    }
                     return null;
                 }
                 excludeRuntimeIds.add(resolved.runtime.id);
-                await resolver.markRuntimeUnavailable(resolved.runtime.id, result.error || `LLM runtime ended with status ${result.status}.`).catch(() => { });
+                if (shouldMarkRuntimeUnavailable) {
+                    await resolver.markRuntimeUnavailable(resolved.runtime.id, result.error || `LLM runtime ended with status ${result.status}.`).catch(() => { });
+                }
                 return null;
             }
             await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
         }
         excludeRuntimeIds.add(resolved.runtime.id);
-        await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => { });
+        if (shouldMarkRuntimeUnavailable) {
+            await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => { });
+        }
         return null;
     }
     catch {
         if (!excludeRuntimeIds.has(resolved.runtime.id)) {
             excludeRuntimeIds.add(resolved.runtime.id);
-            await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime failed while running chat reply.').catch(() => { });
+            if (shouldMarkRuntimeUnavailable) {
+                await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime failed while running chat reply.').catch(() => { });
+            }
         }
         return null;
     }
@@ -159,17 +238,30 @@ function createHostLlmChatReplyRunner(options) {
     const metaBotSlug = options?.metaBotSlug;
     const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const pollIntervalMs = options?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    const allowedChatSkillsResolver = options?.allowedChatSkillsResolver;
+    const enforceSkillScope = Boolean(allowedChatSkillsResolver);
+    const logWarning = options?.logWarning;
     const fallbackRunner = (0, defaultChatReplyRunner_1.createDefaultChatReplyRunner)();
     // If no resolver provided, fall back to template-only replies.
     if (!runtimeResolver || !llmExecutor) {
         return fallbackRunner;
     }
     return async (input) => {
-        const prompt = buildChatPrompt(input);
+        let allowedSkillScope = (0, privateChatAllowedSkills_1.emptyPrivateChatAllowedSkillScope)();
+        if (allowedChatSkillsResolver) {
+            try {
+                allowedSkillScope = await allowedChatSkillsResolver();
+            }
+            catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                logWarning?.('[private chat allowed skills]', message);
+            }
+        }
+        const prompt = buildChatPrompt(input, allowedSkillScope, { metaBotSlug });
         const excludeRuntimeIds = new Set();
         // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
         for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
-            const outcome = await tryExecute(runtimeResolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds);
+            const outcome = await tryExecute(runtimeResolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope);
             if (outcome) {
                 // Track lastUsedAt on the binding that was successfully used.
                 if (outcome.bindingId) {

@@ -15,22 +15,6 @@ const MAX_REPLIES_PER_HOUR = 100;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
-function getCooldownDelayMs(turnCount) {
-    if (turnCount <= 5)
-        return 0;
-    if (turnCount <= 10)
-        return 5_000;
-    if (turnCount <= 20)
-        return 10_000;
-    return 15_000;
-}
-function sleep(ms) {
-    if (ms <= 0)
-        return Promise.resolve();
-    return new Promise(resolve => {
-        setTimeout(resolve, ms);
-    });
-}
 function buildConversationId(selfGlobalMetaId, peerGlobalMetaId) {
     return `pc-${selfGlobalMetaId}-${peerGlobalMetaId}`;
 }
@@ -255,11 +239,6 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             if (!checkRateLimit(rateLimiter, now))
                 return;
             const maxTurns = strategy?.maxTurns ?? DEFAULT_MAX_TURNS;
-            // Apply cooldown delay.
-            const cooldownMs = getCooldownDelayMs(conversation.turnCount);
-            if (cooldownMs > 0) {
-                await sleep(cooldownMs);
-            }
             // Check hard turn limit.
             if (conversation.turnCount >= maxTurns) {
                 const closingContent = ensureFinalByeLine('It was great chatting with you. Let us continue another time.');

@@ -20,6 +20,19 @@
         gap: 12px;
         margin-bottom: 18px;
       }
+      .refund-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+      .refund-refresh {
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        border-radius: var(--radius-sm);
+        padding: 7px 11px;
+        font-family: var(--mono);
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .refund-refresh:hover { border-color: var(--accent); color: var(--accent); }
+      .refund-refresh:disabled { opacity: .65; cursor: wait; }
       .refund-eyebrow {
         font-size: 11px;
         font-family: var(--mono);
@@ -33,6 +46,89 @@
       .refund-status[data-tone="busy"]    { color: var(--amber); }
       .refund-status[data-tone="error"]   { color: var(--red); }
       .refund-status[data-tone="ready"]   { color: var(--green); }
+      .refund-sync-status {
+        margin-bottom: 12px;
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .refund-sync-status[data-tone="success"] { color: var(--green); }
+      .refund-sync-status[data-tone="busy"] { color: var(--amber); }
+      .refund-sync-status[data-tone="error"] { color: var(--red); }
+      .refund-manual-alert {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 0 0 12px;
+        padding: 12px 14px;
+        border: 1px solid color-mix(in srgb, var(--amber) 42%, transparent);
+        border-radius: 10px;
+        background: color-mix(in srgb, var(--amber) 12%, transparent);
+      }
+      .refund-manual-alert[hidden] { display: none; }
+      .refund-manual-alert-copy { display: grid; gap: 3px; min-width: 0; }
+      .refund-manual-alert-copy strong { font-size: 13px; color: var(--text); }
+      .refund-manual-alert-copy span { font-size: 11px; font-family: var(--mono); color: var(--muted); }
+      .refund-manual-alert-action {
+        flex-shrink: 0;
+        border: 1px solid var(--amber);
+        background: var(--amber);
+        color: #111827;
+        border-radius: var(--radius-sm);
+        padding: 7px 11px;
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 600;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .refund-tabs {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        width: fit-content;
+        max-width: 100%;
+        padding: 4px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--panel);
+      }
+      .refund-tab {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-height: 36px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--muted);
+        padding: 8px 12px;
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .refund-tab:hover { color: var(--text); }
+      .refund-tab[data-active="true"] {
+        background: var(--surface);
+        color: var(--text);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .08);
+      }
+      .refund-tab-count {
+        min-width: 22px;
+        border-radius: 999px;
+        background: var(--accent-dim);
+        color: var(--accent);
+        padding: 2px 7px;
+        text-align: center;
+        font-size: 11px;
+      }
+      .refund-panels { display: block; }
+      .refund-panel[hidden] { display: none; }
       .refund-section-header {
         display: flex;
         align-items: start;
@@ -48,7 +144,7 @@
         background: var(--accent-dim);
         color: var(--accent);
       }
-      .refund-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+      .refund-summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
       .refund-summary-item { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--panel); }
       .refund-summary-label { font-size: 10px; font-family: var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
       .refund-summary-value { margin-top: 4px; font-size: 18px; font-weight: 600; }
@@ -61,6 +157,7 @@
       .refund-counterparty-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .refund-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 9px; font-size: 10px; font-weight: 600; font-family: var(--mono); text-transform: uppercase; letter-spacing: .05em; }
       .refund-badge[data-tone="pending"] { background: color-mix(in srgb, var(--amber) 20%, transparent); color: var(--amber); }
+      .refund-badge[data-tone="manual"] { background: color-mix(in srgb, var(--amber) 24%, transparent); color: var(--amber); }
       .refund-badge[data-tone="refunded"] { background: color-mix(in srgb, var(--green) 20%, transparent); color: var(--green); }
       .refund-badge[data-tone="failed"] { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
       .refund-grid { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -70,13 +167,13 @@
       .refund-value { font-size: 12px; overflow-wrap: anywhere; }
       .refund-note { margin-top: 8px; font-size: 11px; color: var(--muted); }
       .refund-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-      .refund-actions a {
+      .refund-actions .refund-trace-link {
         color: var(--accent);
         text-decoration: none;
         font-size: 12px;
         font-family: var(--mono);
       }
-      .refund-actions a:hover { text-decoration: underline; }
+      .refund-actions .refund-trace-link:hover { text-decoration: underline; }
       .refund-action {
         border: 1px solid var(--accent);
         background: var(--accent);
@@ -87,13 +184,33 @@
         font-size: 12px;
         cursor: pointer;
       }
+      .refund-action-secondary {
+        display: inline-flex;
+        align-items: center;
+        border-color: var(--amber);
+        background: transparent;
+        color: var(--amber);
+        text-decoration: none;
+      }
       .refund-action:disabled { opacity: .7; cursor: wait; }
+      .refund-item-manual {
+        border-color: color-mix(in srgb, var(--amber) 36%, var(--border));
+        background: color-mix(in srgb, var(--amber) 6%, var(--panel));
+      }
+      .refund-item-focus {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
       .refund-empty { margin: 0; padding: 16px; text-align: center; border: 1px dashed var(--border); border-radius: 10px; color: var(--muted); }
       .mono-text { font-family: var(--mono); font-size: 11px; color: var(--dim); overflow-wrap: anywhere; }
       @media (max-width: 600px) {
         .refund-summary-grid { grid-template-columns: 1fr; }
         .refund-grid { grid-template-columns: 1fr; }
         .refund-actions { align-items: flex-start; flex-direction: column; }
+        .refund-manual-alert { align-items: stretch; flex-direction: column; }
+        .refund-manual-alert-action { text-align: center; }
+        .refund-tabs { display: grid; width: 100%; }
+        .refund-tab { justify-content: space-between; width: 100%; }
       }
     </style>
   </head>

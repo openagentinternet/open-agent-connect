@@ -1,7 +1,6 @@
 import type { RuntimeState } from '../state/runtimeStateStore';
 import { type SellerOrderRecord } from './sellerOrderState';
-export declare const SERVICE_REFUND_REQUEST_PATH = "/protocols/service-refund-request";
-export declare const SERVICE_REFUND_FINALIZE_PATH = "/protocols/service-refund-finalize";
+export { SERVICE_REFUND_FINALIZE_PATH, SERVICE_REFUND_REQUEST_PATH, parseRefundProtocolContent, } from './serviceRefundProtocol';
 export interface RefundRequestPinDetail {
     pinId: string;
     path?: string | null;
@@ -68,5 +67,4 @@ export interface SellerRefundSettlementBlocked {
     nextState: RuntimeState;
 }
 export type SellerRefundSettlementResult = SellerRefundSettlementSuccess | SellerRefundSettlementBlocked;
-export declare function parseRefundProtocolContent(content: unknown): Record<string, unknown> | null;
 export declare function processSellerRefundSettlement(input: ProcessSellerRefundSettlementInput): Promise<SellerRefundSettlementResult>;

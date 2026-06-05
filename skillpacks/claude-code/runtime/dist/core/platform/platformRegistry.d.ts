@@ -51,4 +51,6 @@ export declare function getPlatformSearchOrder(): RuntimePlatformId[];
 export declare function getPlatformSkillRoots(id: PlatformId): PlatformSkillRoot[];
 export declare function getProjectSkillRoot(id: PlatformId): PlatformSkillRoot | null;
 export declare function getInstallSkillRoots(): InstallSkillRoot[];
+export declare function getMetabotSharedSkillRoot(): InstallSkillRoot;
+export declare function getRuntimePortableSkillRoots(): InstallSkillRoot[];
 export declare function resolvePlatformSkillRootPath(root: PlatformSkillRoot, systemHomeDir: string, env?: NodeJS.ProcessEnv): string;

@@ -8,6 +8,9 @@ const {
   createHostLlmChatReplyRunner,
   parseRunnerOutput,
 } = require('../../dist/core/chat/hostLlmChatReplyRunner.js');
+const {
+  emptyPrivateChatAllowedSkillScope,
+} = require('../../dist/core/chat/privateChatAllowedSkills.js');
 
 function makeInput(overrides = {}) {
   return {
@@ -167,9 +170,89 @@ test('parseRunnerOutput handles only Bye as visible close content', () => {
   assert.equal(result.content, 'Bye');
 });
 
+test('buildChatPrompt includes chain write actor rules when metaBotSlug is provided', () => {
+  const prompt = buildChatPrompt(makeInput(), emptyPrivateChatAllowedSkillScope(), {
+    metaBotSlug: 'mb-75fe8aaf',
+  });
+  assert.match(prompt, /## Chain Write Actor \(critical\)/);
+  assert.match(prompt, /local MetaBot profile `mb-75fe8aaf`/);
+  assert.match(prompt, /--from mb-75fe8aaf/);
+  assert.match(prompt, /Never omit `--from`/);
+});
+
+test('buildChatPrompt omits chain write actor rules without metaBotSlug', () => {
+  const prompt = buildChatPrompt(makeInput());
+  assert.doesNotMatch(prompt, /## Chain Write Actor/);
+});
+
+test('host LLM chat runner injects chain write actor rules from metaBotSlug', async () => {
+  const runtime = {
+    id: 'llm-runtime-1',
+    provider: 'codex',
+    displayName: 'Codex',
+    binaryPath: '/bin/codex',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  const executorCalls = [];
+  const llmExecutor = {
+    async execute(request) {
+      executorCalls.push(request);
+      return 'llm-session-actor';
+    },
+    async getSession(sessionId) {
+      return {
+        sessionId,
+        status: 'completed',
+        result: {
+          status: 'completed',
+          output: 'Reply with correct actor context.',
+          durationMs: 12,
+        },
+      };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime),
+    llmExecutor,
+    metaBotSlug: 'mb-75fe8aaf',
+    pollIntervalMs: 1,
+  });
+
+  await runner(makeInput());
+
+  assert.equal(executorCalls.length, 1);
+  assert.match(executorCalls[0].prompt, /## Chain Write Actor \(critical\)/);
+  assert.match(executorCalls[0].prompt, /--from mb-75fe8aaf/);
+});
+
 test('buildChatPrompt ends with Reply now:', () => {
   const prompt = buildChatPrompt(makeInput());
   assert.ok(prompt.endsWith('Reply now:'));
+});
+
+test('parseRunnerOutput strips planning preamble before skill reply', () => {
+  const raw = '先读 Karpathy 视角技能，再针对对方关于窄场景与验证方式的追问给出工程向回复。\n你说得对，第三项若只是「再问一个会写代码的 bot」，大概率是伪需求。';
+  const result = parseRunnerOutput(raw);
+  assert.equal(result.state, 'reply');
+  assert.equal(result.content, '你说得对，第三项若只是「再问一个会写代码的 bot」，大概率是伪需求。');
+});
+
+test('buildChatPrompt includes persona immersion rules when skills are allowed', () => {
+  const prompt = buildChatPrompt(makeInput(), {
+    skills: ['andrej-karpathy-perspective'],
+    skillSourcePaths: { 'andrej-karpathy-perspective': '/tmp/karpathy' },
+    skippedSkills: [],
+    warning: null,
+  });
+  assert.match(prompt, /Persona Immersion \(critical\)/);
+  assert.match(prompt, /Never tell the user you are reading/);
+  assert.match(prompt, /Do NOT open with a plan sentence/);
 });
 
 function createFakeRuntimeResolver(runtime, calls = {}) {

@@ -110,6 +110,19 @@
       }
       .badge-caller  { background: var(--accent-dim); color: var(--accent); }
       .badge-provider { background: var(--green-dim); color: var(--green); }
+      .session-refund-badge {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 3px;
+        padding: 2px 6px;
+        background: var(--amber-dim);
+        color: var(--amber);
+        font-size: 9px;
+        font-family: var(--mono);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+      }
 
       .session-time {
         font-size: 10px;
@@ -252,6 +265,43 @@
         justify-content: center;
         gap: 5px;
         max-width: 230px;
+      }
+      .detail-refund-alert {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 20px;
+        border-bottom: 1px solid color-mix(in srgb, var(--amber) 32%, var(--border));
+        background: color-mix(in srgb, var(--amber) 10%, var(--surface));
+        flex-shrink: 0;
+      }
+      .detail-refund-copy {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+      }
+      .detail-refund-copy strong {
+        color: var(--text);
+        font-size: 13px;
+      }
+      .detail-refund-copy span {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        overflow-wrap: anywhere;
+      }
+      .detail-refund-action {
+        flex-shrink: 0;
+        border: 1px solid var(--amber);
+        background: var(--amber);
+        color: #111827;
+        border-radius: var(--radius-sm);
+        padding: 7px 11px;
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 600;
+        text-decoration: none;
       }
 
       /* Messages scroll area */
@@ -609,6 +659,8 @@
         .trace-workspace { margin: 12px 16px 16px; flex-direction: column; }
         .session-panel { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 220px; }
         .detail-panel { min-height: 300px; }
+        .detail-refund-alert { align-items: stretch; flex-direction: column; padding: 12px; }
+        .detail-refund-action { text-align: center; }
         .msg-row { padding: 3px 12px; }
         .msg-bubble { max-width: 85%; }
         .copy-toast { right: 16px; bottom: 16px; }

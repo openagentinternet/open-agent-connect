@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -180,4 +180,8 @@ test('ensureProfileWorkspace creates the required workspace files and eager runt
     const targetStat = await stat(targetPath);
     assert.equal(Boolean(targetStat), true, `${relativePath} should exist`);
   }
+
+  const agentsMd = await readFile(path.join(homeDir, 'AGENTS.md'), 'utf8');
+  assert.match(agentsMd, /profile slug is `alice`/);
+  assert.match(agentsMd, /--from alice/);
 });

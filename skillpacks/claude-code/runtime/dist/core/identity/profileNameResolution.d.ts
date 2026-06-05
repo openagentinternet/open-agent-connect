@@ -29,3 +29,4 @@ export declare function buildProfileAliases(name: unknown, slug?: unknown, exist
 export declare function scoreProfileNameCandidate<TProfile extends ProfileNameResolutionRecord>(query: unknown, profile: TProfile): ProfileNameCandidateScore<TProfile>;
 export declare function detectAmbiguousProfileNameMatch<TProfile extends ProfileNameResolutionRecord>(scores: ProfileNameCandidateScore<TProfile>[]): boolean;
 export declare function resolveProfileNameMatch<TProfile extends ProfileNameResolutionRecord>(query: unknown, profiles: TProfile[]): ProfileNameResolutionResult<TProfile>;
+export declare function resolveProfileNameConflict<TProfile extends ProfileNameResolutionRecord>(query: unknown, profiles: TProfile[]): ProfileNameResolutionResult<TProfile>;

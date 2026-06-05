@@ -6,6 +6,8 @@ import { type A2ASimplemsgListenerManager, type A2ASimplemsgListenerStartReport 
 import { type A2ASimplemsgPresenceWatchdog } from '../core/a2a/simplemsgPresenceWatchdog';
 import { type PrivateChatAutoReplyDependencies, type PrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
 import type { ChatReplyRunner, PrivateChatAutoReplyConfig, PrivateChatInboundMessage } from '../core/chat/privateChatTypes';
+import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
+import { createLlmBindingStore } from '../core/llm/llmBindingStore';
 import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
 import { LlmExecutor } from '../core/llm/executor';
 import type { CliDependencies, CliRuntimeContext } from './types';
@@ -25,6 +27,20 @@ export declare function refreshA2ASimplemsgListenerForIdentityProfileRegistratio
     refreshed: boolean;
     report: A2ASimplemsgListenerStartReport | null;
 }>;
+type ServiceRefundSyncIntervalHandle = {
+    unref?: () => void;
+};
+export interface ServiceRefundSyncLoop {
+    runOnce: () => Promise<void>;
+    stop: () => void;
+}
+export declare function createServiceRefundSyncLoop(input: {
+    syncRefunds: () => Promise<unknown>;
+    intervalMs?: number;
+    setIntervalFn?: (callback: () => Promise<void>, intervalMs: number) => ServiceRefundSyncIntervalHandle;
+    clearIntervalFn?: (handle: ServiceRefundSyncIntervalHandle) => void;
+    logWarning?: (message: string) => void;
+}): ServiceRefundSyncLoop;
 export declare function getDefaultDaemonPort(homeDir?: string): number;
 export declare function getDaemonRuntimeFingerprint(rootDir?: string): string;
 export declare function buildDaemonConfigHash(env: NodeJS.ProcessEnv, options?: {
@@ -43,6 +59,8 @@ export interface PrivateChatAutoReplyProfileDispatcherOptions {
         paths: MetabotPaths;
         metaBotSlug: string;
         runtimeResolver: ReturnType<typeof createLlmRuntimeResolver>;
+        runtimeStore: ReturnType<typeof createLlmRuntimeStore>;
+        bindingStore: ReturnType<typeof createLlmBindingStore>;
         llmExecutor: Pick<LlmExecutor, 'execute' | 'getSession'>;
     }) => ChatReplyRunner;
     createOrchestrator?: (deps: PrivateChatAutoReplyDependencies, config: PrivateChatAutoReplyConfig) => PrivateChatAutoReplyOrchestrator;
@@ -50,6 +68,16 @@ export interface PrivateChatAutoReplyProfileDispatcherOptions {
 type A2ARecoveredOrderProtocolMessage = A2ASimplemsgInboundDispatcherMessage & {
     localProfileSlug?: string | null;
 };
+export declare function createPrivateChatReplyRunnerForProfile(input: {
+    paths: MetabotPaths;
+    metaBotSlug: string;
+    runtimeResolver: ReturnType<typeof createLlmRuntimeResolver>;
+    runtimeStore: ReturnType<typeof createLlmRuntimeStore>;
+    bindingStore: ReturnType<typeof createLlmBindingStore>;
+    llmExecutor: Pick<LlmExecutor, 'execute' | 'getSession'>;
+    env?: NodeJS.ProcessEnv;
+    logWarning?: (scope: string, message: string) => void;
+}): ChatReplyRunner;
 export interface A2AUnhandledOrderReplayResult {
     profiles: number;
     conversations: number;

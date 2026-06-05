@@ -40,6 +40,7 @@ export interface MetabotPaths {
     directorySeedsPath: string;
     privateChatStatePath: string;
     chatStrategiesPath: string;
+    chatSkillPolicyPath: string;
     soulMdPath: string;
     goalMdPath: string;
     roleMdPath: string;

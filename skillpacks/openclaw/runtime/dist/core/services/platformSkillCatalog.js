@@ -210,7 +210,10 @@ function createPlatformSkillCatalog(options) {
                 };
             }
             const platform = (0, platformRegistry_1.getPlatformDefinition)(runtime.provider);
-            const roots = (0, platformRegistry_1.getPlatformSkillRoots)(platform.id);
+            const roots = [
+                ...(0, platformRegistry_1.getPlatformSkillRoots)(platform.id),
+                (0, platformRegistry_1.getMetabotSharedSkillRoot)(),
+            ];
             const rootResults = await Promise.all(roots.map(async (root) => scanRoot({
                 platform,
                 root,

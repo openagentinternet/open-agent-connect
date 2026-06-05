@@ -37,6 +37,7 @@ export interface SellerOrderRecord {
     endReason: string | null;
     refundRequestPinId: string | null;
     refundRequestTxid: string | null;
+    refundRequestedAt: number | null;
     refundTxid: string | null;
     refundFinalizePinId: string | null;
     refundBlockingReason: string | null;

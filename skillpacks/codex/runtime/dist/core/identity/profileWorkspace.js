@@ -33,11 +33,14 @@ async function writeFileIfMissing(filePath, content) {
         await node_fs_1.promises.writeFile(filePath, content, 'utf8');
     }
 }
-function buildStarterFiles(name) {
+function buildStarterFiles(name, slug) {
     return {
         'AGENTS.md': [
             '# Agent Instructions',
             '',
+            `- This MetaBot profile slug is \`${slug}\`. Display name: ${name}.`,
+            `- Any MetaWeb write (buzz, file upload, chain write, private chat) MUST include \`--from ${slug}\` on every metabot CLI command.`,
+            '- Never omit `--from` in this profile context; omission uses the host active identity and publishes under the wrong MetaBot.',
             '- Keep profile-specific operating rules here.',
             '- Update this file intentionally when the profile behavior changes.',
             '',
@@ -102,7 +105,8 @@ async function ensureProfileWorkspace(input) {
         ensureDirectory(node_path_1.default.join(homeDir, '.runtime', 'state')),
         ensureDirectory(node_path_1.default.join(homeDir, '.runtime', 'locks')),
     ]);
-    const starterFiles = buildStarterFiles(name);
+    const slug = node_path_1.default.basename(homeDir);
+    const starterFiles = buildStarterFiles(name, slug);
     await Promise.all(Object.entries(starterFiles).map(([relativePath, content]) => (writeFileIfMissing(node_path_1.default.join(homeDir, relativePath), content))));
     await writeFileIfMissing(node_path_1.default.join(homeDir, '.runtime', 'config.json'), `${JSON.stringify((0, configTypes_1.createDefaultConfig)(), null, 2)}\n`);
     await writeFileIfMissing(node_path_1.default.join(homeDir, 'llmbindings.json'), `${JSON.stringify({ version: 1, bindings: [] }, null, 2)}\n`);
@@ -116,7 +120,7 @@ function resolveIdentityCreateProfileHome(input) {
             message: 'MetaBot identity name is required.',
         };
     }
-    const duplicateMatch = (0, profileNameResolution_1.resolveProfileNameMatch)(requestedName, input.profiles);
+    const duplicateMatch = (0, profileNameResolution_1.resolveProfileNameConflict)(requestedName, input.profiles);
     if (duplicateMatch.status === 'matched' && duplicateMatch.matchType !== 'ranked') {
         return {
             status: 'duplicate',

@@ -344,7 +344,7 @@ async function readPortableSkillSelection(deps, runtime, providerSkill, fallback
     }
     const rootDiagnostics = [];
     const seenRoots = new Set();
-    for (const root of (0, platformRegistry_1.getInstallSkillRoots)()) {
+    for (const root of (0, platformRegistry_1.getRuntimePortableSkillRoots)()) {
         const absolutePath = resolveSkillRootAbsolutePath(deps, root);
         const rootKey = node_path_1.default.resolve(absolutePath);
         if (seenRoots.has(rootKey)) {

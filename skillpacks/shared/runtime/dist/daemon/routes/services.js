@@ -104,13 +104,39 @@ const handleServicesRoutes = async (context) => {
             context.sendMethodNotAllowed(['GET']);
             return true;
         }
+        const refundRequest = {
+            ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from').trim() } : {}),
+            ...(url.searchParams.has('all') ? { all: readBoolean(url.searchParams.get('all')) } : {}),
+            kind: url.searchParams.get('kind')?.trim() || 'all',
+        };
+        if (readBoolean(url.searchParams.get('refresh'))) {
+            const syncResult = handlers.services?.syncRefunds
+                ? await handlers.services.syncRefunds(refundRequest)
+                : (0, commandResult_1.commandFailed)('not_implemented', 'Services refund sync handler is not configured.');
+            if (!syncResult.ok) {
+                context.sendJson(200, syncResult);
+                return true;
+            }
+        }
         const result = handlers.services?.listRefunds
-            ? await handlers.services.listRefunds({
-                ...(url.searchParams.get('from')?.trim() ? { from: url.searchParams.get('from').trim() } : {}),
-                ...(url.searchParams.has('all') ? { all: readBoolean(url.searchParams.get('all')) } : {}),
-                kind: url.searchParams.get('kind')?.trim() || 'all',
-            })
+            ? await handlers.services.listRefunds(refundRequest)
             : (0, commandResult_1.commandFailed)('not_implemented', 'Services refunds handler is not configured.');
+        context.sendJson(200, result);
+        return true;
+    }
+    if (url.pathname === '/api/services/refunds/sync') {
+        if (req.method !== 'POST') {
+            context.sendMethodNotAllowed(['POST']);
+            return true;
+        }
+        const input = await context.readJsonBody();
+        const result = handlers.services?.syncRefunds
+            ? await handlers.services.syncRefunds({
+                ...(typeof input.from === 'string' ? { from: input.from } : {}),
+                ...(typeof input.kind === 'string' ? { kind: input.kind } : {}),
+                ...(typeof input.all === 'boolean' ? { all: input.all } : {}),
+            })
+            : (0, commandResult_1.commandFailed)('not_implemented', 'Services refund sync handler is not configured.');
         context.sendJson(200, result);
         return true;
     }

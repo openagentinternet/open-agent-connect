@@ -110,6 +110,10 @@ export interface CliDependencies {
             all: boolean;
             kind: 'initiated' | 'received' | 'all';
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        syncRefunds?: (input: {
+            from?: string;
+            all: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         settleRefund?: (input: {
             from?: string;
             orderId?: string;

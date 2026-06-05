@@ -30,6 +30,14 @@ export interface TraceSessionListItem {
     stateTone: 'active' | 'completed' | 'failure' | 'timeout' | 'manual' | 'neutral';
     stateLabel: string;
     timeAgoMs: number;
+    refundActionRequired: boolean;
+    refundConfirmable: boolean;
+    refundOrderId: string | null;
+    refundStatus: string | null;
+    refundRequestPinId: string | null;
+    refundFinalizePinId: string | null;
+    refundFrom: string | null;
+    refundHref: string | null;
 }
 export interface TraceSessionMessage {
     id: string;
@@ -58,6 +66,14 @@ export interface TraceSessionDetail {
     callerGlobalMetaId: string;
     providerGlobalMetaId: string;
     messages: TraceSessionMessage[];
+    refundActionRequired: boolean;
+    refundConfirmable: boolean;
+    refundOrderId: string | null;
+    refundStatus: string | null;
+    refundRequestPinId: string | null;
+    refundFinalizePinId: string | null;
+    refundFrom: string | null;
+    refundHref: string | null;
 }
 export declare function buildSessionListViewModel(rawSessions: unknown[], now?: number): TraceSessionListItem[];
 export declare function buildSessionDetailViewModel(payload: Record<string, unknown>): TraceSessionDetail | null;

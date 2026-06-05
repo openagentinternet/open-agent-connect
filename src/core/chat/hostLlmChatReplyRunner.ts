@@ -17,6 +17,40 @@ const DEFAULT_POLL_INTERVAL_MS = 500;
 const MAX_FALLBACK_ATTEMPTS = 5;
 const CLOSE_CONVERSATION_SIGNAL = 'Bye';
 
+function isPlanningPreambleLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (/^先[读查]/u.test(trimmed) && /技能|skill|Skill|MVC|资料|视角/u.test(trimmed)) {
+    return true;
+  }
+  if (/^(?:让我先|我会先|接下来我会|我需要先)/u.test(trimmed) && /技能|skill|Skill|资料/u.test(trimmed)) {
+    return true;
+  }
+  if (/^Use (?:the )?.*skill/i.test(trimmed) && /before (?:I )?reply/i.test(trimmed)) {
+    return true;
+  }
+  return false;
+}
+
+function stripPlanningPreamble(value: string): string {
+  const lines = value.split(/\r?\n/u);
+  while (lines.length > 0) {
+    const line = lines[0];
+    if (!line.trim()) {
+      lines.shift();
+      continue;
+    }
+    if (isPlanningPreambleLine(line)) {
+      lines.shift();
+      continue;
+    }
+    break;
+  }
+  return lines.join('\n').trim();
+}
+
 type ChatLlmExecutor = {
   execute(request: LlmExecutionRequest): Promise<string>;
   getSession(sessionId: string): Promise<LlmSessionRecord | null>;
@@ -50,12 +84,18 @@ function canonicalizeFinalByeLine(value: string): string {
   return lines.join('\n').trim();
 }
 
+export interface BuildChatPromptOptions {
+  metaBotSlug?: string;
+}
+
 function buildChatPrompt(
   input: ChatReplyRunnerInput,
   allowedSkillScope: PrivateChatAllowedSkillScope = emptyPrivateChatAllowedSkillScope(),
+  options: BuildChatPromptOptions = {},
 ): string {
   const { conversation, recentMessages, persona, strategy } = input;
   const maxTurns = strategy?.maxTurns ?? 30;
+  const metaBotSlug = normalizeText(options.metaBotSlug);
 
   const sections: string[] = [];
 
@@ -73,6 +113,17 @@ function buildChatPrompt(
 
   if (persona.goal) {
     sections.push(`## Your Goal\n${persona.goal}`);
+  }
+
+  if (metaBotSlug) {
+    sections.push([
+      '## Chain Write Actor (critical)',
+      `You are replying as local MetaBot profile \`${metaBotSlug}\`.`,
+      `- Any on-chain write MUST pass \`--from ${metaBotSlug}\` on every metabot CLI command.`,
+      '- This includes `buzz post`, `file upload`, `chain write`, and `chat private`.',
+      '- Never omit `--from` in this private chat turn; omission uses the host active identity and publishes under the wrong MetaBot.',
+      '- When a private chat skill performs uploads or config reads, keep the same `--from` slug on every related command.',
+    ].join('\n'));
   }
 
   const strategyLines = [
@@ -105,14 +156,22 @@ function buildChatPrompt(
     sections.push([
       '## Available Private Chat Skills',
       'These are the only skills available for this private chat turn.',
-      'Use them only when they help answer or complete the sender request.',
+      'Read and apply them silently when they help answer the sender request.',
+      'Never tell the user you are reading, loading, or following a skill.',
       ...allowedSkillScope.skills.map((skillName) => `- ${skillName}`),
+    ].join('\n'));
+    sections.push([
+      '## Persona Immersion (critical)',
+      '- Stay fully in character from the very first word of your reply.',
+      '- NEVER announce plans or internal actions: no "先读/先查 skill", no workflow/Step narration, no "按角色风格回复".',
+      '- Skill reading, research, and checkpoints are invisible — output only what the persona would say.',
     ].join('\n'));
   }
 
   sections.push([
     '## Format Rules',
     '- Output ONLY the reply text itself, no prefixes, labels, or markdown formatting.',
+    '- Do NOT open with a plan sentence (for example: "先读…技能，再…"). Start directly with the in-character answer.',
     '- Reply in the same language the other party is using.',
     `- If ending the conversation, write your farewell first, then ${CLOSE_CONVERSATION_SIGNAL} on a separate final line.`,
   ].join('\n'));
@@ -134,7 +193,7 @@ function buildChatPrompt(
 }
 
 function parseRunnerOutput(rawOutput: string): ChatReplyRunnerResult {
-  const output = normalizeText(rawOutput);
+  const output = normalizeText(stripPlanningPreamble(rawOutput));
   if (!output) {
     return { state: 'skip' };
   }
@@ -267,7 +326,7 @@ export function createHostLlmChatReplyRunner(options?: {
         logWarning?.('[private chat allowed skills]', message);
       }
     }
-    const prompt = buildChatPrompt(input, allowedSkillScope);
+    const prompt = buildChatPrompt(input, allowedSkillScope, { metaBotSlug });
     const excludeRuntimeIds = new Set<string>();
 
     // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
@@ -298,4 +357,4 @@ export function createHostLlmChatReplyRunner(options?: {
 }
 
 // Exported for testing.
-export { buildChatPrompt, parseRunnerOutput };
+export { buildChatPrompt, parseRunnerOutput, stripPlanningPreamble, isPlanningPreambleLine };

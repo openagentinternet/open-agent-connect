@@ -15,6 +15,8 @@ exports.getPlatformSearchOrder = getPlatformSearchOrder;
 exports.getPlatformSkillRoots = getPlatformSkillRoots;
 exports.getProjectSkillRoot = getProjectSkillRoot;
 exports.getInstallSkillRoots = getInstallSkillRoots;
+exports.getMetabotSharedSkillRoot = getMetabotSharedSkillRoot;
+exports.getRuntimePortableSkillRoots = getRuntimePortableSkillRoots;
 exports.resolvePlatformSkillRootPath = resolvePlatformSkillRootPath;
 const node_path_1 = __importDefault(require("node:path"));
 const DEFAULT_CAPABILITIES = ['tool-use'];
@@ -24,6 +26,14 @@ const sharedAgentsSkillRoot = {
     kind: 'global',
     path: '~/.agents/skills',
     autoBind: 'always',
+    sharedStandard: true,
+};
+const metabotSharedSkillRoot = {
+    platformId: 'shared-agents',
+    id: 'metabot-shared',
+    kind: 'global',
+    path: '~/.metabot/skills',
+    autoBind: 'manual',
     sharedStandard: true,
 };
 exports.PLATFORM_DEFINITIONS = [
@@ -346,6 +356,12 @@ function getInstallSkillRoots() {
         .filter((root) => root.kind === 'global')
         .map((root) => ({ ...root, platformId: platform.id })));
     return [sharedAgentsSkillRoot, ...roots];
+}
+function getMetabotSharedSkillRoot() {
+    return { ...metabotSharedSkillRoot };
+}
+function getRuntimePortableSkillRoots() {
+    return [getMetabotSharedSkillRoot(), ...getInstallSkillRoots()];
 }
 function normalizeOptionalEnvPath(value) {
     return typeof value === 'string' ? value.trim() : '';

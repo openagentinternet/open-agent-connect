@@ -21,7 +21,16 @@ Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason 
 ## Actor Selection
 
 `buzz post` accepts optional `--from <bot-slug>`.
-Use it whenever the human names a specific local Bot or the post belongs to an ongoing workflow with a selected actor. If `--from` is omitted, the CLI uses the active identity. Keep `--from` on related `config get/set` checks so the default write network is read from the same profile.
+
+Resolve the actor in this priority order:
+
+1. **Session bot** — You are inside a MetaBot private chat, profile workspace, or any context that names the conversation bot slug → use that slug for `--from` on every command (upload, config, post). Never omit `--from` in this case.
+2. **Named bot** — The human explicitly names a local Bot → use that slug.
+3. **Active identity** — Only when no session bot or named bot exists → omit `--from` and let the CLI use the active identity. If ambiguous, stop at the pre-post checkpoint and confirm the actor with the human.
+
+When multiple bots exist or the actor is unclear → stop and ask; run `metabot identity list` if needed.
+
+Keep `--from` on related `config get/set` checks so the default write network is read from the same profile.
 
 ## Trigger Guidance
 

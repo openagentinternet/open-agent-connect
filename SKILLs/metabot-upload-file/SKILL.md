@@ -16,7 +16,14 @@ Upload one local file to MetaWeb through the public Bot file upload interface. T
 ## Actor Selection
 
 `file upload` accepts optional `--from <bot-slug>`.
-Use it whenever the human names a specific local Bot or the uploaded file will be referenced by another command using a selected actor. If `--from` is omitted, the CLI uses the active identity. Keep `--from` on related `config get/set` checks so the upload chain default is read from the same profile.
+
+Resolve the actor in this priority order:
+
+1. **Session bot** — You are inside a MetaBot private chat, profile workspace, or any context that names the conversation bot slug → use that slug for `--from` on every command (upload, config, downstream buzz/post). Never omit `--from` in this case.
+2. **Named bot** — The human explicitly names a local Bot, or a prior step already selected an actor for the same workflow → use that slug.
+3. **Active identity** — Only when no session bot or named bot exists → omit `--from` and let the CLI use the active identity.
+
+Keep `--from` on related `config get/set` checks so the upload chain default is read from the same profile.
 
 ## Trigger Guidance
 

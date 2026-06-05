@@ -77,7 +77,17 @@ function buildMyServicesPageDefinition() {
               </label>
               <div class="wide-field">
                 <span>Provider Skills</span>
-                <div class="skill-checkbox-list" data-edit-provider-skill-list aria-label="Provider skills"></div>
+                <div class="skill-picker" data-edit-provider-skill-picker aria-label="Provider skills">
+                  <div class="skill-picker-row">
+                    <select data-edit-provider-skill-select aria-label="Provider skill to add">
+                      <option value="">Select a skill to add</option>
+                    </select>
+                    <button class="btn" type="button" data-edit-provider-skill-add>Add</button>
+                  </div>
+                  <div class="skill-chip-list" data-edit-provider-skill-chips aria-live="polite">
+                    <p class="field-hint">No skill selected.</p>
+                  </div>
+                </div>
               </div>
               <label>
                 <span>Output Type</span>
@@ -161,7 +171,9 @@ function buildMyServicesPageDefinition() {
     ordersPageNext: document.querySelector('[data-orders-page-next]'),
     editModal: document.querySelector('[data-my-service-edit-modal]'),
     editForm: document.querySelector('[data-my-service-edit-form]'),
-    editProviderSkillList: document.querySelector('[data-edit-provider-skill-list]'),
+    editProviderSkillSelect: document.querySelector('[data-edit-provider-skill-select]'),
+    editProviderSkillAdd: document.querySelector('[data-edit-provider-skill-add]'),
+    editProviderSkillChips: document.querySelector('[data-edit-provider-skill-chips]'),
     editOutputType: document.querySelector('[data-edit-output-type]'),
     editCurrency: document.querySelector('[data-edit-currency]'),
     editPrice: document.querySelector('[data-edit-price]'),
@@ -192,6 +204,8 @@ function buildMyServicesPageDefinition() {
     editCoverPreviewUri: '',
     editCoverRemoved: false,
     editSkillOptions: [],
+    editSelectedProviderSkillValues: [],
+    editCandidateProviderSkillValue: '',
   };
 
   const escapeHtml = (value) => String(value || '')
@@ -406,28 +420,68 @@ function buildMyServicesPageDefinition() {
     )).join('');
   };
 
-  const selectedEditSkillValues = () => {
-    if (!elements.editProviderSkillList) return [];
-    return Array.from(elements.editProviderSkillList.querySelectorAll('input[name="providerSkills"]:checked'))
-      .map((input) => normalizeTextClient(input.value))
-      .filter(Boolean);
+  const normalizeEditSkillValues = (values) => {
+    const seen = new Set();
+    const normalized = [];
+    for (const value of Array.isArray(values) ? values : [values]) {
+      const skillValue = normalizeTextClient(value);
+      if (!skillValue || seen.has(skillValue)) continue;
+      seen.add(skillValue);
+      normalized.push(skillValue);
+    }
+    return normalized;
   };
 
-  const renderEditSkillList = (options, selectedValues) => {
-    if (!elements.editProviderSkillList) return;
-    const selected = new Set((selectedValues || []).map((value) => normalizeTextClient(value)).filter(Boolean));
-    if (!options.length) {
-      elements.editProviderSkillList.innerHTML = '<p class="field-hint">No primary runtime skills available.</p>';
-      return;
-    }
-    elements.editProviderSkillList.innerHTML = options.map((option) => {
+  const selectedEditSkillValues = () => normalizeEditSkillValues(state.editSelectedProviderSkillValues);
+
+  const renderEditSkillPicker = (options, selectedValues) => {
+    if (!elements.editProviderSkillSelect || !elements.editProviderSkillAdd || !elements.editProviderSkillChips) return;
+    const normalizedSelected = normalizeEditSkillValues(selectedValues);
+    const optionByValue = new Map();
+    for (const option of Array.isArray(options) ? options : []) {
       const value = normalizeTextClient(option.value || option);
       const label = normalizeTextClient(option.label || option) || value;
-      return '<label class="skill-checkbox-option">'
-        + '<input type="checkbox" name="providerSkills" value="' + escapeHtml(value) + '"' + (selected.has(value) ? ' checked' : '') + ' />'
-        + '<span><strong>' + escapeHtml(label) + '</strong><small>' + escapeHtml(value) + '</small></span>'
-        + '</label>';
-    }).join('');
+      if (!value || optionByValue.has(value)) continue;
+      optionByValue.set(value, { value, label });
+    }
+    for (const value of normalizedSelected) {
+      if (!optionByValue.has(value)) {
+        optionByValue.set(value, { value, label: value });
+      }
+    }
+    const normalizedOptions = Array.from(optionByValue.values());
+    state.editSkillOptions = normalizedOptions;
+    state.editSelectedProviderSkillValues = normalizedSelected;
+
+    if (!normalizedOptions.length) {
+      elements.editProviderSkillSelect.innerHTML = '<option value="">No primary runtime skills available</option>';
+      elements.editProviderSkillSelect.disabled = true;
+      elements.editProviderSkillAdd.disabled = true;
+      elements.editProviderSkillChips.innerHTML = '<p class="field-hint">No primary runtime skills available.</p>';
+      return;
+    }
+
+    const selected = new Set(normalizedSelected);
+    const addableOptions = normalizedOptions.filter((option) => !selected.has(option.value));
+    if (!addableOptions.some((option) => option.value === state.editCandidateProviderSkillValue)) {
+      state.editCandidateProviderSkillValue = '';
+    }
+    elements.editProviderSkillSelect.innerHTML = '<option value="">Select a skill to add</option>' + addableOptions.map((option) => (
+      '<option value="' + escapeHtml(option.value) + '">' + escapeHtml(option.label) + '</option>'
+    )).join('');
+    elements.editProviderSkillSelect.value = state.editCandidateProviderSkillValue;
+    elements.editProviderSkillSelect.disabled = addableOptions.length === 0;
+    elements.editProviderSkillAdd.disabled = !state.editCandidateProviderSkillValue;
+
+    elements.editProviderSkillChips.innerHTML = normalizedSelected.length
+      ? normalizedSelected.map((value) => {
+          const option = optionByValue.get(value) || { value, label: value };
+          return '<span class="skill-chip">'
+            + '<span title="' + escapeHtml(option.value) + '">' + escapeHtml(option.label) + '</span>'
+            + '<button type="button" aria-label="Remove ' + escapeHtml(option.value) + '" title="Remove" data-edit-provider-skill-remove="' + escapeHtml(option.value) + '">x</button>'
+            + '</span>';
+        }).join('')
+      : '<p class="field-hint">No skill selected.</p>';
   };
 
   const selectedEditPaymentTiming = () => {
@@ -451,6 +505,8 @@ function buildMyServicesPageDefinition() {
     state.editServiceId = serviceId;
     state.editCoverDataUrl = '';
     state.editCoverRemoved = false;
+    state.editSelectedProviderSkillValues = [];
+    state.editCandidateProviderSkillValue = '';
     const model = buildModel();
     const service = findModelService(model, serviceId);
     const raw = getSelectedRawService();
@@ -466,7 +522,8 @@ function buildMyServicesPageDefinition() {
     if (paymentTimingInput) paymentTimingInput.checked = true;
     populateSelect(elements.editCurrency, model.currencyOptions, model.editForm.currency);
     populateSelect(elements.editOutputType, model.outputTypeOptions, model.editForm.outputType);
-    renderEditSkillList(model.editForm.providerSkills.map((skill) => ({ value: skill, label: skill })), model.editForm.providerSkills);
+    state.editSelectedProviderSkillValues = normalizeEditSkillValues(model.editForm.providerSkills);
+    renderEditSkillPicker(model.editForm.providerSkills.map((skill) => ({ value: skill, label: skill })), state.editSelectedProviderSkillValues);
     syncEditPaymentTimingFields();
     renderEditCover();
     if (elements.editModal) elements.editModal.hidden = false;
@@ -484,7 +541,7 @@ function buildMyServicesPageDefinition() {
             skills.unshift({ value: providerSkill, label: providerSkill });
           }
         }
-        renderEditSkillList(skills, model.editForm.providerSkills);
+        renderEditSkillPicker(skills, state.editSelectedProviderSkillValues);
       } catch (error) {
         if (elements.editCoverNote) {
           elements.editCoverNote.textContent = error instanceof Error ? error.message : String(error);
@@ -499,6 +556,9 @@ function buildMyServicesPageDefinition() {
     state.editCoverDataUrl = '';
     state.editCoverPreviewUri = '';
     state.editCoverRemoved = false;
+    state.editSelectedProviderSkillValues = [];
+    state.editCandidateProviderSkillValue = '';
+    state.editSkillOptions = [];
   };
 
   const openRevoke = (serviceId) => {
@@ -579,8 +639,24 @@ function buildMyServicesPageDefinition() {
   };
 
   document.addEventListener('click', async (event) => {
-    const target = event.target instanceof Element ? event.target.closest('[data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-edit-close], [data-my-service-revoke-close]') : null;
+    const target = event.target instanceof Element ? event.target.closest('[data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
     if (!target) return;
+    if (target.matches('[data-edit-provider-skill-add]')) {
+      const candidate = normalizeTextClient(state.editCandidateProviderSkillValue);
+      const exists = state.editSkillOptions.some((option) => option.value === candidate);
+      if (candidate && exists && !selectedEditSkillValues().includes(candidate)) {
+        state.editSelectedProviderSkillValues = normalizeEditSkillValues([...selectedEditSkillValues(), candidate]);
+        state.editCandidateProviderSkillValue = '';
+        renderEditSkillPicker(state.editSkillOptions, state.editSelectedProviderSkillValues);
+      }
+      return;
+    }
+    if (target.matches('[data-edit-provider-skill-remove]')) {
+      const skillValue = normalizeTextClient(target.getAttribute('data-edit-provider-skill-remove'));
+      state.editSelectedProviderSkillValues = selectedEditSkillValues().filter((value) => value !== skillValue);
+      renderEditSkillPicker(state.editSkillOptions, state.editSelectedProviderSkillValues);
+      return;
+    }
     if (target.matches('[data-my-services-refresh]')) {
       try {
         await loadServices(true);
@@ -652,6 +728,12 @@ function buildMyServicesPageDefinition() {
       if (target && target.name === 'paymentTiming') {
         syncEditPaymentTimingFields();
       }
+    });
+  }
+  if (elements.editProviderSkillSelect) {
+    elements.editProviderSkillSelect.addEventListener('change', () => {
+      state.editCandidateProviderSkillValue = normalizeTextClient(elements.editProviderSkillSelect.value);
+      renderEditSkillPicker(state.editSkillOptions, state.editSelectedProviderSkillValues);
     });
   }
   if (elements.editCoverInput) {

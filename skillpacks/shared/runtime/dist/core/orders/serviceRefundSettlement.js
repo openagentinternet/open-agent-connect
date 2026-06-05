@@ -1,12 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SERVICE_REFUND_FINALIZE_PATH = exports.SERVICE_REFUND_REQUEST_PATH = void 0;
-exports.parseRefundProtocolContent = parseRefundProtocolContent;
+exports.parseRefundProtocolContent = exports.SERVICE_REFUND_REQUEST_PATH = exports.SERVICE_REFUND_FINALIZE_PATH = void 0;
 exports.processSellerRefundSettlement = processSellerRefundSettlement;
 const sellerOrderState_1 = require("./sellerOrderState");
 const orderLifecycle_1 = require("./orderLifecycle");
-exports.SERVICE_REFUND_REQUEST_PATH = '/protocols/service-refund-request';
-exports.SERVICE_REFUND_FINALIZE_PATH = '/protocols/service-refund-finalize';
+var serviceRefundProtocol_1 = require("./serviceRefundProtocol");
+Object.defineProperty(exports, "SERVICE_REFUND_FINALIZE_PATH", { enumerable: true, get: function () { return serviceRefundProtocol_1.SERVICE_REFUND_FINALIZE_PATH; } });
+Object.defineProperty(exports, "SERVICE_REFUND_REQUEST_PATH", { enumerable: true, get: function () { return serviceRefundProtocol_1.SERVICE_REFUND_REQUEST_PATH; } });
+Object.defineProperty(exports, "parseRefundProtocolContent", { enumerable: true, get: function () { return serviceRefundProtocol_1.parseRefundProtocolContent; } });
+const serviceRefundProtocol_2 = require("./serviceRefundProtocol");
 function normalizeText(value) {
     if (typeof value === 'string')
         return value.trim();
@@ -16,37 +18,6 @@ function normalizeText(value) {
 }
 function normalizeLower(value) {
     return normalizeText(value).toLowerCase();
-}
-function readObject(value) {
-    return value && typeof value === 'object' && !Array.isArray(value)
-        ? value
-        : null;
-}
-function parseJsonObject(value) {
-    try {
-        return readObject(JSON.parse(value));
-    }
-    catch {
-        return null;
-    }
-}
-function parseRefundProtocolContent(content) {
-    if (typeof content === 'string') {
-        return parseJsonObject(content);
-    }
-    const object = readObject(content);
-    if (!object) {
-        return null;
-    }
-    const data = readObject(object.data);
-    const summary = object.contentSummary ?? data?.contentSummary ?? object.content;
-    if (typeof summary === 'string') {
-        return parseJsonObject(summary);
-    }
-    if (readObject(summary)) {
-        return summary;
-    }
-    return object;
 }
 function canonicalCurrency(value) {
     const normalized = normalizeText(value).toUpperCase();
@@ -87,10 +58,17 @@ function isZeroAmount(value) {
     return Number.isFinite(numeric) && numeric === 0;
 }
 function readRefundAmount(payload) {
-    return normalizeText(payload.refundAmount) || normalizeText(payload.amount);
+    return normalizeText(payload.refundAmount)
+        || normalizeText(payload.amount)
+        || normalizeText(payload.paymentAmount);
 }
 function readRefundCurrency(payload) {
-    return normalizeText(payload.refundCurrency) || normalizeText(payload.currency);
+    return normalizeText(payload.refundCurrency)
+        || normalizeText(payload.currency)
+        || normalizeText(payload.paymentAsset);
+}
+function readRefundAddress(payload) {
+    return normalizeText(payload.refundAddress) || normalizeText(payload.refundToAddress);
 }
 function matchesPaymentKey(order, candidate) {
     const paymentTxid = normalizeText(order.paymentTxid);
@@ -202,10 +180,10 @@ function validatePayloadMatchesOrder(input) {
     if (canonicalCurrency(readRefundCurrency(payload)) !== canonicalCurrency(order.paymentCurrency)) {
         return { ok: false, code: 'refund_request_currency_mismatch', message: 'Refund request currency does not match the seller order.' };
     }
-    if (canonicalChain(payload.paymentChain) !== canonicalChain(order.paymentChain, order.paymentCurrency)) {
+    if (canonicalChain(payload.paymentChain, readRefundCurrency(payload)) !== canonicalChain(order.paymentChain, order.paymentCurrency)) {
         return { ok: false, code: 'refund_request_chain_mismatch', message: 'Refund request payment chain does not match the seller order.' };
     }
-    if (canonicalSettlementKind(payload.settlementKind) !== canonicalSettlementKind(order.settlementKind, order.paymentAmount)) {
+    if (canonicalSettlementKind(payload.settlementKind, readRefundAmount(payload)) !== canonicalSettlementKind(order.settlementKind, order.paymentAmount)) {
         return { ok: false, code: 'refund_request_settlement_mismatch', message: 'Refund request settlement kind does not match the seller order.' };
     }
     return { ok: true };
@@ -384,7 +362,7 @@ async function processSellerRefundSettlement(input) {
             now: attemptedAt,
         });
     }
-    if (normalizeText(refundRequestDetail.path) && normalizeText(refundRequestDetail.path) !== exports.SERVICE_REFUND_REQUEST_PATH) {
+    if (normalizeText(refundRequestDetail.path) && normalizeText(refundRequestDetail.path) !== serviceRefundProtocol_2.SERVICE_REFUND_REQUEST_PATH) {
         return blockSettlement({
             state: input.state,
             order,
@@ -393,7 +371,7 @@ async function processSellerRefundSettlement(input) {
             now: attemptedAt,
         });
     }
-    const refundRequestPayload = parseRefundProtocolContent(refundRequestDetail.content);
+    const refundRequestPayload = (0, serviceRefundProtocol_2.parseRefundProtocolContent)(refundRequestDetail.content);
     if (!refundRequestPayload) {
         return blockSettlement({
             state: input.state,
@@ -421,7 +399,7 @@ async function processSellerRefundSettlement(input) {
     }
     const refundAmount = readRefundAmount(refundRequestPayload) || normalizeText(order.paymentAmount);
     const refundCurrency = canonicalCurrency(readRefundCurrency(refundRequestPayload) || order.paymentCurrency);
-    const paymentChain = canonicalChain(refundRequestPayload.paymentChain, order.paymentCurrency);
+    const paymentChain = canonicalChain(refundRequestPayload.paymentChain, readRefundCurrency(refundRequestPayload) || order.paymentCurrency);
     const settlementKind = canonicalSettlementKind(refundRequestPayload.settlementKind, order.paymentAmount);
     if (isZeroAmount(refundAmount) || settlementKind === 'free') {
         const nextState = markStateRefunded({
@@ -455,7 +433,7 @@ async function processSellerRefundSettlement(input) {
             now: attemptedAt,
         });
     }
-    const refundToAddress = normalizeText(refundRequestPayload.refundToAddress);
+    const refundToAddress = readRefundAddress(refundRequestPayload);
     if (!refundToAddress) {
         return blockSettlement({
             state: input.state,

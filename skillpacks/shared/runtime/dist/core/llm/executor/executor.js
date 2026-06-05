@@ -10,6 +10,15 @@ const node_path_1 = __importDefault(require("node:path"));
 const backend_1 = require("./backends/backend");
 const session_manager_1 = require("./session-manager");
 const skill_injector_1 = require("./skill-injector");
+const platformRegistry_1 = require("../../platform/platformRegistry");
+const STRICT_ISOLATION_PLATFORM_HOME_FILES = {
+    'claude-code': ['config.json', 'settings.json'],
+    codex: ['auth.json', 'config.toml'],
+};
+const STRICT_ISOLATION_USER_HOME_FILES = {
+    'claude-code': ['.claude.json'],
+};
+const STRICT_ISOLATION_SOURCE_HOME_PROVIDERS = new Set(['cursor']);
 function createSessionId() {
     return `llm_${(0, node_crypto_1.randomUUID)()}`;
 }
@@ -18,6 +27,157 @@ function nowIso() {
 }
 function isTerminalStatus(status) {
     return ['completed', 'failed', 'timeout', 'cancelled'].includes(status);
+}
+function mergeStringEnvValues(...sources) {
+    const merged = {};
+    for (const source of sources) {
+        if (!source)
+            continue;
+        for (const [key, value] of Object.entries(source)) {
+            if (typeof value === 'string') {
+                merged[key] = value;
+            }
+        }
+    }
+    return merged;
+}
+function platformHomeEnvParent(root, isolatedHome) {
+    if (!root.path.startsWith('~/')) {
+        return isolatedHome;
+    }
+    const relativePath = root.path.slice(2);
+    const segments = relativePath.split('/').filter(Boolean);
+    if (segments[segments.length - 1] === 'skills') {
+        segments.pop();
+    }
+    return segments.length > 0 ? node_path_1.default.resolve(isolatedHome, ...segments) : isolatedHome;
+}
+function skillRootParent(rootPath) {
+    return node_path_1.default.basename(rootPath) === 'skills' ? node_path_1.default.dirname(rootPath) : rootPath;
+}
+function resolveStrictIsolationSourceHome(input) {
+    const sourceEnv = mergeStringEnvValues(input.baseEnv, input.requestEnv);
+    return sourceEnv.HOME || process.env.HOME || input.fallbackHome;
+}
+function shouldUseSourceHomeForStrictIsolation(provider) {
+    return STRICT_ISOLATION_SOURCE_HOME_PROVIDERS.has(provider);
+}
+async function copyFileIfPresent(sourcePath, destinationPath) {
+    let stat;
+    try {
+        stat = await node_fs_1.promises.stat(sourcePath);
+    }
+    catch {
+        return;
+    }
+    if (!stat.isFile())
+        return;
+    await node_fs_1.promises.mkdir(node_path_1.default.dirname(destinationPath), { recursive: true });
+    await node_fs_1.promises.copyFile(sourcePath, destinationPath);
+}
+async function copyStrictIsolationUserHomeFiles(input) {
+    const supportFiles = STRICT_ISOLATION_USER_HOME_FILES[input.provider] ?? [];
+    for (const fileName of supportFiles) {
+        await copyFileIfPresent(node_path_1.default.join(input.sourceHome, fileName), node_path_1.default.join(input.isolatedHome, fileName));
+    }
+}
+function applyOpenClawStrictIsolationEnv(env, sourceHome) {
+    const stateDir = node_path_1.default.join(sourceHome, '.openclaw');
+    if (!env.OPENCLAW_STATE_DIR) {
+        env.OPENCLAW_STATE_DIR = stateDir;
+    }
+    if (!env.OPENCLAW_CONFIG_PATH) {
+        env.OPENCLAW_CONFIG_PATH = node_path_1.default.join(stateDir, 'openclaw.json');
+    }
+}
+function buildStrictSkillIsolationEnv(input) {
+    const env = mergeStringEnvValues(input.baseEnv, input.requestEnv);
+    const useSourceHome = shouldUseSourceHomeForStrictIsolation(input.provider);
+    env.HOME = useSourceHome ? input.sourceHome : input.isolatedHome;
+    env.PWD = input.isolatedCwd;
+    env.XDG_CONFIG_HOME = useSourceHome
+        ? (env.XDG_CONFIG_HOME || node_path_1.default.join(input.sourceHome, '.config'))
+        : node_path_1.default.join(input.isolatedHome, '.config');
+    if ((0, platformRegistry_1.isPlatformId)(input.provider)) {
+        for (const root of (0, platformRegistry_1.getPlatformSkillRoots)(input.provider)) {
+            if (root.homeEnv) {
+                env[root.homeEnv] = platformHomeEnvParent(root, input.isolatedHome);
+            }
+        }
+    }
+    if (input.provider === 'openclaw') {
+        applyOpenClawStrictIsolationEnv(env, input.sourceHome);
+    }
+    return env;
+}
+async function prepareStrictSkillIsolationPlatformHome(input) {
+    if (!(0, platformRegistry_1.isPlatformId)(input.provider))
+        return;
+    await copyStrictIsolationUserHomeFiles({
+        provider: input.provider,
+        sourceHome: input.sourceHome,
+        isolatedHome: input.isolatedHome,
+    });
+    const supportFiles = STRICT_ISOLATION_PLATFORM_HOME_FILES[input.provider] ?? [];
+    const sourceEnv = mergeStringEnvValues(input.baseEnv, input.requestEnv);
+    const preparedParents = new Set();
+    for (const root of (0, platformRegistry_1.getPlatformSkillRoots)(input.provider)) {
+        if (root.kind !== 'global')
+            continue;
+        const isolatedSkillRoot = (0, platformRegistry_1.resolvePlatformSkillRootPath)(root, input.isolatedHome, input.env);
+        const isolatedParent = skillRootParent(isolatedSkillRoot);
+        await node_fs_1.promises.mkdir(isolatedParent, { recursive: true });
+        if (supportFiles.length === 0 || preparedParents.has(isolatedParent))
+            continue;
+        preparedParents.add(isolatedParent);
+        const sourceSkillRoot = (0, platformRegistry_1.resolvePlatformSkillRootPath)(root, input.sourceHome, sourceEnv);
+        const sourceParent = skillRootParent(sourceSkillRoot);
+        for (const fileName of supportFiles) {
+            await copyFileIfPresent(node_path_1.default.join(sourceParent, fileName), node_path_1.default.join(isolatedParent, fileName));
+        }
+    }
+}
+async function createStrictSkillIsolationScope(input) {
+    await node_fs_1.promises.mkdir(input.sessionsRoot, { recursive: true });
+    const root = await node_fs_1.promises.mkdtemp(node_path_1.default.join(input.sessionsRoot, 'skill-scope-'));
+    const cwd = node_path_1.default.join(root, 'work');
+    const systemHomeDir = node_path_1.default.join(root, 'home');
+    await node_fs_1.promises.mkdir(cwd, { recursive: true });
+    await node_fs_1.promises.mkdir(systemHomeDir, { recursive: true });
+    await node_fs_1.promises.mkdir(node_path_1.default.join(systemHomeDir, '.config'), { recursive: true });
+    const sourceHome = resolveStrictIsolationSourceHome({
+        baseEnv: input.baseEnv,
+        requestEnv: input.requestEnv,
+        fallbackHome: systemHomeDir,
+    });
+    const env = buildStrictSkillIsolationEnv({
+        provider: input.provider,
+        sourceHome,
+        isolatedHome: systemHomeDir,
+        isolatedCwd: cwd,
+        baseEnv: input.baseEnv,
+        requestEnv: input.requestEnv,
+    });
+    await prepareStrictSkillIsolationPlatformHome({
+        provider: input.provider,
+        sourceHome,
+        isolatedHome: systemHomeDir,
+        env,
+        baseEnv: input.baseEnv,
+        requestEnv: input.requestEnv,
+    });
+    return {
+        root,
+        cwd,
+        systemHomeDir,
+        skillSystemHomeDir: shouldUseSourceHomeForStrictIsolation(input.provider) ? sourceHome : systemHomeDir,
+        env,
+    };
+}
+async function removeStrictSkillIsolationScope(scope) {
+    if (!scope)
+        return;
+    await node_fs_1.promises.rm(scope.root, { recursive: true, force: true });
 }
 class LlmExecutor {
     sessionsRoot;
@@ -144,64 +304,88 @@ class LlmExecutor {
         }
     }
     async runSession(sessionId, request, factory, binaryPath, controller) {
-        const startedAt = nowIso();
-        const cwd = request.cwd ?? process.cwd();
-        await this.sessionManager.update(sessionId, { status: 'running', startedAt, cwd });
-        if (request.skills && request.skills.length > 0) {
-            const injection = await (0, skill_injector_1.injectSkills)({
-                skills: request.skills,
-                skillsRoot: this.skillsRoot,
-                skillSourcePaths: request.skillSourcePaths,
-                provider: request.runtime.provider,
-                cwd,
-                systemHomeDir: this.systemHomeDir,
-                env: this.env,
+        let isolationScope = null;
+        try {
+            const startedAt = nowIso();
+            const strictSkillIsolation = request.skillIsolation === 'strict';
+            isolationScope = strictSkillIsolation
+                ? await createStrictSkillIsolationScope({
+                    sessionsRoot: this.sessionsRoot,
+                    provider: request.runtime.provider,
+                    baseEnv: this.env,
+                    requestEnv: request.env,
+                })
+                : null;
+            const cwd = isolationScope?.cwd ?? request.cwd ?? process.cwd();
+            const requestEnv = isolationScope?.env ?? request.env;
+            const backendRequest = { ...request, cwd, env: requestEnv };
+            await this.sessionManager.update(sessionId, { status: 'running', startedAt, cwd });
+            if (request.skills && request.skills.length > 0) {
+                const injection = await (0, skill_injector_1.injectSkills)({
+                    skills: request.skills,
+                    skillsRoot: this.skillsRoot,
+                    skillSourcePaths: request.skillSourcePaths,
+                    provider: request.runtime.provider,
+                    cwd,
+                    systemHomeDir: isolationScope?.skillSystemHomeDir ?? this.systemHomeDir,
+                    env: requestEnv ?? this.env,
+                });
+                for (const error of injection.errors) {
+                    this.pushEvent(sessionId, {
+                        type: 'log',
+                        level: 'warning',
+                        message: `Skill injection failed for ${error.skill}: ${error.error}`,
+                    });
+                }
+            }
+            const backend = factory(binaryPath, requestEnv);
+            let accumulatedOutput = '';
+            const emitter = {
+                emit: (event) => {
+                    if (event.type === 'text') {
+                        accumulatedOutput += event.content;
+                    }
+                    if (event.type === 'status' && event.sessionId) {
+                        void this.sessionManager.update(sessionId, { providerSessionId: event.sessionId }).catch(() => undefined);
+                    }
+                    this.pushEvent(sessionId, event);
+                },
+            };
+            let result;
+            try {
+                result = await backend.execute(backendRequest, emitter, controller.signal);
+                if (!result.output && accumulatedOutput) {
+                    result = { ...result, output: accumulatedOutput };
+                }
+            }
+            catch (error) {
+                result = {
+                    status: controller.signal.aborted ? 'cancelled' : 'failed',
+                    output: accumulatedOutput,
+                    error: (0, backend_1.stringifyError)(error),
+                    durationMs: Date.now() - Date.parse(startedAt),
+                };
+            }
+            await this.sessionManager.update(sessionId, {
+                status: result.status,
+                providerSessionId: result.providerSessionId,
+                result,
+                completedAt: nowIso(),
             });
-            for (const error of injection.errors) {
+            this.running.delete(sessionId);
+            await removeStrictSkillIsolationScope(isolationScope).catch((error) => {
                 this.pushEvent(sessionId, {
                     type: 'log',
                     level: 'warning',
-                    message: `Skill injection failed for ${error.skill}: ${error.error}`,
+                    message: `Strict skill isolation cleanup failed: ${(0, backend_1.stringifyError)(error)}`,
                 });
-            }
+            });
+            this.pushEvent(sessionId, { type: 'result', result });
+            this.closeStream(sessionId);
         }
-        const backend = factory(binaryPath, request.env);
-        let accumulatedOutput = '';
-        const emitter = {
-            emit: (event) => {
-                if (event.type === 'text') {
-                    accumulatedOutput += event.content;
-                }
-                if (event.type === 'status' && event.sessionId) {
-                    void this.sessionManager.update(sessionId, { providerSessionId: event.sessionId }).catch(() => undefined);
-                }
-                this.pushEvent(sessionId, event);
-            },
-        };
-        let result;
-        try {
-            result = await backend.execute({ ...request, cwd }, emitter, controller.signal);
-            if (!result.output && accumulatedOutput) {
-                result = { ...result, output: accumulatedOutput };
-            }
+        finally {
+            await removeStrictSkillIsolationScope(isolationScope).catch(() => undefined);
         }
-        catch (error) {
-            result = {
-                status: controller.signal.aborted ? 'cancelled' : 'failed',
-                output: accumulatedOutput,
-                error: (0, backend_1.stringifyError)(error),
-                durationMs: Date.now() - Date.parse(startedAt),
-            };
-        }
-        await this.sessionManager.update(sessionId, {
-            status: result.status,
-            providerSessionId: result.providerSessionId,
-            result,
-            completedAt: nowIso(),
-        });
-        this.running.delete(sessionId);
-        this.pushEvent(sessionId, { type: 'result', result });
-        this.closeStream(sessionId);
     }
     async failSession(sessionId, message) {
         const result = {

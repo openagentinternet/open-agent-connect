@@ -32,11 +32,14 @@ async function writeFileIfMissing(filePath: string, content: string): Promise<vo
   }
 }
 
-function buildStarterFiles(name: string): Record<string, string> {
+function buildStarterFiles(name: string, slug: string): Record<string, string> {
   return {
     'AGENTS.md': [
       '# Agent Instructions',
       '',
+      `- This MetaBot profile slug is \`${slug}\`. Display name: ${name}.`,
+      `- Any MetaWeb write (buzz, file upload, chain write, private chat) MUST include \`--from ${slug}\` on every metabot CLI command.`,
+      '- Never omit `--from` in this profile context; omission uses the host active identity and publishes under the wrong MetaBot.',
       '- Keep profile-specific operating rules here.',
       '- Update this file intentionally when the profile behavior changes.',
       '',
@@ -112,7 +115,8 @@ export async function ensureProfileWorkspace(input: {
     ensureDirectory(path.join(homeDir, '.runtime', 'locks')),
   ]);
 
-  const starterFiles = buildStarterFiles(name);
+  const slug = path.basename(homeDir);
+  const starterFiles = buildStarterFiles(name, slug);
   await Promise.all(Object.entries(starterFiles).map(([relativePath, content]) => (
     writeFileIfMissing(path.join(homeDir, relativePath), content)
   )));

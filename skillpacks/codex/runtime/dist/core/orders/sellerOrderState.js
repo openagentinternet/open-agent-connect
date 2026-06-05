@@ -85,6 +85,7 @@ function createSellerOrderRecord(input) {
         endReason: normalizeText(input.endReason) || null,
         refundRequestPinId: normalizeText(input.refundRequestPinId) || null,
         refundRequestTxid: normalizeText(input.refundRequestTxid) || null,
+        refundRequestedAt: normalizeNumber(input.refundRequestedAt),
         refundTxid: normalizeText(input.refundTxid) || null,
         refundFinalizePinId: normalizeText(input.refundFinalizePinId) || null,
         refundBlockingReason: normalizeText(input.refundBlockingReason) || null,
@@ -118,6 +119,7 @@ function transitionSellerOrderRecord(current, patch) {
         ratingRequestedAt: patch.ratingRequestedAt ?? current.ratingRequestedAt,
         endedAt: patch.endedAt ?? current.endedAt,
         refundedAt: patch.refundedAt ?? current.refundedAt,
+        refundRequestedAt: patch.refundRequestedAt ?? current.refundRequestedAt,
         refundCompletedAt: patch.refundCompletedAt ?? current.refundCompletedAt,
     });
 }

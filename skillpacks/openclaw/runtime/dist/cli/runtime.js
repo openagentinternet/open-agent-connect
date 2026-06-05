@@ -6,9 +6,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.LOOM_DEV_ROUND_LLM_TIMEOUT_MS = exports.LOOM_DRAFT_LLM_TIMEOUT_MS = void 0;
 exports.buildA2ASimplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher;
 exports.refreshA2ASimplemsgListenerForIdentityProfileRegistration = refreshA2ASimplemsgListenerForIdentityProfileRegistration;
+exports.createServiceRefundSyncLoop = createServiceRefundSyncLoop;
 exports.getDefaultDaemonPort = getDefaultDaemonPort;
 exports.getDaemonRuntimeFingerprint = getDaemonRuntimeFingerprint;
 exports.buildDaemonConfigHash = buildDaemonConfigHash;
+exports.createPrivateChatReplyRunnerForProfile = createPrivateChatReplyRunnerForProfile;
 exports.replayUnhandledA2AOrderMessagesForProfiles = replayUnhandledA2AOrderMessagesForProfiles;
 exports.createPrivateChatAutoReplyProfileDispatcher = createPrivateChatAutoReplyProfileDispatcher;
 exports.resolvePeerChatPublicKeyFromLocalProfiles = resolvePeerChatPublicKeyFromLocalProfiles;
@@ -65,6 +67,7 @@ const privateChatAutoReplyBackfill_1 = require("../core/chat/privateChatAutoRepl
 const privateChatStateStore_1 = require("../core/chat/privateChatStateStore");
 const chatStrategyStore_1 = require("../core/chat/chatStrategyStore");
 const hostLlmChatReplyRunner_1 = require("../core/chat/hostLlmChatReplyRunner");
+const privateChatAllowedSkills_1 = require("../core/chat/privateChatAllowedSkills");
 const orderProtocolTextGenerator_1 = require("../core/a2a/orderProtocolTextGenerator");
 const servicePayment_1 = require("../core/payments/servicePayment");
 const llmRuntimeStore_1 = require("../core/llm/llmRuntimeStore");
@@ -97,6 +100,7 @@ const CHAIN_NET = 'livenet';
 exports.LOOM_DRAFT_LLM_TIMEOUT_MS = 120_000;
 exports.LOOM_DEV_ROUND_LLM_TIMEOUT_MS = 900_000;
 const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
+const DEFAULT_SERVICE_REFUND_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 let cachedDaemonRuntimeFingerprint = null;
 function normalizeDispatcherPrivateChatMessage(message) {
     return {
@@ -147,6 +151,45 @@ async function refreshA2ASimplemsgListenerForIdentityProfileRegistration(input) 
     return {
         refreshed: true,
         report,
+    };
+}
+function createServiceRefundSyncLoop(input) {
+    const intervalMs = Math.max(60_000, Math.floor(input.intervalMs ?? DEFAULT_SERVICE_REFUND_SYNC_INTERVAL_MS));
+    const setIntervalFn = input.setIntervalFn
+        ?? ((callback, nextIntervalMs) => setInterval(callback, nextIntervalMs));
+    const clearIntervalFn = input.clearIntervalFn
+        ?? ((handle) => clearInterval(handle));
+    const logWarning = input.logWarning ?? ((message) => console.warn(message));
+    let running = false;
+    let stopped = false;
+    let cleared = false;
+    const runOnce = async () => {
+        if (running || stopped) {
+            return;
+        }
+        running = true;
+        try {
+            await input.syncRefunds();
+        }
+        catch (error) {
+            logWarning(`[service refund sync] ${error instanceof Error ? error.message : String(error)}`);
+        }
+        finally {
+            running = false;
+        }
+    };
+    const handle = setIntervalFn(runOnce, intervalMs);
+    handle.unref?.();
+    return {
+        runOnce,
+        stop() {
+            stopped = true;
+            if (cleared) {
+                return;
+            }
+            cleared = true;
+            clearIntervalFn(handle);
+        },
     };
 }
 const EVOLUTION_IMPORT_SKILL_NAME = 'metabot-network-directory';
@@ -1241,6 +1284,22 @@ function createCliSigner(context, homeDir) {
     }
     return baseSigner;
 }
+function createPrivateChatReplyRunnerForProfile(input) {
+    return (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)({
+        runtimeResolver: input.runtimeResolver,
+        llmExecutor: input.llmExecutor,
+        metaBotSlug: input.metaBotSlug,
+        allowedChatSkillsResolver: (0, privateChatAllowedSkills_1.createPrivateChatAllowedSkillsResolver)({
+            paths: input.paths,
+            metaBotSlug: input.metaBotSlug,
+            runtimeStore: input.runtimeStore,
+            bindingStore: input.bindingStore,
+            env: input.env,
+            logWarning: input.logWarning,
+        }),
+        logWarning: input.logWarning,
+    });
+}
 function normalizeReplayText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -1450,7 +1509,12 @@ async function replayUnhandledA2AOrderMessagesForProfiles(input) {
                 continue;
             }
             try {
-                await handler(replayMessage);
+                const handled = await handler(replayMessage);
+                if (!handled.ok) {
+                    result.failed += 1;
+                    input.logWarning?.('[A2A order replay handler]', new Error(`${handled.code || handled.state}: ${handled.message || 'ORDER handler returned a non-success result.'}`));
+                    continue;
+                }
                 result.replayed += 1;
             }
             catch (error) {
@@ -1502,12 +1566,19 @@ function createPrivateChatAutoReplyProfileDispatcher(input) {
                 paths: profilePaths,
                 metaBotSlug,
                 runtimeResolver: profileRuntimeResolver,
+                runtimeStore: profileRuntimeStoreForLlm,
+                bindingStore: profileBindingStore,
                 llmExecutor: input.llmExecutor,
             })
-            : (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)({
-                runtimeResolver: profileRuntimeResolver,
-                llmExecutor: input.llmExecutor,
+            : createPrivateChatReplyRunnerForProfile({
+                paths: profilePaths,
                 metaBotSlug,
+                runtimeResolver: profileRuntimeResolver,
+                runtimeStore: profileRuntimeStoreForLlm,
+                bindingStore: profileBindingStore,
+                llmExecutor: input.llmExecutor,
+                env: process.env,
+                logWarning: (scope, message) => console.warn(scope, message),
             });
         const profileGlobalMetaId = normalizeEnvText(profile.globalMetaId);
         const orchestrator = createOrchestrator({
@@ -2145,6 +2216,7 @@ function createDefaultCliDependencies(context) {
                 query.set('kind', input.kind);
                 return requestJson(context, 'GET', `/api/services/refunds?${query.toString()}`);
             },
+            syncRefunds: async (input) => requestJson(context, 'POST', '/api/services/refunds/sync', input),
             settleRefund: async (input) => requestJson(context, 'POST', '/api/services/refunds/settle', input),
             inspectOrder: async (input) => {
                 const query = new URLSearchParams();
@@ -3362,6 +3434,15 @@ async function serveCliDaemonProcess(context) {
         });
     }, onlineServiceCache_1.DEFAULT_ONLINE_SERVICE_CACHE_SYNC_INTERVAL_MS);
     onlineServiceCacheInterval.unref?.();
+    const serviceRefundSyncLoop = createServiceRefundSyncLoop({
+        syncRefunds: async () => {
+            const result = await handlers.services?.syncRefunds?.({});
+            if (result && !result.ok) {
+                throw new Error(result.message ?? result.code ?? 'service_refund_sync_failed');
+            }
+        },
+        logWarning: (message) => console.warn(message),
+    });
     // ---- LLM runtime discovery and resolver ----
     const llmRuntimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(paths);
     const llmBindingStore = (0, llmBindingStore_1.createLlmBindingStore)(paths);
@@ -3398,10 +3479,15 @@ async function serveCliDaemonProcess(context) {
             return state.identity?.globalMetaId ?? null;
         },
         resolvePeerChatPublicKey,
-        replyRunner: (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)({
-            runtimeResolver: llmResolver,
-            llmExecutor,
+        replyRunner: createPrivateChatReplyRunnerForProfile({
+            paths,
             metaBotSlug,
+            runtimeResolver: llmResolver,
+            runtimeStore: llmRuntimeStore,
+            bindingStore: llmBindingStore,
+            llmExecutor,
+            env: process.env,
+            logWarning: (scope, message) => console.warn(scope, message),
         }),
     }, sharedAutoReplyConfig);
     const chatAutoReplyBackfill = (0, privateChatAutoReplyBackfill_1.createPrivateChatAutoReplyBackfillLoop)({
@@ -3533,6 +3619,7 @@ async function serveCliDaemonProcess(context) {
         simplemsgListener.stop();
         chatAutoReplyBackfill.stop();
         clearInterval(onlineServiceCacheInterval);
+        serviceRefundSyncLoop.stop();
         await runtimeStore.clearDaemon(process.pid);
         await daemon.close();
         process.exit(exitCode);

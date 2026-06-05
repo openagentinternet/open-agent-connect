@@ -3,6 +3,26 @@ import type { Buffer } from 'node:buffer';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 export type Awaitable<T> = T | Promise<T>;
 export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'chat-viewer' | 'bot' | 'loom' | 'metaapps';
+export interface ServiceRefundSyncResponse {
+    scanned: {
+        requestPins: number;
+        finalizePins: number;
+        buyerRetryCandidates: number;
+    };
+    applied: {
+        buyerRequests: number;
+        sellerRequests: number;
+        synthesizedSellerOrders: number;
+        finalizations: number;
+    };
+    skipped: number;
+    blocked: number;
+}
+export interface ServiceRefundSyncRequest {
+    from?: string;
+    all?: boolean;
+    kind?: string;
+}
 export interface MetabotDaemonHttpHandlers {
     config?: {
         get?: () => Awaitable<MetabotCommandResult<unknown>>;
@@ -138,6 +158,7 @@ export interface MetabotDaemonHttpHandlers {
             all?: boolean;
             kind?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        syncRefunds?: (input?: ServiceRefundSyncRequest) => Awaitable<MetabotCommandResult<ServiceRefundSyncResponse>>;
         inspectOrder?: (input: {
             from?: string;
             orderId?: string;

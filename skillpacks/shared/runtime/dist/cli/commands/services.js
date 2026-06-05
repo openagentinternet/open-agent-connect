@@ -257,6 +257,21 @@ async function runServicesCommand(args, context) {
                 ...selector.selector,
             });
         }
+        if (refundsSubcommand === 'sync') {
+            const handler = context.dependencies.services?.syncRefunds;
+            if (!handler) {
+                return (0, commandResult_1.commandFailed)('not_implemented', 'Services refund sync handler is not configured.');
+            }
+            const from = readFromFlag(refundsArgs);
+            const all = (0, helpers_1.hasFlag)(refundsArgs, '--all');
+            if (from && all) {
+                return (0, commandResult_1.commandFailed)('invalid_flag', 'Use either --from <bot-slug> or --all for refund sync, not both.');
+            }
+            return handler({
+                ...(from ? { from } : {}),
+                all,
+            });
+        }
         return (0, helpers_1.commandUnknownSubcommand)(`services refunds ${refundsArgs.join(' ')}`.trim());
     }
     if (subcommand === 'orders') {
