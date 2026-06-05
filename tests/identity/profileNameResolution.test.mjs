@@ -11,6 +11,9 @@ const {
   resolveProfileNameMatch,
   scoreProfileNameCandidate,
 } = require('../../dist/core/identity/profileNameResolution.js');
+const {
+  resolveIdentityCreateProfileHome,
+} = require('../../dist/core/identity/profileWorkspace.js');
 
 function createProfile(name, slug = generateProfileSlug(name), aliases = buildProfileAliases(name, slug)) {
   return {
@@ -98,4 +101,20 @@ test('best-match scoring exposes deterministic ties for near-equal candidates', 
     resolved.candidates.map((candidate) => candidate.slug),
     ['charles-zhang', 'charles-zhao'],
   );
+});
+
+test('create-home duplicate detection does not collapse Chinese names to an ASCII suffix', () => {
+  const profiles = [
+    createProfile('老周去AI味', 'ai', ['老周去AI味', 'ai']),
+  ];
+
+  const resolved = resolveIdentityCreateProfileHome({
+    systemHomeDir: '/tmp/oac-home',
+    requestedName: '马斯克_AI',
+    profiles,
+  });
+
+  assert.equal(resolved.status, 'resolved');
+  assert.equal(resolved.slug, 'ai-2');
+  assert.equal(resolved.homeDir, '/tmp/oac-home/.metabot/profiles/ai-2');
 });

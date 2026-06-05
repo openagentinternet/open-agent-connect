@@ -1214,6 +1214,60 @@ test('default bot updateProfile rejects local-only profiles before saving local 
   assert.deepEqual(signerCalls, []);
 });
 
+test('default bot updateProfile allows Chinese names with ASCII suffixes that only fuzzy-match another profile', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const collisionProfile = await createMetabotProfile(systemHomeDir, { name: '老周去AI味' });
+  const profile = await createMetabotProfile(systemHomeDir, { name: '马斯克' });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-musk-bot',
+    mvcAddress: 'addr-musk-bot',
+  });
+  const writeCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async (input) => {
+      writeCalls.push(input);
+      return {
+        txids: [`rename-tx-${writeCalls.length}`],
+        pinId: `rename-pin-${writeCalls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gm-musk-bot',
+        mvcAddress: 'addr-musk-bot',
+      };
+    }),
+  });
+
+  const result = await handlers.bot.updateProfile({
+    slug: profile.slug,
+    name: '马斯克_AI',
+  });
+  const afterUpdate = await getMetabotProfile(systemHomeDir, profile.slug);
+  const afterCollision = await getMetabotProfile(systemHomeDir, collisionProfile.slug);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.name, '马斯克_AI');
+  assert.equal(result.data.profile.slug, profile.slug);
+  assert.equal(afterUpdate.name, '马斯克_AI');
+  assert.equal(afterCollision.name, '老周去AI味');
+  assert.deepEqual(writeCalls.map((call) => [call.path, call.payload]), [
+    ['/info/name', '马斯克_AI'],
+  ]);
+});
+
 test('default bot updateProfile allows full-form saves when unchanged providers are now unavailable', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-');
   t.after(async () => {

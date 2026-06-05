@@ -61,6 +61,14 @@ function sanitizeForLookup(value: string): string {
     .trim();
 }
 
+function sanitizeForExactName(value: string): string {
+  return value
+    .replace(/[\s._/\\-]+/g, ' ')
+    .replace(/[^\p{L}\p{N} ]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function sanitizeForSlug(value: string): string {
   return value
     .replace(/[\s._/\\-]+/g, '-')
@@ -74,6 +82,10 @@ function buildStableShortHash(value: string): string {
     .update(value.normalize('NFKC'))
     .digest('hex')
     .slice(0, 8);
+}
+
+function normalizeExactNameKey(value: unknown): string {
+  return sanitizeForExactName(normalizeAsciiBase(normalizeText(value)));
 }
 
 function normalizeCandidateValues(profile: ProfileNameResolutionRecord): Array<{
@@ -361,5 +373,95 @@ export function resolveProfileNameMatch<TProfile extends ProfileNameResolutionRe
     match: rankedScores[0].profile,
     matchType: 'ranked',
     score: rankedScores[0].score,
+  };
+}
+
+export function resolveProfileNameConflict<TProfile extends ProfileNameResolutionRecord>(
+  query: unknown,
+  profiles: TProfile[],
+): ProfileNameResolutionResult<TProfile> {
+  const rawQuery = normalizeText(query);
+  const normalizedQuery = normalizeExactNameKey(rawQuery);
+  if (!normalizedQuery) {
+    return {
+      status: 'not_found',
+      message: 'A profile name is required.',
+    };
+  }
+
+  const exactSlugQuery = normalizeExactSlugQuery(rawQuery);
+  if (exactSlugQuery) {
+    const exactSlugMatches = profiles.filter((profile) => profile.slug === exactSlugQuery);
+    if (exactSlugMatches.length === 1) {
+      return {
+        status: 'matched',
+        match: exactSlugMatches[0],
+        matchType: 'exact_slug',
+        score: 2_000,
+      };
+    }
+    if (exactSlugMatches.length > 1) {
+      return {
+        status: 'ambiguous',
+        message: formatAmbiguousMatchMessage(rawQuery, exactSlugMatches, 'exact slug'),
+        candidates: sortScoredCandidates(exactSlugMatches.map((profile) => ({
+          profile,
+          score: 2_000,
+          matchedField: 'slug' as const,
+          matchedValue: profile.slug,
+        }))).map((entry) => entry.profile),
+      };
+    }
+  }
+
+  const exactNameMatches = profiles.filter((profile) => normalizeExactNameKey(profile.name) === normalizedQuery);
+  if (exactNameMatches.length === 1) {
+    return {
+      status: 'matched',
+      match: exactNameMatches[0],
+      matchType: 'exact_name',
+      score: 1_800,
+    };
+  }
+  if (exactNameMatches.length > 1) {
+    return {
+      status: 'ambiguous',
+      message: formatAmbiguousMatchMessage(rawQuery, exactNameMatches, 'display name'),
+      candidates: sortScoredCandidates(exactNameMatches.map((profile) => ({
+        profile,
+        score: 1_800,
+        matchedField: 'name' as const,
+        matchedValue: normalizeExactNameKey(profile.name),
+      }))).map((entry) => entry.profile),
+    };
+  }
+
+  const exactAliasMatches = profiles.filter((profile) => (
+    (profile.aliases ?? []).some((alias) => normalizeExactNameKey(alias) === normalizedQuery)
+  ));
+  if (exactAliasMatches.length === 1) {
+    return {
+      status: 'matched',
+      match: exactAliasMatches[0],
+      matchType: 'exact_alias',
+      score: 1_600,
+    };
+  }
+  if (exactAliasMatches.length > 1) {
+    return {
+      status: 'ambiguous',
+      message: formatAmbiguousMatchMessage(rawQuery, exactAliasMatches, 'alias'),
+      candidates: sortScoredCandidates(exactAliasMatches.map((profile) => ({
+        profile,
+        score: 1_600,
+        matchedField: 'alias' as const,
+        matchedValue: normalizedQuery,
+      }))).map((entry) => entry.profile),
+    };
+  }
+
+  return {
+    status: 'not_found',
+    message: `No local MetaBot profile named "${rawQuery}" was found.`,
   };
 }

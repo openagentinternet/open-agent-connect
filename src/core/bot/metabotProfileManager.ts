@@ -6,6 +6,7 @@ import {
   upsertIdentityProfile,
 } from '../identity/identityProfiles';
 import type { IdentityProfileRecord } from '../identity/identityProfiles';
+import { resolveProfileNameConflict } from '../identity/profileNameResolution';
 import {
   ensureProfileWorkspace,
   resolveIdentityCreateProfileHome,
@@ -707,6 +708,16 @@ export async function updateMetabotProfile(
   const name = input.name !== undefined ? normalizeText(input.name) : undefined;
   if (input.name !== undefined && !name) {
     throw new Error('MetaBot name is required.');
+  }
+  if (name !== undefined && name !== current.name) {
+    const profiles = await listIdentityProfiles(systemHomeDir);
+    const duplicate = resolveProfileNameConflict(name, profiles.filter((profile) => profile.slug !== current.slug));
+    if (duplicate.status === 'matched') {
+      throw new Error(`MetaBot name already exists: ${name}`);
+    }
+    if (duplicate.status === 'ambiguous') {
+      throw new Error(duplicate.message);
+    }
   }
   const avatar = input.avatarDataUrl !== undefined ? normalizeText(input.avatarDataUrl) : undefined;
   if (avatar) {

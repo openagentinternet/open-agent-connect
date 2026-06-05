@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createDefaultConfig } from '../config/configTypes';
 import type { IdentityProfileRecord } from './identityProfiles';
-import { generateProfileSlug, resolveProfileNameMatch } from './profileNameResolution';
+import { generateProfileSlug, resolveProfileNameConflict } from './profileNameResolution';
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -156,7 +156,7 @@ export function resolveIdentityCreateProfileHome(input: {
     };
   }
 
-  const duplicateMatch = resolveProfileNameMatch(requestedName, input.profiles);
+  const duplicateMatch = resolveProfileNameConflict(requestedName, input.profiles);
   if (duplicateMatch.status === 'matched' && duplicateMatch.matchType !== 'ranked') {
     return {
       status: 'duplicate',

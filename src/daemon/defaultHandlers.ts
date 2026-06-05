@@ -21,7 +21,7 @@ import {
   ensureProfileWorkspace,
   resolveIdentityCreateProfileHome,
 } from '../core/identity/profileWorkspace';
-import { resolveProfileNameMatch } from '../core/identity/profileNameResolution';
+import { resolveProfileNameConflict, resolveProfileNameMatch } from '../core/identity/profileNameResolution';
 import {
   createRuntimeStateStore,
   type RuntimeDaemonRecord,
@@ -12491,7 +12491,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const state = await runtimeStateStore.readState();
         const existingName = normalizeText(state.identity?.name);
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir);
-        const duplicateMatch = resolveProfileNameMatch(normalizedName, profiles);
+        const duplicateMatch = resolveProfileNameConflict(normalizedName, profiles);
         if (
           duplicateMatch.status === 'matched'
           && duplicateMatch.matchType !== 'ranked'
@@ -17610,9 +17610,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
           update = buildMetabotUpdateInput(body);
           if (update.name !== undefined && update.name !== current.name) {
             const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
-            const duplicate = resolveProfileNameMatch(update.name, profiles.filter((profile) => profile.slug !== current.slug));
+            const duplicate = resolveProfileNameConflict(update.name, profiles.filter((profile) => profile.slug !== current.slug));
             if (duplicate.status === 'matched' && duplicate.matchType !== 'ranked') {
               return commandFailed('name_taken', `MetaBot name already exists: ${update.name}`);
+            }
+            if (duplicate.status === 'ambiguous') {
+              return commandFailed('name_taken', duplicate.message);
             }
           }
           await validateMetabotProviderAvailability(current, update);
