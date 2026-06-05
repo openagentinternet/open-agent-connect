@@ -54,6 +54,28 @@ async function withImmediateTimers(fn) {
   }
 }
 
+async function withCapturedImmediateTimers(fn) {
+  const originalSetTimeout = globalThis.setTimeout;
+  const delays = [];
+  globalThis.setTimeout = (callback, ms, ...args) => {
+    delays.push(ms);
+    if (typeof callback === 'function') {
+      callback(...args);
+    }
+    return {
+      ref() { return this; },
+      unref() { return this; },
+      [Symbol.toPrimitive]() { return 0; },
+    };
+  };
+  try {
+    await fn();
+    return delays;
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+}
+
 async function createAutoReplyHarness(options = {}) {
   const { profileRoot } = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);
@@ -671,6 +693,35 @@ test('auto-reply passes inbound turn count above 20 through to the runner', asyn
 
   assert.equal(harness.runnerInputs.length, 1);
   assert.equal(harness.runnerInputs[0].conversation.turnCount, 21);
+});
+
+test('auto-reply does not delay high-turn private chat replies', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 20,
+    lastDirection: 'outbound',
+    createdAt: now - 1_000_000,
+    updatedAt: now - 1_000,
+  });
+
+  const delays = await withCapturedImmediateTimers(() => harness.handleInbound({
+    content: 'continue without delay',
+    messagePinId: 'incoming-pin-no-delay',
+  }));
+
+  assert.deepEqual(delays, []);
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.runnerInputs[0].conversation.turnCount, 21);
+  assert.equal(harness.writes.length, 1);
 });
 
 test('auto-reply persists order protocol messages without sending ordinary private-chat replies', async () => {

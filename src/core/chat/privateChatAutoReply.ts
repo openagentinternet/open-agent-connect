@@ -51,20 +51,6 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function getCooldownDelayMs(turnCount: number): number {
-  if (turnCount <= 5) return 0;
-  if (turnCount <= 10) return 5_000;
-  if (turnCount <= 20) return 10_000;
-  return 15_000;
-}
-
-function sleep(ms: number): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise(resolve => {
-    setTimeout(resolve, ms);
-  });
-}
-
 function buildConversationId(selfGlobalMetaId: string, peerGlobalMetaId: string): string {
   return `pc-${selfGlobalMetaId}-${peerGlobalMetaId}`;
 }
@@ -328,12 +314,6 @@ export function createPrivateChatAutoReplyOrchestrator(
       if (!checkRateLimit(rateLimiter, now)) return;
 
       const maxTurns = strategy?.maxTurns ?? DEFAULT_MAX_TURNS;
-
-      // Apply cooldown delay.
-      const cooldownMs = getCooldownDelayMs(conversation.turnCount);
-      if (cooldownMs > 0) {
-        await sleep(cooldownMs);
-      }
 
       // Check hard turn limit.
       if (conversation.turnCount >= maxTurns) {
