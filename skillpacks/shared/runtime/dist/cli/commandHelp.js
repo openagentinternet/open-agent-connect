@@ -2221,12 +2221,12 @@ const COMMAND_HELP_SPECS = [
         summary: 'Open one local MetaBot runtime HTML page such as hub, bot, buzz, chat, metaapps, publish, my-services, trace, or refund.',
         usage: 'metabot ui open --page <page> [--from <bot-slug>] [--trace-id <trace-id>] [--session-id <session-id>] [--service-id <service-pin-id>]',
         requiredFlags: [
-            { flag: '--page', value: '<page>', description: 'Built-in page name: hub, bot, buzz, chat, chat-viewer, metaapps, publish, my-services, trace, or refund.' },
+            { flag: '--page', value: '<page>', description: 'Built-in page name: hub, bot, buzz, chat, metaapps, publish, my-services, trace, or refund.' },
         ],
         optionalFlags: [
             FROM_BOT_FLAG,
             { flag: '--trace-id', value: '<trace-id>', description: 'Optional trace identifier for trace page deep links.' },
-            { flag: '--session-id', value: '<session-id>', description: 'A2A session identifier for trace or chat-viewer pages.' },
+            { flag: '--session-id', value: '<session-id>', description: 'A2A session identifier for trace page deep links.' },
             { flag: '--service-id', value: '<service-pin-id>', description: 'Owned service selector for my-services pages.' },
             HELP_JSON_FLAG,
         ],

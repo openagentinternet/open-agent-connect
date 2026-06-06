@@ -112,9 +112,9 @@ CLI parser
       -> daemon default handler resolves scoped actor before signer/store use
 ```
 
-For daemon-backed commands, routes should pass `from` to handlers through JSON bodies or query strings. Default handlers should use a scoped profile helper before touching signer, config, runtime state, private chat state, or evolution stores.
+For daemon-backed commands, routes should pass `from` to handlers through JSON bodies or query strings. Default handlers should use a scoped profile helper before touching signer, config, runtime state, or private chat state.
 
-For direct CLI runtime commands, the runtime should resolve the requested actor home and then reuse existing local logic with that home. This applies to wallet and evolution runtime code that currently calls `normalizeHomeDir(context.env, context.cwd)` directly.
+For direct CLI runtime commands, the runtime should resolve the requested actor home and then reuse existing local logic with that home. This applies to wallet runtime code that currently calls `normalizeHomeDir(context.env, context.cwd)` directly.
 
 ## Compatibility
 
@@ -135,11 +135,8 @@ Add dispatch tests proving `--from` reaches dependencies for:
 - `file upload`
 - `chat private`
 - `chat conversations/messages/auto-reply`
-- `master publish`
-- `master ask`
 - `wallet balance`
 - `wallet transfer`
-- `evolution publish`
 - `config get/set`
 - `llm bindings/bind/unbind/set-preferred/get-preferred`
 
@@ -148,8 +145,7 @@ Add dispatch tests proving `--from` reaches dependencies for:
 Add focused tests proving:
 
 - direct CLI wallet commands use the selected profile home;
-- direct CLI evolution publish uses the selected profile home and signer;
-- daemon-backed buzz, chain write, file upload, chat private, and master publish resolve `from` before signing;
+- daemon-backed buzz, chain write, file upload, and chat private resolve `from` before signing;
 - no-`--from` behavior still uses active identity;
 - missing `--from` profile fails before any chain write.
 

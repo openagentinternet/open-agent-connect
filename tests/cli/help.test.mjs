@@ -946,11 +946,14 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
   assert.match(output.usage, /\[--session-id <session-id>\]/);
   assert.match(output.usage, /\[--service-id <service-pin-id>\]/);
   assert.match(output.requiredFlags[0].description, /metaapps/);
+  assert.doesNotMatch(output.requiredFlags[0].description, /chat-viewer/);
   assert.ok(output.optionalFlags.some((entry) => entry.flag === '--from'));
   const traceFlag = output.optionalFlags.find((entry) => entry.flag === '--trace-id');
   assert.ok(traceFlag);
   assert.match(traceFlag.description, /Optional/);
-  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--session-id'));
+  const sessionFlag = output.optionalFlags.find((entry) => entry.flag === '--session-id');
+  assert.ok(sessionFlag);
+  assert.doesNotMatch(sessionFlag.description, /chat-viewer/);
   assert.ok(output.optionalFlags.some((entry) => entry.flag === '--service-id'));
   assert.ok(output.successFields.includes('localUiUrl'));
   assert.ok(output.examples.includes('metabot ui open --page publish --from alice'));

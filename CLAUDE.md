@@ -73,7 +73,7 @@ Releases are published automatically by GitHub Actions when a version tag is pus
   - `buzz/`, `chat/`, `files/`, `orders/`, `ratings/` — Individual network capabilities
   - `contracts/` — `MetabotCommandResult<T>` schema (success | awaiting_confirmation | waiting | manual_action_required | failed)
   - `config/`, `delegation/`, `skills/`, `host/`, `chain/`, `subsidy/`, `services/`
-- **`ui/`** — Local HTML inspection pages (hub, trace inspector, my-services, publish, refund, chat-viewer) and metaapps (chat, buzz)
+- **`ui/`** — Local HTML inspection pages (hub, trace inspector, my-services, publish, refund) and metaapps (chat, buzz)
 
 ### Key Patterns
 

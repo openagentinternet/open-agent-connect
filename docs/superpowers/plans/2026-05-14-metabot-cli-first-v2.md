@@ -17,16 +17,14 @@
 - Modify `src/cli/runtime.ts` for actor-home resolution and daemon route forwarding.
 - Modify `src/daemon/routes/types.ts` for actor-aware daemon handler input types.
 - Modify `src/daemon/defaultHandlers.ts` for actor-scoped signers, stores, config, and private chat state.
-- Modify `src/cli/commands/buzz.ts`, `chain.ts`, `file.ts`, `chat.ts`, `master.ts`, `wallet.ts`, `evolution.ts`, `config.ts`, and `llm.ts` for `--from` parsing.
+- Modify `src/cli/commands/buzz.ts`, `chain.ts`, `file.ts`, `chat.ts`, `wallet.ts`, `config.ts`, and `llm.ts` for `--from` parsing.
 - Modify `src/cli/commandHelp.ts` for help text, usage strings, and examples.
 - Update tests:
   - `tests/cli/buzz.test.mjs`
   - `tests/cli/chain.test.mjs`
   - `tests/cli/file.test.mjs`
   - `tests/cli/chat.test.mjs`
-  - `tests/cli/masterCommand.test.mjs`
   - `tests/cli/wallet.test.mjs`
-  - `tests/cli/evolution.test.mjs`
   - `tests/cli/config.test.mjs`
   - `tests/cli/help.test.mjs`
   - create `tests/cli/llm.test.mjs` if no equivalent focused LLM parser test exists
@@ -72,18 +70,8 @@ chat.conversations
 chat.messages
 chat.autoReplyStatus
 chat.setAutoReply
-master.publish
-master.ask
-master.trace
 wallet.balance
 wallet.transfer
-evolution.status
-evolution.adopt
-evolution.publish
-evolution.rollback
-evolution.search
-evolution.import
-evolution.imported
 config.get
 config.set
 llm.listBindings
@@ -457,7 +445,7 @@ Then use `metabot-post-buzz`.
 Run:
 
 ```bash
-rg "metabot (buzz post|chain write|file upload|chat private|master publish|master ask|wallet|evolution publish|llm .*--slug)" docs src tests release -n
+rg "metabot (buzz post|chain write|file upload|chat private|wallet|llm .*--slug)" docs src tests release -n
 ```
 
 - [ ] **Step 2: Update in-repo examples**
@@ -474,11 +462,9 @@ npm run build && node --test \
   tests/cli/chain.test.mjs \
   tests/cli/file.test.mjs \
   tests/cli/chat.test.mjs \
-  tests/cli/masterCommand.test.mjs \
   tests/cli/wallet.test.mjs \
   tests/cli/config.test.mjs \
   tests/cli/llm.test.mjs \
-  tests/cli/evolution.test.mjs \
   tests/cli/help.test.mjs
 ```
 
@@ -493,9 +479,7 @@ node dist/cli/main.js buzz post --help --json
 node dist/cli/main.js chain write --help --json
 node dist/cli/main.js file upload --help --json
 node dist/cli/main.js chat private --help --json
-node dist/cli/main.js master publish --help --json
 node dist/cli/main.js wallet balance --help --json
-node dist/cli/main.js evolution publish --help --json
 ```
 
 Expected: each actor-scoped command help includes `--from <bot-slug>`.

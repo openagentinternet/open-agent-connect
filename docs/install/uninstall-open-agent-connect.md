@@ -201,7 +201,6 @@ if [ -d "$HOME/.metabot/profiles" ]; then
     rm -f "$runtime_dir/runtime-state.json"
     rm -f "$runtime_dir/runtime.sqlite"
     rm -rf "$runtime_dir/sessions"
-    rm -rf "$runtime_dir/evolution"
     rm -rf "$runtime_dir/exports"
     rm -rf "$runtime_dir/state"
     rm -rf "$runtime_dir/locks"

@@ -110,7 +110,7 @@ When the human explicitly asks to send on BTC, DOGE, or OPCAT, pass the matching
   - delivery proof (`pinId`, `txids`)
   - who the message was sent to (`to`)
   - unified A2A trace URL (`localUiUrl`) when returned by the runtime
-  - one concrete next step (for example keep chatting or move to service/master workflow)
+  - one concrete next step (for example keep chatting or move to a service workflow)
   - natural-language next prompts in the same language as the user
   - intent-equivalent wording guidance (do not lock to one fixed phrase template)
 - do not reply with one rigid fixed sentence.

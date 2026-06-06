@@ -357,7 +357,6 @@ Responsibilities:
 - demand discovery
 - collaboration protocols
 - memory publication
-- evolution artifact publication
 - trust and rating protocols
 
 ### Layer 6: Read Model and Board Layer
@@ -670,7 +669,6 @@ Shows:
 
 - stable skill identities
 - current resolved variant
-- local evolution history
 - imported remote variants
 - adoption and rollback actions
 
@@ -717,7 +715,7 @@ This architecture needs explicit trust boundaries.
 
 ### Trust Boundary C: Skill Adoption
 
-- remote evolution artifacts must remain optional
+- remote skill variants must remain optional
 - trust policy should gate auto-adopt
 
 ### Trust Boundary D: Shared Memory

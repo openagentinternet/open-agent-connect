@@ -182,7 +182,7 @@ export async function runLoomCommand(
 - `CHAIN_WRITE_FLAG` — `{ flag: '--chain', value: '<mvc|btc|doge|opcat>', description: '...' }`
 - `HELP_JSON_FLAG` — `{ flag: '--json', description: 'Emit machine-readable help JSON instead of text.' }`
 
-**Payload file naming** — use `--payload-file`, same as `services publish` and `master publish`. The file contains the JSON payload that maps directly to the protocol schema.
+**Payload file naming** — use `--payload-file`, same as `services publish`. The file contains the JSON payload that maps directly to the protocol schema.
 
 **Chain write pattern** — follow `services publish` in `src/cli/commands/services.ts` (subcommand `'publish'`). Key sequence:
 1. Read `--payload-file` with `readFlagValue(args, '--payload-file')`

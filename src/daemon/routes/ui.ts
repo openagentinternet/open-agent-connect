@@ -1,7 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { buildHubPageDefinition } from '../../ui/pages/hub/app';
-import { buildChatViewerPageDefinition } from '../../ui/pages/chat-viewer/app';
 import { buildMyServicesPageDefinition } from '../../ui/pages/my-services/app';
 import { buildPublishPageDefinition } from '../../ui/pages/publish/app';
 import { buildRefundPageDefinition } from '../../ui/pages/refund/app';
@@ -29,7 +28,6 @@ const PAGE_BUILDERS: Record<MetabotUiPageName, () => LocalUiPageDefinition> = {
   'my-services': buildMyServicesPageDefinition,
   'trace': buildTracePageDefinition,
   'refund': buildRefundPageDefinition,
-  'chat-viewer': buildChatViewerPageDefinition,
   'bot': buildBotPageDefinition,
   'loom': buildLoomPageDefinition,
   'metaapps': buildMetaAppsPageDefinition,

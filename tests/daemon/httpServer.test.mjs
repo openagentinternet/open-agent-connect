@@ -2513,24 +2513,20 @@ test('GET /ui/trace gives verbose cards more room and allows long participant va
   assert.match(html, /msg-bubble/);
 });
 
-test('GET /ui/chat-viewer serves the built-in private chat viewer shell', async (t) => {
+test('GET /ui/chat-viewer returns not_found after private chat viewer retirement', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
   const response = await fetch(`${server.baseUrl}/ui/chat-viewer?peer=gm-remote-bob`);
-  const html = await response.text();
+  const payload = await response.json();
 
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
-  assert.match(html, /Private Chat Viewer/);
-  assert.match(html, /id-chat-msg-list/);
-  assert.match(html, /viewer-mode="standalone"/);
-  assert.match(html, /\/api\/chat\/private\/conversation/);
-  assert.match(html, /\/ui\/chat\/idframework\/components\/id-chat-msg-list\.js/);
-  assert.match(html, /afterIndex/);
+  assert.equal(response.status, 404);
+  assert.match(response.headers.get('content-type') ?? '', /application\/json/i);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'not_found');
 });
 
-test('GET /ui/trace navigation omits Chat Viewer while legacy direct route remains available', async (t) => {
+test('GET /ui/trace navigation omits retired Chat Viewer', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
@@ -2540,9 +2536,6 @@ test('GET /ui/trace navigation omits Chat Viewer while legacy direct route remai
   assert.equal(response.status, 200);
   assert.doesNotMatch(html, />Chat Viewer(?: \*)?</);
   assert.doesNotMatch(html, /href="\/ui\/chat-viewer"/);
-
-  const legacyResponse = await fetch(`${server.baseUrl}/ui/chat-viewer?peer=gm-remote-bob`);
-  assert.equal(legacyResponse.status, 200);
 });
 
 test('GET /ui/chat/idframework/components/id-chat-msg-list.js serves the standalone-capable IDFramework component', async (t) => {

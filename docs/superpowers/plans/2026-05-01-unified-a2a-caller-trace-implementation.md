@@ -47,7 +47,7 @@
 | `src/core/a2a/metawebReplyWaiter.ts` | Parse scoped delivery/rating tags and optionally read unified store updates. |
 | `src/daemon/defaultHandlers.ts` | Wire service call, private chat, trace list/detail, and listener startup to focused modules. |
 | `src/daemon/routes/trace.ts` | Keep endpoints but allow detail lookup by unified session ids. |
-| `src/daemon/routes/ui.ts` | Keep trace as primary. Leave chat-viewer only as a deprecated legacy route or redirect it later; do not return it from new A2A commands. |
+| `src/daemon/routes/ui.ts` | Keep trace as the private-chat and A2A inspection surface. |
 | `src/cli/commands/services.ts` | Print and poll `sessionId`-bearing trace URLs. |
 | `src/cli/commands/chat.ts` | Surface `/ui/trace?sessionId=...` for private chat sends. |
 | `src/cli/runtime.ts` | Wire service payment dependency and trace session metadata through daemon calls. |
@@ -745,7 +745,7 @@ Assert `metabot chat private` returns:
 ```text
 localUiUrl contains /ui/trace
 localUiUrl contains sessionId=
-localUiUrl does not contain /ui/chat-viewer
+localUiUrl uses /ui/trace
 ```
 
 Also assert the selected `sessionId` resolves through `/api/trace/sessions/<sessionId>`.
@@ -758,13 +758,13 @@ Run:
 npm run build && node --test tests/chat/privateChat.test.mjs tests/cli/trace.test.mjs
 ```
 
-Expected: fail because current private chat returns `/ui/chat-viewer?peer=...`.
+Expected: fail until private chat returns a session-targeted trace URL.
 
 - [ ] **Step 3: Change private chat result URL**
 
 After outbound persistence, return `/ui/trace?sessionId=<peerSessionId>&traceId=<traceId>` and keep old trace artifact exports for compatibility.
 
-Do not attempt to keep `/ui/chat-viewer` live by dual-writing new messages into `privateChatStateStore`. The old route may remain mounted as a deprecated legacy viewer, but all new command output and tests should use trace. If a later product decision requires chat-viewer to show unified data, implement that as an explicit projection adapter in a separate task.
+All new command output and tests should use trace.
 
 - [ ] **Step 4: Re-run tests**
 
@@ -990,7 +990,7 @@ git commit -m "fix: stabilize unified a2a verification"
 - After every commit, post a detailed development diary with `metabot-post-buzz`.
 - Prefer small modules over adding more logic to `src/daemon/defaultHandlers.ts`.
 - Do not remove old stores until trace and legacy read paths have an explicit migration story.
-- Do not return `/ui/chat-viewer` from new successful commands. It may stay mounted as a deprecated legacy route, or a later task may add an explicit unified-store projection if product compatibility requires it.
+- Return `/ui/trace` from successful private-chat and A2A commands.
 - All docs, comments, and new SKILL text must be English.
 
 ## Open Review Gates

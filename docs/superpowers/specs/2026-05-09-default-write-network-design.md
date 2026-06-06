@@ -105,7 +105,6 @@ The following code paths write to chain but should remain MVC in the first phase
 | Bot profile sync | `src/core/bot/metabotProfileManager.ts` writes `/info/name`, `/info/avatar`, and `/info/bio` with `network: 'mvc'`. | `/ui/bot` profile edits are identity metadata, not generic content publishing. |
 | Provider heartbeat | `src/core/provider/providerHeartbeatLoop.ts` writes heartbeat pins with `network: 'mvc'`. | Directory/presence readers may assume MVC. |
 | Service call/order protocol | `src/daemon/defaultHandlers.ts` writes order private messages and order protocol pins with `network: 'mvc'`. | Needs payment-chain and remote-listener design; `--chain` may be confused with payment chain. |
-| Master ask/receive protocol messages | `src/daemon/defaultHandlers.ts` writes request/response private messages with `network: 'mvc'`. | Needs remote-listener design and protocol compatibility review. |
 | Refund request/finalize | `src/daemon/defaultHandlers.ts` writes refund protocol pins with `network: 'mvc'`. | Must stay aligned with payment/order lookup semantics. |
 | Auto-reply private chat | `src/core/chat/privateChatAutoReply.ts` writes simplemsg replies with `network: 'mvc'`. | Background behavior should be handled with a separate auto-reply/network policy. |
 | Rating follow-up private message | `src/daemon/defaultHandlers.ts` writes the provider follow-up simplemsg with `network: 'mvc'`. | The rating pin itself is covered; follow-up delivery chain needs protocol compatibility review. |
@@ -237,7 +236,6 @@ Apply the resolver to covered handlers:
 - `file.upload`
 - `services.publish`
 - `services.rate`
-- `master.publish`
 - `chat.private`
 
 Do not rely only on CLI parsing. Local UI and external daemon clients may call the API directly.
@@ -449,6 +447,5 @@ npm test
 ## Open Follow-Up Questions For Later Specs
 
 - Should `services call` expose a separate write-chain flag for order protocol messages, or should it intentionally stay on MVC because payment-chain semantics are distinct?
-- Should `master ask`, `master receive`, and automatic master protocol messages follow the default write network?
 - Should profile metadata sync and identity bootstrap remain MVC forever for discovery compatibility, or become configurable after readers are proven multi-chain-safe?
 - Should provider heartbeat and refund protocol pins remain MVC, or should provider presence/order directories become multi-chain-aware first?

@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-27
 **Status:** Draft
-**Scope:** `services.call` and `master.ask` caller-side UX
+**Scope:** `services.call` caller-side UX
 
 ## Context
 
@@ -10,15 +10,13 @@ When a user calls a remote service via `metabot services call`, the current flow
 
 By contrast, `buzz post` and `chat private` both return a `localUiUrl` field that the host agent can present as a clickable link.
 
-The same 15-second blocking pattern exists in `master.ask`.
-
 **Problems:**
 1. 15-second foreground wait is too short for most real provider interactions.
 2. No `localUiUrl` in the response — unlike buzz and chat.
 3. No progress feedback during the wait — the user sees nothing.
 4. On timeout, no actionable guidance on how to track the request.
 
-**Goal:** Make service calls and master asks feel responsive and trackable. The user should see immediate acknowledgment, real-time progress in the CLI session, and always have a trace URL to inspect the full interaction.
+**Goal:** Make service calls feel responsive and trackable. The user should see immediate acknowledgment, real-time progress in the CLI session, and always have a trace URL to inspect the full interaction.
 
 ## Design
 
@@ -96,23 +94,7 @@ The background continuation (`scheduleCallerReplyContinuation`) continues to run
 
 **Delete constant:** `DEFAULT_CALLER_FOREGROUND_WAIT_MS` (no longer used by any call site — see Section 3 for the other sites).
 
-### 3. Daemon `master.ask` Handler Refactor
-
-**File:** `src/daemon/defaultHandlers.ts`
-
-There are **two** foreground wait sites in master flows that both use `DEFAULT_CALLER_FOREGROUND_WAIT_MS`:
-
-1. **`master.ask` main flow** (~line 4702): The primary ask path where the user sends a new master request.
-2. **`master.ask --confirm` flow** (~line 3565): The confirmation/re-ask path where a pending ask is sent after user confirmation.
-
-Both must be refactored to:
-- Remove the foreground `awaitMasterReply()` call.
-- Call `scheduleMasterReplyContinuation()` immediately.
-- Return `commandWaiting` with trace URL and request data.
-
-The `master.ask --confirm` flow only reaches the foreground wait after the user has already confirmed. The fast-return pattern applies to this confirmation step — the initial suggestion step (which returns `awaiting_confirmation`) is unaffected.
-
-### 4. CLI `services call` Poll Loop
+### 3. CLI `services call` Poll Loop
 
 **File:** `src/cli/commands/services.ts`
 
@@ -148,13 +130,7 @@ After receiving a `waiting` response from the daemon, the CLI enters a poll loop
 - CLI progress output goes to `context.stderr.write(...)` so the final JSON on `context.stdout` stays machine-parseable. The CLI `stderr` field (`Pick<NodeJS.WriteStream, 'write'>`) is sufficient for `.write()` calls.
 - **Host agent detection:** When called by a host agent (Codex, Claude Code, etc.), the CLI should skip the poll loop and return the `commandWaiting` result immediately. The host agent sees `localUiUrl` in the JSON and can present it. Detection: check if `context.stdout` is a TTY via `process.stdout.isTTY`. If not a TTY (piped output), skip polling and return the waiting result directly.
 
-### 5. CLI `master ask` Poll Loop
-
-**File:** `src/cli/commands/master.ts`
-
-Same pattern as services call. Extract the poll loop into a shared helper to avoid duplication.
-
-### 6. Shared Poll Helper
+### 4. Shared Poll Helper
 
 **File:** `src/cli/commands/pollTraceHelper.ts` (new)
 
@@ -169,7 +145,7 @@ export async function pollTraceUntilComplete(input: {
 }): Promise<{ completed: boolean; trace?: unknown }>
 ```
 
-Used by both `services call` and `master ask`.
+Used by `services call`.
 
 **Trace response shape:** The `GET /api/trace/{traceId}` endpoint returns `commandSuccess(buildTraceInspectorPayload(...))`. The poll helper extracts `publicStatus` from `result.data.sessions` (array of session objects, each with a `publicStatus` field). The trace is considered complete when the first session's `publicStatus === 'completed'`. The `responseText` is extracted from `result.data.sessions[0].transcript` or the trace's structured response fields.
 
@@ -178,7 +154,7 @@ Used by both `services call` and `master ask`.
 - Network/connection error: Retry silently (daemon may be temporarily busy).
 - Other errors: Log to stderr and continue polling.
 
-### 7. Return Value Enhancement for Success
+### 5. Return Value Enhancement for Success
 
 When the poll detects completion, the CLI makes one final `GET /api/trace/{traceId}` to get the full trace data and returns a `commandSuccess` with:
 - All existing fields (traceId, session, payment, etc.)
@@ -192,9 +168,8 @@ When the daemon's `services.call` returns `commandSuccess` directly (e.g., for l
 | File | Change |
 |---|---|
 | `src/core/contracts/commandResult.ts` | Add `localUiUrl` and `data` to `CommandWaiting` |
-| `src/daemon/defaultHandlers.ts` | Refactor `services.call` and `master.ask`: remove foreground wait, return `commandWaiting` with URL |
+| `src/daemon/defaultHandlers.ts` | Refactor `services.call`: remove foreground wait, return `commandWaiting` with URL |
 | `src/cli/commands/services.ts` | Add poll loop after `waiting` response |
-| `src/cli/commands/master.ts` | Add poll loop after `waiting` response |
 | `src/cli/commands/pollTraceHelper.ts` | New: shared poll-until-complete helper |
 | `src/cli/runtime.ts` | Expose trace poll dependency (reuse existing `requestJson` with GET) |
 

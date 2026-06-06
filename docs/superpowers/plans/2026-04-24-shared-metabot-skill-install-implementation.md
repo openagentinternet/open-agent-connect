@@ -39,7 +39,7 @@
 - `README.md`
 - `tests/cli/skills.test.mjs`
 - `tests/cli/help.test.mjs`
-- `tests/evolution/skillResolver.test.mjs`
+- `tests/cli/skills.test.mjs`
 - `tests/skillpacks/buildSkillpacks.test.mjs`
 - `tests/docs/codexInstallDocs.test.mjs`
 - `docs/hosts/codex-agent-update.md`
@@ -80,7 +80,7 @@
 - Modify: `src/cli/runtime.ts`
 - Modify: `src/cli/commandHelp.ts`
 - Test: `tests/cli/skills.test.mjs`
-- Test: `tests/evolution/skillResolver.test.mjs`
+- Test: `tests/cli/skills.test.mjs`
 
 - [ ] **Step 1: Extend the skill host and render types for shared-default resolution**
 
@@ -115,19 +115,19 @@ Add tests to `tests/cli/skills.test.mjs` for:
 - `host === "shared"` and `resolutionMode === "shared_default"` on no-host calls
 - existing `--host codex` tests still passing unchanged
 
-Also extend `tests/evolution/skillResolver.test.mjs` so the direct resolver surface proves:
+Also extend `tests/cli/skills.test.mjs` so the direct resolver surface proves:
 
 - `renderResolvedSkillContract()` accepts no-host shared-default rendering
 - JSON render returns `host === "shared"` and `resolutionMode === "shared_default"`
 - explicit host override still returns `host === "<host>"` and `resolutionMode === "host_override"`
 
-Keep `metabot-network-directory` as the direct resolver/evolution canary there. It remains a base-registry contract in this round, not a shared installed skillpack entry.
+Keep `metabot-network-directory` as the direct resolver canary there. It remains a base-registry contract in this round, not a shared installed skillpack entry.
 
 Run:
 
 ```bash
 npm run build
-node --test tests/cli/skills.test.mjs tests/evolution/skillResolver.test.mjs
+node --test tests/cli/skills.test.mjs
 ```
 
 Expected:
@@ -173,7 +173,7 @@ Run:
 
 ```bash
 npm run build
-node --test tests/cli/skills.test.mjs tests/evolution/skillResolver.test.mjs
+node --test tests/cli/skills.test.mjs
 ```
 
 Expected:
@@ -183,7 +183,7 @@ Expected:
 - [ ] **Step 6: Commit Task 1**
 
 ```bash
-git add src/core/skills/skillContractTypes.ts src/core/skills/skillResolver.ts src/cli/types.ts src/cli/commands/skills.ts src/cli/runtime.ts src/cli/commandHelp.ts tests/cli/skills.test.mjs tests/evolution/skillResolver.test.mjs
+git add src/core/skills/skillContractTypes.ts src/core/skills/skillResolver.ts src/cli/types.ts src/cli/commands/skills.ts src/cli/runtime.ts src/cli/commandHelp.ts tests/cli/skills.test.mjs
 git commit -m "feat: support shared-default metabot skills resolve"
 ```
 
@@ -614,7 +614,7 @@ git commit -m "docs: unify metabot install guidance"
 - Verify: `tests/cli/skills.test.mjs`
 - Verify: `tests/cli/hostCommand.test.mjs`
 - Verify: `tests/cli/help.test.mjs`
-- Verify: `tests/evolution/skillResolver.test.mjs`
+- Verify: `tests/cli/skills.test.mjs`
 - Verify: `tests/skillpacks/buildSkillpacks.test.mjs`
 - Verify: `tests/skillpacks/hostBindSmoke.test.mjs`
 - Verify: `tests/docs/codexInstallDocs.test.mjs`
@@ -627,7 +627,7 @@ Run:
 ```bash
 npm run build
 npm run build:skillpacks
-node --test tests/cli/skills.test.mjs tests/cli/hostCommand.test.mjs tests/cli/help.test.mjs tests/evolution/skillResolver.test.mjs tests/skillpacks/buildSkillpacks.test.mjs tests/skillpacks/hostBindSmoke.test.mjs tests/docs/codexInstallDocs.test.mjs
+node --test tests/cli/skills.test.mjs tests/cli/hostCommand.test.mjs tests/cli/help.test.mjs tests/skillpacks/buildSkillpacks.test.mjs tests/skillpacks/hostBindSmoke.test.mjs tests/docs/codexInstallDocs.test.mjs
 ```
 
 Expected:
@@ -658,7 +658,7 @@ Manually confirm from the working tree that:
 - [ ] **Step 4: Commit Task 6**
 
 ```bash
-git add skillpacks tests/cli/skills.test.mjs tests/cli/hostCommand.test.mjs tests/cli/help.test.mjs tests/evolution/skillResolver.test.mjs tests/skillpacks/buildSkillpacks.test.mjs tests/skillpacks/hostBindSmoke.test.mjs tests/docs/codexInstallDocs.test.mjs
+git add skillpacks tests/cli/skills.test.mjs tests/cli/hostCommand.test.mjs tests/cli/help.test.mjs tests/skillpacks/buildSkillpacks.test.mjs tests/skillpacks/hostBindSmoke.test.mjs tests/docs/codexInstallDocs.test.mjs
 git commit -m "test: verify shared metabot skill install flow"
 ```
 
