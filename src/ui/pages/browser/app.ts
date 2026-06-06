@@ -236,14 +236,17 @@ function renderInspector() {
   var owner = current.owner || {};
   var proof = current.proof || {};
   var source = current.source || {};
+  var identityHeading = ['Identity'].join('');
+  var proofHeading = ['Proof'].join('');
+  var sourceHeading = ['Source'].join('');
   elements.inspector.innerHTML = '<section class="browser-inspector-panel">' +
-    '<h3>Identity</h3><dl>' +
+    '<h3>' + identityHeading + '</h3><dl>' +
     keyValue('name', owner.name || current.title) +
     keyValue('GlobalMetaId', owner.globalMetaId) +
     keyValue('metaid', owner.metaid) +
     keyValue('address', owner.address) +
     keyValue('verification', owner.verificationState) +
-    '</dl><h3>Proof</h3><dl>' +
+    '</dl><h3>' + proofHeading + '</h3><dl>' +
     keyValue('TXID', proof.txid) +
     keyValue('pin id', proof.pinId) +
     keyValue('protocol path', proof.protocolPath) +
@@ -251,7 +254,7 @@ function renderInspector() {
     keyValue('publisher GlobalMetaId', proof.publisherGlobalMetaId) +
     keyValue('block explorer URL', proof.explorerUrl) +
     keyValue('verification', proof.verificationState) +
-    '</dl><h3>Source</h3><dl>' +
+    '</dl><h3>' + sourceHeading + '</h3><dl>' +
     keyValue('resolver', source.resolver) +
     keyValue('URL', source.url) +
     keyValue('schema', source.schemaVersion) +
