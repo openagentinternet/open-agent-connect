@@ -22,7 +22,7 @@ const PLATFORM_ASSET_CONTENT_TYPES: Record<string, string> = {
   '.jpeg': 'image/jpeg',
 };
 
-const PAGE_BUILDERS: Record<MetabotUiPageName, () => LocalUiPageDefinition> = {
+const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, () => LocalUiPageDefinition>> = {
   'hub': buildHubPageDefinition,
   'publish': buildPublishPageDefinition,
   'my-services': buildMyServicesPageDefinition,
@@ -91,7 +91,11 @@ async function loadTemplate(page: MetabotUiPageName): Promise<string> {
 }
 
 async function renderBuiltInPage(page: MetabotUiPageName): Promise<string> {
-  const definition = PAGE_BUILDERS[page]();
+  const builder = PAGE_BUILDERS[page];
+  if (!builder) {
+    throw new Error(`Local UI page is not registered: ${page}`);
+  }
+  const definition = builder();
   const template = await loadTemplate(page);
   // If the template manages its own layout (uses __PAGE_CONTENT__ directly),
   // inject only the page-specific content HTML. Otherwise fall back to the
