@@ -10,9 +10,19 @@ export interface ChainConfig {
   defaultWriteNetwork: DefaultWriteNetwork;
 }
 
+export interface BrowserConfig {
+  metasoP2PBaseUrl: string;
+  metafileContentBaseUrl?: string;
+  blockExplorerBaseUrl?: string;
+  walletApiBaseUrl?: string;
+  defaultChainName: DefaultWriteNetwork;
+  localMode: boolean;
+}
+
 export interface MetabotConfig {
   chain: ChainConfig;
   a2a: A2AConfig;
+  browser: BrowserConfig;
 }
 
 export function isDefaultWriteNetwork(value: unknown): value is DefaultWriteNetwork {
@@ -26,6 +36,13 @@ export function createDefaultConfig(): MetabotConfig {
     },
     a2a: {
       simplemsgListenerEnabled: true,
+    },
+    browser: {
+      metasoP2PBaseUrl: 'https://so.metaid.io',
+      metafileContentBaseUrl: 'https://so.metaid.io/content',
+      blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+      defaultChainName: 'mvc',
+      localMode: true,
     },
   };
 }

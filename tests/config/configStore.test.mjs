@@ -73,6 +73,13 @@ test('createConfigStore defaults to the active runtime config and persists updat
       a2a: {
         simplemsgListenerEnabled: true,
       },
+      browser: {
+        metasoP2PBaseUrl: 'https://so.metaid.io',
+        metafileContentBaseUrl: 'https://so.metaid.io/content',
+        blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+        defaultChainName: 'mvc',
+        localMode: true,
+      },
     });
 
     const updated = {
@@ -81,6 +88,14 @@ test('createConfigStore defaults to the active runtime config and persists updat
       },
       a2a: {
         simplemsgListenerEnabled: false,
+      },
+      browser: {
+        metasoP2PBaseUrl: 'https://so.example.test',
+        metafileContentBaseUrl: 'https://so.example.test/content',
+        blockExplorerBaseUrl: 'https://explorer.example.test/tx',
+        walletApiBaseUrl: 'https://wallet.example.test',
+        defaultChainName: 'opcat',
+        localMode: false,
       },
     };
 
@@ -103,6 +118,13 @@ test('read merges defaults when active config fields are missing', async () => {
       },
       a2a: {
         simplemsgListenerEnabled: true,
+      },
+      browser: {
+        metasoP2PBaseUrl: 'https://so.metaid.io',
+        metafileContentBaseUrl: 'https://so.metaid.io/content',
+        blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+        defaultChainName: 'mvc',
+        localMode: true,
       },
     });
   });
@@ -138,6 +160,13 @@ test('read ignores retired askMaster and evolution_network config fields', async
       a2a: {
         simplemsgListenerEnabled: false,
       },
+      browser: {
+        metasoP2PBaseUrl: 'https://so.metaid.io',
+        metafileContentBaseUrl: 'https://so.metaid.io/content',
+        blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+        defaultChainName: 'mvc',
+        localMode: true,
+      },
     });
   });
 });
@@ -168,6 +197,13 @@ test('set drops retired askMaster and evolution_network fields from persisted co
       },
       a2a: {
         simplemsgListenerEnabled: true,
+      },
+      browser: {
+        metasoP2PBaseUrl: 'https://so.metaid.io',
+        metafileContentBaseUrl: 'https://so.metaid.io/content',
+        blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+        defaultChainName: 'mvc',
+        localMode: true,
       },
     });
   });
