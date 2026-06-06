@@ -79,6 +79,18 @@ function escapeHtml(value) {
   });
 }
 
+function safeUrl(rawValue) {
+  var value = textValue(rawValue);
+  if (!value) return '';
+  if (value.charAt(0) === '/' && value.slice(0, 2) !== '//') return value;
+  try {
+    var parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : '';
+  } catch (error) {
+    return '';
+  }
+}
+
 function bindElements() {
   elements = {
     input: document.querySelector('[data-browser-uri-input]'),
@@ -159,8 +171,76 @@ function renderCurrent() {
   if (elements.statusRenderer) elements.statusRenderer.textContent = 'renderer: ' + rendererType;
   if (elements.statusTxid) elements.statusTxid.textContent = 'TXID: ' + (txid || '-');
   if (elements.viewport) {
-    elements.viewport.innerHTML = '<section class="browser-resource-loading"><h2>' + escapeHtml(current.title || ownerName) + '</h2></section>';
+    elements.viewport.innerHTML = renderRenderer(current);
   }
+}
+
+function renderActionButtons(actions) {
+  if (!Array.isArray(actions) || actions.length === 0) return '';
+  return '<div class="browser-action-row">' + actions.map(function (action) {
+    var kind = textValue(action && action.kind);
+    var label = textValue(action && action.label) || kind || 'Action';
+    var disabled = action && action.enabled === false ? ' disabled' : '';
+    return '<button type="button" data-browser-action="' + escapeHtml(kind) + '" data-browser-action-id="' + escapeHtml(textValue(action && action.id)) + '"' + disabled + '>' + escapeHtml(label) + '</button>';
+  }).join('') + '</div>';
+}
+
+function renderBotPage(current) {
+  var data = current.renderer && current.renderer.data && typeof current.renderer.data === 'object'
+    ? current.renderer.data
+    : {};
+  var profile = data.profile && typeof data.profile === 'object' ? data.profile : {};
+  var homepage = data.homepage && typeof data.homepage === 'object' ? data.homepage : {};
+  var services = Array.isArray(data.services) ? data.services : [];
+  var avatar = safeUrl(profile.avatar || (current.owner && current.owner.avatar));
+  var name = textValue(profile.name) || textValue(homepage.title) || textValue(current.title);
+  var globalMetaId = textValue(data.globalMetaId) || textValue(current.owner && current.owner.globalMetaId);
+  var summary = textValue(homepage.summary) || textValue(profile.bio);
+  var servicesHtml = services.length
+    ? '<section class="browser-bot-services"><h3>Services</h3>' + services.map(function (service) {
+      var serviceName = textValue(service.displayName) || textValue(service.serviceName) || textValue(service.id) || 'Service';
+      var serviceDescription = textValue(service.description);
+      return '<article class="browser-service-row"><strong>' + escapeHtml(serviceName) + '</strong>' +
+        (serviceDescription ? '<p>' + escapeHtml(serviceDescription) + '</p>' : '') +
+        '<button type="button" data-browser-action="service-call" data-service-id="' + escapeHtml(textValue(service.currentPinId || service.servicePinId || service.pinId || service.id)) + '">Request</button></article>';
+    }).join('') + '</section>'
+    : '';
+  return '<article class="browser-bot-page">' +
+    (avatar ? '<img class="browser-bot-avatar" src="' + escapeHtml(avatar) + '" alt="" />' : '') +
+    '<div class="browser-bot-main"><h2>' + escapeHtml(name || 'Bot') + '</h2>' +
+    (globalMetaId ? '<p class="browser-globalmetaid">' + escapeHtml(globalMetaId) + '</p>' : '') +
+    (summary ? '<p class="browser-bot-summary">' + escapeHtml(summary) + '</p>' : '') +
+    renderActionButtons(current.actions) +
+    servicesHtml + '</div></article>';
+}
+
+function renderBlockedRenderer(message) {
+  return '<section class="browser-empty-state" data-browser-renderer-blocked><h2>Renderer URL blocked</h2><p>' + escapeHtml(message || 'Renderer URL blocked.') + '</p></section>';
+}
+
+function renderRenderer(current) {
+  var renderer = current.renderer || {};
+  var type = textValue(renderer.type) || 'unsupported';
+  var url = safeUrl(renderer.url);
+  if (type === 'bot-page') {
+    return renderBotPage(current);
+  }
+  if (['html-iframe', 'pdf', 'image', 'video'].includes(type) && !url) {
+    return renderBlockedRenderer('Renderer URL blocked.');
+  }
+  if (type === 'html-iframe') {
+    return '<iframe class="browser-html-frame" sandbox src="' + escapeHtml(url) + '"></iframe>';
+  }
+  if (type === 'pdf') {
+    return '<section class="browser-pdf-wrap"><iframe class="browser-pdf" src="' + escapeHtml(url) + '"></iframe><a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">Open PDF</a></section>';
+  }
+  if (type === 'image') {
+    return '<img class="browser-image" src="' + escapeHtml(url) + '" alt="" />';
+  }
+  if (type === 'video') {
+    return '<video class="browser-video" src="' + escapeHtml(url) + '" controls></video>';
+  }
+  return '<section class="browser-empty-state" data-browser-unsupported-renderer><h2>Unsupported renderer</h2><p>' + escapeHtml(renderer.error || 'Unsupported renderer.') + '</p></section>';
 }
 
 function resolveUrl(uri) {
@@ -252,6 +332,8 @@ async function initialize() {
 globalThis.browserEndpoints = browserEndpoints;
 globalThis.state = state;
 globalThis.api = api;
+globalThis.safeUrl = safeUrl;
+globalThis.renderRenderer = renderRenderer;
 globalThis.loadContext = loadContext;
 globalThis.resolveUri = resolveUri;
 globalThis.navigateTo = navigateTo;
