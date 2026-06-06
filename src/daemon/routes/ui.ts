@@ -6,6 +6,7 @@ import { buildPublishPageDefinition } from '../../ui/pages/publish/app';
 import { buildRefundPageDefinition } from '../../ui/pages/refund/app';
 import { buildTracePageDefinition } from '../../ui/pages/trace/app';
 import { buildBotPageDefinition } from '../../ui/pages/bot/app';
+import { buildBrowserPageDefinition } from '../../ui/pages/browser/app';
 import { buildLoomPageDefinition } from '../../ui/pages/loom/app';
 import { buildMetaAppsPageDefinition } from '../../ui/pages/metaapps/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
@@ -29,6 +30,7 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, () => LocalUiPageDefiniti
   'trace': buildTracePageDefinition,
   'refund': buildRefundPageDefinition,
   'bot': buildBotPageDefinition,
+  'browser': buildBrowserPageDefinition,
   'loom': buildLoomPageDefinition,
   'metaapps': buildMetaAppsPageDefinition,
 };
@@ -36,6 +38,7 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, () => LocalUiPageDefiniti
 const NAV_ITEMS: Array<{ page: MetabotUiPageName; label: string }> = [
   { page: 'hub', label: 'Hub' },
   { page: 'bot', label: 'Bot' },
+  { page: 'browser', label: 'Browser' },
   { page: 'publish', label: 'Publish' },
   { page: 'my-services', label: 'My Services' },
   { page: 'trace', label: 'Trace' },
@@ -155,6 +158,18 @@ async function servePlatformAsset(context: Parameters<RouteHandler>[0]): Promise
 
 export const handleUiRoutes: RouteHandler = async (context) => {
   const { req, url, handlers } = context;
+
+  if (url.pathname === '/browser') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+    const html = handlers.ui?.renderPage
+      ? await handlers.ui.renderPage('browser')
+      : await renderBuiltInPage('browser');
+    context.sendHtml(200, html);
+    return true;
+  }
 
   if (!url.pathname.startsWith(UI_ROUTE_PREFIX)) {
     return false;

@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
+    <style>
+      .content:has(.browser-shell) {
+        max-width: none;
+        padding: 0;
+      }
+      .browser-shell {
+        min-height: calc(100vh - 52px);
+        background: var(--bg);
+        color: var(--text);
+        display: grid;
+        grid-template-rows: 48px minmax(0, 1fr) 32px;
+        grid-template-columns: minmax(0, 1fr);
+        overflow: hidden;
+      }
+      @supports (min-height: 100svh) {
+        .browser-shell { min-height: calc(100svh - 52px); }
+      }
+      .browser-shell [hidden] {
+        display: none !important;
+      }
+      .browser-topbar {
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        display: grid;
+        grid-template-columns: auto minmax(180px, 1fr) auto auto;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        min-width: 0;
+      }
+      .browser-nav {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+      }
+      .browser-nav button,
+      .browser-address-form button,
+      .browser-resource-chip,
+      .browser-using-chip,
+      .browser-status-strip button {
+        min-height: 30px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        color: var(--text);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font: 11px var(--mono);
+        padding: 5px 9px;
+        white-space: nowrap;
+      }
+      .browser-nav button:hover,
+      .browser-address-form button:hover,
+      .browser-resource-chip:hover,
+      .browser-using-chip:hover,
+      .browser-status-strip button:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .browser-address-form {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 6px;
+        min-width: 0;
+      }
+      .browser-address-form input {
+        width: 100%;
+        min-height: 30px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        color: var(--text);
+        font: 12px var(--mono);
+        padding: 5px 10px;
+        outline: none;
+        min-width: 0;
+      }
+      .browser-address-form input:focus {
+        border-color: var(--accent);
+      }
+      .browser-resource-chip,
+      .browser-using-chip {
+        max-width: 180px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .browser-drawer,
+      .browser-inspector {
+        position: fixed;
+        top: 52px;
+        bottom: 32px;
+        width: min(360px, 88vw);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        z-index: 20;
+        overflow: auto;
+      }
+      .browser-drawer {
+        left: 0;
+        border-left: 0;
+      }
+      .browser-inspector {
+        right: 0;
+        border-right: 0;
+      }
+      .browser-viewport {
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+        background: var(--bg);
+      }
+      .browser-status-strip {
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        padding: 0 10px;
+        color: var(--muted);
+        font: 11px var(--mono);
+      }
+      .browser-status-strip span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .browser-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        background: rgba(0, 0, 0, .34);
+      }
+      @media (max-width: 760px) {
+        .browser-shell {
+          grid-template-rows: auto minmax(0, 1fr) auto;
+        }
+        .browser-topbar {
+          grid-template-columns: 1fr;
+          align-items: stretch;
+        }
+        .browser-nav {
+          overflow-x: auto;
+        }
+        .browser-resource-chip,
+        .browser-using-chip {
+          max-width: none;
+          justify-content: flex-start;
+        }
+        .browser-status-strip {
+          flex-wrap: wrap;
+          min-height: 48px;
+          padding: 6px 10px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    __PAGE_CONTENT__
+    <script>
+      __PAGE_SCRIPT__
+    </script>
+  </body>
+</html>
