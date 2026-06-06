@@ -56,6 +56,8 @@ var state = {
   usingSlug: '',
   drawerOpen: false,
   inspectorOpen: false,
+  pendingPrivateChat: null,
+  pendingServiceCall: null,
   visits: [],
   status: 'loading',
   error: ''
@@ -303,6 +305,171 @@ function renderBotPage(current) {
     servicesHtml + '</div></article>';
 }
 
+function servicesFromCurrent() {
+  var current = state.current || {};
+  var renderer = current.renderer || {};
+  var data = renderer.data && typeof renderer.data === 'object' ? renderer.data : {};
+  return Array.isArray(data.services) ? data.services : [];
+}
+
+function servicePinId(service) {
+  return textValue(service && (service.currentPinId || service.servicePinId || service.pinId || service.id));
+}
+
+function findService(serviceId) {
+  var services = servicesFromCurrent();
+  var targetId = textValue(serviceId);
+  if (!targetId) return services[0] || null;
+  for (var index = 0; index < services.length; index += 1) {
+    var service = services[index];
+    if (servicePinId(service) === targetId || textValue(service && service.id) === targetId) {
+      return service;
+    }
+  }
+  return services[0] || null;
+}
+
+function renderModal(title, bodyHtml, confirmLabel, confirmAction) {
+  if (!elements.modalRoot) return;
+  elements.modalRoot.hidden = false;
+  elements.modalRoot.innerHTML = '<section class="browser-modal-panel" role="dialog" aria-modal="true">' +
+    '<header><h2>' + escapeHtml(title) + '</h2><button type="button" data-browser-modal-close aria-label="Close">Close</button></header>' +
+    '<div class="browser-modal-body">' + bodyHtml + '</div>' +
+    '<footer><button type="button" data-browser-modal-close>Cancel</button>' +
+    '<button type="button" data-browser-modal-confirm data-browser-modal-action="' + escapeHtml(confirmAction) + '">' + escapeHtml(confirmLabel) + '</button></footer></section>';
+}
+
+function closeModal() {
+  state.pendingPrivateChat = null;
+  state.pendingServiceCall = null;
+  if (elements.modalRoot) {
+    elements.modalRoot.hidden = true;
+    elements.modalRoot.innerHTML = '';
+  }
+}
+
+function usingLabel() {
+  var identity = state.context && state.context.defaultUsingIdentity;
+  return textValue(identity && identity.name) || textValue(state.usingSlug) || 'Current Bot';
+}
+
+async function copyUri(action) {
+  var uri = textValue(action && action.uri) ||
+    textValue(state.current && state.current.normalizedUri) ||
+    textValue(state.current && state.current.uri);
+  if (!uri) {
+    setStatus('error', 'No URI to copy.');
+    return;
+  }
+  if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    await navigator.clipboard.writeText(uri);
+  }
+  setStatus('copied', '');
+}
+
+function openPrivateChatModal() {
+  if (!state.current || !state.current.owner || !state.current.owner.globalMetaId) {
+    setStatus('error', 'Target Bot is missing.');
+    return;
+  }
+  state.pendingPrivateChat = {
+    to: state.current.owner.globalMetaId,
+    targetName: textValue(state.current.owner.name) || textValue(state.current.title) || state.current.owner.globalMetaId
+  };
+  renderModal(
+    'Private Chat',
+    '<dl>' + keyValue('using', usingLabel()) + keyValue('target', state.pendingPrivateChat.targetName) + '</dl>' +
+      '<textarea data-browser-private-chat-message rows="5" placeholder="Message"></textarea>',
+    'Send',
+    'private-chat'
+  );
+}
+
+async function confirmPrivateChat(messageText) {
+  var pending = state.pendingPrivateChat;
+  var content = textValue(messageText);
+  if (!pending || !content) {
+    setStatus('error', 'Message is required.');
+    return null;
+  }
+  var result = await api(browserEndpoints.privateChat, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      from: state.usingSlug || undefined,
+      to: pending.to,
+      content: content
+    })
+  });
+  closeModal();
+  setStatus('sent', '');
+  return result;
+}
+
+function openServiceCallModal(action) {
+  var service = findService(action && action.serviceId);
+  if (!service) {
+    setStatus('error', 'No callable service found.');
+    return;
+  }
+  var pinId = servicePinId(service);
+  var providerGlobalMetaId = textValue(service.providerGlobalMetaId) || textValue(state.current && state.current.owner && state.current.owner.globalMetaId);
+  var serviceName = textValue(service.displayName) || textValue(service.serviceName) || textValue(service.name) || pinId || 'Service';
+  state.pendingServiceCall = {
+    service: service,
+    servicePinId: pinId,
+    providerGlobalMetaId: providerGlobalMetaId,
+    serviceName: serviceName
+  };
+  renderModal(
+    'Request Service',
+    '<dl>' + keyValue('using', usingLabel()) + keyValue('service', serviceName) +
+      keyValue('service pin id', pinId) + keyValue('provider GlobalMetaId', providerGlobalMetaId) +
+      keyValue('price', textValue(service.price) ? textValue(service.price) + ' ' + textValue(service.currency || '') : '') + '</dl>' +
+      '<textarea data-browser-service-task rows="5" placeholder="Request"></textarea>',
+    'Request',
+    'service-call'
+  );
+}
+
+async function confirmServiceCall(userTaskText) {
+  var pending = state.pendingServiceCall;
+  var userTask = textValue(userTaskText);
+  if (!pending || !pending.servicePinId || !pending.providerGlobalMetaId || !userTask) {
+    setStatus('error', 'Service request is incomplete.');
+    return null;
+  }
+  var result = await api(browserEndpoints.serviceCall, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      from: state.usingSlug || undefined,
+      request: {
+        servicePinId: pending.servicePinId,
+        providerGlobalMetaId: pending.providerGlobalMetaId,
+        userTask: userTask,
+        taskContext: 'Requested from Agent Internet Browser',
+        rawRequest: userTask,
+        confirmed: true
+      }
+    })
+  });
+  closeModal();
+  setStatus('requested', '');
+  return result;
+}
+
+async function handleTrustedAction(action) {
+  var kind = textValue(action && action.kind);
+  if (kind === 'copy') return copyUri(action);
+  if (kind === 'private-chat') return openPrivateChatModal(action);
+  if (kind === 'service-call') return openServiceCallModal(action);
+  if (kind === 'service-list') return openServiceCallModal(action);
+  if (kind === 'proof' || kind === 'creator') return openInspector();
+  setStatus('error', 'Unsupported action.');
+  return null;
+}
+
 function renderBlockedRenderer(message) {
   return '<section class="browser-empty-state" data-browser-renderer-blocked><h2>Renderer URL blocked</h2><p>' + escapeHtml(message || 'Renderer URL blocked.') + '</p></section>';
 }
@@ -394,6 +561,38 @@ async function loadContext() {
 
 async function initialize() {
   bindElements();
+  if (elements.viewport) {
+    elements.viewport.addEventListener('click', function (event) {
+      var target = event && event.target && event.target.getAttribute ? event.target : null;
+      if (!target) return;
+      var kind = target.getAttribute('data-browser-action');
+      if (!kind) return;
+      handleTrustedAction({
+        kind: kind,
+        id: target.getAttribute('data-browser-action-id') || '',
+        serviceId: target.getAttribute('data-service-id') || ''
+      });
+    });
+  }
+  if (elements.modalRoot) {
+    elements.modalRoot.addEventListener('click', function (event) {
+      var target = event && event.target && event.target.getAttribute ? event.target : null;
+      if (!target) return;
+      if (target.getAttribute('data-browser-modal-close') !== null) {
+        closeModal();
+        return;
+      }
+      var action = target.getAttribute('data-browser-modal-action');
+      if (action === 'private-chat') {
+        var input = elements.modalRoot.querySelector('[data-browser-private-chat-message]');
+        confirmPrivateChat(input ? input.value : '');
+      }
+      if (action === 'service-call') {
+        var task = elements.modalRoot.querySelector('[data-browser-service-task]');
+        confirmServiceCall(task ? task.value : '');
+      }
+    });
+  }
   if (elements.form) {
     elements.form.addEventListener('submit', function (event) {
       event.preventDefault();
@@ -426,11 +625,16 @@ async function initialize() {
 globalThis.browserEndpoints = browserEndpoints;
 globalThis.state = state;
 globalThis.api = api;
+globalThis.bindElements = bindElements;
 globalThis.safeUrl = safeUrl;
 globalThis.renderRenderer = renderRenderer;
 globalThis.renderDrawer = renderDrawer;
 globalThis.openInspector = openInspector;
 globalThis.renderInspector = renderInspector;
+globalThis.handleTrustedAction = handleTrustedAction;
+globalThis.confirmPrivateChat = confirmPrivateChat;
+globalThis.confirmServiceCall = confirmServiceCall;
+globalThis.closeModal = closeModal;
 globalThis.loadContext = loadContext;
 globalThis.resolveUri = resolveUri;
 globalThis.navigateTo = navigateTo;
